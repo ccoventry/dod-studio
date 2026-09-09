@@ -150,7 +150,8 @@ function render() {
   // that's actually going to block Start Capture Batch outright.
   const bannedScheduledCvars = new Set(bannedScheduled.map((b) => cvarOf(b.command)));
   const hazards = custom.filter((c) => c.kind === 'hazard' && !bannedScheduledCvars.has(cvarOf(c.command)));
-  const customOverrides = custom.filter((c) => c.kind !== 'hazard');
+  const duplicates = custom.filter((c) => c.kind === 'duplicateScheduled');
+  const customOverrides = custom.filter((c) => c.kind !== 'hazard' && c.kind !== 'duplicateScheduled');
 
   // ── Initial Commands ─────────────────────────────────────────────────────
   // Game Config (unseen) belongs here, not its own block: the fix it advises
@@ -258,6 +259,16 @@ function render() {
       })
       .join('');
     schedParts.push(section(STRINGS.CFG.CUSTOM_TITLE, STRINGS.CFG.CUSTOM_ADVICE, rows, '#ff8a5c'));
+  }
+  // Not an override — the same value scheduled more than once overrides
+  // nothing — so it gets its own section rather than folding into
+  // customOverrides above, which would either misreport it as replacing a
+  // value (it doesn't) or need a source/config line it doesn't have.
+  if (duplicates.length > 0) {
+    const rows = duplicates
+      .map((d) => `<li><code>${STRINGS.CFG.duplicateScheduledRow(d.command)}</code></li>`)
+      .join('');
+    schedParts.push(section(STRINGS.CFG.DUPLICATE_TITLE, STRINGS.CFG.DUPLICATE_ADVICE, rows, '#ff8a5c'));
   }
   if (noopScheduled.length > 0) {
     const rows = noopScheduled

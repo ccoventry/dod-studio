@@ -934,6 +934,10 @@ export const STRINGS = {
       `${cvar} ${value} replaces ${previous}, set before the demo loads`,
     customOverridesConfig: (cvar, value, previous, source) =>
       `${cvar} ${value} replaces ${previous} from ${source}`,
+    DUPLICATE_TITLE: 'These Scheduled Commands repeat an earlier one:',
+    DUPLICATE_ADVICE:
+      'Same cvar, same relation (Before/After), same value, more than once — probably an accidental extra row rather than something intentional. A deliberate multi-stage sequence (different values on the same relation) is not flagged here; only an exact repeat is.',
+    duplicateScheduledRow: (command) => `${command} — duplicates an earlier Scheduled Command`,
     override: (cvar, initValue, cfgValue, file, line) =>
       `${cvar} ${initValue} replaces ${cfgValue} from ${file}, line ${line}`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',

@@ -479,6 +479,61 @@ pub async fn scan_game_configs(
             });
         }
 
+        // What's already reported as of here (hazards only — banned_scheduled
+        // is a separate Vec) — a frozen snapshot, not the live `custom` that
+        // the two passes below keep pushing into. Both passes below exclude
+        // anything already flagged as a hazard; neither must also see the
+        // other's own output, or a duplicate-detection pass running after
+        // the override pass would treat "I already pushed an override row
+        // for this exact command text" as "skip it", silently discarding
+        // every occurrence of the very duplicates it exists to catch.
+        let already_hazarded: std::collections::HashSet<String> =
+            custom.iter().map(|w| w.command.clone()).collect();
+
+        // A literal duplicate: the same cvar, the same relation, and the
+        // same value, scheduled more than once. Independent of whether
+        // either occurrence overrides anything — two identical `Before`
+        // commands for a cvar the baseline already agrees with are still
+        // two redundant rows in the list for no reason, and that is worth
+        // surfacing on its own.
+        //
+        // Deliberately narrow, per the user's call (2026-09-08, #213):
+        // NOT triggered by two DIFFERENT values sharing a relation (e.g.
+        // ramping `hud_deathnotice_time` down in two `Before` steps) — a
+        // deliberate multi-stage sequence is a legitimate, if uncommon, use
+        // of Scheduled Commands, and only the value-comparison logic below
+        // judges those. NOT triggered by an opposite-relation pair either —
+        // that is the intended "set it, then restore it" shape, not a
+        // duplicate.
+        let mut dup_groups: indexmap::IndexMap<(String, String, String), Vec<&CustomCommandPayload>> =
+            indexmap::IndexMap::new();
+        for payload in application_order(&custom_commands) {
+            if already_hazarded.contains(payload.command.trim()) {
+                continue;
+            }
+            let Some((cvar, value)) = native::patch::cfg_scan::assigned_cvar(&payload.command) else {
+                continue;
+            };
+            dup_groups
+                .entry((cvar.to_lowercase(), payload.relation.clone(), value.to_lowercase()))
+                .or_default()
+                .push(payload);
+        }
+        for (_, entries) in &dup_groups {
+            for payload in entries.iter().skip(1) {
+                let cvar = native::patch::cfg_scan::assigned_cvar(&payload.command)
+                    .map(|(c, _)| c)
+                    .unwrap_or_default();
+                custom.push(CustomCommandWarning {
+                    command: payload.command.trim().to_string(),
+                    cvar,
+                    kind: "duplicateScheduled".to_string(),
+                    replaced_value: String::new(),
+                    source: String::new(),
+                });
+            }
+        }
+
         // Only the FIRST scheduled command to touch a cvar displaces the config
         // or init value. A paired set — `hud_deathnotice_time 555` before the
         // clip and `1` after it — is one override and one restore, and
@@ -502,7 +557,13 @@ pub async fn scan_game_configs(
             let Some((cvar, value)) = native::patch::cfg_scan::assigned_cvar(command) else {
                 continue;
             };
-            if custom.iter().any(|w| w.command == command.trim()) {
+            // Against the frozen `already_hazarded` snapshot, not the live
+            // `custom` — by now `custom` also holds this pass's own
+            // duplicate-detection rows, and checking against those would
+            // mean a command sharing text with its own duplicate warning
+            // gets excluded from the override check too, on both the first
+            // occurrence (which never duplicated anything) and any that do.
+            if already_hazarded.contains(command.trim()) {
                 continue;
             }
             let key = cvar.to_lowercase();
@@ -832,6 +893,90 @@ mod tests {
             .collect();
         assert_eq!(rows.len(), 1, "{:?}", r.custom);
         assert_eq!(rows[0].command, "hud_deathnotice_time 555", "10s back runs before 2s back");
+    }
+
+    #[test]
+    fn a_literal_duplicate_scheduled_command_is_flagged() {
+        // Same cvar, same relation, same value, twice — the actual bug
+        // report: two `mirv_movie_separate_hud 1`, both `Before`, produced
+        // no warning at all before this test existed (that specific cvar
+        // is used here as `sensitivity` instead — a neutral cvar with no
+        // hazard/banned status to keep this test isolated to the duplicate
+        // logic alone). The first occurrence is not itself flagged as a
+        // duplicate — it's the second (and any later) one that repeats
+        // something already stated.
+        let r = report_scheduled(
+            "literal_dup",
+            vec![
+                scheduled("sensitivity 3", "Before", 2.0),
+                scheduled("sensitivity 3", "Before", 2.0),
+            ],
+        );
+
+        let dups: Vec<_> = r.custom.iter().filter(|c| c.kind == "duplicateScheduled").collect();
+        assert_eq!(dups.len(), 1, "{:?}", r.custom);
+        assert_eq!(dups[0].command, "sensitivity 3");
+    }
+
+    #[test]
+    fn three_identical_scheduled_commands_flag_the_second_and_third() {
+        let r = report_scheduled(
+            "literal_dup_triple",
+            vec![
+                scheduled("sensitivity 3", "Before", 5.0),
+                scheduled("sensitivity 3", "Before", 3.0),
+                scheduled("sensitivity 3", "Before", 1.0),
+            ],
+        );
+
+        assert_eq!(
+            r.custom.iter().filter(|c| c.kind == "duplicateScheduled").count(),
+            2,
+            "{:?}",
+            r.custom
+        );
+    }
+
+    #[test]
+    fn a_before_after_pair_is_not_flagged_as_a_duplicate() {
+        // The legitimate "set it, then restore it" shape — opposite
+        // relations — must not also come out as a duplicate warning.
+        let r = report_scheduled(
+            "pair_not_dup",
+            vec![
+                scheduled("hud_deathnotice_time 555", "Before", 10.0),
+                scheduled("hud_deathnotice_time 1", "After", 5.0),
+            ],
+        );
+
+        assert_eq!(
+            r.custom.iter().filter(|c| c.kind == "duplicateScheduled").count(),
+            0,
+            "{:?}",
+            r.custom
+        );
+    }
+
+    #[test]
+    fn two_different_values_sharing_a_relation_are_not_a_duplicate() {
+        // A deliberate multi-stage sequence (same relation, different
+        // values) is a legitimate, if uncommon, use of Scheduled Commands —
+        // user's call, 2026-09-08 (#213). Only a genuinely repeated value
+        // counts as a duplicate.
+        let r = report_scheduled(
+            "ramp_not_dup",
+            vec![
+                scheduled("hud_deathnotice_time 1", "Before", 2.0),
+                scheduled("hud_deathnotice_time 555", "Before", 10.0),
+            ],
+        );
+
+        assert_eq!(
+            r.custom.iter().filter(|c| c.kind == "duplicateScheduled").count(),
+            0,
+            "{:?}",
+            r.custom
+        );
     }
 
     #[test]
