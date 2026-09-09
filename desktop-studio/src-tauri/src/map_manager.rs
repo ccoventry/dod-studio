@@ -267,7 +267,6 @@ pub async fn scan_game_configs(
     init_commands: Vec<String>,
     custom_commands: Vec<CustomCommandPayload>,
     capture_fps: Option<i32>,
-    separate_hud: Option<bool>,
     decal_flush: Option<bool>,
 ) -> Result<CfgReport, String> {
     let exe = PathBuf::from(&game_path);
@@ -294,9 +293,6 @@ pub async fn scan_game_configs(
         };
         if let Some(v) = capture_fps {
             cfg.capture_fps = v;
-        }
-        if let Some(v) = separate_hud {
-            cfg.separate_hud = v;
         }
         if let Some(v) = decal_flush {
             cfg.decal_flush = v;
@@ -488,22 +484,38 @@ pub async fn scan_game_configs(
         // clip and `1` after it — is one override and one restore, and
         // reporting the restore against the config file too says the same thing
         // twice while describing the second one wrongly.
+        //
+        // `already_reported` is populated only when a warning is actually
+        // pushed below — NOT unconditionally on every cvar seen. A duplicate
+        // that sets the same value the baseline already has is not reported
+        // (same equal-value guard `overrides_in`/`self_overrides` apply on
+        // the Initial Commands side), and must not silently claim the "only
+        // the first" slot: `mirv_movie_separate_hud 1` typed twice when
+        // Initial Commands already leaves it at `1` produces two no-op
+        // entries here, correctly silent on both — but if the first of two
+        // duplicates happened to match the baseline and a later one set a
+        // genuinely different value, that later one still needs to surface.
         let mut already_reported: std::collections::HashSet<String> =
             std::collections::HashSet::new();
         for payload in application_order(&custom_commands) {
             let command = &payload.command;
-            let Some((cvar, _)) = native::patch::cfg_scan::assigned_cvar(command) else {
+            let Some((cvar, value)) = native::patch::cfg_scan::assigned_cvar(command) else {
                 continue;
             };
             if custom.iter().any(|w| w.command == command.trim()) {
                 continue;
             }
-            if !already_reported.insert(cvar.to_lowercase()) {
+            let key = cvar.to_lowercase();
+            if already_reported.contains(&key) {
                 continue;
             }
             if let Some(existing) =
                 native::patch::cfg_scan::effective_in(&effective_commands, &cvar)
             {
+                if existing.eq_ignore_ascii_case(&value) {
+                    continue;
+                }
+                already_reported.insert(key);
                 custom.push(CustomCommandWarning {
                     command: command.trim().to_string(),
                     cvar,
@@ -512,6 +524,10 @@ pub async fn scan_game_configs(
                     source: String::new(),
                 });
             } else if let Some(setting) = scan.effective(&cvar) {
+                if setting.value.eq_ignore_ascii_case(&value) {
+                    continue;
+                }
+                already_reported.insert(key);
                 custom.push(CustomCommandWarning {
                     command: command.trim().to_string(),
                     cvar,
@@ -770,7 +786,6 @@ mod tests {
             Vec::new(),
             custom,
             Some(120),
-            Some(false),
             Some(true),
         ))
         .unwrap()
@@ -849,7 +864,6 @@ mod tests {
             init.iter().map(|s| s.to_string()).collect(),
             custom.iter().map(|s| scheduled(s, "Before", 2.0)).collect(),
             Some(fps),
-            Some(false),
             Some(true),
         ))
         .unwrap()
@@ -868,7 +882,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
@@ -944,7 +957,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
@@ -1031,7 +1043,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1090,7 +1101,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1106,7 +1116,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1124,7 +1133,6 @@ mod tests {
                 Vec::new(),
                 Some(120),
                 Some(false),
-                Some(false),
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
@@ -1139,7 +1147,6 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
