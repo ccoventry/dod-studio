@@ -40,10 +40,13 @@ tokio = "1.46.1"
 web-time = { version = "1.1.0", features = ["serde"] }
 log = "0.4"
 dirs = "5.0"
-# 1.9.3 is from 2023 and the tree also carries 2.x transitively. Unified here
-# first; the bump to 2.x is a separate change (IndexMap's 2.0 renamed several
-# methods) and wants its own testing.
-indexmap = { version = "1.9.3", features = ["std"] }
+# 2.14.0 is the version Tauri already pulls in transitively, so this is one
+# compiled copy rather than two. #232 unified the workspace on 1.9.3; #234
+# moved it forward. The only first-party use is one `IndexMap<String, _>` in
+# `map_manager.rs` built from `new`/`insert`/`into_iter`, none of which 2.0
+# changed -- in particular nothing calls `remove`, whose 2.0 split into
+# `swap_remove`/`shift_remove` is the one silent behaviour change.
+indexmap = { version = "2.14.0", features = ["std"] }
 # Pinned at 0.29 by native/src/sys/disk.rs and capture_engine.rs, which use the
 # extension-trait API (SystemExt/ProcessExt/DiskExt) that sysinfo 0.30 removed.
 # desktop-studio was independently on 0.30, so both were being compiled. Moving
