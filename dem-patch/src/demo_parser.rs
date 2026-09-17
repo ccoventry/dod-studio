@@ -56,7 +56,22 @@ pub fn parse_demo(i: &[u8], netmsg_parse_mode: MessageDataParseMode) -> Result<D
 
         parse_fallback_directory(frames_start, file_start, netmsg_parse_mode, aux2.clone())
     } else {
-        let directory_start = &file_start[header.directory_offset as usize..];
+        // `directory_offset` comes straight off disk and is signed, so a
+        // corrupted file can make this index negative (which wraps to an
+        // enormous `usize`) or simply point past EOF. Slicing on it unchecked
+        // panics, and with `panic = "abort"` in the release profile a panic
+        // here takes the whole process down -- a folder scan cannot skip the
+        // file and carry on, because there is nothing left to carry on with.
+        // See #225.
+        let offset = header.directory_offset;
+        if offset < 0 || offset as usize > file_start.len() {
+            return nom_fail(format!(
+                "directory offset {} is outside the file ({} bytes)",
+                offset,
+                file_start.len()
+            ));
+        }
+        let directory_start = &file_start[offset as usize..];
 
         parse_directory(directory_start, file_start, netmsg_parse_mode, aux2.clone())
     }?;
@@ -219,6 +234,15 @@ pub fn parse_directory_entry<'a>(
     // frame_count is unreliable
     // parse until NextSection and stop for current entry
     let mut frames: Vec<Frame> = vec![];
+    // Same as `directory_offset` above: signed, read from the file, and used
+    // as an index into it. #225.
+    if frame_offset < 0 || frame_offset as usize > file_start.len() {
+        return nom_fail(format!(
+            "directory entry frame offset {} is outside the file ({} bytes)",
+            frame_offset,
+            file_start.len()
+        ));
+    }
     let mut frames_start = &file_start[frame_offset as usize..];
 
     loop {
@@ -412,7 +436,15 @@ pub fn parse_network_messages(
         return nom_fail(format!("message length too long: {}", message_length));
     }
 
-    // let (i, netmessage_data_chunk) = take(message_length)(i)?;
+    // `message_length` is bounded above, but a truncated file can still leave
+    // fewer bytes than it claims -- splitting on it unchecked panics. #225.
+    if message_length as usize > i.len() {
+        return nom_fail(format!(
+            "message length {} runs past the end of the file ({} bytes left)",
+            message_length,
+            i.len()
+        ));
+    }
     let netmessage_data_chunk = &i[..message_length as usize];
     let the_rest = &i[message_length as usize..];
     // let (i, netmessage_data_chunk) = count(le_u8, message_length as usize)(i)?;

@@ -27,7 +27,19 @@ impl Doer for SvcSpawnBaseline {
             None => return nom_fail("missing custom_entity_state_t decoder"),
         };
 
-        while br.peek_n_bits(16).to_u32() != (1 << 16) - 1 {
+        loop {
+            // The terminator is a 16-bit sentinel. Running out of bits before
+            // reaching it means the message is malformed -- without this the
+            // loop never ends, because an exhausted reader peeks as zero,
+            // which is not the sentinel. #225.
+            if !br.has_bits(16) {
+                br.flag_bad_read();
+                break;
+            }
+            if br.peek_n_bits(16).to_u32() == (1 << 16) - 1 {
+                break;
+            }
+
             let index = br.read_n_bit(11).to_owned();
             let entity_index = index.to_u16();
 
@@ -58,6 +70,10 @@ impl Doer for SvcSpawnBaseline {
             };
 
             entities.push(res);
+
+            if br.is_bad_read() {
+                break;
+            }
         }
 
         // Footer | last entity = (1 << 16) - 1
@@ -68,6 +84,15 @@ impl Doer for SvcSpawnBaseline {
         let extra_data: Vec<Delta> = (0..total_extra_data.to_u8())
             .map(|_| parse_delta(entity_state_decoder, &mut br))
             .collect();
+
+        // A read that ran past the end of this message's bytes means the
+        // demo is malformed. Reject it here, where the caller's normal
+        // parse-error path can skip the file -- the alternative is an
+        // out-of-bounds index, and `panic = "abort"` makes that fatal to the
+        // whole process rather than to this one demo. See #225.
+        if br.is_bad_read() {
+            return nom_fail("SvcSpawnBaseline: read past the end of the message");
+        }
 
         let range = br.get_consumed_bytes();
         let (i, _) = take(range)(i)?;
