@@ -26,6 +26,13 @@
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
 //!   `docs/goldsrc_scoreboard.md`.
+//! - `voice`: the `dodtools_mute_voice_commands` cvar -- silence "fire in the
+//!   hole!" and the rest, without overwriting the game's own `.wav` files.
+//! - `crosshair`: the `dodtools_crosshair` cvar -- hide the crosshair and have
+//!   it stay hidden, which the stock `crosshair` cvar cannot do because
+//!   `CHud::Redraw` forces the value back every frame.
+//!
+//! The last three are all in `docs/goldsrc_hud_suppression.md`.
 //!
 //! See each module's docs for the full R&D reasoning.
 //!
@@ -44,6 +51,7 @@
 mod anim_fix;
 mod commands;
 mod crash;
+mod crosshair;
 mod deathmsg;
 mod detour;
 mod debug;
@@ -54,6 +62,7 @@ mod pe;
 mod scan;
 mod scoreboard;
 mod sound_fix;
+mod voice;
 
 use std::sync::atomic::Ordering;
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
