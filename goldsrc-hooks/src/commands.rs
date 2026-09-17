@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: four cvars and one command.
+//! The `dodtools_*` console surface: five cvars and two commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, sound_fix};
+use crate::{anim_fix, scoreboard, sound_fix};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_animation_fix");
@@ -55,6 +55,8 @@ const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
 const STATUS_NAME: &str = console_name!("status");
+/// `scoreboard.rs` owns this name, because its own error text uses it too.
+const SCOREBOARD_NAME: &str = scoreboard::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -64,6 +66,7 @@ static CVAR_GUNSHOTS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mu
 static CVAR_ANIMATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_ATTENUATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -185,6 +188,48 @@ fn poll_attenuation() {
     }
 }
 
+/// The last scoreboard setting that could not be applied, so a failure is
+/// reported once rather than sixty times a second. `client.dll` is not loaded
+/// for the first few frames of a session, which is exactly when this cvar is
+/// most likely to already hold a value from the launch line.
+static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
+
+/// Unlike the other toggles, this one does not set a flag the rest of the crate
+/// reads -- it writes to `client.dll`. So it is handed to `set_allowed`
+/// unconditionally every frame rather than compared against a cached copy:
+/// after the first scan the call is one byte read and a compare, and deciding
+/// from the byte is what makes the setting survive `client.dll` being unloaded
+/// and reloaded between demos. `set_allowed` reports whether it wrote, so the
+/// log line is still change-triggered.
+///
+/// It also keeps retrying while `client.dll` is not loaded yet, which is the
+/// normal state for the first frames of a session -- and exactly when this cvar
+/// already holds a value handed to it on the launch line.
+fn poll_scoreboard() {
+    let ptr = CVAR_SCOREBOARD.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        return;
+    }
+    let allowed = unsafe { (*ptr).value } != 0.0;
+    match scoreboard::set_allowed(allowed) {
+        Ok(false) => SCOREBOARD_COMPLAINED.store(false, Ordering::Relaxed),
+        Ok(true) => {
+            SCOREBOARD_COMPLAINED.store(false, Ordering::Relaxed);
+            let state = if allowed { "1 (normal)" } else { "0 (+showscores blocked)" };
+            unsafe { crate::debug::report(&format!("commands: {SCOREBOARD_NAME} = {state}")) };
+        }
+        Err(why) => {
+            if !SCOREBOARD_COMPLAINED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "commands: {SCOREBOARD_NAME} not applied yet -- {why}"
+                    ))
+                };
+            }
+        }
+    }
+}
+
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
 /// the per-frame prologue so it lands before `anim_fix::apply()` runs.
 pub fn poll() {
@@ -195,6 +240,7 @@ pub fn poll() {
     poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
     poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
     poll_attenuation();
+    poll_scoreboard();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -209,7 +255,7 @@ pub fn poll() {
 fn status_text() -> String {
     let on = |flag: bool| if flag { "1 (on)" } else { "0 (off)" };
     format!(
-        "{ANIMATION_FIX_NAME} = {} ({})\n  {}\n{GUNSHOTS_FIX_NAME} = {}\n  {}\n{ATTENUATION_NAME} = {}\n{HELD_MODELS_NAME} = {}\n",
+        "{ANIMATION_FIX_NAME} = {} ({})\n  {}\n{GUNSHOTS_FIX_NAME} = {}\n  {}\n{ATTENUATION_NAME} = {}\n{HELD_MODELS_NAME} = {}\n{SCOREBOARD_NAME} = {}\n  {}\n",
         anim_fix::level(),
         anim_fix::level_description(anim_fix::level()),
         anim_fix::status(),
@@ -217,6 +263,8 @@ fn status_text() -> String {
         sound_fix::status(),
         sound_fix::carry_attenuation(),
         on(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
+        if scoreboard::suppressed() { "0 (+showscores blocked)" } else { "1 (normal)" },
+        scoreboard::status(),
     )
 }
 
@@ -337,6 +385,61 @@ fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
     };
 }
 
+/// The fallback for `dodtools_scoreboard`. Unlike the other toggles this one
+/// has to report a failure to the console: `client.dll` may not be loaded, or
+/// the signature may not match this build, and silently doing nothing would
+/// look exactly like a scoreboard that refuses to stay hidden.
+unsafe extern "C" fn cmd_scoreboard() {
+    let Some(engfuncs) = engine::engfuncs() else { return };
+
+    if unsafe { (engfuncs.cmd_argc)() } >= 2 {
+        let arg1 = unsafe { (engfuncs.cmd_argv)(1) };
+        if !arg1.is_null() {
+            let raw = unsafe { CStr::from_ptr(arg1 as *const c_char) }
+                .to_string_lossy()
+                .into_owned();
+            let allowed = match raw.trim() {
+                "0" => false,
+                "1" => true,
+                other => {
+                    console_print(&format!("{SCOREBOARD_NAME}: expected 0 or 1, got \"{other}\"
+"));
+                    return;
+                }
+            };
+            match scoreboard::set_allowed(allowed) {
+                Ok(_) => {
+                    console_print(&format!("{SCOREBOARD_NAME} = {}
+", if allowed { "1" } else { "0" }));
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "commands: {SCOREBOARD_NAME} = {} (set)",
+                            if allowed { "1" } else { "0" }
+                        ))
+                    };
+                }
+                Err(why) => {
+                    console_print(&format!("{SCOREBOARD_NAME}: {why}
+"));
+                    unsafe {
+                        crate::debug::report(&format!("commands: {SCOREBOARD_NAME} failed -- {why}"))
+                    };
+                }
+            }
+            return;
+        }
+    }
+
+    console_print(&format!(
+        "{SCOREBOARD_NAME} = {}
+usage: {SCOREBOARD_NAME} <0|1>  (0 blocks +showscores)
+{}
+",
+        if scoreboard::suppressed() { "0" } else { "1" },
+        scoreboard::status()
+    ));
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -405,9 +508,10 @@ fn install_fallback_commands() {
     add_command(ANIMATION_FIX_NAME, cmd_animation_fix);
     add_command(ATTENUATION_NAME, cmd_gunshot_attenuation);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
+    add_command(SCOREBOARD_NAME, cmd_scoreboard);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -438,9 +542,17 @@ pub fn install() {
     let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
     let attenuation = register(ATTENUATION_NAME, &sound_fix::carry_attenuation().to_string());
     let held_models = register(HELD_MODELS_NAME, bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)));
+    // Defaults to 1 -- the game's own behaviour. Nothing this DLL does should
+    // change what a session looks like until it is asked to.
+    let scoreboard_cvar = register(SCOREBOARD_NAME, "1");
 
-    let (Some(gunshots), Some(animation), Some(attenuation), Some(held_models)) =
-        (gunshots, animation, attenuation, held_models)
+    let (
+        Some(gunshots),
+        Some(animation),
+        Some(attenuation),
+        Some(held_models),
+        Some(scoreboard_cvar),
+    ) = (gunshots, animation, attenuation, held_models, scoreboard_cvar)
     else {
         install_fallback_commands();
         return;
@@ -450,12 +562,13 @@ pub fn install() {
     CVAR_ANIMATION.store(animation, Ordering::Relaxed);
     CVAR_ATTENUATION.store(attenuation, Ordering::Relaxed);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
+    CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -480,7 +593,13 @@ mod tests {
     #[test]
     fn status_names_every_setting() {
         let text = status_text();
-        for name in [ANIMATION_FIX_NAME, GUNSHOTS_FIX_NAME, ATTENUATION_NAME, HELD_MODELS_NAME] {
+        for name in [
+            ANIMATION_FIX_NAME,
+            GUNSHOTS_FIX_NAME,
+            ATTENUATION_NAME,
+            HELD_MODELS_NAME,
+            SCOREBOARD_NAME,
+        ] {
             assert!(text.contains(name), "{name} missing from the status reply:\n{text}");
         }
     }

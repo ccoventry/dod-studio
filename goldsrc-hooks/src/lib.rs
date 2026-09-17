@@ -22,6 +22,10 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
+//! - `scoreboard`: the `dodtools_scoreboard` cvar -- stop a POV demo's
+//!   recorded TAB presses from putting the scoreboard over the shot, without
+//!   editing `ScoreBoard.res`. Full design write-up in
+//!   `docs/goldsrc_scoreboard.md`.
 //!
 //! See each module's docs for the full R&D reasoning.
 //!
@@ -48,6 +52,7 @@ mod names;
 mod patch;
 mod pe;
 mod scan;
+mod scoreboard;
 mod sound_fix;
 
 use std::sync::atomic::Ordering;
