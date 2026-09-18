@@ -112,6 +112,8 @@ pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sound_mute;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod map_text;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
@@ -184,6 +186,9 @@ pub use map_check::{check_demo, map_reference, MapReference, MapStatus};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use sound_mute::{map_sounds, mute_sounds, MapSounds, MuteSelection, MuteStats};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use map_text::{hide_map_text, map_text, MapText, TextSelection, TextStats};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use map_fetch::{fetch_map, map_url, FetchOutcome, DEFAULT_MIRROR};

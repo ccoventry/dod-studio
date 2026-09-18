@@ -67,11 +67,12 @@ of which crash identically to the untrimmed map. This only helps recordings
 made *after* a trimmed map is deployed. See #207 for the original problem and
 #231 for the fix that actually addresses it.
 
-### Map sounds
+### Map sounds and text
 
 | Probe | Question it answers |
 | --- | --- |
 | `mute_map_sounds` | What does this map play on a capture or a round win, and can it be silenced? |
+| `hide_map_text` | What does this map put on screen, and can it be hidden? |
 
 The other one here that writes a file. It reads the sound names out of the
 map's own entity lump -- `dod_control_point`'s `point_*_capsound` keyvalues,
@@ -79,10 +80,18 @@ and the `ambient_generic` the `dod_control_point_master` fires at round end --
 and replaces the demo messages carrying them with `SvcNop`, the same move
 `decal_strip` makes for decals.
 
+`hide_map_text` is its counterpart for #287. The strings come from the same
+lump -- `dod_score_ent`'s `message` for the round result, `env_message`'s for a
+hint like anzio's mortar warning -- and the messages carrying them are nopped
+the same way. Both carriers #287 first suspected, `TE_TEXTMESSAGE` and
+`svc_centerprint`, turned out to carry nothing at all; the channel is `HudText`,
+which DoD's own clan-match prompts share, so selecting by what the map declares
+is what keeps those prompts alive.
+
 `--list` stops after printing what it found, which answers "what would this map
-lose?" without writing anything. See `native/src/patch/sound_mute.rs` for why
-the selection is structural rather than a filename list, and #284/#285 for the
-measurements.
+lose?" without writing anything. See `native/src/patch/sound_mute.rs` and
+`map_text.rs` for why the selection is structural rather than a name list, and
+#284/#285/#287 for the measurements.
 
 ### Capture backends
 
