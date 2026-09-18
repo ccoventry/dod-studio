@@ -44,12 +44,32 @@
 //! proves were there. The general `dodtools_hudelement` command in #265 is
 //! still worth having -- this is not it, and does not block it.
 //!
-//! ## Scope
+//! ## It covers both the POV and the spectator crosshair
 //!
-//! This is DoD's own HUD crosshair. It is not the weapon-specific crosshair
-//! sprite the engine draws through `pfnSetCrosshair`, which is a separate
-//! mechanism, and it says nothing about why POV and HLTV first-person differ
-//! (#219).
+//! One function draws both, and the stub is at its first instruction, so both
+//! die. `Draw` branches on the observer-mode global at `client+0x1e88d4`:
+//!
+//! ```text
+//!     mode == 0            the POV path -- and the only one that reads the
+//!                          `crosshair` cvar
+//!     mode == 3 or 4       client+0x2d1f0, the spectator crosshair
+//!                          (3 and 4 are roaming and in-eye in HL's numbering)
+//!     anything else        nothing is drawn
+//! ```
+//!
+//! Worth recording for #219, which asks why POV and HLTV first-person differ:
+//! **the spectator branch never reads the `crosshair` cvar at all.** So even
+//! without `CHud::Redraw` forcing the value back, `crosshair 0` could not have
+//! hidden the spectator crosshair -- there is no code path by which it would.
+//!
+//! ## What is not covered
+//!
+//! DoD also calls the engine's own `pfnSetCrosshair` (`gEngfuncs[13]`) from its
+//! weapon-sprite code -- once with a null sprite (clearing it) and once with a
+//! real one. That is a second, engine-drawn crosshair which this does not
+//! touch, and whether it is ever visible has **not** been established. A live
+//! test settles it: if anything remains on screen with this set to 0, that is
+//! what it is.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 

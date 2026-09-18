@@ -130,11 +130,30 @@ that stores it. Patching the function needs neither. The general
 `dodtools_hudelement` command in #265 is still worth having; this is not it and
 does not block it.
 
-### Scope
+### Both the POV and the spectator crosshair
 
-This is DoD's own HUD crosshair. It is not the weapon crosshair sprite the
-engine draws through `pfnSetCrosshair`, and it says nothing about why POV and
-HLTV first-person differ (#219).
+One function draws both, and the stub is at its first instruction, so both die.
+`Draw` branches on the observer-mode global at `client+0x1e88d4`:
+
+| observer mode | what happens |
+|---|---|
+| `0` (not spectating) | the POV crosshair — **the only path that reads the `crosshair` cvar** |
+| `3` or `4` | `client+0x2d1f0`, the spectator crosshair (roaming and in-eye in HL's numbering) |
+| anything else | nothing is drawn |
+
+**This answers the open question in #219.** POV and HLTV first-person differ
+because the spectator branch never consults the `crosshair` cvar. Even if
+`CHud::Redraw` were not forcing the value back every frame, `crosshair 0` could
+not have hidden the spectator crosshair — no code path reads it there.
+
+### What is not covered
+
+DoD also calls the engine's own `pfnSetCrosshair` (`gEngfuncs[13]`) from its
+weapon-sprite code, once with a null sprite (clearing it) and once with a real
+one. That is a second, engine-drawn crosshair, this does not touch it, and
+whether it is ever visible has **not** been established. A live test settles it
+in seconds: if anything is still on screen with this set to 0, that is what it
+is.
 
 ---
 
