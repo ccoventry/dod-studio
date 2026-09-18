@@ -86,6 +86,7 @@
 
 use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
+use crate::crosshair;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
@@ -278,14 +279,24 @@ pub fn matching() -> bool {
 }
 
 /// One line for `dodtools_status`.
+///
+/// Reports what is patched into the code, which is not the same question as
+/// what is on screen: `dodtools_hide_crosshair` stubs `Draw`'s prologue, so
+/// none of this ever runs while it is on. Said here rather than left for the
+/// player to work out from two settings that otherwise look unrelated.
 pub fn status() -> String {
-    match ACTIVE_STYLE.load(Ordering::Relaxed) {
+    let text = match ACTIVE_STYLE.load(Ordering::Relaxed) {
         0 => format!(
             "the spectator crosshair is DoD's own 24x24 tile of crosshairs.spr (set {STYLE_CVAR} to 1-{MAX_STYLE} and {NAME} to 1 to use your own)"
         ),
         style => format!(
             "the spectator crosshair draws tile {style} of customXHair.spr, the same one {STYLE_CVAR} gives the POV view"
         ),
+    };
+    if crosshair::hidden() {
+        format!("{text} (moot right now -- {} is 1, so nothing is drawn)", crosshair::NAME)
+    } else {
+        text
     }
 }
 
@@ -451,6 +462,29 @@ mod tests {
         assert!(matching());
 
         ACTIVE_STYLE.store(saved, Ordering::Release);
+    }
+
+    /// `dodtools_hide_crosshair` stubs `Draw`'s prologue, so nothing this
+    /// module patches ever runs while it is on. `status()` has to say so,
+    /// rather than describe a tile that is not actually visible.
+    #[test]
+    fn status_notes_when_hide_crosshair_makes_it_moot() {
+        let saved_style = ACTIVE_STYLE.load(Ordering::Acquire);
+        let saved_hidden = crosshair::HIDDEN_NOW.load(Ordering::Acquire);
+
+        ACTIVE_STYLE.store(7, Ordering::Release);
+        crosshair::HIDDEN_NOW.store(false, Ordering::Release);
+        assert!(!status().contains("moot"), "{}", status());
+
+        crosshair::HIDDEN_NOW.store(true, Ordering::Release);
+        let text = status();
+        assert!(text.contains("moot"), "{text}");
+        assert!(text.contains(crosshair::NAME), "{text}");
+        // The tile it would draw is still worth reporting alongside the note.
+        assert!(text.contains("tile 7"), "{text}");
+
+        ACTIVE_STYLE.store(saved_style, Ordering::Release);
+        crosshair::HIDDEN_NOW.store(saved_hidden, Ordering::Release);
     }
 
     /// The span exactly as `client.dll` ships it, built from the pattern with
