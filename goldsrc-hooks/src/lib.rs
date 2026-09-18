@@ -65,6 +65,7 @@ mod hand_signals;
 mod hudelement;
 mod msglog;
 mod names;
+mod overview_map;
 mod patch;
 mod pe;
 mod scan;

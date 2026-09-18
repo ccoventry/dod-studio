@@ -45,6 +45,14 @@ Plus five control surfaces, always available and doing nothing until used:
   the spectated player. `dodtools_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **Overview map** (`dodtools_overviewmap <full|mini> <x> <y> <w> <h>`): places
+  and sizes DoD's overview map, so the big one can be a corner inset instead of
+  something that has to be off. The rects are cached in `gHUD` rather than
+  recomputed per frame, so this is four dword writes, re-asserted each frame
+  because `VidInit` recomputes them. `dodtools_overviewmap` with no arguments
+  lists both and what the engine currently has; `default` releases them.
+  Note the kill feed and objective icons take their y from the full map's
+  bounds.
 - **Interpolation ceiling** (`dodtools_ex_interp_max <ms>`): raises the engine's
   clamp on `ex_interp` above its 100 ms ceiling, for smoother entity motion
   between snapshots. `ex_interp` is engine-managed -- a per-frame clamp writes
