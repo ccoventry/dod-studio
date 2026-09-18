@@ -45,6 +45,11 @@ Plus five control surfaces, always available and doing nothing until used:
   the spectated player. `dodtools_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **Interpolation ceiling** (`dodtools_ex_interp_max <ms>`): raises the engine's
+  clamp on `ex_interp` above its 100 ms ceiling, for smoother entity motion
+  between snapshots. `ex_interp` is engine-managed -- a per-frame clamp writes
+  the value back through `Cvar_Set` -- so setting the cvar by hand does not
+  stay. `cl_updaterate` still sets the floor. See `docs/goldsrc_ex_interp.md`.
 - **Clear decals** (`dodtools_clear_decals`): empties the engine's 4096-slot
   decal pool on command, unlinking each decal from its surface first the way
   the engine's own remove functions do. Nothing to do with `r_decals`, which
