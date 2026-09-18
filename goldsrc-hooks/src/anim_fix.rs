@@ -904,7 +904,7 @@ pub fn status() -> String {
     let seen = SEEN_VIEWMODELS.lock().unwrap();
     let count = seen.as_ref().map(|s| s.len()).unwrap_or(0);
     format!(
-        "state: {} (distinct viewmodels seen: {count}, animations corrected: {})",
+        "{} -- {count} viewmodels, {} played",
         stage_name(STAGE.load(Ordering::Relaxed)),
         ANIMATIONS_PLAYED.load(Ordering::Relaxed),
     )

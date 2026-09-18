@@ -213,7 +213,7 @@ pub fn status() -> String {
         return "voice commands play normally".into();
     }
     "voice commands are silent; the POV chat line still shows (there is none \
-     while spectating), and pain and death sounds are not affected)"
+     while spectating), and pain and death sounds are not affected"
         .into()
 }
 
