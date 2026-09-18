@@ -46,7 +46,10 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, decals, hudelement, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
+use crate::{
+    anim_fix, crosshair, decals, hand_signals, hudelement, scoreboard, sound_fix,
+    spectator_crosshair, spectator_target, voice,
+};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -64,6 +67,7 @@ const CROSSHAIR_NAME: &str = crosshair::NAME;
 const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
+const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -78,6 +82,7 @@ static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_
 static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -261,6 +266,30 @@ fn describe_crosshair(on: bool) -> &'static str {
     if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
+/// Reads the cvar, clears the remembered stances when it is turned off, and
+/// then does the frame's substitution. Kept out of `poll_flag` because turning
+/// it off has to forget: a stance remembered before a map change is not one to
+/// put back after it.
+fn poll_hand_signals() {
+    let ptr = CVAR_HAND_SIGNALS.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        return;
+    }
+    let wanted = unsafe { (*ptr).value } != 0.0;
+    if wanted != hand_signals::ENABLED.swap(wanted, Ordering::Relaxed) {
+        if !wanted {
+            hand_signals::reset();
+        }
+        unsafe {
+            crate::debug::report(&format!(
+                "commands: {HAND_SIGNALS_NAME} = {}",
+                if wanted { "1 (gestures replaced)" } else { "0 (normal)" }
+            ))
+        };
+    }
+    hand_signals::apply();
+}
+
 /// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
@@ -338,6 +367,7 @@ pub fn poll() {
         spectator_crosshair::set_matching,
         describe_spectator_crosshair,
     );
+    poll_hand_signals();
     poll_hudelements();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
@@ -416,6 +446,11 @@ fn status_text() -> String {
     // something once instead of holding a value.
     if decals::has_run() {
         lines.push(format!("decals: {}", decals::status()));
+    }
+    // Reported whenever it is on, because "is it finding anything?" is the one
+    // question the cvar's own value cannot answer.
+    if hand_signals::ENABLED.load(Ordering::Relaxed) || hand_signals::has_acted() {
+        lines.push(format!("hand signals: {}", hand_signals::status()));
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -748,6 +783,12 @@ unsafe extern "C" fn cmd_clear_decals() {
     }
 }
 
+unsafe extern "C" fn cmd_hand_signals() {
+    handle_toggle(HAND_SIGNALS_NAME, &hand_signals::ENABLED, || {
+        hand_signals::status()
+    });
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -828,6 +869,7 @@ fn install_fallback_commands() {
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
     add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
+    add_command(HAND_SIGNALS_NAME, cmd_hand_signals);
     unsafe {
         crate::debug::report(&format!(
             "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
@@ -872,6 +914,7 @@ pub fn install() {
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
     let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
+    let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
 
     let (
         Some(gunshots),
@@ -883,6 +926,7 @@ pub fn install() {
         Some(voice_cvar),
         Some(crosshair_cvar),
         Some(spectator_crosshair_cvar),
+        Some(hand_signals_cvar),
     ) = (
         gunshots,
         animation,
@@ -893,6 +937,7 @@ pub fn install() {
         voice_cvar,
         crosshair_cvar,
         spectator_crosshair_cvar,
+        hand_signals_cvar,
     )
     else {
         install_fallback_commands();
@@ -908,12 +953,13 @@ pub fn install() {
     CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
     CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
+    CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME} and command {STATUS_NAME}"
         ))
     };
 }

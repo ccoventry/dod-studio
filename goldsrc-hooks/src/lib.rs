@@ -60,6 +60,7 @@ mod deathmsg;
 mod detour;
 mod debug;
 mod engine;
+mod hand_signals;
 mod hudelement;
 mod msglog;
 mod names;

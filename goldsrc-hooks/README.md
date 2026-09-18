@@ -39,6 +39,12 @@ Plus five control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
+- **Hand signals** (`dodtools_hide_hand_signals 1`): stops players miming their
+  voice commands -- the nod, the point, the wave. Replaces any `hs_*` body
+  sequence with that player's last ordinary one, for everyone in view, not just
+  the spectated player. `dodtools_mute_voice_commands` does not cover this:
+  `client.dll` has no `hs_` string at all, because the sequence is replicated
+  entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
 - **Clear decals** (`dodtools_clear_decals`): empties the engine's 4096-slot
   decal pool on command, unlinking each decal from its surface first the way
   the engine's own remove functions do. Nothing to do with `r_decals`, which

@@ -253,3 +253,59 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
    - the running total every 100 animations.
 5. If a weapon looks dead, check for an unmatched-pair line before anything else
    — that failure is silent and total.
+
+---
+
+## 12. The other direction: `dodtools_hide_hand_signals`
+
+Everything above puts an animation *back*. This one takes one away, and it
+belongs here because it works on the same field, from the same per-frame hook.
+
+Using a voice command in DoD also plays a gesture on the player -- a nod for
+"Yes Sir!", a point for "Enemy Ahead". `dodtools_mute_voice_commands` silences
+the sound and leaves the mime, because the two are unrelated mechanisms:
+`client.dll` contains **no `hs_` string at all**. The client never picks these
+by name. The server picks a sequence index and it arrives as replicated
+`curstate.sequence` -- the same field §3 reads to infer firing, and the reason
+it survives into an HLTV demo.
+
+### Detection is by label, not by index
+
+#283 measured the indices -- 54 `hs_*` sequences per player model, in two
+contiguous runs at 212-238 and 287-313, identical across all five stock models
+-- and flagged the risk in trusting them, since a custom player model could
+reorder its sequence list.
+
+So the implementation does not use them. It reads the model's own labels,
+through the same cached `mstudioseqdesc_t` walk this fix already does
+(`model_sequence_info`), and asks whether the label starts with `hs_`. Exact
+for any model, and a reordered one is handled rather than mis-suppressed.
+
+### What replaces it
+
+A sequence index has to be *something*. Each player's last non-`hs_` sequence
+is remembered and put back for the signal's duration -- their stance or aim in
+every case that matters. A player first seen mid-signal has nothing to put
+back, so they are left alone and counted rather than given a guess.
+
+`gaitsequence` is untouched. It drives the legs independently, and the
+standing/prone split in the `hs_` names says the signal is upper-body.
+
+### The ordering question, answered from the call order
+
+#283's remaining unknown was whether a write lands before the renderer reads
+it. It runs from `commands::poll`, which this crate drives from the `HUD_Frame`
+trampoline -- and `HUD_Frame` is called once per frame *before* the engine
+renders the view, unlike `HUD_Redraw`, which paints the HUD after it. So the
+write is in place for the same frame's `StudioDrawPlayer`.
+
+That is an argument, not a measurement. If a live test shows the gesture
+surviving, the fallback is the one #283 names: the studio renderer's
+`StudioDrawPlayer`, reachable through the interface already captured in slot
+39.
+
+### It applies to every player in view
+
+Not only the spectated one. That is what clean footage wants, but it is a
+behavioural choice rather than an obvious default, so `dodtools_status` says so.
+
