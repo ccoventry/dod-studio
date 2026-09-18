@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: five cvars and two commands.
+//! The `dodtools_*` console surface: seven cvars and two commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, scoreboard, sound_fix};
+use crate::{anim_fix, crosshair, scoreboard, sound_fix, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_animation_fix");
@@ -55,8 +55,10 @@ const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
 const STATUS_NAME: &str = console_name!("status");
-/// `scoreboard.rs` owns this name, because its own error text uses it too.
+/// Each module owns its own name, because its error text uses it too.
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
+const VOICE_NAME: &str = voice::NAME;
+const CROSSHAIR_NAME: &str = crosshair::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -67,6 +69,8 @@ static CVAR_ANIMATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_m
 static CVAR_ATTENUATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -188,46 +192,62 @@ fn poll_attenuation() {
     }
 }
 
-/// The last scoreboard setting that could not be applied, so a failure is
+/// Set once per code-patch cvar that could not be applied, so a failure is
 /// reported once rather than sixty times a second. `client.dll` is not loaded
-/// for the first few frames of a session, which is exactly when this cvar is
-/// most likely to already hold a value from the launch line.
+/// for the first few frames of a session, which is exactly when these cvars
+/// are most likely to already hold a value from the launch line.
 static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
-/// Unlike the other toggles, this one does not set a flag the rest of the crate
-/// reads -- it writes to `client.dll`. So it is handed to `set_allowed`
-/// unconditionally every frame rather than compared against a cached copy:
-/// after the first scan the call is one byte read and a compare, and deciding
-/// from the byte is what makes the setting survive `client.dll` being unloaded
-/// and reloaded between demos. `set_allowed` reports whether it wrote, so the
-/// log line is still change-triggered.
+/// Three of these cvars do not set a flag the rest of the crate reads -- they
+/// write to `client.dll`'s code. Those are handed to their `apply` every frame
+/// rather than compared against a cached copy: after the first scan the call is
+/// a short byte compare, and deciding from the bytes is what makes the setting
+/// survive `client.dll` being unloaded and reloaded between demos. `apply`
+/// reports whether it wrote, so the log line is still change-triggered.
 ///
 /// It also keeps retrying while `client.dll` is not loaded yet, which is the
-/// normal state for the first frames of a session -- and exactly when this cvar
-/// already holds a value handed to it on the launch line.
-fn poll_scoreboard() {
-    let ptr = CVAR_SCOREBOARD.load(Ordering::Relaxed);
+/// normal state for the first frames of a session -- and exactly when these
+/// cvars already hold a value handed to them on the launch line.
+fn poll_code_patch(
+    name: &str,
+    cvar: &AtomicPtr<CvarSPartial>,
+    complained: &AtomicBool,
+    apply: fn(bool) -> Result<bool, String>,
+    describe: fn(bool) -> &'static str,
+) {
+    let ptr = cvar.load(Ordering::Relaxed);
     if ptr.is_null() {
         return;
     }
-    let allowed = unsafe { (*ptr).value } != 0.0;
-    match scoreboard::set_allowed(allowed) {
-        Ok(false) => SCOREBOARD_COMPLAINED.store(false, Ordering::Relaxed),
+    let on = unsafe { (*ptr).value } != 0.0;
+    match apply(on) {
+        Ok(false) => complained.store(false, Ordering::Relaxed),
         Ok(true) => {
-            SCOREBOARD_COMPLAINED.store(false, Ordering::Relaxed);
-            let state = if allowed { "1 (normal)" } else { "0 (+showscores blocked)" };
-            unsafe { crate::debug::report(&format!("commands: {SCOREBOARD_NAME} = {state}")) };
+            complained.store(false, Ordering::Relaxed);
+            unsafe { crate::debug::report(&format!("commands: {name} = {}", describe(on))) };
         }
         Err(why) => {
-            if !SCOREBOARD_COMPLAINED.swap(true, Ordering::Relaxed) {
+            if !complained.swap(true, Ordering::Relaxed) {
                 unsafe {
-                    crate::debug::report(&format!(
-                        "commands: {SCOREBOARD_NAME} not applied yet -- {why}"
-                    ))
+                    crate::debug::report(&format!("commands: {name} not applied yet -- {why}"))
                 };
             }
         }
     }
+}
+
+fn describe_scoreboard(on: bool) -> &'static str {
+    if on { "1 (+showscores blocked)" } else { "0 (normal)" }
+}
+
+fn describe_voice(on: bool) -> &'static str {
+    if on { "1 (voice commands silent)" } else { "0 (normal)" }
+}
+
+fn describe_crosshair(on: bool) -> &'static str {
+    if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
@@ -240,7 +260,27 @@ pub fn poll() {
     poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
     poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
     poll_attenuation();
-    poll_scoreboard();
+    poll_code_patch(
+        SCOREBOARD_NAME,
+        &CVAR_SCOREBOARD,
+        &SCOREBOARD_COMPLAINED,
+        scoreboard::set_hidden,
+        describe_scoreboard,
+    );
+    poll_code_patch(
+        VOICE_NAME,
+        &CVAR_VOICE,
+        &VOICE_COMPLAINED,
+        voice::set_muted,
+        describe_voice,
+    );
+    poll_code_patch(
+        CROSSHAIR_NAME,
+        &CVAR_CROSSHAIR,
+        &CROSSHAIR_COMPLAINED,
+        crosshair::set_hidden,
+        describe_crosshair,
+    );
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -255,7 +295,7 @@ pub fn poll() {
 fn status_text() -> String {
     let on = |flag: bool| if flag { "1 (on)" } else { "0 (off)" };
     format!(
-        "{ANIMATION_FIX_NAME} = {} ({})\n  {}\n{GUNSHOTS_FIX_NAME} = {}\n  {}\n{ATTENUATION_NAME} = {}\n{HELD_MODELS_NAME} = {}\n{SCOREBOARD_NAME} = {}\n  {}\n",
+        "{ANIMATION_FIX_NAME} = {} ({})\n  {}\n{GUNSHOTS_FIX_NAME} = {}\n  {}\n{ATTENUATION_NAME} = {}\n{HELD_MODELS_NAME} = {}\n{SCOREBOARD_NAME} = {}\n  {}\n{VOICE_NAME} = {}\n  {}\n{CROSSHAIR_NAME} = {}\n  {}\n",
         anim_fix::level(),
         anim_fix::level_description(anim_fix::level()),
         anim_fix::status(),
@@ -263,8 +303,12 @@ fn status_text() -> String {
         sound_fix::status(),
         sound_fix::carry_attenuation(),
         on(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
-        if scoreboard::suppressed() { "0 (+showscores blocked)" } else { "1 (normal)" },
+        if scoreboard::suppressed() { "1 (+showscores blocked)" } else { "0 (normal)" },
         scoreboard::status(),
+        if voice::muted() { "1 (silent)" } else { "0 (normal)" },
+        voice::status(),
+        if crosshair::hidden() { "1 (hidden)" } else { "0 (normal)" },
+        crosshair::status(),
     )
 }
 
@@ -385,11 +429,17 @@ fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
     };
 }
 
-/// The fallback for `dodtools_scoreboard`. Unlike the other toggles this one
-/// has to report a failure to the console: `client.dll` may not be loaded, or
-/// the signature may not match this build, and silently doing nothing would
-/// look exactly like a scoreboard that refuses to stay hidden.
-unsafe extern "C" fn cmd_scoreboard() {
+/// The fallback for the three code-patch cvars. Unlike the other toggles these
+/// have to report a failure to the console: `client.dll` may not be loaded, or
+/// a signature may not match this build, and silently doing nothing would look
+/// exactly like a setting that refuses to take.
+fn handle_code_patch(
+    name: &str,
+    usage: &str,
+    apply: fn(bool) -> Result<bool, String>,
+    current: fn() -> bool,
+    status: fn() -> String,
+) {
     let Some(engfuncs) = engine::engfuncs() else { return };
 
     if unsafe { (engfuncs.cmd_argc)() } >= 2 {
@@ -398,32 +448,23 @@ unsafe extern "C" fn cmd_scoreboard() {
             let raw = unsafe { CStr::from_ptr(arg1 as *const c_char) }
                 .to_string_lossy()
                 .into_owned();
-            let allowed = match raw.trim() {
+            let on = match raw.trim() {
                 "0" => false,
                 "1" => true,
                 other => {
-                    console_print(&format!("{SCOREBOARD_NAME}: expected 0 or 1, got \"{other}\"
-"));
+                    console_print(&format!("{name}: expected 0 or 1, got \"{other}\"\n"));
                     return;
                 }
             };
-            match scoreboard::set_allowed(allowed) {
+            let bit = if on { "1" } else { "0" };
+            match apply(on) {
                 Ok(_) => {
-                    console_print(&format!("{SCOREBOARD_NAME} = {}
-", if allowed { "1" } else { "0" }));
-                    unsafe {
-                        crate::debug::report(&format!(
-                            "commands: {SCOREBOARD_NAME} = {} (set)",
-                            if allowed { "1" } else { "0" }
-                        ))
-                    };
+                    console_print(&format!("{name} = {bit}\n"));
+                    unsafe { crate::debug::report(&format!("commands: {name} = {bit} (set)")) };
                 }
                 Err(why) => {
-                    console_print(&format!("{SCOREBOARD_NAME}: {why}
-"));
-                    unsafe {
-                        crate::debug::report(&format!("commands: {SCOREBOARD_NAME} failed -- {why}"))
-                    };
+                    console_print(&format!("{name}: {why}\n"));
+                    unsafe { crate::debug::report(&format!("commands: {name} failed -- {why}")) };
                 }
             }
             return;
@@ -431,13 +472,40 @@ unsafe extern "C" fn cmd_scoreboard() {
     }
 
     console_print(&format!(
-        "{SCOREBOARD_NAME} = {}
-usage: {SCOREBOARD_NAME} <0|1>  (0 blocks +showscores)
-{}
-",
-        if scoreboard::suppressed() { "0" } else { "1" },
-        scoreboard::status()
+        "{name} = {}\nusage: {name} <0|1>  ({usage})\n{}\n",
+        if current() { "1" } else { "0" },
+        status()
     ));
+}
+
+unsafe extern "C" fn cmd_scoreboard() {
+    handle_code_patch(
+        SCOREBOARD_NAME,
+        "1 blocks +showscores",
+        scoreboard::set_hidden,
+        scoreboard::suppressed,
+        scoreboard::status,
+    );
+}
+
+unsafe extern "C" fn cmd_voice() {
+    handle_code_patch(
+        VOICE_NAME,
+        "1 silences voice commands",
+        voice::set_muted,
+        voice::muted,
+        voice::status,
+    );
+}
+
+unsafe extern "C" fn cmd_crosshair() {
+    handle_code_patch(
+        CROSSHAIR_NAME,
+        "1 hides the crosshair",
+        crosshair::set_hidden,
+        crosshair::hidden,
+        crosshair::status,
+    );
 }
 
 unsafe extern "C" fn cmd_log_held_models() {
@@ -509,9 +577,11 @@ fn install_fallback_commands() {
     add_command(ATTENUATION_NAME, cmd_gunshot_attenuation);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
+    add_command(VOICE_NAME, cmd_voice);
+    add_command(CROSSHAIR_NAME, cmd_crosshair);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -542,9 +612,12 @@ pub fn install() {
     let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
     let attenuation = register(ATTENUATION_NAME, &sound_fix::carry_attenuation().to_string());
     let held_models = register(HELD_MODELS_NAME, bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)));
-    // Defaults to 1 -- the game's own behaviour. Nothing this DLL does should
-    // change what a session looks like until it is asked to.
-    let scoreboard_cvar = register(SCOREBOARD_NAME, "1");
+    // These three default to the game's own behaviour. Nothing this DLL does
+    // should change what a session looks like until it is asked to -- which is
+    // why the mute defaults to 0 while the other two default to 1.
+    let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
+    let voice_cvar = register(VOICE_NAME, "0");
+    let crosshair_cvar = register(CROSSHAIR_NAME, "0");
 
     let (
         Some(gunshots),
@@ -552,7 +625,17 @@ pub fn install() {
         Some(attenuation),
         Some(held_models),
         Some(scoreboard_cvar),
-    ) = (gunshots, animation, attenuation, held_models, scoreboard_cvar)
+        Some(voice_cvar),
+        Some(crosshair_cvar),
+    ) = (
+        gunshots,
+        animation,
+        attenuation,
+        held_models,
+        scoreboard_cvar,
+        voice_cvar,
+        crosshair_cvar,
+    )
     else {
         install_fallback_commands();
         return;
@@ -563,12 +646,14 @@ pub fn install() {
     CVAR_ATTENUATION.store(attenuation, Ordering::Relaxed);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
+    CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
+    CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -599,8 +684,46 @@ mod tests {
             ATTENUATION_NAME,
             HELD_MODELS_NAME,
             SCOREBOARD_NAME,
+            VOICE_NAME,
+            CROSSHAIR_NAME,
         ] {
             assert!(text.contains(name), "{name} missing from the status reply:\n{text}");
+        }
+    }
+
+    /// Every suppression cvar reads the same way: **1 does the thing the name
+    /// says**, 0 leaves the game alone. That is the whole point of naming them
+    /// `hide_*` / `mute_*` rather than after the thing they act on, and it is
+    /// the one property a future edit could invert without any test noticing --
+    /// the byte-level tests check widths and encodings, not sense.
+    #[test]
+    fn one_means_suppressed_for_every_suppression_cvar() {
+        assert!(describe_scoreboard(true).contains("blocked"), "{}", describe_scoreboard(true));
+        assert!(describe_scoreboard(false).contains("normal"), "{}", describe_scoreboard(false));
+
+        assert!(describe_crosshair(true).contains("hidden"), "{}", describe_crosshair(true));
+        assert!(describe_crosshair(false).contains("normal"), "{}", describe_crosshair(false));
+
+        assert!(describe_voice(true).contains("silent"), "{}", describe_voice(true));
+        assert!(describe_voice(false).contains("normal"), "{}", describe_voice(false));
+
+        for d in [describe_scoreboard(true), describe_crosshair(true), describe_voice(true)] {
+            assert!(d.starts_with('1'), "{d}");
+        }
+    }
+
+    /// The names have to carry the sense, since the value alone cannot. A cvar
+    /// called after its subject (`dodtools_scoreboard`) leaves the reader to
+    /// guess whether 1 means "scoreboard" or "suppress the scoreboard"; one
+    /// called after the action does not.
+    #[test]
+    fn suppression_cvars_are_named_after_the_action() {
+        for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
+            let verb = name.trim_start_matches("dodtools_");
+            assert!(
+                verb.starts_with("hide_") || verb.starts_with("mute_"),
+                "{name} is named after its subject, not the action it performs"
+            );
         }
     }
 }

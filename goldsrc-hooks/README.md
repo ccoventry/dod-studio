@@ -13,18 +13,25 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus two control surfaces, always available and doing nothing until used:
+Plus four control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodtools_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
   players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
-- **Scoreboard** (`dodtools_scoreboard 0`): stops a POV demo's recorded TAB
+- **Scoreboard** (`dodtools_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
   than editing `dod/resource/ui/ScoreBoard.res` -- see
   `docs/goldsrc_scoreboard.md`.
+- **Voice commands** (`dodtools_mute_voice_commands 1`): silences "fire in the
+  hole!" and the rest, without overwriting the game's own `player/us*.wav`,
+  `player/brit*.wav` and `player/ger*.wav`. Subtitles and speaker icons still
+  show -- see `docs/goldsrc_hud_suppression.md`.
+- **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
+  hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
+  that value back every frame. Same doc.
 
 All of them live in one DLL since they share the same engine-interface
 bootstrap; set only the env var for whichever fix you want active.
@@ -58,10 +65,11 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 ## Status
 
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
-against a running game. The sound fix and `dodtools_scoreboard` are confirmed
-by static analysis only -- see the module docs in `src/engine.rs`,
-`src/sound_fix.rs` and `src/scoreboard.rs` for what is established from the DoD
-1.3 game files vs. what still needs a live check. `tools/` holds a verifier per
+against a running game. The sound fix, `dodtools_hide_scoreboard`,
+`dodtools_mute_voice_commands` and `dodtools_hide_crosshair` are confirmed by static
+analysis only -- see the module docs in `src/engine.rs`, `src/sound_fix.rs`,
+`src/scoreboard.rs`, `src/voice.rs` and `src/crosshair.rs` for what is
+established from the DoD 1.3 game files vs. what still needs a live check. `tools/` holds a verifier per
 patched site, which checks the Rust constants against a real `client.dll`.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
