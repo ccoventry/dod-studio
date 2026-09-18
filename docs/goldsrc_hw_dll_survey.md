@@ -283,10 +283,11 @@ a clear payoff.
 
 ---
 
-## 5. What is not surveyed
+## 5. What is not surveyed *by the first pass*
 
 Stated plainly, because a partial survey presented as complete is worse than
-none.
+none. **Sections 7-11 close several of these** — read §11 for what is actually
+left.
 
 - **Most of `hw.dll`.** `.text` is 1.13 MB against `client.dll`'s 0.67 MB, and
   none of what made the client pass cheap is available: no RTTI, no useful
@@ -315,9 +316,256 @@ python goldsrc-hooks/tools/survey_hw_dll.py             # everything
 python goldsrc-hooks/tools/survey_hw_dll.py keys        # HLAE's 68 keys
 python goldsrc-hooks/tools/survey_hw_dll.py collide     # where they land in hw.dll
 python goldsrc-hooks/tools/survey_hw_dll.py findings    # ours, re-checked
+python goldsrc-hooks/tools/survey_hw_dll.py parse       # the svc table, and names
+python goldsrc-hooks/tools/survey_hw_dll.py entities    # the flush and its predicate
+python goldsrc-hooks/tools/survey_hw_dll.py decals      # the decal ring
+python goldsrc-hooks/tools/survey_hw_dll.py pin         # HLAE's ambiguous patterns
 python goldsrc-hooks/tools/survey_hw_dll.py --hw ... --afx ...
 ```
 
+`parse`, `entities` and `decals` run without HLAE present, as `findings` does.
 `findings` runs without HLAE present and re-checks each address in §3 against
 the bytes this build ships, so a different `hw.dll` fails loudly rather than
 being described by a document written against another one.
+
+---
+
+## 7. The naming problem, solved: the engine's own dispatch table
+
+§5 says the first pass could name **36 functions**, and #273 said a complete
+pass "needs a naming strategy first, not just more disassembly". There is one,
+and the engine supplies it.
+
+`CL_ParseServerMessage` does not dispatch through a switch. It dispatches
+through a table of 12-byte records:
+
+```c
+struct { int opcode; char *name; void (*func)(void); } svc_funcs[60];
+```
+
+at `hw+0x13b3b0`, and the dispatch reads its two fields by displacement:
+
+```asm
+hw+0x1d498  mov edx, [edi*4 + svc_funcs+4]   ; edi = opcode*3  -> .name
+hw+0x1d502  mov edi, [ecx + svc_funcs+8]     ; ecx = opcode*12 -> .func
+```
+
+Both displacements appearing in code is what makes this the table the engine
+uses, rather than a data shape that merely looks like one — `survey_hw_dll.py
+parse` checks for both and refuses the finding without them.
+
+**It names 58 functions in one read.** Not one of them is the target of a
+direct `call` anywhere in the image, so a call-graph walk cannot find them at
+all; they exist only as entries here.
+
+| opcode | name | handler | | opcode | name | handler |
+|---|---|---|---|---|---|---|
+| 2 | `svc_disconnect` | `hw+0x1da30` | | 32 | `svc_cdtrack` | `hw+0x1e3b0` |
+| 3 | `svc_event` | `hw+0x1e980` | | 33 | `svc_restore` | `hw+0x1e410` |
+| 4 | `svc_version` | `hw+0x1dbe0` | | 34 | `svc_cutscene` | `hw+0x1e520` |
+| 5 | `svc_setview` | `hw+0x1dc50` | | 35 | `svc_weaponanim` | `hw+0x1e420` |
+| 6 | `svc_sound` | `hw+0x1a8f0` | | 36 | `svc_decalname` | `hw+0x1e440` |
+| 7 | `svc_time` | `hw+0x1d930` | | 37 | `svc_roomtype` | `hw+0x1e460` |
+| 8 | `svc_print` | `hw+0x1dc60` | | 38 | `svc_addangle` | `hw+0x1e210` |
+| 9 | `svc_stufftext` | `hw+0x1e1a0` | | 39 | `svc_newusermsg` | `hw+0x1e490` |
+| 10 | `svc_setangle` | `hw+0x1e1f0` | | 40 | `svc_packetentities` | `hw+0x1e550` |
+| 11 | `svc_serverinfo` | `hw+0x1e1d0` | | 41 | `svc_deltapacketentities` | `hw+0x1e570` |
+| 12 | `svc_lightstyle` | `hw+0x1e280` | | 42 | `svc_choke` | `hw+0x1e590` |
+| 13 | `svc_updateuserinfo` | `hw+0x1e4a0` | | 43 | `svc_resourcelist` | `hw+0x1e5c0` |
+| 14 | `svc_deltadescription` | `hw+0x1cd50` | | 44 | `svc_newmovevars` | `hw+0x1e5e0` |
+| 15 | `svc_clientdata` | `hw+0x1da20` | | 45 | `svc_resourcerequest` | `hw+0x1e5f0` |
+| 16 | `svc_stopsound` | `hw+0x1e2e0` | | 46 | `svc_customization` | `hw+0x1e600` |
+| 17 | `svc_pings` | `hw+0x1ec80` | | 47 | `svc_crosshairangle` | `hw+0x1e230` |
+| 18 | `svc_particle` | `hw+0x1e300` | | 48 | `svc_soundfade` | `hw+0x1e610` |
+| 19 | `svc_damage` | `hw+0x1e4b0` | | 49 | `svc_filetxferfailed` | `hw+0x1ef90` |
+| 20 | `svc_spawnstatic` | `hw+0x1e320` | | 50 | `svc_hltv` | `hw+0x1ece0` |
+| 21 | `svc_event_reliable` | `hw+0x1ebb0` | | 51 | `svc_director` | `hw+0x1ecf0` |
+| 22 | `svc_spawnbaseline` | `hw+0x1e310` | | 52 | `svc_voiceinit` | `hw+0x1ed60` |
+| 23 | `svc_temp_entity` | `hw+0x1e330` | | 53 | `svc_voicedata` | `hw+0x1ed80` |
+| 24 | `svc_setpause` | `hw+0x1e340` | | 54 | `svc_sendextrainfo` | `hw+0x1dc00` |
+| 25 | `svc_signonnum` | `hw+0x1e370` | | 55 | `svc_timescale` | `hw+0x1ed20` |
+| 26 | `svc_centerprint` | `hw+0x1dc80` | | 56 | `svc_resourcelocation` | `hw+0x1e5d0` |
+| 27 | `svc_killedmonster` | `hw+0x1e4c0` | | 57 | `svc_sendcvarvalue` | `hw+0x1efc0` |
+| 28 | `svc_foundsecret` | `hw+0x1e4d0` | | 58 | `svc_sendcvarvalue2` | `hw+0x1f090` |
+| 29 | `svc_spawnstaticsound` | `hw+0x1e3a0` | | 59 | `svc_exec` | `hw+0x1f180` |
+| 30 | `svc_intermission` | `hw+0x1e4e0` | | | | |
+| 31 | `svc_finale` | `hw+0x1e4f0` | | | | |
+
+`svc_bad` (0) and `svc_nop` (1) carry a NULL handler and are dealt with inline.
+
+**`CL_ParseServerMessage = hw+0x1d300`**, derived as the function containing the
+`.func` read rather than asserted.
+
+There is also a per-opcode counter array at `0x2d09de0`, incremented as
+`inc [opcode*4 + 0x2d09de0]` for every message parsed — a ready-made histogram
+of what a session actually received.
+
+### The self-naming heuristic was too narrow
+
+The first pass matched `Name:` as a *prefix*. The function #273 said was not
+located names itself as **`"WARNING:  CL_FlushEntityPacket"`** — the name at the
+end, no colon after it. Matching an engine identifier **anywhere in a message**,
+and requiring the string to be a message rather than a bare identifier (which
+drops 41 OpenGL extension names), raises the count from 36 names to **48
+functions located**:
+
+```
+CL_CheckCRCs           CL_ParsePacketEntities   Mod_LoadAliasModel   SV_FlyMove
+CL_EntityNum           CL_ParseServerInfo       Mod_LoadSpriteGroup  SV_ModelIndex
+CL_FlushEntityPacket   CL_ParseTEnt             Mod_NumForName       SV_ParseMove
+CL_ParseConsistencyInfo CL_PrecacheResources    Mod_ParseMarksurfaces SV_Physics
+CL_ReallocateDynamicData CL_RegisterResources   Mod_PointInLeaf      SV_RecursiveHullCheck
+CL_RemoveFromResourceList CL_StartResourceDownloading NET_JoinGroup  SV_StartSound
+COM_LoadFile           COM_LoadFileLimit        NET_QueuePacket      SZ_GetSpace
+Cmd_AddCommand         Cmd_CheckParm            NET_SendPacket       S_FindName
+Cmd_ForwardToServerInternal Draw_TransPic       PM_HullPointContents S_StartDynamicSound
+EV_Precache            Host_Error               R_DrawSprite         S_StartStaticSound
+Mod_Extradata          Mod_FindName             R_RenderView         SV_ClearResourceLists
+R_TextureAnimation     SV_AddSampleToHashedLookupTable  SV_ReallocateDynamicData
+```
+
+Caveat, reported rather than hidden: `CL_ParseResourceList` and
+`CL_ParseConsistencyInfo` both resolve to `hw+0x1b9f0`. A name appearing in two
+places usually means one of them inlined the other; the tool prints such cases
+instead of picking.
+
+Between the table and the messages, **106 of `hw.dll`'s functions now have a
+name**, against 36 before.
+
+---
+
+## 8. `CL_ParsePacketEntities` and `CL_FlushEntityPacket`
+
+Both located. #273 listed the first as "located but not surveyed" and the second
+as "not located".
+
+```
+CL_ParsePacketEntities = hw+0x12d90   (names itself at hw+0x12ffa)
+CL_FlushEntityPacket   = hw+0x12240   (names itself at hw+0x1228e)
+```
+
+`CL_FlushEntityPacket` is called from **three** sites, all inside
+`CL_ParsePacketEntities` — `hw+0x12ecf`, `hw+0x13081`, `hw+0x130c4` — and each
+is immediately followed by `hw+0x123d0`, which frees the frame's entity array
+(`free(frame[+0x24]); frame[+0x24] = 0; frame[0] = 0`).
+
+### The predicate, from the engine's side
+
+The demo side of this was already established for the reseq work. The engine
+agrees, and spells it in one place:
+
+```asm
+hw+0x12eb7  mov eax, [cls.netchan.incoming_sequence]   ; 0x2d59b20
+hw+0x12ebc  mov ecx, [CL_UPDATE_MASK]                  ; hw+0x13afcc
+hw+0x12ec2  sub eax, edi                               ; edi = oldpacket
+hw+0x12ec4  and eax, 0xff
+hw+0x12ec9  cmp eax, ecx
+hw+0x12ecb  jl  <normal path>                          ; else fall into the flush
+```
+
+so the flush fires when `((incoming_sequence - oldpacket) & 0xff) >=
+CL_UPDATE_MASK`.
+
+What is worth recording is that **both constants live in `.data`, not in the
+instruction stream**:
+
+```
+CL_UPDATE_BACKUP   hw+0x13afc8 = 64
+CL_UPDATE_MASK     hw+0x13afcc = 63
+```
+
+That is why the predicate is checkable offline at all, and it is what
+`survey_hw_dll.py entities` re-checks.
+
+---
+
+## 9. The decal ring
+
+#273 asks whether the ring's **size** is reachable. It is not, and the question
+turns out to be the wrong one.
+
+The pool is a fixed array, not a sized allocation: `r_decals` only bounds how
+far the rotating index travels before wrapping, and evicts nothing. Measured:
+
+```
+R_DecalRemoveAll<by flag>  hw+0x4a000
+R_DecalInit                hw+0x49da0
+R_DecalUnlink              hw+0x49e80
+gDecalPool                 0x2325cb8 .. 0x2341cb8   (0x1c000 bytes)
+gDecalCount                0x2342308
+sizeof(decal_t)            0x1c  ->  4096 slots = MAX_RENDER_DECALS
+decal_t::psurface          +0x04
+decal_t::flags             +0x16    bit 0 = permanent; the allocator skips
+                                    `flags & 0x81` when rotating
+```
+
+What *is* reachable is **emptying** it, which is the thing the pipeline actually
+wanted. `R_DecalInit` alone would be a crash — it wipes the pool without
+unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
+renderer still walks. The engine's own remove functions unlink first, and
+`dodtools_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
+
+Note this is the one finding here that is **pre-Anniversary only**: the
+Anniversary engine compiles the remove loop differently, so `R_DecalUnlink`
+cannot be recovered from it this way. `R_DecalInit`'s signature matches both.
+
+---
+
+## 10. HLAE's non-detour write, pinned
+
+§5 recorded a loose end: the `_DSZ` keys imply at least one HLAE write that is
+not a Detours hook, and `CL_ParseServerMessage_CmdRead` is resolved but never
+`DetourAttach`ed.
+
+Its pattern matches four places, which the first pass could not narrow. With
+`CL_ParseServerMessage` named, one of them is inside it and the rest are not:
+
+```
+CL_ParseServerMessage_CmdRead: 4 matches -- PINNED
+    CL_ParseServerMessage (hw+0x1d3e6)
+    hw+0x58f2f
+    hw+0xe18c4
+    hw+0xe19ff
+```
+
+`hw+0x1d3e6` is seven bytes:
+
+```asm
+hw+0x1d3e6  8b df              mov ebx, edi
+hw+0x1d3e8  e8 e3 d4 00 00     call hw+0x2a8d0      ; MSG_ReadByte
+hw+0x1d3ed  8b f0              mov esi, eax         ; esi = the svc opcode
+hw+0x1d3f0  83 fe ff           cmp esi, -1
+```
+
+`hw+0x2a8d0` is `MSG_ReadByte`, identified from its body rather than its name:
+it reads `msg_readcount` (`0x2d08228`) against `net_message.cursize`
+(`0x27a2730`), sets `msg_badread` (`0x2d0822c`) and returns -1 on overrun, and
+otherwise returns `net_message.data[msg_readcount++]` (`0x27a2728`).
+
+So HLAE overwrites **the instruction pair that fetches each svc opcode**, in the
+middle of `CL_ParseServerMessage`, with a span patch rather than a prologue
+detour. That is the collision §2 warns about, now with an address: anything of
+ours that wants to watch the message stream must not touch `hw+0x1d3e6 .. +7`,
+and the `msg_readcount` globals above are the cheaper place to watch from.
+
+---
+
+## 11. What is still not surveyed
+
+Shorter than §5, and deliberately not empty.
+
+- **Most of `hw.dll` still.** 106 named functions out of several thousand.
+- **The demo reader** (`hw+0x105fd`, bounded as §3.3 describes) is located and
+  still not opened.
+- **`R_PushDlights`, `SND_PickChannel` and the six `UnkDrawHud*` keys.**
+  Unchanged from §5: HLAE resolves and does not detour them, and how it uses
+  them is still unestablished.
+- **The other three `CL_ParseServerMessage_CmdRead` matches** (`hw+0x58f2f`,
+  `hw+0xe18c4`, `hw+0xe19ff`) are in unnamed functions. They are almost
+  certainly other `MSG_Read*` call sites rather than anything HLAE wants, but
+  that is inference.
+- **Whether the 34 `DetourAttach` sites plus this one span patch are all of
+  HLAE's writes.** One was found by pulling on the `_DSZ` thread; nothing says
+  it was the only one.
+- **The engine's own read of the demo `ConsoleCommand` field** (§3.1), and the
+  **`ex_interp` flag at `+0x2d5df84`** (§3.2). Both unchanged.
