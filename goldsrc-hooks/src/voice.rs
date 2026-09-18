@@ -46,17 +46,30 @@
 //! move it.
 //!
 //! **This is the reason to patch the call rather than stub the callback.**
-//! Everything after the call still runs: the on-screen subtitle, the voice
-//! icon over the speaker, and the distance check that decides whether you were
-//! close enough to hear it. So it behaves exactly like the blank-`.wav`
-//! approach -- audio gone, everything else untouched -- where a `ret` at the
-//! top of the callback would have silently taken the subtitles with it.
+//! Everything after the call still runs, and what it does is print the chat
+//! line. So this behaves exactly like the blank-`.wav` approach -- audio gone,
+//! everything else untouched -- where a `ret` at the top of the callback would
+//! have silently taken the chat line with it.
+//!
+//! The tail, read rather than assumed: it gets the speaker and the local
+//! player, **returns if they are not on the same team**, **returns if the
+//! observer-mode global is non-zero -- i.e. whenever you are spectating**,
+//! returns if the speaker is too far away, and only then formats
+//! `(PlayerName): <text>` from the `#Voice_subtitle_*` table and prints it
+//! behind the `#VOICE` prefix.
+//!
+//! The practical consequence: in an HLTV demo the chat line never appears in
+//! the first place, so this setting only ever removes the sound. In a POV demo
+//! the chat line stays, exactly as it did with blanked `.wav` files. Removing
+//! that too would be a `ret` at the top of each callback -- a second mode, not
+//! a different design.
 //!
 //! ## Scope, stated plainly
 //!
 //! Voice **commands** only. Pain, death and hurt sounds are different events
-//! and are not touched. Nor is player voice chat (`voice_modenable`), which is
-//! a separate system entirely.
+//! and are not touched. Nor is player voice chat (`voice_modenable`) or its
+//! `sprites/voiceicon.spr` speaker icon, which belong to `CVoiceStatus` -- a
+//! separate system with nothing to do with these callbacks.
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
@@ -199,8 +212,8 @@ pub fn status() -> String {
     if !muted() {
         return "voice commands play normally".into();
     }
-    "voice commands are silent; their subtitles and speaker icons still show \
-     (pain and death sounds are not affected)"
+    "voice commands are silent; the POV chat line still shows (there is none \
+     while spectating), and pain and death sounds are not affected)"
         .into()
 }
 
@@ -265,7 +278,7 @@ mod tests {
     fn status_says_what_is_left_alone() {
         MUTED.store(true, Ordering::Release);
         let text = status();
-        assert!(text.contains("subtitle"), "{text}");
+        assert!(text.contains("chat line"), "{text}");
         assert!(text.contains("pain and death"), "{text}");
         MUTED.store(false, Ordering::Release);
         assert!(status().contains("normally"));

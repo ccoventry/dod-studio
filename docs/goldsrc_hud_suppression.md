@@ -73,17 +73,40 @@ Removing the call does not move either.
 ### Why the call and not the callback
 
 A `ret` at the top of each callback would be simpler and is wrong. Everything
-*after* the call still matters: the on-screen subtitle, the voice icon over the
-speaker, and the distance check deciding whether you were close enough to hear
-it. Patching only the call reproduces the blank-`.wav` behaviour exactly —
-audio gone, everything else as it was. Stubbing the callback would have taken
-the subtitles with it, silently.
+*after* the call still matters, and what it does is print the chat line.
+Patching only the call reproduces the blank-`.wav` behaviour exactly — audio
+gone, everything else as it was. Stubbing the callback would have taken the
+chat line with it, silently.
+
+### What the tail actually does, and when
+
+Read rather than assumed, because it decides what this setting looks like in
+practice. After the sound, the US/British callback:
+
+1. gets the speaker's entity and the local player, and their player info;
+2. **returns if the speaker is not on your team**;
+3. **returns if the observer-mode global is non-zero — i.e. whenever you are
+   spectating**;
+4. returns if the speaker is further away than a fixed distance;
+5. otherwise formats `"%c%s%s%s"` from `"(%s1) "`, the player's name and
+   `": %s2"`, and prints it with the `#VOICE` prefix and the matching
+   `#Voice_subtitle_*` string.
+
+So the "subtitle" is **the chat line** — `(PlayerName): Fire in the hole!` —
+and step 3 means it **never appears while spectating at all**. In an HLTV demo
+this setting removes the sound and there was never any text; in a POV demo it
+removes the sound and the chat line stays, exactly as it did with blanked
+`.wav` files.
+
+If the chat line should go too, that is a `ret` at the top of each callback
+rather than a NOP over the call — a second mode, not a different design.
 
 ### Scope
 
 Voice **commands** only. Pain, death and hurt sounds are different events and
-are untouched, as is player voice chat (`voice_modenable`), which is a separate
-system.
+are untouched, as is player voice chat (`voice_modenable`) and its
+`sprites/voiceicon.spr` speaker icon, which is `CVoiceStatus` — a separate
+system that has nothing to do with these callbacks.
 
 ---
 
