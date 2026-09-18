@@ -30,7 +30,7 @@
 //! See each module's docs for the full R&D reasoning.
 //!
 //! Both are `dodtools_*` **cvars**, so they behave like any other engine
-//! setting: `dodtools_hltv_animation_fix 1` from the console, `+dodtools_hltv_animation_fix 1`
+//! setting: `dodtools_hltv_show_viewmodel_animations 1` from the console, `+dodtools_hltv_show_viewmodel_animations 1`
 //! on the launch line, or a line in any `.cfg` the user execs. `commands.rs`
 //! copies them into the runtime flags once per frame, and `dodtools_status`
 //! reports what each fix is actually doing rather than only what it is set to.
@@ -87,7 +87,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// The animation fix starts **off**, like the sound fix: a capture pipeline
 /// should not silently alter viewmodel animations for anyone who happens to
 /// have the DLL loaded. Pick an iteration per session with
-/// `dodtools_hltv_animation_fix <0-5>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
+/// `dodtools_hltv_show_viewmodel_animations <0-4>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
 /// have it start on one -- see `anim_fix::LEVEL` for what each is.
 ///
 /// It was on through live testing, because a session that begins by
@@ -113,7 +113,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // obvious from the log rather than mistaken for a broken hook.
     unsafe {
         debug::report(&format!(
-            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodtools_hltv_gunshots_fix / dodtools_hltv_animation_fix toggle live)",
+            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodtools_hltv_gunshots_fix / dodtools_hltv_show_viewmodel_animations toggle live)",
             if sound_fix::ENABLED.load(Ordering::Relaxed) { "ON" } else { "off" },
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
@@ -164,7 +164,7 @@ fn install_fixes() {
     // it's safe to install even if that capture hasn't landed yet.
     anim_fix::install();
 
-    // In-game dodtools_hltv_gunshots_fix / dodtools_hltv_animation_fix
+    // In-game dodtools_hltv_gunshots_fix / dodtools_hltv_show_viewmodel_animations
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();

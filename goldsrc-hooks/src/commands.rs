@@ -5,15 +5,15 @@
 //! These were four `pfnAddCommand` commands, and the difference is not
 //! cosmetic. A command is a function the engine calls and forgets; the state
 //! lives in this DLL's own atomics, where the console cannot see it. So
-//! `dodtools_hltv_animation_fix` printed nothing in the type-ahead, could not
+//! `dodtools_hltv_show_viewmodel_animations` printed nothing in the type-ahead, could not
 //! be queried with a bare name the way `sensitivity` can, and — the part that
 //! actually mattered — could not be set from a config file or the launch line.
 //! That last gap is the entire reason `GOLDSRC_HOOKS_ANIM_FIX` and
 //! `ANIM_FIX_DEFAULT` existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodtools_hltv_animation_fix` on its own, takes
-//! `+dodtools_hltv_animation_fix 1` on the launch line, and can be set from any
+//! its value, answers `dodtools_hltv_show_viewmodel_animations` on its own, takes
+//! `+dodtools_hltv_show_viewmodel_animations 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -49,7 +49,7 @@ use crate::names::console_name;
 use crate::{anim_fix, scoreboard, sound_fix};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
-const ANIMATION_FIX_NAME: &str = console_name!("hltv_animation_fix");
+const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
 const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
@@ -132,7 +132,7 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but the animation fix carries an iteration number rather
 /// than a flag -- see `anim_fix::LEVEL`. Out-of-range values are clamped
-/// rather than refused, so `dodtools_hltv_animation_fix 99` is a usable way to
+/// rather than refused, so `dodtools_hltv_show_viewmodel_animations 99` is a usable way to
 /// ask for the newest behaviour without remembering what the newest is.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
