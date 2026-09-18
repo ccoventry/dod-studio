@@ -32,7 +32,7 @@ Plus four control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
-- **Spectator crosshair** (`dodtools_match_spectator_crosshair 1`): draws the
+- **Spectator crosshair** (`dodtools_match_pov_crosshair 1`): draws the
   spectator crosshair from `sprites/customXHair.spr`, using the same tile
   `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24 tile of
   `crosshairs.spr`. Loses to `dodtools_hide_crosshair`, which stubs the whole
@@ -72,7 +72,7 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
 against a running game. The sound fix, `dodtools_hide_scoreboard`,
 `dodtools_mute_voice_commands`, `dodtools_hide_crosshair` and
-`dodtools_match_spectator_crosshair` are confirmed by static
+`dodtools_match_pov_crosshair` are confirmed by static
 analysis only -- see the module docs in `src/engine.rs`, `src/sound_fix.rs`,
 `src/scoreboard.rs`, `src/voice.rs`, `src/crosshair.rs` and
 `src/spectator_crosshair.rs` for what is

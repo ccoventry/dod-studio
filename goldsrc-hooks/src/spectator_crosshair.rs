@@ -1,4 +1,4 @@
-//! `dodtools_match_spectator_crosshair`: draw the spectator crosshair from the
+//! `dodtools_match_pov_crosshair`: draw the spectator crosshair from the
 //! same sprite and the same tile the player's own `cl_xhair_style` picks.
 //!
 //! ## The two crosshairs are drawn by two different code paths
@@ -91,7 +91,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("match_spectator_crosshair");
+pub const NAME: &str = console_name!("match_pov_crosshair");
 
 /// DoD's own cvar, read here rather than mirrored: whatever the player sets for
 /// their POV crosshair is what the spectator view should show.

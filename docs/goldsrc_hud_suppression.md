@@ -232,7 +232,7 @@ already have a working `.res` workaround.
 
 ---
 
-## 6. `dodtools_match_spectator_crosshair`
+## 6. `dodtools_match_pov_crosshair`
 
 The other half of §3's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:
