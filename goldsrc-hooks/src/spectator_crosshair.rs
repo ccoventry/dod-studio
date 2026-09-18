@@ -70,12 +70,34 @@
 //! [`tile_rect`] reproduces that arithmetic rather than inventing a layout, so
 //! the spectator view gets the *same* tile the player sees, whatever they set.
 //!
-//! ## `cl_xhair_style 0` is not a tile
+//! ## `cl_xhair_style 0` is not a tile, and is not implemented here
 //!
-//! Zero means "use the HUD sprite list's crosshair", not "use tile 0" -- the
-//! POV path takes a different function entirely. There is then no custom
-//! crosshair to match, so this leaves the stock spectator rect in place and
-//! says so in `dodtools_status` rather than inventing a tile.
+//! The dispatcher at `client+0x2cd5c` checks `style == 0` *before* calling
+//! `client+0x2ced0` at all: zero calls `client+0x2cda0` instead, a
+//! completely different function that draws the classic four-segment dynamic
+//! crosshair (its gap driven by per-frame weapon accuracy fields on the HUD
+//! object, and gated by the separate `cl_dynamic_xhair` cvar) rather than
+//! blitting a sprite tile. `client+0x2ced0` -- the function this module
+//! mirrors -- is never reached for style 0, confirmed by disassembly.
+//!
+//! Replicating that for a spectated player would mean re-deriving their
+//! weapon-accuracy state the same way the animation fix re-derives body
+//! animation, and it is not known whether that state is replicated in a demo
+//! at all. Out of scope here: this leaves the stock spectator rect in place
+//! for style 0 and says so in `dodtools_status` rather than inventing a
+//! tile. Filed as a follow-up.
+//!
+//! ## `cl_xhair_style < 0` draws the whole sheet
+//!
+//! Unlike the zero case, *every* nonzero style -- negative included -- does
+//! reach `client+0x2ced0`, which clamps only at the top (`style > 16` becomes
+//! 16) and has no lower clamp at all. For a negative style the resulting
+//! `style - 1` feeds a signed mod/div-by-4 that produces rect coordinates
+//! outside the sprite. Confirmed live: DoD's own POV view renders that as the
+//! entire 256x256 sheet, all sixteen crosshairs at once, rather than clamping
+//! or refusing it. [`tile_rect`] reproduces that outcome directly for any
+//! negative style, rather than replicating the specific out-of-range
+//! arithmetic that happens to produce it.
 //!
 //! ## It loses to `dodtools_hide_crosshair`
 //!
@@ -127,8 +149,17 @@ const STOCK_RECT: [i32; 4] = [24, 0, 48, 24];
 /// see the module docs -- and the sprite measures 256x256, which is 4 x 64.
 const TILE: i32 = 64;
 const COLUMNS: i32 = 4;
+/// The sprite's full side length, `TILE * COLUMNS`.
+const SPRITE_SIDE: i32 = TILE * COLUMNS;
 /// The highest style the POV path will honour; it clamps anything above this.
 pub const MAX_STYLE: i32 = 16;
+/// The canonical `ACTIVE_STYLE` for "whole sheet" -- any negative
+/// `cl_xhair_style` collapses to this on read-back, since the rect they
+/// produce is identical (see [`tile_rect`]) and there is nothing to
+/// distinguish them once written.
+pub const WHOLE_SHEET: i32 = -1;
+/// The whole sprite, `[left, top, right, bottom]`.
+const WHOLE_SHEET_RECT: [i32; 4] = [0, 0, SPRITE_SIDE, SPRITE_SIDE];
 
 /// Resolved address of the span, or 0 before the first successful scan.
 static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
@@ -144,13 +175,27 @@ static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
 /// The rect DoD's POV path would use for `style`, as `[left, top, right,
 /// bottom]` in the order the patched span writes them.
 ///
-/// Mirrors `client+0x2ced0` exactly, including its clamp. `style` below 1 has
-/// no tile -- see the module docs -- and is rejected rather than clamped up,
-/// because clamping would silently show tile 1 to someone who has no custom
-/// crosshair at all.
+/// Mirrors `client+0x2ced0`'s clamp at the top (`style > 16` becomes 16) and
+/// its *absence* of one at the bottom -- confirmed by disassembly, not
+/// assumed. `client+0x2ced0` is never even called for `style == 0` (the
+/// caller at `client+0x2cd5c` branches on that before making the call, taking
+/// a completely different function -- see the module docs), so `style == 0`
+/// has no tile here either. But every *other* value, including negative
+/// ones, does reach `client+0x2ced0`, and its unclamped `style - 1` feeds a
+/// signed mod/div-by-4 that produces a rect with negative coordinates for
+/// `style < 0`. What that rect renders as in practice was confirmed live:
+/// the whole 256x256 sheet, all sixteen crosshairs at once -- consistent with
+/// the sprite draw call wrapping on out-of-range texture coordinates rather
+/// than clamping. This function reproduces that outcome directly, as
+/// [`WHOLE_SHEET_RECT`], rather than replicating the exact out-of-bounds
+/// arithmetic that happens to produce it -- the wrap is downstream of the
+/// rect this module writes, not something writing the rect can influence.
 pub fn tile_rect(style: i32) -> Option<[i32; 4]> {
-    if style < 1 {
+    if style == 0 {
         return None;
+    }
+    if style < 0 {
+        return Some(WHOLE_SHEET_RECT);
     }
     let index = style.min(MAX_STYLE) - 1;
     let column = index % COLUMNS;
@@ -196,6 +241,7 @@ fn read_state(present: &[u8]) -> Option<i32> {
     ];
     match present[HANDLE_AT] {
         STOCK_HANDLE if rect == STOCK_RECT => Some(0),
+        CUSTOM_HANDLE if rect == WHOLE_SHEET_RECT => Some(WHOLE_SHEET),
         CUSTOM_HANDLE => (1..=MAX_STYLE).find(|style| tile_rect(*style) == Some(rect)),
         _ => None,
     }
@@ -217,7 +263,12 @@ fn wanted(present: &[u8], style: i32) -> Option<Vec<u8>> {
     Some(want)
 }
 
-/// DoD's `cl_xhair_style`, truncated the way the POV path truncates it.
+/// DoD's `cl_xhair_style`, truncated and clamped the way the POV path does.
+///
+/// Only an upper clamp -- `client+0x2ced0` has none at the bottom, so
+/// negative values are passed through rather than raised to 0. Clamping them
+/// away here would silently show the stock rect for a style that POV renders
+/// as the whole sheet.
 fn requested_style() -> i32 {
     let Some(engfuncs) = engine::engfuncs() else {
         return 0;
@@ -229,7 +280,7 @@ fn requested_style() -> i32 {
     if !value.is_finite() {
         return 0;
     }
-    (value as i32).clamp(0, MAX_STYLE)
+    (value as i32).min(MAX_STYLE)
 }
 
 /// Points the spectator crosshair at `customXHair.spr`, or back at the stock
@@ -247,22 +298,26 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     // Safety: the scan proved `SPAN` bytes of mapped code start here.
     let present = unsafe { std::slice::from_raw_parts(address as *const u8, SPAN) };
 
-    let Some(current) = read_state(present) else {
+    if read_state(present).is_none() {
         return Err(format!(
-            "the spectator crosshair rect holds an encoding that is neither DoD's nor one of this module's sixteen tiles (sprite displacement {:#04x}) -- something else has patched it",
+            "the spectator crosshair rect holds an encoding that is neither DoD's nor one of this module's tiles (sprite displacement {:#04x}) -- something else has patched it",
             present[HANDLE_AT]
         ));
-    };
-
-    let style = if matching { requested_style() } else { 0 };
-    if style == current {
-        ACTIVE_STYLE.store(style, Ordering::Release);
-        return Ok(false);
     }
 
+    let style = if matching { requested_style() } else { 0 };
     let Some(want) = wanted(present, style) else {
         return Err(format!("{STYLE_CVAR} resolved to {style}, which is not a tile"));
     };
+
+    // Compared by bytes, not by `style` against `read_state`'s canonical
+    // value: every negative style writes the identical whole-sheet rect (see
+    // `tile_rect`), so `cl_xhair_style` moving between -1 and -5 must not
+    // count as a change needing a write, even though the two numbers differ.
+    if present == want.as_slice() {
+        ACTIVE_STYLE.store(style, Ordering::Release);
+        return Ok(false);
+    }
 
     // Safety: writing to code the scan vouched for, through the same
     // protect/write/restore used everywhere else in this DLL.
@@ -288,6 +343,9 @@ pub fn status() -> String {
     let text = match ACTIVE_STYLE.load(Ordering::Relaxed) {
         0 => format!(
             "the spectator crosshair is DoD's own 24x24 tile of crosshairs.spr (set {STYLE_CVAR} to 1-{MAX_STYLE} and {NAME} to 1 to use your own)"
+        ),
+        style if style < 0 => format!(
+            "the spectator crosshair draws the whole customXHair.spr sheet, the same as the POV view at {STYLE_CVAR} {style}"
         ),
         style => format!(
             "the spectator crosshair draws tile {style} of customXHair.spr, the same one {STYLE_CVAR} gives the POV view"
@@ -390,14 +448,27 @@ mod tests {
         }
     }
 
-    /// DoD clamps anything above 16 down to 16 rather than wrapping, and has no
-    /// tile at all below 1 -- zero means "use the HUD sprite", which is a
-    /// different function.
+    /// DoD clamps anything above 16 down to 16 rather than wrapping. Zero has
+    /// no tile -- it means "use the HUD sprite", a different function -- but
+    /// every negative style, confirmed by disassembly, has no lower clamp at
+    /// all and reaches the tile function regardless.
     #[test]
     fn styles_outside_the_grid_clamp_the_way_dod_clamps() {
         assert_eq!(tile_rect(99), tile_rect(16));
         assert_eq!(tile_rect(0), None);
-        assert_eq!(tile_rect(-3), None);
+    }
+
+    /// Negative styles all collapse to the same whole-sheet rect -- there is
+    /// no per-value distinction to preserve, since DoD's own out-of-range
+    /// arithmetic doesn't produce one a spectator could tell apart on screen.
+    #[test]
+    fn any_negative_style_is_the_whole_sheet() {
+        for style in [-1, -2, -3, -16, -1000] {
+            assert_eq!(tile_rect(style), Some(WHOLE_SHEET_RECT), "style {style}");
+        }
+        let [left, top, right, bottom] = WHOLE_SHEET_RECT;
+        assert_eq!((left, top), (0, 0));
+        assert_eq!((right, bottom), (SPRITE_SIDE, SPRITE_SIDE));
     }
 
     /// A round trip through the bytes: what [`wanted`] writes is what
@@ -413,6 +484,20 @@ mod tests {
             let written = wanted(&stock, style).expect("a writable state");
             assert_eq!(written.len(), SPAN);
             assert_eq!(read_state(&written), Some(style), "style {style}");
+        }
+    }
+
+    /// Negative styles are the one case where the property above doesn't hold
+    /// literally: every negative value writes the identical whole-sheet rect
+    /// (see [`any_negative_style_is_the_whole_sheet`]), so reading it back
+    /// cannot recover which one wrote it -- only that it was some negative
+    /// style. `read_state` reports that as [`WHOLE_SHEET`] regardless.
+    #[test]
+    fn negative_styles_all_read_back_as_whole_sheet() {
+        let stock = stock_span();
+        for style in [-1, -2, -16, -1000] {
+            let written = wanted(&stock, style).expect("a writable state");
+            assert_eq!(read_state(&written), Some(WHOLE_SHEET), "style {style}");
         }
     }
 
@@ -458,6 +543,11 @@ mod tests {
 
         ACTIVE_STYLE.store(7, Ordering::Release);
         assert!(status().contains("tile 7"), "{}", status());
+        assert!(status().contains("customXHair.spr"), "{}", status());
+        assert!(matching());
+
+        ACTIVE_STYLE.store(-1, Ordering::Release);
+        assert!(status().contains("whole"), "{}", status());
         assert!(status().contains("customXHair.spr"), "{}", status());
         assert!(matching());
 
