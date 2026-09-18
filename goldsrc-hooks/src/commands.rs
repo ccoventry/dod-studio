@@ -5,15 +5,15 @@
 //! These were four `pfnAddCommand` commands, and the difference is not
 //! cosmetic. A command is a function the engine calls and forgets; the state
 //! lives in this DLL's own atomics, where the console cannot see it. So
-//! `dodtools_hltv_animation_fix` printed nothing in the type-ahead, could not
+//! `dodtools_hltv_show_viewmodel_animations` printed nothing in the type-ahead, could not
 //! be queried with a bare name the way `sensitivity` can, and — the part that
 //! actually mattered — could not be set from a config file or the launch line.
 //! That last gap is the entire reason `GOLDSRC_HOOKS_ANIM_FIX` and
 //! `ANIM_FIX_DEFAULT` existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodtools_hltv_animation_fix` on its own, takes
-//! `+dodtools_hltv_animation_fix 1` on the launch line, and can be set from any
+//! its value, answers `dodtools_hltv_show_viewmodel_animations` on its own, takes
+//! `+dodtools_hltv_show_viewmodel_animations 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -49,7 +49,7 @@ use crate::names::console_name;
 use crate::{anim_fix, crosshair, scoreboard, sound_fix, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
-const ANIMATION_FIX_NAME: &str = console_name!("hltv_animation_fix");
+const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
 const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
@@ -136,7 +136,7 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but the animation fix carries an iteration number rather
 /// than a flag -- see `anim_fix::LEVEL`. Out-of-range values are clamped
-/// rather than refused, so `dodtools_hltv_animation_fix 99` is a usable way to
+/// rather than refused, so `dodtools_hltv_show_viewmodel_animations 99` is a usable way to
 /// ask for the newest behaviour without remembering what the newest is.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
@@ -286,30 +286,33 @@ pub fn poll() {
     crate::deathmsg::poll();
 }
 
-/// Everything a session might want to know in one reply.
+/// What the fixes are actually *doing* -- the one question a cvar cannot
+/// answer about itself.
 ///
-/// A cvar answers "what is this set to" on its own, which is what the four
-/// toggles used to do the long way round. What it cannot answer is whether the
-/// fix is *doing* anything — the flag being on says nothing about whether the
-/// preconditions are being met in the current view — so that half moves here.
+/// Deliberately does **not** list the settings and their values. Every one of
+/// them is a cvar, so the console's own type-ahead already shows the name and
+/// its current value as you type it. Repeating that here cost twelve lines of
+/// output to say what the engine gives away for free, and in a narrow console
+/// the long names wrapped and the columns stopped lining up.
+///
+/// What is left is the part nothing else reports. A flag being on says nothing
+/// about whether the preconditions are being met in the current view, and
+/// "the fix isn't working" has twice turned out to be "the log budget ran out"
+/// -- these counters are the honest number.
 fn status_text() -> String {
-    let on = |flag: bool| if flag { "1 (on)" } else { "0 (off)" };
-    format!(
-        "{ANIMATION_FIX_NAME} = {} ({})\n  {}\n{GUNSHOTS_FIX_NAME} = {}\n  {}\n{ATTENUATION_NAME} = {}\n{HELD_MODELS_NAME} = {}\n{SCOREBOARD_NAME} = {}\n  {}\n{VOICE_NAME} = {}\n  {}\n{CROSSHAIR_NAME} = {}\n  {}\n",
-        anim_fix::level(),
-        anim_fix::level_description(anim_fix::level()),
-        anim_fix::status(),
-        on(sound_fix::ENABLED.load(Ordering::Relaxed)),
-        sound_fix::status(),
-        sound_fix::carry_attenuation(),
-        on(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
-        if scoreboard::suppressed() { "1 (+showscores blocked)" } else { "0 (normal)" },
-        scoreboard::status(),
-        if voice::muted() { "1 (silent)" } else { "0 (normal)" },
-        voice::status(),
-        if crosshair::hidden() { "1 (hidden)" } else { "0 (normal)" },
-        crosshair::status(),
-    )
+    let mut lines: Vec<String> = Vec::new();
+    if anim_fix::enabled() {
+        lines.push(format!("viewmodel animations: {}", anim_fix::status()));
+    }
+    if sound_fix::ENABLED.load(Ordering::Relaxed) {
+        lines.push(format!("gunshots: {}", sound_fix::status()));
+    }
+    if lines.is_empty() {
+        // Not an error, and worth saying out loud: the suppressions leave no
+        // trace to count, so silence here would read as a broken command.
+        return "nothing active that reports progress\n".to_string();
+    }
+    format!("{}\n", lines.join("\n"))
 }
 
 unsafe extern "C" fn cmd_status() {
@@ -673,22 +676,36 @@ mod tests {
         assert_eq!(CVAR_FLAGS & FCVAR_ARCHIVE, 0);
     }
 
-    /// The status reply is the only place the four settings are reported
-    /// together, so it is worth knowing if one silently drops out of it.
+    /// The status reply deliberately no longer lists the settings -- the
+    /// console's own type-ahead shows each cvar and its value as you type it,
+    /// so repeating them here was duplicated output that wrapped badly in a
+    /// narrow console. What it must still do is report the two fixes that have
+    /// preconditions, and say *something* when neither is on rather than
+    /// returning an empty reply that reads as a broken command.
     #[test]
-    fn status_names_every_setting() {
-        let text = status_text();
-        for name in [
-            ANIMATION_FIX_NAME,
-            GUNSHOTS_FIX_NAME,
-            ATTENUATION_NAME,
-            HELD_MODELS_NAME,
-            SCOREBOARD_NAME,
-            VOICE_NAME,
-            CROSSHAIR_NAME,
-        ] {
-            assert!(text.contains(name), "{name} missing from the status reply:\n{text}");
-        }
+    fn status_reports_only_the_fixes_with_progress_to_report() {
+        let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
+        let sound = sound_fix::ENABLED.load(Ordering::Relaxed);
+
+        anim_fix::LEVEL.store(0, Ordering::Relaxed);
+        sound_fix::ENABLED.store(false, Ordering::Relaxed);
+        let idle = status_text();
+        assert!(idle.contains("nothing active"), "{idle}");
+
+        sound_fix::ENABLED.store(true, Ordering::Relaxed);
+        assert!(status_text().contains("gunshots"), "{}", status_text());
+
+        anim_fix::LEVEL.store(1, Ordering::Relaxed);
+        let both = status_text();
+        assert!(both.contains("viewmodel animations"), "{both}");
+        assert!(both.contains("gunshots"), "{both}");
+
+        // The settings themselves must NOT be echoed -- that is the whole point.
+        assert!(!both.contains(SCOREBOARD_NAME), "{both}");
+        assert!(!both.contains(CROSSHAIR_NAME), "{both}");
+
+        anim_fix::LEVEL.store(anim, Ordering::Relaxed);
+        sound_fix::ENABLED.store(sound, Ordering::Relaxed);
     }
 
     /// Every suppression cvar reads the same way: **1 does the thing the name
