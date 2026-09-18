@@ -6,7 +6,12 @@ covers `dodtools_hide_scoreboard`.
 
 Everything here is from offline analysis of DoD 1.3's `client.dll` (`pefile` +
 `capstone`, the house method in `docs/goldsrc_client_dll_internals.md` §10),
-checked by `goldsrc-hooks/tools/verify_voice_crosshair_offsets.py`.
+checked by `goldsrc-hooks/tools/verify_voice_crosshair_offsets.py` and
+`verify_spectator_crosshair_offsets.py`.
+
+§6 is the odd one out: it puts something *back* rather than taking it away. It
+lives here because it patches the same function, and because the reason it is
+needed at all is the fork §3 had to map.
 
 ---
 
@@ -182,7 +187,7 @@ is.
 
 ## 4. Re-applied every frame, from the bytes
 
-All three settings (including `dodtools_hide_scoreboard`) are handed to their
+All four settings (including `dodtools_hide_scoreboard`) are handed to their
 `apply` every frame rather than compared against a cached flag.
 
 That is not defensive habit. **The engine unloads and reloads `client.dll`
@@ -194,6 +199,9 @@ is a short byte compare, so the cost is nothing.
 
 `commands.rs`'s `poll_code_patch` is that shared loop; `apply` returns whether
 it wrote, so the log line stays change-triggered.
+
+For §6 the same loop earns its keep twice over: polling is also how it notices
+`cl_xhair_style` being changed under it, with no cvar callback needed.
 
 ---
 
@@ -221,3 +229,86 @@ vgui2 `Panel` vtable layout for this build, which is the remaining work.
 
 Lower priority than it looks: unlike the voice commands, the spectator bars
 already have a working `.res` workaround.
+
+---
+
+## 6. `dodtools_match_spectator_crosshair`
+
+The other half of §3's finding. Mapping the fork to prove the hide covered both
+crosshairs also showed *why* they never look alike:
+
+```text
+mode 0        POV. Reads cl_xhair_style. Non-zero -> client+0x2ced0, which
+              draws a 64x64 tile out of customXHair.spr. Zero -> the HUD
+              sprite list's crosshair at client+0x2cda0.
+mode 3 or 4   client+0x2d1f0. Hardcodes crosshairs.spr and a 24x24 rect, and
+              reads no cvar at all.
+```
+
+So a custom crosshair set up for play is simply absent while spectating, and
+what you get instead is a 24x24 tile of a 128x128 sprite — 576 pixels to make a
+crosshair out of.
+
+### Nothing needs loading
+
+`CHudDoDCrossHair::VidInit` loads **both** sprites unconditionally:
+
+```asm
+client+0x2cc82  call pfnSPR_Load     ; "sprites/crosshairs.spr"
+client+0x2cc88  mov [esi+0x60], eax
+client+0x2cca0  call pfnSPR_Load     ; "sprites/customXHair.spr"
+client+0x2cca6  mov [esi+0x74], eax
+```
+
+The custom sprite's handle is already on the object, unused on this path.
+
+### Five fields in one 57-byte span
+
+```asm
+client+0x2d205  mov dword [ecx+0x64], 0x18   ; left   = 24
+client+0x2d20c  mov dword [ecx+0x6c], 0      ; top    = 0
+client+0x2d213  mov dword [ecx+0x68], 0x30   ; right  = 48
+client+0x2d21a  mov dword [ecx+0x70], 0x18   ; bottom = 24
+...
+client+0x2d23b  mov eax, [ecx+0x60]          ; the sprite handle
+```
+
+`0x60` becomes `0x74`, and the four immediates become the selected tile.
+Swapping the handle alone would sample a 24x24 corner out of a 256x256 sprite;
+changing the rect alone would sample off the end of a 128x128 one. One change,
+one patch, one signature.
+
+### The grid is DoD's, not ours
+
+`client+0x2ced0` — the POV path — computes its rect as:
+
+```text
+if (style > 16) style = 16;
+style--;
+col = style % 4;  row = style / 4;
+left = col << 6;  right  = (col + 1) << 6;
+top  = row << 6;  bottom = (row + 1) << 6;
+```
+
+A 4x4 grid of 64x64 tiles, which is exactly how the shipped `customXHair.spr`
+is laid out (256x256, one frame, sixteen crosshairs — read straight out of the
+`.spr`). `spectator_crosshair::tile_rect` reproduces that arithmetic rather
+than inventing a layout, so the spectator view gets the *same* tile the player
+sees, whatever they set.
+
+`cl_xhair_style 0` is not tile 0: zero sends the POV path to a different
+function entirely, so there is no custom crosshair to match and this leaves the
+stock rect alone rather than guessing.
+
+### It loses to §3, by construction
+
+`dodtools_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
+patches instructions *inside* a function that is then never reached, so hiding
+wins with no interlock written anywhere.
+
+### What this does not answer
+
+#219 asks why the POV and HLTV first-person crosshairs differ. §3 found half of
+it — the spectator branch never reads the `crosshair` cvar. This is the other
+half: it never reads `cl_xhair_style` either. Whether anything *else* differs
+between the two views is still open.

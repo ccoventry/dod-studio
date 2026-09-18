@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, scoreboard, sound_fix, voice};
+use crate::{anim_fix, crosshair, scoreboard, sound_fix, spectator_crosshair, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -59,6 +59,7 @@ const STATUS_NAME: &str = console_name!("status");
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
+const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -71,6 +72,7 @@ static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -199,6 +201,7 @@ fn poll_attenuation() {
 static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -250,6 +253,10 @@ fn describe_crosshair(on: bool) -> &'static str {
     if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
+fn describe_spectator_crosshair(on: bool) -> &'static str {
+    if on { "1 (spectator crosshair follows cl_xhair_style)" } else { "0 (normal)" }
+}
+
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
 /// the per-frame prologue so it lands before `anim_fix::apply()` runs.
 pub fn poll() {
@@ -280,6 +287,15 @@ pub fn poll() {
         &CROSSHAIR_COMPLAINED,
         crosshair::set_hidden,
         describe_crosshair,
+    );
+    // Polled every frame like the rest, and for one extra reason: this is also
+    // how it notices `cl_xhair_style` changing under it.
+    poll_code_patch(
+        SPECTATOR_CROSSHAIR_NAME,
+        &CVAR_SPECTATOR_CROSSHAIR,
+        &SPECTATOR_CROSSHAIR_COMPLAINED,
+        spectator_crosshair::set_matching,
+        describe_spectator_crosshair,
     );
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
@@ -511,6 +527,16 @@ unsafe extern "C" fn cmd_crosshair() {
     );
 }
 
+unsafe extern "C" fn cmd_spectator_crosshair() {
+    handle_code_patch(
+        SPECTATOR_CROSSHAIR_NAME,
+        "1 draws the spectator crosshair from customXHair.spr, like the POV one",
+        spectator_crosshair::set_matching,
+        spectator_crosshair::matching,
+        spectator_crosshair::status,
+    );
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -582,9 +608,10 @@ fn install_fallback_commands() {
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
+    add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -621,6 +648,7 @@ pub fn install() {
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
+    let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
 
     let (
         Some(gunshots),
@@ -630,6 +658,7 @@ pub fn install() {
         Some(scoreboard_cvar),
         Some(voice_cvar),
         Some(crosshair_cvar),
+        Some(spectator_crosshair_cvar),
     ) = (
         gunshots,
         animation,
@@ -638,6 +667,7 @@ pub fn install() {
         scoreboard_cvar,
         voice_cvar,
         crosshair_cvar,
+        spectator_crosshair_cvar,
     )
     else {
         install_fallback_commands();
@@ -651,12 +681,13 @@ pub fn install() {
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
     CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
+    CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} and command {STATUS_NAME}"
         ))
     };
 }
