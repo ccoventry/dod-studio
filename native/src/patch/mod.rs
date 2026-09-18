@@ -110,6 +110,8 @@ pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod sound_mute;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
@@ -179,6 +181,9 @@ pub use decal_strip::{capture_fov_from_init, capture_fov_resolved};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use map_check::{check_demo, map_reference, MapReference, MapStatus};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use sound_mute::{map_sounds, mute_sounds, MapSounds, MuteSelection, MuteStats};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use map_fetch::{fetch_map, map_url, FetchOutcome, DEFAULT_MIRROR};
