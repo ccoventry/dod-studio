@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
+use crate::{anim_fix, crosshair, hudelement, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -62,6 +62,7 @@ const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
 const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
+const HUDELEMENT_NAME: &str = hudelement::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -205,6 +206,7 @@ static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static HUDELEMENT_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -258,6 +260,38 @@ fn describe_crosshair(on: bool) -> &'static str {
     if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
+/// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
+/// so it cannot go through `poll_code_patch`. Everything else about it is the
+/// same: applied every frame, reported only when it writes, and complaining
+/// once rather than sixty times a second while `client.dll` is not loaded.
+fn poll_hudelements() {
+    match hudelement::apply() {
+        Ok(0) => HUDELEMENT_COMPLAINED.store(false, Ordering::Relaxed),
+        Ok(written) => {
+            HUDELEMENT_COMPLAINED.store(false, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {HUDELEMENT_NAME} wrote {written} vftable slot(s) -- {}",
+                    hudelement::status()
+                ))
+            };
+        }
+        Err(why) => {
+            // Nothing hidden and nothing to restore is the normal state, and
+            // it is not worth a line in the log every session just because
+            // client.dll has not loaded yet.
+            if hudelement::hidden_count() == 0 {
+                return;
+            }
+            if !HUDELEMENT_COMPLAINED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!("commands: {HUDELEMENT_NAME} not applied yet -- {why}"))
+                };
+            }
+        }
+    }
+}
+
 fn describe_spectator_crosshair(on: bool) -> &'static str {
     if on { "1 (spectator crosshair follows cl_xhair_style)" } else { "0 (normal)" }
 }
@@ -303,6 +337,7 @@ pub fn poll() {
         spectator_crosshair::set_matching,
         describe_spectator_crosshair,
     );
+    poll_hudelements();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -369,6 +404,17 @@ fn status_text() -> String {
     // nothing" line would be noise in the overwhelmingly common case.
     if let Some(msglog) = crate::msglog::status_line() {
         lines.push(msglog);
+    }
+    // The one setting the console's own type-ahead cannot report, because it
+    // is a command rather than a cvar -- which is the reason the rest are left
+    // out of here and this is not.
+    if hudelement::hidden_count() > 0 {
+        lines.push(format!("HUD elements: {}", hudelement::status()));
+    }
+    if lines.is_empty() {
+        // Not an error, and worth saying out loud: the suppressions leave no
+        // trace to count, so silence here would read as a broken command.
+        return "nothing active that reports progress\n".to_string();
     }
     format!("{}\n", lines.join("\n"))
 }
@@ -586,6 +632,85 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
     );
 }
 
+/// `dodtools_hide_hudelement [<name> <0|1>]`.
+///
+/// A command rather than a cvar: it takes two arguments, which a cvar's single
+/// value cannot carry, and there are seventeen of them -- seventeen cvars would
+/// bury everything else in the console's type-ahead.
+unsafe extern "C" fn cmd_hudelement() {
+    let Some(engfuncs) = engine::engfuncs() else { return };
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+
+    let argv = |n: i32| -> Option<String> {
+        let raw = unsafe { (engfuncs.cmd_argv)(n) };
+        (!raw.is_null()).then(|| {
+            unsafe { CStr::from_ptr(raw as *const c_char) }.to_string_lossy().trim().to_owned()
+        })
+    };
+
+    if argc < 2 {
+        console_print(&format!(
+            "usage: {HUDELEMENT_NAME} <element> <0|1>   (1 hides it)\n       {HUDELEMENT_NAME} all 0        (show everything again)\n{}",
+            hudelement::listing()
+        ));
+        return;
+    }
+
+    let Some(name) = argv(1) else { return };
+    if argc < 3 {
+        console_print(&format!("{HUDELEMENT_NAME}: expected {HUDELEMENT_NAME} {name} <0|1>\n"));
+        return;
+    }
+    let Some(raw) = argv(2) else { return };
+    let on = match raw.as_str() {
+        "0" => false,
+        "1" => true,
+        other => {
+            console_print(&format!("{HUDELEMENT_NAME}: expected 0 or 1, got \"{other}\"\n"));
+            return;
+        }
+    };
+
+    if name.eq_ignore_ascii_case("all") {
+        if on {
+            // Deliberately refused. Hiding every element at once includes the
+            // menus, and a capture session that cannot see the class menu is a
+            // support question, not a feature.
+            console_print(&format!(
+                "{HUDELEMENT_NAME}: `all 1` would hide the team and class menus too -- name the elements you want gone\n"
+            ));
+            return;
+        }
+        hudelement::show_all();
+        console_print(&format!("{HUDELEMENT_NAME}: every element shown again\n"));
+        unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} all 0")) };
+        return;
+    }
+
+    let Some(index) = hudelement::find(&name) else {
+        console_print(&format!(
+            "{HUDELEMENT_NAME}: no element called \"{name}\"\n{}",
+            hudelement::listing()
+        ));
+        return;
+    };
+
+    hudelement::set_hidden(index, on);
+    let bit = if on { "1" } else { "0" };
+    // Applied here as well as in `poll`, so the console reports the real
+    // outcome rather than "set" for something that could not be written.
+    match hudelement::apply() {
+        Ok(_) => {
+            console_print(&format!("{HUDELEMENT_NAME} {name} = {bit}\n"));
+            unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} {name} = {bit}")) };
+        }
+        Err(why) => {
+            console_print(&format!("{HUDELEMENT_NAME}: {why}\n"));
+            unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} {name} failed -- {why}")) };
+        }
+    }
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -694,6 +819,7 @@ pub fn install() {
     // of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
+    add_command(HUDELEMENT_NAME, cmd_hudelement);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
@@ -811,6 +937,14 @@ mod tests {
         let both = status_text();
         assert!(both.contains("viewmodel animations"), "{both}");
         assert!(both.contains("gunshots"), "{both}");
+
+        // A command has no type-ahead value to read, so this is the only
+        // place that says which elements are hidden.
+        hudelement::show_all();
+        assert!(!status_text().contains("HUD elements"), "{}", status_text());
+        hudelement::set_hidden(hudelement::find("saytext").unwrap(), true);
+        assert!(status_text().contains("saytext"), "{}", status_text());
+        hudelement::show_all();
 
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
         sound_fix::ENABLED.store(sound, Ordering::Relaxed);

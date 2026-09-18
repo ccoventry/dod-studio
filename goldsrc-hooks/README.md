@@ -39,6 +39,13 @@ Plus five control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
+- **Any HUD element** (`dodtools_hide_hudelement <name> 1`): hides one of the
+  seventeen elements DoD draws -- chat, the kill feed, the status bar, the
+  overview map, the MG-deploy and capture-area icons, the scope overlay, the
+  objective icons and the rest. Run it with no arguments to list them.
+  `dodtools_hide_hudelement all 0` puts everything back. Writes
+  `CHudBase::Draw` into the element's vftable slot 3 -- one dword, no code
+  patch -- see `docs/goldsrc_hud_suppression.md` section 7.
 - **Spectator crosshair** (`dodtools_match_pov_crosshair 1`): draws the
   spectator crosshair from `sprites/customXHair.spr`, using the same tile
   `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24 tile of

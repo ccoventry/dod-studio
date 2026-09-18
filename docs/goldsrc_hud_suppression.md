@@ -316,3 +316,76 @@ wins with no interlock written anywhere.
 it — the spectator branch never reads the `crosshair` cvar. This is the other
 half: it never reads `cl_xhair_style` either. Whether anything *else* differs
 between the two views is still open.
+
+---
+
+## 7. `dodtools_hide_hudelement` -- the general case
+
+Sections 2, 3 and 6 each patch one function for one purpose, and section 3's
+own module doc says why it is not this: patching a function needs no vftable
+address and reverts to bytes its own signature already proved were there. Fine
+for one element; not a plan for seventeen.
+
+`CHud::Redraw` walks a linked list and calls each element's **vftable slot 3**,
+`Draw`. `CHudBase::Draw` is `xor eax, eax; ret 4` -- a complete no-op with the
+right calling convention, which five of the twenty-two elements already use
+unchanged because they never override it.
+
+So hiding any element is **writing that one address into its slot 3**. No
+signature, no detour, no stub, no relocation, nothing left mid-instruction.
+Showing it again is writing back the dword that was there.
+
+### Why the vftable and not `m_iFlags`
+
+Clearing bit 0 of an element's `m_iFlags` is per-*instance*, which sounds
+better. The game writes that field itself from `Init`, `VidInit`, `Reset` and
+in some cases `Draw`, so it would have to be re-applied against the game's own
+writes. A vftable is written once by the constructor and never touched again.
+
+### Fixed RVAs, verified by name
+
+This is the one module here built on fixed offsets rather than a signature,
+because a vftable has no code to sign. What replaces the signature is better
+than one: DoD's `client.dll` ships **MSVC RTTI**, so `vftable[-1]` is a
+complete object locator whose type descriptor carries the class' decorated
+name. Every entry in the table names the class it expects
+(`.?AVCHudSayText@@`), and nothing is written until the loaded module agrees.
+A wrong build fails loudly, by name.
+
+`goldsrc-hooks/tools/verify_hudelements.py` checks the same thing offline, and
+adds the check the DLL cannot make for itself: **completeness**. It finds every
+class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
+`Draw`, and fails if any of them is missing from the table. On the shipped
+`client.dll` that is 22 registering classes, 17 of which draw -- exactly the
+table.
+
+### The five that are not listed
+
+`CClientEnvModel`, `CHudTextMessage`, `CParticleShooter`, `CVoiceStatusHud` and
+`CWeatherManager` do not override `Draw`. They are on the list to receive user
+messages and to be ticked, not to draw, so hiding them is already true and
+offering it would only invite the question of why it did nothing.
+
+`CVoiceStatusHud` is also the one element with **two** vftables (`+0xabb48` and
+`+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
+second is the element's. Worth knowing before anyone adds an entry.
+
+### `all 1` is refused
+
+`all 0` shows everything again, which is what a way out looks like. `all 1` is
+refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
+the class menu is a support question rather than a feature.
+
+### What it reaches that nothing else did
+
+Chat, the kill feed, the status bar under the crosshair, the overview map, the
+scope overlay, the team and class menus, the tram controls, the mortar HUD, the
+VGUI2 print panel, the objective icons, and `CHudDodIcons` -- which owns **both**
+the MG-deploy icon (#288) and the capture-area icon (#289), along with blood
+and bandage. Those two were filed separately because the icons look unrelated;
+one element draws all four, so they are one switch, and separating them would
+mean patching inside a 1507-byte `Draw`.
+
+It does **not** reach the VGUI2 spectator bars (§5) or the auto-help panel
+(#286). Those are not HUD elements and are not on this list.
+
