@@ -239,7 +239,7 @@ fn poll_code_patch(
 }
 
 fn describe_scoreboard(on: bool) -> &'static str {
-    if on { "1 (normal)" } else { "0 (+showscores blocked)" }
+    if on { "1 (+showscores blocked)" } else { "0 (normal)" }
 }
 
 fn describe_voice(on: bool) -> &'static str {
@@ -247,7 +247,7 @@ fn describe_voice(on: bool) -> &'static str {
 }
 
 fn describe_crosshair(on: bool) -> &'static str {
-    if on { "1 (normal)" } else { "0 (crosshair hidden)" }
+    if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
@@ -264,7 +264,7 @@ pub fn poll() {
         SCOREBOARD_NAME,
         &CVAR_SCOREBOARD,
         &SCOREBOARD_COMPLAINED,
-        scoreboard::set_allowed,
+        scoreboard::set_hidden,
         describe_scoreboard,
     );
     poll_code_patch(
@@ -278,7 +278,7 @@ pub fn poll() {
         CROSSHAIR_NAME,
         &CVAR_CROSSHAIR,
         &CROSSHAIR_COMPLAINED,
-        crosshair::set_shown,
+        crosshair::set_hidden,
         describe_crosshair,
     );
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
@@ -303,11 +303,11 @@ fn status_text() -> String {
         sound_fix::status(),
         sound_fix::carry_attenuation(),
         on(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
-        if scoreboard::suppressed() { "0 (+showscores blocked)" } else { "1 (normal)" },
+        if scoreboard::suppressed() { "1 (+showscores blocked)" } else { "0 (normal)" },
         scoreboard::status(),
         if voice::muted() { "1 (silent)" } else { "0 (normal)" },
         voice::status(),
-        if crosshair::hidden() { "0 (hidden)" } else { "1 (normal)" },
+        if crosshair::hidden() { "1 (hidden)" } else { "0 (normal)" },
         crosshair::status(),
     )
 }
@@ -481,9 +481,9 @@ fn handle_code_patch(
 unsafe extern "C" fn cmd_scoreboard() {
     handle_code_patch(
         SCOREBOARD_NAME,
-        "0 blocks +showscores",
-        scoreboard::set_allowed,
-        || !scoreboard::suppressed(),
+        "1 blocks +showscores",
+        scoreboard::set_hidden,
+        scoreboard::suppressed,
         scoreboard::status,
     );
 }
@@ -501,9 +501,9 @@ unsafe extern "C" fn cmd_voice() {
 unsafe extern "C" fn cmd_crosshair() {
     handle_code_patch(
         CROSSHAIR_NAME,
-        "0 hides the crosshair",
-        crosshair::set_shown,
-        || !crosshair::hidden(),
+        "1 hides the crosshair",
+        crosshair::set_hidden,
+        crosshair::hidden,
         crosshair::status,
     );
 }
@@ -615,9 +615,9 @@ pub fn install() {
     // These three default to the game's own behaviour. Nothing this DLL does
     // should change what a session looks like until it is asked to -- which is
     // why the mute defaults to 0 while the other two default to 1.
-    let scoreboard_cvar = register(SCOREBOARD_NAME, "1");
+    let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
-    let crosshair_cvar = register(CROSSHAIR_NAME, "1");
+    let crosshair_cvar = register(CROSSHAIR_NAME, "0");
 
     let (
         Some(gunshots),
@@ -688,6 +688,42 @@ mod tests {
             CROSSHAIR_NAME,
         ] {
             assert!(text.contains(name), "{name} missing from the status reply:\n{text}");
+        }
+    }
+
+    /// Every suppression cvar reads the same way: **1 does the thing the name
+    /// says**, 0 leaves the game alone. That is the whole point of naming them
+    /// `hide_*` / `mute_*` rather than after the thing they act on, and it is
+    /// the one property a future edit could invert without any test noticing --
+    /// the byte-level tests check widths and encodings, not sense.
+    #[test]
+    fn one_means_suppressed_for_every_suppression_cvar() {
+        assert!(describe_scoreboard(true).contains("blocked"), "{}", describe_scoreboard(true));
+        assert!(describe_scoreboard(false).contains("normal"), "{}", describe_scoreboard(false));
+
+        assert!(describe_crosshair(true).contains("hidden"), "{}", describe_crosshair(true));
+        assert!(describe_crosshair(false).contains("normal"), "{}", describe_crosshair(false));
+
+        assert!(describe_voice(true).contains("silent"), "{}", describe_voice(true));
+        assert!(describe_voice(false).contains("normal"), "{}", describe_voice(false));
+
+        for d in [describe_scoreboard(true), describe_crosshair(true), describe_voice(true)] {
+            assert!(d.starts_with('1'), "{d}");
+        }
+    }
+
+    /// The names have to carry the sense, since the value alone cannot. A cvar
+    /// called after its subject (`dodtools_scoreboard`) leaves the reader to
+    /// guess whether 1 means "scoreboard" or "suppress the scoreboard"; one
+    /// called after the action does not.
+    #[test]
+    fn suppression_cvars_are_named_after_the_action() {
+        for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
+            let verb = name.trim_start_matches("dodtools_");
+            assert!(
+                verb.starts_with("hide_") || verb.starts_with("mute_"),
+                "{name} is named after its subject, not the action it performs"
+            );
         }
     }
 }

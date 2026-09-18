@@ -22,13 +22,13 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `scoreboard`: the `dodtools_scoreboard` cvar -- stop a POV demo's
+//! - `scoreboard`: the `dodtools_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
 //!   `docs/goldsrc_scoreboard.md`.
 //! - `voice`: the `dodtools_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
-//! - `crosshair`: the `dodtools_crosshair` cvar -- hide the crosshair and have
+//! - `crosshair`: the `dodtools_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
 //!

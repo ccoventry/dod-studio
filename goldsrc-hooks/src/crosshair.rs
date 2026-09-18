@@ -78,7 +78,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("crosshair");
+pub const NAME: &str = console_name!("hide_crosshair");
 
 /// `CHudDoDCrossHair::Draw`'s prologue. The wildcards cover the relative call
 /// and the one absolute address that follows it, both of which move with the
@@ -134,20 +134,21 @@ fn draw_address() -> Result<usize, String> {
 
 /// Shows or hides the crosshair, returning whether anything was written.
 ///
-/// `shown` is the cvar's own sense: `true` is the game's stock behaviour.
+/// `hidden` is the cvar's own sense: `true` stubs the draw, `false` is the
+/// game's stock behaviour.
 ///
 /// Idempotent and cheap to call every frame, which is how it is used. That is
 /// not tidiness -- the engine reloads `client.dll` between demos and a reloaded
 /// module comes back with the stock prologue, so deciding from the bytes rather
 /// than from a flag is what makes the setting survive into the second demo of a
 /// session.
-pub fn set_shown(shown: bool) -> Result<bool, String> {
+pub fn set_hidden(hidden: bool) -> Result<bool, String> {
     let address = draw_address()?;
-    let want: &[u8] = if shown { STOCK } else { HIDDEN };
+    let want: &[u8] = if hidden { HIDDEN } else { STOCK };
 
     let present = unsafe { std::slice::from_raw_parts(address as *const u8, STOCK.len()) };
     if present == want {
-        HIDDEN_NOW.store(!shown, Ordering::Release);
+        HIDDEN_NOW.store(hidden, Ordering::Release);
         return Ok(false);
     }
     if present != STOCK && present != HIDDEN {
@@ -159,7 +160,7 @@ pub fn set_shown(shown: bool) -> Result<bool, String> {
     if !unsafe { crate::patch::write_code_bytes(address, want) } {
         return Err("could not make CHudDoDCrossHair::Draw writable".to_string());
     }
-    HIDDEN_NOW.store(!shown, Ordering::Release);
+    HIDDEN_NOW.store(hidden, Ordering::Release);
     Ok(true)
 }
 

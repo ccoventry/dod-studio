@@ -20,7 +20,7 @@ Plus four control surfaces, always available and doing nothing until used:
   players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
-- **Scoreboard** (`dodtools_scoreboard 0`): stops a POV demo's recorded TAB
+- **Scoreboard** (`dodtools_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
   than editing `dod/resource/ui/ScoreBoard.res` -- see
@@ -29,7 +29,7 @@ Plus four control surfaces, always available and doing nothing until used:
   hole!" and the rest, without overwriting the game's own `player/us*.wav`,
   `player/brit*.wav` and `player/ger*.wav`. Subtitles and speaker icons still
   show -- see `docs/goldsrc_hud_suppression.md`.
-- **Crosshair** (`dodtools_crosshair 0`): hides the crosshair and makes it stay
+- **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
 
@@ -65,8 +65,8 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 ## Status
 
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
-against a running game. The sound fix, `dodtools_scoreboard`,
-`dodtools_mute_voice_commands` and `dodtools_crosshair` are confirmed by static
+against a running game. The sound fix, `dodtools_hide_scoreboard`,
+`dodtools_mute_voice_commands` and `dodtools_hide_crosshair` are confirmed by static
 analysis only -- see the module docs in `src/engine.rs`, `src/sound_fix.rs`,
 `src/scoreboard.rs`, `src/voice.rs` and `src/crosshair.rs` for what is
 established from the DoD 1.3 game files vs. what still needs a live check. `tools/` holds a verifier per

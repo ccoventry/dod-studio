@@ -1,8 +1,8 @@
 # Silencing and hiding things DoD draws, without editing game files
 
-`dodtools_mute_voice_commands` and `dodtools_crosshair`, and why each needed a
+`dodtools_mute_voice_commands` and `dodtools_hide_crosshair`, and why each needed a
 patch rather than a setting. Companion to `docs/goldsrc_scoreboard.md`, which
-covers `dodtools_scoreboard`.
+covers `dodtools_hide_scoreboard`.
 
 Everything here is from offline analysis of DoD 1.3's `client.dll` (`pefile` +
 `capstone`, the house method in `docs/goldsrc_client_dll_internals.md` §10),
@@ -110,7 +110,7 @@ system that has nothing to do with these callbacks.
 
 ---
 
-## 3. `dodtools_crosshair`
+## 3. `dodtools_hide_crosshair`
 
 ### Why the stock cvar is not enough
 
@@ -182,7 +182,7 @@ is.
 
 ## 4. Re-applied every frame, from the bytes
 
-All three settings (including `dodtools_scoreboard`) are handed to their
+All three settings (including `dodtools_hide_scoreboard`) are handed to their
 `apply` every frame rather than compared against a cached flag.
 
 That is not defensive habit. **The engine unloads and reloads `client.dll`
