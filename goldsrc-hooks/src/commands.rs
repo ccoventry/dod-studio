@@ -305,18 +305,22 @@ pub fn poll() {
 /// Everything in one place, for debugging -- not the settings surface a
 /// player is expected to type. That is what `debug_` in the name signals:
 /// every value here is also visible piecemeal (a suppression cvar's own
-/// bare-name query, the console type-ahead), but this is the one command
-/// that dumps all of it together, which is what a support question actually
-/// needs.
+/// bare-name query, the console type-ahead, `dodtools_deathmsg`'s own
+/// status), but this is the one command that dumps all of it together, which
+/// is what a support question actually needs -- so it covers the *entire*
+/// `dodtools_*` surface, not a subset.
 ///
-/// The four suppression cvars are listed unconditionally, on or off, because
-/// there is no progress to gate them on -- they are just a byte, and "what
-/// is it set to" is exactly what this command exists to answer without
-/// hunting down four bare names individually. The two fixes below them are
-/// gated on being enabled, because for *those* a flag being on says nothing
-/// about whether the preconditions are being met in the current view, and
-/// "the fix isn't working" has twice turned out to be "the log budget ran
-/// out" -- their counters are the honest number, and are noise when off.
+/// The suppression cvars and `log_weapon_model` are listed unconditionally,
+/// on or off, because there is no progress to gate them on -- they are just
+/// a byte, and "what is it set to" is exactly what this command exists to
+/// answer without hunting down each bare name individually. The two fixes
+/// below them are gated on being enabled, because for *those* a flag being
+/// on says nothing about whether the preconditions are being met in the
+/// current view, and "the fix isn't working" has twice turned out to be "the
+/// log budget ran out" -- their counters are the honest number, and are
+/// noise when off. `dodtools_hltv_gunshot_attenuation`'s value is folded
+/// into the gunshots line rather than given its own, since it does nothing
+/// while the fix is off.
 fn status_text() -> String {
     let bit = |on: bool| if on { "1" } else { "0" };
     let mut lines: Vec<String> = vec![
@@ -328,13 +332,22 @@ fn status_text() -> String {
             bit(spectator_crosshair::matching()),
             spectator_crosshair::status()
         ),
+        format!(
+            "{HELD_MODELS_NAME} = {} -- logs the third-person model the spectated player holds, each time it changes",
+            bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed))
+        ),
     ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
     }
     if sound_fix::ENABLED.load(Ordering::Relaxed) {
-        lines.push(format!("gunshots: {}", sound_fix::status()));
+        lines.push(format!(
+            "gunshots: {} ({ATTENUATION_NAME} = {})",
+            sound_fix::status(),
+            sound_fix::carry_attenuation()
+        ));
     }
+    lines.push(crate::deathmsg::status().trim_end().to_string());
     format!("{}\n", lines.join("\n"))
 }
 
@@ -735,16 +748,28 @@ mod tests {
         anim_fix::LEVEL.store(0, Ordering::Relaxed);
         sound_fix::ENABLED.store(false, Ordering::Relaxed);
         let idle = status_text();
-        // The suppression cvars are always listed, on or off -- that is the
-        // whole point of `debug_status` over the bare-name query.
-        for name in [SCOREBOARD_NAME, VOICE_NAME, CROSSHAIR_NAME, SPECTATOR_CROSSHAIR_NAME] {
+        // The suppression cvars and log_weapon_model are always listed, on
+        // or off -- that is the whole point of `debug_status` over the
+        // bare-name query. deathmsg's own status is always folded in too.
+        for name in [
+            SCOREBOARD_NAME,
+            VOICE_NAME,
+            CROSSHAIR_NAME,
+            SPECTATOR_CROSSHAIR_NAME,
+            HELD_MODELS_NAME,
+        ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
+        assert!(idle.contains("dodtools_deathmsg"), "{idle}");
         assert!(!idle.contains("viewmodel animations"), "{idle}");
         assert!(!idle.contains("gunshots"), "{idle}");
 
         sound_fix::ENABLED.store(true, Ordering::Relaxed);
-        assert!(status_text().contains("gunshots"), "{}", status_text());
+        let gunshots_on = status_text();
+        assert!(gunshots_on.contains("gunshots"), "{gunshots_on}");
+        // The attenuation value is folded into the gunshots line rather than
+        // given its own, since it does nothing while the fix is off.
+        assert!(gunshots_on.contains(ATTENUATION_NAME), "{gunshots_on}");
 
         anim_fix::LEVEL.store(1, Ordering::Relaxed);
         let both = status_text();
