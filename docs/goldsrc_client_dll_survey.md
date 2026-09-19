@@ -248,10 +248,9 @@ want:
 *Technique:* message hook. *Effort:* low per message. *Risk:* low — nothing is
 patched, and an unhandled message is forwarded untouched.
 
-> **Suggested task:** a `dodtools_msglog <name>...` that dumps chosen messages
-> with their payloads to the log. It is an afternoon's work, it needs no
-> patching, and it would make the next three investigations of "what does the
-> client actually receive" cheap instead of a demo-parsing exercise each time.
+**Built** as `dodtools_msglog <name>... | all | clear` (issue #267), covering
+all 71, not just the eight above — the full name/thunk table this section's
+own tool derives. See `src/msglog.rs`.
 
 ---
 
