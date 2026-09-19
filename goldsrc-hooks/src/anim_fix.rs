@@ -112,7 +112,7 @@ pub const LEVEL_MAX: i32 = LEVEL_LOOKAHEAD;
 /// empty for anything like the 3.5s option 1 produced.
 const LOOKAHEAD_SECONDS: f64 = 1.0;
 
-/// What each option is, for `dodtools_status` and the startup line.
+/// What each option is, for `dodtools_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -1559,7 +1559,7 @@ mod tests {
         }
     }
 
-    /// Every option in range needs its own description -- `dodtools_status`
+    /// Every option in range needs its own description -- `dodtools_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

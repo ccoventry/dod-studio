@@ -104,7 +104,11 @@ static DRAW_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether the crosshair is currently suppressed in the loaded module.
-static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
+///
+/// `pub(crate)` rather than private: `spectator_crosshair`'s tests set this
+/// directly to exercise the "hiding wins" note in its own `status()`, the same
+/// way this module's own tests set it.
+pub(crate) static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
 
 fn draw_address() -> Result<usize, String> {
     let Some(base) = engine::client_module_base() else {
@@ -173,7 +177,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();

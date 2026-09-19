@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, scoreboard, sound_fix, voice};
+use crate::{anim_fix, crosshair, scoreboard, sound_fix, spectator_crosshair, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -54,11 +54,12 @@ const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
-const STATUS_NAME: &str = console_name!("status");
+const STATUS_NAME: &str = console_name!("debug_status");
 /// Each module owns its own name, because its error text uses it too.
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
+const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -71,6 +72,7 @@ static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -199,6 +201,7 @@ fn poll_attenuation() {
 static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -252,6 +255,10 @@ fn describe_crosshair(on: bool) -> &'static str {
     if on { "1 (crosshair hidden)" } else { "0 (normal)" }
 }
 
+fn describe_spectator_crosshair(on: bool) -> &'static str {
+    if on { "1 (spectator crosshair follows cl_xhair_style)" } else { "0 (normal)" }
+}
+
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
 /// the per-frame prologue so it lands before `anim_fix::apply()` runs.
 pub fn poll() {
@@ -283,41 +290,77 @@ pub fn poll() {
         crosshair::set_hidden,
         describe_crosshair,
     );
+    // Polled every frame like the rest, and for one extra reason: this is also
+    // how it notices `cl_xhair_style` changing under it.
+    poll_code_patch(
+        SPECTATOR_CROSSHAIR_NAME,
+        &CVAR_SPECTATOR_CROSSHAIR,
+        &SPECTATOR_CROSSHAIR_COMPLAINED,
+        spectator_crosshair::set_matching,
+        describe_spectator_crosshair,
+    );
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
 }
 
-/// What the fixes are actually *doing* -- the one question a cvar cannot
-/// answer about itself.
+/// Everything in one place, for debugging -- not the settings surface a
+/// player is expected to type. That is what `debug_` in the name signals:
+/// every value here is also visible piecemeal (a suppression cvar's own
+/// bare-name query, the console type-ahead, `dodtools_deathmsg`'s own
+/// status), but this is the one command that dumps all of it together, which
+/// is what a support question actually needs -- so it covers the *entire*
+/// `dodtools_*` surface, not a subset.
 ///
-/// Deliberately does **not** list the settings and their values. Every one of
-/// them is a cvar, so the console's own type-ahead already shows the name and
-/// its current value as you type it. Repeating that here cost twelve lines of
-/// output to say what the engine gives away for free, and in a narrow console
-/// the long names wrapped and the columns stopped lining up.
-///
-/// What is left is the part nothing else reports. A flag being on says nothing
-/// about whether the preconditions are being met in the current view, and
-/// "the fix isn't working" has twice turned out to be "the log budget ran out"
-/// -- these counters are the honest number.
+/// The suppression cvars and `log_weapon_model` are listed unconditionally,
+/// on or off, because there is no progress to gate them on -- they are just
+/// a byte, and "what is it set to" is exactly what this command exists to
+/// answer without hunting down each bare name individually. The two fixes
+/// below them are gated on being enabled, because for *those* a flag being
+/// on says nothing about whether the preconditions are being met in the
+/// current view, and "the fix isn't working" has twice turned out to be "the
+/// log budget ran out" -- their counters are the honest number, and are
+/// noise when off. `dodtools_hltv_gunshot_attenuation`'s value is folded
+/// into the gunshots line rather than given its own, since it does nothing
+/// while the fix is off.
 fn status_text() -> String {
-    let mut lines: Vec<String> = Vec::new();
+    let bit = |on: bool| if on { "1" } else { "0" };
+    let mut lines: Vec<String> = vec![
+        format!("{SCOREBOARD_NAME} = {} -- {}", bit(scoreboard::suppressed()), scoreboard::status()),
+        format!("{VOICE_NAME} = {} -- {}", bit(voice::muted()), voice::status()),
+        format!("{CROSSHAIR_NAME} = {} -- {}", bit(crosshair::hidden()), crosshair::status()),
+        format!(
+            "{SPECTATOR_CROSSHAIR_NAME} = {} -- {}",
+            bit(spectator_crosshair::matching()),
+            spectator_crosshair::status()
+        ),
+        format!(
+            "{HELD_MODELS_NAME} = {} -- logs the third-person model the spectated player holds, each time it changes",
+            bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed))
+        ),
+    ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
     }
     if sound_fix::ENABLED.load(Ordering::Relaxed) {
-        lines.push(format!("gunshots: {}", sound_fix::status()));
+        lines.push(format!(
+            "gunshots: {} ({ATTENUATION_NAME} = {})",
+            sound_fix::status(),
+            sound_fix::carry_attenuation()
+        ));
     }
-    if lines.is_empty() {
-        // Not an error, and worth saying out loud: the suppressions leave no
-        // trace to count, so silence here would read as a broken command.
-        return "nothing active that reports progress\n".to_string();
-    }
+    lines.push(crate::deathmsg::status().trim_end().to_string());
     format!("{}\n", lines.join("\n"))
 }
 
 unsafe extern "C" fn cmd_status() {
+    // A console line's semicolon-joined commands all run together, in one
+    // pass, before `poll` gets another turn as the per-frame prologue -- so
+    // `dodtools_hide_scoreboard 1;dodtools_debug_status` on one line would
+    // otherwise report the state from *before* that same line's own change.
+    // `poll` is cheap and idempotent (it already runs every frame), so
+    // forcing one here just makes this report always current.
+    poll();
     let report = status_text();
     console_print(&report);
     // Also to the log, so it stays a complete record of what was actually
@@ -513,6 +556,16 @@ unsafe extern "C" fn cmd_crosshair() {
     );
 }
 
+unsafe extern "C" fn cmd_spectator_crosshair() {
+    handle_code_patch(
+        SPECTATOR_CROSSHAIR_NAME,
+        "1 draws the spectator crosshair from customXHair.spr, like the POV one",
+        spectator_crosshair::set_matching,
+        spectator_crosshair::matching,
+        spectator_crosshair::status,
+    );
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -584,9 +637,10 @@ fn install_fallback_commands() {
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
+    add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -604,7 +658,7 @@ pub fn install() {
         return;
     }
 
-    // `dodtools_status` is a command under either path: it takes no value, so
+    // `dodtools_debug_status` is a command under either path: it takes no value, so
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
@@ -623,6 +677,7 @@ pub fn install() {
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
+    let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
 
     let (
         Some(gunshots),
@@ -632,6 +687,7 @@ pub fn install() {
         Some(scoreboard_cvar),
         Some(voice_cvar),
         Some(crosshair_cvar),
+        Some(spectator_crosshair_cvar),
     ) = (
         gunshots,
         animation,
@@ -640,6 +696,7 @@ pub fn install() {
         scoreboard_cvar,
         voice_cvar,
         crosshair_cvar,
+        spectator_crosshair_cvar,
     )
     else {
         install_fallback_commands();
@@ -653,12 +710,13 @@ pub fn install() {
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
     CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
+    CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -685,26 +743,40 @@ mod tests {
     /// preconditions, and say *something* when neither is on rather than
     /// returning an empty reply that reads as a broken command.
     #[test]
-    fn status_reports_only_the_fixes_with_progress_to_report() {
+    fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
         let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
         let sound = sound_fix::ENABLED.load(Ordering::Relaxed);
 
         anim_fix::LEVEL.store(0, Ordering::Relaxed);
         sound_fix::ENABLED.store(false, Ordering::Relaxed);
         let idle = status_text();
-        assert!(idle.contains("nothing active"), "{idle}");
+        // The suppression cvars and log_weapon_model are always listed, on
+        // or off -- that is the whole point of `debug_status` over the
+        // bare-name query. deathmsg's own status is always folded in too.
+        for name in [
+            SCOREBOARD_NAME,
+            VOICE_NAME,
+            CROSSHAIR_NAME,
+            SPECTATOR_CROSSHAIR_NAME,
+            HELD_MODELS_NAME,
+        ] {
+            assert!(idle.contains(name), "{name} missing from:\n{idle}");
+        }
+        assert!(idle.contains("dodtools_deathmsg"), "{idle}");
+        assert!(!idle.contains("viewmodel animations"), "{idle}");
+        assert!(!idle.contains("gunshots"), "{idle}");
 
         sound_fix::ENABLED.store(true, Ordering::Relaxed);
-        assert!(status_text().contains("gunshots"), "{}", status_text());
+        let gunshots_on = status_text();
+        assert!(gunshots_on.contains("gunshots"), "{gunshots_on}");
+        // The attenuation value is folded into the gunshots line rather than
+        // given its own, since it does nothing while the fix is off.
+        assert!(gunshots_on.contains(ATTENUATION_NAME), "{gunshots_on}");
 
         anim_fix::LEVEL.store(1, Ordering::Relaxed);
         let both = status_text();
         assert!(both.contains("viewmodel animations"), "{both}");
         assert!(both.contains("gunshots"), "{both}");
-
-        // The settings themselves must NOT be echoed -- that is the whole point.
-        assert!(!both.contains(SCOREBOARD_NAME), "{both}");
-        assert!(!both.contains(CROSSHAIR_NAME), "{both}");
 
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
         sound_fix::ENABLED.store(sound, Ordering::Relaxed);

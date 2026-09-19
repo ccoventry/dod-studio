@@ -145,7 +145,7 @@ string, rather than trusting that the signature found the right function.
 dodtools_hide_scoreboard 1     block +showscores
 dodtools_hide_scoreboard 0     back to the game's own behaviour (the default)
 dodtools_hide_scoreboard       report the current state
-dodtools_status                report it alongside every other setting
+dodtools_debug_status                report it alongside every other setting
 ```
 
 It is a cvar, so it also takes `+dodtools_hide_scoreboard 1` on the launch line or

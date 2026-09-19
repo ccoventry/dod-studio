@@ -156,7 +156,7 @@ refinement on top, not the point.
   and shows its value in the console type-ahead.
 - `dodtools_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
-- `dodtools_status` — what each fix is *doing*, not just what it is set to. A
+- `dodtools_debug_status` — what each fix is *doing*, not just what it is set to. A
   cvar can answer "what is this set to" on its own; whether the fix's
   preconditions are being met in the current view is a different question, and
   this is where it is answered.
