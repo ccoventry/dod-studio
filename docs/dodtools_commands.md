@@ -112,15 +112,19 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 | `dodtools_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
 | `dodtools_objectives <any> default` | hand that one back to the game |
 
-## Open, not yet merged
+### `dodtools_hide_sprite`
 
-Tracked here so a scan of this file doesn't miss what's about to land, but
-these aren't real until their PR merges -- check the PR before relying on
-anything below.
-
-| command | issue | PR |
-| --- | --- | --- |
-| `dodtools_hide_sprite <model-path>...` | #315 | #318 |
+`dodtools_hide_sprite <model-path>...` suppresses specific map-placed
+`env_sprite` entities by exact model path -- an allow-list, not a blanket
+toggle, replacing the whole set on each call (not additive). `clear` stops
+hiding anything. Only reaches genuine `env_sprite` entities rendered through
+the engine's normal entity list (`HUD_AddEntity`); DoD draws some
+sprite-looking things -- the crosshair, the capture-area icon -- as ordinary
+2D HUD elements instead, which this command can never reach regardless of
+path spelling (`dodtools_hide_crosshair`/`dodtools_hide_hudelement` reach
+those). No enumeration of valid paths either: an unmatched entry (wrong path,
+wrong extension, or a 2D-drawn element like the above) fails silently, with
+no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
 
 ## Keeping this in sync
 
