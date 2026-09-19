@@ -339,6 +339,13 @@ fn status_text() -> String {
 }
 
 unsafe extern "C" fn cmd_status() {
+    // A console line's semicolon-joined commands all run together, in one
+    // pass, before `poll` gets another turn as the per-frame prologue -- so
+    // `dodtools_hide_scoreboard 1;dodtools_debug_status` on one line would
+    // otherwise report the state from *before* that same line's own change.
+    // `poll` is cheap and idempotent (it already runs every frame), so
+    // forcing one here just makes this report always current.
+    poll();
     let report = status_text();
     console_print(&report);
     // Also to the log, so it stays a complete record of what was actually
