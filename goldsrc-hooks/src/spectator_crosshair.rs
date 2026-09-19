@@ -164,8 +164,11 @@ const WHOLE_SHEET_RECT: [i32; 4] = [0, 0, SPRITE_SIDE, SPRITE_SIDE];
 /// Resolved address of the span, or 0 before the first successful scan.
 static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 
-/// The module base it was resolved against. `client.dll` is unloaded and
-/// reloaded between demos, so a changed base means rescan.
+/// The module base it was resolved against. Measured (five game sessions,
+/// five `LoadLibraryA("client.dll")` log lines, no reload between demos
+/// inside a session): `client.dll` does *not* reload for a new demo. This
+/// guards a rescan for whatever *would* reload it -- a mod change, returning
+/// to the menu -- neither of which has been tested.
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// The style currently written into the code, or 0 for the stock rect. Read by
@@ -290,9 +293,11 @@ fn requested_style() -> i32 {
 /// follow `cl_xhair_style`, `false` is the game's stock behaviour.
 ///
 /// Idempotent and cheap to call every frame, which is how `commands::poll` uses
-/// it. That is also what makes it track `cl_xhair_style` live, and what makes
-/// the setting survive `client.dll` being unloaded and reloaded between demos —
-/// a reloaded module comes back stock, and the next frame writes it again.
+/// it. That is also what makes it track `cl_xhair_style` live, and what would
+/// make the setting survive `client.dll` being unloaded and reloaded, on
+/// whatever transition actually does that -- measured *not* to be a demo
+/// change (see [`SCANNED_BASE`]) -- since a reloaded module comes back stock
+/// and the next frame would write it again.
 pub fn set_matching(matching: bool) -> Result<bool, String> {
     let address = span_address()?;
     // Safety: the scan proved `SPAN` bytes of mapped code start here.
@@ -473,8 +478,9 @@ mod tests {
 
     /// A round trip through the bytes: what [`wanted`] writes is what
     /// [`read_state`] reads back. This is the property that lets `set_matching`
-    /// decide from the code rather than from a flag, which is what makes it
-    /// survive `client.dll` reloading between demos.
+    /// decide from the code rather than from a flag, which is what would let
+    /// it survive `client.dll` reloading -- on whatever transition actually
+    /// triggers that (see [`SCANNED_BASE`]).
     #[test]
     fn every_state_reads_back_as_the_style_that_wrote_it() {
         let stock = stock_span();
