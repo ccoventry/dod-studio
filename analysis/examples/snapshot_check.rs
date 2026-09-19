@@ -26,7 +26,7 @@ fn main() {
     let mut recent: Vec<u32> = Vec::new();
     let mut pending: Option<(f32, usize, u32, Vec<u32>)> = None;
     let mut after: Vec<u32> = Vec::new();
-    let mut report = |p: &(f32, usize, u32, Vec<u32>), after: &[u32]| {
+    let report = |p: &(f32, usize, u32, Vec<u32>), after: &[u32]| {
         let (time, listed, declared, before) = p;
         println!("\nfull snapshot at t={time:.2}s");
         println!("  lists {listed} entities, declares entity_count {declared}");
@@ -58,9 +58,8 @@ fn main() {
                         let c = pe.entity_count.to_u32();
                         recent.push(c);
                         if pending.is_some() && after.len() < 4 { after.push(c) }
-                        if pending.is_some() && after.len() == 4 {
-                            if let Some(p) = pending.take() { report(&p, &after) }
-                        }
+                        if pending.is_some() && after.len() == 4
+                            && let Some(p) = pending.take() { report(&p, &after) }
                     }
                     _ => {}
                 }

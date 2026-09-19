@@ -35,7 +35,7 @@ fn walk_reporting_sections(bytes: &[u8], start: usize, end: usize) -> Walk {
     while pos + FRAME_HEADER_SIZE <= end {
         let t = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || time < 0.0 || time > 100_000.0 { break }
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
         if t == 5 { sections.push((pos, frames, time)); }
         let slot = if t == 255 { 10 } else { t as usize };
         let frame_start = pos;

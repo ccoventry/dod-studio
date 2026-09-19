@@ -32,18 +32,16 @@ fn main() {
                         EngineMessage::SvcClientData(cd) => {
                             for (k,v) in cd.client_data.iter() {
                                 let kk = key(k);
-                                if kk.starts_with("iuser") {
-                                    if let Some(i)=as_i32(v) { *cd_iuser.entry(kk).or_default().entry(i).or_insert(0)+=1; }
-                                }
+                                if kk.starts_with("iuser")
+                                    && let Some(i)=as_i32(v) { *cd_iuser.entry(kk).or_default().entry(i).or_insert(0)+=1; }
                             }
                         }
                         EngineMessage::SvcPacketEntities(pe) => {
                             for es in &pe.entity_states {
                                 for (k,v) in es.delta.iter() {
                                     let kk=key(k);
-                                    if kk.starts_with("iuser") {
-                                        if let Some(i)=as_i32(v) { *per_entity.entry(kk).or_default().entry(es.entity_index).or_default().entry(i).or_insert(0)+=1; }
-                                    }
+                                    if kk.starts_with("iuser")
+                                        && let Some(i)=as_i32(v) { *per_entity.entry(kk).or_default().entry(es.entity_index).or_default().entry(i).or_insert(0)+=1; }
                                 }
                             }
                         }
@@ -52,9 +50,8 @@ fn main() {
                                 let Some(d)=&es.delta else { continue };
                                 for (k,v) in d.iter() {
                                     let kk=key(k);
-                                    if kk.starts_with("iuser") {
-                                        if let Some(i)=as_i32(v) { *per_entity.entry(kk).or_default().entry(es.entity_index).or_default().entry(i).or_insert(0)+=1; }
-                                    }
+                                    if kk.starts_with("iuser")
+                                        && let Some(i)=as_i32(v) { *per_entity.entry(kk).or_default().entry(es.entity_index).or_default().entry(i).or_insert(0)+=1; }
                                 }
                             }
                         }

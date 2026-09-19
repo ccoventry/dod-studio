@@ -49,12 +49,11 @@ fn main() {
             let MessageData::Parsed(msgs) = &bt.1.messages else { idx += 1; continue };
             if time >= t_lo && time <= t_hi {
                 for m in msgs {
-                    if let NetMessage::EngineMessage(em) = m {
-                        if let EngineMessage::SvcTempEntity(te) = &**em {
+                    if let NetMessage::EngineMessage(em) = m
+                        && let EngineMessage::SvcTempEntity(te) = &**em {
                             println!("frame_idx={idx} t={time:.2}s seq={seq}: {} raw_len_hint={:?}",
                                 variant_name(&te.entity), &te.entity);
                         }
-                    }
                 }
             }
             idx += 1;

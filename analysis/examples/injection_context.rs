@@ -17,8 +17,8 @@ fn main() {
     let mut idx = 0usize;
     for entry in demo.directory.entries.iter() {
         for f in &entry.frames {
-            if let FrameData::NetworkMessage(bt) = &f.frame_data {
-                if let MessageData::Parsed(msgs) = &bt.1.messages {
+            if let FrameData::NetworkMessage(bt) = &f.frame_data
+                && let MessageData::Parsed(msgs) = &bt.1.messages {
                     let names: Vec<&str> = msgs.iter().map(|m| match m {
                         NetMessage::EngineMessage(em) => match &**em {
                             EngineMessage::SvcPacketEntities(_) => "svc_packetentities(FULL)",
@@ -31,12 +31,11 @@ fn main() {
                         },
                         NetMessage::UserMessage(_) => "usermsg",
                     }).collect();
-                    if names.iter().any(|n| *n == "svc_packetentities(FULL)") {
+                    if names.contains(&"svc_packetentities(FULL)") {
                         injection_points.push(idx);
                     }
                     rows.push((idx, f.time, names.join(",")));
                 }
-            }
             idx += 1;
         }
     }

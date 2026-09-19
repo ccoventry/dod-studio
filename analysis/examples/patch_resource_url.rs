@@ -25,14 +25,13 @@ fn main() {
             let FrameData::NetworkMessage(bt) = &mut f.frame_data else { continue };
             let MessageData::Parsed(msgs) = &mut bt.1.messages else { continue };
             for m in msgs.iter_mut() {
-                if let NetMessage::EngineMessage(em) = m {
-                    if let EngineMessage::SvcResourceLocation(rl) = &mut **em {
+                if let NetMessage::EngineMessage(em) = m
+                    && let EngineMessage::SvcResourceLocation(rl) = &mut **em {
                         println!("frame time={:.2}s: {:?} -> {new_url:?}",
                             f.time, String::from_utf8_lossy(&rl.download_url));
                         rl.download_url = new_bytes.clone();
                         patched += 1;
                     }
-                }
             }
         }
     }

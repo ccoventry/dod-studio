@@ -26,13 +26,12 @@ fn main() {
             let MessageData::Parsed(msgs) = &bt.1.messages else { idx += 1; continue };
             for m in msgs {
                 let NetMessage::UserMessage(um) = m else { continue };
-                if let Ok(UserMessage::SayText(st)) = UserMessage::new(&um.name, &um.data) {
-                    if st.text.contains(&needle) {
+                if let Ok(UserMessage::SayText(st)) = UserMessage::new(&um.name, &um.data)
+                    && st.text.contains(&needle) {
                         found += 1;
                         println!("frame_idx={idx} t={time:.2}s seq={seq}: client={} text={:?}",
                             st.client_index, st.text);
                     }
-                }
             }
             idx += 1;
         }

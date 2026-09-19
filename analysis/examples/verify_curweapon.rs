@@ -16,13 +16,12 @@ fn main() {
             let time = f.time;
             let MessageData::Parsed(msgs) = &bt.1.messages else { idx += 1; continue };
             for m in msgs {
-                if let NetMessage::UserMessage(um) = m {
-                    if let Ok(UserMessage::CurWeapon(cw)) = UserMessage::new(&um.name, &um.data) {
+                if let NetMessage::UserMessage(um) = m
+                    && let Ok(UserMessage::CurWeapon(cw)) = UserMessage::new(&um.name, &um.data) {
                         println!("frame_idx={idx} t={time:.2}s: CurWeapon active={} weapon={:?} clip_ammo={}",
                             cw.is_active, cw.weapon, cw.clip_ammo);
                         last_before_join = Some((idx, time));
                     }
-                }
             }
             idx += 1;
         }

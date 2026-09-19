@@ -69,7 +69,7 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Run {
         r.cut = frame_start;
         let t = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || time < 0.0 || time > 100_000.0 { break }
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
         pos += FRAME_HEADER_SIZE;
         match t {
             5 | 2 | 255 => {}
@@ -160,9 +160,8 @@ fn verify(exe: &std::path::Path, probe: &[u8]) -> bool {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn() else { return false };
-    if let Some(mut si) = child.stdin.take() {
-        if si.write_all(probe).is_err() { /* child died early; the wait below reports it */ }
-    }
+    if let Some(mut si) = child.stdin.take()
+        && si.write_all(probe).is_err() { /* child died early; the wait below reports it */ }
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 

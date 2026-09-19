@@ -34,7 +34,7 @@ fn step(bytes: &[u8], pos: usize, end: usize) -> Option<(u8, usize)> {
     if pos + FRAME_HEADER_SIZE > end { return None }
     let t = bytes[pos];
     let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().ok()?);
-    if (t > 9 && t != 255) || !time.is_finite() || time < 0.0 || time > 100_000.0 { return None }
+    if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { return None }
     let mut p = pos + FRAME_HEADER_SIZE;
     match t {
         5 | 2 | 255 => {}

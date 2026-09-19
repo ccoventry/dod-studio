@@ -36,12 +36,11 @@ fn main() {
                 || matches!(f.frame_data, FrameData::DemoStart))
             .cloned().collect();
         // Close the section cleanly.
-        if !matches!(kept.last().map(|f| &f.frame_data), Some(FrameData::NextSection)) {
-            if let Some(term) = entry.frames.iter().rev()
+        if !matches!(kept.last().map(|f| &f.frame_data), Some(FrameData::NextSection))
+            && let Some(term) = entry.frames.iter().rev()
                 .find(|f| matches!(f.frame_data, FrameData::NextSection)).cloned() {
                 kept.push(term);
             }
-        }
         println!("  entry {ei}: {before} -> {} frames", kept.len());
         entry.frames = kept;
         entry.frame_count = entry.frames.len() as i32;

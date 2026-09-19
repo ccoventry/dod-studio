@@ -44,7 +44,7 @@ fn main() {
                         es.entity_index_difference.is_some(),
                         es.has_custom_delta,
                         es.has_baseline_index,
-                        es.delta.iter().count(),
+                        es.delta.len(),
                     );
                 }
             }

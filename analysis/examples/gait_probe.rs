@@ -116,11 +116,9 @@ fn main() {
                         EngineMessage::SvcClientData(cd) => {
                             if let Some((_, v)) =
                                 cd.client_data.iter().find(|(k, _)| key(k) == "maxspeed")
-                            {
-                                if let Some(f) = as_f32(v) {
+                                && let Some(f) = as_f32(v) {
                                     *t.maxspeed.entry(f.round() as i32).or_insert(0) += 1;
                                 }
-                            }
                         }
                         // Player entities are indices 1..=32. Most updates
                         // arrive as deltas, not full snapshots, so both carry.

@@ -23,14 +23,13 @@ fn main() {
             let time = f.time;
             let MessageData::Parsed(msgs) = &bt.1.messages else { idx += 1; continue };
             for m in msgs {
-                if let NetMessage::EngineMessage(em) = m {
-                    if let dem::types::EngineMessage::SvcUpdateUserInfo(ui) = &**em {
+                if let NetMessage::EngineMessage(em) = m
+                    && let dem::types::EngineMessage::SvcUpdateUserInfo(ui) = &**em {
                         let raw = String::from_utf8_lossy(ui.user_info.as_slice()).to_string();
                         let parts: Vec<&str> = raw.trim_matches(|c| c == '\0' || c == '\\').split('\\').collect();
                         let fmap: HashMap<&str, &str> = parts.chunks_exact(2).map(|c| (c[0], c[1])).collect();
                         if let Some(n) = fmap.get("name") { names.insert(ui.index, n.to_string()); }
                     }
-                }
                 if let NetMessage::UserMessage(um) = m {
                     if time < t_lo || time > t_hi { continue }
                     let name_str = String::from_utf8_lossy(&um.name).trim_matches('\0').to_string();

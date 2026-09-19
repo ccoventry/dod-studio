@@ -79,7 +79,7 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Quality {
     while frames < cap && pos + FRAME_HEADER_SIZE <= end {
         let t = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || time < 0.0 || time > 100_000.0 { break }
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
         let frame_start = pos;
         if t != 255 && t != 5 {
             if first_time.is_nan() { first_time = time }
@@ -230,7 +230,7 @@ fn main() {
     let mut next_report = start_scan + (1 << 22);
 
     let mut scan = start_scan.max(cut + 1);
-    while scan + FRAME_HEADER_SIZE < end && hit.map_or(true, |h| scan < h + WINDOW) {
+    while scan + FRAME_HEADER_SIZE < end && hit.is_none_or(|h| scan < h + WINDOW) {
         if scan >= next_report {
             eprintln!("  ... at byte {scan} ({:.0}% of the way to the end), {considered} candidates seen so far",
                 100.0 * (scan - cut) as f64 / (end - cut) as f64);

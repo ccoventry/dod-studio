@@ -29,9 +29,8 @@ fn main() {
     for entry in demo.directory.entries.iter().skip(1) {
         let mut prev: Option<f32> = None;
         for f in &entry.frames {
-            if let Some(p) = prev {
-                if f.time - p > best { best = f.time - p; join_time = p; }
-            }
+            if let Some(p) = prev
+                && f.time - p > best { best = f.time - p; join_time = p; }
             prev = Some(f.time);
         }
     }

@@ -37,12 +37,11 @@ fn main() {
             let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
             let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
             for m in msgs {
-                if let NetMessage::UserMessage(um) = m {
-                    if matches!(UserMessage::new(&um.name, &um.data), Ok(UserMessage::DeathMsg(_))) {
+                if let NetMessage::UserMessage(um) = m
+                    && matches!(UserMessage::new(&um.name, &um.data), Ok(UserMessage::DeathMsg(_))) {
                         buckets[b] += 1;
                         total += 1;
                     }
-                }
             }
         }
     }

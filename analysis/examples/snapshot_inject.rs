@@ -114,11 +114,10 @@ fn main() {
                     prev = Some((seq, f.time));
                     if let MessageData::Parsed(msgs) = &bt.1.messages {
                         for m in msgs {
-                            if let NetMessage::EngineMessage(em) = m {
-                                if let EngineMessage::SvcDeltaPacketEntities(pe) = &**em {
+                            if let NetMessage::EngineMessage(em) = m
+                                && let EngineMessage::SvcDeltaPacketEntities(pe) = &**em {
                                     last_delta_seq = pe.delta_sequence.to_u32();
                                 }
-                            }
                         }
                     }
                 }
@@ -191,11 +190,10 @@ fn main() {
                     // `CurWeapon` payload is `[is_active: u8, weapon: u8, clip_ammo: u8]`
                     // (dod::lib.rs `cur_weapon`). Only the is_active=true half of a
                     // switch pair says what's actually in hand right now.
-                    if let NetMessage::UserMessage(um) = m {
-                        if um.name.starts_with(b"CurWeapon") && um.data.len() == 3 && um.data[0] != 0 {
+                    if let NetMessage::UserMessage(um) = m
+                        && um.name.starts_with(b"CurWeapon") && um.data.len() == 3 && um.data[0] != 0 {
                             client_acc.cur_weapon = Some((um.id, um.data.clone()));
                         }
-                    }
                     continue;
                 };
                 match &**em {
@@ -421,15 +419,14 @@ fn main() {
             // predicts, and it is not part of `SvcClientData` at all -- a
             // separate user message. Replaying the last real one here, once,
             // stops the join from starting the client on a stale weapon.
-            if i == 1 {
-                if let Some((id, data)) = &client_state.cur_weapon {
+            if i == 1
+                && let Some((id, data)) = &client_state.cur_weapon {
                     msgs.push(NetMessage::UserMessage(UserMessage {
                         id: *id,
                         name: b"CurWeapon".to_vec(),
                         data: data.clone(),
                     }));
                 }
-            }
             msgs.push(NetMessage::EngineMessage(Box::new(EngineMessage::SvcDeltaPacketEntities(no_op))));
             Frame {
                 time: time_i,
@@ -479,10 +476,10 @@ fn main() {
                 ramped += 1;
             }
 
-            if injected < joins.len() && here > joins[injected].0 {
-                if let FrameData::NetworkMessage(bt) = &mut f.frame_data {
-                    if let MessageData::Parsed(msgs) = &mut bt.1.messages {
-                        if let Some(at) = msgs.iter().position(|m| matches!(m, NetMessage::EngineMessage(em)
+            if injected < joins.len() && here > joins[injected].0
+                && let FrameData::NetworkMessage(bt) = &mut f.frame_data
+                    && let MessageData::Parsed(msgs) = &mut bt.1.messages
+                        && let Some(at) = msgs.iter().position(|m| matches!(m, NetMessage::EngineMessage(em)
                             if matches!(**em, EngineMessage::SvcDeltaPacketEntities(_))))
                         {
                             msgs[at] = NetMessage::EngineMessage(Box::new(
@@ -491,9 +488,6 @@ fn main() {
                                 injected + 1, f.time);
                             injected += 1;
                         }
-                    }
-                }
-            }
 
             new_frames.push(f);
         }
