@@ -79,6 +79,9 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
   Still include `Closes #NN` in the PR body too — the GraphQL call is in addition to that, not a replacement for it.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
+### Code Style
+- **This repo is deliberately not `rustfmt`-formatted** (decided in issue #235: `cargo fmt --all --check` differs on 847 files, and reformatting as a side effect of some other change would make that change unreviewable, conflict with every open branch and PR at once, and rewrite blame across the codebase). Never run `cargo fmt` over a change set — its default `max_width = 100` will reflow deliberately long comment-and-code lines this codebase relies on. If the repo's formatting policy is ever revisited, it needs its own dedicated commit on a quiet day with no open PRs, not a side effect of unrelated work.
+
 ---
 
 ## Concurrency, Rust & Memory Constraints
