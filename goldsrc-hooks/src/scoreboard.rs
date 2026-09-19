@@ -147,11 +147,13 @@ fn je_address() -> Result<usize, String> {
 /// `false` is the game's stock behaviour.
 ///
 /// Idempotent and cheap to call every frame, which is how it is used. That
-/// matters for more than tidiness: the engine unloads and reloads `client.dll`
-/// between demos, and a reloaded module comes back with the stock byte. A
-/// cached "already suppressed" belief would leave the scoreboard working again
-/// from the second demo of a session onward, silently. Deciding from the byte
-/// itself rather than from a flag is what makes that self-heal.
+/// matters for more than tidiness: if `client.dll` is ever unloaded and
+/// reloaded (measured *not* to happen for a plain demo change --
+/// `docs/goldsrc_dod_quirks.md` -- but untested for a mod change or
+/// returning to the menu), a reloaded module comes back with the stock byte.
+/// A cached "already suppressed" belief would leave the scoreboard working
+/// again from that point onward, silently. Deciding from the byte itself
+/// rather than from a flag is what would make that self-heal.
 pub fn set_hidden(hidden: bool) -> Result<bool, String> {
     let address = je_address()?;
     let want = if hidden { JMP } else { JE };

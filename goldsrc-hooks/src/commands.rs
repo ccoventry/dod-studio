@@ -203,9 +203,11 @@ static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
 /// rather than compared against a cached copy: after the first scan the call is
-/// a short byte compare, and deciding from the bytes is what makes the setting
-/// survive `client.dll` being unloaded and reloaded between demos. `apply`
-/// reports whether it wrote, so the log line is still change-triggered.
+/// a short byte compare, and deciding from the bytes is what would let the
+/// setting survive `client.dll` being unloaded and reloaded -- measured *not*
+/// to happen for a plain demo change (`docs/goldsrc_dod_quirks.md`), but
+/// untested for a mod change or returning to the menu. `apply` reports
+/// whether it wrote, so the log line is still change-triggered.
 ///
 /// It also keeps retrying while `client.dll` is not loaded yet, which is the
 /// normal state for the first frames of a session -- and exactly when these

@@ -185,12 +185,16 @@ is.
 All three settings (including `dodtools_hide_scoreboard`) are handed to their
 `apply` every frame rather than compared against a cached flag.
 
-That is not defensive habit. **The engine unloads and reloads `client.dll`
-between demos**, and a reloaded module comes back with the original bytes. A
-cached "already patched" belief would leave every one of these working for the
-first demo of a session and quietly stopping from the second onward — a failure
-you would only notice in the finished footage. After the first scan the check
-is a short byte compare, so the cost is nothing.
+That is not defensive habit. **If the engine ever unloads and reloads
+`client.dll`**, a reloaded module comes back with the original bytes, and a
+cached "already patched" belief would leave every one of these working right
+up until that point and quietly stopping after — a failure you would only
+notice in the finished footage. Measured 2026-09-18 (`docs/goldsrc_dod_quirks.md`):
+a plain demo-to-demo transition does **not** reload `client.dll` — five game
+sessions, five load lines, none mid-session — so this guards against whatever
+*does* (a mod change, returning to the menu), not against loading a new demo.
+After the first scan the check is a short byte compare, so the cost is
+nothing either way.
 
 `commands.rs`'s `poll_code_patch` is that shared loop; `apply` returns whether
 it wrote, so the log line stays change-triggered.

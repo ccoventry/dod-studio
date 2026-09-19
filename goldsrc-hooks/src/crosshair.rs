@@ -95,8 +95,12 @@ const HIDDEN: &[u8] = &[0x33, 0xc0, 0xc2, 0x04, 0x00];
 /// successful scan.
 static DRAW_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 
-/// The module base the address was resolved against. `client.dll` is unloaded
-/// and reloaded between demos, so a changed base means rescan.
+/// The module base the address was resolved against. Measured (five game
+/// sessions, five `LoadLibraryA("client.dll")` log lines, no reload between
+/// demos inside a session, `docs/goldsrc_dod_quirks.md`): a plain demo change
+/// does not reload `client.dll`. This guards a rescan for whatever *would*
+/// reload it -- a mod change, returning to the menu -- neither of which has
+/// been tested.
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether the crosshair is currently suppressed in the loaded module.
@@ -138,10 +142,10 @@ fn draw_address() -> Result<usize, String> {
 /// game's stock behaviour.
 ///
 /// Idempotent and cheap to call every frame, which is how it is used. That is
-/// not tidiness -- the engine reloads `client.dll` between demos and a reloaded
-/// module comes back with the stock prologue, so deciding from the bytes rather
-/// than from a flag is what makes the setting survive into the second demo of a
-/// session.
+/// not tidiness -- deciding from the bytes rather than a flag is what would
+/// let the setting survive `client.dll` being unloaded and reloaded, on
+/// whatever transition actually does that (see [`SCANNED_BASE`]) -- a
+/// reloaded module comes back with the stock prologue.
 pub fn set_hidden(hidden: bool) -> Result<bool, String> {
     let address = draw_address()?;
     let want: &[u8] = if hidden { HIDDEN } else { STOCK };
