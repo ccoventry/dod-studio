@@ -51,12 +51,26 @@
 //! only the second is the element's. It is not offered here, but the next
 //! person to add an entry should know the trap exists.
 //!
+//! `CHudAmmo` overrides `Draw` and registers itself, so `verify_hudelements.py`
+//! has to be told about it by name (`KNOWN_EXCLUDED`) or its completeness check
+//! would fail. Disassembly of `client+0x28b00` shows every `FillRGBA`/`SPR_Draw`
+//! pair in the function -- ammo counter and weapon-select menu alike -- lands
+//! after one of its four `CHud::ShouldDraw(3)` calls; nothing draws before the
+//! first one. So the stock `cl_hud_ammo` cvar already hides all of it, with no
+//! forced-reset trap the way `crosshair`/`r_drawentities`/`cl_lw` have -- unlike
+//! `objectives` and `icons` below, which both draw something *before* their own
+//! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
+//!
 //! ## Re-applied every frame
 //!
-//! Like every other setting in this DLL -- the engine unloads and reloads
-//! `client.dll` between demos, and a reloaded module comes back with a stock
-//! vftable. `commands::poll` drives [`poll`], which re-reads the module base,
-//! rescans if it moved, and writes only what differs.
+//! `client.dll` does **not** reload on a plain demo change
+//! (`docs/goldsrc_dod_quirks.md`), so this has not been observed to matter in
+//! practice. It is still cheap idempotent insurance against whatever
+//! transition *would* reload the module (a mod change, returning to the menu;
+//! neither tested) -- the same guard `scoreboard.rs` and `crosshair.rs` keep
+//! for the same reason, not a mechanism unique to this module. `commands::poll`
+//! drives [`poll`], which re-reads the module base, rescans if it moved, and
+//! writes only what differs.
 
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 
@@ -98,12 +112,6 @@ pub struct Element {
 /// Every element that overrides `Draw`, so every element there is any point
 /// hiding. Derived by `goldsrc-hooks/tools/survey_client_dll.py elements`.
 pub const ELEMENTS: &[Element] = &[
-    Element {
-        name: "ammo",
-        class: ".?AVCHudAmmo@@",
-        vftable_rva: 0xac29c,
-        what: "the ammo counter and the weapon-select menu",
-    },
     Element {
         name: "common",
         class: ".?AVCHudDoDCommon@@",
@@ -207,7 +215,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 17] = [const { AtomicUsize::new(0) }; 17];
+static STOCK_DRAW: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);
@@ -338,9 +346,10 @@ pub fn hidden_count() -> usize {
 /// Writes the vftable slots to match what was asked for, returning how many
 /// changed.
 ///
-/// Called every frame. After the first resolve this is seventeen dword
-/// comparisons, and it is what makes the setting survive `client.dll` being
-/// unloaded and reloaded between demos.
+/// Called every frame. After the first resolve this is sixteen dword
+/// comparisons -- cheap insurance against a `client.dll` reload (see the
+/// module doc's "Re-applied every frame" section), not a cost a plain demo
+/// change is known to trigger.
 pub fn apply() -> Result<usize, String> {
     let base = resolve()?;
     let base_draw = BASE_DRAW.load(Ordering::Acquire);
@@ -477,29 +486,29 @@ mod tests {
 
     #[test]
     fn lookup_is_case_insensitive_and_exact() {
-        assert_eq!(find("ammo"), find("AMMO"));
-        assert!(find("ammo").is_some());
-        assert!(find("amm").is_none());
-        assert!(find("ammoo").is_none());
+        assert_eq!(find("crosshair"), find("CROSSHAIR"));
+        assert!(find("crosshair").is_some());
+        assert!(find("cross").is_none());
+        assert!(find("crosshairr").is_none());
         assert!(find("").is_none());
     }
 
     #[test]
     fn hiding_and_showing_move_only_the_one_bit() {
         show_all();
-        let ammo = find("ammo").unwrap();
+        let crosshair = find("crosshair").unwrap();
         let chat = find("saytext").unwrap();
 
-        set_hidden(ammo, true);
-        assert!(is_hidden(ammo));
+        set_hidden(crosshair, true);
+        assert!(is_hidden(crosshair));
         assert!(!is_hidden(chat));
         assert_eq!(hidden_count(), 1);
 
         set_hidden(chat, true);
         assert_eq!(hidden_count(), 2);
 
-        set_hidden(ammo, false);
-        assert!(!is_hidden(ammo));
+        set_hidden(crosshair, false);
+        assert!(!is_hidden(crosshair));
         assert!(is_hidden(chat));
 
         show_all();
@@ -531,7 +540,7 @@ mod tests {
             assert!(listing.contains(element.name), "{} is missing", element.name);
         }
         assert!(listing.lines().any(|l| l.contains("scope") && l.contains(" 1 ")));
-        assert!(listing.lines().any(|l| l.contains("ammo") && l.contains(" 0 ")));
+        assert!(listing.lines().any(|l| l.contains("crosshair") && l.contains(" 0 ")));
         show_all();
     }
 

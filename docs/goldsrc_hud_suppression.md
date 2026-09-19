@@ -324,7 +324,7 @@ between the two views is still open.
 Sections 2, 3 and 6 each patch one function for one purpose, and section 3's
 own module doc says why it is not this: patching a function needs no vftable
 address and reverts to bytes its own signature already proved were there. Fine
-for one element; not a plan for seventeen.
+for one element; not a plan for sixteen.
 
 `CHud::Redraw` walks a linked list and calls each element's **vftable slot 3**,
 `Draw`. `CHudBase::Draw` is `xor eax, eax; ret 4` -- a complete no-op with the
@@ -355,9 +355,9 @@ A wrong build fails loudly, by name.
 `goldsrc-hooks/tools/verify_hudelements.py` checks the same thing offline, and
 adds the check the DLL cannot make for itself: **completeness**. It finds every
 class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
-`Draw`, and fails if any of them is missing from the table. On the shipped
-`client.dll` that is 22 registering classes, 17 of which draw -- exactly the
-table.
+`Draw`, and fails if any of them is missing from the table (or a documented
+exclusion). On the shipped `client.dll` that is 22 registering classes, 17 of
+which draw -- 16 in the table, plus `CHudAmmo`, deliberately excluded below.
 
 ### The five that are not listed
 
@@ -369,6 +369,20 @@ offering it would only invite the question of why it did nothing.
 `CVoiceStatusHud` is also the one element with **two** vftables (`+0xabb48` and
 `+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
 second is the element's. Worth knowing before anyone adds an entry.
+
+### The one that overrides `Draw` and still isn't listed
+
+`CHudAmmo` draws (the ammo counter and the weapon-select menu) and registers
+itself, so it would fail the completeness check above like a genuine miss
+unless named as an exception. It isn't a miss: disassembly of `client+0x28b00`
+(`CHudAmmo::Draw`, 2604 bytes) shows every `FillRGBA`/`SPR_Draw` pair in the
+function landing after one of its four `CHud::ShouldDraw(3)` calls, and nothing
+drawing before the first one. The stock `cl_hud_ammo` cvar already hides all of
+it -- unlike `crosshair`/`r_drawentities`/`cl_lw`, `cl_hud_ammo` is not one of
+the cvars `CHud::Redraw` forces back every frame (§3 above), so setting it from
+a config actually sticks. `objectives` and `icons` below were checked the same
+way and kept, because both draw something *before* their own `ShouldDraw` gate
+that no stock cvar reaches.
 
 ### `all 1` is refused
 

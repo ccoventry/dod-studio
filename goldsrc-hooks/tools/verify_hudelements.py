@@ -18,9 +18,9 @@ Every constant below is read out of the Rust rather than restated.
      `Draw`, and that address decodes to `xor eax, eax; ret 4`.
   5. No vftable is listed twice, and none is the donor's.
   6. **Completeness**: every class in the image whose `Init` registers it with
-     `CHud::AddHudElem` and which overrides `Draw` is in the table. This is the
-     check that catches an element nobody thought of, rather than one that is
-     wrong.
+     `CHud::AddHudElem` and which overrides `Draw` is in the table, or named in
+     `KNOWN_EXCLUDED` with a reason. This is the check that catches an element
+     nobody thought of, rather than one that is wrong.
 
 Usage:
     python goldsrc-hooks/tools/verify_hudelements.py [path-to-client.dll]
@@ -54,6 +54,17 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "hudelement.rs"
 ADD_HUD_ELEM = 0x22330
 
 BASE_DRAW_CODE = b"\x33\xc0\xc2\x04\x00"
+
+# Classes that override `Draw` and register themselves -- so the completeness
+# check below would otherwise flag them as a missed element -- but are left
+# out of `hudelement.rs` on purpose. See that file's "What is not listed"
+# section for why each one is here.
+KNOWN_EXCLUDED = {
+    # Every draw call in CHudAmmo::Draw lands after one of its own
+    # CHud::ShouldDraw(3) calls; the stock cl_hud_ammo cvar already hides all
+    # of it, and (unlike crosshair) CHud::Redraw does not force it back.
+    ".?AVCHudAmmo@@",
+}
 
 
 def rust_elements(src: str):
@@ -188,14 +199,20 @@ def main() -> int:
 
     overriding = {n: v for n, v in registering.items() if u32(v + slot * 4) - base != base_draw}
     declared = {klass for _, klass, _ in table}
-    missing = sorted(set(overriding) - declared)
+    missing = sorted(set(overriding) - declared - KNOWN_EXCLUDED)
     check(
         not missing,
-        f"every drawing element that registers itself is in the table"
-        + (f" -- missing {missing}" if missing else f" ({len(overriding)} found)"),
+        f"every drawing element that registers itself is in the table or KNOWN_EXCLUDED"
+        + (f" -- missing {missing}" if missing else f" ({len(overriding)} found, {len(KNOWN_EXCLUDED)} excluded)"),
     )
     extra = sorted(declared - set(registering))
     check(not extra, "every declared element registers itself" + (f" -- {extra}" if extra else ""))
+    stale_exclusions = sorted(KNOWN_EXCLUDED - set(overriding))
+    check(
+        not stale_exclusions,
+        "every KNOWN_EXCLUDED class still overrides Draw and registers itself"
+        + (f" -- {stale_exclusions} no longer do(es)" if stale_exclusions else ""),
+    )
 
     print()
     if failures:
