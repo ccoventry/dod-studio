@@ -86,12 +86,11 @@ static SKIPPED_NOT_SPECTATING: AtomicU32 = AtomicU32::new(0);
 /// `dodtools_hltv_gunshots_fix` status reply.
 pub fn status() -> String {
     format!(
-        "sounds seen: {}, weapon-fire samples: {}, extended: {}, skipped (not spectating): {}, carry attenuation: {} (game default {ATTN_NORM})",
+        "{} sounds, {} shots, {} extended, {} skipped (not spectating)",
         CALLS.load(Ordering::Relaxed),
         SHOOT_SAMPLES.load(Ordering::Relaxed),
         BOOSTED.load(Ordering::Relaxed),
         SKIPPED_NOT_SPECTATING.load(Ordering::Relaxed),
-        carry_attenuation(),
     )
 }
 
