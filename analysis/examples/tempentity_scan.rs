@@ -52,7 +52,7 @@ fn main() {
                     if let NetMessage::EngineMessage(em) = m
                         && let EngineMessage::SvcTempEntity(te) = &**em {
                             println!("frame_idx={idx} t={time:.2}s seq={seq}: {} raw_len_hint={:?}",
-                                variant_name(&te.entity), &te.entity);
+                                variant_name(&te.entity), te.entity);
                         }
                 }
             }

@@ -26,7 +26,7 @@ fn main() {
                         if let EngineMessage::SvcUpdateUserInfo(ui) = &**em {
                             let raw = String::from_utf8_lossy(ui.user_info.as_slice()).to_string();
                             let parts: Vec<&str> = raw.trim_matches(|c| c == '\0' || c == '\\').split('\\').collect();
-                            let fmap: HashMap<&str, &str> = parts.chunks_exact(2).map(|c| (c[0], c[1])).collect();
+                            let fmap: HashMap<&str, &str> = parts.as_chunks::<2>().0.iter().map(|c| (c[0], c[1])).collect();
                             if let Some(n) = fmap.get("name") {
                                 names.insert(ui.index, n.to_string());
                             }
