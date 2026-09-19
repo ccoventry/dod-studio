@@ -84,7 +84,7 @@
 //! weapon-accuracy state the same way the animation fix re-derives body
 //! animation, and it is not known whether that state is replicated in a demo
 //! at all. Out of scope here: this leaves the stock spectator rect in place
-//! for style 0 and says so in `dodtools_status` rather than inventing a
+//! for style 0 and says so in `dodtools_debug_status` rather than inventing a
 //! tile. Filed as a follow-up.
 //!
 //! ## `cl_xhair_style < 0` draws the whole sheet
@@ -172,7 +172,7 @@ static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// The style currently written into the code, or 0 for the stock rect. Read by
-/// [`status`] and by `dodtools_status`.
+/// [`status`] and by `dodtools_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
 
 /// The rect DoD's POV path would use for `style`, as `[left, top, right,
@@ -338,7 +338,7 @@ pub fn matching() -> bool {
     ACTIVE_STYLE.load(Ordering::Relaxed) != 0
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 ///
 /// Reports what is patched into the code, which is not the same question as
 /// what is on screen: `dodtools_hide_crosshair` stubs `Draw`'s prologue, so

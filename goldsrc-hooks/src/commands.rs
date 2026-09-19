@@ -54,7 +54,7 @@ const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
-const STATUS_NAME: &str = console_name!("status");
+const STATUS_NAME: &str = console_name!("debug_status");
 /// Each module owns its own name, because its error text uses it too.
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
@@ -302,31 +302,38 @@ pub fn poll() {
     crate::deathmsg::poll();
 }
 
-/// What the fixes are actually *doing* -- the one question a cvar cannot
-/// answer about itself.
+/// Everything in one place, for debugging -- not the settings surface a
+/// player is expected to type. That is what `debug_` in the name signals:
+/// every value here is also visible piecemeal (a suppression cvar's own
+/// bare-name query, the console type-ahead), but this is the one command
+/// that dumps all of it together, which is what a support question actually
+/// needs.
 ///
-/// Deliberately does **not** list the settings and their values. Every one of
-/// them is a cvar, so the console's own type-ahead already shows the name and
-/// its current value as you type it. Repeating that here cost twelve lines of
-/// output to say what the engine gives away for free, and in a narrow console
-/// the long names wrapped and the columns stopped lining up.
-///
-/// What is left is the part nothing else reports. A flag being on says nothing
+/// The four suppression cvars are listed unconditionally, on or off, because
+/// there is no progress to gate them on -- they are just a byte, and "what
+/// is it set to" is exactly what this command exists to answer without
+/// hunting down four bare names individually. The two fixes below them are
+/// gated on being enabled, because for *those* a flag being on says nothing
 /// about whether the preconditions are being met in the current view, and
-/// "the fix isn't working" has twice turned out to be "the log budget ran out"
-/// -- these counters are the honest number.
+/// "the fix isn't working" has twice turned out to be "the log budget ran
+/// out" -- their counters are the honest number, and are noise when off.
 fn status_text() -> String {
-    let mut lines: Vec<String> = Vec::new();
+    let bit = |on: bool| if on { "1" } else { "0" };
+    let mut lines: Vec<String> = vec![
+        format!("{SCOREBOARD_NAME} = {} -- {}", bit(scoreboard::suppressed()), scoreboard::status()),
+        format!("{VOICE_NAME} = {} -- {}", bit(voice::muted()), voice::status()),
+        format!("{CROSSHAIR_NAME} = {} -- {}", bit(crosshair::hidden()), crosshair::status()),
+        format!(
+            "{SPECTATOR_CROSSHAIR_NAME} = {} -- {}",
+            bit(spectator_crosshair::matching()),
+            spectator_crosshair::status()
+        ),
+    ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
     }
     if sound_fix::ENABLED.load(Ordering::Relaxed) {
         lines.push(format!("gunshots: {}", sound_fix::status()));
-    }
-    if lines.is_empty() {
-        // Not an error, and worth saying out loud: the suppressions leave no
-        // trace to count, so silence here would read as a broken command.
-        return "nothing active that reports progress\n".to_string();
     }
     format!("{}\n", lines.join("\n"))
 }
@@ -629,7 +636,7 @@ pub fn install() {
         return;
     }
 
-    // `dodtools_status` is a command under either path: it takes no value, so
+    // `dodtools_debug_status` is a command under either path: it takes no value, so
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
@@ -714,14 +721,20 @@ mod tests {
     /// preconditions, and say *something* when neither is on rather than
     /// returning an empty reply that reads as a broken command.
     #[test]
-    fn status_reports_only_the_fixes_with_progress_to_report() {
+    fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
         let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
         let sound = sound_fix::ENABLED.load(Ordering::Relaxed);
 
         anim_fix::LEVEL.store(0, Ordering::Relaxed);
         sound_fix::ENABLED.store(false, Ordering::Relaxed);
         let idle = status_text();
-        assert!(idle.contains("nothing active"), "{idle}");
+        // The suppression cvars are always listed, on or off -- that is the
+        // whole point of `debug_status` over the bare-name query.
+        for name in [SCOREBOARD_NAME, VOICE_NAME, CROSSHAIR_NAME, SPECTATOR_CROSSHAIR_NAME] {
+            assert!(idle.contains(name), "{name} missing from:\n{idle}");
+        }
+        assert!(!idle.contains("viewmodel animations"), "{idle}");
+        assert!(!idle.contains("gunshots"), "{idle}");
 
         sound_fix::ENABLED.store(true, Ordering::Relaxed);
         assert!(status_text().contains("gunshots"), "{}", status_text());
@@ -730,10 +743,6 @@ mod tests {
         let both = status_text();
         assert!(both.contains("viewmodel animations"), "{both}");
         assert!(both.contains("gunshots"), "{both}");
-
-        // The settings themselves must NOT be echoed -- that is the whole point.
-        assert!(!both.contains(SCOREBOARD_NAME), "{both}");
-        assert!(!both.contains(CROSSHAIR_NAME), "{both}");
 
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
         sound_fix::ENABLED.store(sound, Ordering::Relaxed);

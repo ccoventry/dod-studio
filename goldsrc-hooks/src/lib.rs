@@ -39,7 +39,7 @@
 //! Both are `dodtools_*` **cvars**, so they behave like any other engine
 //! setting: `dodtools_hltv_show_viewmodel_animations 1` from the console, `+dodtools_hltv_show_viewmodel_animations 1`
 //! on the launch line, or a line in any `.cfg` the user execs. `commands.rs`
-//! copies them into the runtime flags once per frame, and `dodtools_status`
+//! copies them into the runtime flags once per frame, and `dodtools_debug_status`
 //! reports what each fix is actually doing rather than only what it is set to.
 //!
 //! The `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME` / `GOLDSRC_HOOKS_ANIM_FIX`

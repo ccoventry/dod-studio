@@ -173,7 +173,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();
