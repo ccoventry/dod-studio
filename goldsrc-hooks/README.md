@@ -3,7 +3,9 @@
 Standalone companion DLL for DoD 1.3 GoldSrc capture sessions. Injected into
 `hl.exe` alongside (not instead of) HLAE's own hook DLL -- see `src/lib.rs`
 for why this doesn't need HLAE's build toolchain or any DoD-specific
-reverse-engineering.
+reverse-engineering. For every `dodtools_*` cvar/command in one scannable
+table, see [`docs/dodtools_commands.md`](../docs/dodtools_commands.md)
+instead of the list below.
 
 Two independent fixes, each off by default and toggled by its own env var:
 
