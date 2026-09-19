@@ -635,7 +635,7 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
 /// `dodtools_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
-/// value cannot carry, and there are seventeen of them -- seventeen cvars would
+/// value cannot carry, and there are thirteen of them -- thirteen cvars would
 /// bury everything else in the console's type-ahead.
 unsafe extern "C" fn cmd_hudelement() {
     let Some(engfuncs) = engine::engfuncs() else { return };
@@ -657,6 +657,27 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 
     let Some(name) = argv(1) else { return };
+
+    // Checked before the argument count, so a bad name is reported as a bad
+    // name whether or not a 0/1 followed it -- "expected <0|1>" would
+    // otherwise lead someone to believe the name was fine and only the
+    // second argument was missing.
+    let is_all = name.eq_ignore_ascii_case("all");
+    let index = if is_all {
+        None
+    } else {
+        match hudelement::find(&name) {
+            Some(i) => Some(i),
+            None => {
+                console_print(&format!(
+                    "{HUDELEMENT_NAME}: no element called \"{name}\"\n{}",
+                    hudelement::listing()
+                ));
+                return;
+            }
+        }
+    };
+
     if argc < 3 {
         console_print(&format!("{HUDELEMENT_NAME}: expected {HUDELEMENT_NAME} {name} <0|1>\n"));
         return;
@@ -671,7 +692,7 @@ unsafe extern "C" fn cmd_hudelement() {
         }
     };
 
-    if name.eq_ignore_ascii_case("all") {
+    if is_all {
         if on {
             // Deliberately refused. Hiding every element at once includes the
             // menus, and a capture session that cannot see the class menu is a
@@ -687,14 +708,7 @@ unsafe extern "C" fn cmd_hudelement() {
         return;
     }
 
-    let Some(index) = hudelement::find(&name) else {
-        console_print(&format!(
-            "{HUDELEMENT_NAME}: no element called \"{name}\"\n{}",
-            hudelement::listing()
-        ));
-        return;
-    };
-
+    let index = index.expect("validated above: not `all`, so `find` succeeded or we already returned");
     hudelement::set_hidden(index, on);
     let bit = if on { "1" } else { "0" };
     // Applied here as well as in `poll`, so the console reports the real
