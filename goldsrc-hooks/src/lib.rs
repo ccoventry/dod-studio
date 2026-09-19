@@ -63,6 +63,7 @@ mod scan;
 mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
+mod spectator_target;
 mod voice;
 
 use std::sync::atomic::Ordering;
