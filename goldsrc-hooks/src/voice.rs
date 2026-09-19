@@ -117,8 +117,12 @@ const SITES: &[&Site] = &[&ALLIED, &GERMAN];
 /// Resolved addresses of the two `FF 13`s, or 0 before the first scan.
 static CALL_ADDRESSES: [AtomicUsize; 2] = [AtomicUsize::new(0), AtomicUsize::new(0)];
 
-/// The module base the addresses were resolved against. `client.dll` is
-/// unloaded and reloaded between demos, so a changed base means rescan.
+/// The module base the addresses were resolved against. Measured (five game
+/// sessions, five `LoadLibraryA("client.dll")` log lines, no reload between
+/// demos inside a session, `docs/goldsrc_dod_quirks.md`): a plain demo change
+/// does not reload `client.dll`. This guards a rescan for whatever *would*
+/// reload it -- a mod change, returning to the menu -- neither of which has
+/// been tested.
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// Whether the calls are currently patched out in the loaded module.
@@ -171,10 +175,10 @@ fn call_addresses() -> Result<[usize; 2], String> {
 
 /// Applies or removes the mute, returning whether anything was written.
 ///
-/// Idempotent and cheap to call every frame, which is how it is used -- and
-/// necessary, because the engine reloads `client.dll` between demos and a
-/// reloaded module comes back with the original `call` in place. Deciding from
-/// the bytes rather than from a flag is what makes that self-heal.
+/// Idempotent and cheap to call every frame, which is how it is used --
+/// deciding from the bytes rather than a flag is what would make this
+/// self-heal if `client.dll` is ever unloaded and reloaded (see
+/// [`SCANNED_BASE`]), coming back with the original `call` in place.
 pub fn set_muted(muted: bool) -> Result<bool, String> {
     let addresses = call_addresses()?;
     let want: &[u8] = if muted { NOPS } else { CALL };
