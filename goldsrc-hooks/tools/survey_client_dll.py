@@ -118,6 +118,25 @@ KNOWN_FUNCTIONS = {
     0x22970: "CHud::ComputeOverviewMapRects",
     # (digit, x, y) with this in ecx -- draws one digit of the objective timer.
     0x30620: "CObjectiveIcons::DrawDigit",
+    # (int mode, ...) -- the only writer of the spectator-interface-mode global
+    # at +0xe88d4 (modes 1-4). See docs/goldsrc_client_dll_survey.md #11.
+    0x38850: "CHudSpectator::SetMode",
+    # Cycles the interface mode 1->2->4->3->1 and calls SetMode with the
+    # result; the per-frame input handler for whatever key is bound to it.
+    0x386A0: "CHudSpectator::HandleButtonsDown",
+}
+
+# `function_end`'s "next byte is padding" heuristic assumes the compiler pads
+# between functions, which holds almost everywhere in this image (see #0
+# above) except here: `CHudSpectator::Draw` is genuinely 45 bytes
+# (`+0x38000`..`+0x3802d`), but MSVC placed `HandleButtonsDown` directly
+# after it with no padding, so a linear scan reads straight through into the
+# next function and keeps going until *that* one hits padding -- 879 bytes,
+# for a function that is actually 45. Found by disassembly while chasing
+# #296 (`dodtools_hide_hudelement`) and confirmed again here for #269.
+# `elements()` consults this before trusting the heuristic.
+KNOWN_FUNCTION_ENDS = {
+    0x38000: 0x3802D,  # CHudSpectator::Draw
 }
 
 
@@ -416,7 +435,7 @@ def elements(img, owners):
                 "slots": slots,
                 "own": [SLOT_NAMES[i] for i, s in enumerate(slots) if s != base_slots[i]],
                 "draw": draw,
-                "draw_len": img.function_end(draw) - draw,
+                "draw_len": KNOWN_FUNCTION_ENDS.get(draw, img.function_end(draw)) - draw,
                 "messages": [m for m, _h, o in messages if o.startswith(f"{name}::")],
                 "sections": sorted({s for _c, s, o in sites if o.startswith(f"{name}::") and s}),
             })
