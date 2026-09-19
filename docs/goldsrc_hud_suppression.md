@@ -324,7 +324,7 @@ between the two views is still open.
 Sections 2, 3 and 6 each patch one function for one purpose, and section 3's
 own module doc says why it is not this: patching a function needs no vftable
 address and reverts to bytes its own signature already proved were there. Fine
-for one element; not a plan for sixteen.
+for one element; not a plan for thirteen.
 
 `CHud::Redraw` walks a linked list and calls each element's **vftable slot 3**,
 `Draw`. `CHudBase::Draw` is `xor eax, eax; ret 4` -- a complete no-op with the
@@ -357,7 +357,7 @@ adds the check the DLL cannot make for itself: **completeness**. It finds every
 class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
 `Draw`, and fails if any of them is missing from the table (or a documented
 exclusion). On the shipped `client.dll` that is 22 registering classes, 17 of
-which draw -- 16 in the table, plus `CHudAmmo`, deliberately excluded below.
+which draw -- 13 in the table, plus four deliberately excluded below.
 
 ### The five that are not listed
 
@@ -370,19 +370,42 @@ offering it would only invite the question of why it did nothing.
 `+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
 second is the element's. Worth knowing before anyone adds an entry.
 
-### The one that overrides `Draw` and still isn't listed
+### The four that override `Draw` and still aren't listed
 
-`CHudAmmo` draws (the ammo counter and the weapon-select menu) and registers
-itself, so it would fail the completeness check above like a genuine miss
-unless named as an exception. It isn't a miss: disassembly of `client+0x28b00`
-(`CHudAmmo::Draw`, 2604 bytes) shows every `FillRGBA`/`SPR_Draw` pair in the
-function landing after one of its four `CHud::ShouldDraw(3)` calls, and nothing
-drawing before the first one. The stock `cl_hud_ammo` cvar already hides all of
-it -- unlike `crosshair`/`r_drawentities`/`cl_lw`, `cl_hud_ammo` is not one of
-the cvars `CHud::Redraw` forces back every frame (§3 above), so setting it from
-a config actually sticks. `objectives` and `icons` below were checked the same
-way and kept, because both draw something *before* their own `ShouldDraw` gate
-that no stock cvar reaches.
+Each of these registers itself and overrides `Draw`, so each would fail the
+completeness check above like a genuine miss unless named as an exception.
+None of them is a miss, but for two different reasons.
+
+`CHudAmmo` draws (the ammo counter and the weapon-select menu) for real:
+disassembly of `client+0x28b00` (`CHudAmmo::Draw`, 2604 bytes) shows every
+`FillRGBA`/`SPR_Draw` pair in the function landing after one of its four
+`CHud::ShouldDraw(3)` calls, and nothing drawing before the first one. The
+stock `cl_hud_ammo` cvar already hides all of it -- unlike
+`crosshair`/`r_drawentities`/`cl_lw`, `cl_hud_ammo` is not one of the cvars
+`CHud::Redraw` forces back every frame (§3 above), so setting it from a config
+actually sticks. `objectives` and `icons` below were checked the same way and
+kept, because both draw something *before* their own `ShouldDraw` gate that no
+stock cvar reaches.
+
+The other three don't draw anything at all, in this build, regardless of any
+cvar or hook:
+
+- `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight bytes,
+  no calls. The overview map is rendered some other way entirely; not yet
+  found, plausibly VGUI2 like the scoreboard.
+- `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks a
+  flag byte and an observer sub-mode value, then returns a plain boolean.
+  Neither function contains a `FillRGBA` or `SPR_Draw` call. There is no
+  mortar aiming HUD in this build to hide.
+- `CHudSpectator::Draw` (`client+0x38000`) is 45 bytes ending in a real
+  `ret 4` immediately followed, with no padding, by an unrelated function --
+  a naive linear disassembly scan folds the two together and badly overstates
+  the size, so measure carefully if re-checking this one. The real function
+  checks observer mode and conditionally calls a method on what looks like a
+  VGUI2 interface pointer, plausibly telling a panel to hide, but never draws.
+
+Writing `CHudBase::Draw` over a function that already draws nothing changes
+nothing observable, so offering these three would only mislead.
 
 ### `all 1` is refused
 
@@ -392,14 +415,16 @@ the class menu is a support question rather than a feature.
 
 ### What it reaches that nothing else did
 
-Chat, the kill feed, the status bar under the crosshair, the overview map, the
-scope overlay, the team and class menus, the tram controls, the mortar HUD, the
-VGUI2 print panel, the objective icons, and `CHudDodIcons` -- which owns **both**
-the MG-deploy icon (#288) and the capture-area icon (#289), along with blood
-and bandage. Those two were filed separately because the icons look unrelated;
-one element draws all four, so they are one switch, and separating them would
-mean patching inside a 1507-byte `Draw`.
+Chat, the kill feed, the status bar under the crosshair, the scope overlay,
+the team and class menus, the tram controls, the VGUI2 print panel, the
+objective icons, and `CHudDodIcons` -- which owns **both** the MG-deploy icon
+(#288) and the capture-area icon (#289), along with blood and bandage. Those
+two were filed separately because the icons look unrelated; one element draws
+all four, so they are one switch, and separating them would mean patching
+inside a 1507-byte `Draw`.
 
 It does **not** reach the VGUI2 spectator bars (§5) or the auto-help panel
-(#286). Those are not HUD elements and are not on this list.
+(#286). Those are not HUD elements and are not on this list. It also does not
+reach the overview map or a mortar aiming HUD -- see the four exclusions
+above, both of those turned out not to be drawn by any `Draw` override at all.
 

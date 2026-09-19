@@ -64,6 +64,18 @@ KNOWN_EXCLUDED = {
     # CHud::ShouldDraw(3) calls; the stock cl_hud_ammo cvar already hides all
     # of it, and (unlike crosshair) CHud::Redraw does not force it back.
     ".?AVCHudAmmo@@",
+    # Draw is `mov eax, 1; ret 4` -- eight bytes, no calls. Draws nothing,
+    # hook or no hook. The overview map renders some other way (not found).
+    ".?AVCHudDoDMap@@",
+    # Draw calls one gHUD helper that checks a flag and an observer sub-mode
+    # and returns a plain boolean. No FillRGBA/SPR_Draw call in either
+    # function. There is no mortar aiming HUD in this build.
+    ".?AVCMortarHud@@",
+    # Draw is 45 bytes ending in a real `ret 4` immediately followed (no
+    # padding) by an unrelated function capstone's linear scan would
+    # otherwise fold in. It checks observer mode and conditionally calls a
+    # method on what looks like a VGUI2 interface pointer -- never draws.
+    ".?AVCHudSpectator@@",
 }
 
 

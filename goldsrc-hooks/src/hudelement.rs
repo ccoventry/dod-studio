@@ -61,6 +61,27 @@
 //! `objectives` and `icons` below, which both draw something *before* their own
 //! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
 //!
+//! Three more overrode `Draw` and registered themselves, so they too need
+//! `KNOWN_EXCLUDED` entries -- but for a different reason than `CHudAmmo`: each
+//! one's `Draw` turned out not to draw anything at all, in any context, hook or
+//! no hook. Writing `CHudBase::Draw` over a function that already does nothing
+//! changes nothing observable, so offering these would only mislead:
+//!
+//! - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight
+//!   bytes, no calls. The overview map is rendered some other way entirely
+//!   (not yet found; likely VGUI2, like the scoreboard).
+//! - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks
+//!   a flag and an observer sub-mode, then returns a plain boolean. Neither
+//!   function contains a single `FillRGBA`/`SPR_Draw` call. There is no mortar
+//!   aiming HUD in this build to hide.
+//! - `CHudSpectator::Draw` (`client+0x38000`, 45 bytes -- capstone's linear
+//!   scan runs past the `ret 4` into an unrelated adjacent function with no
+//!   padding between them, so measure it carefully if re-checking) checks
+//!   observer mode and conditionally calls a method on what looks like a
+//!   VGUI2 interface pointer -- plausibly telling a panel to hide -- but never
+//!   draws. Whatever the real "spectator overlay" is, it is not this vtable
+//!   slot.
+//!
 //! ## Re-applied every frame
 //!
 //! `client.dll` does **not** reload on a plain demo change
@@ -137,12 +158,6 @@ pub const ELEMENTS: &[Element] = &[
         what: "the MG-deploy icon, the capture-area icon, blood and bandage",
     },
     Element {
-        name: "map",
-        class: ".?AVCHudDoDMap@@",
-        vftable_rva: 0xac398,
-        what: "the overview map",
-    },
-    Element {
         name: "menu",
         class: ".?AVCHudMenu@@",
         vftable_rva: 0xac1a0,
@@ -153,12 +168,6 @@ pub const ELEMENTS: &[Element] = &[
         class: ".?AVCHudMessage@@",
         vftable_rva: 0xac20c,
         what: "map text and the round result (HudText)",
-    },
-    Element {
-        name: "mortar",
-        class: ".?AVCMortarHud@@",
-        vftable_rva: 0xacf2c,
-        what: "the mortar aiming HUD",
     },
     Element {
         name: "objectives",
@@ -177,12 +186,6 @@ pub const ELEMENTS: &[Element] = &[
         class: ".?AVCHudScope@@",
         vftable_rva: 0xac374,
         what: "the sniper scope overlay",
-    },
-    Element {
-        name: "spectator",
-        class: ".?AVCHudSpectator@@",
-        vftable_rva: 0xac254,
-        what: "the spectator overlay CHudSpectator draws (not the VGUI2 spectator bars)",
     },
     Element {
         name: "statusbar",
@@ -215,7 +218,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 16] = [const { AtomicUsize::new(0) }; 16];
+static STOCK_DRAW: [AtomicUsize; 13] = [const { AtomicUsize::new(0) }; 13];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);
@@ -346,7 +349,7 @@ pub fn hidden_count() -> usize {
 /// Writes the vftable slots to match what was asked for, returning how many
 /// changed.
 ///
-/// Called every frame. After the first resolve this is sixteen dword
+/// Called every frame. After the first resolve this is thirteen dword
 /// comparisons -- cheap insurance against a `client.dll` reload (see the
 /// module doc's "Re-applied every frame" section), not a cost a plain demo
 /// change is known to trigger.
@@ -521,13 +524,13 @@ mod tests {
     #[test]
     fn setting_the_same_state_twice_is_idempotent() {
         show_all();
-        let map = find("map").unwrap();
-        set_hidden(map, true);
-        set_hidden(map, true);
-        assert!(is_hidden(map));
-        set_hidden(map, false);
-        set_hidden(map, false);
-        assert!(!is_hidden(map));
+        let train = find("train").unwrap();
+        set_hidden(train, true);
+        set_hidden(train, true);
+        assert!(is_hidden(train));
+        set_hidden(train, false);
+        set_hidden(train, false);
+        assert!(!is_hidden(train));
         show_all();
     }
 
