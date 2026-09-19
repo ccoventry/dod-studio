@@ -61,7 +61,7 @@
 //! `objectives` and `icons` below, which both draw something *before* their own
 //! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
 //!
-//! Three more overrode `Draw` and registered themselves, so they too need
+//! Four more overrode `Draw` and registered themselves, so they too need
 //! `KNOWN_EXCLUDED` entries -- but for a different reason than `CHudAmmo`: each
 //! one's `Draw` turned out not to draw anything at all, in any context, hook or
 //! no hook. Writing `CHudBase::Draw` over a function that already does nothing
@@ -81,6 +81,14 @@
 //!   VGUI2 interface pointer -- plausibly telling a panel to hide -- but never
 //!   draws. Whatever the real "spectator overlay" is, it is not this vtable
 //!   slot.
+//! - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
+//!   observer-mode global, then unconditionally returns 1 without drawing.
+//!   The actual scope vignette is a `ScreenFade` engine call inside
+//!   `CHudScope::Think` (vftable slot 4, not 3), gated on the *local*
+//!   player's own current weapon -- which is never populated while
+//!   spectating, live-confirmed: no scope overlay ever appears in a demo.
+//!   Reaching the real effect would mean hooking `Think`/`ScreenFade`
+//!   instead, a materially different job (issue #307/#308 territory).
 //!
 //! ## Re-applied every frame
 //!
@@ -182,12 +190,6 @@ pub const ELEMENTS: &[Element] = &[
         what: "chat",
     },
     Element {
-        name: "scope",
-        class: ".?AVCHudScope@@",
-        vftable_rva: 0xac374,
-        what: "the sniper scope overlay",
-    },
-    Element {
         name: "statusbar",
         class: ".?AVCHudStatusBar@@",
         vftable_rva: 0xac1e8,
@@ -218,7 +220,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 13] = [const { AtomicUsize::new(0) }; 13];
+static STOCK_DRAW: [AtomicUsize; 12] = [const { AtomicUsize::new(0) }; 12];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);
@@ -349,7 +351,7 @@ pub fn hidden_count() -> usize {
 /// Writes the vftable slots to match what was asked for, returning how many
 /// changed.
 ///
-/// Called every frame. After the first resolve this is thirteen dword
+/// Called every frame. After the first resolve this is twelve dword
 /// comparisons -- cheap insurance against a `client.dll` reload (see the
 /// module doc's "Re-applied every frame" section), not a cost a plain demo
 /// change is known to trigger.
@@ -537,12 +539,12 @@ mod tests {
     #[test]
     fn the_listing_names_every_element_and_its_state() {
         show_all();
-        set_hidden(find("scope").unwrap(), true);
+        set_hidden(find("saytext").unwrap(), true);
         let listing = listing();
         for element in ELEMENTS {
             assert!(listing.contains(element.name), "{} is missing", element.name);
         }
-        assert!(listing.lines().any(|l| l.contains("scope") && l.contains(" 1 ")));
+        assert!(listing.lines().any(|l| l.contains("saytext") && l.contains(" 1 ")));
         assert!(listing.lines().any(|l| l.contains("crosshair") && l.contains(" 0 ")));
         show_all();
     }

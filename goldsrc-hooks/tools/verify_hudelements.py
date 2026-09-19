@@ -76,6 +76,11 @@ KNOWN_EXCLUDED = {
     # otherwise fold in. It checks observer mode and conditionally calls a
     # method on what looks like a VGUI2 interface pointer -- never draws.
     ".?AVCHudSpectator@@",
+    # Draw reads a flag and an observer-mode global, then unconditionally
+    # returns 1 -- no drawing. The real scope vignette is a ScreenFade call
+    # inside Think (slot 4, not 3), gated on the local player's own weapon;
+    # never populated while spectating. Live-confirmed: no overlay in a demo.
+    ".?AVCHudScope@@",
 }
 
 

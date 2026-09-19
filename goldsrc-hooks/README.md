@@ -40,13 +40,15 @@ Plus five control surfaces, always available and doing nothing until used:
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
 - **Any HUD element** (`dodtools_hide_hudelement <name> 1`): hides one of the
-  thirteen elements DoD draws that the stock `cl_hud_*` cvars don't already
+  twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
-  icons, the scope overlay, the objective icons and the rest. (The ammo
-  counter/weapon-select menu is left out on purpose: it's already fully gated
-  behind `cl_hud_ammo`, no hook needed. The overview map, the mortar HUD, and
-  the spectator overlay are also left out -- their `Draw` functions turned out
-  not to draw anything at all in this build, hook or no hook.) Run it with no
+  icons, the objective icons and the rest. (The ammo counter/weapon-select
+  menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
+  no hook needed. The overview map, the mortar HUD, the spectator overlay, and
+  the sniper scope overlay are also left out -- their `Draw` functions turned
+  out not to draw anything at all in this build, hook or no hook; the scope's
+  real effect lives in `Think`, gated on the local player's own weapon, so it
+  never fires while spectating either way.) Run it with no
   arguments to list them. `dodtools_hide_hudelement all 0` puts everything
   back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
   dword, no code patch -- see `docs/goldsrc_hud_suppression.md` section 7.
