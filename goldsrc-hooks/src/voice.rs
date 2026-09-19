@@ -207,7 +207,7 @@ pub fn muted() -> bool {
     MUTED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 pub fn status() -> String {
     if !muted() {
         return "voice commands play normally".into();

@@ -181,7 +181,7 @@ pub fn suppressed() -> bool {
     SUPPRESSED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 pub fn status() -> String {
     if !suppressed() {
         return "the scoreboard behaves normally; a POV demo's recorded TAB presses will show it"
