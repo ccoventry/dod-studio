@@ -448,14 +448,18 @@ spectator`) changed nothing: that mechanism can only stub this 45-byte
 gatekeeper, and the gatekeeper was never drawing anything to begin with.
 
 Immediately after `Draw` (`+0x38030`, no padding between them — the trap that
-produced the stale 879-byte figure) is a **different, unidentified function**:
-a ten-case switch on an integer argument in `1..10` (its own jump table at
-`+0x38370`), each case doing UI-ish work (cursor/menu-shaped calls) that was
-not chased further — plausibly a numbered spectator options menu, not
-confirmed. Not `HandleButtonsDown`; that one is elsewhere (below). This is
-the second time this exact trap has mattered for `CHudSpectator` in one
-sitting: `function_end`'s "next byte is padding" heuristic has now been wrong
-twice in three functions here, so nothing past this point relies on it
+produced the stale 879-byte figure) is a **different function, identified
+2026-09-19 while investigating #206**: `CHudSpectator::DirectorMessage`.
+A ten-case switch on `DRC_CMD - 1` (its own jump table at `+0x38370`),
+matching [`common/hltv.h`](https://github.com/FWGS/hlsdk-portable/blob/master/common/hltv.h)'s
+`DRC_CMD_*` values `1..10` exactly (case index 1, `DRC_CMD_EVENT`, is the
+sole writer of the spectator-target global; case index 2, `DRC_CMD_MODE`,
+is where `SetMode` gets called from a director message rather than a
+keypress — see #206's own write-up on that issue for the full trace). Not
+`HandleButtonsDown`; that one is elsewhere (below), and is the *input*
+path into `SetMode`, where `DirectorMessage` is the *network* path. This
+was the second time the `function_end` padding-heuristic trap mattered for
+`CHudSpectator` in one sitting; nothing past this point relies on it
 without independent confirmation from the raw bytes.
 
 ### The mode global has exactly one writer: `SetMode` (`+0x38850`)
@@ -464,12 +468,31 @@ without independent confirmation from the raw bytes.
 case in one `switch (mode)` inside this function, `mode` clamped to `1..4`
 before the jump table:
 
+**Update, 2026-09-19 (issue #206 investigation): the four modes are
+confirmed by string evidence, not inferred.** `client.dll`'s `.rdata`
+carries a null-terminated table at `+0xcee35` — `"#OBS_IN_EYE"`,
+`"#OBS_ROAMING"`, `"#OBS_CHASE_FREE"`, `"#OBS_CHASE_LOCKED"`,
+`"#OBS_MAP_FREE"` (the `#` prefix and exact spellings match the upstream
+Half-Life SDK's `CHudSpectator::GetModeName`-shaped switch verbatim,
+[`cl_dll/hud_spectator.cpp`](https://github.com/FWGS/hlsdk-portable/blob/master/cl_dll/hud_spectator.cpp)),
+alongside the literal string `"usage:  spec_mode <Main Mode> [<Inset Mode>]"`
+— confirming `SetMode`'s second parameter (previously guessed as a target)
+is actually **`iNewInsetMode`** (the `spec_pip` inset window's own mode),
+matching what `docs/goldsrc_spectator_camera` memory already said about
+`spec_mode`'s second argument. `OBS_NONE=0, OBS_CHASE_LOCKED=1,
+OBS_CHASE_FREE=2, OBS_ROAMING=3, OBS_IN_EYE=4, OBS_MAP_FREE=5,
+OBS_MAP_CHASE=6` is the standard SDK enum
+([`pm_shared/pm_shared.h`](https://github.com/FWGS/hlsdk-portable/blob/master/pm_shared/pm_shared.h)) —
+DoD's `SetMode` clamping to `1..4` means it supports every mode except the
+two map ones, consistent with DoD drawing its overview map through a
+separate VGUI2 mechanism (§5) rather than an observer mode.
+
 | `mode` | writes `+0xe88d4` | also does |
 | --- | --- | --- |
-| 1 | `1` | nothing else |
-| 2 | `2` | zeroes a float field on an object reached through `*(this+0x174c) + 0xc`; not identified further |
-| 3 | `3` | only when there's a currently-valid observer target: calls a small helper (`+0x1950c90`) that reads/writes the same pair of 3-float static buffers (`+0x1a97540`, `+0x1a97550`) a shared pre-switch step already populated from either the target's or the local player's own fields, then re-applies the result through the same engine call `Draw`'s setup code uses for view data, and sets a `+0x1a9da08` "needs redraw" flag. The exact field-level semantics (what's read vs. written, and whether it's an origin/angles pair) were not pinned down |
-| 4 | `4` | nothing else |
+| 1 (`OBS_CHASE_LOCKED`) | `1` | nothing else |
+| 2 (`OBS_CHASE_FREE`) | `2` | zeroes a float field on an object reached through `*(this+0x174c) + 0xc` — the same indirection `DirectorMessage`'s `DRC_CMD_EVENT`/`DRC_CMD_MODE` cases (§10 below) read to check `m_autoDirector->value`, so this almost certainly zeroes the auto-director cvar directly. Matches the stock SDK's `HandleButtonsDown`, which does the same (`m_autoDirector->value = 0.0f`) when the player manually picks a target — plausibly folded into this case in DoD's build rather than kept at the call site, not confirmed which |
+| 3 (`OBS_ROAMING`) | `3` | **confirmed against the stock `SetModes`' `case OBS_ROAMING`**: "jump to current vJumpOrigin/angle" — only when there's a currently-valid observer target, jumps the free-roam camera to that target's current chase position (`V_GetChasePos`) and applies it (`gEngfuncs.SetViewAngles`, matching the `interface->+0x24`-adjacent engine call this disassembly found at `+0x1950c90`/the `+0x1a97540`/`+0x1a97550` float-pair staging this section already documented), then sets `+0x1a9da08` ("needs redraw") |
+| 4 (`OBS_IN_EYE`) | `4` | nothing else |
 
 `mode == -1` is a sentinel meaning "current" (reads `+0xe88d4` back instead of
 picking a case), and a call that resolves to the mode already active — which
@@ -512,16 +535,11 @@ input, not confirmed which physical bind maps to which bit.
 
 ### What §9's four questions come out to
 
-1. **What the four modes are.** Not established by name from statics alone —
-   nothing in `client.dll` stores or compares against a string for any of
-   them, only the bare integer. The cycle order (1, 2, 4, 3) and mode 3's
-   extra rect-save/restore and mode 2's FOV-field clear are real structural
-   differences between them, consistent with something like (in some order)
-   a full interface bar, a minimal one, a PIP/rect-restoring one, and a
-   status-only one — but naming them "Chase"/"In Eye"/"Roaming" etc. would be
-   guessing. **Still needs a live check**: bind the cycle key, watch which of
-   `spec_pip`/`spec_scoreboard`/the bar's own visible parts change per step,
-   and read the number `SetMode`'s own status print reports at each stop.
+1. **What the four modes are — answered, 2026-09-19, by string evidence,
+   not a live check.** `OBS_CHASE_LOCKED` (1), `OBS_CHASE_FREE` (2),
+   `OBS_ROAMING` (3), `OBS_IN_EYE` (4) — see the confirmed table above. The
+   cycle order (1, 2, 4, 3) reads as a coherent progression once named:
+   locked chase, free chase, first-person, free-roam, back to locked chase.
 2. **Whether the bar is placeable/suppressible, and where.** Not through
    `client.dll` at all in the way #265's mechanism reaches everything else —
    the bar is VGUI2, drawn by whatever's behind `+0x1a9d564`, which this
