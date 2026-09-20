@@ -33,13 +33,24 @@ fn timestamp() -> String {
 ///
 /// `DOD_TOOLS_LOG_DIR` redirects it, exactly as it redirects the activity log,
 /// so a test run or a packaging check can keep its output out of the user's
-/// own logs.
+/// own logs -- and a `cfg(test)` build redirects itself, so that safety is not
+/// something every future test has to remember. The env var is checked first
+/// so a test binary compiled *without* `cfg(test)` can still be pointed
+/// somewhere safe. This mirrors `native`'s `redirected_log_dir` (issue #64).
 ///
 /// Falls back to `%TEMP%` if neither resolves. Logging is best-effort and must
 /// never be the reason a capture fails, so there is always somewhere to go.
 fn log_path() -> Option<std::path::PathBuf> {
     if let Some(redirected) = std::env::var_os("DOD_TOOLS_LOG_DIR") {
         let dir = std::path::PathBuf::from(redirected);
+        let _ = std::fs::create_dir_all(&dir);
+        return Some(dir.join(LOG_FILE));
+    }
+    // Without this, `cargo test` appends to the developer's own live hook log,
+    // where a test's lines are indistinguishable from a real session's -- and
+    // that log is what gets read to diagnose a live test.
+    if cfg!(test) {
+        let dir = std::env::temp_dir().join("dod_tools_test_logs");
         let _ = std::fs::create_dir_all(&dir);
         return Some(dir.join(LOG_FILE));
     }
@@ -90,4 +101,39 @@ pub unsafe fn new_session_separator() {
             now.wYear, now.wMonth, now.wDay
         ))
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The reason this module has a `cfg(test)` branch at all: a `cargo test`
+    /// run must not append to the developer's real hook log, where its lines
+    /// are indistinguishable from a real session's. Asserts the behaviour --
+    /// where the path is *not* -- rather than the exact fallback directory.
+    #[test]
+    fn a_test_build_does_not_log_into_the_live_log_directory() {
+        // The env var wins over the `cfg(test)` fallback by design, so this
+        // only has something to prove when it is unset -- which is the
+        // configuration an ordinary `cargo test` run has.
+        if std::env::var_os("DOD_TOOLS_LOG_DIR").is_some() {
+            return;
+        }
+
+        let path = log_path().expect("a test build always resolves a path");
+
+        if let Some(appdata) = std::env::var_os("APPDATA") {
+            let live = std::path::PathBuf::from(appdata).join("dod-tools").join("logs");
+            assert!(
+                !path.starts_with(&live),
+                "test logging resolved to the live log directory: {}",
+                path.display()
+            );
+        }
+        assert!(
+            path.starts_with(std::env::temp_dir()),
+            "expected a temp fallback, got {}",
+            path.display()
+        );
+    }
 }
