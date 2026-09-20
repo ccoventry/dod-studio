@@ -752,6 +752,15 @@ fn claim_fire(now: f64) -> bool {
 
 static CURRENT_SPECTATED: AtomicI32 = AtomicI32::new(-1);
 static CURRENT_VIEWMODEL: AtomicPtr<ModelSPartial> = AtomicPtr::new(std::ptr::null_mut());
+
+/// The entity index the engine's own `GetViewModel()` currently renders a
+/// first-person viewmodel for -- i.e. who the game actually thinks "you" are
+/// this frame, independent of `CHudSpectator`'s own bookkeeping. `-1` before
+/// the first frame. Read by `spectator_target.rs`'s diagnostic; see its
+/// module doc for why the two are tracked side by side.
+pub(crate) fn current_viewmodel_entity() -> i32 {
+    CURRENT_SPECTATED.load(Ordering::Relaxed)
+}
 static CURRENT_DEPLOY_STATE: AtomicI32 = AtomicI32::new(-1);
 /// Last bipod state actually read off a "bu"/"bd" model, carried across the
 /// stance variants that do not encode one. Cleared on a player switch, since
