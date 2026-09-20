@@ -67,6 +67,23 @@ of which crash identically to the untrimmed map. This only helps recordings
 made *after* a trimmed map is deployed. See #207 for the original problem and
 #231 for the fix that actually addresses it.
 
+### Map sounds
+
+| Probe | Question it answers |
+| --- | --- |
+| `mute_map_sounds` | What does this map play on a capture or a round win, and can it be silenced? |
+
+The other one here that writes a file. It reads the sound names out of the
+map's own entity lump -- `dod_control_point`'s `point_*_capsound` keyvalues,
+and the `ambient_generic` the `dod_control_point_master` fires at round end --
+and replaces the demo messages carrying them with `SvcNop`, the same move
+`decal_strip` makes for decals.
+
+`--list` stops after printing what it found, which answers "what would this map
+lose?" without writing anything. See `native/src/patch/sound_mute.rs` for why
+the selection is structural rather than a filename list, and #284/#285 for the
+measurements.
+
 ### The capture scanner
 
 | Probe | Question it answers |
