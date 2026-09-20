@@ -73,7 +73,7 @@ use crate::names::console_name;
 use crate::scan;
 
 /// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("scoreboard");
+pub const NAME: &str = console_name!("hide_scoreboard");
 
 /// The whole `+showscores` handler, wildcarded over the two absolute addresses
 /// and the one relative call.
@@ -143,22 +143,24 @@ fn je_address() -> Result<usize, String> {
 }
 
 /// Applies or removes the suppression, returning whether a byte was actually
-/// written. `allowed` is the cvar's own sense: `true` is the game's stock
-/// behaviour, `false` blocks `+showscores`.
+/// written. `hidden` is the cvar's own sense: `true` blocks `+showscores`,
+/// `false` is the game's stock behaviour.
 ///
 /// Idempotent and cheap to call every frame, which is how it is used. That
-/// matters for more than tidiness: the engine unloads and reloads `client.dll`
-/// between demos, and a reloaded module comes back with the stock byte. A
-/// cached "already suppressed" belief would leave the scoreboard working again
-/// from the second demo of a session onward, silently. Deciding from the byte
-/// itself rather than from a flag is what makes that self-heal.
-pub fn set_allowed(allowed: bool) -> Result<bool, String> {
+/// matters for more than tidiness: if `client.dll` is ever unloaded and
+/// reloaded (measured *not* to happen for a plain demo change --
+/// `docs/goldsrc_dod_quirks.md` -- but untested for a mod change or
+/// returning to the menu), a reloaded module comes back with the stock byte.
+/// A cached "already suppressed" belief would leave the scoreboard working
+/// again from that point onward, silently. Deciding from the byte itself
+/// rather than from a flag is what would make that self-heal.
+pub fn set_hidden(hidden: bool) -> Result<bool, String> {
     let address = je_address()?;
-    let want = if allowed { JE } else { JMP };
+    let want = if hidden { JMP } else { JE };
 
     let present = unsafe { *(address as *const u8) };
     if present == want {
-        SUPPRESSED.store(!allowed, Ordering::Release);
+        SUPPRESSED.store(hidden, Ordering::Release);
         return Ok(false);
     }
     // Anything other than the two bytes this module writes means something else
@@ -172,7 +174,7 @@ pub fn set_allowed(allowed: bool) -> Result<bool, String> {
     if !unsafe { crate::patch::write_code_bytes(address, &[want]) } {
         return Err("could not make the +showscores handler writable".to_string());
     }
-    SUPPRESSED.store(!allowed, Ordering::Release);
+    SUPPRESSED.store(hidden, Ordering::Release);
     Ok(true)
 }
 
@@ -181,7 +183,7 @@ pub fn suppressed() -> bool {
     SUPPRESSED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodtools_debug_status`.
 pub fn status() -> String {
     if !suppressed() {
         return "the scoreboard behaves normally; a POV demo's recorded TAB presses will show it"
