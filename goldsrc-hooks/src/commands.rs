@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: nine cvars and two commands.
+//! The `dodtools_*` console surface: nine cvars and three commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -310,6 +310,8 @@ pub fn poll() {
     // callback slot), so its viewmodel-entity half reads apply()'s previous
     // frame's result, not this one's -- see spectator_target.rs's module doc.
     spectator_target::poll();
+    // Same reason, for whichever messages dodtools_msglog currently wants.
+    crate::msglog::poll();
 }
 
 /// Everything in one place, for debugging -- not the settings surface a
@@ -362,6 +364,12 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Gated like the two fixes above rather than always shown like the
+    // suppression cvars: logging is off by default and a permanent "logging
+    // nothing" line would be noise in the overwhelmingly common case.
+    if let Some(msglog) = crate::msglog::status_line() {
+        lines.push(msglog);
+    }
     format!("{}\n", lines.join("\n"))
 }
 
@@ -685,6 +693,7 @@ pub fn install() {
     // Always a command, never a cvar: it has subcommands and a variable number
     // of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
+    add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
