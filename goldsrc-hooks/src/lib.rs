@@ -11,7 +11,7 @@
 //! client interface through a single `F` export instead. See `engine.rs`'s
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
-//! Implements two fixes and two control surfaces, each independent of the
+//! Implements two fixes and seven control surfaces, each independent of the
 //! others and each safe to inject without them:
 //! - `sound_fix`: force full-volume weapon-fire audio while spectating.
 //! - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -38,8 +38,13 @@
 //!   (territory flag) icon row and timer, which the game itself draws at a
 //!   different y while spectating than it does in a POV demo. Full design
 //!   write-up in `docs/goldsrc_objective_icons.md`.
+//! - `spectator_crosshair`: the `dodtools_match_pov_crosshair` cvar -- draw the
+//!   spectator crosshair from the same sprite and tile a player's own
+//!   `cl_xhair_style` picks, since the two are drawn by different code paths
+//!   and do not otherwise share a look.
 //!
-//! The scoreboard/voice/crosshair three are all in `docs/goldsrc_hud_suppression.md`.
+//! The scoreboard/voice/crosshair/spectator_crosshair four are all in
+//! `docs/goldsrc_hud_suppression.md`.
 //!
 //! See each module's docs for the full R&D reasoning.
 //!

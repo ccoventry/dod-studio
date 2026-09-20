@@ -625,6 +625,12 @@ mod tests {
 
     #[test]
     fn the_status_line_distinguishes_a_set_coordinate_from_the_game_s() {
+        // The one test in this module touching WANTED_X/Y/TIMER directly --
+        // cargo test's default parallel runner would race two tests that both
+        // did this, the same shared-static hazard msglog.rs/hide_sprite.rs
+        // document for their own equivalent statics. Restoring all three to
+        // UNSET (not just the one this test sets to a real value) keeps that
+        // true if a second such test is ever added here.
         WANTED_X.store(UNSET, Ordering::Release);
         WANTED_Y.store(42, Ordering::Release);
         WANTED_TIMER.store(UNSET, Ordering::Release);
@@ -632,7 +638,9 @@ mod tests {
         assert!(text.contains("icon y = 42"), "{text}");
         assert!(text.contains("icon x = the game's"), "{text}");
         assert!(text.contains("timer y = the game's"), "{text}");
+        WANTED_X.store(UNSET, Ordering::Release);
         WANTED_Y.store(UNSET, Ordering::Release);
+        WANTED_TIMER.store(UNSET, Ordering::Release);
     }
 
     #[test]
