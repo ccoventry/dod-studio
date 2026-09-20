@@ -25,7 +25,6 @@ crate-type = ["rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
-indexmap = { workspace = true }
 
 [dependencies]
 tauri = { version = "2", features = [] }
