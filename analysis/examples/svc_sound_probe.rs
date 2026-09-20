@@ -12,6 +12,13 @@
 //! which carrier it uses, and whether an HLTV recording keeps the entity index
 //! that makes it attributable to the player being watched.
 //!
+//! It reports the other server-side carrier too. `ambient_generic` -- which is
+//! how every DoD map plays its round-win music -- does not use `svc_sound`, and
+//! a probe that only counted `svc_sound` would report "absent" for a sound that
+//! is merely arriving by the other door. Both are engine messages, so neither
+//! is visible to `EV_PlaySound`; the distinction matters to *where* a mute
+//! would have to intercept, not to *whether* the event hook could.
+//!
 //! Pass a filter to narrow the listing to sounds worth looking at:
 //!
 //!     cargo run --release -p analysis --example svc_sound_probe -- <demo> [substring]
@@ -40,10 +47,15 @@ fn main() {
     // Precache index -> sound name, from SvcResourceList (type 0 == t_sound).
     let mut sound_names: HashMap<u32, String> = HashMap::new();
     let mut played: HashMap<String, Played> = HashMap::new();
+    // count, first frame seen, last frame seen.
+    let mut statics: HashMap<String, (usize, usize, usize)> = HashMap::new();
     let mut unnamed = 0usize;
+    let mut frame_no = 0usize;
+    let mut unnamed_static = 0usize;
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
+            frame_no += 1;
             let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
             let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
             for m in msgs {
@@ -86,6 +98,16 @@ fn main() {
                             }
                         }
                     }
+                    EngineMessage::SvcSpawnStaticSound(s) => {
+                        match sound_names.get(&(s.sound_index as u32)) {
+                            Some(name) => {
+                                let e = statics.entry(name.clone()).or_insert((0, frame_no, frame_no));
+                                e.0 += 1;
+                                e.2 = frame_no;
+                            }
+                            None => unnamed_static += 1,
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -93,7 +115,11 @@ fn main() {
     }
 
     println!("=== {path} ===");
-    println!("{} sounds precached, {unnamed} svc_sound with no resolvable name\n", sound_names.len());
+    println!(
+        "{} sounds precached, {unnamed} svc_sound and {unnamed_static} svc_spawnstaticsound with no resolvable name
+",
+        sound_names.len()
+    );
 
     let mut rows: Vec<(String, Played)> =
         played.into_iter().filter(|(n, _)| filter.is_empty() || n.to_lowercase().contains(&filter)).collect();
@@ -101,12 +127,33 @@ fn main() {
 
     if rows.is_empty() {
         println!("no svc_sound matching {filter:?} -- it is not carried on this path at all");
-        return;
+    } else {
+        println!("{:<44} {:>7} {:>12}  entities", "svc_sound", "played", "with entity");
+        for (name, p) in rows.iter().take(30) {
+            let mut ents: Vec<u32> = p.entities.clone();
+            ents.sort_unstable();
+            println!("{name:<44} {:>7} {:>12}  {ents:?}", p.total, p.with_entity);
+        }
     }
-    println!("{:<44} {:>7} {:>12}  entities", "sound", "played", "with entity");
-    for (name, p) in rows.iter().take(30) {
-        let mut ents: Vec<u32> = p.entities.clone();
-        ents.sort_unstable();
-        println!("{name:<44} {:>7} {:>12}  {ents:?}", p.total, p.with_entity);
+
+    let mut static_rows: Vec<(String, (usize, usize, usize))> = statics
+        .into_iter()
+        .filter(|(n, _)| filter.is_empty() || n.to_lowercase().contains(&filter))
+        .collect();
+    static_rows.sort_by_key(|(_, c)| std::cmp::Reverse(c.0));
+    if static_rows.is_empty() {
+        println!("
+no svc_spawnstaticsound matching {filter:?}");
+    } else {
+        // A map's placed ambience is registered once, in the signon block, so it
+        // sits at the very first frames. A sound the map *triggers* -- the
+        // round-win music -- arrives on the same message but spread through the
+        // demo, so the frame range is what tells the two apart.
+        println!("
+{:<44} {:>7} {:>9} {:>9}", "svc_spawnstaticsound", "spawned", "first", "last");
+        for (name, (count, first, last)) in static_rows.iter().take(30) {
+            println!("{name:<44} {count:>7} {first:>9} {last:>9}");
+        }
+        println!("(frame numbers out of {frame_no})");
     }
 }
