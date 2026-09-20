@@ -67,6 +67,23 @@ of which crash identically to the untrimmed map. This only helps recordings
 made *after* a trimmed map is deployed. See #207 for the original problem and
 #231 for the fix that actually addresses it.
 
+### The capture scanner
+
+| Probe | Question it answers |
+| --- | --- |
+| `hltv_scan_probe` | Does the scanner's HLTV guard fire, and what would the scan find without it? |
+
+Written for #247, which reports that HLTV demos cannot be captured because
+`scanner.rs` rejects them at the header. It runs the scanner's own entry point
+rather than describing it, then runs the same analysis the scanner would have
+run next and reports the streaks its per-player loop would have walked.
+
+The answer on this library: **the guard never fires.** It reads the first 512
+bytes looking for the literal `"HLTV Proxy"`, and that string does not appear
+anywhere in any of the 37 demos here -- not in the header, not in 54MB of
+frames. Meanwhile eight of them are HLTV by the `analysis` crate's own
+`SvcHltv` test, and all eight scan fine and produce 161-177 streaks each.
+
 ### Capture backends
 
 | Probe | Question it answers |

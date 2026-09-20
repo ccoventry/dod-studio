@@ -38,7 +38,6 @@ version = "0.10.0"
 dependencies = [
  "dem",
  "dod",
- "indexmap 1.9.3",
  "serde",
 ]
 
@@ -1067,7 +1066,7 @@ dependencies = [
  "dirs 5.0.1",
  "dod",
  "hl-demo-auditor",
- "indexmap 1.9.3",
+ "indexmap 2.14.0",
  "log",
  "native",
  "serde",

@@ -7,7 +7,6 @@ edition.workspace = true
 dod = { path = "../dod" }
 dem = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-indexmap = { workspace = true }
 
 [lints]
 workspace = true
