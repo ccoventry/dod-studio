@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: seven cvars and two commands.
+//! The `dodtools_*` console surface: nine cvars and three commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, scoreboard, sound_fix, spectator_crosshair, voice};
+use crate::{anim_fix, crosshair, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -54,6 +54,8 @@ const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
+/// See spectator_target.rs's module doc -- issue #206's diagnostic.
+const SPECTATOR_TARGET_LOG_NAME: &str = console_name!("log_spectator_target");
 const STATUS_NAME: &str = console_name!("debug_status");
 /// Each module owns its own name, because its error text uses it too.
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
@@ -69,6 +71,7 @@ static CVAR_GUNSHOTS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mu
 static CVAR_ANIMATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_ATTENUATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_SPECTATOR_TARGET_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
@@ -268,6 +271,7 @@ pub fn poll() {
     poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
     poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
     poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
+    poll_flag(SPECTATOR_TARGET_LOG_NAME, &CVAR_SPECTATOR_TARGET_LOG, &spectator_target::LOG);
     poll_attenuation();
     poll_code_patch(
         SCOREBOARD_NAME,
@@ -302,6 +306,12 @@ pub fn poll() {
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
+    // Runs in the prologue (before anim_fix::apply(), the one per-frame
+    // callback slot), so its viewmodel-entity half reads apply()'s previous
+    // frame's result, not this one's -- see spectator_target.rs's module doc.
+    spectator_target::poll();
+    // Same reason, for whichever messages dodtools_msglog currently wants.
+    crate::msglog::poll();
 }
 
 /// Everything in one place, for debugging -- not the settings surface a
@@ -338,6 +348,10 @@ fn status_text() -> String {
             "{HELD_MODELS_NAME} = {} -- logs the third-person model the spectated player holds, each time it changes",
             bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed))
         ),
+        format!(
+            "{SPECTATOR_TARGET_LOG_NAME} = {} -- logs CHudSpectator's own target alongside the engine's rendered viewmodel entity, whenever either changes (issue #206)",
+            bit(spectator_target::LOG.load(Ordering::Relaxed))
+        ),
     ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
@@ -350,6 +364,12 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Gated like the two fixes above rather than always shown like the
+    // suppression cvars: logging is off by default and a permanent "logging
+    // nothing" line would be noise in the overwhelmingly common case.
+    if let Some(msglog) = crate::msglog::status_line() {
+        lines.push(msglog);
+    }
     format!("{}\n", lines.join("\n"))
 }
 
@@ -572,6 +592,13 @@ unsafe extern "C" fn cmd_log_held_models() {
     });
 }
 
+/// Issue #206's diagnostic -- see `spectator_target.rs`'s module doc.
+unsafe extern "C" fn cmd_log_spectator_target() {
+    handle_toggle(SPECTATOR_TARGET_LOG_NAME, &spectator_target::LOG, || {
+        "logs CHudSpectator's own target alongside the engine's rendered viewmodel entity, whenever either changes".into()
+    });
+}
+
 /// How far boosted gunshots carry. Separate from the on/off toggle because it
 /// is the value you actually want to sweep while listening.
 unsafe extern "C" fn cmd_gunshot_attenuation() {
@@ -634,13 +661,14 @@ fn install_fallback_commands() {
     add_command(ANIMATION_FIX_NAME, cmd_animation_fix);
     add_command(ATTENUATION_NAME, cmd_gunshot_attenuation);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
+    add_command(SPECTATOR_TARGET_LOG_NAME, cmd_log_spectator_target);
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
     add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -665,12 +693,14 @@ pub fn install() {
     // Always a command, never a cvar: it has subcommands and a variable number
     // of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
+    add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
     let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
     let attenuation = register(ATTENUATION_NAME, &sound_fix::carry_attenuation().to_string());
     let held_models = register(HELD_MODELS_NAME, bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)));
+    let spectator_target_log = register(SPECTATOR_TARGET_LOG_NAME, bit(spectator_target::LOG.load(Ordering::Relaxed)));
     // These three default to the game's own behaviour. Nothing this DLL does
     // should change what a session looks like until it is asked to -- which is
     // why the mute defaults to 0 while the other two default to 1.
@@ -684,6 +714,7 @@ pub fn install() {
         Some(animation),
         Some(attenuation),
         Some(held_models),
+        Some(spectator_target_log),
         Some(scoreboard_cvar),
         Some(voice_cvar),
         Some(crosshair_cvar),
@@ -693,6 +724,7 @@ pub fn install() {
         animation,
         attenuation,
         held_models,
+        spectator_target_log,
         scoreboard_cvar,
         voice_cvar,
         crosshair_cvar,
@@ -707,6 +739,7 @@ pub fn install() {
     CVAR_ANIMATION.store(animation, Ordering::Relaxed);
     CVAR_ATTENUATION.store(attenuation, Ordering::Relaxed);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
+    CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
     CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
@@ -716,7 +749,7 @@ pub fn install() {
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -759,6 +792,7 @@ mod tests {
             CROSSHAIR_NAME,
             SPECTATOR_CROSSHAIR_NAME,
             HELD_MODELS_NAME,
+            SPECTATOR_TARGET_LOG_NAME,
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
