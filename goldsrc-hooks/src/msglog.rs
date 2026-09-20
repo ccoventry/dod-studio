@@ -323,7 +323,11 @@ fn resolve_names(rest: &[String]) -> Result<Vec<String>, Vec<String>> {
 }
 
 fn dispatch(argv: &[String]) -> String {
-    let rest = &argv[1..];
+    // argv[0] is the command name itself, so a bare invocation (or an empty
+    // argv, which args() returns when engfuncs isn't resolved yet) is a
+    // query -- not `&argv[1..]`, which panics on an empty slice and aborts
+    // the whole process under this DLL's release `panic = "abort"` profile.
+    let rest = if argv.len() > 1 { &argv[1..] } else { &[] };
     if rest.is_empty() {
         return format!("{}{}", status(), usage());
     }
@@ -430,6 +434,15 @@ mod tests {
     fn bare_invocation_is_a_status_query_not_a_mutation() {
         // The one dispatch() path with nothing to race on.
         let reply = dispatch(&["msglog".to_string()]);
+        assert!(reply.contains("usage"), "{reply}");
+    }
+
+    #[test]
+    fn a_genuinely_empty_argv_is_also_a_status_query() {
+        // args() returns Vec::new() whenever engine::engfuncs() isn't
+        // resolved yet, not just a one-element argv0-only vec -- `&argv[1..]`
+        // panics on that, and this DLL ships with `panic = "abort"`.
+        let reply = dispatch(&[]);
         assert!(reply.contains("usage"), "{reply}");
     }
 

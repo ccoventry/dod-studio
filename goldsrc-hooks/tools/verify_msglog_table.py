@@ -51,7 +51,15 @@ def main(argv: list[str]) -> int:
 
     img = Image(dll)
     owners = Owners(img)
-    live = {name: rva for name, rva, _owner in hooked_messages(img, owners) if name != "?"}
+    # A name of "?" means the string couldn't be recovered; a None rva means
+    # the handler thunk pointer couldn't be recovered. Either way there is
+    # nothing to compare this entry against, and leaving a None in `live`
+    # crashes the `:#x` formatting below the moment one becomes mismatched.
+    live = {
+        name: rva
+        for name, rva, _owner in hooked_messages(img, owners)
+        if name != "?" and rva is not None
+    }
     rs = rust_table(RUST.read_text())
 
     missing = sorted(set(live) - set(rs))
