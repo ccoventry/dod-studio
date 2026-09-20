@@ -61,12 +61,21 @@
 //! `objectives` and `icons` below, which both draw something *before* their own
 //! `ShouldDraw` gate and so keep genuine reach a stock cvar does not have.
 //!
-//! Four more overrode `Draw` and registered themselves, so they too need
+//! Five more overrode `Draw` and registered themselves, so they too need
 //! `KNOWN_EXCLUDED` entries -- but for a different reason than `CHudAmmo`: each
 //! one's `Draw` turned out not to draw anything at all, in any context, hook or
 //! no hook. Writing `CHudBase::Draw` over a function that already does nothing
 //! changes nothing observable, so offering these would only mislead:
 //!
+//! - `CHudDoDCommon::Draw` (`client+0x2c6f0`) is not the "shared HUD backdrop"
+//!   the name suggests -- confirmed against the real DoD 1.3 client source
+//!   (`whamemer/dod13-client`, `cl_dll/dod_common.cpp`): it auto-presses
+//!   `+attack;wait;-attack` four seconds after the player you're spectating
+//!   dies (cycling the observer target), syncs a couple of per-team gameplay
+//!   flags (paratrooper mode, infinite lives) other elements read, and clears
+//!   the sniper scope after a server-driven camera-view event ends. No
+//!   `FillRGBA`/`SPR_Draw` anywhere in it. Live testing this element showed
+//!   nothing changing for exactly this reason -- there was nothing to see.
 //! - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight
 //!   bytes, no calls. The overview map is rendered some other way entirely
 //!   (not yet found; likely VGUI2, like the scoreboard).
@@ -142,12 +151,6 @@ pub struct Element {
 /// hiding. Derived by `goldsrc-hooks/tools/survey_client_dll.py elements`.
 pub const ELEMENTS: &[Element] = &[
     Element {
-        name: "common",
-        class: ".?AVCHudDoDCommon@@",
-        vftable_rva: 0xac3bc,
-        what: "DoD's shared HUD backdrop",
-    },
-    Element {
         name: "crosshair",
         class: ".?AVCHudDoDCrossHair@@",
         vftable_rva: 0xac134,
@@ -220,7 +223,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 12] = [const { AtomicUsize::new(0) }; 12];
+static STOCK_DRAW: [AtomicUsize; 11] = [const { AtomicUsize::new(0) }; 11];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);

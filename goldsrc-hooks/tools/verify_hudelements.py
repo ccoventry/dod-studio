@@ -64,6 +64,12 @@ KNOWN_EXCLUDED = {
     # CHud::ShouldDraw(3) calls; the stock cl_hud_ammo cvar already hides all
     # of it, and (unlike crosshair) CHud::Redraw does not force it back.
     ".?AVCHudAmmo@@",
+    # Not a backdrop despite the name. Confirmed against the real DoD 1.3
+    # client source (whamemer/dod13-client, cl_dll/dod_common.cpp): auto-cycles
+    # the spectated player 4s after they die, syncs two per-team gameplay
+    # flags, and clears the scope after a camera-view event -- no
+    # FillRGBA/SPR_Draw call anywhere in it.
+    ".?AVCHudDoDCommon@@",
     # Draw is `mov eax, 1; ret 4` -- eight bytes, no calls. Draws nothing,
     # hook or no hook. The overview map renders some other way (not found).
     ".?AVCHudDoDMap@@",

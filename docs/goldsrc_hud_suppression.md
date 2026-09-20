@@ -357,7 +357,7 @@ adds the check the DLL cannot make for itself: **completeness**. It finds every
 class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
 `Draw`, and fails if any of them is missing from the table (or a documented
 exclusion). On the shipped `client.dll` that is 22 registering classes, 17 of
-which draw -- 12 in the table, plus five deliberately excluded below.
+which draw -- 11 in the table, plus six deliberately excluded below.
 
 ### The five that are not listed
 
@@ -370,7 +370,7 @@ offering it would only invite the question of why it did nothing.
 `+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
 second is the element's. Worth knowing before anyone adds an entry.
 
-### The five that override `Draw` and still aren't listed
+### The six that override `Draw` and still aren't listed
 
 Each of these registers itself and overrides `Draw`, so each would fail the
 completeness check above like a genuine miss unless named as an exception.
@@ -387,9 +387,20 @@ actually sticks. `objectives` and `icons` below were checked the same way and
 kept, because both draw something *before* their own `ShouldDraw` gate that no
 stock cvar reaches.
 
-The other four don't draw anything at all, in this build, regardless of any
+The other five don't draw anything at all, in this build, regardless of any
 cvar or hook:
 
+- `CHudDoDCommon::Draw` (`client+0x2c6f0`, 412 bytes) is not the "shared HUD
+  backdrop" the name implies. No `FillRGBA`/`SPR_Draw` call anywhere in it --
+  instead it fires `+attack;wait;-attack` four seconds after the player you're
+  spectating dies (cycling the observer target), copies two per-team gameplay
+  flags (paratrooper mode, infinite lives) other elements read, and clears the
+  sniper scope after a server-driven camera-view event ends. Confirmed against
+  the real DoD 1.3 client source, `whamemer/dod13-client`'s
+  `cl_dll/dod_common.cpp` -- `CHudDoDCommon::Draw` there matches the
+  disassembly instruction for instruction. Live testing this element bore
+  that out: nothing observable changed either way, because there was nothing
+  to see.
 - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight bytes,
   no calls. The overview map is rendered some other way entirely; not yet
   found, plausibly VGUI2 like the scoreboard.
@@ -411,7 +422,7 @@ cvar or hook:
   demo, matching the disassembly exactly.
 
 Writing `CHudBase::Draw` over a function that already draws nothing changes
-nothing observable, so offering these four would only mislead.
+nothing observable, so offering these five would only mislead.
 
 ### `all 1` is refused
 
