@@ -112,7 +112,7 @@ pub const LEVEL_MAX: i32 = LEVEL_LOOKAHEAD;
 /// empty for anything like the 3.5s option 1 produced.
 const LOOKAHEAD_SECONDS: f64 = 1.0;
 
-/// What each option is, for `dodtools_status` and the startup line.
+/// What each option is, for `dodtools_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -752,6 +752,15 @@ fn claim_fire(now: f64) -> bool {
 
 static CURRENT_SPECTATED: AtomicI32 = AtomicI32::new(-1);
 static CURRENT_VIEWMODEL: AtomicPtr<ModelSPartial> = AtomicPtr::new(std::ptr::null_mut());
+
+/// The entity index the engine's own `GetViewModel()` currently renders a
+/// first-person viewmodel for -- i.e. who the game actually thinks "you" are
+/// this frame, independent of `CHudSpectator`'s own bookkeeping. `-1` before
+/// the first frame. Read by `spectator_target.rs`'s diagnostic; see its
+/// module doc for why the two are tracked side by side.
+pub(crate) fn current_viewmodel_entity() -> i32 {
+    CURRENT_SPECTATED.load(Ordering::Relaxed)
+}
 static CURRENT_DEPLOY_STATE: AtomicI32 = AtomicI32::new(-1);
 /// Last bipod state actually read off a "bu"/"bd" model, carried across the
 /// stance variants that do not encode one. Cleared on a player switch, since
@@ -850,7 +859,7 @@ const STAGE_VIEWMODEL_MISMATCH: i32 = 8;
 
 fn stage_name(stage: i32) -> &'static str {
     match stage {
-        STAGE_DISABLED => "disabled (dodtools_hltv_animation_fix is 0)",
+        STAGE_DISABLED => "disabled (dodtools_hltv_show_viewmodel_animations is 0)",
         STAGE_NO_ENGFUNCS => "waiting for engfuncs",
         STAGE_NOT_SPECTATING => "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view",
         STAGE_NO_VIEWMODEL_ENTITY => "no viewmodel entity",
@@ -899,12 +908,12 @@ fn stage_with<A, B>(stage: i32, entity: *mut A, model: *mut B, index: i32) {
     };
 }
 
-/// One-line summary for the `dodtools_hltv_animation_fix` status reply.
+/// One-line summary for the `dodtools_hltv_show_viewmodel_animations` status reply.
 pub fn status() -> String {
     let seen = SEEN_VIEWMODELS.lock().unwrap();
     let count = seen.as_ref().map(|s| s.len()).unwrap_or(0);
     format!(
-        "state: {} (distinct viewmodels seen: {count}, animations corrected: {})",
+        "{} -- {count} viewmodels, {} played",
         stage_name(STAGE.load(Ordering::Relaxed)),
         ANIMATIONS_PLAYED.load(Ordering::Relaxed),
     )
@@ -1559,7 +1568,7 @@ mod tests {
         }
     }
 
-    /// Every option in range needs its own description -- `dodtools_status`
+    /// Every option in range needs its own description -- `dodtools_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

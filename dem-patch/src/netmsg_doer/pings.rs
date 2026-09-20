@@ -1,5 +1,7 @@
 use crate::types::PingS;
 
+use crate::nom_helper::nom_fail;
+
 use super::*;
 
 impl Doer for SvcPings {
@@ -31,6 +33,15 @@ impl Doer for SvcPings {
         });
 
         // Don't forget
+        // A read that ran past the end of this message's bytes means the
+        // demo is malformed. Reject it here, where the caller's normal
+        // parse-error path can skip the file -- the alternative is an
+        // out-of-bounds index, and `panic = "abort"` makes that fatal to the
+        // whole process rather than to this one demo. See #225.
+        if br.is_bad_read() {
+            return nom_fail("SvcPings: read past the end of the message");
+        }
+
         let (i, _) = take(br.get_consumed_bytes())(i)?;
 
         Ok((i, SvcPings { pings }))

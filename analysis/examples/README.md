@@ -20,6 +20,7 @@ ignores them; `cargo build --examples` and `cargo test` compile them.
 | `capwindow_probe` | How far is a flag capture from the objective-score credits it earned? |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
+| `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and
@@ -77,3 +78,13 @@ Measured across 624 demos — a mixed POV library plus 126 LAN HLTV recordings.
   `env_message` (`MAP_SPAWN_WARNING`, four times in one anzio half). DoD's own
   clan-match prompts (`#Clan_allies_ready`) share the channel, so suppressing
   the channel wholesale is not the same thing as suppressing the map.
+- **A map's own sounds never reach `EV_PlaySound`.** The two the mute requests
+  ask about arrive on *different* engine messages, and neither is the event
+  hook: a flag capture plays the `dod_control_point`'s `point_*_capsound`
+  keyvalue as `svc_sound`, carrying that control point's entity index, while
+  round-win music is an `ambient_generic` the map triggers, which arrives as
+  `svc_spawnstaticsound` — the same message the map's placed ambience is
+  registered with at signon, told apart only by *when* it appears. Measured
+  across the demo library: win music lands in mid-demo frames and is absent
+  from the halves that end without one, while placed ambience always sits in
+  the first ~50 frames.
