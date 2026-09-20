@@ -116,6 +116,32 @@
 //! nothing to test against, not because it is proven dead -- unlike the five
 //! above, this one could turn out to work the moment the right demo turns up.
 //!
+//! ## `vgui2print` is narrower than its name suggests
+//!
+//! `CHudVGUI2Print` has three real callers, not one, but only one of them goes
+//! through the vtable slot this element hides:
+//!
+//! - `CHudDoDCommon` (`client+0x3c007`, key `Dod_mg_reload` -- "Deploy your
+//!   machine gun to Reload!") calls a *queueing* method (`client+0x3a990`)
+//!   that only writes text/position/color/expiry into `CHudVGUI2Print`'s own
+//!   fields. The pixels are drawn later, when `CHudVGUI2Print::Draw` itself
+//!   runs and reads that state -- the vtable-dispatched path this element's
+//!   hide actually intercepts. Live-confirmed.
+//! - `CObjectiveIcons` (`client+0x300f4`, key `clan_warmup_mode` -- "Warmup
+//!   Mode") calls a *drawing* method (`client+0x3a3f0`) that renders
+//!   immediately by calling a shared low-level helper (`client+0x3a4b0`) at
+//!   a fixed address -- never touching `CHudVGUI2Print::Draw` or its vtable
+//!   slot. Hiding `vgui2print` does not hide this banner.
+//! - `CHudMenu::Draw` (`client+0x3dee0`) calls the same low-level helper
+//!   directly too, for its own rich-text menu list (parsing `\`-prefixed
+//!   color/newline escape codes, word-wrapping, one call per word). Also
+//!   untouched by hiding `vgui2print` -- `menu`'s own vftable hide is what
+//!   stops this, by not letting `CHudMenu::Draw` run at all.
+//!
+//! So `vgui2print` only ever hides queued, timed prompts like the MG-reload
+//! message -- anything drawn immediately through the shared helper is a
+//! different code path this element's vtable slot cannot see.
+//!
 //! ## Re-applied every frame
 //!
 //! `client.dll` does **not** reload on a plain demo change
@@ -225,7 +251,7 @@ pub const ELEMENTS: &[Element] = &[
         name: "vgui2print",
         class: ".?AVCHudVGUI2Print@@",
         vftable_rva: 0xac3e0,
-        what: "the VGUI2 print panel",
+        what: "queued timed text prompts, e.g. the MG \"Deploy...to Reload!\" message (see module docs)",
     },
 ];
 

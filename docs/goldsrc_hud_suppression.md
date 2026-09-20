@@ -442,6 +442,32 @@ ever been seen to make it draw:
   Excluded because there is nothing left to test it against, not because it
   is proven dead the way the five above are.
 
+### `vgui2print` is narrower than its name suggests
+
+`CHudVGUI2Print` has three real callers, but only one goes through the
+vtable slot this element hides:
+
+- `CHudDoDCommon` (key `Dod_mg_reload` -- "Deploy your machine gun to
+  Reload!") calls a *queueing* method (`client+0x3a990`) that only writes
+  text/position/color/expiry into `CHudVGUI2Print`'s own fields. The pixels
+  are drawn later, when `CHudVGUI2Print::Draw` itself runs and reads that
+  state -- the vtable-dispatched path this element's hide actually
+  intercepts. Live-confirmed.
+- `CObjectiveIcons` (key `clan_warmup_mode` -- "Warmup Mode") calls a
+  *drawing* method (`client+0x3a3f0`) that renders immediately via a shared
+  low-level helper (`client+0x3a4b0`) at a fixed address, never touching
+  `CHudVGUI2Print::Draw` or its vtable slot. Hiding `vgui2print` does not
+  hide this banner.
+- `CHudMenu::Draw` calls that same low-level helper directly too, for its
+  own rich-text menu list (`\`-prefixed color/newline escape codes,
+  word-wrapped one call per word). Also untouched by hiding `vgui2print` --
+  `menu`'s own vftable hide is what stops this, by not letting
+  `CHudMenu::Draw` run at all.
+
+So `vgui2print` only ever hides queued, timed prompts like the MG-reload
+message. Anything drawn immediately through the shared helper is a different
+code path this element's vtable slot cannot see.
+
 ### `all 1` is refused
 
 `all 0` shows everything again, which is what a way out looks like. `all 1` is
@@ -451,9 +477,9 @@ the class menu is a support question rather than a feature.
 ### What it reaches that nothing else did
 
 Chat, the kill feed, the status bar under the crosshair, the team and class
-menus, the tram controls, the VGUI2 print panel, the objective icons, and
-`CHudDodIcons` -- which owns **both** the MG-deploy icon (#288) and the
-capture-area icon (#289), along with blood and bandage. Those two were filed
+menus, the tram controls, the objective icons, and `CHudDodIcons` -- which
+owns **both** the MG-deploy icon (#288) and the capture-area icon (#289),
+along with blood and bandage. Those two were filed
 separately because the icons look unrelated; one element draws all four, so
 they are one switch, and separating them would mean patching inside a
 1507-byte `Draw`.
