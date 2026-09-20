@@ -68,7 +68,7 @@
 //! `dodtools_hide_hudelement` can't reach this" above, which turns out to cut
 //! both ways.
 
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 use crate::names::console_name;
 
@@ -77,8 +77,12 @@ const COMMAND: &str = console_name!("hide_sprite");
 
 /// Model paths to suppress, exactly as typed (case-insensitive compare).
 /// Empty by default -- the whole point is that nothing is hidden until
-/// asked for by name.
-static HIDDEN: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// asked for by name. An `RwLock`, not a `Mutex`: `should_hide` below reads
+/// this once per entity per frame, considerably hotter than the occasional
+/// console-command write, and CLAUDE.md's hot-path rule is explicit that a
+/// shared catalog like this belongs behind a lock readers don't block each
+/// other on.
+static HIDDEN: RwLock<Vec<String>> = RwLock::new(Vec::new());
 
 /// Pure matcher, so it can be unit-tested without touching the shared
 /// `HIDDEN` static -- see the test module for why nothing here does that.
@@ -95,14 +99,14 @@ fn matches(hidden: &[String], model_name: &str) -> bool {
 /// parsing, so it stays a `Vec`, not a data structure sized for a table that
 /// will never be large.
 pub fn should_hide(model_name: &str) -> bool {
-    match HIDDEN.lock() {
+    match HIDDEN.read() {
         Ok(list) => matches(&list, model_name),
         Err(_) => false,
     }
 }
 
 fn status() -> String {
-    match HIDDEN.lock() {
+    match HIDDEN.read() {
         Ok(list) if list.is_empty() => format!("{COMMAND} = hiding nothing\n"),
         Ok(list) => format!("{COMMAND} = hiding {}\n", list.join(", ")),
         Err(_) => format!("{COMMAND} = (lock poisoned)\n"),
@@ -135,12 +139,17 @@ fn args() -> Vec<String> {
 }
 
 fn dispatch(argv: &[String]) -> String {
-    let rest = &argv[1..];
+    // argv[0] is the command name itself, so a bare invocation (or a
+    // genuinely empty argv, which args() returns when engfuncs isn't
+    // resolved yet) is a query -- not `&argv[1..]`, which panics on an empty
+    // slice and aborts the whole process under this DLL's release
+    // `panic = "abort"` profile.
+    let rest = if argv.len() > 1 { &argv[1..] } else { &[] };
     if rest.is_empty() {
         return format!("{}{}", status(), usage());
     }
     if rest.len() == 1 && rest[0].eq_ignore_ascii_case("clear") {
-        if let Ok(mut list) = HIDDEN.lock() {
+        if let Ok(mut list) = HIDDEN.write() {
             list.clear();
         }
         return format!("{COMMAND}: hiding nothing\n");
@@ -148,7 +157,7 @@ fn dispatch(argv: &[String]) -> String {
     // Anything else is a list of model paths, replacing whatever was hidden
     // before -- the same "each call restates the whole set" shape
     // `dodtools_deathmsg block <id>...` and `dodtools_msglog <name>...` use.
-    if let Ok(mut list) = HIDDEN.lock() {
+    if let Ok(mut list) = HIDDEN.write() {
         *list = rest.to_vec();
     }
     format!("{COMMAND}: hiding {}\n", rest.join(", "))
@@ -165,7 +174,7 @@ pub unsafe extern "C" fn command() {
 /// `msglog`'s own status line -- off by default, and a permanent "hiding
 /// nothing" line would be noise in the overwhelmingly common case.
 pub(crate) fn status_line() -> Option<String> {
-    match HIDDEN.lock() {
+    match HIDDEN.read() {
         Ok(list) if !list.is_empty() => Some(format!("{COMMAND} = hiding {}", list.join(", "))),
         _ => None,
     }
@@ -199,6 +208,15 @@ mod tests {
     #[test]
     fn bare_invocation_is_a_status_query_not_a_mutation() {
         let reply = dispatch(&["hide_sprite".to_string()]);
+        assert!(reply.contains("usage"), "{reply}");
+    }
+
+    #[test]
+    fn a_genuinely_empty_argv_is_also_a_status_query() {
+        // args() returns Vec::new() whenever engine::engfuncs() isn't
+        // resolved yet, not just a one-element argv0-only vec -- `&argv[1..]`
+        // panics on that, and this DLL ships with `panic = "abort"`.
+        let reply = dispatch(&[]);
         assert!(reply.contains("usage"), "{reply}");
     }
 }
