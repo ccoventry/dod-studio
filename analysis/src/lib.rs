@@ -562,6 +562,15 @@ impl Analysis {
     where
         F: FnMut(usize, usize),
     {
+        // This only catches anything in a build that unwinds -- tests and
+        // `cargo run` without `--release`. The release profile sets
+        // `panic = "abort"`, so a panic inside the parser aborts the process
+        // and never reaches here. It is kept because it costs nothing and does
+        // work under test, but the actual defence is that `dem-patch` does not
+        // panic on malformed input: bounds live at the read sites, and
+        // `BitReader::is_bad_read` turns an overrun into a parse error. See
+        // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
+        // proves it.
         let demo_res =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_demo_from_bytes(value)));
         let demo = match demo_res {

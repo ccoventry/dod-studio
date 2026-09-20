@@ -92,7 +92,7 @@ inventory:
 | `CHudMessage` | `+0xac20c` | `+0x25000` | 844 | `GameTitle` `HudText` |
 | `CHudSayText` | `+0xac278` | `+0x459e0` | 701 | `SayText` |
 | `CHudScope` | `+0xac374` | `+0x46590` | 22 | `Scope` |
-| `CHudSpectator` | `+0xac254` | `+0x38000` | 879 | — |
+| `CHudSpectator` | `+0xac254` | `+0x38000` | 45 | — |
 | `CHudStatusBar` | `+0xac1e8` | `+0x477a0` | 349 | `StatusValue` |
 | `CHudStatusIcons` | `+0xac158` | `+0x471c0` | 110 | `StatusIcon` |
 | `CHudTextMessage` | `+0xac17c` | *(inherits)* | — | `CapMsg` `TextMsg` |
@@ -395,10 +395,10 @@ Stated plainly, in the habit `docs/goldsrc_death_notices.md` set.
 - **The objective timer's x.** Four literal digit positions (10, 24, 44, 58) plus
   a literal 0 for the background sprite, in `CObjectiveIcons::DrawDigit`'s
   callers. Five sites rather than one value; reachable but not as one setting.
-- **`CHudSpectator::Draw`'s own layout.** 879 bytes that set the spectator
-  interface mode global (`+0xe88d4`) to 1..4 and draw the bar. Not surveyed
-  beyond that; it is the biggest remaining unexplored element and it is the one
-  that decides the `+54` every other element then compensates for.
+- **`CHudSpectator::Draw`'s own layout.** Surveyed in §10 (issue #269): it is
+  genuinely 45 bytes, not the 879 this section originally reported (a
+  `function_end` scan artifact, since fixed in `survey_client_dll.py`). It
+  does not draw the bar itself.
 - **`CVoiceStatusHud` has two vftables** (`+0xabb48` and `+0xabb24`) — it
   inherits from both `IVoiceHud` and `CHudBase`. Only the eight-slot one is the
   HUD element's; the six-slot one is the interface's. Anything that identifies
@@ -413,7 +413,170 @@ Stated plainly, in the habit `docs/goldsrc_death_notices.md` set.
 
 ---
 
-## 10. Reproducing this
+## 10. `CHudSpectator`, surveyed (issue #269)
+
+The biggest gap §9 left open. Method: the same offline `pefile`/`capstone`
+pass, chasing every reference to the spectator-interface-mode global
+(`+0xe88d4`) rather than reading forward from `Draw`, since `Draw` itself
+turned out not to be where the interesting code is.
+
+### `Draw` (`+0x38000`, 45 bytes) doesn't draw the bar
+
+```
+mov eax, [+0xe88d4]            ; the interface mode
+test eax, eax
+jne  +0x28                     ; mode != 0 -> return 1, nothing else
+mov  ecx, [+0x1a9d564]         ; a cached VGUI2 interface pointer
+call [ecx->+0x60]              ; bool: "should the panel be shown"?
+je   +0x23                     ; false -> return 0
+call [ecx->+0x58]              ; true  -> tell the panel to draw itself
+xor  eax, eax
+ret  4
++0x28: mov eax, 1
+       ret 4
+```
+
+When the mode is already non-zero it returns 1 immediately and touches
+nothing else. When it's zero, it asks a VGUI2 panel (through the same
+interface pointer `Draw`'s 45 bytes and several other functions below all go
+through) whether to show, and if so tells the panel to draw itself. **The bar
+is a VGUI2 panel, not a `CHudBase`-drawn sprite** — confirms, from the
+disassembly rather than only from live testing, why #296 found hiding
+`spectator` via the `CHudBase::Draw`-slot mechanism (`dodtools_hide_hudelement
+spectator`) changed nothing: that mechanism can only stub this 45-byte
+gatekeeper, and the gatekeeper was never drawing anything to begin with.
+
+Immediately after `Draw` (`+0x38030`, no padding between them — the trap that
+produced the stale 879-byte figure) is a **different function, identified
+2026-09-19 while investigating #206**: `CHudSpectator::DirectorMessage`.
+A ten-case switch on `DRC_CMD - 1` (its own jump table at `+0x38370`),
+matching [`common/hltv.h`](https://github.com/FWGS/hlsdk-portable/blob/master/common/hltv.h)'s
+`DRC_CMD_*` values `1..10` exactly (case index 1, `DRC_CMD_EVENT`, is the
+sole writer of the spectator-target global; case index 2, `DRC_CMD_MODE`,
+is where `SetMode` gets called from a director message rather than a
+keypress — see #206's own write-up on that issue for the full trace). Not
+`HandleButtonsDown`; that one is elsewhere (below), and is the *input*
+path into `SetMode`, where `DirectorMessage` is the *network* path. This
+was the second time the `function_end` padding-heuristic trap mattered for
+`CHudSpectator` in one sitting; nothing past this point relies on it
+without independent confirmation from the raw bytes.
+
+### The mode global has exactly one writer: `SetMode` (`+0x38850`)
+
+`(int mode, ...)`, thiscall. Every one of the four writes to `+0xe88d4` is a
+case in one `switch (mode)` inside this function, `mode` clamped to `1..4`
+before the jump table:
+
+**Update, 2026-09-19 (issue #206 investigation): the four modes are
+confirmed by string evidence, not inferred.** `client.dll`'s `.rdata`
+carries a null-terminated table at `+0xcee35` — `"#OBS_IN_EYE"`,
+`"#OBS_ROAMING"`, `"#OBS_CHASE_FREE"`, `"#OBS_CHASE_LOCKED"`,
+`"#OBS_MAP_FREE"` (the `#` prefix and exact spellings match the upstream
+Half-Life SDK's `CHudSpectator::GetModeName`-shaped switch verbatim,
+[`cl_dll/hud_spectator.cpp`](https://github.com/FWGS/hlsdk-portable/blob/master/cl_dll/hud_spectator.cpp)),
+alongside the literal string `"usage:  spec_mode <Main Mode> [<Inset Mode>]"`
+— confirming `SetMode`'s second parameter (previously guessed as a target)
+is actually **`iNewInsetMode`** (the `spec_pip` inset window's own mode),
+matching what `docs/goldsrc_spectator_camera` memory already said about
+`spec_mode`'s second argument. `OBS_NONE=0, OBS_CHASE_LOCKED=1,
+OBS_CHASE_FREE=2, OBS_ROAMING=3, OBS_IN_EYE=4, OBS_MAP_FREE=5,
+OBS_MAP_CHASE=6` is the standard SDK enum
+([`pm_shared/pm_shared.h`](https://github.com/FWGS/hlsdk-portable/blob/master/pm_shared/pm_shared.h)) —
+DoD's `SetMode` clamping to `1..4` means it supports every mode except the
+two map ones, consistent with DoD drawing its overview map through a
+separate VGUI2 mechanism (§5) rather than an observer mode.
+
+| `mode` | writes `+0xe88d4` | also does |
+| --- | --- | --- |
+| 1 (`OBS_CHASE_LOCKED`) | `1` | nothing else |
+| 2 (`OBS_CHASE_FREE`) | `2` | zeroes a float field on an object reached through `*(this+0x174c) + 0xc` — the same indirection `DirectorMessage`'s `DRC_CMD_EVENT`/`DRC_CMD_MODE` cases (§10 below) read to check `m_autoDirector->value`, so this almost certainly zeroes the auto-director cvar directly. Matches the stock SDK's `HandleButtonsDown`, which does the same (`m_autoDirector->value = 0.0f`) when the player manually picks a target — plausibly folded into this case in DoD's build rather than kept at the call site, not confirmed which |
+| 3 (`OBS_ROAMING`) | `3` | **confirmed against the stock `SetModes`' `case OBS_ROAMING`**: "jump to current vJumpOrigin/angle" — only when there's a currently-valid observer target, jumps the free-roam camera to that target's current chase position (`V_GetChasePos`) and applies it (`gEngfuncs.SetViewAngles`, matching the `interface->+0x24`-adjacent engine call this disassembly found at `+0x1950c90`/the `+0x1a97540`/`+0x1a97550` float-pair staging this section already documented), then sets `+0x1a9da08` ("needs redraw") |
+| 4 (`OBS_IN_EYE`) | `4` | nothing else |
+
+`mode == -1` is a sentinel meaning "current" (reads `+0xe88d4` back instead of
+picking a case), and a call that resolves to the mode already active — which
+`mode == -1` always does, by construction — takes a **short, silent tail**:
+just `interface->+0x24` (a third slot on the same VGUI2 pointer `Draw` uses —
+plausibly "refresh") and return. Only a call that actually **changes** the
+mode falls through the switch case into the **other** tail (`+0x389d3`, where
+all four cases `jmp`), which builds and echoes a status string first (the
+same "%s"-shaped format-string helper `CHud::Init`'s own console registration
+uses) before the same `interface->+0x24` call. So the print is a one-shot on
+genuine mode changes, not a per-call heartbeat — watching it live means
+watching the moment the cycle key actually changes mode, not just holding it
+or re-invoking with the same value.
+
+### `HandleButtonsDown` (`+0x386a0`) drives it from input
+
+Reads a button-state bitmask (`bl`/`ebx`) and, gated behind bit `0x2`,
+computes the *next* mode in a fixed cycle and calls `SetMode` with it:
+
+```
+current == 1 -> next = 2
+current == 2 -> next = 4
+current == 4 -> next = 3
+current == 3 -> next = 1
+anything else (0, unset) -> next = 2
+```
+
+i.e. **the cycle order is 1 -> 2 -> 4 -> 3 -> 1**, not numeric order — bit
+`0x2` is presumably the edge for whatever key steps through the interface
+layouts. `SetMode` is then called unconditionally near the end of the
+function on every path that reaches that far, passing either the freshly
+cycled mode or whatever `edi` held going in when bit `0x2` was not set — so
+this looks like a per-frame re-assert, not a one-shot keypress handler, but
+that was not confirmed against when the function itself gets called. Two
+other bits gate separate work in the same function: bit `0x4` calls through
+the VGUI2 interface's `+0x64`/`+0x54` slots, and bits `0x801` call a separate
+observer-target stepper at `+0x383a0` with a direction flag taken from bit
+`0x800` — a target-switch input sharing this handler with the mode-cycle
+input, not confirmed which physical bind maps to which bit.
+
+### What §9's four questions come out to
+
+1. **What the four modes are — answered, 2026-09-19, by string evidence,
+   not a live check.** `OBS_CHASE_LOCKED` (1), `OBS_CHASE_FREE` (2),
+   `OBS_ROAMING` (3), `OBS_IN_EYE` (4) — see the confirmed table above. The
+   cycle order (1, 2, 4, 3) reads as a coherent progression once named:
+   locked chase, free chase, first-person, free-roam, back to locked chase.
+2. **Whether the bar is placeable/suppressible, and where.** Not through
+   `client.dll` at all in the way #265's mechanism reaches everything else —
+   the bar is VGUI2, drawn by whatever's behind `+0x1a9d564`, which this
+   survey method (RTTI in `client.dll` only) cannot see into. Suppressing it
+   would mean intercepting the VGUI2 panel itself (a different mechanism
+   class, likely a `CreateInterface`/panel-factory hook, not a vftable-slot
+   patch) — out of scope for a quick follow-up, not attempted here.
+3. **Whether the `54` is reachable at its source.** Yes, more directly than
+   §6 states: all four `54 * ScreenHeight / 480` sites read the *same* single
+   `.rdata` float, `+0xab7a8` (confirmed by byte search — one address, four
+   `fmul` xrefs, matching §6's site count exactly). One 4-byte `.rdata` write
+   would rescale the spectator-bar compensation everywhere at once, instead of
+   `dodtools_deathmsg`/`dodtools_objectives` each patching their own call
+   site. Not implemented — changing a shared constant changes DoD's own
+   spectator-bar height assumption too, which is a real behaviour change, not
+   a pure offset control like the existing per-element ones.
+4. **What `spec_drawstatus`/`spec_drawnames`/`spec_drawcone` actually
+   suppress.** Not established — their `cvar_t*`s are read by the VGUI2 panel
+   behind `+0x1a9d564`, the same boundary problem as question 2. `client.dll`
+   only holds the pointers (§7); what each gates is on the other side of the
+   interface call.
+
+### Reproducing this section
+
+```
+python goldsrc-hooks/tools/survey_client_dll.py elements   # CHudSpectator's row now reads 45, not 879
+```
+
+The rest (`SetMode`, `HandleButtonsDown`, the mode-dispatch table, the button
+bitmask) was read by hand from `+0x38030`..`+0x38a70` and is not yet folded
+into any automated report section — there is no general "decode a switch
+table and diff its cases" pass, unlike the RTTI-driven element/message/cvar
+tables. `+0x38850` and `+0x386a0` are recorded in `KNOWN_FUNCTIONS` so the
+next pass at least gets a name.
+
+---
+
+## 11. Reproducing this
 
 ```
 pip install pefile capstone
