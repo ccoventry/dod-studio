@@ -357,7 +357,7 @@ adds the check the DLL cannot make for itself: **completeness**. It finds every
 class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
 `Draw`, and fails if any of them is missing from the table (or a documented
 exclusion). On the shipped `client.dll` that is 22 registering classes, 17 of
-which draw -- 11 in the table, plus six deliberately excluded below.
+which draw -- 10 in the table, plus seven deliberately excluded below.
 
 ### The five that are not listed
 
@@ -370,11 +370,11 @@ offering it would only invite the question of why it did nothing.
 `+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
 second is the element's. Worth knowing before anyone adds an entry.
 
-### The six that override `Draw` and still aren't listed
+### The seven that override `Draw` and still aren't listed
 
 Each of these registers itself and overrides `Draw`, so each would fail the
 completeness check above like a genuine miss unless named as an exception.
-None of them is a miss, but for two different reasons.
+None of them is a miss, but for three different reasons.
 
 `CHudAmmo` draws (the ammo counter and the weapon-select menu) for real:
 disassembly of `client+0x28b00` (`CHudAmmo::Draw`, 2604 bytes) shows every
@@ -423,6 +423,24 @@ cvar or hook:
 
 Writing `CHudBase::Draw` over a function that already draws nothing changes
 nothing observable, so offering these five would only mislead.
+
+One more is excluded for a third reason -- it draws for real, but nothing has
+ever been seen to make it draw:
+
+- `CHudStatusIcons::Draw` (`client+0x471c0`) loops over four icon slots and
+  calls `SPR_DrawAdditive` for any that hold a sprite handle -- a genuine
+  draw, unlike the five above. What populates a slot is the `StatusIcon` user
+  message (`(enable byte, icon-name string, [r,g,b] if enabling)`, confirmed
+  against `client.dll` itself via `MsgFunc_StatusIcon`/`EnableIcon`, not just
+  source). That message never appeared in 661 real demos checked: the local
+  test library, four demos purpose-recorded trying to trigger it, and 622
+  more from a full install scan. The one lead disassembly turned up --
+  `EnableIcon`'s `strstr(name, "grenade")` hack that plays `weapons/timer.wav`,
+  suggesting a grenade-cook countdown icon -- doesn't hold up: that sound file
+  doesn't exist in any install, and `sprites/hud.txt` has no sprite registered
+  under the plain name `"grenade"` for `GetSpriteIndex` to resolve against.
+  Excluded because there is nothing left to test it against, not because it
+  is proven dead the way the five above are.
 
 ### `all 1` is refused
 

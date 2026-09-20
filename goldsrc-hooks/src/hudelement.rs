@@ -99,6 +99,23 @@
 //!   Reaching the real effect would mean hooking `Think`/`ScreenFade`
 //!   instead, a materially different job (issue #307/#308 territory).
 //!
+//! ## One more excluded, for a third reason: never observed to fire
+//!
+//! `CHudStatusIcons::Draw` (`client+0x471c0`) is not like the five above --
+//! it genuinely draws, via `SPR_DrawAdditive`, whenever one of its four icon
+//! slots holds a sprite handle. The `StatusIcon` user message that populates
+//! those slots (`(enable byte, icon-name string, [r,g,b] if enabling)`,
+//! confirmed against `client.dll` itself, not just source) never appeared in
+//! 661 real demos checked -- the local test library, four demos purpose-
+//! recorded to trigger it, and 622 more from a full install scan. The one
+//! concrete lead (`EnableIcon`'s `strstr(name, "grenade")` hack that plays
+//! `weapons/timer.wav`, suggesting a grenade-cook countdown icon) doesn't
+//! hold up either: that sound file doesn't exist in any install, and
+//! `sprites/hud.txt` has no sprite registered under the plain name
+//! `"grenade"` for `GetSpriteIndex` to resolve. Excluded because there is
+//! nothing to test against, not because it is proven dead -- unlike the five
+//! above, this one could turn out to work the moment the right demo turns up.
+//!
 //! ## Re-applied every frame
 //!
 //! `client.dll` does **not** reload on a plain demo change
@@ -199,12 +216,6 @@ pub const ELEMENTS: &[Element] = &[
         what: "the name and health readout under the crosshair",
     },
     Element {
-        name: "statusicons",
-        class: ".?AVCHudStatusIcons@@",
-        vftable_rva: 0xac158,
-        what: "the status icon strip",
-    },
-    Element {
         name: "train",
         class: ".?AVCHudTrain@@",
         vftable_rva: 0xac230,
@@ -223,7 +234,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 11] = [const { AtomicUsize::new(0) }; 11];
+static STOCK_DRAW: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);

@@ -70,6 +70,13 @@ KNOWN_EXCLUDED = {
     # flags, and clears the scope after a camera-view event -- no
     # FillRGBA/SPR_Draw call anywhere in it.
     ".?AVCHudDoDCommon@@",
+    # Genuinely draws (SPR_DrawAdditive), unlike the others here -- excluded
+    # because its StatusIcon trigger never fired in 661 real demos checked
+    # (local library + purpose-recorded test demos + a full install scan),
+    # and its one lead (a grenade-cook sound hack) references a sound file
+    # that doesn't exist in any install and a sprite name hud.txt doesn't
+    # register. Not proven dead, just untestable against anything available.
+    ".?AVCHudStatusIcons@@",
     # Draw is `mov eax, 1; ret 4` -- eight bytes, no calls. Draws nothing,
     # hook or no hook. The overview map renders some other way (not found).
     ".?AVCHudDoDMap@@",
