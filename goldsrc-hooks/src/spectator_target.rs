@@ -116,7 +116,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn offsets_are_eight_bytes_apart() {
+    fn offsets_are_four_bytes_apart() {
         // g_iUser1 and g_iUser2 are adjacent dwords -- confirmed independently
         // across CHudSpectator::Reset, ::SetMode and the DRC_CMD_EVENT
         // handler tonight, not just asserted once.
