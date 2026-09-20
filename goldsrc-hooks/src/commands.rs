@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: seven cvars and two commands.
+//! The `dodtools_*` console surface: seven cvars and three commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -302,6 +302,8 @@ pub fn poll() {
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
+    // Same reason, for whichever messages dodtools_msglog currently wants.
+    crate::msglog::poll();
 }
 
 /// Everything in one place, for debugging -- not the settings surface a
@@ -350,6 +352,12 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Gated like the two fixes above rather than always shown like the
+    // suppression cvars: logging is off by default and a permanent "logging
+    // nothing" line would be noise in the overwhelmingly common case.
+    if let Some(msglog) = crate::msglog::status_line() {
+        lines.push(msglog);
+    }
     format!("{}\n", lines.join("\n"))
 }
 
@@ -665,6 +673,7 @@ pub fn install() {
     // Always a command, never a cvar: it has subcommands and a variable number
     // of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
+    add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));

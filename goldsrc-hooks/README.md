@@ -15,13 +15,18 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus four control surfaces, always available and doing nothing until used:
+Plus five control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodtools_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
   players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
+- **Message log** (`dodtools_msglog <name>... | all | clear`): dumps chosen
+  DoD user messages and their payloads to the log file, forwarded to the game
+  untouched -- a way to see what the client actually receives, in session,
+  instead of reconstructing it from a demo parse. See the module doc in
+  `src/msglog.rs`.
 - **Scoreboard** (`dodtools_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
@@ -73,12 +78,15 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
 against a running game. The sound fix, `dodtools_hide_scoreboard`,
-`dodtools_mute_voice_commands`, `dodtools_hide_crosshair` and
-`dodtools_match_pov_crosshair` are confirmed by static
+`dodtools_mute_voice_commands`, `dodtools_hide_crosshair`,
+`dodtools_match_pov_crosshair` and `dodtools_msglog` are confirmed by static
 analysis only -- see the module docs in `src/engine.rs`, `src/sound_fix.rs`,
-`src/scoreboard.rs`, `src/voice.rs`, `src/crosshair.rs` and
-`src/spectator_crosshair.rs` for what is
-established from the DoD 1.3 game files vs. what still needs a live check. `tools/` holds a verifier per
+`src/scoreboard.rs`, `src/voice.rs`, `src/crosshair.rs`,
+`src/spectator_crosshair.rs` and `src/msglog.rs` for what is
+established from the DoD 1.3 game files vs. what still needs a live check.
+`dodtools_msglog` reuses `dodtools_deathmsg`'s already-proven prepend/forward
+mechanism unchanged, so the open question is only its own 71-entry name/thunk
+table, not the hook itself. `tools/` holds a verifier per
 patched site, which checks the Rust constants against a real `client.dll`.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because

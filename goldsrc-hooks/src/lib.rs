@@ -11,7 +11,7 @@
 //! client interface through a single `F` export instead. See `engine.rs`'s
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
-//! Implements two fixes and one control surface, each independent of the
+//! Implements two fixes and two control surfaces, each independent of the
 //! others and each safe to inject without them:
 //! - `sound_fix`: force full-volume weapon-fire audio while spectating.
 //! - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -22,6 +22,9 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
+//! - `msglog`: the `dodtools_msglog` command -- dump chosen DoD user messages
+//!   and their payloads to the log, forwarded to the game untouched. Full
+//!   design write-up in the module doc itself.
 //! - `scoreboard`: the `dodtools_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -56,6 +59,7 @@ mod deathmsg;
 mod detour;
 mod debug;
 mod engine;
+mod msglog;
 mod names;
 mod patch;
 mod pe;
