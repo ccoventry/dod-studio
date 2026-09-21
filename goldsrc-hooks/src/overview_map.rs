@@ -16,6 +16,18 @@
 //! executable is touched, no signature is overwritten, and putting it back is
 //! letting `VidInit` recompute.
 //!
+//! ## Why the map closes while spectating someone scoped in (live-tested, 2026-09-21)
+//!
+//! Not a bug in this module, and not something a rect edit can fix.
+//! `CHud::OverviewMapMode` (`+0x228e0`, `goldsrc-hooks/tools/survey_client_dll.py`'s
+//! own `KNOWN_FUNCTIONS` table) only returns `_cl_minimap`'s value while a
+//! spectator predicate holds **and `gHUD`'s FOV field is still 90** -- a
+//! sniper scope changes FOV away from 90, so the engine's own gate takes the
+//! map down regardless of where this module put it, and hands it back once
+//! the FOV returns to 90. Preventing that would mean hooking
+//! `OverviewMapMode` itself (a new gate to bypass, not a placement change) --
+//! out of scope for `dodtools_overviewmap`, not attempted here.
+//!
 //! ## The survey has the two rectangles the wrong way round
 //!
 //! #268 (quoting `docs/goldsrc_client_dll_survey.md` §5) calls `+0x238` "the
