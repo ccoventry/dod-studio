@@ -47,7 +47,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, hand_signals, hudelement, scoreboard, sound_fix,
+    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, scoreboard, sound_fix,
     spectator_crosshair, spectator_target, voice,
 };
 
@@ -68,6 +68,7 @@ const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
+const EX_INTERP_NAME: &str = ex_interp::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -83,6 +84,7 @@ static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut()
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -213,6 +215,7 @@ static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static HUDELEMENT_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static EX_INTERP_COMPLAINED: AtomicI32 = AtomicI32::new(0);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -288,6 +291,40 @@ fn poll_hand_signals() {
         };
     }
     hand_signals::apply();
+}
+
+/// Reads the ceiling out of the cvar and writes it into the engine's clamp.
+///
+/// Its own poll rather than `poll_code_patch`'s because the setting is a value,
+/// not a flag -- and it complains on the *value* rather than once, so changing
+/// the cvar to another bad number says so again while an unchanged bad one
+/// stays quiet.
+fn poll_ex_interp() {
+    let ptr = CVAR_EX_INTERP.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        return;
+    }
+    let wanted = unsafe { (*ptr).value };
+    if !wanted.is_finite() {
+        return;
+    }
+    let wanted = wanted as i32;
+    match ex_interp::set_max(wanted) {
+        Ok(false) => EX_INTERP_COMPLAINED.store(0, Ordering::Relaxed),
+        Ok(true) => {
+            EX_INTERP_COMPLAINED.store(0, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} -- {}", ex_interp::status()))
+            };
+        }
+        Err(why) => {
+            if EX_INTERP_COMPLAINED.swap(wanted, Ordering::Relaxed) != wanted {
+                unsafe {
+                    crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} not applied -- {why}"))
+                };
+            }
+        }
+    }
 }
 
 /// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
@@ -374,6 +411,7 @@ pub fn poll() {
             describe_spectator_crosshair,
         );
         poll_hand_signals();
+        poll_ex_interp();
     }
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
@@ -460,6 +498,11 @@ fn status_text() -> String {
     // question the cvar's own value cannot answer.
     if hand_signals::ENABLED.load(Ordering::Relaxed) || hand_signals::has_acted() {
         lines.push(format!("hand signals: {}", hand_signals::status()));
+    }
+    // Reported whenever it differs from the engine's own ceiling: the cvar says
+    // what was asked for, this says what the engine is actually clamping to.
+    if ex_interp::active() != 0 && ex_interp::active() != ex_interp::STOCK_MS {
+        lines.push(format!("interpolation: {}", ex_interp::status()));
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -930,6 +973,9 @@ pub fn install() {
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
     let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
     let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
+    // Defaults to the engine's own ceiling, so registering it changes nothing
+    // until someone asks for more.
+    let ex_interp_cvar = register(EX_INTERP_NAME, &ex_interp::STOCK_MS.to_string());
 
     let (
         Some(gunshots),
@@ -942,6 +988,7 @@ pub fn install() {
         Some(crosshair_cvar),
         Some(spectator_crosshair_cvar),
         Some(hand_signals_cvar),
+        Some(ex_interp_cvar),
     ) = (
         gunshots,
         animation,
@@ -953,6 +1000,7 @@ pub fn install() {
         crosshair_cvar,
         spectator_crosshair_cvar,
         hand_signals_cvar,
+        ex_interp_cvar,
     )
     else {
         install_fallback_commands();
@@ -969,12 +1017,13 @@ pub fn install() {
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
     CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
+    CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME} and command {STATUS_NAME}"
         ))
     };
 }

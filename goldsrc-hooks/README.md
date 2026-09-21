@@ -45,6 +45,11 @@ Plus five control surfaces, always available and doing nothing until used:
   the spectated player. `dodtools_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **Interpolation ceiling** (`dodtools_ex_interp_max <ms>`): raises the engine's
+  clamp on `ex_interp` above its 100 ms ceiling, for smoother entity motion
+  between snapshots. `ex_interp` is engine-managed -- a per-frame clamp writes
+  the value back through `Cvar_Set` -- so setting the cvar by hand does not
+  stay. `cl_updaterate` still sets the floor. See `docs/goldsrc_ex_interp.md`.
 - **Clear decals** (`dodtools_clear_decals`): empties the engine's 4096-slot
   decal pool on command, unlinking each decal from its surface first the way
   the engine's own remove functions do. Nothing to do with `r_decals`, which
@@ -101,17 +106,20 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 ## Status
 
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
-against a running game. The sound fix, `dodtools_hide_scoreboard`,
-`dodtools_mute_voice_commands`, `dodtools_hide_crosshair`,
-`dodtools_match_pov_crosshair` and `dodtools_msglog` are confirmed by static
-analysis only -- see the module docs in `src/engine.rs`, `src/sound_fix.rs`,
-`src/scoreboard.rs`, `src/voice.rs`, `src/crosshair.rs`,
-`src/spectator_crosshair.rs` and `src/msglog.rs` for what is
-established from the DoD 1.3 game files vs. what still needs a live check.
-`dodtools_msglog` reuses `dodtools_deathmsg`'s already-proven prepend/forward
-mechanism unchanged, so the open question is only its own 71-entry name/thunk
-table, not the hook itself. `tools/` holds a verifier per
-patched site, which checks the Rust constants against a real `client.dll`.
+against a running game. `dodtools_ex_interp_max`'s mechanism is live-proven
+too -- the clamp visibly takes effect -- but no specific value is confirmed
+good yet; see `docs/goldsrc_ex_interp.md` §7. The sound fix,
+`dodtools_hide_scoreboard`, `dodtools_mute_voice_commands`,
+`dodtools_hide_crosshair`, `dodtools_match_pov_crosshair` and
+`dodtools_msglog` are confirmed by static analysis only -- see the module
+docs in `src/engine.rs`, `src/sound_fix.rs`, `src/scoreboard.rs`,
+`src/voice.rs`, `src/crosshair.rs`, `src/spectator_crosshair.rs` and
+`src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
+still needs a live check. `dodtools_msglog` reuses `dodtools_deathmsg`'s
+already-proven prepend/forward mechanism unchanged, so the open question is
+only its own 71-entry name/thunk table, not the hook itself. `tools/` holds
+a verifier per patched site, which checks the Rust constants against a real
+`client.dll`.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
