@@ -47,8 +47,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, scoreboard, sound_fix,
-    spectator_crosshair, spectator_target, voice,
+    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
+    sound_fix, spectator_crosshair, spectator_target, voice,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -69,6 +69,7 @@ const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
 const EX_INTERP_NAME: &str = ex_interp::NAME;
+const OVERVIEWMAP_NAME: &str = overview_map::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -216,6 +217,7 @@ static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static HUDELEMENT_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static EX_INTERP_COMPLAINED: AtomicI32 = AtomicI32::new(0);
+static OVERVIEWMAP_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -327,6 +329,32 @@ fn poll_ex_interp() {
     }
 }
 
+/// Re-asserts any held overview-map rectangle. `VidInit` recomputes both on a
+/// resolution change or a level load, so holding one means writing it again.
+fn poll_overviewmap() {
+    if !overview_map::any_held() {
+        return;
+    }
+    match overview_map::apply() {
+        Ok(0) => OVERVIEWMAP_COMPLAINED.store(false, Ordering::Relaxed),
+        Ok(written) => {
+            OVERVIEWMAP_COMPLAINED.store(false, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {OVERVIEWMAP_NAME} re-applied {written} field(s) -- VidInit had recomputed them"
+                ))
+            };
+        }
+        Err(why) => {
+            if !OVERVIEWMAP_COMPLAINED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} not applied -- {why}"))
+                };
+            }
+        }
+    }
+}
+
 /// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
@@ -416,6 +444,10 @@ pub fn poll() {
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
+    // dodtools_overviewmap keeps its own state -- held rects, not a cvar --
+    // so it belongs here alongside hudelement rather than in the gated block
+    // above.
+    poll_overviewmap();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -503,6 +535,9 @@ fn status_text() -> String {
     // what was asked for, this says what the engine is actually clamping to.
     if ex_interp::active() != 0 && ex_interp::active() != ex_interp::STOCK_MS {
         lines.push(format!("interpolation: {}", ex_interp::status()));
+    }
+    if overview_map::any_held() {
+        lines.push(format!("overview map: {}", overview_map::status()));
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -841,6 +876,89 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
+/// `dodtools_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+///
+/// A command rather than a cvar: four numbers and a name do not fit in one
+/// value, and two cvars per rectangle would be eight names in the type-ahead
+/// for something set once.
+unsafe extern "C" fn cmd_overviewmap() {
+    let Some(engfuncs) = engine::engfuncs() else { return };
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+    let argv = |n: i32| -> Option<String> {
+        let raw = unsafe { (engfuncs.cmd_argv)(n) };
+        (!raw.is_null()).then(|| {
+            unsafe { CStr::from_ptr(raw as *const c_char) }.to_string_lossy().trim().to_owned()
+        })
+    };
+
+    if argc < 2 {
+        console_print(&format!(
+            "usage: {OVERVIEWMAP_NAME} <full|mini> <x> <y> <w> <h>\n       {OVERVIEWMAP_NAME} default   (let the game place them again)\n{}",
+            overview_map::listing()
+        ));
+        return;
+    }
+
+    let Some(first) = argv(1) else { return };
+    if first.eq_ignore_ascii_case("default") {
+        overview_map::release();
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: released; the next resolution change or level load recomputes them\n"
+        ));
+        unsafe { crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} default")) };
+        return;
+    }
+
+    let Some(which) = overview_map::Which::parse(&first) else {
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: no rect called \"{first}\" -- try full, mini or default\n"
+        ));
+        return;
+    };
+    if argc < 6 {
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: {} needs four numbers -- x y w h\n",
+            which.name()
+        ));
+        return;
+    }
+
+    let mut fields = [0_i32; 4];
+    for (index, slot) in fields.iter_mut().enumerate() {
+        let Some(raw) = argv(2 + index as i32) else { return };
+        match raw.parse::<i32>() {
+            Ok(value) => *slot = value,
+            Err(_) => {
+                console_print(&format!("{OVERVIEWMAP_NAME}: \"{raw}\" is not a number\n"));
+                return;
+            }
+        }
+    }
+    let rect = overview_map::Rect { x: fields[0], y: fields[1], w: fields[2], h: fields[3] };
+
+    match overview_map::hold(which, rect).and_then(|()| overview_map::apply()) {
+        Ok(_) => {
+            console_print(&format!(
+                "{OVERVIEWMAP_NAME} {} = {rect}   (shown while _cl_minimap is {})\n",
+                which.name(),
+                which.mode()
+            ));
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {OVERVIEWMAP_NAME} {} = {rect}",
+                    which.name()
+                ))
+            };
+        }
+        Err(why) => {
+            console_print(&format!("{OVERVIEWMAP_NAME}: {why}\n"));
+            unsafe {
+                crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} failed -- {why}"))
+            };
+        }
+    }
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -958,6 +1076,7 @@ pub fn install() {
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
+    add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
