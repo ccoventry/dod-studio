@@ -297,46 +297,55 @@ fn describe_spectator_crosshair(on: bool) -> &'static str {
 }
 
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
-/// the per-frame prologue so it lands before `anim_fix::apply()` runs.
+/// the per-frame prologue so it lands before `anim_fix::apply()` runs --
+/// under both `install()` and `install_fallback_commands()`, since
+/// `poll_hudelements`, `deathmsg::poll`, `spectator_target::poll` and
+/// `msglog::poll` below do not depend on cvars existing at all and must run
+/// either way (issue #324).
 pub fn poll() {
-    if !CVARS_LIVE.load(Ordering::Relaxed) {
-        return;
+    // Cvar-backed polling only: every function below reads a `CVAR_*`
+    // pointer that stays null on the fallback path, but each already
+    // null-checks it individually -- this outer guard is purely the fast
+    // path that skips all nine checks at once when cvars never registered.
+    if CVARS_LIVE.load(Ordering::Relaxed) {
+        poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
+        poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
+        poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
+        poll_flag(SPECTATOR_TARGET_LOG_NAME, &CVAR_SPECTATOR_TARGET_LOG, &spectator_target::LOG);
+        poll_attenuation();
+        poll_code_patch(
+            SCOREBOARD_NAME,
+            &CVAR_SCOREBOARD,
+            &SCOREBOARD_COMPLAINED,
+            scoreboard::set_hidden,
+            describe_scoreboard,
+        );
+        poll_code_patch(
+            VOICE_NAME,
+            &CVAR_VOICE,
+            &VOICE_COMPLAINED,
+            voice::set_muted,
+            describe_voice,
+        );
+        poll_code_patch(
+            CROSSHAIR_NAME,
+            &CVAR_CROSSHAIR,
+            &CROSSHAIR_COMPLAINED,
+            crosshair::set_hidden,
+            describe_crosshair,
+        );
+        // Polled every frame like the rest, and for one extra reason: this is
+        // also how it notices `cl_xhair_style` changing under it.
+        poll_code_patch(
+            SPECTATOR_CROSSHAIR_NAME,
+            &CVAR_SPECTATOR_CROSSHAIR,
+            &SPECTATOR_CROSSHAIR_COMPLAINED,
+            spectator_crosshair::set_matching,
+            describe_spectator_crosshair,
+        );
     }
-    poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
-    poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
-    poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
-    poll_flag(SPECTATOR_TARGET_LOG_NAME, &CVAR_SPECTATOR_TARGET_LOG, &spectator_target::LOG);
-    poll_attenuation();
-    poll_code_patch(
-        SCOREBOARD_NAME,
-        &CVAR_SCOREBOARD,
-        &SCOREBOARD_COMPLAINED,
-        scoreboard::set_hidden,
-        describe_scoreboard,
-    );
-    poll_code_patch(
-        VOICE_NAME,
-        &CVAR_VOICE,
-        &VOICE_COMPLAINED,
-        voice::set_muted,
-        describe_voice,
-    );
-    poll_code_patch(
-        CROSSHAIR_NAME,
-        &CVAR_CROSSHAIR,
-        &CROSSHAIR_COMPLAINED,
-        crosshair::set_hidden,
-        describe_crosshair,
-    );
-    // Polled every frame like the rest, and for one extra reason: this is also
-    // how it notices `cl_xhair_style` changing under it.
-    poll_code_patch(
-        SPECTATOR_CROSSHAIR_NAME,
-        &CVAR_SPECTATOR_CROSSHAIR,
-        &SPECTATOR_CROSSHAIR_COMPLAINED,
-        spectator_crosshair::set_matching,
-        describe_spectator_crosshair,
-    );
+    // Everything below has nothing to do with cvars and must run under both
+    // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
@@ -805,6 +814,12 @@ fn install_fallback_commands() {
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
     add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
+    // Without this, `poll`'s cvar-independent half (hudelement, deathmsg,
+    // spectator_target, msglog) never ran on the fallback path either --
+    // see issue #324. `poll` itself stays a no-op for the nine cvar-backed
+    // commands above, since `CVARS_LIVE` is never set on this path; they
+    // apply synchronously from their own command handler instead.
+    engine::set_per_frame_prologue(poll);
     unsafe {
         crate::debug::report(&format!(
             "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
@@ -1006,5 +1021,20 @@ mod tests {
                 "{name} is named after its subject, not the action it performs"
             );
         }
+    }
+
+    /// Issue #324: `install_fallback_commands()` used to add its nine plain
+    /// commands and stop, never registering `poll` as the per-frame prologue
+    /// -- so `poll`'s cvar-independent half (hudelement, deathmsg,
+    /// spectator_target, msglog) silently never ran on a build where cvar
+    /// registration fails. `engine::engfuncs()` is `None` in this test
+    /// process, so the nine `add_command` calls are themselves no-ops, but
+    /// `set_per_frame_prologue` has no such dependency -- this is the one
+    /// piece of `install_fallback_commands()` a unit test can observe.
+    #[test]
+    fn install_fallback_commands_registers_the_per_frame_prologue() {
+        assert!(!engine::per_frame_prologue_is_set(), "some earlier test already registered one");
+        install_fallback_commands();
+        assert!(engine::per_frame_prologue_is_set());
     }
 }
