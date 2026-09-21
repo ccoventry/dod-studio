@@ -511,6 +511,13 @@ fn model_sequence_duration(model: *mut ModelSPartial, sequence: i32) -> f64 {
 }
 
 /// Just the labels, for everything that only needs to name a sequence.
+/// The same list, for anything outside this module that needs to know what a
+/// sequence index is called. `hand_signals` asks whether a label starts with
+/// `hs_`, and a cached walk is what keeps that a per-frame-cheap question.
+pub(crate) fn sequence_labels(model: *mut ModelSPartial) -> Vec<String> {
+    model_sequence_strings(model)
+}
+
 fn model_sequence_strings(model: *mut ModelSPartial) -> Vec<String> {
     model_sequence_info(model).into_iter().map(|(label, _)| label).collect()
 }
