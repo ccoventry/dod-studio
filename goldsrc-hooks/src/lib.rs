@@ -37,6 +37,12 @@
 //!
 //! The last three are all in `docs/goldsrc_hud_suppression.md`.
 //!
+//! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
+//! at a `dodtools_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
+//! then tracing what it itself calls) both turned out to be dead ends --
+//! see `docs/goldsrc_spectator_bars.md` for what's been ruled out and what
+//! the real next step is (a live memory watch, not more static analysis).
+//!
 //! See each module's docs for the full R&D reasoning.
 //!
 //! Both are `dodtools_*` **cvars**, so they behave like any other engine
