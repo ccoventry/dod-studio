@@ -26,7 +26,7 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
 - **`desktop-studio/`** — Active Tauri v2 + Vite/JS frontend workspace (`src-tauri/` backend and `src/*.js` frontend modules).
 - **`web-analyzer/`** — `analysis` compiled to `wasm32-unknown-unknown`, deployed to GitHub Pages on every push to `main` (`.github/workflows/deploy_web.yml`). Static frontend lives in `www/`.
 
-> The experimental `xash-transcode/` crate (GoldSrc HLDEMO → Xash3D IDEM transcoder for the browser preview viewer) lives on its own `experimental/xash-transcode` branch, not on `main`/`dev`/`feature/tauri-migration`. See that branch's `docs/web_preview_viewer.md` before touching it.
+> The GoldSrc HLDEMO → Xash3D IDEM transcoder for the browser preview viewer moved out of this repo entirely: it now lives at `ccoventry/dod-web-demo-viewer` (`xash-transcode/` + a hand-synced copy of `dem-patch/`), since that's the repo the browser preview viewer itself lives in. dod-tools' old `experimental/xash-transcode` branch is kept only as a historical record — do not add new commits to it, and do not open PRs against it. See `docs/web_preview_viewer.md` in the new repo before touching that code.
 
 ---
 
