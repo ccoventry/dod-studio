@@ -461,6 +461,17 @@ pub fn client_module_base() -> Option<usize> {
     (base != 0).then_some(base)
 }
 
+/// The loaded engine's base address, or `None` before `hw.dll` exists.
+///
+/// Unlike `client.dll`, which is unloaded and reloaded between demos and so is
+/// tracked through the IAT hook, `hw.dll` is loaded once and stays for the
+/// session -- asking the loader each time is both correct and cheap.
+pub fn engine_module_base() -> Option<usize> {
+    let name = c"hw.dll";
+    let handle = unsafe { GetModuleHandleA(name.as_ptr() as *const u8) };
+    (!handle.is_null()).then_some(handle as usize)
+}
+
 /// Returns the captured engine function table, once `client.dll` has loaded
 /// and been successfully signature-scanned. `None` before that.
 pub fn engfuncs() -> Option<&'static ClEngineFuncsPartial> {

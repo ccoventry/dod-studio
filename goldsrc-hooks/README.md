@@ -39,6 +39,11 @@ Plus five control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodtools_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
+- **Clear decals** (`dodtools_clear_decals`): empties the engine's 4096-slot
+  decal pool on command, unlinking each decal from its surface first the way
+  the engine's own remove functions do. Nothing to do with `r_decals`, which
+  bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
+  and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
 - **Any HUD element** (`dodtools_hide_hudelement <name> 1`): hides one of the
   twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area

@@ -46,7 +46,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
-use crate::{anim_fix, crosshair, hudelement, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
+use crate::{anim_fix, crosshair, decals, hudelement, scoreboard, sound_fix, spectator_crosshair, spectator_target, voice};
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
@@ -63,6 +63,7 @@ const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
 const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 const HUDELEMENT_NAME: &str = hudelement::NAME;
+const CLEAR_DECALS_NAME: &str = decals::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -420,6 +421,11 @@ fn status_text() -> String {
     if hudelement::hidden_count() > 0 {
         lines.push(format!("HUD elements: {}", hudelement::status()));
     }
+    // Also a command rather than a cvar, and for the same reason: it does
+    // something once instead of holding a value.
+    if decals::has_run() {
+        lines.push(format!("decals: {}", decals::status()));
+    }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
         // trace to count, so silence here would read as a broken command.
@@ -734,6 +740,23 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 }
 
+/// `dodtools_clear_decals` -- takes no arguments and holds no state, so a
+/// command is the whole of what it needs to be.
+unsafe extern "C" fn cmd_clear_decals() {
+    match decals::clear() {
+        Ok(removed) => {
+            console_print(&format!("{CLEAR_DECALS_NAME}: removed {removed} decal(s)\n"));
+            unsafe {
+                crate::debug::report(&format!("commands: {CLEAR_DECALS_NAME} removed {removed}"))
+            };
+        }
+        Err(why) => {
+            console_print(&format!("{CLEAR_DECALS_NAME}: {why}\n"));
+            unsafe { crate::debug::report(&format!("commands: {CLEAR_DECALS_NAME} failed -- {why}")) };
+        }
+    }
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -849,6 +872,7 @@ pub fn install() {
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
     add_command(HUDELEMENT_NAME, cmd_hudelement);
+    add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
