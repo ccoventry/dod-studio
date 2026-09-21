@@ -24,6 +24,32 @@ use std::sync::{Arc, Mutex};
 /// real parallelism here.
 const PATCH_CONCURRENCY: usize = 4;
 
+/// Same shape as `PATCH_CONCURRENCY`, for `scan_directory_impl`'s Phase 2 --
+/// each file's parse is independent (no shared mutable state between demos;
+/// `native::warm_analyzer_cache` writes to a per-demo-path cache file, not a
+/// single shared one, so concurrent writes for different demos don't
+/// collide), so it is bounded with a fixed worker pool the same way. See #195.
+///
+/// Two, not four, and deliberately lower than `PATCH_CONCURRENCY`: a parse
+/// holds a whole `Analysis` in memory, which measures roughly 14x the demo's
+/// own size, so concurrency here multiplies something already large. Measured
+/// over a 45-demo corpus (3.2GB, 72MB mean, 105MB largest) with
+/// `native/examples/scan_mem_probe.rs`:
+///
+/// | workers | wall time | peak working set |
+/// | ------- | --------- | ---------------- |
+/// | 1       | 56.2s     | 1529 MB          |
+/// | 2       | 40.8s     | 2414 MB          |
+/// | 4       | 36.0s     | 4574 MB          |
+/// | 8       | 49.7s     | 9157 MB          |
+///
+/// Four buys 1.56x the speed for 3x the memory; two gets 1.38x for 1.6x.
+/// Eight is slower *and* uses 9GB, which is what says the ceiling here is
+/// memory pressure rather than CPU. This is a desktop app that may be running
+/// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
+/// stays at 4 because it streams frames rather than holding a full analysis.
+const SCAN_CONCURRENCY: usize = 2;
+
 use native::patch::{PatcherConfig, CaptureStreak, CaptureBlock, PatchJob, StreamPatcher, build_batch_queue, build_preview_patch_jobs, CustomCommand, CommandRelation};
 use native::capture_engine::{spawn_capture_engine, CaptureJob, EngineEvent};
 use native::log_markdown;
@@ -42,12 +68,14 @@ pub struct CapturePayload {
     /// Optional absolute path to ffmpeg.exe; falls back to bundled then PATH.
     #[serde(default)]
     pub ffmpeg_override_path: Option<String>,
+    /// Optional override for `dodstudio_goldsrc_hooks.dll`; falls back to the bundled
+    /// default -- see `PatcherConfig::goldsrc_hooks_dll_path`.
+    #[serde(default)]
+    pub goldsrc_hooks_dll_path: Option<String>,
     #[serde(default = "default_resolution_width")]
     pub resolution_width: i32,
     #[serde(default = "default_resolution_height")]
     pub resolution_height: i32,
-    #[serde(default)]
-    pub separate_hud: bool,
     #[serde(default)]
     pub ffmpeg_capture: bool,
     /// Codec id for direct-to-video capture; unknown ids fall back to the
@@ -67,8 +95,6 @@ pub struct CapturePayload {
     pub obs_password: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
-    #[serde(default = "default_add_condebug")]
-    pub add_condebug: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
@@ -124,7 +150,6 @@ fn default_fast_forward_speed() -> f32 { 0.05 }
 fn default_resolution_width() -> i32 { 1280 }
 fn default_obs_capture_fps_payload() -> i32 { 120 }
 fn default_resolution_height() -> i32 { 720 }
-fn default_add_condebug() -> bool { true }
 
 /// One custom command row — serialisable across the Tauri IPC boundary.
 /// `relation` is a plain string ("Before" | "After") rather than
@@ -241,9 +266,9 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.initial_delay = payload.initial_delay;
     cfg.fast_forward_speed = payload.fast_forward_speed;
     cfg.ffmpeg_override_path = payload.ffmpeg_override_path.clone();
+    cfg.goldsrc_hooks_dll_path = payload.goldsrc_hooks_dll_path.clone();
     cfg.resolution_width = payload.resolution_width;
     cfg.resolution_height = payload.resolution_height;
-    cfg.separate_hud = payload.separate_hud;
     cfg.ffmpeg_capture = payload.ffmpeg_capture;
     cfg.ffmpeg_capture_codec = native::patch::CaptureCodec::from_str_id(&payload.ffmpeg_capture_codec);
     if !payload.capture_mode.is_empty() {
@@ -255,7 +280,6 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
         password: payload.obs_password.clone(),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
-    cfg.add_condebug = payload.add_condebug;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
@@ -497,7 +521,6 @@ fn obs_config(host: String, port: u16, password: String) -> native::patch::ObsCo
         host: if host.is_empty() { "127.0.0.1".to_string() } else { host },
         port: if port == 0 { 4455 } else { port },
         password,
-        ..Default::default()
     }
 }
 
@@ -1167,7 +1190,7 @@ pub async fn scan_directory_impl(
                     .binary_search_by(|p: &PathBuf| {
                         p.file_name()
                             .unwrap_or_default()
-                            .cmp(&path_buf.file_name().unwrap_or_default())
+                            .cmp(path_buf.file_name().unwrap_or_default())
                     })
                     .unwrap_or_else(|pos| pos);
                 list.insert(insert_idx, path_buf);
@@ -1187,7 +1210,7 @@ pub async fn scan_directory_impl(
                             .binary_search_by(|p: &PathBuf| {
                                 p.file_name()
                                     .unwrap_or_default()
-                                    .cmp(&path.file_name().unwrap_or_default())
+                                    .cmp(path.file_name().unwrap_or_default())
                             })
                             .unwrap_or_else(|pos| pos);
                         list.insert(insert_idx, path);
@@ -1198,93 +1221,123 @@ pub async fn scan_directory_impl(
 
         let total_files = list.len() as u32;
 
-        // ── Phase 2: parse each .dem file ────────────────────────────────────
-        let mut results = Vec::new();
-        let mut scanned: u32 = 0;
+        // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
+        // `list` is already sorted by filename (Phase 1's binary-search
+        // insert), so each worker writes its result into a pre-sized slot at
+        // its own original index -- the output comes out in sorted order for
+        // free, with no re-sort needed once concurrent workers finish out of
+        // order.
+        let total = list.len();
+        let slots: Mutex<Vec<Option<SerializedDemo>>> = Mutex::new((0..total).map(|_| None).collect());
+        let next_index = std::sync::atomic::AtomicUsize::new(0);
+        // Completed-count progress rather than positional index -- same
+        // reason the patch loop's `capture_status` event uses one: files
+        // finish out of order once scanned concurrently.
+        let completed = std::sync::atomic::AtomicU32::new(0);
+        let found = std::sync::atomic::AtomicU32::new(0);
 
-        for file in list {
-            // Honour cancellation before each parse (I/O can be slow)
-            if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
-                let _ = app_handle.emit(
-                    "scan_progress",
-                    serde_json::json!({
-                        "scanned": scanned,
-                        "found": results.len() as u32,
-                        "status": "Cancelled",
-                        "cancelled": true
-                    }),
-                );
-                return Ok(results);
-            }
-
-            scanned += 1;
-            let file_name = file
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string();
-
-            let _ = app_handle.emit(
-                "scan_progress",
-                serde_json::json!({
-                    "scanned": scanned,
-                    "found": results.len() as u32,
-                    "status": format!("Scanning {} / {} — {}", scanned, total_files, file_name),
-                    "cancelled": false
-                }),
-            );
-
-            if let Ok((
-                (
-                    tickrate,
-                    streaks,
-                    is_pov,
-                    local_player_index,
-                    playback_frames,
-                    match_start_tick,
-                    frame_times_arc,
-                ),
-                analysis,
-            )) = scan_demo_for_highlights_with_analysis(&file)
-            {
-                // Pre-warm the analyzer cache with the Analysis this scan already
-                // computed, so opening this demo in the Demo Analyzer afterward
-                // hits the cache path instead of re-parsing. Best-effort/silent.
-                native::warm_analyzer_cache(&file, &analysis);
-
-                let serialized_streaks: Vec<SerializedStreak> = streaks
-                    .into_iter()
-                    .map(|mut s| {
-                        s.match_start_tick = match_start_tick;
-                        s.frame_times = frame_times_arc.clone();
-                        SerializedStreak::from(s)
-                    })
-                    .collect();
-
-                results.push(SerializedDemo {
-                    path: file.to_string_lossy().to_string(),
-                    name: file
+        std::thread::scope(|scope| {
+            let worker_count = SCAN_CONCURRENCY.min(total).max(1);
+            for _ in 0..worker_count {
+                let app_handle = &app_handle;
+                let cancel_token = &cancel_token;
+                let list = &list;
+                let slots = &slots;
+                let next_index = &next_index;
+                let completed = &completed;
+                let found = &found;
+                scope.spawn(move || loop {
+                    // Honour cancellation before starting the next parse
+                    // (I/O can be slow) -- a parse already in flight is not
+                    // interrupted, same blind spot the patch loop's
+                    // decal-flush pass has (#193).
+                    if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
+                        break;
+                    }
+                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if idx >= total {
+                        break;
+                    }
+                    let file = &list[idx];
+                    let file_name = file
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
-                        .to_string(),
-                    tickrate,
-                    is_pov,
-                    local_player_index,
-                    playback_frames,
-                    streaks: serialized_streaks,
+                        .to_string();
+
+                    let serialized = scan_demo_for_highlights_with_analysis(file).ok().map(
+                        |(
+                            (
+                                tickrate,
+                                streaks,
+                                is_pov,
+                                local_player_index,
+                                playback_frames,
+                                match_start_tick,
+                                frame_times_arc,
+                            ),
+                            analysis,
+                        )| {
+                            // Pre-warm the analyzer cache with the Analysis
+                            // this scan already computed, so opening this
+                            // demo in the Demo Analyzer afterward hits the
+                            // cache path instead of re-parsing.
+                            // Best-effort/silent, and safe under concurrency:
+                            // keyed per demo path, not one shared cache.
+                            native::warm_analyzer_cache(file, &analysis);
+
+                            let serialized_streaks: Vec<SerializedStreak> = streaks
+                                .into_iter()
+                                .map(|mut s| {
+                                    s.match_start_tick = match_start_tick;
+                                    s.frame_times = frame_times_arc.clone();
+                                    SerializedStreak::from(s)
+                                })
+                                .collect();
+
+                            SerializedDemo {
+                                path: file.to_string_lossy().to_string(),
+                                name: file_name.clone(),
+                                tickrate,
+                                is_pov,
+                                local_player_index,
+                                playback_frames,
+                                streaks: serialized_streaks,
+                            }
+                        },
+                    );
+
+                    if serialized.is_some() {
+                        found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    }
+                    slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
+
+                    let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                    let _ = app_handle.emit(
+                        "scan_progress",
+                        serde_json::json!({
+                            "scanned": done,
+                            "found": found.load(std::sync::atomic::Ordering::Relaxed),
+                            "status": format!("Scanning {} / {} — {}", done, total_files, file_name),
+                            "cancelled": false
+                        }),
+                    );
                 });
             }
-        }
+        });
 
-        // ── Final progress event (complete) ───────────────────────────────────
+        let results: Vec<SerializedDemo> =
+            slots.into_inner().unwrap_or_else(|p| p.into_inner()).into_iter().flatten().collect();
+        let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
+
+        // ── Final progress event (complete or cancelled) ────────────────────
         let _ = app_handle.emit(
             "scan_progress",
             serde_json::json!({
-                "scanned": scanned,
+                "scanned": completed.load(std::sync::atomic::Ordering::Relaxed),
                 "found": results.len() as u32,
-                "status": "Complete",
-                "cancelled": false
+                "status": if was_cancelled { "Cancelled" } else { "Complete" },
+                "cancelled": was_cancelled
             }),
         );
 
@@ -1294,16 +1347,6 @@ pub async fn scan_directory_impl(
 
     is_scanning_end.store(false, std::sync::atomic::Ordering::SeqCst);
     result
-}
-
-pub fn simulate_aot_capacity(streaks: Vec<f32>, fps: u32, bytes_per_frame: u64, available_bytes: u64) -> (u64, bool) {
-    let mut total_projected_bytes: u64 = 0;
-    for duration in streaks {
-        let frames = (duration * fps as f32).ceil() as u64;
-        total_projected_bytes += frames * bytes_per_frame;
-    }
-    let has_enough_space = total_projected_bytes <= available_bytes;
-    (total_projected_bytes, has_enough_space)
 }
 
 // ── Bookmark Previews (.dodtools_preview) ─────────────────────────────────────
@@ -1338,8 +1381,15 @@ fn write_hidden_sidecar(path: &Path) -> std::io::Result<()> {
 
 /// Validates the HLAE/hl.exe paths, ensures `<hl_parent>/dod` exists, and
 /// builds a minimal `PatcherConfig` carrying just the fields
-/// `build_hlae_process` reads (hlae_path/game_path/resolution/separate_hud).
-fn resolve_preview_env(hlae_path: &str, game_path: &str) -> Result<(PatcherConfig, PathBuf), String> {
+/// `build_hlae_process` reads (hlae_path/game_path/resolution/
+/// goldsrc_hooks_dll_path). `goldsrc_hooks_dll_path` matters only to callers
+/// that actually launch HLAE (`launch_demo_preview`) — `generate_all_previews`
+/// never spawns a process, so it passes `None` here and it's simply unused.
+fn resolve_preview_env(
+    hlae_path: &str,
+    game_path: &str,
+    goldsrc_hooks_dll_path: Option<String>,
+) -> Result<(PatcherConfig, PathBuf), String> {
     if hlae_path.trim().is_empty() || game_path.trim().is_empty() {
         return Err(crate::messages::configure_paths_before("previewing"));
     }
@@ -1362,6 +1412,7 @@ fn resolve_preview_env(hlae_path: &str, game_path: &str) -> Result<(PatcherConfi
     let patcher_config = PatcherConfig {
         hlae_path: hlae_path.to_string(),
         game_path: game_path.to_string(),
+        goldsrc_hooks_dll_path,
         ..PatcherConfig::default()
     };
     Ok((patcher_config, dod_dir))
@@ -1419,9 +1470,10 @@ pub async fn launch_demo_preview(
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
+    goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path)?;
+        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs.first().ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
 
@@ -1452,7 +1504,7 @@ pub async fn generate_all_previews(
     streaks: Vec<SerializedStreak>,
 ) -> Result<usize, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path)?;
+        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, None)?;
         let (_jobs, generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         Ok(generated)
     }))
@@ -1561,9 +1613,9 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             game_path: settings.hl_path.clone(),
             resolution_width: settings.resolution_width,
             resolution_height: settings.resolution_height,
-            separate_hud: settings.separate_hud,
             ffmpeg_capture: settings.ffmpeg_capture,
             ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(&settings.ffmpeg_capture_codec),
+            goldsrc_hooks_dll_path: settings.goldsrc_hooks_dll_path.clone(),
             ..PatcherConfig::default()
         };
 
@@ -1633,6 +1685,7 @@ fn is_engine_process_name(name: &str) -> bool {
 /// deterministic answer instead of asking the user to interpret a raw OS
 /// socket error themselves.
 fn is_obs_process_running() -> bool {
+    use sysinfo::{ProcessExt, SystemExt};
     let sys = sysinfo::System::new_all();
     sys.processes().values().any(|p| {
         let lower = p.name().to_lowercase();
@@ -1643,6 +1696,7 @@ fn is_obs_process_running() -> bool {
 /// True if any `hl.exe` or `hlae.exe` process is currently running.
 #[tauri::command]
 pub fn check_engine_processes() -> bool {
+    use sysinfo::{ProcessExt, SystemExt};
     let sys = sysinfo::System::new_all();
     sys.processes()
         .values()
@@ -1652,13 +1706,13 @@ pub fn check_engine_processes() -> bool {
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
 #[tauri::command]
 pub fn kill_engine_processes() -> Result<(), String> {
+    use sysinfo::{ProcessExt, SystemExt};
     let sys = sysinfo::System::new_all();
     for process in sys.processes().values() {
-        if is_engine_process_name(process.name()) {
-            if !process.kill() {
+        if is_engine_process_name(process.name())
+            && !process.kill() {
                 log::warn!("Failed to kill engine process pid={}", process.pid());
             }
-        }
     }
     Ok(())
 }
@@ -1801,15 +1855,16 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {
             hlae_path: "C:/hlae/hlae.exe".to_string(),
             game_path: "C:/dod/hl.exe".to_string(),
             ffmpeg_override_path: None,
+            goldsrc_hooks_dll_path: None,
             resolution_width: 1920,
             resolution_height: 1080,
-            separate_hud: true,
             ffmpeg_capture: false,
             ffmpeg_capture_codec: String::new(),
             capture_mode: String::new(),
@@ -1817,7 +1872,6 @@ mod tests {
             obs_port: 0,
             obs_password: String::new(),
             save_local_patched_copy: false,
-            add_condebug: true,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,
@@ -1856,23 +1910,6 @@ mod tests {
         assert_eq!(payload.fast_forward_speed, 0.05);
     }
 
-    /// Separate HUD and direct-to-video are both carried through to the patcher
-    /// config, and the two together are a supported combination. They were
-    /// briefly refused as a pair while the HUD streams captured blank; that
-    /// turned out to be the alpha buffer, not the FFmpeg path, and is fixed in
-    /// capture_engine's launch flags. This asserts the pairing survives the
-    /// mapping so the block cannot creep back in unnoticed.
-    #[test]
-    fn test_separate_hud_and_video_capture_survive_together() {
-        let mut payload = sample_payload();
-        payload.separate_hud = true;
-        payload.ffmpeg_capture = true;
-
-        let cfg = config_from_payload(&payload);
-        assert!(cfg.separate_hud);
-        assert!(cfg.ffmpeg_capture);
-    }
-
     #[test]
     fn test_config_from_payload_maps_scalar_fields() {
         let payload = sample_payload();
@@ -1882,7 +1919,6 @@ mod tests {
         assert_eq!(cfg.game_path, payload.game_path);
         assert_eq!(cfg.resolution_width, 1920);
         assert_eq!(cfg.resolution_height, 1080);
-        assert_eq!(cfg.separate_hud, true);
         assert_eq!(cfg.capture_fps, 300);
         assert_eq!(cfg.session_id, "session_test");
         assert_eq!(cfg.init_commands, vec!["exec autoexec".to_string()]);
@@ -1937,10 +1973,14 @@ mod tests {
         assert_eq!(cfg.custom_commands[1].relation, CommandRelation::Before);
     }
 
-    fn write_temp_cfg(tag: &str, content: &str) -> String {
-        let path = std::env::temp_dir().join(format!("dod_cfgimport_{}_{}.cfg", tag, std::process::id()));
+    /// A `.cfg` inside its own scratch directory. The guard comes back with
+    /// the path and has to be held: dropping it removes the file.
+    fn write_temp_cfg(tag: &str, content: &str) -> (Scratch, String) {
+        let dir = Scratch::new(format_args!("cfgimport_{tag}"));
+        let path = dir.join("import.cfg");
         std::fs::write(&path, content).unwrap();
-        path.to_string_lossy().to_string()
+        let text = path.to_string_lossy().to_string();
+        (dir, text)
     }
 
     fn read_cfg_commands_blocking(path: String) -> Result<Vec<String>, String> {
@@ -1950,29 +1990,25 @@ mod tests {
 
     #[test]
     fn test_read_cfg_commands_strips_blank_lines_and_full_line_comments() {
-        let path = write_temp_cfg(
+        let (_dir, path) = write_temp_cfg(
             "basic",
             "// header comment\nmirv_fov 90\n\n  mirv_movie_fps 300  \n// trailing comment\nsensitivity 3\n",
         );
         let commands = read_cfg_commands_blocking(path.clone()).unwrap();
         assert_eq!(commands, vec!["mirv_fov 90", "mirv_movie_fps 300", "sensitivity 3"]);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_read_cfg_commands_on_an_all_comment_file_is_empty() {
-        let path = write_temp_cfg("empty", "// just a header\n// nothing else\n");
+        let (_dir, path) = write_temp_cfg("empty", "// just a header\n// nothing else\n");
         let commands = read_cfg_commands_blocking(path.clone()).unwrap();
         assert!(commands.is_empty());
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_read_cfg_commands_missing_file_errs() {
-        let path = std::env::temp_dir()
-            .join(format!("dod_cfgimport_missing_{}.cfg", std::process::id()))
-            .to_string_lossy()
-            .to_string();
+        let dir = Scratch::absent("cfgimport_missing");
+        let path = dir.join("nothing.cfg").to_string_lossy().to_string();
         assert!(read_cfg_commands_blocking(path).is_err());
     }
 
@@ -1980,20 +2016,19 @@ mod tests {
     fn test_read_cfg_commands_collapses_column_alignment_padding() {
         // A hand-aligned .cfg — cvar and value padded into columns with extra
         // spaces so they line up in a text editor.
-        let path = write_temp_cfg(
+        let (_dir, path) = write_temp_cfg(
             "aligned",
             "r_decals               \"0\"\ncl_hud_objectives\t\t\"1\"\n",
         );
         let commands = read_cfg_commands_blocking(path.clone()).unwrap();
         assert_eq!(commands, vec!["r_decals \"0\"", "cl_hud_objectives \"1\""]);
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
     fn test_read_cfg_commands_preserves_whitespace_inside_quotes() {
         // A quoted value's own spaces (a path, say) are content, not
         // alignment padding, and must survive verbatim.
-        let path = write_temp_cfg(
+        let (_dir, path) = write_temp_cfg(
             "quoted_spaces",
             "mirv_movie_filename    \"F:\\DICE  WSOD25\\02 Audio Video\\clip\"\n",
         );
@@ -2002,7 +2037,6 @@ mod tests {
             commands,
             vec!["mirv_movie_filename \"F:\\DICE  WSOD25\\02 Audio Video\\clip\""]
         );
-        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

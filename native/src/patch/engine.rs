@@ -15,7 +15,7 @@ fn write_console_cmd(writer: &mut std::io::BufWriter<std::fs::File>, time: f32, 
     let command_string = cmd;
     if command_string.len() >= crate::patch::MAX_CONSOLE_CMD_LEN {
         let msg = format!(
-            "FATAL: GoldSrc Cbuf Overflow (64-byte limit breached). Command: '{}', Length: {}",
+            "FATAL: Command too long for a ConsoleCommand frame (the demo format's 64-byte command field). Command: '{}', Length: {}",
             command_string,
             command_string.len()
         );
@@ -54,7 +54,8 @@ fn write_director_event_payload(
     use std::io::Write;
     
     // svc_director STUFFTEXT payload_len is a u8; silently clamp to 253 bytes.
-    // (64-byte panic is for ConsoleCommand frames, not for director payloads.)
+    // (The 64-byte panic is the ConsoleCommand frame's field width, not a limit
+    // on director payloads -- those travel inside a NetworkMessage instead.)
     let command = if command.len() > crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN { &command[..crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN] } else { command };
 
     let cmd_bytes = command.as_bytes();
@@ -82,64 +83,39 @@ fn write_director_event_payload(
     Ok(total_bytes as i32)
 }
 
-/// Parked R&D, deliberately kept: forcing the spectator view into one player's
-/// eyes by injecting `DRC_CMD_INEYE`.
-///
-/// **Unused, and not dead.** It exists for the HLTV case, which is still open.
-/// An HLTV demo carries every player's highlights and the app offers all of
-/// them, but there is no reliable way yet to put the camera on the one a clip
-/// is about — today that means left/right-clicking through spectator targets by
-/// hand. This is the attempt at doing it from the stream instead.
-///
-/// It is NOT about first-person demos. Those already record the only camera
-/// they have, and the Highlights table filters a POV demo down to the recording
-/// player (`isVisibleStreak`, `detail_pane.js`), so nothing there needs a view
-/// hijack. Other players' streaks are scanned out of a POV demo only so the
-/// Demo Analyzer can build a scoreboard from them.
-///
-/// Anything reasoning about where the capture camera is — the decal flush's
-/// visibility test most of all — reads the demo's recorded `refparams`, which
-/// is correct exactly while this stays unused. Switching it on moves the camera
-/// away from what those samples describe, and the flush would have to follow.
-#[allow(dead_code)]
-fn write_ineye_hijack_payload(
-    writer: &mut std::io::BufWriter<std::fs::File>,
-    time: f32,
-    tick: i32,
-    info_block: &[u8],
-    target_player_id: u8,
-) -> std::io::Result<i32> {
-    use std::io::Write;
-
-    const FRAME_TYPE_NETMSG: u8 = 1;
-    const SVC_DIRECTOR: u8 = 51;
-    const DRC_PAYLOAD_LENGTH: u8 = 2;
-    const DRC_CMD_INEYE: u8 = 5;
-    const SVC_NOP: u8 = 1;
-
-    let payload: &[u8] = &[SVC_DIRECTOR, DRC_PAYLOAD_LENGTH, DRC_CMD_INEYE, target_player_id];
-
-    writer.write_all(&[FRAME_TYPE_NETMSG])?;
-    writer.write_all(&time.to_le_bytes())?;
-    writer.write_all(&tick.to_le_bytes())?;
-    writer.write_all(info_block)?;
-
-    // payload_length includes the trailing svc_nop (1 byte)
-    let msg_len = (payload.len() as u32) + 1;
-    writer.write_all(&msg_len.to_le_bytes())?;
-    writer.write_all(payload)?;
-    writer.write_all(&[SVC_NOP])?;
-
-    let total_bytes = std::mem::size_of::<u8>() // FRAME_TYPE_NETMSG
-        + std::mem::size_of::<f32>()            // time
-        + std::mem::size_of::<i32>()            // tick
-        + info_block.len()                      // info_block
-        + std::mem::size_of::<u32>()            // msg_len
-        + payload.len()                         // payload
-        + std::mem::size_of::<u8>();            // SVC_NOP
-
-    Ok(total_bytes as i32)
-}
+// Forces the spectator view into one player's eyes by injecting
+// `DRC_CMD_INEYE`, as a **standalone** network-message frame.
+//
+// Standalone is the whole point. An HLTV demo carries every player's
+// highlights and its camera is the auto-director's, so putting the view on the
+// player a clip is about used to mean clicking through spectator targets by
+// hand. The first attempt at doing it from the stream prepended this
+// svc_director inside the *existing* frame's payload instead of writing its
+// own frame, and the result would not play at all -- "illegal server message"
+// and "packet read overflow" on load, which is the documented consequence of
+// interleaving injected messages into an existing packet.
+//
+// Used by `preview_cli --player`; see `HIJACK_REASSERT_SECONDS` for why it is
+// written repeatedly rather than once.
+//
+// It is NOT about first-person demos. Those already record the only camera
+// they have, and the Highlights table filters a POV demo down to the recording
+// player (`isVisibleStreak`, `detail_pane.js`), so nothing there needs a view
+// hijack. Other players' streaks are scanned out of a POV demo only so the
+// Demo Analyzer can build a scoreboard from them.
+//
+// Anything reasoning about where the capture camera is — the decal flush's
+// visibility test most of all — reads the demo's recorded `refparams`, which
+// is correct exactly while this stays unused. Switching it on moves the camera
+// away from what those samples describe, and the flush would have to follow.
+// GoldSrc's director stream cannot aim DoD's spectator camera. DoD 1.3's
+// client handles DRC commands 1-10 only -- its jump table has exactly ten
+// entries behind a `cmp cmd-1, 9 / ja default` bounds check -- so DRC_CMD_CHASE
+// (11) and DRC_CMD_INEYE (12) fall straight through and are discarded. The
+// in-eye hijack that used to live here was removed once that was read out of
+// client.dll; see docs/goldsrc_client_dll_internals.md. The two director
+// commands this file does inject, MESSAGE (6) and STUFFTEXT (10), are inside
+// the handled range, which is why they work.
 
 // ── Stream patcher ────────────────────────────────────────────────────────────
 
@@ -163,8 +139,18 @@ impl StreamPatcher {
         // then reads from. Held for the whole patch: the scratch demo is
         // deleted when this drops, including on the cancellation path.
         // Falls back to the original demo (having logged why) rather than
-        // failing the batch — see `prepare_flushed_source`.
-        let cleaned_source = crate::patch::decal_strip::prepare_flushed_source(job, config);
+        // failing the batch — see `prepare_flushed_source`. Cancellation is
+        // the one thing it does not fall back from: the pass is checked at
+        // every stage boundary and from inside the demo serialise, so a
+        // Cancel press no longer waits out a whole flush. See #193.
+        let cleaned_source = crate::patch::decal_strip::prepare_flushed_source(
+            job,
+            config,
+            crate::patch::Cancel::new(cancel_token),
+        )
+        .map_err(|_| {
+            std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user")
+        })?;
         let source_demo: &std::path::Path = match &cleaned_source {
             Some(c) => c.path(),
             None => std::path::Path::new(&job.source_demo),
@@ -211,6 +197,7 @@ impl StreamPatcher {
             b.into()
         };
         let mut scheduled_queue: std::collections::VecDeque<(i32, String)> = job.scheduled_commands.iter().cloned().collect();
+
 
         // Step 2.5: Pre-read the directory to map entry boundaries
         let mut dir_entries: Vec<(i32, i32)> = Vec::new();
@@ -430,26 +417,9 @@ impl StreamPatcher {
                     let mut net_buf = vec![0u8; msg_len];
                     read_exact(&mut reader, &mut net_buf, "NetworkMessage Body")?;
 
-                    let mut final_net_buf = net_buf;
-                    let mut added_bytes: i32 = 0;
-
-                    if let Some(ref _tp) = job.target_player {
-                        let target_player_id: u8 = job.streaks.first().map(|s| s.player_index as u8).unwrap_or(1);
-                        let mut hijacked_buf = vec![51u8, 2, 5, target_player_id];
-                        hijacked_buf.extend_from_slice(&final_net_buf);
-                        final_net_buf = hijacked_buf;
-                        added_bytes += 4;
-                    }
-
-                    let final_len_buf = (final_net_buf.len() as u32).to_le_bytes();
-
-                    if added_bytes > 0 {
-                        update_injection(pos, added_bytes, 0);
-                        bytes_injected += added_bytes;
-                    }
-
+                    let final_len_buf = (net_buf.len() as u32).to_le_bytes();
                     writer.write_all(&final_len_buf)?;
-                    writer.write_all(&final_net_buf)?;
+                    writer.write_all(&net_buf)?;
                 }
             }
         }
@@ -757,11 +727,13 @@ mod tests {
 #[cfg(test)]
 mod director_event_tests {
     use super::*;
+    use crate::test_support::Scratch;
     use std::io::{BufWriter, Read, Write};
 
     #[test]
     fn test_write_director_event_payload() {
-        let temp_path = std::env::temp_dir().join("test_write_director_event_payload.dem");
+        let scratch = Scratch::new("director_event_payload");
+        let temp_path = scratch.join("payload.dem");
         let file = std::fs::OpenOptions::new()
             .read(true)
             .write(true)

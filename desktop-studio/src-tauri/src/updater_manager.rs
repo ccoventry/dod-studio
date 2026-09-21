@@ -5,17 +5,18 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 
 /// Fixed manifest URLs — one GitHub Release per channel. `stable` is
 /// published to the repo's `/releases/latest` alias (release_stable.yml,
-/// cut from `main`); `dev` is republished in place under a fixed
-/// `dev-latest` prerelease tag (release_dev.yml, cut from `dev` on demand).
+/// cut from `main`); `experimental` is republished in place under a fixed
+/// `experimental-latest` prerelease tag (release_experimental.yml, cut from
+/// `dev` on demand).
 /// See issue #133 / docs/archive is not relevant here — this is new.
 const STABLE_ENDPOINT: &str =
     "https://github.com/ccoventry/dod-tools/releases/latest/download/latest.json";
-const DEV_ENDPOINT: &str =
-    "https://github.com/ccoventry/dod-tools/releases/download/dev-latest/latest.json";
+const EXPERIMENTAL_ENDPOINT: &str =
+    "https://github.com/ccoventry/dod-tools/releases/download/experimental-latest/latest.json";
 
 fn endpoint_for_channel(channel: &str) -> Result<url::Url, String> {
     let raw = match channel {
-        "dev" => DEV_ENDPOINT,
+        "experimental" => EXPERIMENTAL_ENDPOINT,
         "stable" => STABLE_ENDPOINT,
         other => return Err(crate::messages::unknown_update_channel(other)),
     };
@@ -50,9 +51,10 @@ pub async fn check_for_update(
         .endpoints(vec![endpoint])
         .map_err(crate::messages::failed_to_set_updater_endpoint)?
         // Default semver comparison only offers upgrades, but a channel is a
-        // deliberate choice, not a version target — switching from dev back
-        // to stable is a legitimate "downgrade" (dev's version number is
-        // always ahead) that should still be offered, not silently blocked.
+        // deliberate choice, not a version target — switching from
+        // experimental back to stable is a legitimate "downgrade"
+        // (experimental's version number is always ahead) that should still
+        // be offered, not silently blocked.
         .version_comparator(|current, remote| remote.version != current)
         .build()
         .map_err(crate::messages::failed_to_build_updater)?;

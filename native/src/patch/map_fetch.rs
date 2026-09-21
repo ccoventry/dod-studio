@@ -76,9 +76,9 @@ pub fn fetch_map(
     let target = maps_dir.join(format!("{}.bsp", map_name));
 
     // Already here and already right: say so and touch nothing.
-    if target.is_file() {
-        if let (Some(want), Ok(found)) = (expected, bsp::map_checksum_of_file(&target)) {
-            if want == found {
+    if target.is_file()
+        && let (Some(want), Ok(found)) = (expected, bsp::map_checksum_of_file(&target))
+            && want == found {
                 return Ok(FetchOutcome {
                     map_name: map_name.to_string(),
                     installed: target,
@@ -88,8 +88,6 @@ pub fn fetch_map(
                     already_correct: true,
                 });
             }
-        }
-    }
 
     std::fs::create_dir_all(maps_dir)
         .map_err(|e| crate::messages::labeled(maps_dir.display(), e))?;
@@ -103,11 +101,10 @@ pub fn fetch_map(
     bsp::Bsp::parse(&body)
         .map_err(|e| crate::messages::served_unparseable_map(&url, e))?;
 
-    if let Some(want) = expected {
-        if checksum != want {
+    if let Some(want) = expected
+        && checksum != want {
             return Err(crate::messages::served_wrong_build(&url, checksum, want));
         }
-    }
 
     // Write beside the target so the rename cannot cross a volume, then move
     // the old file aside before putting the new one in place.
@@ -170,6 +167,7 @@ fn download(url: &str) -> Result<Vec<u8>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
     #[test]
     fn the_url_mirrors_the_path_under_dod() {
@@ -207,9 +205,7 @@ mod tests {
     fn a_map_already_present_and_already_correct_is_left_alone() {
         // No download, no rename, and no backup file left behind — the common
         // case must be free and must not touch the library.
-        let dir = std::env::temp_dir().join(format!("dod_map_fetch_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Scratch::new("map_fetch");
 
         // A map whose checksum we can state without a real BSP: an empty lump
         // table checksums to the CRC's initial value.

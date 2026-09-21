@@ -874,7 +874,7 @@ pub(super) fn survey(
                     // so a stride costs no meaningful accuracy.
                     if in_window(ordinal, keep_windows) {
                         camera_stride += 1;
-                        if opts.collect_diagnostics || camera_stride % 4 == 0 {
+                        if opts.collect_diagnostics || camera_stride.is_multiple_of(4) {
                             let fwd = &rp.forward;
                             if fwd.len() >= 3 {
                                 out.window_cameras.push((pos, [fwd[0], fwd[1], fwd[2]]));
@@ -925,11 +925,10 @@ pub(super) fn survey(
                 // Its layout also differs (a leading player index before the
                 // coordinates), hence the separate arm.
                 if let TempEntity::TePlayerDecal(p) = &te.entity {
-                    if p.len() >= 7 {
-                        if let Some(pos) = decal_position(&p[1..7]) {
+                    if p.len() >= 7
+                        && let Some(pos) = decal_position(&p[1..7]) {
                             out.harvested.push(pos);
                         }
-                    }
                     continue;
                 }
 
@@ -999,22 +998,6 @@ pub enum FlushSource {
     MapGeometry,
 }
 
-/// Picks where the synthetic flush decals go.
-///
-/// A coordinate that misses every surface produces no decal and therefore no
-/// pool allocation, which would make the whole sweep silently do nothing. So
-/// proven geometry is preferred over computed geometry:
-///
-///  1. An explicit override, when the caller has eyeballed a spot in game.
-///  2. The harvested real decal nearest the spawn. Every harvested position is
-///     one the engine actually rendered a decal at, so the surface is certain —
-///     and picking the closest to spawn keeps it in the backfield, away from
-///     wherever the highlight fighting happened.
-///  3. The computed floor beneath the settled spawn position. Used only when
-///     the demo yielded no decals at all; a spawn can sit above the floor on
-///     some maps, so this is a geometric guess and is reported as such.
-
-
 /// How the flush decided what a camera can see, for reporting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VisibilityBasis {
@@ -1049,13 +1032,11 @@ pub enum VisibilityBasis {
 /// bad coordinate.
 fn atlas_key(header: &dem::types::Header, opts: &DecalCleanOptions) -> Option<decal_atlas::MapKey> {
     let mut key = decal_atlas::MapKey::from_header(header)?;
-    if key.checksum == 0 {
-        if let Some(dir) = &opts.maps_dir {
-            if let Ok(found) = bsp::map_checksum_of_file(&dir.join(format!("{}.bsp", key.name))) {
+    if key.checksum == 0
+        && let Some(dir) = &opts.maps_dir
+            && let Ok(found) = bsp::map_checksum_of_file(&dir.join(format!("{}.bsp", key.name))) {
                 key.checksum = found;
             }
-        }
-    }
     Some(key)
 }
 
@@ -1433,8 +1414,8 @@ fn resolve_flush_positions(
     // the pool, so paying for it there would be pure cost for no position. The
     // case it exists for is the opposite one: a map nothing has been harvested
     // from yet, where everything above comes back nearly empty.
-    if pool.len() < wanted {
-        if let Some(map) = visibility.bsp {
+    if pool.len() < wanted
+        && let Some(map) = visibility.bsp {
             let sampled = map.face_candidates(&bsp::FaceSampling::default());
             placement.map_sampled = sampled.len();
             placement.map_safe = absorb(
@@ -1444,7 +1425,6 @@ fn resolve_flush_positions(
                 &mut source,
             );
         }
-    }
     if pool.len() < wanted && !opts.map_geometry_only {
         absorb(
             &survey.floor_candidates,
@@ -1617,11 +1597,33 @@ pub(super) fn strip_decal_messages(
                 } else {
                     wall += 1;
                 }
-                *eng = Box::new(EngineMessage::SvcNop);
+                **eng = EngineMessage::SvcNop;
             }
         }
     }
     (wall, spray)
+}
+
+/// Why `clean_demo_decals` did not produce a cleaned demo.
+///
+/// The two arms are handled completely differently upstream, which is the whole
+/// reason this is not a `String`. A `Failed` is reported to the user and the
+/// capture carries on with the unflushed demo — a dirty wall is not worth
+/// losing a batch over. A `Cancelled` is neither: the user asked for the batch
+/// to stop, so nothing is reported and nothing carries on.
+#[derive(Debug)]
+pub enum DecalCleanError {
+    Failed(String),
+    Cancelled,
+}
+
+impl std::fmt::Display for DecalCleanError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DecalCleanError::Failed(why) => f.write_str(why),
+            DecalCleanError::Cancelled => f.write_str("cancelled by user"),
+        }
+    }
 }
 
 /// Strips decal messages outside `keep_windows` and injects ring-sweeping decal
@@ -1641,9 +1643,27 @@ pub fn clean_demo_decals(
     demo_bytes: &[u8],
     keep_windows: &[(i32, i32)],
     opts: &DecalCleanOptions,
-) -> Result<(Vec<u8>, DecalCleanStats), String> {
+    cancel: crate::patch::Cancel<'_>,
+) -> Result<(Vec<u8>, DecalCleanStats), DecalCleanError> {
+    // Checked at every stage boundary below. The stages are not equal: measured
+    // on a 110MB, 730k-frame demo (`native/examples/flush_stage_timing.rs`),
+    // the parse is ~1.1s and the whole clean ~4.8s, of which `write_to_bytes`
+    // is ~3.0s, while survey, strip and
+    // burst planning are 16-40ms each and resolve_flush_positions is ~330ms at
+    // a 4096 ring. So the two that matter are the parse -- which this crate
+    // cannot interrupt, only decline to start -- and the write, which is
+    // interrupted from the inside by `write_to_bytes_cancellable`. The rest are
+    // boundary checks because they are already short enough not to be felt.
+    if cancel.requested() {
+        return Err(DecalCleanError::Cancelled);
+    }
+
     let mut demo = open_demo_from_bytes(demo_bytes)
-        .map_err(|e| format!("Could not parse demo file: {}", e))?;
+        .map_err(|e| DecalCleanError::Failed(format!("Could not parse demo file: {}", e)))?;
+
+    if cancel.requested() {
+        return Err(DecalCleanError::Cancelled);
+    }
 
     let mut stats = DecalCleanStats::default();
 
@@ -1686,10 +1706,17 @@ pub fn clean_demo_decals(
     // The map itself, when the caller told us where to find one. Used both to
     // decide what is genuinely hidden and, in time, to supply coordinates that
     // owe nothing to where anyone happened to shoot.
+    if cancel.requested() {
+        return Err(DecalCleanError::Cancelled);
+    }
+
     let map = load_map(&demo, opts, &mut stats);
     let visibility = Visibility::new(map.as_ref(), &survey.window_cameras, opts);
 
     let placement = resolve_flush_positions(&survey, &atlas, &visibility, opts, positions_wanted);
+    if cancel.requested() {
+        return Err(DecalCleanError::Cancelled);
+    }
     let flush_positions = placement.positions;
     stats.flush_coord = flush_positions.first().copied();
     stats.flush_source = placement.source;
@@ -1736,9 +1763,13 @@ pub fn clean_demo_decals(
         stats.player_spray_stripped += spray;
     }
 
+    if cancel.requested() {
+        return Err(DecalCleanError::Cancelled);
+    }
+
     // ── Pass 2: flush bursts ahead of each capture window ────────────────────
-    if opts.flush_burst {
-        if let (false, Some(texture_index)) = (flush_positions.is_empty(), texture_index) {
+    if opts.flush_burst
+        && let (false, Some(texture_index)) = (flush_positions.is_empty(), texture_index) {
             // Eligible carriers, in global frame order: parsed network frames
             // small enough that a handful of extra 9-byte messages cannot push
             // the packet near the engine's buffer ceiling. Built across every
@@ -1771,17 +1802,7 @@ pub fn clean_demo_decals(
                 // and reached into an earlier clip on 10 of 85 demos.
                 .filter(|&(_, _, ordinal)| !in_window(ordinal, keep_windows))
                 .filter(|&(entry_idx, frame_idx, _)| {
-                    demo.directory.entries[entry_idx]
-                        .frames
-                        .get(frame_idx)
-                        .map(|frame| match &frame.frame_data {
-                            FrameData::NetworkMessage(b) => {
-                                matches!(b.1.messages, MessageData::Parsed(_))
-                                    && b.1.message_length < 1024
-                            }
-                            _ => false,
-                        })
-                        .unwrap_or(false)
+                    crate::patch::is_injectable_frame(&demo, entry_idx, frame_idx)
                 })
                 .collect();
 
@@ -1865,7 +1886,6 @@ pub fn clean_demo_decals(
                 }
             }
         }
-    }
 
     // ── Pin r_decals so the ring stays small and never strands a slot ────────
     if opts.inject_r_decals_command {
@@ -1906,7 +1926,10 @@ pub fn clean_demo_decals(
         }
     }
 
-    Ok((demo.write_to_bytes(), stats))
+    match demo.write_to_bytes_cancellable(&|| cancel.requested()) {
+        Some(bytes) => Ok((bytes, stats)),
+        None => Err(DecalCleanError::Cancelled),
+    }
 }
 
 /// Every world-surface coordinate this demo proves exists.
@@ -1924,13 +1947,13 @@ pub fn proven_world_coordinates(demo: &dem::types::Demo) -> Vec<[f32; 3]> {
 pub fn strip_decals_outside_windows(
     demo_bytes: &[u8],
     keep_windows: &[(i32, i32)],
-) -> Result<(Vec<u8>, DecalCleanStats), String> {
+) -> Result<(Vec<u8>, DecalCleanStats), DecalCleanError> {
     let opts = DecalCleanOptions {
         flush_burst: false,
         inject_r_decals_command: false,
         ..Default::default()
     };
-    clean_demo_decals(demo_bytes, keep_windows, &opts)
+    clean_demo_decals(demo_bytes, keep_windows, &opts, crate::patch::Cancel::never())
 }
 
 // ── Batch-pipeline pre-pass ──────────────────────────────────────────────────
@@ -2104,11 +2127,10 @@ pub fn capture_fov_from_init(init_commands: &[String]) -> Option<f32> {
         // means this silently reads a quoted line as "nothing stated" and
         // falls through to the default, which is the whole bug this exists
         // to prevent.
-        if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<f32>() {
-            if v > 0.0 {
+        if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<f32>()
+            && v > 0.0 {
                 return Some(v);
             }
-        }
     }
     None
 }
@@ -2152,13 +2174,11 @@ pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
     };
     let scan = cfg_scan::scan_cached(&dir);
     for cvar in ["mirv_fov", "default_fov"] {
-        if let Some(setting) = scan.effective(cvar) {
-            if let Ok(v) = setting.value.parse::<f32>() {
-                if v > 0.0 {
+        if let Some(setting) = scan.effective(cvar)
+            && let Ok(v) = setting.value.parse::<f32>()
+                && v > 0.0 {
                     return v;
                 }
-            }
-        }
     }
     config.capture_fov
 }
@@ -2353,9 +2373,21 @@ fn keep_windows_for(job: &PatchJob) -> Option<Vec<(i32, i32)>> {
 /// feature whose failures are invisible in the output bytes: a demo that was
 /// not cleaned patches and records exactly like one that was, and only looks
 /// wrong on screen.
-pub fn prepare_flushed_source(job: &PatchJob, config: &PatcherConfig) -> Option<CleanedSource> {
+pub fn prepare_flushed_source(
+    job: &PatchJob,
+    config: &PatcherConfig,
+    cancel: crate::patch::Cancel<'_>,
+) -> Result<Option<CleanedSource>, crate::patch::Cancelled> {
+    // First, before the ~110MB read below: a job that has not started its
+    // flush when Cancel is pressed should do none of it. With PATCH_CONCURRENCY
+    // jobs in flight, this is what keeps the queued ones from each adding
+    // another full pass to the wait. See #193.
+    if cancel.requested() {
+        return Err(crate::patch::Cancelled);
+    }
+
     if !config.decal_flush {
-        return None;
+        return Ok(None);
     }
 
     // `r_decals 0` turns decals off outright. There is then no ring to turn and
@@ -2369,13 +2401,13 @@ pub fn prepare_flushed_source(job: &PatchJob, config: &PatcherConfig) -> Option<
              resolves to 0 (stated in Initial Commands, or the app's own configured default). \
              There is no ring to sweep. Capture continues; walls will not be cleaned between clips.",
         );
-        return None;
+        return Ok(None);
     }
 
     // The primer job and preview jobs carry no blocks: nothing is being
     // recorded from them, so there is no clip to keep clean.
     if job.blocks.is_empty() {
-        return None;
+        return Ok(None);
     }
 
     warn_about_game_cfgs(config);
@@ -2388,7 +2420,7 @@ pub fn prepare_flushed_source(job: &PatchJob, config: &PatcherConfig) -> Option<
                  bounds. Capture continues; walls will not be cleaned between clips.",
                 job.source_demo
             ));
-            return None;
+            return Ok(None);
         }
     };
 
@@ -2399,24 +2431,36 @@ pub fn prepare_flushed_source(job: &PatchJob, config: &PatcherConfig) -> Option<
                 "⚠️ **Decal flush skipped** — could not read `{}`: {}",
                 job.source_demo, e
             ));
-            return None;
+            return Ok(None);
         }
     };
 
     let opts = flush_options(config);
 
-    let (cleaned, stats) = match clean_demo_decals(&bytes, &keep_windows, &opts) {
+    let (cleaned, stats) = match clean_demo_decals(&bytes, &keep_windows, &opts, cancel) {
         Ok(v) => v,
+        // Not a failure, and deliberately silent: the user asked for the
+        // batch to stop. Reporting it as a flush failure would put a warning
+        // in the capture log for something they did on purpose.
+        Err(DecalCleanError::Cancelled) => return Err(crate::patch::Cancelled),
         Err(e) => {
             crate::log_markdown(&format!(
                 "⚠️ **Decal flush failed** on `{}`: {}. Capture continues with the unmodified \
                  demo; walls will not be cleaned between clips.",
                 job.source_demo, e
             ));
-            return None;
+            return Ok(None);
         }
     };
     drop(bytes);
+
+    // Last chance before spending a ~110MB write on output about to be thrown
+    // away. After this the scratch file exists and `CleanedSource`'s own Drop
+    // owns removing it, so the copy loop in `engine.rs` -- which checks the
+    // same token once per frame -- is the right place for any later check.
+    if cancel.requested() {
+        return Err(crate::patch::Cancelled);
+    }
 
     let path = scratch_path(&job.source_demo);
     if let Err(e) = std::fs::write(&path, &cleaned) {
@@ -2425,11 +2469,11 @@ pub fn prepare_flushed_source(job: &PatchJob, config: &PatcherConfig) -> Option<
             path.display(),
             e
         ));
-        return None;
+        return Ok(None);
     }
 
     report(job, &stats, &keep_windows, &opts);
-    Some(CleanedSource { path })
+    Ok(Some(CleanedSource { path }))
 }
 
 /// Writes the flush result to the capture log. The counts are informational;
@@ -2590,8 +2634,8 @@ fn report(
     // the surface each is drawn on cleared the on-screen test, so none is ever
     // in shot — but it narrows the margin against a camera turn falling between
     // two samples.
-    if let Some(nearest) = stats.min_camera_distance {
-        if nearest < opts.min_camera_clearance {
+    if let Some(nearest) = stats.min_camera_distance
+        && nearest < opts.min_camera_clearance {
             crate::log_markdown(&format!(
                 "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
                  approach {:.0} units against a {:.0}-unit preference. The surface each one is \
@@ -2600,7 +2644,6 @@ fn report(
                 nearest, opts.min_camera_clearance
             ));
         }
-    }
 
     // The one outright defect this pass can introduce: its own decals on
     // screen. The cone test is sampled every fourth frame, so a non-zero count
@@ -2636,6 +2679,7 @@ fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
     use crate::patch::types::CaptureBlock;
 
     /// `source_demo` deliberately points at nothing: every case below must
@@ -2657,7 +2701,7 @@ mod tests {
 
     fn block(block_index: usize, record_start_tick: i32, record_stop_tick: i32) -> CaptureBlock {
         CaptureBlock {
-            demo_name: "chain_01".to_string(),
+            demo_name: "dodtools_chain_01".to_string(),
             block_index,
             drive_index: 0,
             take_folder: std::path::PathBuf::from("take"),
@@ -2668,6 +2712,39 @@ mod tests {
             record_start_tick,
             record_stop_tick,
         }
+    }
+
+    /// `job_with_blocks`'s `source_demo` points at nothing, so this passing at
+    /// all proves the cancelled job returned before reading the demo -- a read
+    /// attempt would surface as a skip, not an `Err`.
+    #[test]
+    fn a_cancelled_batch_abandons_the_flush_before_reading_the_demo() {
+        let job = job_with_blocks(vec![block(0, 100, 200)]);
+        let mut config = PatcherConfig::default();
+        config.decal_flush = true;
+
+        let token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let result = prepare_flushed_source(&job, &config, crate::patch::Cancel::new(&token));
+
+        assert!(
+            matches!(result, Err(crate::patch::Cancelled)),
+            "a cancelled batch must not fall back to the unflushed demo and carry on"
+        );
+    }
+
+    /// The mirror of the above: an uncancelled token must change nothing, or
+    /// every flush would start returning Cancelled.
+    #[test]
+    fn an_unset_token_leaves_the_flush_decision_alone() {
+        let job = job_with_blocks(Vec::new());
+        let mut config = PatcherConfig::default();
+        config.decal_flush = true;
+
+        let token = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let result = prepare_flushed_source(&job, &config, crate::patch::Cancel::new(&token));
+
+        // No blocks -> nothing to keep clean -> a plain skip, not an error.
+        assert!(matches!(result, Ok(None)));
     }
 
     #[test]
@@ -2705,11 +2782,10 @@ mod tests {
     }
 
     /// A game folder laid out as the engine expects: `hl.exe` with `dod/`
-    /// beside it. Returns the path to the exe.
-    fn fake_game(tag: &str, config_cfg: &str, movie_cfg: Option<&str>) -> std::path::PathBuf {
-        let root = std::env::temp_dir()
-            .join(format!("dod_fov_cfg_{}_{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    /// beside it. Returns the path to the exe, and the guard the caller must
+    /// hold -- dropping it here would delete the folder before it was read.
+    fn fake_game(tag: &str, config_cfg: &str, movie_cfg: Option<&str>) -> (Scratch, std::path::PathBuf) {
+        let root = Scratch::new(format_args!("fov_cfg_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
         std::fs::write(dod.join("config.cfg"), config_cfg).unwrap();
@@ -2718,7 +2794,7 @@ mod tests {
         }
         let exe = root.join("hl.exe");
         std::fs::write(&exe, b"").unwrap();
-        exe
+        (root, exe)
     }
 
     #[test]
@@ -2727,7 +2803,7 @@ mod tests {
         // `exec movie.cfg`, movie.cfg carries `mirv_fov 105`, and the app was
         // never told. Sizing the cone for the default 90 makes it ~7 degrees
         // too narrow and calls in-shot positions hidden.
-        let exe = fake_game("found", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let (_root, exe) = fake_game("found", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             ..PatcherConfig::default()
@@ -2843,13 +2919,11 @@ mod tests {
         // otherwise share a single `<map>_00000000` bucket — separate from the
         // bucket the same map's first-person demos fill, and unable to tell two
         // builds apart.
-        let dir = std::env::temp_dir()
-            .join(format!("dod_atlas_key_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = Scratch::new("atlas_key");
         let expected = empty_map(&dir, "dod_anzio");
 
         let opts = DecalCleanOptions {
-            maps_dir: Some(dir.clone()),
+            maps_dir: Some(dir.to_path_buf()),
             ..Default::default()
         };
 
@@ -2867,8 +2941,9 @@ mod tests {
     fn an_hltv_demo_with_no_map_available_keeps_its_zero() {
         // Nothing to resolve from, and inventing a checksum would be worse than
         // an honest shared bucket.
+        let absent = Scratch::absent("atlas_key_absent");
         let opts = DecalCleanOptions {
-            maps_dir: Some(std::env::temp_dir().join("dod_atlas_key_absent")),
+            maps_dir: Some(absent.to_path_buf()),
             ..Default::default()
         };
 
@@ -2882,7 +2957,7 @@ mod tests {
         // "was one stated?" by comparing against the default would read that as
         // silence and hand every defaulted install to its movie.cfg — here,
         // rendering the cone for 105 when the user asked for 90.
-        let exe = fake_game("states_default", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let (_root, exe) = fake_game("states_default", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             init_commands: vec!["mirv_fov 90".to_string()],
@@ -2896,7 +2971,7 @@ mod tests {
 
     #[test]
     fn an_init_command_outranks_the_game_config() {
-        let exe = fake_game("outrank", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let (_root, exe) = fake_game("outrank", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             init_commands: vec!["mirv_fov 120".to_string()],
@@ -2915,7 +2990,7 @@ mod tests {
         // (decal_flush_is_noop) rather than something to hide by disagreeing
         // with the config, so r_decals follows mirv_fov's precedence exactly:
         // init commands, then an executed config, then the app's default.
-        let exe = fake_game("decals_off", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
+        let (_root, exe) = fake_game("decals_off", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             ..PatcherConfig::default()
@@ -2926,7 +3001,7 @@ mod tests {
 
     #[test]
     fn a_nonzero_r_decals_the_game_config_sets_is_adopted() {
-        let exe = fake_game("decals_from_config", "exec movie.cfg\n", Some("r_decals \"512\"\n"));
+        let (_root, exe) = fake_game("decals_from_config", "exec movie.cfg\n", Some("r_decals \"512\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             decal_ring_limit: 128,
@@ -2938,7 +3013,7 @@ mod tests {
 
     #[test]
     fn an_init_command_still_outranks_a_game_config_for_r_decals() {
-        let exe = fake_game("decals_init_outranks", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
+        let (_root, exe) = fake_game("decals_init_outranks", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             init_commands: vec!["r_decals 512".to_string()],
@@ -3034,7 +3109,9 @@ mod tests {
         let job = job_with_blocks(vec![block(0, 1000, 2000)]);
 
         assert_eq!(ring_limit(&config), 0);
-        assert!(prepare_flushed_source(&job, &config).is_none());
+        assert!(prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3045,7 +3122,9 @@ mod tests {
         };
         let job = job_with_blocks(vec![block(0, 1000, 2000)]);
 
-        assert!(prepare_flushed_source(&job, &config).is_none());
+        assert!(prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3054,7 +3133,9 @@ mod tests {
         // to keep clean and nothing to strip against.
         let job = job_with_blocks(Vec::new());
 
-        assert!(prepare_flushed_source(&job, &PatcherConfig::default()).is_none());
+        assert!(prepare_flushed_source(&job, &PatcherConfig::default(), crate::patch::Cancel::never())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3064,7 +3145,9 @@ mod tests {
         let job = job_with_blocks(vec![block(0, 1000, 2000), block(1, 0, 0)]);
 
         assert!(keep_windows_for(&job).is_none());
-        assert!(prepare_flushed_source(&job, &PatcherConfig::default()).is_none());
+        assert!(prepare_flushed_source(&job, &PatcherConfig::default(), crate::patch::Cancel::never())
+            .unwrap()
+            .is_none());
     }
 
     #[test]
@@ -3319,9 +3402,7 @@ mod tests {
         // the temp directory is not ours at any age.
         use std::time::{Duration, SystemTime};
 
-        let dir = std::env::temp_dir().join("dod_sweep_test");
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = Scratch::new("sweep_test");
 
         let stale = dir.join(format!("{}old_1_0.dem", SCRATCH_PREFIX));
         let fresh = dir.join(format!("{}live_2_0.dem", SCRATCH_PREFIX));

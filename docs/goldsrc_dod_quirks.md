@@ -2,8 +2,8 @@
 
 ## Core Engine Limitations & Workarounds
 - **The Initialization Rule:** The `DemoStart` (Type 2) frame must be processed *before* any `ConsoleCommand` (Type 3) frames are written. Injecting commands prior forces the engine to read uninitialized memory buffers, triggering fatal `MAX_POSSIBLE_MSG` crashes.
-- **The Cbuf Overflow (Buffer Bomb):** GoldSrc has a strict 64-byte payload limit for command strings inside macro frames. Injecting long absolute paths alongside configuration commands in a single tick saturates `Cbuf_AddTextToBuffer`, silently discarding commands. Command payloads must be staggered across multiple ticks prior to the target frame.
-- **Console Buffer Overflow (`Cbuf`):** Flooding the engine command buffer causes massive execution dropouts and drops the engine loop entirely back to the main menu.
+- **The 64-Byte Command Frame:** A Type-3 `ConsoleCommand` frame carries a fixed `char command[64]`, so a command string injected at a tick must stay strictly under 64 bytes — injecting a long absolute path alongside configuration commands in a single tick truncates at the field boundary and silently discards the rest. Command payloads must be staggered across multiple ticks prior to the target frame. **This is a property of the demo file format, not of the engine, so it cannot be raised**: GoldSrc's own command buffer is 16,384 bytes (`Cbuf_Init` at `hw.dll+0x272b0`), and `hw.dll` contains no `Cbuf` string at all. This entry used to attribute the limit to `Cbuf_AddTextToBuffer`; see `docs/goldsrc_hw_dll_survey.md` §3.1 for the disproof.
+- **Console Buffer Flooding:** Flooding the engine command buffer causes massive execution dropouts and drops the engine loop entirely back to the main menu. (Observed behaviour; the 16,384-byte `cmd_text` buffer above is what is being flooded, and the engine names nothing here — the `Cbuf` label this entry used to carry came from Quake lineage, not from any string in `hw.dll`.)
   - *Mitigation:* Throttling command injection cycles to minimum ~500ms bounds, always chaining an explicit buffer `clear;` string ahead of the target payload execution.
 - **Audio Desync on Time Warping:** Fast-forwarding (`host_framerate 1`) breaks engine audio buffers. The speed must drop back to real-time (`host_framerate 0`) exactly 2 to 4 seconds prior to injecting `mirv_recordmovie_start` to flush and resync the audio engine.
 - **The First-Load Black Map Bug:** GoldSrc fails to render lighting on the first demo load of a session. A stripped "Primer Demo" must be loaded first, which then daisy-chains into the real demo via `playdemo` to pre-cache map assets.
@@ -14,6 +14,7 @@
 - **Filenames:** Filenames for playdemo calls must be strictly alphanumeric with underscores (_) and under 40 characters.
 - **Engine Logging vs. Console Buffer (The Clear Failsafe Bug):** The `-condebug` launch parameter generates `qconsole.log` in real-time via continuous disk I/O, meaning the `clear` command does not erase historical data. The `condump` console command relies on the visual console memory buffer. Executing `clear` permanently destroys this history, resulting in an empty or partial text file.
   - *`qconsole.log` is written beside `hl.exe`, not in the mod folder.* Cleanup naming `dod/qconsole.log` matches nothing and fails silently — the file simply grows across every session forever. (The working install's had accumulated 34 sessions before anyone noticed.) `condump` is the separate command and writes a numbered `condump_NNN.txt`; the two are unrelated files and only `qconsole.log` is the pipeline's to remove. See `shared::paths::remove_console_log`.
+  - *It is not held open, despite the "continuous disk I/O" above.* Verified offline against the pre-Anniversary `hw.dll` (2026-09-16): `Con_DebugLog` `_vsnprintf`s the line into a 1KB buffer and then does `_open(path, O_WRONLY|O_CREAT|O_APPEND, 0666)` / `_write` / `_close` — **once per console line**, with no persistent `FILE*` anywhere. So outside the microseconds of a single line there is no handle on it at all, and a `taskkill /F` cannot leave one dangling the way it can for a demo the engine was streaming. This is what settles #218: the Auto-clear Logs cleanup does **not** share the #198 race that Auto-clear Temp Demos had. (The `-condebug` boot path also unlinks the previous log, at the same call site that pushes the `"qconsole.log"` string.)
   - *It is also append-only across sessions,* which makes it a comparative record rather than a snapshot: counting an engine complaint per session and dividing by playback length is how the `SZ_GetSpace` question below got settled without an A/B run. Worth keeping rather than clearing.
 - **Visual Asset Pre-Caching (`gl_spriteblend`):** Setting `gl_spriteblend 0` before a demo fully loads causes severe crosshair and sprite corruption. Initialization configurations modifying visual rendering states must strictly be injected after the `DemoStart` frame to allow engine initialization.
 - **The Decal Ring (`r_decals`) — Set Once, Never Again:** `r_decals` is a *bound* on how far the engine's rotating decal index may travel before it wraps, not an eviction trigger. Nothing is freed when it is lowered; every decal sitting above the new limit is simply stranded for the rest of playback. It is also clamped to `MAX_RENDER_DECALS` (4096). It must therefore be set exactly once, at demo load, from `init_commands` — never scheduled mid-demo, and never injected as a `ConsoleCommand` frame in the pipeline, since that would shift every later frame ordinal by +1 and desync the scheduled capture commands. A capture that violates this completes normally and looks plausible.
@@ -32,6 +33,46 @@
 - **An Unfocused Window Stops Fast-Forwarding:** `host_framerate` fast-forward only advances while `hl.exe` has focus. Alt-tab away mid-batch and playback drops to real time until the window is focused again — the engine throttles its frame loop when it is not the foreground window, and the accelerated playback goes with it. Observed 2026-08-28. **This costs every capture mode equally** — the gaps between clips are fast-forwarded on all three paths, and that is the part that stops. Nothing is lost; the cost is wall-clock time. No HLAE flag defeats it: `hlae/Launcher.cs` composes exactly four GoldSrc options (`-window`/`-full -stretchaspect`, `-afxRenderMode`, `-afxForceAlpha8`, `-afxOptimizeCaptureVis`) and none concern focus, while `engine_no_focus_sleep` — which HLAE does clear during `mirv_streams record` — is a **Source 2** cvar with no GoldSrc equivalent. `AfxHookGoldSrc/hooks/user32Hooks.cpp` fakes `WM_ACTIVATE` only for HLAE's docked-window mode and overrides no throttle. Forcing the foreground window would work but is rejected deliberately: a batch runs for minutes and the machine is still the user's. Two consequences for code: **(a)** any watchdog measuring progress in wall-clock seconds must tolerate gaps stretching from seconds to minutes without calling the batch stalled — see `capture_engine::MARKER_STALL_FLOOR`; **(b)** a batch's elapsed time is not a measure of the pipeline's speed unless the window held focus throughout, so benchmark numbers taken while working in another window are meaningless.
 
 - **Scanner Section Boundary Truncation (`type_byte == 5`):** The engine's scanner stops accumulating `frame_times` at the startup section boundary. Do not rely on localized arrays mapping 1:1 with global ticks without proper offset math.
+
+- **`client.dll` Does Not Reload Between Demos.** Measured 2026-09-18 against the `dodstudio_goldsrc_hooks.log`: `hook_load_library_a` logs *every* `LoadLibraryA("client.dll")` with no once-only guard, and across five separate game sessions there were exactly five load lines — one per session, none mid-session, despite each session loading multiple demos. `GetProcAddress(client.dll, "F")` (the engine's own client-init call, see the companion-DLL doc) tells the same story. `hw.dll`/`hl.exe` itself never reloads either — `goldsrc-hooks` hooks its IAT once at injection and that hook observes every subsequent `client.dll` load for the rest of the process's life, which would be impossible if `hw.dll` itself came and went.
+  - *This corrects an error that shipped in several modules' own doc comments* (`scoreboard.rs`, `crosshair.rs`, `voice.rs`, `commands.rs`, and this doc's own `goldsrc_hud_suppression.md`/`goldsrc_scoreboard.md`), which justified deciding cvar state from the current code bytes every frame — rather than a cached flag — by claiming `client.dll` "unloads and reloads between demos." It doesn't, at least not for a plain demo-to-demo transition. The defensive re-check-every-frame design is still correct and still free; it just isn't guarding against demo changes. What (if anything) *does* reload `client.dll` — a mod change, returning to the main menu — is untested.
+  - *Two separate `hl.exe` launches minutes apart look identical to a mid-session reload in the log alone.* The tell is not the base-address change by itself, but whether the whole init sequence re-runs from scratch (hooks reinstalled, `pEngfuncs` recaptured, cvars re-registered, the per-frame demo clock restarting near zero) — check for that, or for a fresh process, before concluding a reload happened mid-session.
+
+## Cvar Enforcement: DoD's Client and GoldSrc's Clamp
+
+Two independent enforcement layers act on cvars, and they are easy to mistake for
+each other when something quits unexpectedly.
+
+**DoD's client (`client.dll`, `CHud::Redraw` at `0x1936e20`).** If `r_drawentities`
+or `cl_lw` is not `1`, it forces the value back, prints *"... is not a valid
+command. Do not use it."*, and calls `quit` — the process exits rather than merely
+correcting course. The `quit` is assembled byte-by-byte on the stack
+(`'q','u','i','t','\n'`) instead of being stored as a literal, which is why no
+`strings` dump of the binary reveals it. Three siblings in the same routine
+(`cl_pitchup`, `cl_pitchdown`, `crosshair`) are corrected silently without quitting.
+
+**It only runs when the HUD draws.** Not "every frame" — every frame *that draws the
+HUD*. With the console open the check does not run at all, so a value can be set and
+put back with no consequence; the quit lands the moment the console closes. This is
+the single most confusing thing about testing it by hand, and the reason an earlier
+write-up of this called it a per-frame check.
+
+**GoldSrc's own clamp (`hw.dll`, `0x1d455c9`), gated on `sv_cheats`.** A hardcoded
+list of renderer cvars is reset to fixed values whenever `sv_cheats` is `0`:
+`r_drawentities` back to the string `"1.0"`, gamma back to `"1.8"`, and several
+others. This is not a cvar flag — `r_drawentities` has `flags = 0x0`; the list lives
+in engine code, and `sv_cheats` itself is the `cvar_t` at `0x1e56404`.
+
+**The consequence, and why the two lists in `cfg_scan` differ.** With `sv_cheats 0`
+— which is the default, and which the pipeline never changes — `r_drawentities`
+cannot be moved off `1` at all, so DoD's quit branch for it is unreachable and a
+config line setting it is *inert*. `cl_lw` has no such clamp, takes the value it is
+given, and genuinely kills the game. Both are refused as typed commands
+(`BANNED_COMMANDS`); only `cl_lw` is an unconditional `FATAL_CVARS` entry, while
+`r_drawentities` is reported only when the same config also enables cheats. See
+`FatalCvar::needs_sv_cheats`.
+
+Verified live and by disassembly of both binaries, 2026-09-16.
 
 ## NetworkMessage Quirks & HLTV Protocol
 - **DRC_CMD_CAMERA Structure:** The `DRC_CMD_CAMERA` subcommand is a 30+ byte cinematic vector command (coordinates, FOV, direction vectors), not a 1-byte entity lock.

@@ -9,6 +9,18 @@ pub struct AppSettings {
     pub hlae_path: String,
     pub hl_path: String,
     pub ffmpeg_path: Option<String>,
+    /// Override for `dodstudio_goldsrc_hooks.dll` (see `native::patch::PatcherConfig`'s
+    /// field of the same name). Blank/absent means "use the bundled default
+    /// beside this app's own install" -- see
+    /// `native::patch::default_goldsrc_hooks_dll_path`.
+    ///
+    /// The key keeps its original spelling although the DLL was renamed to
+    /// `dodstudio_goldsrc_hooks.dll`: it is persisted in the user's settings file
+    /// and never shown, so renaming it would silently discard an existing
+    /// override (the one a dev build relies on) to change a string nobody
+    /// reads.
+    #[serde(default)]
+    pub goldsrc_hooks_dll_path: Option<String>,
     pub pinned_folders: Vec<String>,
     /// Analyzer sidebar's "Recent" quick-links tier — most-recent-first,
     /// capped at 10, pushed whenever a folder selection yields a non-empty
@@ -37,8 +49,6 @@ pub struct AppSettings {
     pub resolution_width: i32,
     #[serde(default = "default_resolution_height")]
     pub resolution_height: i32,
-    #[serde(default)]
-    pub separate_hud: bool,
     /// Whether the pipeline sweeps the decal ring between clips.
     ///
     /// Distinct from `r_decals` in `init_commands`, which says how many decals
@@ -83,8 +93,6 @@ pub struct AppSettings {
     /// software, not ours to manage, so nothing here tracks its lifecycle.
     #[serde(default)]
     pub obs_exe_path: String,
-    #[serde(default = "default_add_condebug")]
-    pub add_condebug: bool,
     #[serde(default)]
     pub auto_clear_logs: bool,
     #[serde(default)]
@@ -139,7 +147,7 @@ pub struct AppSettings {
     #[serde(default = "default_notify_updates")]
     pub notify_updates: bool,
     /// Which release channel `check_for_update` polls: `"stable"` (built from
-    /// `main`) or `"dev"` (built from `dev`, on-demand). See issue #133.
+    /// `main`) or `"experimental"` (built from `dev`, on-demand). See issue #133.
     #[serde(default = "default_update_channel")]
     pub update_channel: String,
     #[serde(default = "default_auto_check_updates")]
@@ -149,7 +157,6 @@ pub struct AppSettings {
 fn default_resolution_width() -> i32 { 1280 }
 fn default_obs_capture_fps() -> i32 { 120 }
 fn default_resolution_height() -> i32 { 720 }
-fn default_add_condebug() -> bool { true }
 fn default_initial_delay() -> f32 { 3.0 }
 fn default_fast_forward_speed() -> f32 { 0.05 }
 fn default_render_codec() -> String { "prores".to_string() }
@@ -181,6 +188,7 @@ impl Default for AppSettings {
             hlae_path: String::new(),
             hl_path: String::new(),
             ffmpeg_path: None,
+            goldsrc_hooks_dll_path: None,
             pinned_folders: Vec::new(),
             demo_folder_history: Vec::new(),
             scan_folders_for_demos: false,
@@ -192,7 +200,6 @@ impl Default for AppSettings {
             post_roll_seconds: 0.6,
             resolution_width: default_resolution_width(),
             resolution_height: default_resolution_height(),
-            separate_hud: false,
             decal_flush: default_decal_flush(),
             ffmpeg_capture: false,
             ffmpeg_capture_codec: default_capture_codec(),
@@ -201,7 +208,6 @@ impl Default for AppSettings {
             obs_port: default_obs_port(),
             obs_password: String::new(),
             obs_exe_path: String::new(),
-            add_condebug: default_add_condebug(),
             auto_clear_logs: false,
             auto_clear_previews: false,
             auto_clear_temp_demos: false,
@@ -253,13 +259,11 @@ pub fn settings_path() -> PathBuf {
 impl AppSettings {
     pub fn load_or_default() -> Self {
         let path = settings_path();
-        if path.exists() {
-            if let Ok(content) = fs::read_to_string(&path) {
-                if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+        if path.exists()
+            && let Ok(content) = fs::read_to_string(&path)
+                && let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
                     return settings;
                 }
-            }
-        }
         Self::default()
     }
 

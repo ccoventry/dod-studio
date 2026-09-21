@@ -55,14 +55,6 @@ export async function downloadMap(mapName, expectedChecksum, gamePath) {
     });
 }
 
-export async function mapDownloadUrl(mapName) {
-  return invoke("map_download_url", { mapName })
-    .catch((err) => {
-      console.error("IPC Execution Error (map_download_url):", err);
-      return null;
-    });
-}
-
 
 // What the pre-roll and post-roll have to cover. Quiet on failure: a timing
 // hint that cannot be computed is not worth interrupting anyone over.
@@ -87,7 +79,6 @@ export async function scanGameConfigs(
     initCommands,
     customCommands,
     captureFps: context.captureFps ?? null,
-    separateHud: context.separateHud ?? null,
     decalFlush: context.decalFlush ?? null,
   })
     .catch((err) => {
@@ -179,8 +170,8 @@ export async function startCaptureBatch(payload) {
  *  (BOOKMARK/director events at each highlight, regardless of selection or
  *  Min Kills — reuses an existing preview instead of regenerating one) and
  *  immediately launches it in HLAE via `+viewdemo`. */
-export async function launchDemoPreview(hlaePath, gamePath, streaks) {
-  return invoke("launch_demo_preview", { hlaePath, gamePath, streaks })
+export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
+  return invoke("launch_demo_preview", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
     .catch((err) => {
       console.error("IPC Execution Error (launch_demo_preview):", err);
       showToast(STRINGS.IPC.previewFailed(err), 'error');
@@ -265,14 +256,6 @@ export async function cancelCaptureBatch() {
     });
 }
 
-export async function getCaptureStatus() {
-  return invoke("capture_status")
-    .catch((err) => {
-      console.error("IPC Execution Error (capture_status):", err);
-      throw err;
-    });
-}
-
 export async function calculateExportPoolSpace(paths) {
   return invoke("calculate_export_pool_space", { paths: paths })
     .catch((err) => {
@@ -293,18 +276,6 @@ export async function diagnoseCaptureOutputPaths(paths) {
     });
 }
 
-export async function simulateAotCapacity(streaks, fps, bytesPerFrame, availableBytes) {
-  return invoke("simulate_aot_capacity", { 
-    streaks, 
-    fps, 
-    bytesPerFrame, 
-    availableBytes 
-  }).catch((err) => {
-    console.error("IPC Execution Error (simulate_aot_capacity):", err);
-    showToast(STRINGS.IPC.simulationError(err), 'error');
-    throw err;
-  });
-}
 
 export async function queueRenderBatch(payload) {
   // payload must match RenderBatchPayload:
@@ -564,7 +535,7 @@ export async function scanDemoFolders(root) {
     });
 }
 
-/** Checks `channel` ("stable" or "dev") for a newer release. Resolves to
+/** Checks `channel` ("stable" or "experimental") for a newer release. Resolves to
  *  `{ version, current_version, notes, pub_date }` or `null` when already
  *  up to date. See issue #133. */
 export async function checkForUpdate(channel) {
@@ -591,8 +562,8 @@ export async function downloadAndInstallUpdate() {
 
 /** Reads the actual compiled-in app version (Cargo.toml's `version`, stamped
  *  by the release workflows) — never hardcoded, so it always matches what
- *  was really built, whether that's a stable release, a dev build, or a
- *  local `npm run tauri dev` session. Best-effort: a version label isn't
+ *  was really built, whether that's a stable release, an experimental build,
+ *  or a local `npm run tauri dev` session. Best-effort: a version label isn't
  *  worth interrupting the user over. */
 export async function getAppVersion() {
   return getVersion().catch((err) => {

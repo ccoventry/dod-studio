@@ -3,6 +3,9 @@
 //! # Example
 //!
 //! ```no_run
+//! use dem::open_demo;
+//! use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
+//!
 //! let mut demo = open_demo("./src/tests/demotest.dem").unwrap();
 //!
 //! for entry in &mut demo.directory.entries {
@@ -22,7 +25,7 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 use std::{ffi::OsStr, path::Path};
-use nom::{combinator::all_consuming, multi::many0};
+use nom::{combinator::all_consuming, multi::many0, Parser};
 use types::{AuxRefCell, ByteVec, DeltaDecoderTable, Demo, NetMessage};
 
 use nom_helper::Result;
@@ -52,7 +55,7 @@ pub extern crate bitvec;
 ///
 pub fn parse_netmsg(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetMessage>> {
     let parser = move |i| NetMessage::parse(i, aux.clone());
-    all_consuming(many0(parser))(i)
+    all_consuming(many0(parser)).parse(i)
 }
 
 /// Should be used for replacing `data.msg` of each frame.
@@ -70,6 +73,8 @@ pub fn write_netmsg(i: &Vec<NetMessage>, aux: AuxRefCell) -> ByteVec {
 ///
 /// # Example
 /// ```no_run
+/// use dem::open_demo;
+///
 /// let demo = open_demo("./tests/demotest.dem").unwrap();
 /// ```
 pub fn open_demo(demo_path: impl AsRef<Path> + AsRef<OsStr>) -> eyre::Result<Demo> {
@@ -108,14 +113,72 @@ macro_rules! nbit_str {
 mod test {
     use super::*;
 
+    /// Regenerates `./src/tests/demotest.dem`, the small tracked fixture the
+    /// four tests below need. Not run automatically -- there is nothing to
+    /// regenerate *from*, this constructs a minimal demo entirely in code
+    /// rather than trimming a real recording, so running it again only
+    /// matters if the on-disk format itself changes.
+    ///
+    /// A real DoD/HLTV demo carries thousands of frames; this carries three
+    /// -- DemoStart, one ConsoleCommand, NextSection -- which is the smallest
+    /// shape `parse_directory`/`write_to_bytes` actually round-trip: a
+    /// `NetworkMessage` frame needs a fully populated `DemoInfo` (ref params,
+    /// usercmd, movevars, ...) for no benefit here, since these tests exist to
+    /// exercise open/write/parse-mode plumbing, not to be a realistic demo.
+    /// `frame_count`/`frame_offset`/`file_length`/`directory_offset` are left
+    /// at 0 -- `Demo::write_to_bytes` recomputes all four from the actual
+    /// frames and byte offsets rather than trusting these fields, which is
+    /// also why a hand-built `Demo` can produce a valid file at all.
     #[test]
-    #[ignore = "needs ./src/tests/demotest.dem, a local fixture not committed to the repo"]
+    #[ignore = "regenerates the tracked fixture; run manually with `cargo test -p dem --lib test::regenerate_fixture -- --ignored`"]
+    fn regenerate_fixture() {
+        use crate::types::{ConsoleCommand, Directory, DirectoryEntry, Frame, FrameData, Header};
+
+        let demo = Demo {
+            header: Header {
+                magic: b"HLDEMO\x00\x00".to_vec(),
+                demo_protocol: 5,
+                network_protocol: 48,
+                map_name: "dod_test".into(),
+                game_directory: "dod".into(),
+                map_checksum: 0,
+                directory_offset: 0,
+            },
+            directory: Directory {
+                entries: vec![DirectoryEntry {
+                    type_: 1,
+                    description: "fixture".into(),
+                    flags: 0,
+                    cd_track: 0,
+                    track_time: 0.0,
+                    frame_count: 0,
+                    frame_offset: 0,
+                    file_length: 0,
+                    frames: vec![
+                        Frame { time: 0.0, frame: 0, frame_data: FrameData::DemoStart },
+                        Frame {
+                            time: 0.0,
+                            frame: 0,
+                            frame_data: FrameData::ConsoleCommand(ConsoleCommand {
+                                command: "echo dem-patch test fixture".into(),
+                            }),
+                        },
+                        Frame { time: 0.0, frame: 1, frame_data: FrameData::NextSection },
+                    ],
+                }],
+            },
+            _aux: None,
+        };
+
+        demo.write_to_file("./src/tests/demotest.dem").unwrap();
+    }
+
+    #[test]
     fn open() {
         open_demo("./src/tests/demotest.dem").unwrap();
     }
 
     #[test]
-    #[ignore = "needs ./src/tests/demotest.dem, a local fixture not committed to the repo"]
     fn open_without_netmessage() {
         Demo::parse_from_file(
             "./src/tests/demotest.dem",
@@ -125,14 +188,12 @@ mod test {
     }
 
     #[test]
-    #[ignore = "needs ./src/tests/demotest.dem, a local fixture not committed to the repo"]
     fn write() {
         let dem = open_demo("./src/tests/demotest.dem").unwrap();
         dem.write_to_file("./src/tests/demotest_out.dem").unwrap();
     }
 
     #[test]
-    #[ignore = "needs a populated ./src/tests/ folder, not committed to the repo"]
     fn read_a_lot() {
         let folder = "./src/tests/";
 
@@ -156,6 +217,65 @@ mod test {
                     )
                 })
             })
-            .unwrap_or_else(|_| assert!(false));
+            .unwrap_or_else(|e| panic!("could not read the test fixture directory: {e}"));
+    }
+
+    /// A malformed demo must come back as `Err`, never as a panic.
+    ///
+    /// The distinction is not cosmetic. The release profile sets
+    /// `panic = "abort"`, so the `catch_unwind` in
+    /// `Analysis::try_from_bytes_with_progress` cannot contain a panic raised
+    /// in here -- a single corrupted file in a scanned folder would take the
+    /// whole process down instead of being skipped with a diagnostic. Before
+    /// #225, 248 of 400 randomly mangled demos did exactly that.
+    ///
+    /// These run under the test profile, which unwinds, so a regression shows
+    /// up as a failing test rather than as a dead test runner.
+    mod malformed_input_is_an_error_not_a_crash {
+        use super::*;
+
+        fn fixture() -> Vec<u8> {
+            std::fs::read("./src/tests/demotest.dem").expect("fixture")
+        }
+
+        /// The header's `directory_offset` is signed and is used as an index
+        /// into the file.
+        #[test]
+        fn a_directory_offset_past_the_end_is_refused() {
+            let mut bytes = fixture();
+            bytes[540..544].copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+            assert!(open_demo_from_bytes(&bytes).is_err());
+        }
+
+        #[test]
+        fn a_negative_directory_offset_is_refused() {
+            let mut bytes = fixture();
+            bytes[540..544].copy_from_slice(&(-8i32).to_le_bytes());
+            assert!(open_demo_from_bytes(&bytes).is_err());
+        }
+
+        /// Cutting the file anywhere past the header must not panic. Most cuts
+        /// land mid-frame; a few happen to be parseable.
+        #[test]
+        fn truncation_at_every_offset_past_the_header_is_survivable() {
+            let bytes = fixture();
+            for at in 544..bytes.len() {
+                let _ = open_demo_from_bytes(&bytes[..at]);
+            }
+        }
+
+        /// Every single-byte value at every position past the header. This is
+        /// the fixture, so it is small enough to be exhaustive.
+        #[test]
+        fn any_single_byte_corruption_past_the_header_is_survivable() {
+            let bytes = fixture();
+            for at in 544..bytes.len() {
+                for v in [0x00u8, 0x01, 0x7f, 0x80, 0xfe, 0xff] {
+                    let mut mutant = bytes.clone();
+                    mutant[at] = v;
+                    let _ = open_demo_from_bytes(&mutant);
+                }
+            }
+        }
     }
 }

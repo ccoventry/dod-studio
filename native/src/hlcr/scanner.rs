@@ -75,21 +75,18 @@ fn collect_wav_files(take_folder: &Path) -> Vec<String> {
     let mut wav_files = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(take_folder) {
         for sub_entry in read_dir.flatten() {
-            if let Ok(file_type) = sub_entry.file_type() {
-                if file_type.is_file() {
+            if let Ok(file_type) = sub_entry.file_type()
+                && file_type.is_file() {
                     let path = sub_entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext.to_string_lossy().to_lowercase() == "wav" {
-                            if let Some(name) = path.file_name() {
+                    if let Some(ext) = path.extension()
+                        && ext.to_string_lossy().to_lowercase() == "wav"
+                            && let Some(name) = path.file_name() {
                                 wav_files.push(name.to_string_lossy().into_owned());
                             }
-                        }
-                    }
                 }
-            }
         }
     }
-    wav_files.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
+    wav_files.sort_by_key(|a| a.to_lowercase());
     wav_files
 }
 
@@ -220,13 +217,12 @@ fn avi_frame_count(path: &Path) -> Option<usize> {
             b"avih" => {
                 total_frames = u32_at(&buf, body + 16).unwrap_or(0);
             }
-            b"strh" => {
+            b"strh"
                 // Only the video stream's length is meaningful here; an audio
                 // stream's dwLength counts samples or blocks, not frames.
-                if buf.get(body..body + 4) == Some(b"vids") && stream_length == 0 {
+                if buf.get(body..body + 4) == Some(b"vids") && stream_length == 0 => {
                     stream_length = u32_at(&buf, body + 32).unwrap_or(0);
                 }
-            }
             _ => {}
         }
 
@@ -446,11 +442,9 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
         for entry in read_dir.flatten() {
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false)
                 && entry.file_name().to_string_lossy().to_lowercase().starts_with("take")
-            {
-                if take_shape_is_renderable(&entry.path()) {
+                && take_shape_is_renderable(&entry.path()) {
                     return true;
                 }
-            }
         }
     }
     false
@@ -705,16 +699,14 @@ fn count_bmps(folder: &Path) -> usize {
     let mut count = 0;
     if let Ok(read_dir) = std::fs::read_dir(folder) {
         for entry in read_dir.flatten() {
-            if let Ok(file_type) = entry.file_type() {
-                if file_type.is_file() {
+            if let Ok(file_type) = entry.file_type()
+                && file_type.is_file() {
                     let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext.to_string_lossy().to_lowercase() == "bmp" {
+                    if let Some(ext) = path.extension()
+                        && ext.to_string_lossy().to_lowercase() == "bmp" {
                             count += 1;
                         }
-                    }
                 }
-            }
         }
     }
     count
@@ -722,25 +714,22 @@ fn count_bmps(folder: &Path) -> usize {
 
 fn get_clip_date(img_folder_path: &Path) -> String {
     let bmp_path = img_folder_path.join("00000.bmp");
-    if let Ok(metadata) = std::fs::metadata(&bmp_path).or_else(|_| std::fs::metadata(img_folder_path)) {
-        if let Ok(created) = metadata.created().or_else(|_| metadata.modified()) {
+    if let Ok(metadata) = std::fs::metadata(&bmp_path).or_else(|_| std::fs::metadata(img_folder_path))
+        && let Ok(created) = metadata.created().or_else(|_| metadata.modified()) {
             return chrono::DateTime::<chrono::Local>::from(created)
                 .format("%Y-%m-%d %I:%M %p")
                 .to_string();
         }
-    }
     "-".to_string()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    fn scratch_dir(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("dod_scanner_test_{}", name));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-        dir
+    fn scratch_dir(name: &str) -> Scratch {
+        Scratch::new(format_args!("scanner_test_{name}"))
     }
 
     fn write_frames(take: &Path, stream: &str) {
@@ -784,8 +773,7 @@ mod tests {
 
     #[test]
     fn test_missing_take_folder_is_not_renderable() {
-        let missing = std::env::temp_dir().join("dod_scanner_test_does_not_exist");
-        let _ = std::fs::remove_dir_all(&missing);
+        let missing = Scratch::absent("scanner_test_does_not_exist");
         assert!(!is_renderable_take(&missing));
     }
 
@@ -830,11 +818,8 @@ mod tests {
         std::fs::write(folder.join(VIDEO_FILE), avi).unwrap();
     }
 
-    fn scratch(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("dod_scan_{}_{}", name, std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn scratch(name: &str) -> Scratch {
+        Scratch::new(format_args!("scan_{name}"))
     }
 
     /// A stream folder holding a video with the given bytes, named `video.<ext>`.
@@ -872,12 +857,12 @@ mod tests {
     #[test]
     fn a_video_take_with_audio_is_renderable_without_a_wav() {
         let root = scratch("obs_take");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
         assert!(collect_wav_files(&take).is_empty(), "no wav, by construction");
         assert!(is_renderable_take(&take));
         // And through the take* nesting, which is how the capture side asks.
-        assert!(is_renderable_take(&root.join("chain_01_b0")));
+        assert!(is_renderable_take(&root.join("dodtools_chain_01_b0")));
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -886,7 +871,7 @@ mod tests {
     #[test]
     fn a_silent_video_take_is_not_renderable() {
         let root = scratch("silent");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_without_audio());
         assert!(
             !is_renderable_take(&take),
@@ -1116,7 +1101,7 @@ mod tests {
     #[test]
     fn scan_finds_an_obs_take_with_no_wav() {
         let root = scratch("obs_scan");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
 
         let clips = scan(&take);
@@ -1133,12 +1118,12 @@ mod tests {
     #[test]
     fn scan_names_an_obs_take_from_demo_and_take_not_a_wav() {
         let root = scratch("obs_naming");
-        let take = root.join("some_demo").join("chain_02_b1").join("take0000");
+        let take = root.join("some_demo").join("dodtools_chain_02_b1").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
 
         let clips = scan(&take);
         assert_eq!(clips.len(), 1);
-        assert!(clips[0].base_name.contains("chain_02_b1"), "{}", clips[0].base_name);
+        assert!(clips[0].base_name.contains("dodtools_chain_02_b1"), "{}", clips[0].base_name);
         assert!(clips[0].base_name.ends_with("-obs"), "{}", clips[0].base_name);
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -1149,7 +1134,7 @@ mod tests {
     #[test]
     fn scan_does_not_find_a_silent_obs_take() {
         let root = scratch("obs_silent_scan");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_without_audio());
 
         let clips = scan(&take);
@@ -1178,7 +1163,7 @@ mod tests {
     #[test]
     fn a_silent_stream_beside_an_audible_one_is_not_scanned_even_though_the_take_is() {
         let root = scratch("mixed_streams");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
         write_named_video(&take, "second", "mp4", &mp4_without_audio());
 
@@ -1196,7 +1181,7 @@ mod tests {
     #[test]
     fn a_hud_bundle_with_no_wav_and_a_silent_all_stream_is_not_scanned() {
         let root = scratch("hud_bundle_silent_all");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         // "all" is silent, but some other stream carries audio, so the take
         // as a whole still passes `take_shape_is_renderable`.
         write_named_video(&take, "all", "mp4", &mp4_without_audio());
@@ -1215,7 +1200,7 @@ mod tests {
     #[test]
     fn a_hud_bundle_with_no_wav_admits_all_but_not_the_hud_pair() {
         let root = scratch("hud_bundle_no_wav");
-        let take = root.join("chain_01_b0").join("take0000");
+        let take = root.join("dodtools_chain_01_b0").join("take0000");
         write_named_video(&take, "all", "mp4", &mp4_with_audio());
         write_named_video(&take, "hudcolor", "mp4", &mp4_without_audio());
         write_named_video(&take, "hudalpha", "mp4", &mp4_without_audio());

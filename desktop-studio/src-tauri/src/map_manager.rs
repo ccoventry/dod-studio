@@ -172,6 +172,23 @@ pub struct BannedCommandRow {
     pub command: String,
 }
 
+/// A config sets a `cfg_scan::FATAL_CVARS` entry to something other than the
+/// one value DoD's own client will not quit the game over.
+///
+/// Distinct from `BannedCommandRow`: that one is a command the user *typed*
+/// into Initial or Scheduled Commands, which the app can simply refuse to run.
+/// This is a value already sitting in a config file the app never writes to
+/// (see `cfg_scan`'s module doc) -- the most it can do is say so.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CfgFatalRow {
+    pub cvar: String,
+    pub value: String,
+    pub required: String,
+    pub file: String,
+    pub line: usize,
+}
+
 /// A command from `cfg_scan::NOOP_IN_INIT_COMMANDS` or
 /// `NOOP_EVERYWHERE_COMMANDS` found somewhere that has no effect — never
 /// blocking, just something the user should stop expecting to matter.
@@ -230,6 +247,13 @@ pub struct CfgReport {
     /// scheduled, so they show up in `banned_scheduled` instead).
     pub noop_init: Vec<NoopCommandRow>,
     pub noop_scheduled: Vec<NoopCommandRow>,
+    /// `cfg_scan::FATAL_CVARS` entries a config sets wrong -- DoD's own
+    /// client quits the game outright the moment it renders a HUD frame with
+    /// one of these not at its required value. Not blocking (nothing here can
+    /// force a fix to a file the app never writes), but the most severe
+    /// warning this report carries: everything else degrades a capture,
+    /// this one crashes the game.
+    pub fatal_cvars: Vec<CfgFatalRow>,
 }
 
 /// Scheduled commands in the order the engine reaches them.
@@ -267,7 +291,6 @@ pub async fn scan_game_configs(
     init_commands: Vec<String>,
     custom_commands: Vec<CustomCommandPayload>,
     capture_fps: Option<i32>,
-    separate_hud: Option<bool>,
     decal_flush: Option<bool>,
 ) -> Result<CfgReport, String> {
     let exe = PathBuf::from(&game_path);
@@ -294,9 +317,6 @@ pub async fn scan_game_configs(
         };
         if let Some(v) = capture_fps {
             cfg.capture_fps = v;
-        }
-        if let Some(v) = separate_hud {
-            cfg.separate_hud = v;
         }
         if let Some(v) = decal_flush {
             cfg.decal_flush = v;
@@ -380,7 +400,7 @@ pub async fn scan_game_configs(
         // still counts as seeing it, so that is not reported as unseen.
         let named: std::collections::HashSet<String> = effective_commands
             .iter()
-            .filter_map(|c| c.trim().split_whitespace().next().map(str::to_lowercase))
+            .filter_map(|c| c.split_whitespace().next().map(str::to_lowercase))
             .collect();
         // mirv_fov/default_fov are read directly from an executed config
         // whenever neither is stated in Initial Commands
@@ -522,6 +542,20 @@ pub async fn scan_game_configs(
             }
         }
 
+        // Config-file values DoD's own client will quit the game over --
+        // distinct from banned_init/banned_scheduled, which is about commands
+        // typed into the pipeline's own fields (see CfgFatalRow's doc comment).
+        let fatal_cvars: Vec<CfgFatalRow> = native::patch::cfg_scan::fatal_cvar_hazards(&scan)
+            .into_iter()
+            .map(|f| CfgFatalRow {
+                file: f.file_name(),
+                cvar: f.cvar,
+                value: f.value,
+                required: f.required,
+                line: f.line,
+            })
+            .collect();
+
         CfgReport {
             unseen,
             overrides,
@@ -533,6 +567,7 @@ pub async fn scan_game_configs(
             decal_flush_is_noop,
             noop_init,
             noop_scheduled,
+            fatal_cvars,
         }
     })
     .await
@@ -626,13 +661,6 @@ pub fn roll_floors(
     }
 }
 
-/// The URL a map would be fetched from, so a prompt can show it before anything
-/// reaches the network.
-#[tauri::command]
-pub fn map_download_url(map_name: String) -> Result<String, String> {
-    map_fetch::map_url(map_fetch::DEFAULT_MIRROR, &map_name)
-}
-
 /// Download one map and install it, verified against the build the demo wants.
 ///
 /// This writes into the user's game folder and talks to the network, so it is
@@ -669,6 +697,7 @@ pub async fn download_map(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
     #[test]
     fn a_game_path_with_no_map_folder_says_so_rather_than_failing_later() {
@@ -686,15 +715,14 @@ mod tests {
     /// A game folder as the engine expects it: `hl.exe` with `dod/` beside it,
     /// a `config.cfg` that execs `movie.cfg`, and the values that caused all
     /// this in `movie.cfg`.
-    fn fake_game(tag: &str) -> String {
-        let root = std::env::temp_dir().join(format!("dod_cfgrep_{}_{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn fake_game(tag: &str) -> (Scratch, String) {
+        let root = Scratch::new(format_args!("cfgrep_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
-        std::fs::write(&dod.join("config.cfg"), "bind \"F7\" \"r_decals 4000\"\nexec movie.cfg\n")
+        std::fs::write(dod.join("config.cfg"), "bind \"F7\" \"r_decals 4000\"\nexec movie.cfg\n")
             .unwrap();
         std::fs::write(
-            &dod.join("movie.cfg"),
+            dod.join("movie.cfg"),
             // hud_deathnotice_time is here because it is the cvar people
             // genuinely pair around a clip — raised before, restored after.
             "r_decals \"0\"\nmirv_movie_fps \"300\"\nhud_deathnotice_time \"10\"\nmirv_fov \"105\"\n",
@@ -702,7 +730,7 @@ mod tests {
         .unwrap();
         let exe = root.join("hl.exe");
         std::fs::write(&exe, b"").unwrap();
-        exe.to_string_lossy().to_string()
+        (root, exe.to_string_lossy().to_string())
     }
 
     /// Same shape as `fake_game`, but movie.cfg never touches `r_decals` at
@@ -710,46 +738,63 @@ mod tests {
     /// (0, specifically, to exercise the flush's own zero-ring case), so the
     /// one test that needs the genuinely-nothing-anywhere case gets its own
     /// fixture rather than changing that shared one out from under them.
-    fn fake_game_without_r_decals(tag: &str) -> String {
-        let root = std::env::temp_dir().join(format!("dod_cfgrep_nodecals_{}_{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn fake_game_without_r_decals(tag: &str) -> (Scratch, String) {
+        let root = Scratch::new(format_args!("cfgrep_nodecals_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
-        std::fs::write(&dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
-        std::fs::write(&dod.join("movie.cfg"), "mirv_movie_fps \"300\"\n").unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        std::fs::write(dod.join("movie.cfg"), "mirv_movie_fps \"300\"\n").unwrap();
         let exe = root.join("hl.exe");
         std::fs::write(&exe, b"").unwrap();
-        exe.to_string_lossy().to_string()
+        (root, exe.to_string_lossy().to_string())
     }
 
     /// Same shape again, but movie.cfg states `r_decals <value>` and nothing
     /// else — for the tests that need a config-stated value other than the
     /// 0 the shared `fake_game` fixture always carries.
-    fn fake_game_with_r_decals(tag: &str, value: &str) -> String {
-        let root = std::env::temp_dir().join(format!("dod_cfgrep_decals_{}_{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn fake_game_with_r_decals(tag: &str, value: &str) -> (Scratch, String) {
+        let root = Scratch::new(format_args!("cfgrep_decals_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
-        std::fs::write(&dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
-        std::fs::write(&dod.join("movie.cfg"), format!("r_decals \"{}\"\n", value)).unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        std::fs::write(dod.join("movie.cfg"), format!("r_decals \"{}\"\n", value)).unwrap();
         let exe = root.join("hl.exe");
         std::fs::write(&exe, b"").unwrap();
-        exe.to_string_lossy().to_string()
+        (root, exe.to_string_lossy().to_string())
     }
 
     /// Same shape again, movie.cfg assigning `mirv_movie_filename` — the
     /// shared `fake_game` fixture's config.cfg only `bind`s it, which is not
     /// an assignment the scanner records at all.
-    fn fake_game_with_mirv_movie_filename(tag: &str) -> String {
-        let root = std::env::temp_dir().join(format!("dod_cfgrep_moviefn_{}_{}", tag, std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+    fn fake_game_with_mirv_movie_filename(tag: &str) -> (Scratch, String) {
+        let root = Scratch::new(format_args!("cfgrep_moviefn_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
-        std::fs::write(&dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
-        std::fs::write(&dod.join("movie.cfg"), "mirv_movie_filename \"clip\"\n").unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        std::fs::write(dod.join("movie.cfg"), "mirv_movie_filename \"clip\"\n").unwrap();
         let exe = root.join("hl.exe");
         std::fs::write(&exe, b"").unwrap();
-        exe.to_string_lossy().to_string()
+        (root, exe.to_string_lossy().to_string())
+    }
+
+    /// Same shape again, movie.cfg assigning `r_drawentities` to a value other
+    /// than 1. Only fatal when the config also turns cheats on: while
+    /// `sv_cheats` is 0 GoldSrc clamps the cvar back itself and DoD's client
+    /// never sees the value (`cfg_scan::FatalCvar::needs_sv_cheats`).
+    fn fake_game_with_r_drawentities(tag: &str, value: &str, cheats: bool) -> (Scratch, String) {
+        let root = Scratch::new(format_args!("cfgrep_fatal_{tag}"));
+        let dod = root.join("dod");
+        std::fs::create_dir_all(&dod).unwrap();
+        std::fs::write(dod.join("config.cfg"), "exec movie.cfg\n").unwrap();
+        let cheat_line = if cheats { "sv_cheats \"1\"\n" } else { "" };
+        std::fs::write(
+            dod.join("movie.cfg"),
+            format!("{}r_drawentities \"{}\"\n", cheat_line, value),
+        )
+        .unwrap();
+        let exe = root.join("hl.exe");
+        std::fs::write(&exe, b"").unwrap();
+        (root, exe.to_string_lossy().to_string())
     }
 
     fn scheduled(command: &str, relation: &str, offset: f32) -> CustomCommandPayload {
@@ -765,12 +810,12 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        let (_dir, game) = fake_game(tag);
         rt.block_on(scan_game_configs(
-            fake_game(tag),
+            game,
             Vec::new(),
             custom,
             Some(120),
-            Some(false),
             Some(true),
         ))
         .unwrap()
@@ -844,12 +889,12 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
+        let (_dir, game) = fake_game(tag);
         rt.block_on(scan_game_configs(
-            fake_game(tag),
+            game,
             init.iter().map(|s| s.to_string()).collect(),
             custom.iter().map(|s| scheduled(s, "Before", 2.0)).collect(),
             Some(fps),
-            Some(false),
             Some(true),
         ))
         .unwrap()
@@ -862,13 +907,13 @@ mod tests {
         // config setting it really is invisible to the pipeline. That is
         // the genuinely silent case this category exists for.
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game("unseen");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game("unseen"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
@@ -924,6 +969,80 @@ mod tests {
     }
 
     #[test]
+    fn r_drawentities_and_cl_lw_in_initial_commands_are_reported_as_banned() {
+        let r = report("banned_fatal_init", &["r_drawentities 0", "cl_lw 0"], &[], 120);
+
+        let cvars: Vec<&str> = r.banned_init.iter().map(|b| b.cvar.as_str()).collect();
+        assert_eq!(cvars, vec!["r_drawentities", "cl_lw"], "{:?}", r.banned_init);
+    }
+
+    #[test]
+    fn r_drawentities_and_cl_lw_in_scheduled_commands_are_reported_as_banned() {
+        let r = report("banned_fatal_scheduled", &[], &["r_drawentities 0", "cl_lw 0"], 120);
+
+        let cvars: Vec<&str> = r.banned_scheduled.iter().map(|b| b.cvar.as_str()).collect();
+        assert_eq!(cvars, vec!["r_drawentities", "cl_lw"], "{:?}", r.banned_scheduled);
+    }
+
+    #[test]
+    fn a_config_setting_r_drawentities_to_zero_is_reported_as_fatal() {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_with_r_drawentities("fatal_config", "0", true);
+        let r = rt
+            .block_on(scan_game_configs(
+                game,
+                vec![],
+                vec![],
+                Some(120),
+                Some(true),
+            ))
+            .unwrap();
+
+        assert_eq!(r.fatal_cvars.len(), 1, "{:?}", r.fatal_cvars);
+        assert_eq!(r.fatal_cvars[0].cvar, "r_drawentities");
+        assert_eq!(r.fatal_cvars[0].value, "0");
+        assert_eq!(r.fatal_cvars[0].required, "1");
+        assert_eq!(r.fatal_cvars[0].file, "movie.cfg");
+    }
+
+    #[test]
+    fn r_drawentities_without_sv_cheats_is_not_reported_as_fatal() {
+        // The engine clamps it back to 1.0 on its own, so the line is inert
+        // and flagging it would block a capture over nothing. Confirmed live:
+        // setting r_drawentities with cheats off does not close the game.
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_with_r_drawentities("fatal_no_cheats", "0", false);
+        let r = rt
+            .block_on(scan_game_configs(
+                game,
+                vec![],
+                vec![],
+                Some(120),
+                Some(true),
+            ))
+            .unwrap();
+
+        assert!(r.fatal_cvars.is_empty(), "{:?}", r.fatal_cvars);
+    }
+
+    #[test]
+    fn a_config_setting_r_drawentities_to_one_is_not_reported_as_fatal() {
+        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_with_r_drawentities("fatal_config_ok", "1", true);
+        let r = rt
+            .block_on(scan_game_configs(
+                game,
+                vec![],
+                vec![],
+                Some(120),
+                Some(true),
+            ))
+            .unwrap();
+
+        assert!(r.fatal_cvars.is_empty(), "{:?}", r.fatal_cvars);
+    }
+
+    #[test]
     fn mirv_movie_filename_in_initial_commands_is_reported_as_a_noop_not_banned() {
         let r = report("noop_init_typed", &["mirv_movie_filename foo"], &[], 120);
 
@@ -938,13 +1057,13 @@ mod tests {
         // fake_game()'s config.cfg has a bind, not an assignment — this needs
         // a fixture that actually assigns the cvar.
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_with_mirv_movie_filename("noop_config");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game_with_mirv_movie_filename("noop_config"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
@@ -1025,13 +1144,13 @@ mod tests {
     #[test]
     fn the_default_ring_is_reported_when_nothing_states_r_decals() {
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_without_r_decals("decal_default_unset");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game_without_r_decals("decal_default_unset"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1084,13 +1203,13 @@ mod tests {
         // fixture that states nothing at all — falling through to the app's
         // nonzero default.
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_without_r_decals("decal_noop_nonzero");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game_without_r_decals("decal_noop_nonzero"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1100,13 +1219,13 @@ mod tests {
     #[test]
     fn a_nonzero_r_decals_a_config_states_is_not_reported_as_a_flush_noop() {
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game_with_r_decals("decal_noop_config_nonzero", "512");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game_with_r_decals("decal_noop_config_nonzero", "512"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(true),
             ))
             .unwrap();
@@ -1117,13 +1236,13 @@ mod tests {
     #[test]
     fn a_zero_r_decals_is_not_reported_as_a_flush_noop_when_flush_is_off() {
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game("decal_noop_flush_off");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game("decal_noop_flush_off"),
+                game,
                 vec!["r_decals \"0\"".to_string()],
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();
@@ -1133,13 +1252,13 @@ mod tests {
     #[test]
     fn the_default_ring_is_not_reported_when_flush_is_off() {
         let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let (_dir, game) = fake_game("decal_default_flush_off");
         let r = rt
             .block_on(scan_game_configs(
-                fake_game("decal_default_flush_off"),
+                game,
                 Vec::new(),
                 Vec::new(),
                 Some(120),
-                Some(false),
                 Some(false),
             ))
             .unwrap();

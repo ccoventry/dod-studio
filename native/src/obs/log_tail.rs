@@ -131,10 +131,14 @@ impl LogTailer {
 
     /// Reads whatever has been appended since the last call.
     ///
-    /// Handles the file being deleted or truncated underneath — which happens
-    /// when a batch's cleanup runs, or when the engine starts a fresh log — by
-    /// rewinding to zero. A shrinking file is a new file, and its content is
-    /// live rather than history.
+    /// Handles the file being deleted or truncated underneath by rewinding to
+    /// zero. A shrinking file is a new file, and its content is live rather than
+    /// history.
+    ///
+    /// The only thing that actually shortens it is a batch's own cleanup
+    /// (`auto_clear_logs`). The engine **appends** across launches — measured on
+    /// a 1.5 MB `qconsole.log` holding 100 startup banners — so this rewind is
+    /// defensive rather than a path the engine drives.
     pub fn poll(&mut self) -> Vec<Marker> {
         let Ok(mut file) = std::fs::File::open(&self.path) else {
             // Not there yet, or just removed. Either way the next thing written
@@ -240,12 +244,16 @@ fn parse_next_clip_progress(label: &str) -> Option<(u32, u32, u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
     use std::io::Write;
 
-    fn temp(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("dod_logtail_{}_{}", name, std::process::id()));
-        let _ = std::fs::remove_file(&p);
-        p
+    /// A log file inside its own scratch directory. The guard comes back with
+    /// it because the file is what the test names and the directory is what
+    /// gets removed.
+    fn temp(name: &str) -> (Scratch, PathBuf) {
+        let dir = Scratch::new(format_args!("logtail_{name}"));
+        let file = dir.join("obs.log");
+        (dir, file)
     }
 
     #[test]
@@ -319,7 +327,7 @@ mod tests {
     /// replaying it would fire a record on a batch that finished days ago.
     #[test]
     fn starts_at_the_end_of_an_existing_log() {
-        let p = temp("history");
+        let (_dir, p) = temp("history");
         std::fs::write(&p, "[dod-tools] START_RECORD - Tick 1\n").unwrap();
         let mut t = LogTailer::at_end(&p);
         assert!(t.poll().is_empty(), "history must not be replayed");
@@ -337,7 +345,7 @@ mod tests {
     /// engine flushes per line, but a read can still land mid-line.
     #[test]
     fn reassembles_a_line_split_across_reads() {
-        let p = temp("partial");
+        let (_dir, p) = temp("partial");
         std::fs::write(&p, "").unwrap();
         let mut t = LogTailer::at_end(&p);
 
@@ -346,7 +354,7 @@ mod tests {
         f.flush().unwrap();
         assert!(t.poll().is_empty(), "half a line is not a marker yet");
 
-        write!(f, "CORD - Tick 99\n").unwrap();
+        writeln!(f, "CORD - Tick 99").unwrap();
         f.flush().unwrap();
         let got = t.poll();
         assert_eq!(got.len(), 1);
@@ -359,7 +367,7 @@ mod tests {
     /// and its contents are live rather than history.
     #[test]
     fn a_truncated_log_is_read_from_the_start() {
-        let p = temp("truncate");
+        let (_dir, p) = temp("truncate");
         std::fs::write(&p, "[dod-tools] BREADCRUMB - Tick 1\n[dod-tools] BREADCRUMB - Tick 2\n").unwrap();
         let mut t = LogTailer::at_end(&p);
         assert!(t.poll().is_empty());
@@ -373,7 +381,8 @@ mod tests {
 
     #[test]
     fn a_missing_log_is_not_an_error() {
-        let mut t = LogTailer::at_end(&temp("absent"));
+        let (_dir, absent) = temp("absent");
+        let mut t = LogTailer::at_end(&absent);
         assert!(t.poll().is_empty());
     }
 }

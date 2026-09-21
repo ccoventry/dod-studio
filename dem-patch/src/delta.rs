@@ -24,7 +24,10 @@ pub fn parse_delta(dd: &DeltaDecoder, br: &mut BitReader) -> Delta {
 
             if (mask_byte & (1 << j)) != 0 {
                 let description = &dd[index];
-                let key = from_utf8(&description.name).unwrap().to_owned();
+                // A decoder table built from a corrupted delta_description
+                // can carry a non-UTF-8 field name. Lossy rather than
+                // `unwrap`, because the release profile aborts on panic. #225.
+                let key = String::from_utf8_lossy(&description.name).into_owned();
                 let value = parse_delta_field(description, br);
                 res.insert(key, value);
             }
@@ -38,6 +41,21 @@ macro_rules! flag {
     ($lhs:expr, $rhs:expr) => {{
         $lhs as u32 & $rhs as u32 != 0
     }};
+}
+
+/// `bits` and `divisor` both come off disk. `bits` of 0 makes the signed paths
+/// below compute `0 - 1`, and `divisor` of 0 makes the integer paths divide by
+/// zero -- each an abort under `panic = "abort"`. Neither occurs in a valid
+/// delta description. See #225.
+fn signed_bits(description: &DeltaDecoderS) -> usize {
+    (description.bits as usize).saturating_sub(1)
+}
+
+/// Integer division that yields 0 instead of aborting when `divisor` is 0.
+macro_rules! div_or_zero {
+    ($value:expr, $divisor:expr) => {
+        $value.checked_div($divisor).unwrap_or(0)
+    };
 }
 
 fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8> {
@@ -56,40 +74,43 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
     if is_byte {
         if is_signed {
             let sign = if br.read_1_bit() { -1 } else { 1 };
-            let value = br.read_n_bit(description.bits as usize - 1).to_u8();
-            let res_value = ((sign * value as i8) / description.divisor as i8).to_le_bytes();
+            let value = br.read_n_bit(signed_bits(description)).to_u8();
+            let res_value =
+                div_or_zero!(sign * value as i8, description.divisor as i8).to_le_bytes();
             res_value.to_vec()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u8();
-            let res_value = (value / description.divisor as u8).to_le_bytes();
+            let res_value = div_or_zero!(value, description.divisor as u8).to_le_bytes();
             res_value.to_vec()
         }
     } else if is_short {
         if is_signed {
             let sign = if br.read_1_bit() { -1 } else { 1 };
-            let value = (br.read_n_bit(description.bits as usize - 1)).to_u16();
-            let res_value = ((sign * value as i16) / description.divisor as i16).to_le_bytes();
+            let value = (br.read_n_bit(signed_bits(description))).to_u16();
+            let res_value =
+                div_or_zero!(sign * value as i16, description.divisor as i16).to_le_bytes();
             res_value.to_vec()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u16();
-            let res_value = (value / description.divisor as u16).to_le_bytes();
+            let res_value = div_or_zero!(value, description.divisor as u16).to_le_bytes();
             res_value.to_vec()
         }
     } else if is_integer {
         if is_signed {
             let sign = if br.read_1_bit() { -1 } else { 1 };
-            let value = (br.read_n_bit(description.bits as usize - 1)).to_u32();
-            let res_value = ((sign * value as i32) / description.divisor as i32).to_le_bytes();
+            let value = (br.read_n_bit(signed_bits(description))).to_u32();
+            let res_value =
+                div_or_zero!(sign * value as i32, description.divisor as i32).to_le_bytes();
             res_value.to_vec()
         } else {
             let value = (br.read_n_bit(description.bits as usize)).to_u32();
-            let res_value = (value / description.divisor as u32).to_le_bytes();
+            let res_value = div_or_zero!(value, description.divisor as u32).to_le_bytes();
             res_value.to_vec()
         }
     } else if is_some_float {
         if is_signed {
             let sign = if br.read_1_bit() { -1 } else { 1 };
-            let value = (br.read_n_bit(description.bits as usize - 1)).to_u32();
+            let value = (br.read_n_bit(signed_bits(description))).to_u32();
             let res_value = (((sign * value as i32) as f32) / (description.divisor)).to_le_bytes();
             res_value.to_vec()
         } else {
@@ -99,13 +120,19 @@ fn parse_delta_field(description: &DeltaDecoderS, br: &mut BitReader) -> Vec<u8>
         }
     } else if is_angle {
         let value = (br.read_n_bit(description.bits as usize)).to_u32();
-        let multiplier = 360f32 / ((1 << description.bits) as f32);
+        // `1 << bits` overflows for a `bits` of 32 or more, which a corrupted
+        // description can carry. #225.
+        let multiplier = 360f32 / (1u32.checked_shl(description.bits).unwrap_or(u32::MAX) as f32);
         let res_value = (value as f32 * multiplier).to_le_bytes();
         res_value.to_vec()
     } else if is_string {
         bitslice_to_u8_vec(br.read_string())
     } else {
-        unreachable!("Encoded value does not match any types. Should this happens?");
+        // Was `unreachable!`. It is reachable: `flags` is read off disk, and a
+        // corrupted description can name no type at all. Flag the read so the
+        // caller rejects the message rather than aborting the process. #225.
+        br.flag_bad_read();
+        Vec::new()
     }
 }
 

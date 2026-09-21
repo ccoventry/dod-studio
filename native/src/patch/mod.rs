@@ -11,8 +11,58 @@
 //   Step 4 (pending): builder.rs        ← build_batch_queue, spawn_patch_batch
 //   Step 5 (pending): scanner.rs        ← scan_demo_for_highlights, is_hltv_demo
 
+/// Cancellation as the decal-flush pipeline sees it.
+///
+/// A capture batch owns an `Arc<AtomicBool>` and passes it in; the offline
+/// probes in `native/examples`, the `strip_decals` binary and the unit tests
+/// run the same code with nothing to cancel them, and pass [`Cancel::never`].
+/// Wrapping the difference here keeps every check site a plain
+/// `if cancel.requested()` instead of an `Option` dance repeated a dozen times.
+#[derive(Clone, Copy)]
+pub struct Cancel<'a>(Option<&'a std::sync::Arc<std::sync::atomic::AtomicBool>>);
+
+impl<'a> Cancel<'a> {
+    pub fn new(token: &'a std::sync::Arc<std::sync::atomic::AtomicBool>) -> Self {
+        Self(Some(token))
+    }
+
+    /// A check that never fires, for callers outside a cancellable batch.
+    pub const fn never() -> Self {
+        Self(None)
+    }
+
+    #[inline]
+    pub fn requested(&self) -> bool {
+        self.0
+            .is_some_and(|t| t.load(std::sync::atomic::Ordering::Relaxed))
+    }
+}
+
+/// Returned by the decal-flush pipeline when it gave up because the batch was
+/// cancelled. Deliberately not a `String` error: cancellation is not a failure
+/// and must not be reported to the user as one, nor fall back to the
+/// unflushed demo and carry on patching the way a real flush failure does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Cancelled;
+
+impl std::fmt::Display for Cancelled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("cancelled by user")
+    }
+}
+
 // Engine & Memory Limits
+
+/// The width of a Type-3 `ConsoleCommand` frame's `char command[64]` field.
+///
+/// This is a **demo file format** property, not an engine one, so it cannot be
+/// raised: `dem-patch`'s `parse_console_command` reads exactly 64 bytes, and a
+/// longer string would run into the next frame. GoldSrc's own command buffer is
+/// 16,384 bytes (`Cbuf_Init`, `hw.dll+0x272b0`) and imposes nothing here — see
+/// `docs/goldsrc_hw_dll_survey.md` §3.1. A command too long for one frame has to
+/// be staggered across several ticks.
 pub const MAX_CONSOLE_CMD_LEN: usize = 64;
+/// The longest command that still leaves room for the field's NUL terminator.
 pub const MAX_CONSOLE_CMD_SAFE_LEN: usize = 63;
 pub const MAX_DIRECTOR_STUFFTEXT_LEN: usize = 253;
 pub const IO_BUFFER_CAPACITY: usize = 262_144;
@@ -38,6 +88,18 @@ pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
 pub const CUSTOM_CMD_WARN_LIMIT: usize = 60;
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
+/// Upper bound on the size of a `NetworkMessage` frame the decal passes will
+/// append injected payload to.
+///
+/// A frame at or above this is already close enough to the engine's own read
+/// budget that adding to it risks an `svc_bad` on playback, so the passes skip
+/// it and use a smaller neighbour instead — there are always plenty. This is a
+/// safety margin chosen against the engine's behaviour, not a value the format
+/// states anywhere, which is exactly why it wants a name rather than a `1024`
+/// sitting in two files. `decal_probe` and `decal_strip` both filter on it via
+/// `is_injectable_frame`.
+pub const MAX_INJECTABLE_MESSAGE_LEN: u32 = 1024;
+
 /// The engine's own ceiling on the decal ring. `r_decals` is clamped to this,
 /// so a sweep of this size turns a full revolution regardless of what the cvar
 /// is set to — which is what lets the pipeline stop pinning it. See
@@ -55,6 +117,14 @@ pub mod decal_strip;
 pub mod decal_atlas;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod bsp_entities;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sound_mute;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_text;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod cfg_scan;
 pub mod map_check;
@@ -88,6 +158,7 @@ pub use types::{
     PatcherConfig,
     HighlightRules,
     HighlightStatus,
+    default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -102,7 +173,8 @@ pub use decal_strip::{
     DEFAULT_LEAD_SECONDS,
     proven_world_coordinates, ring_limit, ring_limit_from_init, ring_limit_from_game_config,
     strip_decals_outside_windows,
-    CleanedSource, DecalCleanOptions, DecalCleanStats, FlushSource, VisibilityBasis,
+    CleanedSource, DecalCleanError, DecalCleanOptions, DecalCleanStats, FlushSource,
+    VisibilityBasis,
     DECALS_PER_POSITION, MAX_OVERLAP_DECALS,
 };
 
@@ -123,13 +195,43 @@ pub use decal_strip::{capture_fov_from_init, capture_fov_resolved};
 pub use map_check::{check_demo, map_reference, MapReference, MapStatus};
 
 #[cfg(not(target_arch = "wasm32"))]
+pub use sound_mute::{map_sounds, mute_sounds, MapSounds, MuteSelection, MuteStats};
+
+#[cfg(not(target_arch = "wasm32"))]
+pub use map_text::{hide_map_text, map_text, MapText, TextSelection, TextStats};
+
+#[cfg(not(target_arch = "wasm32"))]
 pub use map_fetch::{fetch_map, map_url, FetchOutcome, DEFAULT_MIRROR};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use engine::StreamPatcher;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use builder::{build_batch_queue, final_init_commands, spawn_patch_batch, WorkspaceGuard, build_director_message, build_director_stufftext, build_preview_patch_jobs};
+pub use builder::{build_batch_queue, final_init_commands, spawn_patch_batch, WorkspaceGuard, build_director_message, build_director_stufftext, build_preview_patch_jobs, playdemo_safe_stem};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use scanner::{is_hltv_demo, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis};
+
+/// Whether a frame can carry injected payload: it must be a `NetworkMessage`
+/// whose contents were actually parsed (an unparsed one is opaque bytes there
+/// is nothing safe to append to) and under [`MAX_INJECTABLE_MESSAGE_LEN`].
+///
+/// `entry_idx`/`frame_idx` index `demo.directory.entries[..].frames[..]`; an
+/// out-of-range pair is simply not injectable rather than a panic, so callers
+/// can hand this raw indices straight out of a frame-ordinal walk.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn is_injectable_frame(demo: &dem::types::Demo, entry_idx: usize, frame_idx: usize) -> bool {
+    use dem::types::{FrameData, MessageData};
+
+    demo.directory
+        .entries
+        .get(entry_idx)
+        .and_then(|entry| entry.frames.get(frame_idx))
+        .is_some_and(|frame| match &frame.frame_data {
+            FrameData::NetworkMessage(b) => {
+                matches!(b.1.messages, MessageData::Parsed(_))
+                    && b.1.message_length < MAX_INJECTABLE_MESSAGE_LEN
+            }
+            _ => false,
+        })
+}

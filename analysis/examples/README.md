@@ -18,6 +18,17 @@ ignores them; `cargo build --examples` and `cargo test` compile them.
 | `reconcile_probe` | Do derived kill counts agree with the server's own frag counter? |
 | `reconnect_probe` | What does a reconnect do to the server's score counters? |
 | `capwindow_probe` | How far is a flag capture from the objective-score credits it earned? |
+| `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
+| `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
+| `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
+
+`weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
+in the demo was that?". Its clock counts from when the *client* loaded and
+keeps running while playback is paused, so it has no fixed relationship to a
+position in the file. This reads `entity_state_t::weaponmodel` — the same
+replicated field the animation fix reads — off `frame.time`, which is the
+demo's own, and prints bursts of rapid switching. Matching a burst's shape
+against the log is how the two clocks get lined up; see the module doc.
 
 Run any of them against a single demo:
 
@@ -57,3 +68,23 @@ Measured across 624 demos — a mixed POV library plus 126 LAN HLTV recordings.
   whenever an HLTV caster is spectating, and demo patchers inject it. `SvcHltv`
   is the reliable signal.
 - **About 1% of demos will not parse.** Plan for a per-file failure path.
+- **Map text is `HudText`, and only `HudText`.** Across all 36 demos in the
+  local library, `svc_temp_entity`/`TE_TEXTMESSAGE` and `svc_centerprint` were
+  carrying **nothing at all** — the two carriers #287 nominated first. Every
+  map-authored line on screen arrived as the `HudText` user message: the
+  round-result text from a `dod_score_ent`'s `message` keyvalue
+  (`MAP_ALLIED_VICTORY2`, or a literal `"Allies take control over the
+  village!"` on maps that skip the token), and the spawn-exit warning from an
+  `env_message` (`MAP_SPAWN_WARNING`, four times in one anzio half). DoD's own
+  clan-match prompts (`#Clan_allies_ready`) share the channel, so suppressing
+  the channel wholesale is not the same thing as suppressing the map.
+- **A map's own sounds never reach `EV_PlaySound`.** The two the mute requests
+  ask about arrive on *different* engine messages, and neither is the event
+  hook: a flag capture plays the `dod_control_point`'s `point_*_capsound`
+  keyvalue as `svc_sound`, carrying that control point's entity index, while
+  round-win music is an `ambient_generic` the map triggers, which arrives as
+  `svc_spawnstaticsound` — the same message the map's placed ambience is
+  registered with at signon, told apart only by *when* it appears. Measured
+  across the demo library: win music lands in mid-demo frames and is absent
+  from the halves that end without one, while placed ambience always sits in
+  the first ~50 frames.

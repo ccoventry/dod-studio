@@ -55,9 +55,9 @@ export async function isLocalOrDebugBuild() {
 async function displayCurrentVersion() {
   const version = await getAppVersion();
   if (!version) return;
-  // Dev channel versions carry a `-<run number>` suffix (see
-  // release_dev.yml); a stable release never has a `-` at all. But two
-  // other cases read identically to that check alone: `npm run tauri dev`
+  // Experimental channel versions carry a `-<run number>` suffix (see
+  // release_experimental.yml); a stable release never has a `-` at all. But
+  // two other cases read identically to that check alone: `npm run tauri dev`
   // (import.meta.env.DEV, true only under the Vite dev server) and
   // `tauri build --debug` (a real bundled install, just not a release-
   // profile binary — cfg!(debug_assertions), read via is_debug_build()).
@@ -68,7 +68,7 @@ async function displayCurrentVersion() {
   } else if (await isDebugBuild()) {
     buildKind = 'debug';
   } else {
-    buildKind = suffix ? 'dev' : 'stable';
+    buildKind = suffix ? 'experimental' : 'stable';
   }
   // OS window title (taskbar/Alt-Tab), not an in-page element — used to be
   // a footer label (#122) before moving here.

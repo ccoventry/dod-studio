@@ -418,16 +418,14 @@ impl ObsSession {
         self.end_block();
         let mut guard = self.client.lock().unwrap_or_else(|p| p.into_inner());
         if let Some(client) = guard.as_mut() {
-            if let Some(scene) = self.previous_scene.take() {
-                if !scene.is_empty() {
+            if let Some(scene) = self.previous_scene.take()
+                && !scene.is_empty() {
                     let _ = client.set_scene(&scene);
                 }
-            }
-            if let Some(profile) = self.previous_profile.take() {
-                if !profile.is_empty() {
+            if let Some(profile) = self.previous_profile.take()
+                && !profile.is_empty() {
                     let _ = client.set_profile(&profile);
                 }
-            }
         }
         *guard = None;
     }
@@ -537,12 +535,10 @@ pub(super) fn fold_into_take(recorded: &Path, dest: &Path) -> Result<PathBuf, St
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::Scratch;
 
-    fn scratch(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("dod_obs_{}_{}", name, std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+    fn scratch(name: &str) -> Scratch {
+        Scratch::new(format_args!("obs_{name}"))
     }
 
     /// The layout is load-bearing: the scanner, `take_key` and the renderer all
@@ -550,7 +546,7 @@ mod tests {
     #[test]
     fn folds_a_recording_into_the_stream_folder() {
         let root = scratch("fold");
-        let dest = root.join("chain_01_b0").join(TAKE_FOLDER).join(STREAM_FOLDER);
+        let dest = root.join("dodtools_chain_01_b0").join(TAKE_FOLDER).join(STREAM_FOLDER);
         std::fs::create_dir_all(&dest).unwrap();
         let recorded = dest.join("2026-08-28 03-26-01.mp4");
         std::fs::write(&recorded, b"x").unwrap();

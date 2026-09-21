@@ -1,9 +1,9 @@
 # Versioning & Releases (desktop-studio)
 
 How version numbers get assigned, where they live, and how the two update
-channels (`stable`, `dev`) relate to `main`/`dev`. Written up because this
-isn't obvious from the workflow files alone and is easy to forget between
-releases — refer back here instead of re-deriving it.
+channels (`stable`, `experimental`) relate to `main`/`dev`. Written up because
+this isn't obvious from the workflow files alone and is easy to forget
+between releases — refer back here instead of re-deriving it.
 
 ## Where a version number lives
 
@@ -33,18 +33,18 @@ The workflow also accepts an optional `workflow_dispatch` `version` input — a 
 
 Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version>`. The `stable` update channel polls this via GitHub's `/releases/latest` alias, which only ever resolves to a release like this one.
 
-## Dev channel — manual, on-demand
+## Experimental channel — manual, on-demand
 
-`.github/workflows/release_dev.yml` is `workflow_dispatch`-only — it never fires automatically, not even on push to `dev`. You trigger it by hand whenever you want to publish a build for dev-channel testing.
+`.github/workflows/release_experimental.yml` is `workflow_dispatch`-only — it never fires automatically, not even on push to `dev`. You trigger it by hand whenever you want to publish a build for experimental-channel testing.
 
 **Version entry is currently required, and free-text:**
 - The `version` input asks for "the version this build is heading toward" (e.g. `0.1.2`) — your own guess at what the *next* stable version will eventually be, not a value read from anywhere.
 - The workflow appends `-<GitHub run number>` automatically (e.g. `0.1.2-47`). This isn't cosmetic — it's load-bearing for three reasons documented in the workflow itself:
-  1. A semver pre-release suffix (`-47`) always sorts *below* the plain version it's attached to, so a dev build only ever offers itself as an update to someone already on an older dev build — never to someone on the matching stable release.
-  2. The run number is monotonically increasing across dispatches, unlike a git short-SHA (which sorts alphabetically, not chronologically) — so a second dev build always looks newer than the first.
+  1. A semver pre-release suffix (`-47`) always sorts *below* the plain version it's attached to, so an experimental build only ever offers itself as an update to someone already on an older experimental build — never to someone on the matching stable release.
+  2. The run number is monotonically increasing across dispatches, unlike a git short-SHA (which sorts alphabetically, not chronologically) — so a second experimental build always looks newer than the first.
   3. The MSI/WiX bundler Tauri uses on Windows only accepts a single, purely-numeric pre-release segment. `-dev.<sha>` and `-dev.<run number>` were both tried and rejected by real builds before landing on the current bare `-<run number>` — see the workflow's own comment and [this Tauri discussion](https://github.com/tauri-apps/tauri/discussions/7600) for the failure mode.
 
-Published as a **prerelease**, always overwriting the same fixed tag `dev-latest` (the previous `dev-latest` release+tag is deleted first). The `dev` update channel polls this via the fixed URL `.../releases/download/dev-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
+Published as a **prerelease**, always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
 
 ## Bumping to a new minor or major version
 
@@ -52,8 +52,8 @@ Not automatic on either channel — deliberately a human decision. Edit `desktop
 
 ## Open questions (not yet decided — your call)
 
-**Should dev's version input auto-detect instead of staying manual?**
-Right now dev asks you to type a version guess every time. It *could* mirror stable's approach — read `dev`'s own `Cargo.toml` major.minor and auto-compute a patch guess the same way (highest existing `v<major>.<minor>.*` tag + 1), making the input optional with that as the default and a manual override still available for a deliberate minor/major signal. The one thing that computation can't know on its own is *intent* — whether the work currently on `dev` is heading toward a patch or a minor/major bump — so it would still occasionally need a manual override, just less often than every single dispatch. Worth doing if the manual entry keeps being a "wait, what number was I on" moment; not worth doing if it rarely comes up. (This would mean editing `release_dev.yml` — flag if you want that built.)
+**Should the experimental channel's version input auto-detect instead of staying manual?**
+Right now it asks you to type a version guess every time. It *could* mirror stable's approach — read `dev`'s own `Cargo.toml` major.minor and auto-compute a patch guess the same way (highest existing `v<major>.<minor>.*` tag + 1), making the input optional with that as the default and a manual override still available for a deliberate minor/major signal. The one thing that computation can't know on its own is *intent* — whether the work currently on `dev` is heading toward a patch or a minor/major bump — so it would still occasionally need a manual override, just less often than every single dispatch. Worth doing if the manual entry keeps being a "wait, what number was I on" moment; not worth doing if it rarely comes up. (This would mean editing `release_experimental.yml` — flag if you want that built.)
 
-**Should a stable release also trigger a matching dev release, so dev doesn't fall behind?**
-Depends on what "falls behind" means at the moment it happens. Right after a `dev` → `main` merge, `dev` and `main` are usually at the *same commit* (the merge that cut the stable release is the same commit dev was already on) — so re-cutting a dev release in that exact window would just republish identical code under a different version string. The real risk isn't "dev is missing what stable has" (it never is, right after a merge) — it's "`dev-latest` still points at an *older* prerelease build from before that merge," which could look stale to someone checking the dev channel even though `dev` the branch has already moved on. So the more useful trigger is probably: cut a fresh dev release whenever meaningful new work has landed on `dev` *since* the last dev release — not automatically lockstep with every stable cutover, which would frequently be a same-commit no-op.
+**Should a stable release also trigger a matching experimental release, so the experimental channel doesn't fall behind?**
+Depends on what "falls behind" means at the moment it happens. Right after a `dev` → `main` merge, `dev` and `main` are usually at the *same commit* (the merge that cut the stable release is the same commit dev was already on) — so re-cutting an experimental release in that exact window would just republish identical code under a different version string. The real risk isn't "the experimental channel is missing what stable has" (it never is, right after a merge) — it's "`experimental-latest` still points at an *older* prerelease build from before that merge," which could look stale to someone checking the experimental channel even though `dev` the branch has already moved on. So the more useful trigger is probably: cut a fresh experimental release whenever meaningful new work has landed on `dev` *since* the last experimental release — not automatically lockstep with every stable cutover, which would frequently be a same-commit no-op.
