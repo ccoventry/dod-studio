@@ -123,3 +123,22 @@ happened.
 The module refuses to overwrite a ceiling that is neither the engine's 100 nor
 a value it would have written itself, so a second patcher is reported rather
 than clobbered.
+
+---
+
+## 7. Live test (2026-09-21)
+
+The mechanism works: the user watched an HLTV demo while changing the value
+and saw a real, visible effect on entity motion smoothness, confirming the
+clamp is actually being raised and applied every frame as intended.
+
+No single value has been settled on as "the right one" yet. Too high and
+flickshots look wrong — the user's own description, not yet pinned down to a
+specific artifact (plausibly the interpolation window stretching far enough
+that a fast snap-to-target reads as sliding into place rather than a sudden
+flick, since that is exactly the kind of motion a wider window smooths across
+more aggressively). This is a tuning tradeoff, not a correctness bug: the
+cvar defaults to the engine's own stock ceiling (100 ms) and changes nothing
+until a session sets it higher, so shipping the capability is safe regardless
+of what the ideal value turns out to be. Worth revisiting once a specific
+value or range is confirmed to look right across more than one demo.
