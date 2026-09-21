@@ -523,6 +523,14 @@ pub fn set_per_frame_prologue(callback: fn()) {
     let _ = PER_FRAME_PROLOGUE.set(callback);
 }
 
+/// Whether something has called `set_per_frame_prologue` yet -- issue #324's
+/// regression test needs to observe this without a real engine to drive
+/// `run_per_frame_callback` itself.
+#[cfg(test)]
+pub(crate) fn per_frame_prologue_is_set() -> bool {
+    PER_FRAME_PROLOGUE.get().is_some()
+}
+
 pub fn set_per_frame_callback(callback: fn()) {
     let _ = PER_FRAME_CALLBACK.set(callback);
     if !TIMER_THREAD_STARTED.swap(true, Ordering::AcqRel) {

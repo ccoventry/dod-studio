@@ -1231,7 +1231,7 @@ pub fn apply() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Every label below is copied from a dump of the real
@@ -1523,9 +1523,15 @@ mod tests {
     /// the level to 1 can decide what another test observes. That was
     /// survivable while the statics only held pointers; it stopped being so
     /// once the level became a thing tests deliberately vary.
+    ///
+    /// `pub(crate)`: `commands.rs`'s own test also stores into `LEVEL`
+    /// directly (issue #321) and needs this same lock, not a second one --
+    /// two independent mutexes would serialise each module's tests against
+    /// themselves but not against each other, which is exactly the race
+    /// #321 hit.
     static TEST_STATICS: Mutex<()> = Mutex::new(());
 
-    fn lock_statics() -> std::sync::MutexGuard<'static, ()> {
+    pub(crate) fn lock_statics() -> std::sync::MutexGuard<'static, ()> {
         // A poisoned lock means some other test panicked, which is already
         // being reported -- take it anyway rather than cascading a second
         // failure into every test that follows.
