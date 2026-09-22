@@ -2155,7 +2155,7 @@ fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
 /// it used to be the one deliberate exception, on the reasoning that adopting
 /// a `movie.cfg`'s `r_decals 0` would silently stand the flush down. That
 /// objection is gone now that a resolved 0 with Flush Decals on is its own
-/// loud, reported fact (`decal_flush_is_noop` in the desktop-studio report)
+/// loud, reported fact (`decal_flush_is_noop` in the studio report)
 /// rather than something this function would have hidden by disagreeing with
 /// the config. User-requested symmetry, 2026-09-05.
 ///

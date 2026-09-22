@@ -1,9 +1,9 @@
-name: Release desktop-studio (Stable)
+name: Release studio (Stable)
 
 # Fires automatically on every push to main — in this repo's flow, main is
 # ruleset-protected (PR-only, non-fast-forward), so every push is really a
 # dev->main release-cutover merge; there's no other kind of push that lands
-# here. See issue #133 and desktop-studio/src-tauri/src/updater_manager.rs:
+# here. See issue #133 and studio/src-tauri/src/updater_manager.rs:
 # this workflow's GitHub Release is exactly what the app's "stable" update
 # channel polls, via GitHub's `/releases/latest` alias (works because this
 # release is neither a draft nor a prerelease).
@@ -49,7 +49,7 @@ jobs:
             echo "RELEASE_VERSION=${MANUAL_VERSION}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          MAJOR_MINOR=$(grep -m1 '^version = ' desktop-studio/src-tauri/Cargo.toml | sed -E 's/version = "([0-9]+\.[0-9]+)\.[0-9]+.*/\1/')
+          MAJOR_MINOR=$(grep -m1 '^version = ' studio/src-tauri/Cargo.toml | sed -E 's/version = "([0-9]+\.[0-9]+)\.[0-9]+.*/\1/')
           LATEST_PATCH=$(git tag -l "v${MAJOR_MINOR}.*" | sed -E "s/^v${MAJOR_MINOR}\.//" | sort -n | tail -1)
           NEXT_PATCH=$(( ${LATEST_PATCH:--1} + 1 ))
           echo "RELEASE_VERSION=${MAJOR_MINOR}.${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
@@ -76,10 +76,10 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: desktop-studio/package-lock.json
+          cache-dependency-path: studio/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: desktop-studio
+        working-directory: studio
         run: npm ci
 
       # Stamps this run's version into the two Tauri-side manifests. Not
@@ -94,7 +94,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = process.env.RELEASE_VERSION;
-            for (const path of ['desktop-studio/src-tauri/tauri.conf.json', 'desktop-studio/package.json']) {
+            for (const path of ['studio/src-tauri/tauri.conf.json', 'studio/package.json']) {
               const json = JSON.parse(fs.readFileSync(path, 'utf8'));
               json.version = version;
               fs.writeFileSync(path, JSON.stringify(json, null, 2) + '\n');
@@ -104,7 +104,7 @@ jobs:
           # bakes CARGO_PKG_VERSION into the compiled binary from Cargo.toml,
           # which is what tauri-action actually uses for bundle filenames and
           # the published latest.json, so it needs the same stamp.
-          sed -i "s/^version = \".*\"/version = \"${RELEASE_VERSION}\"/" desktop-studio/src-tauri/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${RELEASE_VERSION}\"/" studio/src-tauri/Cargo.toml
 
       - name: Build, sign, and publish release
         uses: tauri-apps/tauri-action@v1
@@ -113,7 +113,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: desktop-studio
+          projectPath: studio
           tagName: v${{ steps.version.outputs.RELEASE_VERSION }}
           releaseName: "DoD Studio v${{ steps.version.outputs.RELEASE_VERSION }}"
           releaseBody: "See assets below to download."

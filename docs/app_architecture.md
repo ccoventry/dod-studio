@@ -2,12 +2,12 @@
 
 ## Tech Stack Core
 - **Language/Runtime:** Rust targeting native desktop, plus a `wasm32-unknown-unknown` compilation gate retained in `native/` for cfg-isolating non-wasm-safe code (no active wasm GUI target — see Historical Notes).
-- **UI Framework:** Tauri v2 backend + Vite/JS frontend (`desktop-studio/`), current since the `feature/tauri-migration` merge to `dev` (2026-08-18).
+- **UI Framework:** Tauri v2 backend + Vite/JS frontend (`studio/`), current since the `feature/tauri-migration` merge to `dev` (2026-08-18).
 
 ## Workspace Module Boundaries
 - `native/`: Core engine — direct GoldSrc hooks, binary stream patching (`patch/`), FFmpeg transcoding (`hlcr/`), and `native/src/shared/` (shared types/path-resolution helpers — nested inside `native/`, not a top-level workspace crate).
-- `desktop-studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`.
-- `desktop-studio/src/`: Vite/JS frontend modules (one file per pane, e.g. `capture_pane.js`/`render_pane.js`). No native threading or direct `std::fs` — everything crosses the Tauri IPC boundary.
+- `studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`.
+- `studio/src/`: Vite/JS frontend modules (one file per pane, e.g. `capture_pane.js`/`render_pane.js`). No native threading or direct `std::fs` — everything crosses the Tauri IPC boundary.
 
 ## State, Memory, & Concurrency Rules
 - **State Ingestion (historical, egui-era):** Originally described as immediate-mode execution feeding a bounded sync channel into UI state blocks. Now: telemetry/progress crosses the Tauri IPC boundary as events; see CLAUDE.md's "Telemetry Throttling" rule for the current, accurate guidance (~30fps/33ms throttling via an `Arc<AtomicU32>` debouncer).
@@ -65,5 +65,5 @@
 - **GC Architecture:** Garbage collection policies (configuration) are decoupled from mechanisms (execution), ensuring the `Drop` trait remains lightweight.
 
 ## Historical Notes (pre-Tauri-migration, egui era — kept for context, not current architecture)
-- The original UI was `egui`/`eframe` (native immediate-mode Rust GUI, `native/src/bin/gui/`), fully replaced by the Tauri v2 + Vite/JS frontend and merged to `dev` 2026-08-18 (merge commit `00e540d`). That directory and every `egui`/`eframe` dependency are gone from the workspace — `desktop-studio/src-tauri/src/capture_manager.rs` even carries an explicit "MUST NOT import any egui / eframe symbols" comment as a guardrail against drift back.
+- The original UI was `egui`/`eframe` (native immediate-mode Rust GUI, `native/src/bin/gui/`), fully replaced by the Tauri v2 + Vite/JS frontend and merged to `dev` 2026-08-18 (merge commit `00e540d`). That directory and every `egui`/`eframe` dependency are gone from the workspace — `studio/src-tauri/src/capture_manager.rs` even carries an explicit "MUST NOT import any egui / eframe symbols" comment as a guardrail against drift back.
 - One dated UI-state fix from that era, kept only as a historical record: background-thread capacity errors were once surfaced by storing them in the `egui` temporary context, gated on `current_state == CaptureStudioState::Select` (an enum that no longer exists) — not applicable to the current architecture, mentioned here only in case old commit history references it.

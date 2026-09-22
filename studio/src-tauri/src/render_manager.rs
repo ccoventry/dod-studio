@@ -1,4 +1,4 @@
-// desktop-studio/src-tauri/src/render_manager.rs
+// studio/src-tauri/src/render_manager.rs
 //
 // Calls into native::hlcr's real render pipeline (renderer.rs/config.rs/
 // autosave.rs/scanner.rs — byte-identical to dev, previously orphaned, see

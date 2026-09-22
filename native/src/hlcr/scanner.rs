@@ -56,7 +56,7 @@ pub struct ClipData {
 /// all, just a copy of `video_file` into the export pool.
 ///
 /// Shared between the Tauri layer's per-job toggle gate
-/// (`desktop-studio/src-tauri/src/render_manager.rs`'s `skip_available`) and
+/// (`studio/src-tauri/src/render_manager.rs`'s `skip_available`) and
 /// `run_render_job`'s own admission check, so the two can never quietly drift
 /// apart about which clips qualify — the same reason `is_renderable_take` is
 /// shared between the capture and render sides.

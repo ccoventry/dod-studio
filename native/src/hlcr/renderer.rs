@@ -676,7 +676,7 @@ pub async fn run_render_job(
 }
 
 /// Opaque wake-lock guard for a render batch's duration. Wrapped so
-/// `desktop-studio/src-tauri` never needs `keepawake` as a direct
+/// `studio/src-tauri` never needs `keepawake` as a direct
 /// dependency — `native` already depends on it (see
 /// `capture_engine.rs::CaptureCleanupGuard`'s own wake lock, the
 /// capture-side equivalent of this).

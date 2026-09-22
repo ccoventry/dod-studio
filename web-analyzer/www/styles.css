@@ -1,4 +1,4 @@
-/* Subset of desktop-studio/src/styles.css — reset + :root tokens + only the
+/* Subset of studio/src/styles.css — reset + :root tokens + only the
    Demo Analyzer report-tab rules (no Explorer sidebar/browser styles, not
    used in this single-file-drop build). Kept as a near-verbatim copy so the
    ported report tabs render identically to the desktop app. */
@@ -82,7 +82,7 @@ body {
   flex-shrink: 0;
 }
 
-/* egui Panel & Cards Styling — matches desktop-studio's .egui-panel/.egui-card */
+/* egui Panel & Cards Styling — matches studio's .egui-panel/.egui-card */
 .egui-panel, .egui-card {
   background: var(--bg-panel);
   border: 1px solid var(--border-color);

@@ -823,9 +823,9 @@ Two smaller ones found on the way:
 - **`native/src/hlcr/scanner.rs`** — `is_renderable_take` gains the video-with-audio case;
   `avi_frame_count` needs a companion if the container is not AVI.
 - **`native/src/hlcr/renderer.rs`** — a trim branch on the existing video-input path.
-- **`desktop-studio/src-tauri/src/capture_manager.rs`** — `VerifiedBlock`'s two tiers gain the
+- **`studio/src-tauri/src/capture_manager.rs`** — `VerifiedBlock`'s two tiers gain the
   duration assertion; settings plumbing for host/port/password.
-- **`desktop-studio/src/`** — capture-mode selector, connection settings, preflight report. Every
+- **`studio/src/`** — capture-mode selector, connection settings, preflight report. Every
   `invoke()` needs its `.catch()`.
 - **`native/src/strings.rs`** — new user-facing strings go here, per the centralisation pass.
 

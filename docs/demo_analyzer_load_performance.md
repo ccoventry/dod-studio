@@ -14,7 +14,7 @@ each tier is marked with its outcome and any deviation from the original design.
 
 ## Goal
 
-Opening a demo in the Demo Analyzer (`desktop-studio/src/analyzer_pane.js` ->
+Opening a demo in the Demo Analyzer (`studio/src/analyzer_pane.js` ->
 `analyze_demo_full`) takes a few seconds. User wants it faster — ideally
 instant, or at least <= 1s.
 
@@ -40,8 +40,8 @@ risk building an optimization you immediately have to partially undo.
 Commit `f6b382c` on `feature/tauri-migration`:
 - Folder/demo picker sidebar in the Demo Analyzer tab (folder tree + demo list
   next to the report, matching the `dev` branch egui GUI's persistent
-  explorer). Files: `desktop-studio/index.html`, `desktop-studio/src/analyzer_pane.js`,
-  `desktop-studio/src-tauri/src/dir_browser.rs`.
+  explorer). Files: `studio/index.html`, `studio/src/analyzer_pane.js`,
+  `studio/src-tauri/src/dir_browser.rs`.
 - `benchmark/src/main.rs` rewritten. It used to compare an "unoptimized vs
   optimized" event loop that doesn't reflect the real load path (see below) —
   it's now a phase-attribution profiler for the actual path
@@ -123,7 +123,7 @@ work (Tier 4), that's the first thing to instrument.
 ## Verified separately (source-read, not benchmarked)
 
 - **`native/src/patch/scanner.rs::scan_demo_for_highlights`** (called by
-  `desktop-studio/src-tauri/src/capture_manager.rs::scan_directory_impl`,
+  `studio/src-tauri/src/capture_manager.rs::scan_directory_impl`,
   i.e. every Capture Studio folder scan) already calls
   `analysis::Analysis::try_from_bytes(&bytes)` — **the exact same full parse**
   `analyze_demo_full` does — for every demo it scans, then discards
@@ -136,7 +136,7 @@ work (Tier 4), that's the first thing to instrument.
   cache needs zero new derive work.
 - **Incidental bug, unrelated to load speed, found while tracing callers —
   resolved 2026-08-22, by removal rather than a fix.** `analyze_demo` (the
-  *other* Tauri command, `desktop-studio/src-tauri/src/lib.rs` ~line
+  *other* Tauri command, `studio/src-tauri/src/lib.rs` ~line
   207-255 — different from `analyze_demo_full`) fed the "Advanced
   Diagnostics / Match Telemetry" inline panel (`#telemetry-container`,
   distinct from the Demo Analyzer tab). It did the full ~1.3s parse, then
@@ -156,7 +156,7 @@ work (Tier 4), that's the first thing to instrument.
   `telemetry_pane.js`, and the `analyzeDemo()` IPC wrapper are all gone.
   The button and its jump to Demo Analyzer are untouched.
 - Confirmed directly in this session's own build output:
-  `[profile.release]` in `desktop-studio/src-tauri/Cargo.toml` is silently
+  `[profile.release]` in `studio/src-tauri/Cargo.toml` is silently
   ignored by Cargo ("profiles for the non root package will be ignored,
   specify profiles at the workspace root") — profiles only apply from the
   workspace-root `Cargo.toml`. Zero runtime effect today; harmless but
@@ -187,7 +187,7 @@ Highest leverage, low risk, purely additive. Design:
   -> run today's `run_analyzer_with_progress` in full, then best-effort
   write-through to the cache file (ignore write errors — must never fail the
   analyze call because the cache write failed).
-- Wire `desktop-studio/src-tauri/src/lib.rs::analyze_demo_full` (~line 275) to
+- Wire `studio/src-tauri/src/lib.rs::analyze_demo_full` (~line 275) to
   call this instead of `run_analyzer_with_progress` directly.
 
 **As built:** matches the design above almost exactly. `native/src/lib.rs`
@@ -234,7 +234,7 @@ hypothetical, it's coming soon.
   `last_emit: Instant` and skip emitting unless >= 33ms has elapsed (per
   CLAUDE.md's telemetry-throttling guardrail — ~30fps). That bounds real
   emits to ~25-40 per parse.
-- Frontend: `desktop-studio/src/analyzer_pane.js::loadAnalyzerDemo` needs a
+- Frontend: `studio/src/analyzer_pane.js::loadAnalyzerDemo` needs a
   `listen('analyzer_progress', ...)` (register directly in the pane module,
   per the existing note in `ipc_bridge.js` about not double-registering
   listeners — same pattern `render_pane.js` uses for `render_status`) to swap
