@@ -1,0 +1,28 @@
+# `main` only ever receives `dev`. Every change lands on `dev` first by PR
+# (dev-protection), and a release is a `dev` -> `main` PR. A PR from any other
+# branch straight into `main` skips `dev`, and the commit it leaves on `main`
+# has to be merged back afterwards: #325 did exactly that and took #340 and
+# #341 to undo. `main` stays the default branch, so a PR opened without an
+# explicit base (e.g. `gh pr create` with no `-B dev`) targets it by accident.
+#
+# main-protection requires this job by name, so such a PR cannot merge.
+# `edited` is listed so retargeting an open PR re-runs the check.
+name: Main only from dev
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, reopened, synchronize]
+
+jobs:
+  source-branch:
+    name: PR into main comes from dev
+    runs-on: ubuntu-latest
+    steps:
+      - name: Refuse any head branch other than dev
+        if: github.head_ref != 'dev' || github.event.pull_request.head.repo.full_name != github.repository
+        run: |
+          echo "::error::PRs into main must come from dev (this one is from '${{ github.event.pull_request.head.label }}'). Retarget it: gh pr edit ${{ github.event.pull_request.number }} --base dev"
+          exit 1
+      - name: Head branch is dev
+        run: echo "OK"
