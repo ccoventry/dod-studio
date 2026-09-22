@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: nine cvars and three commands.
+//! The `dodtools_*` console surface: eleven cvars and eight commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -514,6 +514,11 @@ fn status_text() -> String {
     // nothing" line would be noise in the overwhelmingly common case.
     if let Some(msglog) = crate::msglog::status_line() {
         lines.push(msglog);
+    }
+    // Same reasoning as msglog above: hiding is off by default and a
+    // permanent "hiding nothing" line would be noise in the common case.
+    if let Some(hide_sprite) = crate::hide_sprite::status_line() {
+        lines.push(hide_sprite);
     }
     // The one setting the console's own type-ahead cannot report, because it
     // is a command rather than a cvar -- which is the reason the rest are left
@@ -1070,10 +1075,12 @@ pub fn install() {
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
-    // Always a command, never a cvar: it has subcommands and a variable number
-    // of arguments, which a cvar's single value cannot carry.
+    // Always commands, never cvars: both have subcommands and a variable
+    // number of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
+    add_commands(crate::objicons::COMMAND_NAMES, crate::objicons::command);
+    add_commands(crate::hide_sprite::COMMAND_NAMES, crate::hide_sprite::command);
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);

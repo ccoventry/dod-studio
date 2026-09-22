@@ -15,7 +15,7 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus five control surfaces, always available and doing nothing until used:
+Plus thirteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodtools_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -27,6 +27,16 @@ Plus five control surfaces, always available and doing nothing until used:
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
+- **Hide map sprite** (`dodtools_hide_sprite <model-path>...`): suppresses
+  specific map-placed `env_sprite` entities by model path (e.g.
+  `sprites/mapsprites/flames.spr`) -- an allow-list, not a blanket toggle,
+  since most sprites in that folder are meaningful (smoke, fire, tracers). Not
+  every sprite-looking element qualifies: several DoD draws itself as an
+  ordinary 2D HUD element (the crosshair, the capture-area icon) rather than a
+  world-placed entity, and those never reach this command regardless of
+  spelling -- `dodtools_hide_crosshair`/`dodtools_hide_hudelement` reach those
+  instead. Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't
+  previously use. See the module doc in `src/hide_sprite.rs`.
 - **Scoreboard** (`dodtools_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
@@ -81,6 +91,11 @@ Plus five control surfaces, always available and doing nothing until used:
   `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24 tile of
   `crosshairs.spr`. Loses to `dodtools_hide_crosshair`, which stubs the whole
   function. Same doc, section 6.
+- **Objective icons** (`dodtools_objectives`): places the territory-flag icon
+  row in the top-left corner, and the objective timer beside it. The game draws
+  both ~117 pixels lower at 1080p while spectating than it does in a POV demo,
+  which is why the same map captured both ways does not line up -- see
+  `docs/goldsrc_objective_icons.md`.
 
 All of them live in one DLL since they share the same engine-interface
 bootstrap; set only the env var for whichever fix you want active.
@@ -116,8 +131,19 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 The animation fix and all four `dodtools_deathmsg` subcommands are live-proven
 against a running game. `dodtools_ex_interp_max`'s mechanism is live-proven
 too -- the clamp visibly takes effect -- but no specific value is confirmed
-good yet; see `docs/goldsrc_ex_interp.md` §7. The sound fix,
-`dodtools_hide_scoreboard`, `dodtools_mute_voice_commands`,
+good yet; see `docs/goldsrc_ex_interp.md` §7. `dodtools_objectives` is
+live-proven too: `offset`/`xoffset` reposition the icon row correctly, and
+`timer` was confirmed on `dod_charlie`, the one DoD 1.3 map with a
+reinforcement timer -- see `docs/goldsrc_objective_icons.md`. `dodtools_hide_sprite`
+is live-proven as well: `sprites/mapsprites/flames.spr` on `dod_railroad2_s9a`
+(found by scanning the map's own BSP entity lump for `env_sprite` classnames,
+since the command's target has to be a real map-placed entity, not a 2D HUD
+element like the crosshair or the capture-area icon -- see the module doc's
+"Why `dodtools_hide_hudelement` can't reach this") visibly disappeared and
+came back across a `clear`/re-set cycle, which confirms `HUD_AddEntity`'s
+return-value contract (0 = suppress) actually holds in this build and not
+only in Xash3D's open-source equivalent. The
+sound fix, `dodtools_hide_scoreboard`, `dodtools_mute_voice_commands`,
 `dodtools_hide_crosshair`, `dodtools_match_pov_crosshair` and
 `dodtools_msglog` are confirmed by static analysis only -- see the module
 docs in `src/engine.rs`, `src/sound_fix.rs`, `src/scoreboard.rs`,
