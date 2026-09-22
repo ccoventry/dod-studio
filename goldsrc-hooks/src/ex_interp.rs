@@ -1,4 +1,4 @@
-//! `dodtools_ex_interp_max`: raise the engine's interpolation-window ceiling.
+//! `dodstudio_ex_interp_max`: raise the engine's interpolation-window ceiling.
 //!
 //! ## `ex_interp` is engine-managed, which is the whole problem
 //!
@@ -175,7 +175,7 @@ pub fn active() -> i32 {
     ACTIVE_MS.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodstudio_status`.
 pub fn status() -> String {
     match ACTIVE_MS.load(Ordering::Relaxed) {
         0 => format!(

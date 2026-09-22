@@ -1,4 +1,4 @@
-//! `dodtools_clear_decals`: empty the engine's decal pool at runtime.
+//! `dodstudio_clear_decals`: empty the engine's decal pool at runtime.
 //!
 //! ## What this replaces
 //!
@@ -121,7 +121,7 @@ static DECAL_COUNT: AtomicUsize = AtomicUsize::new(0);
 static UNLINK: AtomicUsize = AtomicUsize::new(0);
 static RESOLVED_BASE: AtomicUsize = AtomicUsize::new(0);
 
-/// How many decals the last successful clear removed, for `dodtools_status`.
+/// How many decals the last successful clear removed, for `dodstudio_status`.
 static LAST_CLEARED: AtomicUsize = AtomicUsize::new(usize::MAX);
 
 /// Reads a little-endian `u32` at `address`.
@@ -247,7 +247,7 @@ pub fn clear() -> Result<usize, String> {
     Ok(in_use)
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodstudio_status`.
 pub fn status() -> String {
     match LAST_CLEARED.load(Ordering::Relaxed) {
         usize::MAX => format!("no decal clear has run this session ({NAME} runs one)"),

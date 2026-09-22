@@ -5,8 +5,8 @@
 > `feat/goldsrc-hooks-companion-dll`. Tracked by
 > [#204](https://github.com/ccoventry/dod-tools/issues/204).
 > Defaults **off**. It is a cvar: turn it on in the console with
-> `dodtools_hltv_show_viewmodel_animations 1`, on the launch line with
-> `+dodtools_hltv_show_viewmodel_animations 1`, or from any `.cfg` the session execs.
+> `dodstudio_hltv_show_viewmodel_animations 1`, on the launch line with
+> `+dodstudio_hltv_show_viewmodel_animations 1`, or from any `.cfg` the session execs.
 
 Watching a DoD demo in first person, the weapon on screen barely moves. It does
 not recoil when the player fires, does not reload when they reload, and does not
@@ -151,12 +151,12 @@ refinement on top, not the point.
 
 ## 8. Diagnostics
 
-- `dodtools_hltv_show_viewmodel_animations <0|1>` — a **cvar**, so it also takes
-  `+dodtools_hltv_show_viewmodel_animations 1` on the launch line or a line in any `.cfg`,
+- `dodstudio_hltv_show_viewmodel_animations <0|1>` — a **cvar**, so it also takes
+  `+dodstudio_hltv_show_viewmodel_animations 1` on the launch line or a line in any `.cfg`,
   and shows its value in the console type-ahead.
-- `dodtools_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
+- `dodstudio_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
-- `dodtools_debug_status` — what each fix is *doing*, not just what it is set to. A
+- `dodstudio_debug_status` — what each fix is *doing*, not just what it is set to. A
   cvar can answer "what is this set to" on its own; whether the fix's
   preconditions are being met in the current view is a different question, and
   this is where it is answered.
@@ -244,7 +244,7 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
-2. `dodtools_hltv_show_viewmodel_animations 1`, `dodtools_log_weapon_model 1`.
+2. `dodstudio_hltv_show_viewmodel_animations 1`, `dodstudio_log_weapon_model 1`.
 3. Play an HLTV demo in-eye and let the director move between players.
 4. Read `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log`. The lines that matter, in order of value:
    - `now spectating … holding … viewmodel "…"` on every camera switch,
@@ -256,13 +256,13 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 
 ---
 
-## 12. The other direction: `dodtools_hide_hand_signals`
+## 12. The other direction: `dodstudio_hide_hand_signals`
 
 Everything above puts an animation *back*. This one takes one away, and it
 belongs here because it works on the same field, from the same per-frame hook.
 
 Using a voice command in DoD also plays a gesture on the player -- a nod for
-"Yes Sir!", a point for "Enemy Ahead". `dodtools_mute_voice_commands` silences
+"Yes Sir!", a point for "Enemy Ahead". `dodstudio_mute_voice_commands` silences
 the sound and leaves the mime, because the two are unrelated mechanisms:
 `client.dll` contains **no `hs_` string at all**. The client never picks these
 by name. The server picks a sequence index and it arrives as replicated
@@ -307,5 +307,5 @@ surviving, the fallback is the one #283 names: the studio renderer's
 ### It applies to every player in view
 
 Not only the spectated one. That is what clean footage wants, but it is a
-behavioural choice rather than an obvious default, so `dodtools_status` says so.
+behavioural choice rather than an obvious default, so `dodstudio_status` says so.
 

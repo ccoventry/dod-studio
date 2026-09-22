@@ -738,7 +738,7 @@ fn usage() -> String {
     )
 }
 
-/// `pub(crate)`: also folded into `dodtools_debug_status`'s combined report.
+/// `pub(crate)`: also folded into `dodstudio_debug_status`'s combined report.
 pub(crate) fn status() -> String {
     let max = PATCHED_MAX.load(Ordering::Acquire);
     let offset = PATCHED_OFFSET.load(Ordering::Acquire);

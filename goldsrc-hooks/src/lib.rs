@@ -22,27 +22,27 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `msglog`: the `dodtools_msglog` command -- dump chosen DoD user messages
+//! - `msglog`: the `dodstudio_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_sprite`: the `dodtools_hide_sprite <model-path>...` command --
+//! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
 //!   suppress specific map-placed `env_sprite` entities by model path, an
 //!   allow-list rather than a blanket toggle. Full design write-up in the
 //!   module doc itself (issue #315).
-//! - `scoreboard`: the `dodtools_hide_scoreboard` cvar -- stop a POV demo's
+//! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
 //!   `docs/goldsrc_scoreboard.md`.
-//! - `voice`: the `dodtools_mute_voice_commands` cvar -- silence "fire in the
+//! - `voice`: the `dodstudio_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
-//! - `crosshair`: the `dodtools_hide_crosshair` cvar -- hide the crosshair and have
+//! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
-//! - `objicons`: the `dodtools_objectives` command -- place the objective
+//! - `objicons`: the `dodstudio_objectives` command -- place the objective
 //!   (territory flag) icon row and timer, which the game itself draws at a
 //!   different y while spectating than it does in a POV demo. Full design
 //!   write-up in `docs/goldsrc_objective_icons.md`.
-//! - `spectator_crosshair`: the `dodtools_match_pov_crosshair` cvar -- draw the
+//! - `spectator_crosshair`: the `dodstudio_match_pov_crosshair` cvar -- draw the
 //!   spectator crosshair from the same sprite and tile a player's own
 //!   `cl_xhair_style` picks, since the two are drawn by different code paths
 //!   and do not otherwise share a look.
@@ -51,7 +51,7 @@
 //! `docs/goldsrc_hud_suppression.md`.
 //!
 //! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
-//! at a `dodtools_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
+//! at a `dodstudio_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
 //! then tracing what it itself calls) both turned out to be dead ends --
 //! see `docs/goldsrc_spectator_bars.md` for what's been ruled out and what
 //! the real next step is (a live memory watch, not more static analysis).

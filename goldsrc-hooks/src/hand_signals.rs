@@ -1,8 +1,8 @@
-//! `dodtools_hide_hand_signals`: stop players miming their voice commands.
+//! `dodstudio_hide_hand_signals`: stop players miming their voice commands.
 //!
 //! ## Why the voice mute does not cover this
 //!
-//! `dodtools_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
+//! `dodstudio_mute_voice_commands` NOPs a client-side `EV_PlaySound` call, which
 //! is where the *sound* comes from. The gesture is a different mechanism
 //! entirely: `client.dll` contains **no `hs_` string at all**, because the
 //! client never picks these animations by name. The server picks a sequence
@@ -33,7 +33,7 @@
 //! of the signal, which is their stance/weapon idle or aim in every case that
 //! matters. A player first seen mid-signal has no remembered sequence, so they
 //! are left alone rather than given a guess -- counted, and reported by
-//! `dodtools_status`.
+//! `dodstudio_status`.
 //!
 //! `gaitsequence` is deliberately untouched. It drives the legs independently,
 //! and the standing/prone split in the `hs_` names says the signal is an
@@ -172,7 +172,7 @@ pub fn reset() {
     }
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodstudio_status`.
 pub fn status() -> String {
     if !ENABLED.load(Ordering::Relaxed) {
         return "hand signals play normally".to_string();

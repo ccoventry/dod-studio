@@ -573,7 +573,7 @@ def report_decals(hw, afx):
     print("\n  #273 asked whether the ring's SIZE is reachable. It is not a cvar:")
     print("  the pool is a fixed 0x1c000-byte array and `r_decals` only bounds how")
     print("  far the index travels before wrapping. What IS reachable is emptying")
-    print("  it, which is what dodtools_clear_decals does -- see")
+    print("  it, which is what dodstudio_clear_decals does -- see")
     print("  goldsrc-hooks/src/decals.rs and docs/goldsrc_decals.md.")
     ok = pool + cleared == end and cleared % 0x1C == 0
     if not ok:

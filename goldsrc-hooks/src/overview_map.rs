@@ -1,4 +1,4 @@
-//! `dodtools_overviewmap`: move and resize DoD's overview map.
+//! `dodstudio_overviewmap`: move and resize DoD's overview map.
 //!
 //! ## Four dwords, not a patch
 //!
@@ -26,7 +26,7 @@
 //! map down regardless of where this module put it, and hands it back once
 //! the FOV returns to 90. Preventing that would mean hooking
 //! `OverviewMapMode` itself (a new gate to bypass, not a placement change) --
-//! out of scope for `dodtools_overviewmap`, not attempted here.
+//! out of scope for `dodstudio_overviewmap`, not attempted here.
 //!
 //! ## The survey has the two rectangles the wrong way round
 //!
@@ -357,7 +357,7 @@ pub fn listing() -> String {
     out
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodstudio_status`.
 pub fn status() -> String {
     let held: Vec<&str> = [Which::Full, Which::Mini]
         .into_iter()

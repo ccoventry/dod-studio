@@ -355,7 +355,7 @@ fn poll_overviewmap() {
     }
 }
 
-/// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
+/// `dodstudio_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
 /// once rather than sixty times a second while `client.dll` is not loaded.
@@ -444,7 +444,7 @@ pub fn poll() {
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
-    // dodtools_overviewmap keeps its own state -- held rects, not a cvar --
+    // dodstudio_overviewmap keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
@@ -455,17 +455,17 @@ pub fn poll() {
     // callback slot), so its viewmodel-entity half reads apply()'s previous
     // frame's result, not this one's -- see spectator_target.rs's module doc.
     spectator_target::poll();
-    // Same reason, for whichever messages dodtools_msglog currently wants.
+    // Same reason, for whichever messages dodstudio_msglog currently wants.
     crate::msglog::poll();
 }
 
 /// Everything in one place, for debugging -- not the settings surface a
 /// player is expected to type. That is what `debug_` in the name signals:
 /// every value here is also visible piecemeal (a suppression cvar's own
-/// bare-name query, the console type-ahead, `dodtools_deathmsg`'s own
+/// bare-name query, the console type-ahead, `dodstudio_deathmsg`'s own
 /// status), but this is the one command that dumps all of it together, which
 /// is what a support question actually needs -- so it covers the *entire*
-/// `dodtools_*` surface, not a subset.
+/// `dodstudio_*` surface, not a subset.
 ///
 /// The suppression cvars and `log_weapon_model` are listed unconditionally,
 /// on or off, because there is no progress to gate them on -- they are just
@@ -475,7 +475,7 @@ pub fn poll() {
 /// on says nothing about whether the preconditions are being met in the
 /// current view, and "the fix isn't working" has twice turned out to be "the
 /// log budget ran out" -- their counters are the honest number, and are
-/// noise when off. `dodtools_hltv_gunshot_attenuation`'s value is folded
+/// noise when off. `dodstudio_hltv_gunshot_attenuation`'s value is folded
 /// into the gunshots line rather than given its own, since it does nothing
 /// while the fix is off.
 fn status_text() -> String {
@@ -555,7 +555,7 @@ fn status_text() -> String {
 unsafe extern "C" fn cmd_status() {
     // A console line's semicolon-joined commands all run together, in one
     // pass, before `poll` gets another turn as the per-frame prologue -- so
-    // `dodtools_hide_scoreboard 1;dodtools_debug_status` on one line would
+    // `dodstudio_hide_scoreboard 1;dodstudio_debug_status` on one line would
     // otherwise report the state from *before* that same line's own change.
     // `poll` is cheap and idempotent (it already runs every frame), so
     // forcing one here just makes this report always current.
@@ -765,7 +765,7 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
     );
 }
 
-/// `dodtools_hide_hudelement [<name> <0|1>]`.
+/// `dodstudio_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
 /// value cannot carry, and there are thirteen of them -- thirteen cvars would
@@ -858,7 +858,7 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 }
 
-/// `dodtools_clear_decals` -- takes no arguments and holds no state, so a
+/// `dodstudio_clear_decals` -- takes no arguments and holds no state, so a
 /// command is the whole of what it needs to be.
 unsafe extern "C" fn cmd_clear_decals() {
     match decals::clear() {
@@ -881,7 +881,7 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
-/// `dodtools_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+/// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
 /// value, and two cvars per rectangle would be eight names in the type-ahead
@@ -1204,7 +1204,7 @@ mod tests {
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
-        assert!(idle.contains("dodtools_deathmsg"), "{idle}");
+        assert!(idle.contains("dodstudio_deathmsg"), "{idle}");
         assert!(!idle.contains("viewmodel animations"), "{idle}");
         assert!(!idle.contains("gunshots"), "{idle}");
 
@@ -1254,13 +1254,13 @@ mod tests {
     }
 
     /// The names have to carry the sense, since the value alone cannot. A cvar
-    /// called after its subject (`dodtools_scoreboard`) leaves the reader to
+    /// called after its subject (`dodstudio_scoreboard`) leaves the reader to
     /// guess whether 1 means "scoreboard" or "suppress the scoreboard"; one
     /// called after the action does not.
     #[test]
     fn suppression_cvars_are_named_after_the_action() {
         for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
-            let verb = name.trim_start_matches("dodtools_");
+            let verb = name.trim_start_matches("dodstudio_");
             assert!(
                 verb.starts_with("hide_") || verb.starts_with("mute_"),
                 "{name} is named after its subject, not the action it performs"

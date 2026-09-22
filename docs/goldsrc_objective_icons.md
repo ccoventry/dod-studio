@@ -19,11 +19,11 @@ Implemented in `goldsrc-hooks/src/objicons.rs`; re-checked against a real
 ## 1. The console surface
 
 ```
-dodtools_objectives offset <y>       y the objective icons are drawn at
-dodtools_objectives xoffset <x>      x the icon row starts at
-dodtools_objectives timer <y>        y the objective timer beside them is drawn at
-dodtools_objectives <any> default    hand that one back to the game
-dodtools_objectives                  what each is set to, and the usage above
+dodstudio_objectives offset <y>       y the objective icons are drawn at
+dodstudio_objectives xoffset <x>      x the icon row starts at
+dodstudio_objectives timer <y>        y the objective timer beside them is drawn at
+dodstudio_objectives <any> default    hand that one back to the game
+dodstudio_objectives                  what each is set to, and the usage above
 ```
 
 All three are **absolute screen positions**, and each means the same thing in a

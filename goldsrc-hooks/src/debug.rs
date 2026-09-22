@@ -50,7 +50,7 @@ fn log_path() -> Option<std::path::PathBuf> {
     // where a test's lines are indistinguishable from a real session's -- and
     // that log is what gets read to diagnose a live test.
     if cfg!(test) {
-        let dir = std::env::temp_dir().join("dod_tools_test_logs");
+        let dir = std::env::temp_dir().join("dod_studio_test_logs");
         let _ = std::fs::create_dir_all(&dir);
         return Some(dir.join(LOG_FILE));
     }
