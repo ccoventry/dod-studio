@@ -30,7 +30,9 @@ fn msg_kind(m: &NetMessage) -> &'static str {
 
 fn main() {
     let mut a = std::env::args().skip(1);
-    let path = a.next().expect("usage: reencode_diff <demo.dem> <t_lo> <t_hi>");
+    let path = a
+        .next()
+        .expect("usage: reencode_diff <demo.dem> <t_lo> <t_hi>");
     let t_lo: f32 = a.next().expect("t_lo").parse().unwrap();
     let t_hi: f32 = a.next().expect("t_hi").parse().unwrap();
     let bytes = std::fs::read(&path).expect("read");
@@ -47,25 +49,43 @@ fn main() {
 
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            if f.time < t_lo || f.time > t_hi { continue }
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            if f.time < t_lo || f.time > t_hi {
+                continue;
+            }
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             frames_in_window += 1;
-            for m in msgs { *before.entry(msg_kind(m)).or_insert((0,0)) = (before.get(msg_kind(m)).map(|x|x.0).unwrap_or(0)+1, 0); }
+            for m in msgs {
+                *before.entry(msg_kind(m)).or_insert((0, 0)) =
+                    (before.get(msg_kind(m)).map(|x| x.0).unwrap_or(0) + 1, 0);
+            }
         }
     }
     for entry in redone.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            if f.time < t_lo || f.time > t_hi { continue }
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
-            for m in msgs { *after.entry(msg_kind(m)).or_insert(0) += 1; }
+            if f.time < t_lo || f.time > t_hi {
+                continue;
+            }
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
+            for m in msgs {
+                *after.entry(msg_kind(m)).or_insert(0) += 1;
+            }
         }
     }
     println!("{path} window t={t_lo}..{t_hi}, {frames_in_window} network-message frames");
     println!("message-kind counts, before vs after full round-trip (should match exactly):");
     let mut kinds: Vec<&str> = before.keys().chain(after.keys()).copied().collect();
-    kinds.sort(); kinds.dedup();
+    kinds.sort();
+    kinds.dedup();
     for k in kinds {
         let b = before.get(k).map(|x| x.0).unwrap_or(0);
         let a = after.get(k).copied().unwrap_or(0);

@@ -32,9 +32,8 @@
 use native::patch::scanner::scan_demo_for_highlights;
 use native::patch::types::PatcherConfig;
 use native::patch::{
-    build_batch_queue, clean_demo_decals, on_screen_half_angle, Cancel, DecalCleanOptions,
-    FlushSource,
-    VisibilityBasis,
+    Cancel, DecalCleanOptions, FlushSource, VisibilityBasis, build_batch_queue, clean_demo_decals,
+    on_screen_half_angle,
 };
 
 fn main() {

@@ -14,7 +14,8 @@ impl Doer for SvcUpdateUserInfo {
                 user_info: user_info.into(),
                 cd_key_hash: cd_key_hash.into(),
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

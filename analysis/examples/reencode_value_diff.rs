@@ -15,7 +15,10 @@ use std::collections::BTreeMap;
 fn canon_delta(d: &Delta) -> String {
     let mut keys: Vec<&String> = d.keys().collect();
     keys.sort();
-    keys.iter().map(|k| format!("{k}={:?}", d[*k])).collect::<Vec<_>>().join(",")
+    keys.iter()
+        .map(|k| format!("{k}={:?}", d[*k]))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 fn canon_msg(m: &NetMessage) -> String {
@@ -26,26 +29,50 @@ fn canon_msg(m: &NetMessage) -> String {
                 "clientdata(mask={:?},data={},weapons={:?})",
                 cd.delta_update_mask.as_ref().map(|b| b.to_u32()),
                 canon_delta(&cd.client_data),
-                cd.weapon_data.as_ref().map(|ws| ws.iter()
-                    .map(|w| format!("{}:{}", w.weapon_index.to_u32(), canon_delta(&w.weapon_data)))
+                cd.weapon_data.as_ref().map(|ws| ws
+                    .iter()
+                    .map(|w| format!(
+                        "{}:{}",
+                        w.weapon_index.to_u32(),
+                        canon_delta(&w.weapon_data)
+                    ))
                     .collect::<Vec<_>>()),
             ),
             EngineMessage::SvcEvent(ev) => {
-                let events: Vec<String> = ev.events.iter().map(|e| format!(
-                    "idx={}:pkt={:?}:delta={}", e.event_index.to_u32(),
-                    e.packet_index.as_ref().map(|b| b.to_u32()),
-                    e.delta.as_ref().map(canon_delta).unwrap_or_default(),
-                )).collect();
+                let events: Vec<String> = ev
+                    .events
+                    .iter()
+                    .map(|e| {
+                        format!(
+                            "idx={}:pkt={:?}:delta={}",
+                            e.event_index.to_u32(),
+                            e.packet_index.as_ref().map(|b| b.to_u32()),
+                            e.delta.as_ref().map(canon_delta).unwrap_or_default(),
+                        )
+                    })
+                    .collect();
                 format!("event(count={},events={events:?})", ev.event_count.to_u32())
             }
             EngineMessage::SvcDeltaPacketEntities(pe) => {
-                let mut ents: Vec<String> = pe.entity_states.iter().map(|es| format!(
-                    "[{}:remove={}:{}]", es.entity_index, es.remove_entity,
-                    es.delta.as_ref().map(canon_delta).unwrap_or_default(),
-                )).collect();
+                let mut ents: Vec<String> = pe
+                    .entity_states
+                    .iter()
+                    .map(|es| {
+                        format!(
+                            "[{}:remove={}:{}]",
+                            es.entity_index,
+                            es.remove_entity,
+                            es.delta.as_ref().map(canon_delta).unwrap_or_default(),
+                        )
+                    })
+                    .collect();
                 ents.sort();
-                format!("deltapacketentities(count={},dseq={},ents={:?})",
-                    pe.entity_count.to_u32(), pe.delta_sequence.to_u32(), ents)
+                format!(
+                    "deltapacketentities(count={},dseq={},ents={:?})",
+                    pe.entity_count.to_u32(),
+                    pe.delta_sequence.to_u32(),
+                    ents
+                )
             }
             _ => format!("{m:?}"),
         },
@@ -64,7 +91,9 @@ fn strip_addrs(s: &str) -> String {
     while let Some(i) = rest.find("addr: 0x") {
         out.push_str(&rest[..i]);
         rest = &rest[i + 8..];
-        let end = rest.find(|c: char| !c.is_ascii_hexdigit()).unwrap_or(rest.len());
+        let end = rest
+            .find(|c: char| !c.is_ascii_hexdigit())
+            .unwrap_or(rest.len());
         rest = &rest[end..];
         // Skip the trailing ", " left after the address itself.
         rest = rest.trim_start_matches(", ");
@@ -79,9 +108,15 @@ fn collect(path: &str, t_lo: f32, t_hi: f32) -> BTreeMap<i32, (f32, String)> {
     let mut out = BTreeMap::new();
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            if f.time < t_lo || f.time > t_hi { continue }
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            if f.time < t_lo || f.time > t_hi {
+                continue;
+            }
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             let seq = bt.1.sequence_info.incoming_sequence;
             let canon: Vec<String> = msgs.iter().map(|m| strip_addrs(&canon_msg(m))).collect();
             out.insert(seq, (f.time, canon.join(" | ")));
@@ -92,20 +127,28 @@ fn collect(path: &str, t_lo: f32, t_hi: f32) -> BTreeMap<i32, (f32, String)> {
 
 fn main() {
     let mut a = std::env::args().skip(1);
-    let before_path = a.next().expect("usage: reencode_value_diff <before.dem> <after.dem> <t_lo> <t_hi>");
+    let before_path = a
+        .next()
+        .expect("usage: reencode_value_diff <before.dem> <after.dem> <t_lo> <t_hi>");
     let after_path = a.next().expect("after.dem");
     let t_lo: f32 = a.next().expect("t_lo").parse().unwrap();
     let t_hi: f32 = a.next().expect("t_hi").parse().unwrap();
 
     let before = collect(&before_path, t_lo, t_hi);
     let after = collect(&after_path, t_lo, t_hi);
-    println!("before: {} frames in window, after: {} frames in window", before.len(), after.len());
+    println!(
+        "before: {} frames in window, after: {} frames in window",
+        before.len(),
+        after.len()
+    );
 
     let mut matched = 0usize;
     let mut identical = 0usize;
     let mut diffs = 0usize;
     for (seq, (t, b_content)) in &before {
-        let Some((_, a_content)) = after.get(seq) else { continue };
+        let Some((_, a_content)) = after.get(seq) else {
+            continue;
+        };
         matched += 1;
         if a_content == b_content {
             identical += 1;
@@ -114,5 +157,7 @@ fn main() {
             println!("DIFF #{diffs} at seq={seq} t={t:.2}s");
         }
     }
-    println!("\n{matched} sequence numbers matched between the two files, {identical} identical, {diffs} differ");
+    println!(
+        "\n{matched} sequence numbers matched between the two files, {identical} identical, {diffs} differ"
+    );
 }

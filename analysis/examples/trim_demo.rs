@@ -18,8 +18,14 @@ use dem::open_demo_from_bytes;
 
 fn main() {
     let mut args = std::env::args().skip(1);
-    let input = args.next().expect("usage: trim_demo <in.dem> <seconds> <out.dem>");
-    let seconds: f32 = args.next().expect("seconds").parse().expect("seconds must be a number");
+    let input = args
+        .next()
+        .expect("usage: trim_demo <in.dem> <seconds> <out.dem>");
+    let seconds: f32 = args
+        .next()
+        .expect("seconds")
+        .parse()
+        .expect("seconds must be a number");
     let output = args.next().expect("out.dem");
 
     let bytes = std::fs::read(&input).expect("read input");
@@ -34,10 +40,17 @@ fn main() {
         if ei == 0 {
             continue;
         }
-        let cut = entry.frames.iter().position(|f| f.time > seconds).unwrap_or(entry.frames.len());
-        let mut terminator = entry.frames.iter().skip(cut).find(|f| {
-            matches!(f.frame_data, dem::types::FrameData::NextSection)
-        }).cloned();
+        let cut = entry
+            .frames
+            .iter()
+            .position(|f| f.time > seconds)
+            .unwrap_or(entry.frames.len());
+        let mut terminator = entry
+            .frames
+            .iter()
+            .skip(cut)
+            .find(|f| matches!(f.frame_data, dem::types::FrameData::NextSection))
+            .cloned();
         entry.frames.truncate(cut);
         if let Some(t) = terminator.as_mut() {
             // Rebase it onto the cut: left at its original timestamp the file
@@ -57,15 +70,28 @@ fn main() {
 
     let after: usize = demo.directory.entries.iter().map(|e| e.frames.len()).sum();
     println!("frames {before} -> {after}");
-    println!("bytes  {} -> {}  ({:.1}% of original)", bytes.len(), out.len(),
-        100.0 * out.len() as f64 / bytes.len() as f64);
+    println!(
+        "bytes  {} -> {}  ({:.1}% of original)",
+        bytes.len(),
+        out.len(),
+        100.0 * out.len() as f64 / bytes.len() as f64
+    );
 
     // The only check that matters: does it read back?
     match open_demo_from_bytes(&out) {
         Ok(d) => {
             let n: usize = d.directory.entries.iter().map(|e| e.frames.len()).sum();
-            let tmax = d.directory.entries.iter().flat_map(|e| e.frames.iter()).map(|f| f.time).fold(f32::MIN, f32::max);
-            println!("re-parsed OK: {} entries, {n} frames, last frame t={tmax:.2}", d.directory.entries.len());
+            let tmax = d
+                .directory
+                .entries
+                .iter()
+                .flat_map(|e| e.frames.iter())
+                .map(|f| f.time)
+                .fold(f32::MIN, f32::max);
+            println!(
+                "re-parsed OK: {} entries, {n} frames, last frame t={tmax:.2}",
+                d.directory.entries.len()
+            );
         }
         Err(e) => println!("RE-PARSE FAILED: {e}"),
     }

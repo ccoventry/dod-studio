@@ -4,9 +4,9 @@
 // Consumed by: cli.rs, pipeline.rs, main.rs (single-demo highlight injection path).
 
 use dem::open_demo_from_bytes;
-use dem::types::{Frame, FrameData, ConsoleCommand, ByteString};
+use dem::types::{ByteString, ConsoleCommand, Frame, FrameData};
 
-use crate::patch::types::{PatchOptions, CommandRelation};
+use crate::patch::types::{CommandRelation, PatchOptions};
 
 pub fn patch_demo_highlights(
     demo_bytes: &[u8],
@@ -19,14 +19,14 @@ pub fn patch_demo_highlights(
     // Find the Playback entry
     let mut entry = demo.directory.entries.iter_mut().find(|e| e.type_ == 1);
     if entry.is_none() {
-        entry = demo.directory.entries.iter_mut().find(|e| {
-            e.description
-                .to_str()
-                .unwrap_or("")
-                .contains("Playback")
-        });
+        entry = demo
+            .directory
+            .entries
+            .iter_mut()
+            .find(|e| e.description.to_str().unwrap_or("").contains("Playback"));
     }
-    let entry = entry.ok_or_else(|| "Could not find Playback entry in demo directory".to_string())?;
+    let entry =
+        entry.ok_or_else(|| "Could not find Playback entry in demo directory".to_string())?;
 
     let start_of_playback = entry.frames.first().map(|f| f.time).unwrap_or(0.0);
 
@@ -71,15 +71,16 @@ pub fn patch_demo_highlights(
 
     // Fast forward initially if first highlight is a bit in
     if let Some(&(first_start, _)) = merged_intervals.first()
-        && first_start > initial_delay + pre_record_buffer {
-            entry.frames.push(Frame {
-                time: start_of_playback + initial_delay,
-                frame: 0,
-                frame_data: FrameData::ConsoleCommand(ConsoleCommand {
-                    command: ByteString::from(ff_cmd.as_str()),
-                }),
-            });
-        }
+        && first_start > initial_delay + pre_record_buffer
+    {
+        entry.frames.push(Frame {
+            time: start_of_playback + initial_delay,
+            frame: 0,
+            frame_data: FrameData::ConsoleCommand(ConsoleCommand {
+                command: ByteString::from(ff_cmd.as_str()),
+            }),
+        });
+    }
 
     for &(start_time, stop_time) in &merged_intervals {
         // Check if player died within 5.0 seconds before streak start
@@ -94,7 +95,8 @@ pub fn patch_demo_highlights(
         }
 
         // a. Pre-Streak Normalization: drop speed and run stop_commands
-        let norm_time = (start_time - pre_record_buffer).max(start_of_playback + initial_delay + 0.1);
+        let norm_time =
+            (start_time - pre_record_buffer).max(start_of_playback + initial_delay + 0.1);
 
         entry.frames.push(Frame {
             time: norm_time,
@@ -149,7 +151,8 @@ pub fn patch_demo_highlights(
         }
 
         // b. Record Start: mirv_recordmovie_start
-        let record_start_time = (start_time - record_start_lead).max(start_of_playback + initial_delay + 0.2);
+        let record_start_time =
+            (start_time - record_start_lead).max(start_of_playback + initial_delay + 0.2);
         entry.frames.push(Frame {
             time: record_start_time,
             frame: 0,
@@ -181,19 +184,24 @@ pub fn patch_demo_highlights(
 
     // e. Exit On Finish: quit command after the last stop record
     if options.exit_on_finish
-        && let Some(&(_, last_stop)) = merged_intervals.last() {
-            let quit_time = last_stop + post_record_buffer + 0.5;
-            entry.frames.push(Frame {
-                time: quit_time,
-                frame: 0,
-                frame_data: FrameData::ConsoleCommand(ConsoleCommand {
-                    command: ByteString::from("quit"),
-                }),
-            });
-        }
+        && let Some(&(_, last_stop)) = merged_intervals.last()
+    {
+        let quit_time = last_stop + post_record_buffer + 0.5;
+        entry.frames.push(Frame {
+            time: quit_time,
+            frame: 0,
+            frame_data: FrameData::ConsoleCommand(ConsoleCommand {
+                command: ByteString::from("quit"),
+            }),
+        });
+    }
 
     // Sort frames by time
-    entry.frames.sort_by(|a, b| a.time.partial_cmp(&b.time).unwrap_or(std::cmp::Ordering::Equal));
+    entry.frames.sort_by(|a, b| {
+        a.time
+            .partial_cmp(&b.time)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     // Re-index frame numbers sequentially
     for (idx, frame) in entry.frames.iter_mut().enumerate() {

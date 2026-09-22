@@ -94,7 +94,11 @@ fn native_roots() -> Vec<DirEntryLite> {
                 let p = PathBuf::from(&drive);
                 if p.is_dir() {
                     let demo_count = count_demo_files(&p);
-                    Some(DirEntryLite { name: drive.clone(), path: drive, demo_count })
+                    Some(DirEntryLite {
+                        name: drive.clone(),
+                        path: drive,
+                        demo_count,
+                    })
                 } else {
                     None
                 }
@@ -105,7 +109,11 @@ fn native_roots() -> Vec<DirEntryLite> {
     {
         let root = PathBuf::from("/");
         let demo_count = count_demo_files(&root);
-        vec![DirEntryLite { name: "/".to_string(), path: "/".to_string(), demo_count }]
+        vec![DirEntryLite {
+            name: "/".to_string(),
+            path: "/".to_string(),
+            demo_count,
+        }]
     }
 }
 
@@ -130,7 +138,8 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
     let mut subdirs = Vec::new();
     let mut demos = Vec::new();
 
-    let entries = std::fs::read_dir(&dir).map_err(|e| crate::messages::failed_to_read_file(&path, e))?;
+    let entries =
+        std::fs::read_dir(&dir).map_err(|e| crate::messages::failed_to_read_file(&path, e))?;
     for entry in entries.filter_map(Result::ok) {
         let entry_path = entry.path();
         let name = entry.file_name().to_string_lossy().into_owned();
@@ -140,7 +149,11 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
                 continue;
             }
             let demo_count = count_demo_files(&entry_path);
-            subdirs.push(DirEntryLite { name, path: entry_path.to_string_lossy().into_owned(), demo_count });
+            subdirs.push(DirEntryLite {
+                name,
+                path: entry_path.to_string_lossy().into_owned(),
+                demo_count,
+            });
         } else if is_dem_file(&entry_path) {
             let meta = entry.metadata().ok();
             let size_bytes = meta.as_ref().map(|m| m.len()).unwrap_or(0);
@@ -169,7 +182,12 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
     // should return to the drive-list root instead of erroring on `.parent()`.
     let parent = dir.parent().map(|p| p.to_string_lossy().into_owned());
 
-    Ok(DirListing { path: Some(path), parent, subdirs, demos })
+    Ok(DirListing {
+        path: Some(path),
+        parent,
+        subdirs,
+        demos,
+    })
 }
 
 /// A sensible starting folder for the picker — the user's Documents
@@ -247,16 +265,18 @@ pub async fn scan_demo_folders(root: Option<String>) -> Result<Vec<DemoFolderHit
                 for entry in entries.filter_map(Result::ok) {
                     let path = entry.path();
                     if path.is_dir() {
-                        if walk_recursive && depth < max_depth
-                            && let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                                let name_lower = name.to_lowercase();
-                                if !name.starts_with('.')
-                                    && !name.starts_with('$')
-                                    && !SCAN_SKIP_DIRS.contains(&name_lower.as_str())
-                                {
-                                    subdirs.push(path);
-                                }
+                        if walk_recursive
+                            && depth < max_depth
+                            && let Some(name) = path.file_name().and_then(|n| n.to_str())
+                        {
+                            let name_lower = name.to_lowercase();
+                            if !name.starts_with('.')
+                                && !name.starts_with('$')
+                                && !SCAN_SKIP_DIRS.contains(&name_lower.as_str())
+                            {
+                                subdirs.push(path);
                             }
+                        }
                     } else if is_dem_file(&path) {
                         demo_count += 1;
                     }
@@ -264,7 +284,10 @@ pub async fn scan_demo_folders(root: Option<String>) -> Result<Vec<DemoFolderHit
             }
 
             if demo_count > 0 {
-                folders.push(DemoFolderHit { path: dir.to_string_lossy().into_owned(), demo_count });
+                folders.push(DemoFolderHit {
+                    path: dir.to_string_lossy().into_owned(),
+                    demo_count,
+                });
             }
 
             subdirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));

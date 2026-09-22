@@ -158,13 +158,14 @@ fn parse_localization_content(content: &str, map: &mut HashMap<String, String>, 
             let key_clean = normalize_key(&key);
             map.insert(key_clean, val);
         } else if current_lang == target_lang
-            && let Some(pos) = trimmed.find('=') {
-                let key = normalize_key(&trimmed[..pos]);
-                let val = trimmed[pos + 1..].trim().to_string();
-                if !key.is_empty() {
-                    map.insert(key, val);
-                }
+            && let Some(pos) = trimmed.find('=')
+        {
+            let key = normalize_key(&trimmed[..pos]);
+            let val = trimmed[pos + 1..].trim().to_string();
+            if !key.is_empty() {
+                map.insert(key, val);
             }
+        }
     }
 }
 
@@ -208,10 +209,9 @@ fn scan_dir_recursive(
                     true
                 };
 
-                if should_load
-                    && let Ok(content) = read_to_string_lossy_utf16_or_utf8(&path) {
-                        parse_localization_content(&content, map, amxx_code);
-                    }
+                if should_load && let Ok(content) = read_to_string_lossy_utf16_or_utf8(&path) {
+                    parse_localization_content(&content, map, amxx_code);
+                }
             }
         }
     }
@@ -423,7 +423,10 @@ mod tests {
         assert_eq!(translate_key("weapon.k98").as_deref(), Some("K98"));
 
         // Case is normalized on the way in.
-        assert_eq!(translate_key("#Game_Joined_Team").as_deref(), Some("*%s1 joined %s2"));
+        assert_eq!(
+            translate_key("#Game_Joined_Team").as_deref(),
+            Some("*%s1 joined %s2")
+        );
 
         assert_eq!(translate_key("#definitely_not_a_real_key"), None);
     }

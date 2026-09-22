@@ -1,6 +1,6 @@
 #![allow(unused_mut, unused_variables, unused_assignments, dead_code)]
 use std::fs::File;
-use std::io::{BufReader, BufWriter, Read, Write, Seek, SeekFrom};
+use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 
 const DEMO_HEADER_SIZE: usize = 544;
@@ -22,12 +22,12 @@ fn write_hltv_director_frame(
     writer.write_all(&time.to_le_bytes())?;
     writer.write_all(&tick.to_le_bytes())?;
     writer.write_all(info_block)?; // 464 bytes NETMSG_INFO_SIZE
-    
+
     let msg_len = (payload.len() + 1) as u32;
     writer.write_all(&msg_len.to_le_bytes())?;
     writer.write_all(payload)?;
     writer.write_all(&[1_u8])?; // svc_nop
-    
+
     let total_bytes = 9 + 464 + 4 + payload.len() + 1;
     Ok(total_bytes as i32)
 }
@@ -54,7 +54,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut header = vec![0u8; DEMO_HEADER_SIZE];
     reader.read_exact(&mut header)?;
 
-    let original_offset = i32::from_le_bytes(header[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into()?);
+    let original_offset =
+        i32::from_le_bytes(header[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into()?);
     writer.write_all(&header)?;
 
     // Map directory entry boundaries
@@ -123,8 +124,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let file_tick = i32::from_le_bytes(frame_hdr[5..9].try_into()?);
         let file_tick = i32::from_le_bytes(frame_hdr[5..9].try_into()?);
 
-
-
         match type_byte {
             2 | 5 => {
                 writer.write_all(&frame_hdr)?;
@@ -162,7 +161,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if sample_length > MAX_PAYLOAD_LIMIT_BYTES {
                     break;
                 }
-                std::io::copy(&mut reader.by_ref().take((sample_length + 16) as u64), &mut writer)?;
+                std::io::copy(
+                    &mut reader.by_ref().take((sample_length + 16) as u64),
+                    &mut writer,
+                )?;
             }
             9 => {
                 writer.write_all(&frame_hdr)?;
@@ -186,7 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                 let mut len_buf = [0u8; 4];
                 reader.read_exact(&mut len_buf)?;
-                
+
                 let msg_len = u32::from_le_bytes(len_buf) as usize;
                 if msg_len > MAX_PAYLOAD_LIMIT_BYTES {
                     break;
@@ -200,7 +202,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut new_payload = vec![0x33, 0x02, 0x03, 0x04, 0x33, 0x02, 0x04, 0x08];
                     new_payload.extend_from_slice(&payload);
                     payload = new_payload;
-                    
+
                     let added_bytes = 8;
                     update_injection(pos as u64, added_bytes, 0);
                     bytes_injected += added_bytes;
@@ -253,6 +255,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let new_offset = original_offset + bytes_injected;
     out_file.write_all(&new_offset.to_le_bytes())?;
 
-    println!("Injection complete. Output written to {}. Total injected: {} bytes.", output_path.display(), bytes_injected);
+    println!(
+        "Injection complete. Output written to {}. Total injected: {} bytes.",
+        output_path.display(),
+        bytes_injected
+    );
     Ok(())
 }

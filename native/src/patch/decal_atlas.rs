@@ -111,8 +111,6 @@ fn to_cell(p: &[f32; 3]) -> Option<Cell> {
     ))
 }
 
-
-
 /// What one merge did, for reporting.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct AtlasStats {
@@ -353,8 +351,16 @@ mod tests {
         let (merged, stats) = merge_and_save(&user, &seeds, &key(), &[[0.0, 0.0, 0.0]]);
         assert_eq!(stats.added, 1, "only the user's own coordinate is recorded");
         assert_eq!(merged.len(), 2, "but both are available to the flush");
-        assert_eq!(load(&user, &key()).len(), 1, "the seed must not leak into the user store");
-        assert_eq!(load(&seed, &key()).len(), 1, "the seed must not be rewritten");
+        assert_eq!(
+            load(&user, &key()).len(),
+            1,
+            "the seed must not leak into the user store"
+        );
+        assert_eq!(
+            load(&seed, &key()).len(),
+            1,
+            "the seed must not be rewritten"
+        );
     }
 
     #[test]

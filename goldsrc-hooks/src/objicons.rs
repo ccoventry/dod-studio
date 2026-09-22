@@ -246,7 +246,13 @@ fn resume_jump(resume: usize) -> Vec<u8> {
 /// relocating any relative branch inside it. The two overrides are independent
 /// flags rather than one, so `offset` alone leaves the game's x alone and
 /// `xoffset` alone leaves the game's y alone.
-fn row_stub(x_active: usize, x_value: usize, y_active: usize, y_value: usize, resume: usize) -> Vec<u8> {
+fn row_stub(
+    x_active: usize,
+    x_value: usize,
+    y_active: usize,
+    y_value: usize,
+    resume: usize,
+) -> Vec<u8> {
     let mut code = substitute_stack_slot(x_active, x_value, X_SLOT);
     code.extend_from_slice(&substitute_stack_slot(y_active, y_value, Y_SLOT));
     code.extend_from_slice(ROW_STOLEN);
@@ -316,8 +322,15 @@ const TIMER_SITE: Site = Site {
 /// lands where it did, so a build that moved the convergence point fails here
 /// rather than having a jump written over the middle of something else. It also
 /// catches someone else's detour, since an `E9` is not what we expect to find.
-fn install_once(site: &Site, base: usize, build_stub: impl FnOnce(usize) -> Vec<u8>) -> Result<(), String> {
-    let mut slot = site.installed.lock().map_err(|_| "the detour lock is poisoned".to_string())?;
+fn install_once(
+    site: &Site,
+    base: usize,
+    build_stub: impl FnOnce(usize) -> Vec<u8>,
+) -> Result<(), String> {
+    let mut slot = site
+        .installed
+        .lock()
+        .map_err(|_| "the detour lock is poisoned".to_string())?;
     if slot.is_some() {
         return Ok(());
     }
@@ -383,7 +396,11 @@ impl Setting {
                 )
             }),
             Setting::TimerY => install_once(&TIMER_SITE, base, |resume| {
-                timer_stub(TIMER_ACTIVE.as_ptr() as usize, TIMER_VALUE.as_ptr() as usize, resume)
+                timer_stub(
+                    TIMER_ACTIVE.as_ptr() as usize,
+                    TIMER_VALUE.as_ptr() as usize,
+                    resume,
+                )
             }),
         }
     }
@@ -454,7 +471,9 @@ fn status() -> String {
 }
 
 fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else { return Vec::new() };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return Vec::new();
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
     (0..argc)
         .filter_map(|i| {
@@ -462,7 +481,11 @@ fn args() -> Vec<String> {
             if ptr.is_null() {
                 return None;
             }
-            Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+            Some(
+                unsafe { CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
         .collect()
 }
@@ -520,7 +543,13 @@ mod tests {
 
     #[test]
     fn the_row_stub_assembles_to_what_the_comment_claims() {
-        let code = row_stub(0x1111_1111, 0x2222_2222, 0x3333_3333, 0x4444_4444, 0x5555_5555);
+        let code = row_stub(
+            0x1111_1111,
+            0x2222_2222,
+            0x3333_3333,
+            0x4444_4444,
+            0x5555_5555,
+        );
         #[rustfmt::skip]
         assert_eq!(
             code,
@@ -560,17 +589,29 @@ mod tests {
         // Hand-assembled, so the one thing a typo would silently break is a
         // `je` displacement: too small lands mid-instruction, too large skips
         // an instruction the game needs. Derive both from the bytes themselves.
-        let row = row_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd, 0xeeee_eeee);
+        let row = row_stub(
+            0xaaaa_aaaa,
+            0xbbbb_bbbb,
+            0xcccc_cccc,
+            0xdddd_dddd,
+            0xeeee_eeee,
+        );
         let row_guards = guards(&row);
         assert_eq!(row_guards.len(), 2, "one guarded assignment per axis");
         // The first lands on the second guard; the second on the stolen bytes.
         assert_eq!(row_guards[0].1, row_guards[1].0 - 7);
-        assert_eq!(&row[row_guards[1].1..row_guards[1].1 + ROW_STOLEN.len()], ROW_STOLEN);
+        assert_eq!(
+            &row[row_guards[1].1..row_guards[1].1 + ROW_STOLEN.len()],
+            ROW_STOLEN
+        );
 
         let timer = timer_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc);
         let timer_guards = guards(&timer);
         assert_eq!(timer_guards.len(), 1);
-        assert_eq!(&timer[timer_guards[0].1..timer_guards[0].1 + TIMER_STOLEN.len()], TIMER_STOLEN);
+        assert_eq!(
+            &timer[timer_guards[0].1..timer_guards[0].1 + TIMER_STOLEN.len()],
+            TIMER_STOLEN
+        );
     }
 
     #[test]
@@ -578,19 +619,35 @@ mod tests {
         // Writing the x into the y's slot would place the row correctly along
         // one axis and nowhere sensible along the other, and every other test
         // here would still pass.
-        let code = row_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc, 0xdddd_dddd, 0xeeee_eeee);
+        let code = row_stub(
+            0xaaaa_aaaa,
+            0xbbbb_bbbb,
+            0xcccc_cccc,
+            0xdddd_dddd,
+            0xeeee_eeee,
+        );
         for ((_, landing), slot) in guards(&code).iter().zip([X_SLOT, Y_SLOT]) {
             // The guarded block is `mov eax,[abs32]` + `mov [esp+slot],eax`.
             let assign = landing - 9;
-            assert_eq!(code[assign], 0xa1, "the guarded block must start with the load");
-            assert_eq!(code[assign + 8], slot, "the assignment writes the wrong slot");
+            assert_eq!(
+                code[assign], 0xa1,
+                "the guarded block must start with the load"
+            );
+            assert_eq!(
+                code[assign + 8],
+                slot,
+                "the assignment writes the wrong slot"
+            );
         }
     }
 
     #[test]
     fn each_stolen_span_is_long_enough_to_hold_the_jump_that_replaces_it() {
         for stolen in [ROW_STOLEN, TIMER_STOLEN] {
-            assert!(stolen.len() >= 5, "a near jump needs five bytes: {stolen:02x?}");
+            assert!(
+                stolen.len() >= 5,
+                "a near jump needs five bytes: {stolen:02x?}"
+            );
         }
     }
 
@@ -620,7 +677,11 @@ mod tests {
         names.sort_unstable();
         names.dedup();
         assert_eq!(names.len(), SUBCOMMANDS.len());
-        assert_eq!(SUBCOMMANDS.len(), settings.len(), "every setting needs a way to reach it");
+        assert_eq!(
+            SUBCOMMANDS.len(),
+            settings.len(),
+            "every setting needs a way to reach it"
+        );
     }
 
     #[test]
@@ -647,7 +708,10 @@ mod tests {
     fn every_subcommand_is_in_the_usage_text() {
         let text = usage();
         for (name, _, _) in SUBCOMMANDS {
-            assert!(text.contains(name), "{name} missing from the usage text:\n{text}");
+            assert!(
+                text.contains(name),
+                "{name} missing from the usage text:\n{text}"
+            );
         }
     }
 
@@ -655,6 +719,9 @@ mod tests {
     fn an_unknown_subcommand_is_named_rather_than_guessed_at() {
         let reply = dispatch(&[COMMAND.to_string(), "y".to_string(), "10".to_string()]);
         assert!(reply.contains("no subcommand"), "{reply}");
-        assert!(reply.contains("xoffset"), "the reply should show what is available");
+        assert!(
+            reply.contains("xoffset"),
+            "the reply should show what is available"
+        );
     }
 }

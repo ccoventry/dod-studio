@@ -42,8 +42,18 @@ const MAX_BURST_GAP: f32 = 1.0;
 /// and 7.5% on the Garand, against 1.2% and 2.8% for the same weapons in a POV
 /// demo, which is the tell that those numbers are the method failing rather
 /// than rounds going missing.
-const AUTOMATIC_WEAPONS: &[&str] =
-    &["bar", "mp44", "mp40", "thompson", "sten", "greasegun", "bren", "mg42", "mg34", "30cal"];
+const AUTOMATIC_WEAPONS: &[&str] = &[
+    "bar",
+    "mp44",
+    "mp40",
+    "thompson",
+    "sten",
+    "greasegun",
+    "bren",
+    "mg42",
+    "mg34",
+    "30cal",
+];
 
 /// Reads a delta field as a little-endian u32. Field names arrive padded, so
 /// they are trimmed before matching.
@@ -55,7 +65,9 @@ fn delta_u32(delta: &dem::types::Delta, field: &str) -> Option<u32> {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: hltv_shot_gap_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: hltv_shot_gap_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -68,10 +80,16 @@ fn main() {
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcResourceList(rl) => {
                         for r in &rl.resources {
@@ -133,7 +151,9 @@ fn main() {
     // stable even when one player only fired a few rounds.
     let mut per_weapon: HashMap<String, Vec<Vec<f32>>> = HashMap::new();
     for ((idx, _shooter), mut times) in fires {
-        let Some(name) = event_names.get(&idx) else { continue };
+        let Some(name) = event_names.get(&idx) else {
+            continue;
+        };
         if !name.contains("events/weapons/") {
             continue;
         }
@@ -204,7 +224,11 @@ fn main() {
         for g in &gaps {
             *buckets.entry((g / 0.005) as i32).or_insert(0) += 1;
         }
-        let cyclic = buckets.iter().max_by_key(|(_, c)| **c).map(|(b, _)| (*b as f32 + 0.5) * 0.005).unwrap_or(0.0);
+        let cyclic = buckets
+            .iter()
+            .max_by_key(|(_, c)| **c)
+            .map(|(b, _)| (*b as f32 + 0.5) * 0.005)
+            .unwrap_or(0.0);
         if cyclic <= 0.0 {
             continue;
         }
@@ -282,7 +306,10 @@ fn report_longest_bursts(bursts: &[Burst]) {
     }
 
     println!("\nlongest sustained bursts -- seek here to see automatic fire:");
-    println!("{:<12} {:>7} {:>10}  seek to", "weapon", "rounds", "demo time");
+    println!(
+        "{:<12} {:>7} {:>10}  seek to",
+        "weapon", "rounds", "demo time"
+    );
     for b in longest.iter().take(12) {
         // A couple of seconds early, so the camera is settled and on the player
         // before the burst rather than arriving mid-way through it.

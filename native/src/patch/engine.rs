@@ -3,13 +3,21 @@
 // Reads/writes to disk — native-only.
 // Strict 468-byte NetworkMessage alignment must be preserved; see ai_project_context.md.
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::patch::types::{PatchJob, PatcherConfig};
 use crate::patch::{MAX_PAYLOAD_LIMIT_BYTES, NETWORK_HEADER_ALIGNMENT, SCANNER_SECTION_BOUNDARY};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 // ── Internal helper ───────────────────────────────────────────────────────────
 
-fn write_console_cmd(writer: &mut std::io::BufWriter<std::fs::File>, time: f32, tick: i32, cmd: &str) -> std::io::Result<i32> {
+fn write_console_cmd(
+    writer: &mut std::io::BufWriter<std::fs::File>,
+    time: f32,
+    tick: i32,
+    cmd: &str,
+) -> std::io::Result<i32> {
     use std::io::Write;
     log::debug!("Injecting Command: {} at tick: {}", cmd, tick);
     let command_string = cmd;
@@ -27,7 +35,10 @@ fn write_console_cmd(writer: &mut std::io::BufWriter<std::fs::File>, time: f32, 
             let local_dir = exe_dir.join("local");
             std::fs::create_dir_all(&local_dir)?;
             let log_path = local_dir.join("crash_log.md");
-            let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)?;
             writeln!(file, "{}", msg)?;
             Ok(())
         })();
@@ -52,34 +63,39 @@ fn write_director_event_payload(
     command: &str,
 ) -> std::io::Result<i32> {
     use std::io::Write;
-    
+
     // svc_director STUFFTEXT payload_len is a u8; silently clamp to 253 bytes.
     // (The 64-byte panic is the ConsoleCommand frame's field width, not a limit
     // on director payloads -- those travel inside a NetworkMessage instead.)
-    let command = if command.len() > crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN { &command[..crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN] } else { command };
+    let command = if command.len() > crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN {
+        &command[..crate::patch::MAX_DIRECTOR_STUFFTEXT_LEN]
+    } else {
+        command
+    };
 
     let cmd_bytes = command.as_bytes();
     let cmd_len = cmd_bytes.len();
     let payload_len = (1 + cmd_len + 1) as u8;
-    
+
     let mut payload = Vec::with_capacity(3 + cmd_len + 1);
-    payload.push(0x33);         // svc_director
+    payload.push(0x33); // svc_director
     payload.push(payload_len);
-    payload.push(0x0A);         // DRC_CMD_STUFFTEXT
+    payload.push(0x0A); // DRC_CMD_STUFFTEXT
     payload.extend_from_slice(cmd_bytes);
-    payload.push(0x00);         // null terminator
+    payload.push(0x00); // null terminator
 
     writer.write_all(&[1_u8])?; // type (NetworkMessage)
     writer.write_all(&time.to_le_bytes())?;
     writer.write_all(&tick.to_le_bytes())?;
     writer.write_all(info_block)?;
-    
+
     let msg_len = (payload.len() + 1) as u32;
     writer.write_all(&msg_len.to_le_bytes())?;
     writer.write_all(&payload)?;
     writer.write_all(&[1_u8])?; // svc_nop
-    
-    let total_bytes = crate::patch::FRAME_HEADER_SIZE + NETWORK_HEADER_ALIGNMENT + payload.len() + 1;
+
+    let total_bytes =
+        crate::patch::FRAME_HEADER_SIZE + NETWORK_HEADER_ALIGNMENT + payload.len() + 1;
     Ok(total_bytes as i32)
 }
 
@@ -125,15 +141,23 @@ pub struct StreamPatcher {
 }
 
 impl StreamPatcher {
-    pub fn new(input_path: impl AsRef<std::path::Path>, output_path: impl AsRef<std::path::Path>) -> Self {
+    pub fn new(
+        input_path: impl AsRef<std::path::Path>,
+        output_path: impl AsRef<std::path::Path>,
+    ) -> Self {
         Self {
             input_path: input_path.as_ref().to_path_buf(),
             output_path: output_path.as_ref().to_path_buf(),
         }
     }
 
-    pub fn patch(&self, job: &PatchJob, config: &PatcherConfig, cancel_token: &Arc<AtomicBool>) -> Result<(), std::io::Error> {
-        use std::io::{BufReader, BufWriter, Read, Write, Seek, SeekFrom};
+    pub fn patch(
+        &self,
+        job: &PatchJob,
+        config: &PatcherConfig,
+        cancel_token: &Arc<AtomicBool>,
+    ) -> Result<(), std::io::Error> {
+        use std::io::{BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 
         // Decal hygiene runs first, as a whole-file rewrite the stream below
         // then reads from. Held for the whole patch: the scratch demo is
@@ -148,9 +172,7 @@ impl StreamPatcher {
             config,
             crate::patch::Cancel::new(cancel_token),
         )
-        .map_err(|_| {
-            std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user")
-        })?;
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user"))?;
         let source_demo: &std::path::Path = match &cleaned_source {
             Some(c) => c.path(),
             None => std::path::Path::new(&job.source_demo),
@@ -162,7 +184,10 @@ impl StreamPatcher {
         let mut reader = BufReader::with_capacity(crate::patch::IO_BUFFER_CAPACITY, input_file);
         let mut writer = BufWriter::with_capacity(crate::patch::IO_BUFFER_CAPACITY, output_file);
 
-        let read_exact = |reader: &mut BufReader<std::fs::File>, buf: &mut [u8], label: &str| -> Result<(), std::io::Error> {
+        let read_exact = |reader: &mut BufReader<std::fs::File>,
+                          buf: &mut [u8],
+                          label: &str|
+         -> Result<(), std::io::Error> {
             let expected_size = buf.len();
             let file_cursor_position = reader.stream_position().unwrap_or(0);
             match reader.read_exact(buf) {
@@ -184,7 +209,11 @@ impl StreamPatcher {
         read_exact(&mut reader, &mut header, "Header")?;
 
         // Extract directory offset (i32 is at offset 540..544)
-        let original_offset = i32::from_le_bytes(header[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE].try_into().unwrap());
+        let original_offset = i32::from_le_bytes(
+            header[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE]
+                .try_into()
+                .unwrap(),
+        );
 
         writer.write_all(&header)?;
 
@@ -196,8 +225,8 @@ impl StreamPatcher {
             b.sort_unstable_by_key(|(tick, _)| *tick);
             b.into()
         };
-        let mut scheduled_queue: std::collections::VecDeque<(i32, String)> = job.scheduled_commands.iter().cloned().collect();
-
+        let mut scheduled_queue: std::collections::VecDeque<(i32, String)> =
+            job.scheduled_commands.iter().cloned().collect();
 
         // Step 2.5: Pre-read the directory to map entry boundaries
         let mut dir_entries: Vec<(i32, i32)> = Vec::new();
@@ -247,7 +276,10 @@ impl StreamPatcher {
 
         loop {
             if cancel_token.load(Ordering::Relaxed) {
-                return Err(std::io::Error::new(std::io::ErrorKind::Interrupted, "Cancelled by user"));
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::Interrupted,
+                    "Cancelled by user",
+                ));
             }
 
             let pos = reader.stream_position().unwrap_or(0);
@@ -277,7 +309,7 @@ impl StreamPatcher {
                     update_injection(pos, b, 1);
                     bytes_injected += b;
                 }
-                
+
                 while let Some((target_tick, _cmd)) = scheduled_queue.front() {
                     let actual_target = *target_tick;
                     if playback_started && frame_counter >= actual_target {
@@ -348,7 +380,8 @@ impl StreamPatcher {
                     let mut prefix = [0u8; 8];
                     read_exact(&mut reader, &mut prefix, "Sound Prefix")?;
                     writer.write_all(&prefix)?;
-                    let sample_length = u32::from_le_bytes(prefix[4..8].try_into().unwrap()) as usize;
+                    let sample_length =
+                        u32::from_le_bytes(prefix[4..8].try_into().unwrap()) as usize;
 
                     if sample_length > MAX_PAYLOAD_LIMIT_BYTES {
                         crate::log_markdown(&format!(
@@ -356,10 +389,16 @@ impl StreamPatcher {
                             sample_length,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
-                    std::io::copy(&mut reader.by_ref().take((sample_length + 16) as u64), &mut writer)?;
+                    std::io::copy(
+                        &mut reader.by_ref().take((sample_length + 16) as u64),
+                        &mut writer,
+                    )?;
                 }
                 9 => {
                     // DemoBuffer (4 bytes + buffer_length)
@@ -375,7 +414,10 @@ impl StreamPatcher {
                             buffer_length,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
                     std::io::copy(&mut reader.by_ref().take(buffer_length as u64), &mut writer)?;
@@ -389,7 +431,13 @@ impl StreamPatcher {
                     while let Some((target_tick, _)) = director_queue.front() {
                         if playback_started && frame_counter >= *target_tick {
                             let (_, label) = director_queue.pop_front().unwrap();
-                            let b = write_director_event_payload(&mut writer, time, file_tick, &scratch_buf, &label)?;
+                            let b = write_director_event_payload(
+                                &mut writer,
+                                time,
+                                file_tick,
+                                &scratch_buf,
+                                &label,
+                            )?;
                             update_injection(pos, b, 1);
                             bytes_injected += b;
                         } else {
@@ -411,7 +459,10 @@ impl StreamPatcher {
                             msg_len,
                             reader.stream_position().unwrap_or(0)
                         ));
-                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Parser alignment lost"));
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            "Parser alignment lost",
+                        ));
                     }
 
                     let mut net_buf = vec![0u8; msg_len];
@@ -423,7 +474,6 @@ impl StreamPatcher {
                 }
             }
         }
-
 
         // [STEP 4] Directory Offset Rewrite (EOF Handling)
         // 4b: Copy the remaining directory entries from the input to the output.
@@ -487,9 +537,9 @@ impl StreamPatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::patch::types::{CaptureStreak, PatcherConfig, PatchJob};
     use crate::patch::builder::spawn_patch_batch;
     use crate::patch::types::PatchEvent;
+    use crate::patch::types::{CaptureStreak, PatchJob, PatcherConfig};
 
     #[test]
     fn test_stream_patcher_end_to_end() {
@@ -553,27 +603,25 @@ mod tests {
         let job = PatchJob {
             source_demo: input_path.to_string_lossy().to_string(),
             output_demo: output_path.clone(),
-            streaks: vec![
-                CaptureStreak {
-                    start_tick: 50,
-                    end_tick: 100,
-                    source_demo: input_path.to_string_lossy().to_string(),
-                    target_player: None,
-                    kill_count: 0,
-                    timeline_string: String::new(),
-                    duration_string: String::new(),
-                    player_index: 0,
-                    kills: Vec::new(),
-                    start_index: 0,
-                    end_index: 0,
-                    total_demo_frames: 3000,
-                    demo_fps: 100.0,
-                    viewdemo_times: Vec::new(),
-                    frame_times: std::sync::Arc::new(Vec::new()),
-                    match_start_tick: None,
-                    status: Default::default(),
-                }
-            ],
+            streaks: vec![CaptureStreak {
+                start_tick: 50,
+                end_tick: 100,
+                source_demo: input_path.to_string_lossy().to_string(),
+                target_player: None,
+                kill_count: 0,
+                timeline_string: String::new(),
+                duration_string: String::new(),
+                player_index: 0,
+                kills: Vec::new(),
+                start_index: 0,
+                end_index: 0,
+                total_demo_frames: 3000,
+                demo_fps: 100.0,
+                viewdemo_times: Vec::new(),
+                frame_times: std::sync::Arc::new(Vec::new()),
+                match_start_tick: None,
+                status: Default::default(),
+            }],
             target_player: None,
             init_commands: vec!["host_framerate 0".to_string()],
             scheduled_commands: vec![(10, "some_command".to_string())],
@@ -652,27 +700,25 @@ mod tests {
         let job = PatchJob {
             source_demo: input_path.to_string_lossy().to_string(),
             output_demo: output_path.clone(),
-            streaks: vec![
-                CaptureStreak {
-                    start_tick: 50,
-                    end_tick: 100,
-                    source_demo: input_path.to_string_lossy().to_string(),
-                    target_player: None,
-                    kill_count: 0,
-                    timeline_string: String::new(),
-                    duration_string: String::new(),
-                    player_index: 0,
-                    kills: Vec::new(),
-                    start_index: 0,
-                    end_index: 0,
-                    total_demo_frames: 3000,
-                    demo_fps: 100.0,
-                    viewdemo_times: Vec::new(),
-                    frame_times: std::sync::Arc::new(Vec::new()),
-                    match_start_tick: None,
-                    status: Default::default(),
-                }
-            ],
+            streaks: vec![CaptureStreak {
+                start_tick: 50,
+                end_tick: 100,
+                source_demo: input_path.to_string_lossy().to_string(),
+                target_player: None,
+                kill_count: 0,
+                timeline_string: String::new(),
+                duration_string: String::new(),
+                player_index: 0,
+                kills: Vec::new(),
+                start_index: 0,
+                end_index: 0,
+                total_demo_frames: 3000,
+                demo_fps: 100.0,
+                viewdemo_times: Vec::new(),
+                frame_times: std::sync::Arc::new(Vec::new()),
+                match_start_tick: None,
+                status: Default::default(),
+            }],
             target_player: None,
             init_commands: vec!["host_framerate 0".to_string()],
             scheduled_commands: vec![(10, "some_command".to_string())],
@@ -767,16 +813,16 @@ mod director_event_tests {
         expected.extend_from_slice(&info_block);
 
         let mut payload = Vec::new();
-        payload.push(0x33);         // svc_director
+        payload.push(0x33); // svc_director
         payload.push(payload_len);
-        payload.push(0x0A);         // DRC_CMD_STUFFTEXT
+        payload.push(0x0A); // DRC_CMD_STUFFTEXT
         payload.extend_from_slice(cmd_bytes);
-        payload.push(0x00);         // null terminator
+        payload.push(0x00); // null terminator
 
         let msg_len = (payload.len() + 1) as u32;
         expected.extend_from_slice(&msg_len.to_le_bytes());
         expected.extend_from_slice(&payload);
-        expected.push(0x01);        // svc_nop
+        expected.push(0x01); // svc_nop
 
         assert_eq!(result, expected);
     }

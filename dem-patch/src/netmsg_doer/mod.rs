@@ -11,10 +11,10 @@ use nom::number::complete::le_u8;
 
 use nom::{
     multi::count,
-    number::complete::{le_f32, le_i16, le_i32, le_i8, le_u16, le_u32},
+    number::complete::{le_f32, le_i8, le_i16, le_i32, le_u16, le_u32},
 };
 
-use crate::nom_helper::{null_string, Result};
+use crate::nom_helper::{Result, null_string};
 
 use crate::bit::{BitReader, BitSliceCast};
 use crate::byte_writer::ByteWriter;

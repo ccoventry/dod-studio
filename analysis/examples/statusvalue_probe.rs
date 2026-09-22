@@ -18,7 +18,9 @@ use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: statusvalue_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: statusvalue_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -28,8 +30,12 @@ fn main() {
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
                 match m {
                     NetMessage::EngineMessage(em) => {
@@ -78,12 +84,22 @@ fn main() {
     }
     windows.push((start, prev, count));
 
-    println!("{} window(s) of sustained ID (gap <= {}s)\n", windows.len(), MAX_GAP);
+    println!(
+        "{} window(s) of sustained ID (gap <= {}s)\n",
+        windows.len(),
+        MAX_GAP
+    );
     let mut by_length = windows.clone();
     by_length.sort_by(|a, b| (b.1 - b.0).partial_cmp(&(a.1 - a.0)).unwrap());
     println!("Longest windows -- best ones to test against:");
     for (start, end, count) in by_length.iter().take(10) {
-        println!("  {:.2}s .. {:.2}s  ({:.1}s, {} update(s))", start, end, end - start, count);
+        println!(
+            "  {:.2}s .. {:.2}s  ({:.1}s, {} update(s))",
+            start,
+            end,
+            end - start,
+            count
+        );
     }
 
     println!("\nAll windows, in order:");

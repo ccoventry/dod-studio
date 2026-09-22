@@ -110,104 +110,91 @@ pub const BREADCRUMB_INTERVAL_TICKS: i32 = 5000;
 pub mod types;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub mod highlevel;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_strip;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_atlas;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod bsp;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod bsp_entities;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod sound_mute;
+pub mod builder;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cfg_scan;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_atlas;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_probe;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod decal_strip;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod engine;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod highlevel;
+pub mod map_check;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_fetch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod map_text;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
-pub mod cfg_scan;
-pub mod map_check;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod map_fetch;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod decal_probe;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod engine;
-#[cfg(not(target_arch = "wasm32"))]
-pub mod builder;
-#[cfg(not(target_arch = "wasm32"))]
 pub mod scanner;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod sound_mute;
 
 // ── Re-export wall ────────────────────────────────────────────────────────────
 // All items below were previously at the top level of patch.rs.
 // Every existing `native::patch::*` call site resolves here unchanged.
 
 pub use types::{
-    MAX_PAYLOAD_SIZE,
-    CustomCommand,
-    CommandRelation,
-    CaptureCodec,
-    CaptureMode,
-    ObsConfig,
-    PatchOptions,
-    CaptureStreak,
-    CaptureBlock,
-    PatchJob,
-    DriveHeadroom,
-    PatcherConfig,
-    HighlightRules,
-    HighlightStatus,
-    default_goldsrc_hooks_dll_path,
+    CaptureBlock, CaptureCodec, CaptureMode, CaptureStreak, CommandRelation, CustomCommand,
+    DriveHeadroom, HighlightRules, HighlightStatus, MAX_PAYLOAD_SIZE, ObsConfig, PatchJob,
+    PatchOptions, PatcherConfig, default_goldsrc_hooks_dll_path,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use types::{PatchEvent, CaptureWorker};
+pub use types::{CaptureWorker, PatchEvent};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use highlevel::patch_demo_highlights;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{
-    capture_fov, clean_demo_decals, on_screen_half_angle, prepare_flushed_source,
-    DEFAULT_LEAD_SECONDS,
-    proven_world_coordinates, ring_limit, ring_limit_from_init, ring_limit_from_game_config,
-    strip_decals_outside_windows,
-    CleanedSource, DecalCleanError, DecalCleanOptions, DecalCleanStats, FlushSource,
-    VisibilityBasis,
-    DECALS_PER_POSITION, MAX_OVERLAP_DECALS,
+    CleanedSource, DECALS_PER_POSITION, DEFAULT_LEAD_SECONDS, DecalCleanError, DecalCleanOptions,
+    DecalCleanStats, FlushSource, MAX_OVERLAP_DECALS, VisibilityBasis, capture_fov,
+    clean_demo_decals, on_screen_half_angle, prepare_flushed_source, proven_world_coordinates,
+    ring_limit, ring_limit_from_game_config, ring_limit_from_init, strip_decals_outside_windows,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_probe::{
-    best_view_for, camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
-    CameraView, GridStats, Probe, ProbeOptions, ProbeRow,
-    ProbeStats, Sighting,
+    CameraView, GridStats, Probe, ProbeOptions, ProbeRow, ProbeStats, Sighting, best_view_for,
+    camera_at_time, decal_texture_histogram, probe_decal_offsets, project,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use cfg_scan::{scan as scan_game_cfgs, CfgScan, CvarSetting, WATCHED_CVARS};
+pub use cfg_scan::{CfgScan, CvarSetting, WATCHED_CVARS, scan as scan_game_cfgs};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use decal_strip::{capture_fov_from_init, capture_fov_resolved};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_check::{check_demo, map_reference, MapReference, MapStatus};
+pub use map_check::{MapReference, MapStatus, check_demo, map_reference};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use sound_mute::{map_sounds, mute_sounds, MapSounds, MuteSelection, MuteStats};
+pub use sound_mute::{MapSounds, MuteSelection, MuteStats, map_sounds, mute_sounds};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_text::{hide_map_text, map_text, MapText, TextSelection, TextStats};
+pub use map_text::{MapText, TextSelection, TextStats, hide_map_text, map_text};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use map_fetch::{fetch_map, map_url, FetchOutcome, DEFAULT_MIRROR};
+pub use map_fetch::{DEFAULT_MIRROR, FetchOutcome, fetch_map, map_url};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use engine::StreamPatcher;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use builder::{build_batch_queue, final_init_commands, spawn_patch_batch, WorkspaceGuard, build_director_message, build_director_stufftext, build_preview_patch_jobs, playdemo_safe_stem};
+pub use builder::{
+    WorkspaceGuard, build_batch_queue, build_director_message, build_director_stufftext,
+    build_preview_patch_jobs, final_init_commands, playdemo_safe_stem, spawn_patch_batch,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use scanner::{is_hltv_demo, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis};

@@ -54,8 +54,12 @@ fn main() {
                                 .trim_matches(|c| c == '\0' || c == '\\')
                                 .split('\\')
                                 .collect();
-                            let f: HashMap<&str, &str> =
-                                parts.as_chunks::<2>().0.iter().map(|&[k, v]| (k, v)).collect();
+                            let f: HashMap<&str, &str> = parts
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|&[k, v]| (k, v))
+                                .collect();
                             if f.get("*hltv") == Some(&"1") {
                                 hltv_slot_in_userinfo = true;
                             }

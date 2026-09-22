@@ -1,5 +1,5 @@
-use hl_demo_auditor::{find_duplicates, scan_dir, AuditProgress};
-use serde::{Serialize};
+use hl_demo_auditor::{AuditProgress, find_duplicates, scan_dir};
+use serde::Serialize;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -38,32 +38,40 @@ pub async fn run_demo_audit_impl(
 
     let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let (tx, rx) = mpsc::channel();
-        
+
         // Spawn a thread to forward progress events to Tauri frontend
         let ah = app_handle.clone();
         let cancel_clone = cancel_token.clone();
         let mut files_checked = 0;
-        
+
         let progress_handle = std::thread::spawn(move || {
             while let Ok(msg) = rx.recv() {
-                if cancel_clone.load(Ordering::Relaxed) { break; }
+                if cancel_clone.load(Ordering::Relaxed) {
+                    break;
+                }
                 match msg {
                     AuditProgress::Scanning(p) => {
-                        let _ = ah.emit("audit_progress", serde_json::json!({
-                            "files_checked": files_checked,
-                            "duplicates_found": 0,
-                            "wasted_bytes": 0,
-                            "status": format!("Scanning folder: {}", p)
-                        }));
+                        let _ = ah.emit(
+                            "audit_progress",
+                            serde_json::json!({
+                                "files_checked": files_checked,
+                                "duplicates_found": 0,
+                                "wasted_bytes": 0,
+                                "status": format!("Scanning folder: {}", p)
+                            }),
+                        );
                     }
                     AuditProgress::Hashing(p) => {
                         files_checked += 1;
-                        let _ = ah.emit("audit_progress", serde_json::json!({
-                            "files_checked": files_checked,
-                            "duplicates_found": 0,
-                            "wasted_bytes": 0,
-                            "status": format!("Checking: {}", p)
-                        }));
+                        let _ = ah.emit(
+                            "audit_progress",
+                            serde_json::json!({
+                                "files_checked": files_checked,
+                                "duplicates_found": 0,
+                                "wasted_bytes": 0,
+                                "status": format!("Checking: {}", p)
+                            }),
+                        );
                     }
                     _ => {}
                 }
@@ -78,7 +86,7 @@ pub async fn run_demo_audit_impl(
             }
         }
 
-        let (_, duplicate_groups, dup_count, space_wasted_bytes) = 
+        let (_, duplicate_groups, dup_count, space_wasted_bytes) =
             find_duplicates(files, &cancel_token, &Some(tx));
 
         // Signal progress thread to exit and wait for it
@@ -96,7 +104,11 @@ pub async fn run_demo_audit_impl(
             .map(|g| SerializedDuplicateGroup {
                 size: g.key.size,
                 header_hash: g.key.header_hash,
-                files: g.files.into_iter().map(|f| f.to_string_lossy().to_string()).collect(),
+                files: g
+                    .files
+                    .into_iter()
+                    .map(|f| f.to_string_lossy().to_string())
+                    .collect(),
             })
             .collect();
 
@@ -149,7 +161,9 @@ pub fn reveal_in_explorer_impl(path: String) -> Result<(), String> {
     {
         // Linux fallback: no universal "select this file" behavior, so just
         // open the parent directory via the desktop's default file manager.
-        let parent = path_buf.parent().ok_or(crate::messages::NO_PARENT_DIRECTORY_FOR_PATH)?;
+        let parent = path_buf
+            .parent()
+            .ok_or(crate::messages::NO_PARENT_DIRECTORY_FOR_PATH)?;
         std::process::Command::new("xdg-open")
             .arg(parent)
             .spawn()

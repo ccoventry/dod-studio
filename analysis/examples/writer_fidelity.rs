@@ -18,7 +18,9 @@
 use dem::open_demo_from_bytes;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: writer_fidelity <healthy.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: writer_fidelity <healthy.dem>");
     let original = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&original).expect("parse");
     let rewritten = demo.write_to_bytes();
@@ -50,8 +52,12 @@ fn main() {
     // the discrepancy is vs. a full desync of everything downstream.
     let mut diffs = 0usize;
     for i in 0..min_len {
-        if original[i] != rewritten[i] { diffs += 1 }
+        if original[i] != rewritten[i] {
+            diffs += 1
+        }
     }
-    println!("  {diffs} of {min_len} compared bytes differ ({:.2}%)",
-        100.0 * diffs as f64 / min_len as f64);
+    println!(
+        "  {diffs} of {min_len} compared bytes differ ({:.2}%)",
+        100.0 * diffs as f64 / min_len as f64
+    );
 }

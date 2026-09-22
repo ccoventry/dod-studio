@@ -74,10 +74,10 @@ mod anim_fix;
 mod commands;
 mod crash;
 mod crosshair;
-mod decals;
 mod deathmsg;
-mod detour;
 mod debug;
+mod decals;
+mod detour;
 mod engine;
 mod ex_interp;
 mod hand_signals;
@@ -142,8 +142,14 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // having it on would colour an animation test for no reason. The firing
     // animation does not depend on it -- anim_fix::on_weapon_fired is called
     // from the EV_PlaySound hook regardless of this flag.
-    sound_fix::ENABLED.store(env_flag("GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME", false), Ordering::Relaxed);
-    anim_fix::LEVEL.store(env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT), Ordering::Relaxed);
+    sound_fix::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME", false),
+        Ordering::Relaxed,
+    );
+    anim_fix::LEVEL.store(
+        env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
+        Ordering::Relaxed,
+    );
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
@@ -155,7 +161,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     unsafe {
         debug::report(&format!(
             "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations toggle live)",
-            if sound_fix::ENABLED.load(Ordering::Relaxed) { "ON" } else { "off" },
+            if sound_fix::ENABLED.load(Ordering::Relaxed) {
+                "ON"
+            } else {
+                "off"
+            },
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
         ))
@@ -182,7 +192,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     let mut waited = 0u32;
     while engine::engfuncs().is_none() {
         if waited >= 30_000 {
-            unsafe { debug::report("goldsrc-hooks: timed out waiting for client.dll's Initialize to run; fixes not installed this session") };
+            unsafe {
+                debug::report(
+                    "goldsrc-hooks: timed out waiting for client.dll's Initialize to run; fixes not installed this session",
+                )
+            };
             return 0;
         }
         unsafe { Sleep(50) };
@@ -216,13 +230,24 @@ fn install_fixes() {
 /// Only ever called by the Windows loader itself, per the standard `DllMain`
 /// contract -- never call this directly.
 #[unsafe(no_mangle)]
-pub unsafe extern "system" fn DllMain(_hinst: HINSTANCE, reason: u32, _reserved: *mut std::ffi::c_void) -> BOOL {
+pub unsafe extern "system" fn DllMain(
+    _hinst: HINSTANCE,
+    reason: u32,
+    _reserved: *mut std::ffi::c_void,
+) -> BOOL {
     if reason == DLL_PROCESS_ATTACH {
         // Do as little as possible directly in DllMain (loader-lock rules --
         // no LoadLibrary, no waiting, ideally no allocation). Hand off to a
         // worker thread immediately instead.
         unsafe {
-            CreateThread(std::ptr::null(), 0, Some(worker_thread), std::ptr::null(), 0, std::ptr::null_mut());
+            CreateThread(
+                std::ptr::null(),
+                0,
+                Some(worker_thread),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+            );
         }
     }
     TRUE

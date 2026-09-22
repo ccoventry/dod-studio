@@ -20,7 +20,11 @@ fn main() {
     let init_commands: Vec<String> = args.collect();
 
     let scan = cfg_scan::scan(&dir);
-    println!("{}\n{} config file(s) executed\n", dir.display(), scan.files_read);
+    println!(
+        "{}\n{} config file(s) executed\n",
+        dir.display(),
+        scan.files_read
+    );
 
     let effective = scan.effective_settings();
     if effective.is_empty() {
@@ -28,7 +32,13 @@ fn main() {
     } else {
         println!("Set by configs the engine runs on its own:");
         for s in &effective {
-            println!("  {:<12} {:<8} {}:{}", s.cvar, s.value, s.file_name(), s.line);
+            println!(
+                "  {:<12} {:<8} {}:{}",
+                s.cvar,
+                s.value,
+                s.file_name(),
+                s.line
+            );
         }
     }
 
@@ -48,11 +58,20 @@ fn main() {
     if !shadowed.is_empty() {
         println!("\nAlso set, but overridden later in the chain:");
         for s in shadowed {
-            println!("  {:<12} {:<8} {}:{}", s.cvar, s.value, s.file_name(), s.line);
+            println!(
+                "  {:<12} {:<8} {}:{}",
+                s.cvar,
+                s.value,
+                s.file_name(),
+                s.line
+            );
         }
     }
 
-    println!("\n{} assignment(s) seen across those configs.", scan.settings.len());
+    println!(
+        "\n{} assignment(s) seen across those configs.",
+        scan.settings.len()
+    );
 
     if !init_commands.is_empty() {
         let shadows = cfg_scan::self_overrides(&init_commands);

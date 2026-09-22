@@ -55,7 +55,9 @@ struct Snapshot {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: sprint_viewmodel_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: sprint_viewmodel_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -75,10 +77,16 @@ fn main() {
                 frame_anims += 1;
                 frame_anim_times.push((frame.time, wa.anim));
             }
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcWeaponAnim(wa) => {
                         anim_times.push((frame.time, wa.sequence_number as i32));
@@ -121,9 +129,18 @@ fn main() {
     }
 
     println!("demo: {path}");
-    println!("clientdata updates that changed something: {}", timeline.len());
-    println!("svc_weaponanim: {}   Dem_WeaponAnim frames: {frame_anims}", anim_times.len());
-    println!("clientdata fields present: {}\n", names.into_iter().collect::<Vec<_>>().join(", "));
+    println!(
+        "clientdata updates that changed something: {}",
+        timeline.len()
+    );
+    println!(
+        "svc_weaponanim: {}   Dem_WeaponAnim frames: {frame_anims}",
+        anim_times.len()
+    );
+    println!(
+        "clientdata fields present: {}\n",
+        names.into_iter().collect::<Vec<_>>().join(", ")
+    );
 
     // How often each field moves at all. A field that never changes cannot be
     // carrying a sprint.
@@ -141,10 +158,14 @@ fn main() {
         }
         for n in 0..4 {
             if a.fuser[n] != b.fuser[n] {
-                *changes.entry(["fuser1", "fuser2", "fuser3", "fuser4"][n]).or_default() += 1;
+                *changes
+                    .entry(["fuser1", "fuser2", "fuser3", "fuser4"][n])
+                    .or_default() += 1;
             }
             if a.iuser[n] != b.iuser[n] {
-                *changes.entry(["iuser1", "iuser2", "iuser3", "iuser4"][n]).or_default() += 1;
+                *changes
+                    .entry(["iuser1", "iuser2", "iuser3", "iuser4"][n])
+                    .or_default() += 1;
             }
         }
     }
@@ -167,7 +188,10 @@ fn main() {
     }
 
     // Whether the viewmodel is ever switched off, which is option 1.
-    let off = timeline.iter().filter(|(_, s)| s.viewmodel == Some(0)).count();
+    let off = timeline
+        .iter()
+        .filter(|(_, s)| s.viewmodel == Some(0))
+        .count();
     println!("\nclientdata updates with viewmodel == 0: {off}");
     let models: BTreeSet<i32> = timeline.iter().filter_map(|(_, s)| s.viewmodel).collect();
     println!("distinct viewmodel indices: {models:?}");
@@ -208,7 +232,10 @@ fn main() {
         let inside: Vec<_> = timeline.iter().filter(|(t, _)| t >= a && t <= b).collect();
         let vms: BTreeSet<i32> = inside.iter().filter_map(|(_, s)| s.viewmodel).collect();
         let anims: BTreeSet<i32> = inside.iter().filter_map(|(_, s)| s.weaponanim).collect();
-        let animated = frame_anim_times.iter().filter(|(t, _)| t >= a && t <= b).count();
+        let animated = frame_anim_times
+            .iter()
+            .filter(|(t, _)| t >= a && t <= b)
+            .count();
         println!(
             "  {a:8.2} .. {b:8.2}  ({:5.2}s)  viewmodel {vms:?}  weaponanim {anims:?}  Dem_WeaponAnim {animated}",
             b - a

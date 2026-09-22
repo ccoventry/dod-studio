@@ -37,7 +37,12 @@ fn walk(bytes: &[u8], start: usize, end: usize) -> (usize, f32, usize, String) {
         let type_byte = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
         if type_byte > 9 && type_byte != 255 {
-            return (frames, last_time, pos, format!("impossible frame type {type_byte}"));
+            return (
+                frames,
+                last_time,
+                pos,
+                format!("impossible frame type {type_byte}"),
+            );
         }
         if !time.is_finite() {
             return (frames, last_time, pos, "frame time is not a number".into());
@@ -54,18 +59,35 @@ fn walk(bytes: &[u8], start: usize, end: usize) -> (usize, f32, usize, String) {
                 // the file.
                 sections += 1;
                 if sections >= 2 {
-                    return (frames, last_time, pos, "final section boundary (clean end)".into());
+                    return (
+                        frames,
+                        last_time,
+                        pos,
+                        "final section boundary (clean end)".into(),
+                    );
                 }
             }
             0 | 1 => {
                 if pos + NETWORK_HEADER_ALIGNMENT > end {
-                    return (frames, last_time, pos, "truncated inside a network frame".into());
+                    return (
+                        frames,
+                        last_time,
+                        pos,
+                        "truncated inside a network frame".into(),
+                    );
                 }
                 let len = i32::from_le_bytes(
-                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT].try_into().unwrap(),
+                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT]
+                        .try_into()
+                        .unwrap(),
                 ) as usize;
                 if len > MAX_PAYLOAD_LIMIT_BYTES {
-                    return (frames, last_time, pos, format!("impossible packet size {len}"));
+                    return (
+                        frames,
+                        last_time,
+                        pos,
+                        format!("impossible packet size {len}"),
+                    );
                 }
                 pos += NETWORK_HEADER_ALIGNMENT + len;
             }
@@ -75,27 +97,49 @@ fn walk(bytes: &[u8], start: usize, end: usize) -> (usize, f32, usize, String) {
             6 => pos += EVENT_FRAME_SIZE,
             7 => pos += 8,
             8 => {
-                if pos + 8 > end { return (frames, last_time, pos, "truncated sound frame".into()); }
+                if pos + 8 > end {
+                    return (frames, last_time, pos, "truncated sound frame".into());
+                }
                 let len = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
                 pos += 24 + len;
             }
             9 => {
-                if pos + 4 > end { return (frames, last_time, pos, "truncated buffer frame".into()); }
+                if pos + 4 > end {
+                    return (frames, last_time, pos, "truncated buffer frame".into());
+                }
                 let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
                 pos += 4 + len;
             }
-            _ => return (frames, last_time, pos, format!("unhandled frame type {type_byte}")),
+            _ => {
+                return (
+                    frames,
+                    last_time,
+                    pos,
+                    format!("unhandled frame type {type_byte}"),
+                );
+            }
         }
         if pos > end {
-            return (frames, last_time, pos, "a frame ran past the end of the section".into());
+            return (
+                frames,
+                last_time,
+                pos,
+                "a frame ran past the end of the section".into(),
+            );
         }
     }
 }
 
 fn main() {
     for path in std::env::args().skip(1) {
-        let Ok(bytes) = std::fs::read(&path) else { println!("{path}: unreadable"); continue };
-        let name = std::path::Path::new(&path).file_name().unwrap().to_string_lossy();
+        let Ok(bytes) = std::fs::read(&path) else {
+            println!("{path}: unreadable");
+            continue;
+        };
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy();
         println!("\n=== {name}  ({:.1} MB) ===", bytes.len() as f64 / 1e6);
 
         match analysis::Analysis::try_from_bytes(&bytes) {
@@ -108,14 +152,25 @@ fn main() {
             continue;
         }
         let dir_off = i32::from_le_bytes(
-            bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into().unwrap(),
+            bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE]
+                .try_into()
+                .unwrap(),
         ) as usize;
-        println!("  directory offset: {dir_off} (file is {} bytes)", bytes.len());
-        let end = if dir_off > 0 && dir_off <= bytes.len() { dir_off } else { bytes.len() };
+        println!(
+            "  directory offset: {dir_off} (file is {} bytes)",
+            bytes.len()
+        );
+        let end = if dir_off > 0 && dir_off <= bytes.len() {
+            dir_off
+        } else {
+            bytes.len()
+        };
 
         let (frames, last_time, stopped_at, why) = walk(&bytes, DEMO_HEADER_SIZE, end);
         println!("  frame walk: {frames} frames, last good time {last_time:.2}s");
-        println!("  stopped at byte {stopped_at} ({:.1}% through the frame area) -- {why}",
-            100.0 * (stopped_at - DEMO_HEADER_SIZE) as f64 / (end - DEMO_HEADER_SIZE).max(1) as f64);
+        println!(
+            "  stopped at byte {stopped_at} ({:.1}% through the frame area) -- {why}",
+            100.0 * (stopped_at - DEMO_HEADER_SIZE) as f64 / (end - DEMO_HEADER_SIZE).max(1) as f64
+        );
     }
 }

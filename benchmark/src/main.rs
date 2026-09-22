@@ -36,9 +36,26 @@ const CONSUMED_ENGINE: &[&str] = &[
 /// UserMessage names the analyzer accepts.
 /// Mirrors `is_relevant_message` in analysis/src/lib.rs.
 const CONSUMED_USER: &[&str] = &[
-    "RoundState", "ClanTimer", "TimeLeft", "WaveTime", "TeamScore", "ScoreShort",
-    "ObjScore", "Frags", "PClass", "PTeam", "ScoreInfo", "ScoreInfoLong", "SayText",
-    "TextMsg", "DeathMsg", "PStatus", "Scope", "CurWeapon", "ReloadDone", "ResetHUD",
+    "RoundState",
+    "ClanTimer",
+    "TimeLeft",
+    "WaveTime",
+    "TeamScore",
+    "ScoreShort",
+    "ObjScore",
+    "Frags",
+    "PClass",
+    "PTeam",
+    "ScoreInfo",
+    "ScoreInfoLong",
+    "SayText",
+    "TextMsg",
+    "DeathMsg",
+    "PStatus",
+    "Scope",
+    "CurWeapon",
+    "ReloadDone",
+    "ResetHUD",
     "Health",
 ];
 
@@ -181,14 +198,26 @@ fn report(rows: &[Row], histogram: &HashMap<(String, bool), usize>) {
     }
 
     println!("\n### Demo Analyzer load-path phase attribution\n");
-    println!("| File | Size (MB) | read | structural | decode | drop | events | serialize | JSON (MB) | total |");
-    println!("|------|-----------|------|------------|--------|------|--------|-----------|-----------|-------|");
+    println!(
+        "| File | Size (MB) | read | structural | decode | drop | events | serialize | JSON (MB) | total |"
+    );
+    println!(
+        "|------|-----------|------|------------|--------|------|--------|-----------|-----------|-------|"
+    );
     for r in rows {
         let total = r.read_ms + r.decode_ms + r.drop_ms + r.events_ms + r.serial_ms;
         println!(
             "| {} | {:.1} | {:.0} ms | {:.0} ms | {:.0} ms | {:.0} ms | {:.0} ms | {:.0} ms | {:.2} | {:.0} ms |",
-            r.name, r.size_mb, r.read_ms, r.structural_ms, r.decode_ms, r.drop_ms, r.events_ms,
-            r.serial_ms, r.json_mb, total
+            r.name,
+            r.size_mb,
+            r.read_ms,
+            r.structural_ms,
+            r.decode_ms,
+            r.drop_ms,
+            r.events_ms,
+            r.serial_ms,
+            r.json_mb,
+            total
         );
     }
 
@@ -219,8 +248,14 @@ fn report(rows: &[Row], histogram: &HashMap<(String, bool), usize>) {
     line("drop:", drop_t);
     line("events:", events);
     line("serialize:", serial);
-    println!("\n* **Average end-to-end backend load: {:.0} ms**", total / n);
-    println!("* Average IPC JSON payload: {:.2} MB", sum(|r| r.json_mb) / n);
+    println!(
+        "\n* **Average end-to-end backend load: {:.0} ms**",
+        total / n
+    );
+    println!(
+        "* Average IPC JSON payload: {:.2} MB",
+        sum(|r| r.json_mb) / n
+    );
     println!(
         "* Structural walk alone is {:.0} ms avg — so {:.0} ms ({:.0}%) of decode is netmessage parsing.",
         structural / n,

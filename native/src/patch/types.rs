@@ -27,8 +27,7 @@ pub const MAX_PAYLOAD_SIZE: usize = MAX_PAYLOAD_LIMIT_BYTES;
 /// free, not capture-time.** HLAE pipes frames live, so an encoder that cannot
 /// keep up slows the capture instead of failing, and the size ranking is
 /// probably close to the inverse of the real-time-viability ranking.
-#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq, Default)]
 pub enum CaptureCodec {
     /// Built for real-time capture: fast, multithreaded, simple prediction.
     /// 486 MB (0.49x). The default, and the only one proven in a real capture.
@@ -85,14 +84,13 @@ impl CaptureCodec {
     }
 }
 
-
 // ── Command scheduling ────────────────────────────────────────────────────────
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, PartialEq)]
 pub struct CustomCommand {
     pub command: String,
     pub offset: f32,
-    pub relation: CommandRelation,  
+    pub relation: CommandRelation,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
@@ -182,7 +180,12 @@ impl CaptureStreak {
                 parts.push(weapon_clean);
             } else {
                 let gap_sec = (abs_time - slice[i - 1].1).max(0.0).round() as i32;
-                parts.push(format!("(+{}:{:02}) {}", gap_sec / 60, gap_sec % 60, weapon_clean));
+                parts.push(format!(
+                    "(+{}:{:02}) {}",
+                    gap_sec / 60,
+                    gap_sec % 60,
+                    weapon_clean
+                ));
             }
         }
         self.timeline_string = parts.join(", ");
@@ -359,7 +362,11 @@ impl ObsConfig {
             "ws://{}:{} (password: {})",
             self.host,
             self.port,
-            if self.password.is_empty() { "none" } else { "set" },
+            if self.password.is_empty() {
+                "none"
+            } else {
+                "set"
+            },
         )
     }
 }
@@ -479,10 +486,11 @@ fn default_capture_fov() -> f32 {
 /// as "not installed" and simply doesn't inject it, same as any other
 /// optional path.
 pub fn default_goldsrc_hooks_dll_path() -> Option<std::path::PathBuf> {
-    std::env::current_exe()
-        .ok()?
-        .parent()
-        .map(|dir| dir.join("resources").join("goldsrc-hooks").join("dodstudio_goldsrc_hooks.dll"))
+    std::env::current_exe().ok()?.parent().map(|dir| {
+        dir.join("resources")
+            .join("goldsrc-hooks")
+            .join("dodstudio_goldsrc_hooks.dll")
+    })
 }
 
 impl PatcherConfig {
@@ -538,8 +546,13 @@ impl PatcherConfig {
             .map(std::path::PathBuf::from)
             .filter(|p| p.exists())
             .or_else(|| default_goldsrc_hooks_dll_path().filter(|p| p.exists()))
-            .or_else(|| hlae_dir.map(|parent| parent.join("dodstudio_goldsrc_hooks.dll")).filter(|p| p.exists()));
-        let goldsrc_hooks_dll_str = goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
+            .or_else(|| {
+                hlae_dir
+                    .map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))
+                    .filter(|p| p.exists())
+            });
+        let goldsrc_hooks_dll_str =
+            goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
 
         let program_path_str = hl_exe.replace("/", "\\\\");
 
@@ -602,7 +615,13 @@ impl PatcherConfig {
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);
-        cmd.args(["-customLoader", "-noGui", "-autoStart", "-hookDllPath", &hook_dll_str]);
+        cmd.args([
+            "-customLoader",
+            "-noGui",
+            "-autoStart",
+            "-hookDllPath",
+            &hook_dll_str,
+        ]);
         // Say either way. "Optional" used to mean this resolved to nothing and
         // the launch proceeded in silence, which is indistinguishable from the
         // DLL loading and doing nothing -- the same log file stays empty and
@@ -811,13 +830,20 @@ mod launch_args_tests {
         // last two used to get no alpha flags at all, so a hand-driven session
         // that enabled separate HUD in the console wrote an all-white
         // `hudalpha` — an opaque matte, silently unusable. Pin all three.
-        for extra in ["-condebug +exec dodstudio_helper.cfg +playdemo dodstudio_primer", "+viewdemo stem", ""] {
+        for extra in [
+            "-condebug +exec dodstudio_helper.cfg +playdemo dodstudio_primer",
+            "+viewdemo stem",
+            "",
+        ] {
             let line = cmd_line_of(&PatcherConfig::default(), extra);
             assert!(
                 line.contains("-afxForceAlpha8 1"),
                 "alpha flag missing for extra={extra:?}: {line}"
             );
-            assert!(line.contains("-32bpp"), "missing -32bpp for extra={extra:?}: {line}");
+            assert!(
+                line.contains("-32bpp"),
+                "missing -32bpp for extra={extra:?}: {line}"
+            );
             assert!(
                 line.contains("-afxRenderMode standard"),
                 "missing render mode for extra={extra:?}: {line}"
@@ -833,7 +859,11 @@ mod launch_args_tests {
         // used to be a checkbox; there is deliberately no longer any way to
         // launch without it. See #226.
         let cfg = PatcherConfig::default();
-        for extra in ["", "+viewdemo foo", "+exec dodstudio_helper.cfg +playdemo dodstudio_primer"] {
+        for extra in [
+            "",
+            "+viewdemo foo",
+            "+exec dodstudio_helper.cfg +playdemo dodstudio_primer",
+        ] {
             let line = cmd_line_of(&cfg, extra);
             assert!(
                 line.contains("-condebug"),
@@ -849,8 +879,13 @@ mod launch_args_tests {
         // an argument to that command instead of a switch.
         let line = cmd_line_of(&PatcherConfig::default(), "+playdemo dodstudio_primer");
         let first_plus = line.find('+').expect("the console command is present");
-        let alpha = line.find("-afxForceAlpha8").expect("the alpha flag is present");
-        assert!(alpha < first_plus, "alpha flag must precede any +command: {line}");
+        let alpha = line
+            .find("-afxForceAlpha8")
+            .expect("the alpha flag is present");
+        assert!(
+            alpha < first_plus,
+            "alpha flag must precede any +command: {line}"
+        );
     }
 
     #[test]

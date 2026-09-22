@@ -76,8 +76,10 @@ fn main() {
             for m in msgs {
                 match m {
                     NetMessage::EngineMessage(em) => {
-                        if matches!(**em, EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_))
-                        {
+                        if matches!(
+                            **em,
+                            EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
+                        ) {
                             is_hltv = true;
                         }
                         if let EngineMessage::SvcUpdateUserInfo(ui) = &**em {
@@ -86,14 +88,19 @@ fn main() {
                                 .trim_matches(|c| c == '\0' || c == '\\')
                                 .split('\\')
                                 .collect();
-                            let f: HashMap<&str, &str> =
-                                parts.as_chunks::<2>().0.iter().map(|&[k, v]| (k, v)).collect();
+                            let f: HashMap<&str, &str> = parts
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|&[k, v]| (k, v))
+                                .collect();
                             if f.is_empty() {
                                 // Empty userinfo = the slot emptied out.
                                 if let Some(sid) = slot_sid.remove(&ui.index)
-                                    && let Some(p) = players.get_mut(&sid) {
-                                        p.reconnects += 1;
-                                    }
+                                    && let Some(p) = players.get_mut(&sid)
+                                {
+                                    p.reconnects += 1;
+                                }
                                 continue;
                             }
                             if f.get("*hltv") == Some(&"1") {

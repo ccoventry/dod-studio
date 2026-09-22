@@ -19,30 +19,44 @@ fn main() {
 
     for entry in demo.directory.entries.iter() {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcPacketEntities(pe) => {
                         for es in &pe.entity_states {
                             full_total += 1;
-                            if es.is_absolute_entity_index == Some(true) { full_absolute_true += 1 }
+                            if es.is_absolute_entity_index == Some(true) {
+                                full_absolute_true += 1
+                            }
                             if let Some(d) = &es.entity_index_difference {
                                 max_diff_seen = max_diff_seen.max(d.to_u32());
                             }
-                            if es.entity_index == 0 { entity0_appearances += 1 }
+                            if es.entity_index == 0 {
+                                entity0_appearances += 1
+                            }
                             min_index_seen = min_index_seen.min(es.entity_index);
                         }
                     }
                     EngineMessage::SvcDeltaPacketEntities(pe) => {
                         for es in &pe.entity_states {
                             delta_total += 1;
-                            if es.is_absolute_entity_index { delta_absolute_true += 1 }
+                            if es.is_absolute_entity_index {
+                                delta_absolute_true += 1
+                            }
                             if let Some(d) = &es.entity_index_difference {
                                 max_diff_seen = max_diff_seen.max(d.to_u32());
                             }
-                            if es.entity_index == 0 { entity0_appearances += 1 }
+                            if es.entity_index == 0 {
+                                entity0_appearances += 1
+                            }
                             min_index_seen = min_index_seen.min(es.entity_index);
                         }
                     }

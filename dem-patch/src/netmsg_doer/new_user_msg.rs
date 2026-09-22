@@ -23,7 +23,8 @@ impl Doer for SvcNewUserMsg {
 
                 msg
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

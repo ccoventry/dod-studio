@@ -174,13 +174,16 @@ pub unsafe fn code_range(base: *mut u8) -> Option<(usize, usize)> {
         // Section headers follow the optional header, whose size the file
         // header states rather than the format fixing it.
         let optional_size = (*nt).file_header.size_of_optional_header as usize;
-        let first = (nt as *const u8)
-            .add(std::mem::size_of::<u32>() + std::mem::size_of::<ImageFileHeader>() + optional_size)
-            as *const ImageSectionHeader;
+        let first = (nt as *const u8).add(
+            std::mem::size_of::<u32>() + std::mem::size_of::<ImageFileHeader>() + optional_size,
+        ) as *const ImageSectionHeader;
         for i in 0..(*nt).file_header.number_of_sections as usize {
             let section = &*first.add(i);
             if section.characteristics & IMAGE_SCN_MEM_EXECUTE != 0 && section.virtual_size > 0 {
-                return Some((section.virtual_address as usize, section.virtual_size as usize));
+                return Some((
+                    section.virtual_address as usize,
+                    section.virtual_size as usize,
+                ));
             }
         }
         None

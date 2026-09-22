@@ -15,10 +15,10 @@ const TTL_MS: u128 = 2_000;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_available_bytes(path: &std::path::Path) -> u64 {
-    use sysinfo::{System, SystemExt, DiskExt};
-    use std::sync::{OnceLock, Mutex};
     use std::collections::HashMap;
+    use std::sync::{Mutex, OnceLock};
     use std::time::Instant;
+    use sysinfo::{DiskExt, System, SystemExt};
 
     // Shared sysinfo System handle — only refreshed when cache is stale.
     static SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
@@ -30,7 +30,13 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     let path_key: String = path
         .to_string_lossy()
         .chars()
-        .map(|c| if c == '\\' { '/' } else { c.to_ascii_lowercase() })
+        .map(|c| {
+            if c == '\\' {
+                '/'
+            } else {
+                c.to_ascii_lowercase()
+            }
+        })
         .collect();
 
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
@@ -38,9 +44,10 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     // Fast path: return cached value if within TTL.
     if let Ok(guard) = cache.lock()
         && let Some(&(last, bytes)) = guard.get(&path_key)
-            && last.elapsed().as_millis() < TTL_MS {
-                return bytes;
-            }
+        && last.elapsed().as_millis() < TTL_MS
+    {
+        return bytes;
+    }
 
     // Slow path: refresh disk list and update cache. A mount-point prefix
     // match alone isn't enough — "C:/real/folder|garbage" prefix-matches
@@ -72,7 +79,13 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
                     let mount_cow = disk.mount_point().to_string_lossy();
                     let mount_key: String = mount_cow
                         .chars()
-                        .map(|c| if c == '\\' { '/' } else { c.to_ascii_lowercase() })
+                        .map(|c| {
+                            if c == '\\' {
+                                '/'
+                            } else {
+                                c.to_ascii_lowercase()
+                            }
+                        })
                         .collect();
 
                     if path_key.starts_with(&mount_key) && mount_key.len() > best_len {

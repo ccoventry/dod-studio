@@ -36,7 +36,7 @@ fn main() {
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
             frame_index += 1;
-            
+
             match &frame.frame_data {
                 FrameData::NetworkMessage(net_msg_box) => {
                     let len = net_msg_box.1.message_length;

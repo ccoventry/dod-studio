@@ -4,20 +4,19 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
-use tokio::process::Command;
+use std::sync::{Arc, Mutex, mpsc};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
-
+use tokio::process::Command;
 
 use super::config::RenderConfig;
 use super::scanner::ClipData;
 
 #[derive(Clone, Debug)]
 pub enum RenderUpdate {
-    Progress(String, u32),     // (job_id, percentage)
-    Speed(String, String),     // (job_id, speed_text)
-    Status(String, String),    // (job_id, status_text)
-    OutputPath(String, String), // (job_id, absolute path to the encoded file)
+    Progress(String, u32),                  // (job_id, percentage)
+    Speed(String, String),                  // (job_id, speed_text)
+    Status(String, String),                 // (job_id, status_text)
+    OutputPath(String, String),             // (job_id, absolute path to the encoded file)
     Finished(String, bool, Option<String>), // (job_id, success, error_log)
 }
 
@@ -133,21 +132,25 @@ pub async fn run_render_job(
         return;
     }
     if let Some(wav) = &wav_file
-        && !wav.exists() {
-            let _ = tx.send(RenderUpdate::Finished(
-                job_id.clone(),
-                false,
-                Some(format!("Audio file not found: {}", wav.display())),
-            ));
-            return;
-        }
+        && !wav.exists()
+    {
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(format!("Audio file not found: {}", wav.display())),
+        ));
+        return;
+    }
     // The alpha stream carries no sound of its own, so a HUD/alpha composite
     // always needs a separate wav — an OBS take's muxed-in audio can't cover it.
     if is_hud && wav_file.is_none() {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
-            Some("HUD/alpha clips need a separate audio track (sound.wav), but this take has none.".to_string()),
+            Some(
+                "HUD/alpha clips need a separate audio track (sound.wav), but this take has none."
+                    .to_string(),
+            ),
         ));
         return;
     }
@@ -155,7 +158,10 @@ pub async fn run_render_job(
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
             false,
-            Some("No audio source for this take: no sound.wav and no audio-bearing video.".to_string()),
+            Some(
+                "No audio source for this take: no sound.wav and no audio-bearing video."
+                    .to_string(),
+            ),
         ));
         return;
     }
@@ -171,7 +177,11 @@ pub async fn run_render_job(
         } else {
             "Skip (keep original) requires a captured video file, but this take has none."
         };
-        let _ = tx.send(RenderUpdate::Finished(job_id.clone(), false, Some(reason.to_string())));
+        let _ = tx.send(RenderUpdate::Finished(
+            job_id.clone(),
+            false,
+            Some(reason.to_string()),
+        ));
         return;
     }
 
@@ -190,7 +200,10 @@ pub async fn run_render_job(
     // a sentence in it would show a paragraph where a status chip belongs and
     // strand the job if anything returned before "Rendering" overwrote it.
     if let Some(warning) = super::take_meta::fps_mismatch_warning(&take_folder, config.fps) {
-        crate::log_markdown(&format!("[render-fps-mismatch] job {} — {}", job_id, warning));
+        crate::log_markdown(&format!(
+            "[render-fps-mismatch] job {} — {}",
+            job_id, warning
+        ));
     }
 
     let clip_type = clip.clip_type.as_str();
@@ -214,7 +227,9 @@ pub async fn run_render_job(
         for dir in &config.export_directories {
             let live_free = crate::sys::disk::get_available_bytes(dir);
             let already_reserved = *ledger.get(dir).unwrap_or(&0);
-            if live_free.saturating_sub(already_reserved) > reservation_estimate + SAFETY_MARGIN_BYTES {
+            if live_free.saturating_sub(already_reserved)
+                > reservation_estimate + SAFETY_MARGIN_BYTES
+            {
                 *ledger.entry(dir.clone()).or_insert(0) += reservation_estimate;
                 selected_export_dir = Some(dir.clone());
                 // Shows this job's own estimate against what else was already
@@ -257,7 +272,8 @@ pub async fn run_render_job(
         job_id: job_id.clone(),
     });
 
-    let output_folder = selected_export_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
+    let output_folder =
+        selected_export_dir.unwrap_or_else(|| std::env::current_dir().unwrap_or_default());
     if let Err(e) = std::fs::create_dir_all(&output_folder) {
         let _ = tx.send(RenderUpdate::Finished(
             job_id.clone(),
@@ -274,19 +290,37 @@ pub async fn run_render_job(
     let stream_type = if is_hud { "hud" } else { "all" };
     let wav_part = match &clip.wav_file {
         Some(wav) => {
-            let wav_stem = std::path::Path::new(wav).file_stem().unwrap_or_default().to_string_lossy().into_owned();
-            if wav_stem.to_lowercase() == "sound" { String::new() } else { format!("_{}", wav_stem) }
+            let wav_stem = std::path::Path::new(wav)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned();
+            if wav_stem.to_lowercase() == "sound" {
+                String::new()
+            } else {
+                format!("_{}", wav_stem)
+            }
         }
         // An OBS take has no wav to derive a suffix from — base_name already
         // carries the distinguishing "-obs" suffix the scanner gave it.
         None => String::new(),
     };
-    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_micros();
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros();
     let hash_str = format!("{:04x}", timestamp % 0x10000);
     // Reuses `take_folder` (already parsed from this same `clip.take_folder`
     // string above) rather than re-parsing a second `PathBuf` from it.
-    let take_name = take_folder.file_name().unwrap_or_default().to_string_lossy();
-    let demo_name = take_folder.parent().and_then(|p| p.file_name()).unwrap_or_default().to_string_lossy();
+    let take_name = take_folder
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let demo_name = take_folder
+        .parent()
+        .and_then(|p| p.file_name())
+        .unwrap_or_default()
+        .to_string_lossy();
 
     if is_source_copy {
         // Validated above: video_file and a non-hud clip_type are guaranteed here.
@@ -296,31 +330,57 @@ pub async fn run_render_job(
             let _ = tx.send(RenderUpdate::Finished(
                 job_id.clone(),
                 false,
-                Some(format!("Source video not found: {}", source_video.display())),
+                Some(format!(
+                    "Source video not found: {}",
+                    source_video.display()
+                )),
             ));
             return;
         }
         // Kept from whatever OBS wrote — renaming would make the file lie
         // about its own container to every tool that reads it afterwards.
-        let ext = source_video.extension().map(|e| e.to_string_lossy().into_owned()).unwrap_or_else(|| "mp4".to_string());
-        let final_name = format!("{}_{}{}_{}_{}.{}", demo_name, take_name, wav_part, stream_type, hash_str, ext);
+        let ext = source_video
+            .extension()
+            .map(|e| e.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "mp4".to_string());
+        let final_name = format!(
+            "{}_{}{}_{}_{}.{}",
+            demo_name, take_name, wav_part, stream_type, hash_str, ext
+        );
         let out_file = output_folder.join(&final_name);
         let out_file_str = out_file.to_string_lossy().into_owned();
 
         if cancel_rx.load(Ordering::Relaxed) {
-            let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-            let _ = tx.send(RenderUpdate::Finished(job_id, false, Some("Cancelled by user".to_string())));
+            let _ = tx.send(RenderUpdate::Status(
+                job_id.clone(),
+                "Cancelled".to_string(),
+            ));
+            let _ = tx.send(RenderUpdate::Finished(
+                job_id,
+                false,
+                Some("Cancelled by user".to_string()),
+            ));
             return;
         }
-        let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Rendering".to_string()));
+        let _ = tx.send(RenderUpdate::Status(
+            job_id.clone(),
+            "Rendering".to_string(),
+        ));
         // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
         // during a large copy (Custom Output/lossless OBS captures — see
         // docs/obs_alternate_capture.md — can run tens of GB) instead of
         // being silently ignored until the whole file has already moved.
         match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
             Ok(true) => {
-                let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
-                let _ = tx.send(RenderUpdate::Finished(job_id, false, Some("Cancelled by user".to_string())));
+                let _ = tx.send(RenderUpdate::Status(
+                    job_id.clone(),
+                    "Cancelled".to_string(),
+                ));
+                let _ = tx.send(RenderUpdate::Finished(
+                    job_id,
+                    false,
+                    Some("Cancelled by user".to_string()),
+                ));
             }
             Ok(false) => {
                 let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
@@ -353,24 +413,58 @@ pub async fn run_render_job(
     // an owned `String` that lives only as long as this function call.
     let mut codec_args: Vec<&str> = Vec::new();
     let file_ext = if is_hud {
-        codec_args.extend_from_slice(&["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"]);
+        codec_args.extend_from_slice(&[
+            "-c:v",
+            "prores_ks",
+            "-profile:v",
+            "4444",
+            "-pix_fmt",
+            "yuva444p10le",
+        ]);
         ".mov"
     } else {
         match config.target_codec {
             super::config::RenderCodec::NvencH264 => {
-                codec_args.extend_from_slice(&["-c:v", "h264_nvenc", "-preset", "p6", "-tune", "hq", "-cq", "15", "-pix_fmt", "yuv420p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "h264_nvenc",
+                    "-preset",
+                    "p6",
+                    "-tune",
+                    "hq",
+                    "-cq",
+                    "15",
+                    "-pix_fmt",
+                    "yuv420p",
+                ]);
                 ".mp4"
             }
             super::config::RenderCodec::H264Software => {
-                codec_args.extend_from_slice(&["-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v", "libx264", "-preset", "fast", "-crf", "16", "-pix_fmt", "yuv420p",
+                ]);
                 ".mp4"
             }
             super::config::RenderCodec::ProRes => {
-                codec_args.extend_from_slice(&["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "prores_ks",
+                    "-profile:v",
+                    "3",
+                    "-pix_fmt",
+                    "yuv422p10le",
+                ]);
                 ".mov"
             }
             super::config::RenderCodec::DnxHr => {
-                codec_args.extend_from_slice(&["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"]);
+                codec_args.extend_from_slice(&[
+                    "-c:v",
+                    "dnxhd",
+                    "-profile:v",
+                    "dnxhr_hq",
+                    "-pix_fmt",
+                    "yuv422p",
+                ]);
                 ".mov"
             }
             super::config::RenderCodec::HuffYuv => {
@@ -392,7 +486,10 @@ pub async fn run_render_job(
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
                         false,
-                        Some("Custom codec selected but no FFmpeg arguments were entered.".to_string()),
+                        Some(
+                            "Custom codec selected but no FFmpeg arguments were entered."
+                                .to_string(),
+                        ),
                     ));
                     return;
                 }
@@ -433,7 +530,10 @@ pub async fn run_render_job(
         &["-c:a", "pcm_s16le"]
     };
 
-    let final_name = format!("{}_{}{}_{}_{}{}", demo_name, take_name, wav_part, stream_type, hash_str, file_ext);
+    let final_name = format!(
+        "{}_{}{}_{}_{}{}",
+        demo_name, take_name, wav_part, stream_type, hash_str, file_ext
+    );
     let out_file = output_folder.join(&final_name);
 
     // Calculate thread scaling
@@ -465,23 +565,37 @@ pub async fn run_render_job(
     // second number to disagree with.
     if let Some(video) = clip.video_file.as_deref() {
         if clip_type == "hud_only" {
-            let wav = clip.wav_file.as_deref().expect("validated above: HUD clips require a wav");
+            let wav = clip
+                .wav_file
+                .as_deref()
+                .expect("validated above: HUD clips require a wav");
             hud_color_input = format!("{}/{}", clip.img_folder, video);
             hud_alpha_input = format!("{}/{}", alpha_folder, video);
             cmd_args.extend(vec![
-                "-i", &hud_color_input,
-                "-i", &hud_alpha_input,
-                "-thread_queue_size", "512",
-                "-i", wav,
-                "-filter_complex", "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-                "-map", "[hud]", "-map", "2:a",
+                "-i",
+                &hud_color_input,
+                "-i",
+                &hud_alpha_input,
+                "-thread_queue_size",
+                "512",
+                "-i",
+                wav,
+                "-filter_complex",
+                "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
+                "-map",
+                "[hud]",
+                "-map",
+                "2:a",
             ]);
         } else if let Some(wav) = clip.wav_file.as_deref() {
             video_input = format!("{}/{}", clip.img_folder, video);
             cmd_args.extend(vec![
-                "-i", &video_input,
-                "-thread_queue_size", "512",
-                "-i", wav,
+                "-i",
+                &video_input,
+                "-thread_queue_size",
+                "512",
+                "-i",
+                wav,
             ]);
         } else {
             // An OBS take: the video already carries its own audio stream, so
@@ -492,31 +606,68 @@ pub async fn run_render_job(
             cmd_args.extend(vec!["-i", &video_input]);
         }
     } else if clip_type == "hud_only" {
-        let wav = clip.wav_file.as_deref().expect("validated above: HUD clips require a wav");
+        let wav = clip
+            .wav_file
+            .as_deref()
+            .expect("validated above: HUD clips require a wav");
         hud_color_input = format!("{}/%05d.bmp", clip.img_folder);
         hud_alpha_input = format!("{}/%05d.bmp", alpha_folder);
         cmd_args.extend(vec![
             // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps, "-i", &hud_color_input,
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps, "-i", &hud_alpha_input,
-            "-thread_queue_size", "512",
-            "-i", wav,
-            "-filter_complex", "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
-            "-map", "[hud]", "-map", "2:a",
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &hud_color_input,
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &hud_alpha_input,
+            "-thread_queue_size",
+            "512",
+            "-i",
+            wav,
+            "-filter_complex",
+            "[1:v]extractplanes=r[alpha];[0:v][alpha]alphamerge[hud]",
+            "-map",
+            "[hud]",
+            "-map",
+            "2:a",
         ]);
     } else {
         // BMP shape is never admitted without a wav — see `take_shape_is_renderable`.
-        let wav = clip.wav_file.as_deref().expect("validated above: BMP takes require a wav");
+        let wav = clip
+            .wav_file
+            .as_deref()
+            .expect("validated above: BMP takes require a wav");
         img_input = format!("{}/%05d.bmp", clip.img_folder);
         cmd_args.extend(vec![
             // Skip probe/analyze on known BMP sequences; add read-ahead buffering.
-            "-probesize", "32", "-analyzeduration", "0", "-thread_queue_size", "512",
-            "-framerate", &fps,
-            "-i", &img_input,
-            "-thread_queue_size", "512",
-            "-i", wav,
+            "-probesize",
+            "32",
+            "-analyzeduration",
+            "0",
+            "-thread_queue_size",
+            "512",
+            "-framerate",
+            &fps,
+            "-i",
+            &img_input,
+            "-thread_queue_size",
+            "512",
+            "-i",
+            wav,
         ]);
     }
 
@@ -530,7 +681,10 @@ pub async fn run_render_job(
         "-shortest",
         // +faststart is only needed for HTTP streaming; omitting it avoids the
         // post-render moov-atom rewrite pass on what can be multi-GB files.
-        "-progress", "pipe:1", "-loglevel", "error",
+        "-progress",
+        "pipe:1",
+        "-loglevel",
+        "error",
         &out_file_str,
     ]);
 
@@ -543,13 +697,17 @@ pub async fn run_render_job(
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Rendering".to_string()));
+    let _ = tx.send(RenderUpdate::Status(
+        job_id.clone(),
+        "Rendering".to_string(),
+    ));
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             let error_msg = if e.kind() == std::io::ErrorKind::NotFound {
-                "FFmpeg not found. Please install FFmpeg or set a custom path in Settings.".to_string()
+                "FFmpeg not found. Please install FFmpeg or set a custom path in Settings."
+                    .to_string()
             } else {
                 format!("Failed to spawn FFmpeg process: {}", e)
             };
@@ -574,9 +732,10 @@ pub async fn run_render_job(
                 break;
             }
             if let Ok(s) = std::str::from_utf8(&buf[..n])
-                && let Ok(mut log) = stderr_log_clone.lock() {
-                    log.push_str(s);
-                }
+                && let Ok(mut log) = stderr_log_clone.lock()
+            {
+                log.push_str(s);
+            }
         }
     });
 
@@ -687,12 +846,22 @@ pub async fn run_render_job(
         Ok(status) if status.success() => {
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
             let _ = tx.send(RenderUpdate::Progress(job_id.clone(), 100));
-            let _ = tx.send(RenderUpdate::OutputPath(job_id.clone(), out_file_str.clone()));
+            let _ = tx.send(RenderUpdate::OutputPath(
+                job_id.clone(),
+                out_file_str.clone(),
+            ));
             let _ = tx.send(RenderUpdate::Finished(job_id, true, None));
         }
         Ok(status) => {
-            let exit_code = status.code().map(|c| c.to_string()).unwrap_or_else(|| "Unknown".to_string());
-            let error_msg = format!("FFmpeg failed with exit code: {}. Log: {}", exit_code, err_log.as_deref().unwrap_or(""));
+            let exit_code = status
+                .code()
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
+            let error_msg = format!(
+                "FFmpeg failed with exit code: {}. Log: {}",
+                exit_code,
+                err_log.as_deref().unwrap_or("")
+            );
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
             let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
         }
@@ -771,8 +940,8 @@ fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::Scratch;
     use crate::hlcr::config::RenderCodec;
+    use crate::test_support::Scratch;
 
     fn scratch(name: &str) -> Scratch {
         Scratch::new(format_args!("renderer_test_{name}"))
@@ -833,16 +1002,30 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         assert_eq!(last_finished(&updates), Some((true, None)), "{:?}", updates);
-        let output_path = updates.iter().find_map(|u| match u {
-            RenderUpdate::OutputPath(_, p) => Some(p.clone()),
-            _ => None,
-        }).expect("OutputPath was not sent");
+        let output_path = updates
+            .iter()
+            .find_map(|u| match u {
+                RenderUpdate::OutputPath(_, p) => Some(p.clone()),
+                _ => None,
+            })
+            .expect("OutputPath was not sent");
         assert!(output_path.ends_with(".mp4"), "{}", output_path);
-        assert_eq!(std::fs::read(&output_path).unwrap(), b"fake obs video bytes");
+        assert_eq!(
+            std::fs::read(&output_path).unwrap(),
+            b"fake obs video bytes"
+        );
         // A copy, not a move — the original take is untouched.
         assert!(stream.join("video.mp4").exists());
         let _ = std::fs::remove_dir_all(&root);
@@ -875,7 +1058,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -910,7 +1101,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -947,7 +1146,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -987,7 +1194,15 @@ mod tests {
         };
 
         let (tx, rx) = mpsc::channel();
-        run_render_job("0".to_string(), clip, source_copy_config(&export_dir), tx, Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(HashMap::new()))).await;
+        run_render_job(
+            "0".to_string(),
+            clip,
+            source_copy_config(&export_dir),
+            tx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(Mutex::new(HashMap::new())),
+        )
+        .await;
 
         let updates = drain(&rx);
         match last_finished(&updates) {
@@ -1011,7 +1226,10 @@ mod tests {
 
         let cancelled = copy_cancellable(&src, &dst, &cancel).await.unwrap();
         assert!(cancelled);
-        assert!(!dst.exists(), "a cancelled copy must not leave a partial file behind");
+        assert!(
+            !dst.exists(),
+            "a cancelled copy must not leave a partial file behind"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 

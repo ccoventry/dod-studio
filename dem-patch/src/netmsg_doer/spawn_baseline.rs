@@ -48,18 +48,12 @@ impl Doer for SvcSpawnBaseline {
 
             let delta = if type_.to_u8() & 1 != 0 {
                 if between {
-                    parse_delta(
-                        entity_state_player_decoder,
-                        &mut br,
-                    )
+                    parse_delta(entity_state_player_decoder, &mut br)
                 } else {
                     parse_delta(entity_state_decoder, &mut br)
                 }
             } else {
-                parse_delta(
-                    custom_entity_state_decoder,
-                    &mut br,
-                )
+                parse_delta(custom_entity_state_decoder, &mut br)
             };
 
             let res = EntityS {

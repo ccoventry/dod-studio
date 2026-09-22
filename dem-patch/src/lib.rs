@@ -24,8 +24,8 @@
 //! ```
 #![allow(mismatched_lifetime_syntaxes)]
 
+use nom::{Parser, combinator::all_consuming, multi::many0};
 use std::{ffi::OsStr, path::Path};
-use nom::{combinator::all_consuming, multi::many0, Parser};
 use types::{AuxRefCell, ByteVec, DeltaDecoderTable, Demo, NetMessage};
 
 use nom_helper::Result;
@@ -155,7 +155,11 @@ mod test {
                     frame_offset: 0,
                     file_length: 0,
                     frames: vec![
-                        Frame { time: 0.0, frame: 0, frame_data: FrameData::DemoStart },
+                        Frame {
+                            time: 0.0,
+                            frame: 0,
+                            frame_data: FrameData::DemoStart,
+                        },
                         Frame {
                             time: 0.0,
                             frame: 0,
@@ -163,7 +167,11 @@ mod test {
                                 command: "echo dem-patch test fixture".into(),
                             }),
                         },
-                        Frame { time: 0.0, frame: 1, frame_data: FrameData::NextSection },
+                        Frame {
+                            time: 0.0,
+                            frame: 1,
+                            frame_data: FrameData::NextSection,
+                        },
                     ],
                 }],
             },

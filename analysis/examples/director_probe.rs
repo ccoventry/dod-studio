@@ -48,7 +48,10 @@ fn drc_name(c: u8) -> &'static str {
 }
 
 fn hex(b: &[u8]) -> String {
-    b.iter().map(|x| format!("{x:02x}")).collect::<Vec<_>>().join(" ")
+    b.iter()
+        .map(|x| format!("{x:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn main() {
@@ -76,10 +79,16 @@ fn main() {
 
         for entry in &demo.directory.entries {
             for frame in &entry.frames {
-                let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-                let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+                let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                    continue;
+                };
+                let MessageData::Parsed(msgs) = &bt.1.messages else {
+                    continue;
+                };
                 for m in msgs {
-                    let NetMessage::EngineMessage(em) = m else { continue };
+                    let NetMessage::EngineMessage(em) = m else {
+                        continue;
+                    };
                     if let EngineMessage::SvcDirector(d) = &**em {
                         *counts.entry(d.command).or_insert(0) += 1;
                         if samples.len() < 25 {
@@ -106,14 +115,24 @@ fn main() {
 
         println!("  first messages seen:");
         for (t, c, m) in samples.iter().take(12) {
-            println!("     t={:<9.2} cmd={:>3} {:<10} payload[{}]: {}", t, c, drc_name(*c), m.len(), hex(m));
+            println!(
+                "     t={:<9.2} cmd={:>3} {:<10} payload[{}]: {}",
+                t,
+                c,
+                drc_name(*c),
+                m.len(),
+                hex(m)
+            );
         }
 
         if !target_series.is_empty() {
             println!("  target-ish commands: {} total", target_series.len());
             // Gaps between consecutive switches say how often the camera moves.
-            let mut gaps: Vec<f32> =
-                target_series.windows(2).map(|w| w[1].0 - w[0].0).filter(|g| *g > 0.0).collect();
+            let mut gaps: Vec<f32> = target_series
+                .windows(2)
+                .map(|w| w[1].0 - w[0].0)
+                .filter(|g| *g > 0.0)
+                .collect();
             gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
             if !gaps.is_empty() {
                 let med = gaps[gaps.len() / 2];
@@ -126,7 +145,12 @@ fn main() {
             }
             println!("     first 15:");
             for (t, c, m) in target_series.iter().take(15) {
-                println!("       t={:<9.2} {:<8} payload: {}", t, drc_name(*c), hex(m));
+                println!(
+                    "       t={:<9.2} {:<8} payload: {}",
+                    t,
+                    drc_name(*c),
+                    hex(m)
+                );
             }
         }
     }

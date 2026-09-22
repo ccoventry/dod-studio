@@ -16,7 +16,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use native::patch::{hide_map_text, map_text, TextSelection};
+use native::patch::{TextSelection, hide_map_text, map_text};
 
 fn main() {
     let mut args = std::env::args().skip(1);
@@ -49,7 +49,10 @@ fn main() {
     }
 
     if !selection_stated {
-        selection = TextSelection { round_result: true, hints: true };
+        selection = TextSelection {
+            round_result: true,
+            hints: true,
+        };
     }
 
     let Some(demo_path) = demo else {

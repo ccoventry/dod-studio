@@ -65,16 +65,17 @@ fn inspect_single_demo(path: &Path) -> Result<InspectResult, String> {
         for frame in &entry.frames {
             frames += 1;
             if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                    for net_msg in msgs {
-                        if let NetMessage::UserMessage(user_msg) = net_msg {
-                            let name = String::from_utf8_lossy(&user_msg.name)
-                                .trim_end_matches('\x00')
-                                .to_string();
-                            *message_counts.entry(name).or_insert(0) += 1;
-                        }
+                && let MessageData::Parsed(msgs) = &box_type.1.messages
+            {
+                for net_msg in msgs {
+                    if let NetMessage::UserMessage(user_msg) = net_msg {
+                        let name = String::from_utf8_lossy(&user_msg.name)
+                            .trim_end_matches('\x00')
+                            .to_string();
+                        *message_counts.entry(name).or_insert(0) += 1;
                     }
                 }
+            }
         }
     }
 

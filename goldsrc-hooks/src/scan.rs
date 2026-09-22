@@ -58,11 +58,12 @@ impl Pattern {
     /// loop correctly, which is exactly the sort of thing that stays true only
     /// until someone adds a second caller.
     fn matches_at(&self, haystack: &[u8], at: usize) -> bool {
-        haystack
-            .get(at..at + self.0.len())
-            .is_some_and(|window| {
-                self.0.iter().zip(window).all(|(want, &got)| want.is_none_or(|b| got == b))
-            })
+        haystack.get(at..at + self.0.len()).is_some_and(|window| {
+            self.0
+                .iter()
+                .zip(window)
+                .all(|(want, &got)| want.is_none_or(|b| got == b))
+        })
     }
 }
 
@@ -118,7 +119,10 @@ mod tests {
 
     #[test]
     fn a_wildcard_matches_any_byte_but_still_has_to_be_there() {
-        assert_eq!(matches("aa ?? cc", &[0xaa, 0x00, 0xcc, 0xaa, 0xff, 0xcc]), vec![0, 3]);
+        assert_eq!(
+            matches("aa ?? cc", &[0xaa, 0x00, 0xcc, 0xaa, 0xff, 0xcc]),
+            vec![0, 3]
+        );
         // The wildcard occupies a position; it does not mean "anything or nothing".
         assert_eq!(matches("aa ?? cc", &[0xaa, 0xcc]), Vec::<usize>::new());
     }

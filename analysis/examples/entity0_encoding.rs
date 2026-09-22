@@ -18,20 +18,34 @@ use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: entity0_encoding <healthy.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: entity0_encoding <healthy.dem>");
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
 
     let mut found = 0;
     for entry in demo.directory.entries.iter() {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
-                let EngineMessage::SvcPacketEntities(pe) = &**em else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
+                let EngineMessage::SvcPacketEntities(pe) = &**em else {
+                    continue;
+                };
                 found += 1;
-                println!("SvcPacketEntities at t={:.2}s, {} entities listed", f.time, pe.entity_states.len());
+                println!(
+                    "SvcPacketEntities at t={:.2}s, {} entities listed",
+                    f.time,
+                    pe.entity_states.len()
+                );
                 for (i, es) in pe.entity_states.iter().take(3).enumerate() {
                     println!(
                         "  [{i}] entity_index={} increment_entity_number={} is_absolute_entity_index={:?} \
@@ -50,5 +64,7 @@ fn main() {
             }
         }
     }
-    if found == 0 { println!("no SvcPacketEntities found in this demo") }
+    if found == 0 {
+        println!("no SvcPacketEntities found in this demo")
+    }
 }

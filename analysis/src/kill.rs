@@ -1,4 +1,6 @@
-use crate::{AnalyzerEvent, AnalyzerState, mortality::MortalityState, time::GameTime, player::PlayerGlobalId};
+use crate::{
+    AnalyzerEvent, AnalyzerState, mortality::MortalityState, player::PlayerGlobalId, time::GameTime,
+};
 use dod::{RoundState, UserMessage, Weapon};
 
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -58,7 +60,9 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
             };
 
             if let Some(streak) = streak {
-                streak.kills.push((current_time, death_msg.weapon.clone(), v_id));
+                streak
+                    .kills
+                    .push((current_time, death_msg.weapon.clone(), v_id));
             }
         }
     } else if let AnalyzerEvent::UserMessage(UserMessage::RoundState(RoundState::Reset)) = event {

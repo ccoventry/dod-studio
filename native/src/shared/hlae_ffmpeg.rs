@@ -113,19 +113,30 @@ pub enum LinkError {
     /// No HLAE install at the configured path.
     NoInstall,
     /// An `ffmpeg.ini` is already there. Refused rather than overwritten.
-    AlreadyLinked { ini: PathBuf, target: PathBuf },
+    AlreadyLinked {
+        ini: PathBuf,
+        target: PathBuf,
+    },
     /// A binary is already bundled, so an ini would be ignored anyway.
-    AlreadyBundled { path: PathBuf },
+    AlreadyBundled {
+        path: PathBuf,
+    },
     /// The FFmpeg offered is not a file that exists.
-    NoSuchFfmpeg { path: PathBuf },
+    NoSuchFfmpeg {
+        path: PathBuf,
+    },
     /// It exists and it is not FFmpeg. `ffplay.exe` and `ffprobe.exe` live in
     /// the same folder and are a misclick apart in a file picker.
-    NotFfmpeg { why: String },
+    NotFfmpeg {
+        why: String,
+    },
     /// HLAE's folder is not writable by this process. HLAE ships as a zip as
     /// well as an installer, so it can live anywhere and how often this happens
     /// is not known — but a protected location is a real enough possibility to
     /// route through rather than report as a raw OS error. See `link_elevated`.
-    NeedsElevation { ini: PathBuf },
+    NeedsElevation {
+        ini: PathBuf,
+    },
     /// The elevated write was declined at the UAC prompt, or failed.
     ElevationRefused,
     Io(std::io::Error),
@@ -204,11 +215,7 @@ pub fn missing_hook_dll(hlae_exe: &Path) -> Option<PathBuf> {
     // Derived the same way `PatcherConfig::build_hlae_process` derives it, so
     // this cannot pass while the launch argument points somewhere else.
     let dll = hlae_exe.parent()?.join(HOOK_DLL);
-    if dll.is_file() {
-        None
-    } else {
-        Some(dll)
-    }
+    if dll.is_file() { None } else { Some(dll) }
 }
 
 pub fn detect(hlae_exe: &Path) -> HlaeFfmpeg {
@@ -225,15 +232,16 @@ pub fn detect(hlae_exe: &Path) -> HlaeFfmpeg {
 
     let ini = folder.join(INI_NAME);
     if let Ok(body) = std::fs::read_to_string(&ini)
-        && let Some(target) = parse_ini_path(&body) {
-            let target_exists = target.is_file();
-            return HlaeFfmpeg::Linked {
-                ini,
-                target,
-                target_exists,
-                ours: authored_by_us(&body),
-            };
-        }
+        && let Some(target) = parse_ini_path(&body)
+    {
+        let target_exists = target.is_file();
+        return HlaeFfmpeg::Linked {
+            ini,
+            target,
+            target_exists,
+            ours: authored_by_us(&body),
+        };
+    }
 
     HlaeFfmpeg::Missing { folder }
 }
@@ -268,7 +276,9 @@ fn check_is_ffmpeg(ffmpeg_exe: &Path) -> Result<(), LinkError> {
             path: ffmpeg_exe.to_path_buf(),
         });
     }
-    verify_is_ffmpeg(ffmpeg_exe).map(|_| ()).map_err(|why| LinkError::NotFfmpeg { why })
+    verify_is_ffmpeg(ffmpeg_exe)
+        .map(|_| ())
+        .map_err(|why| LinkError::NotFfmpeg { why })
 }
 
 /// The ini half, split out from the check above so the rules about *which files
@@ -281,9 +291,9 @@ fn write_link(hlae_exe: &Path, ffmpeg_exe: &Path) -> Result<PathBuf, LinkError> 
         // Somebody else wrote it: left alone. Ours: replaced, since the
         // alternative is that the first link is permanent and the folder
         // usually cannot be edited by hand without administrator rights.
-        HlaeFfmpeg::Linked { ini, target, ours, .. } if !ours => {
-            return Err(LinkError::AlreadyLinked { ini, target })
-        }
+        HlaeFfmpeg::Linked {
+            ini, target, ours, ..
+        } if !ours => return Err(LinkError::AlreadyLinked { ini, target }),
         HlaeFfmpeg::Linked { .. } | HlaeFfmpeg::Missing { .. } => {}
     }
 
@@ -340,13 +350,15 @@ pub fn link_elevated(hlae_exe: &Path, ffmpeg_exe: &Path) -> Result<PathBuf, Link
         // Somebody else wrote it: left alone. Ours: replaced, since the
         // alternative is that the first link is permanent and the folder
         // usually cannot be edited by hand without administrator rights.
-        HlaeFfmpeg::Linked { ini, target, ours, .. } if !ours => {
-            return Err(LinkError::AlreadyLinked { ini, target })
-        }
+        HlaeFfmpeg::Linked {
+            ini, target, ours, ..
+        } if !ours => return Err(LinkError::AlreadyLinked { ini, target }),
         HlaeFfmpeg::Linked { .. } | HlaeFfmpeg::Missing { .. } => {}
     }
 
-    let ini = ffmpeg_dir(hlae_exe).ok_or(LinkError::NoInstall)?.join(INI_NAME);
+    let ini = ffmpeg_dir(hlae_exe)
+        .ok_or(LinkError::NoInstall)?
+        .join(INI_NAME);
 
     let scratch = std::env::temp_dir().join("dodstudio_hlae_ffmpeg");
     std::fs::create_dir_all(&scratch).map_err(LinkError::Io)?;
@@ -508,7 +520,9 @@ pub fn verify_is_ffmpeg(exe: &Path) -> Result<String, String> {
             }
             Ok(None) => {
                 let _ = child.kill();
-                return Err(crate::messages::did_not_respond_to_version_flag(exe.display()));
+                return Err(crate::messages::did_not_respond_to_version_flag(
+                    exe.display(),
+                ));
             }
             Err(e) => return Err(e.to_string()),
         }
@@ -519,7 +533,12 @@ pub fn verify_is_ffmpeg(exe: &Path) -> Result<String, String> {
         use std::io::Read;
         let mut buf = Vec::new();
         let _ = out.read_to_end(&mut buf);
-        banner = String::from_utf8_lossy(&buf).lines().next().unwrap_or("").trim().to_string();
+        banner = String::from_utf8_lossy(&buf)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
     }
 
     if banner.to_ascii_lowercase().starts_with("ffmpeg version") {
@@ -631,7 +650,10 @@ mod tests {
         // but the readme. It looks set up and is not.
         let hlae = install("missing");
         std::fs::write(
-            hlae.parent().unwrap().join(FFMPEG_DIR).join("readme.advancedfx.txt"),
+            hlae.parent()
+                .unwrap()
+                .join(FFMPEG_DIR)
+                .join("readme.advancedfx.txt"),
             b"install ffmpeg here",
         )
         .expect("readme");
@@ -639,7 +661,10 @@ mod tests {
         let state = detect(&hlae);
         assert!(matches!(state, HlaeFfmpeg::Missing { .. }), "{:?}", state);
         assert!(!state.is_usable());
-        assert!(state.can_link(), "this is exactly the case worth offering to fix");
+        assert!(
+            state.can_link(),
+            "this is exactly the case worth offering to fix"
+        );
     }
 
     #[test]
@@ -664,8 +689,11 @@ mod tests {
         let bin = folder.join("bin");
         std::fs::create_dir_all(&bin).expect("bin");
         std::fs::write(bin.join("ffmpeg.exe"), b"").expect("exe");
-        std::fs::write(folder.join(INI_NAME), "[Ffmpeg]\nPath=C:\\elsewhere\\ffmpeg.exe\n")
-            .expect("ini");
+        std::fs::write(
+            folder.join(INI_NAME),
+            "[Ffmpeg]\nPath=C:\\elsewhere\\ffmpeg.exe\n",
+        )
+        .expect("ini");
 
         assert!(matches!(detect(&hlae), HlaeFfmpeg::Bundled { .. }));
     }
@@ -676,8 +704,11 @@ mod tests {
         // an answer, and the answer is wrong.
         let hlae = install("stale");
         let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
-        std::fs::write(folder.join(INI_NAME), "[Ffmpeg]\nPath=C:\\gone\\ffmpeg.exe\n")
-            .expect("ini");
+        std::fs::write(
+            folder.join(INI_NAME),
+            "[Ffmpeg]\nPath=C:\\gone\\ffmpeg.exe\n",
+        )
+        .expect("ini");
 
         match detect(&hlae) {
             HlaeFfmpeg::Linked { target_exists, .. } => assert!(!target_exists),
@@ -753,7 +784,13 @@ mod tests {
 
     #[test]
     fn an_ini_we_cannot_make_sense_of_reads_as_no_answer() {
-        for body in ["", "; just a comment\n", "[Ffmpeg]\n", "nonsense\n", "[Ffmpeg]\nPath=\n"] {
+        for body in [
+            "",
+            "; just a comment\n",
+            "[Ffmpeg]\n",
+            "nonsense\n",
+            "[Ffmpeg]\nPath=\n",
+        ] {
             assert_eq!(parse_ini_path(body), None, "parsed {:?}", body);
         }
     }
@@ -792,8 +829,14 @@ mod tests {
         // These end up inside a script this code generates, and they are
         // user-supplied paths. Single quotes stop PowerShell expanding `$`,
         // backticks or anything else, and doubling is the only escape needed.
-        assert_eq!(ps_literal(Path::new(r"C:\Program Files (x86)\HLAE")), r"'C:\Program Files (x86)\HLAE'");
-        assert_eq!(ps_literal(Path::new(r"C:\it's\$env:PATH")), r"'C:\it''s\$env:PATH'");
+        assert_eq!(
+            ps_literal(Path::new(r"C:\Program Files (x86)\HLAE")),
+            r"'C:\Program Files (x86)\HLAE'"
+        );
+        assert_eq!(
+            ps_literal(Path::new(r"C:\it's\$env:PATH")),
+            r"'C:\it''s\$env:PATH'"
+        );
     }
 
     #[test]
@@ -838,7 +881,10 @@ mod tests {
         ] {
             assert!(matches!(err, LinkError::NotFfmpeg { .. }), "{:?}", err);
         }
-        assert!(!folder.join(INI_NAME).exists(), "nothing should have been written");
+        assert!(
+            !folder.join(INI_NAME).exists(),
+            "nothing should have been written"
+        );
     }
 
     #[test]
@@ -893,7 +939,10 @@ mod tests {
         let hlae = install("relink");
         let first = a_real_ffmpeg(hlae.parent().unwrap());
         write_link(&hlae, &first).expect("first link");
-        assert!(detect(&hlae).can_link(), "our own file must stay correctable");
+        assert!(
+            detect(&hlae).can_link(),
+            "our own file must stay correctable"
+        );
 
         let second_dir = hlae.parent().unwrap().join("other");
         std::fs::create_dir_all(&second_dir).expect("dir");
@@ -959,7 +1008,10 @@ mod tests {
             write_link(&hlae, &ffmpeg).expect_err("must refuse"),
             LinkError::AlreadyLinked { .. }
         ));
-        assert_eq!(std::fs::read_to_string(folder.join(INI_NAME)).unwrap(), theirs);
+        assert_eq!(
+            std::fs::read_to_string(folder.join(INI_NAME)).unwrap(),
+            theirs
+        );
     }
 
     #[test]
@@ -982,7 +1034,11 @@ mod tests {
             return;
         };
         let banner = verify_is_ffmpeg(&ffmpeg).expect("the real thing must pass");
-        assert!(banner.to_lowercase().starts_with("ffmpeg version"), "{}", banner);
+        assert!(
+            banner.to_lowercase().starts_with("ffmpeg version"),
+            "{}",
+            banner
+        );
     }
 
     #[test]

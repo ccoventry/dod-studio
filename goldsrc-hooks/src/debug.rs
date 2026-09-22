@@ -66,7 +66,9 @@ fn log_path() -> Option<std::path::PathBuf> {
         return Some(dir.join(log_file_name()));
     }
     if let Some(appdata) = std::env::var_os("APPDATA") {
-        let dir = std::path::PathBuf::from(appdata).join("dod-studio").join("logs");
+        let dir = std::path::PathBuf::from(appdata)
+            .join("dod-studio")
+            .join("logs");
         if std::fs::create_dir_all(&dir).is_ok() {
             return Some(dir.join(log_file_name()));
         }
@@ -87,7 +89,10 @@ fn log_file_name() -> String {
     // Safety: fills a plain struct we own; cannot fail.
     let mut now = unsafe { std::mem::zeroed() };
     unsafe { GetLocalTime(&mut now) };
-    format!("{LOG_FILE_PREFIX}{:04}{:02}{:02}{LOG_FILE_SUFFIX}", now.wYear, now.wMonth, now.wDay)
+    format!(
+        "{LOG_FILE_PREFIX}{:04}{:02}{:02}{LOG_FILE_SUFFIX}",
+        now.wYear, now.wMonth, now.wDay
+    )
 }
 
 /// How many days' worth of hook logs to keep on disk -- matches `native`'s
@@ -99,7 +104,9 @@ const MAX_RETAINED_HOOK_LOG_DAYS: usize = 30;
 /// are zero-padded `YYYYMMDD` dates, so lexical sort order is chronological
 /// order, the same trick `native`'s `prune_old_activity_logs` uses.
 fn prune_old_hook_logs(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<std::path::PathBuf> = entries
         .flatten()
         .map(|e| e.path())
@@ -134,8 +141,16 @@ pub unsafe fn report(message: &str) {
         _ => String::new(),
     };
 
-    if let Ok(mut file) = std::fs::OpenOptions::new().create(true).append(true).open(&path) {
-        let _ = writeln!(file, "[{}]{demo} [dodstudio_goldsrc_hooks] {message}", timestamp());
+    if let Ok(mut file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+    {
+        let _ = writeln!(
+            file,
+            "[{}]{demo} [dodstudio_goldsrc_hooks] {message}",
+            timestamp()
+        );
     }
 }
 
@@ -185,7 +200,9 @@ mod tests {
         let path = log_path().expect("a test build always resolves a path");
 
         if let Some(appdata) = std::env::var_os("APPDATA") {
-            let live = std::path::PathBuf::from(appdata).join("dod-studio").join("logs");
+            let live = std::path::PathBuf::from(appdata)
+                .join("dod-studio")
+                .join("logs");
             assert!(
                 !path.starts_with(&live),
                 "test logging resolved to the live log directory: {}",
@@ -205,12 +222,20 @@ mod tests {
         assert!(name.starts_with(LOG_FILE_PREFIX), "{name}");
         assert!(name.ends_with(LOG_FILE_SUFFIX), "{name}");
         let date_part = &name[LOG_FILE_PREFIX.len()..name.len() - LOG_FILE_SUFFIX.len()];
-        assert_eq!(date_part.len(), 8, "expected YYYYMMDD, got {date_part:?} from {name}");
-        assert!(date_part.chars().all(|c| c.is_ascii_digit()), "expected all digits, got {date_part:?}");
+        assert_eq!(
+            date_part.len(),
+            8,
+            "expected YYYYMMDD, got {date_part:?} from {name}"
+        );
+        assert!(
+            date_part.chars().all(|c| c.is_ascii_digit()),
+            "expected all digits, got {date_part:?}"
+        );
     }
 
     fn scratch(name: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("dod_studio_debug_rs_{name}_{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("dod_studio_debug_rs_{name}_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         dir
@@ -223,7 +248,11 @@ mod tests {
     fn prunes_the_oldest_dated_log_once_past_the_retention_window() {
         let dir = scratch("prune");
         for day in 1..=MAX_RETAINED_HOOK_LOG_DAYS + 1 {
-            std::fs::write(dir.join(format!("{LOG_FILE_PREFIX}202601{day:02}{LOG_FILE_SUFFIX}")), "x").unwrap();
+            std::fs::write(
+                dir.join(format!("{LOG_FILE_PREFIX}202601{day:02}{LOG_FILE_SUFFIX}")),
+                "x",
+            )
+            .unwrap();
         }
         // A file that merely shares the directory must survive untouched --
         // pruning is scoped to this module's own filename shape.
@@ -232,28 +261,38 @@ mod tests {
         prune_old_hook_logs(&dir);
 
         assert!(
-            !dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}")).exists(),
+            !dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}"))
+                .exists(),
             "the single oldest file must be pruned"
         );
         for day in 2..=MAX_RETAINED_HOOK_LOG_DAYS + 1 {
             assert!(
-                dir.join(format!("{LOG_FILE_PREFIX}202601{day:02}{LOG_FILE_SUFFIX}")).exists(),
+                dir.join(format!("{LOG_FILE_PREFIX}202601{day:02}{LOG_FILE_SUFFIX}"))
+                    .exists(),
                 "day {day} is within the retention window and must survive"
             );
         }
-        assert!(dir.join("unrelated.log").exists(), "must not touch a file outside its own naming pattern");
+        assert!(
+            dir.join("unrelated.log").exists(),
+            "must not touch a file outside its own naming pattern"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn does_not_prune_when_within_the_retention_window() {
         let dir = scratch("no_prune");
-        std::fs::write(dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}")), "x").unwrap();
+        std::fs::write(
+            dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}")),
+            "x",
+        )
+        .unwrap();
 
         prune_old_hook_logs(&dir);
 
         assert!(
-            dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}")).exists(),
+            dir.join(format!("{LOG_FILE_PREFIX}20260101{LOG_FILE_SUFFIX}"))
+                .exists(),
             "a single file is nowhere near the retention window and must survive"
         );
         let _ = std::fs::remove_dir_all(&dir);

@@ -5,7 +5,9 @@
 //! into the real capture batch pipeline.
 
 use clap::Parser;
-use native::patch::{clean_demo_decals, Cancel, DecalCleanOptions, FlushSource, MAX_OVERLAP_DECALS};
+use native::patch::{
+    Cancel, DecalCleanOptions, FlushSource, MAX_OVERLAP_DECALS, clean_demo_decals,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -128,18 +130,38 @@ fn main() {
             println!("Capture windows kept:  {:?}", args.keep_windows);
             println!("r_decals pinned to:    {}", args.ring_limit);
             println!();
-            println!("Decals stripped outside windows: {}", stats.temp_entity_stripped);
-            println!("Player sprays stripped:          {}", stats.player_spray_stripped);
-            println!("Flush decals injected:           {}", stats.flush_decals_injected);
+            println!(
+                "Decals stripped outside windows: {}",
+                stats.temp_entity_stripped
+            );
+            println!(
+                "Player sprays stripped:          {}",
+                stats.player_spray_stripped
+            );
+            println!(
+                "Flush decals injected:           {}",
+                stats.flush_decals_injected
+            );
             println!("Bursts placed:                   {}", stats.bursts_placed);
             println!();
-            println!("Real decals harvested (survey):  {}", stats.harvested_decals);
+            println!(
+                "Real decals harvested (survey):  {}",
+                stats.harvested_decals
+            );
             match stats.spawn_reference {
-                Some(p) => println!("Settled spawn origin:  [{:.1}, {:.1}, {:.1}]", p[0], p[1], p[2]),
-                None => println!("Settled spawn origin:  <none found — never saw a stable on-ground run>"),
+                Some(p) => println!(
+                    "Settled spawn origin:  [{:.1}, {:.1}, {:.1}]",
+                    p[0], p[1], p[2]
+                ),
+                None => println!(
+                    "Settled spawn origin:  <none found — never saw a stable on-ground run>"
+                ),
             }
             match stats.flush_coord {
-                Some(p) => println!("Flush coordinate:      [{:.1}, {:.1}, {:.1}]", p[0], p[1], p[2]),
+                Some(p) => println!(
+                    "Flush coordinate:      [{:.1}, {:.1}, {:.1}]",
+                    p[0], p[1], p[2]
+                ),
                 None => println!("Flush coordinate:      <none — burst skipped>"),
             }
             match stats.flush_source {
@@ -158,9 +180,9 @@ fn main() {
                 Some(FlushSource::TiledPlane) => println!(
                     "Flush source:          grid tiled across a plane fitted to real decals"
                 ),
-                Some(FlushSource::MapAtlas) => println!(
-                    "Flush source:          the map's accumulated coordinate store"
-                ),
+                Some(FlushSource::MapAtlas) => {
+                    println!("Flush source:          the map's accumulated coordinate store")
+                }
                 Some(FlushSource::MapGeometry) => println!(
                     "Flush source:          sampled off the map's own world faces (BSP geometry)"
                 ),
@@ -170,7 +192,11 @@ fn main() {
                 "Spread across:         {} of {} positions needed{}",
                 stats.flush_positions,
                 stats.flush_positions_wanted,
-                if stats.flush_positions >= stats.flush_positions_wanted { "  (full sweep)" } else { "" }
+                if stats.flush_positions >= stats.flush_positions_wanted {
+                    "  (full sweep)"
+                } else {
+                    ""
+                }
             );
             if stats.flush_positions < stats.flush_positions_wanted {
                 println!(
@@ -196,7 +222,11 @@ fn main() {
                 "On camera during a clip: {} of {} sampled frames{}",
                 stats.flush_on_camera_frames,
                 stats.camera_samples,
-                if stats.flush_on_camera_frames == 0 { "  (clear)" } else { "" }
+                if stats.flush_on_camera_frames == 0 {
+                    "  (clear)"
+                } else {
+                    ""
+                }
             );
             if stats.flush_on_camera_frames > 0 {
                 println!(
@@ -209,7 +239,10 @@ fn main() {
 
             if !stats.bursts_short.is_empty() {
                 println!();
-                println!("WARNING: {} window(s) had too little room for a full sweep.", stats.bursts_short.len());
+                println!(
+                    "WARNING: {} window(s) had too little room for a full sweep.",
+                    stats.bursts_short.len()
+                );
                 println!("These clips are NOT guaranteed clean:");
                 for (tick, placed, wanted) in &stats.bursts_short {
                     println!("  window @ tick {:>7}: placed {}/{}", tick, placed, wanted);

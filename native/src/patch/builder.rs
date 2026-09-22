@@ -2,13 +2,12 @@
 // Batch job construction and the legacy channel-based worker spawner.
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
-use std::sync::{Arc, atomic::AtomicBool};
-use crate::patch::types::{
-    CaptureStreak, PatchJob, PatcherConfig, CommandRelation,
-    CaptureWorker, PatchEvent,
-};
 use crate::patch::engine::StreamPatcher;
+use crate::patch::types::{
+    CaptureStreak, CaptureWorker, CommandRelation, PatchEvent, PatchJob, PatcherConfig,
+};
 use crate::shared::paths::{CHAIN_DEMO_PREFIX, PRIMER_DEMO_STEM};
+use std::sync::{Arc, atomic::AtomicBool};
 
 // ── Frame-time helpers ───────────────────────────────────────────────────────
 
@@ -106,15 +105,15 @@ pub fn take_separation_seconds(config: &PatcherConfig) -> f32 {
 fn build_safe_echos(tick: i32, message: &str) -> Vec<(i32, String)> {
     let mut result = Vec::new();
     let mut current_tick = tick;
-    
+
     let mut words: Vec<&str> = message.split(' ').collect();
     if words.is_empty() {
         return result;
     }
-    
+
     let mut current_chunk = String::new();
     let mut is_first = true;
-    
+
     let mut i = 0;
     while i < words.len() {
         let word = words[i];
@@ -123,24 +122,24 @@ fn build_safe_echos(tick: i32, message: &str) -> Vec<(i32, String)> {
         } else {
             "[dodstudio] ->".to_string()
         };
-        
+
         let test_message = if current_chunk.is_empty() {
             word.to_string()
         } else {
             format!("{} {}", current_chunk, word)
         };
-        
+
         let full_string = format!("{}{}", prefix, test_message);
-        
+
         if full_string.len() > crate::patch::MAX_ECHO_CHUNK_SIZE {
             if current_chunk.is_empty() {
                 let limit = crate::patch::MAX_ECHO_CHUNK_SIZE.saturating_sub(prefix.len());
                 let (part1, part2) = word.split_at(limit.min(word.len()));
-                
+
                 let cmd = format!("echo \"{}{}\"", prefix, part1);
                 result.push((current_tick, cmd));
                 current_tick += 1;
-                
+
                 is_first = false;
                 words[i] = part2;
                 continue;
@@ -148,7 +147,7 @@ fn build_safe_echos(tick: i32, message: &str) -> Vec<(i32, String)> {
                 let cmd = format!("echo \"{}{}\"", prefix, current_chunk);
                 result.push((current_tick, cmd));
                 current_tick += 1;
-                
+
                 current_chunk.clear();
                 is_first = false;
                 continue;
@@ -158,7 +157,7 @@ fn build_safe_echos(tick: i32, message: &str) -> Vec<(i32, String)> {
             i += 1;
         }
     }
-    
+
     if !current_chunk.is_empty() {
         let prefix = if is_first {
             format!("{} ", LOG_TAG)
@@ -168,10 +167,9 @@ fn build_safe_echos(tick: i32, message: &str) -> Vec<(i32, String)> {
         let cmd = format!("echo \"{}{}\"", prefix, current_chunk);
         result.push((current_tick, cmd));
     }
-    
+
     result
 }
-
 
 // ── Block merging ─────────────────────────────────────────────────────────────
 
@@ -320,15 +318,21 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
         (AUDIO_RESYNC_SECONDS, "the audio resync after fast-forward"),
         (SOUND_FLUSH_LEAD_SECONDS, "the stopsound flush"),
         (flush_lead, "the decal flush's lead"),
-        (scheduled_before, "a Scheduled Command set before the highlight"),
+        (
+            scheduled_before,
+            "a Scheduled Command set before the highlight",
+        ),
     ];
-    let (pre_roll, pre_roll_binding) = pre_terms
-        .iter()
-        .copied()
-        .fold((0.0f32, "nothing"), |acc, t| if t.0 > acc.0 { t } else { acc });
+    let (pre_roll, pre_roll_binding) = pre_terms.iter().copied().fold(
+        (0.0f32, "nothing"),
+        |acc, t| if t.0 > acc.0 { t } else { acc },
+    );
 
     let (post_roll, post_roll_binding) = if scheduled_after > 0.0 {
-        (scheduled_after, "a Scheduled Command set after the highlight")
+        (
+            scheduled_after,
+            "a Scheduled Command set after the highlight",
+        )
     } else {
         (0.0, "nothing")
     };
@@ -379,14 +383,22 @@ pub fn blocks_merge(prev_end: i32, next_start: i32, lead_ticks: i32, trail_ticks
 /// rather than `start_tick`, or a Kill Range edit moves the recording without
 /// moving the decision about whether it collides with its neighbour.
 fn first_kill_frame(streak: &CaptureStreak) -> i32 {
-    streak.kills.get(streak.start_index).map(|k| k.0).unwrap_or(streak.start_tick)
+    streak
+        .kills
+        .get(streak.start_index)
+        .map(|k| k.0)
+        .unwrap_or(streak.start_tick)
 }
 
 /// Frame index of a highlight's last recorded kill, honouring a Kill Range
 /// edit. For a merged block this is the absorbed highlight's final kill.
 fn last_kill_frame(streak: &CaptureStreak) -> i32 {
     let idx = streak.end_index.min(streak.kills.len().saturating_sub(1));
-    streak.kills.get(idx).map(|k| k.0).unwrap_or(streak.end_tick)
+    streak
+        .kills
+        .get(idx)
+        .map(|k| k.0)
+        .unwrap_or(streak.end_tick)
 }
 
 // ── Drive allocation ──────────────────────────────────────────────────────────
@@ -450,14 +462,22 @@ fn allocate_blocks_first_fit_decreasing(
 
 // ── Batch queue builder ───────────────────────────────────────────────────────
 
-pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig, global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
+pub fn build_batch_queue(
+    raw_streaks: Vec<CaptureStreak>,
+    config: &PatcherConfig,
+    global_arrays: &std::collections::HashMap<std::path::PathBuf, std::sync::Arc<Vec<f32>>>,
+) -> Result<(Vec<PatchJob>, Vec<crate::patch::types::DriveHeadroom>), std::io::Error> {
     // tickrate is extracted dynamically from streaks per-demo.
     // Each streak is carried alongside its index in `raw_streaks` so the blocks
     // built below can point back at the exact highlights the caller dispatched,
     // even after the overlap merge collapses several into one recording.
-    let mut grouped: std::collections::HashMap<(&str, Option<&str>), Vec<(usize, &CaptureStreak)>> = std::collections::HashMap::new();
+    let mut grouped: std::collections::HashMap<(&str, Option<&str>), Vec<(usize, &CaptureStreak)>> =
+        std::collections::HashMap::new();
     for (idx, streak) in raw_streaks.iter().enumerate() {
-        grouped.entry((streak.source_demo.as_str(), streak.target_player.as_deref())).or_default().push((idx, streak));
+        grouped
+            .entry((streak.source_demo.as_str(), streak.target_player.as_deref()))
+            .or_default()
+            .push((idx, streak));
     }
 
     // The rolls are load-bearing now — the audio resync, the sound flush, the
@@ -488,21 +508,24 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
 
     // Sort grouped chronologically by the start_tick of their first streak
     let mut sorted_groups: Vec<_> = grouped.into_iter().collect();
-    sorted_groups.sort_by_key(|(_, streaks)| streaks.iter().map(|(_, s)| s.start_tick).min().unwrap_or(0));
+    sorted_groups
+        .sort_by_key(|(_, streaks)| streaks.iter().map(|(_, s)| s.start_tick).min().unwrap_or(0));
 
     let mut jobs = Vec::new();
     let total_jobs = sorted_groups.len();
-    
+
     let date_time = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let mut helper_cfg_content = String::new();
 
     let game_path_buf = std::path::PathBuf::from(&config.game_path);
     let dod_dir = match game_path_buf.parent() {
         Some(parent) => parent.join("dod"),
-        None => return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Target game output directory not found"
-        )),
+        None => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Target game output directory not found",
+            ));
+        }
     };
 
     // Remove stale config from dod_dir
@@ -517,7 +540,7 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             }
         }
     }
-    
+
     // ── AOT disk-space simulation ─────────────────────────────────────────────
     // Snapshot current free bytes for every configured capture directory so we
     // can route each clip to the drive with sufficient headroom at build time.
@@ -534,13 +557,15 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
     if drive_free.is_empty() {
         drive_free.push(u64::MAX);
     }
-    
+
     let active_export_dir = match config.primary_media_dir.clone() {
         Some(dir) => dir,
-        None => return Err(std::io::Error::new(
-            std::io::ErrorKind::NotFound,
-            "Target game output directory not found"
-        )),
+        None => {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                "Target game output directory not found",
+            ));
+        }
     };
     let session_dir = if !config.session_id.is_empty() {
         active_export_dir.join(&config.session_id)
@@ -550,7 +575,7 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
     if !session_dir.exists() {
         let _ = std::fs::create_dir_all(&session_dir);
     }
-    
+
     helper_cfg_content.push_str(&format!(
         "# dodstudio_helper.cfg\n# Created by: dod_studio.exe v{}\n# Date: {}\n\n",
         crate::VERSION,
@@ -565,7 +590,8 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
 
     helper_cfg_content.push_str("# Global aliases\n");
     helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
-    helper_cfg_content.push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
+    helper_cfg_content
+        .push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
     helper_cfg_content.push_str("alias sys_fast_forward \"host_framerate 0.05\"\n");
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
@@ -587,11 +613,13 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
     // treats an alias with an empty body as a parse oddity, and a no-op that
     // announces itself is easier to recognise in a log than one that vanishes.
     if config.capture_mode.hlae_records() {
-        helper_cfg_content.push_str("alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n");
+        helper_cfg_content
+            .push_str("alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n");
         helper_cfg_content.push_str("alias sys_record_stop \"mirv_recordmovie_stop\"\n");
     } else {
         helper_cfg_content.push_str("alias sys_record_start \"stopsound\"\n");
-        helper_cfg_content.push_str("alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n");
+        helper_cfg_content
+            .push_str("alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n");
     }
     helper_cfg_content.push_str("alias sys_capture_done_path \"mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop\"\n");
 
@@ -642,8 +670,6 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         ));
     }
 
-
-
     // 1. Primer Job
     if total_jobs > 0 {
         let first_source = sorted_groups[0].0.0.to_string();
@@ -660,7 +686,7 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         // blocks land now, not these small demo files. See issue #8.
         let primer_out = dod_dir.join(format!("{PRIMER_DEMO_STEM}.dem"));
 
-        // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the 
+        // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
         // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
         let mut primer_scheduled = Vec::new();
         helper_cfg_content.push_str("# Demo specific next demos\n");
@@ -689,20 +715,28 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
     // utilized_drives only ever needs to track drives that actually receive
     // a real recording block. See issue #8.
     let mut utilized_drives = std::collections::HashSet::new();
-    for (job_idx, ((source_demo, target_player), mut streak_refs)) in sorted_groups.into_iter().enumerate() {
+    for (job_idx, ((source_demo, target_player), mut streak_refs)) in
+        sorted_groups.into_iter().enumerate()
+    {
         // Sort by start_tick in ascending order
         streak_refs.sort_by_key(|(_, s)| s.start_tick);
-        let (streak_payload_indices, streaks): (Vec<usize>, Vec<CaptureStreak>) =
-            streak_refs.into_iter().map(|(idx, s)| (idx, s.clone())).unzip();
+        let (streak_payload_indices, streaks): (Vec<usize>, Vec<CaptureStreak>) = streak_refs
+            .into_iter()
+            .map(|(idx, s)| (idx, s.clone()))
+            .unzip();
 
         let total_demo_frames = streaks.first().map(|s| s.total_demo_frames).unwrap_or(0);
 
         // One svc_director STUFFTEXT event per streak — label mirrors the highlight table:
         // "#<row>: <kill_count> kills: <timeline_string>"
-        let mut director_events: Vec<(i32, String)> = streaks.iter().enumerate().map(|(i, s)| {
-            let label = format!("#{}: {} kills: {}", i + 1, s.kill_count, s.timeline_string);
-            (s.start_tick, label)
-        }).collect();
+        let mut director_events: Vec<(i32, String)> = streaks
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let label = format!("#{}: {} kills: {}", i + 1, s.kill_count, s.timeline_string);
+                (s.start_tick, label)
+            })
+            .collect();
 
         if let Some(first_streak) = streaks.first() {
             let match_tick = first_streak.match_start_tick.unwrap_or(0);
@@ -712,7 +746,11 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         }
         director_events.sort_by_key(|e| e.0);
 
-        let demo_fps = streaks.first().map(|s| s.demo_fps).filter(|&fps| fps > 0.0).unwrap_or(30.0);
+        let demo_fps = streaks
+            .first()
+            .map(|s| s.demo_fps)
+            .filter(|&fps| fps > 0.0)
+            .unwrap_or(30.0);
 
         let demo_name = format!("{}{:02}", CHAIN_DEMO_PREFIX, job_idx + 1);
         let next_demo_name = format!("{}{:02}", CHAIN_DEMO_PREFIX, job_idx + 2);
@@ -721,7 +759,7 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         let output_demo = dod_dir.join(&output_name);
 
         // ── AOT failover routing (Per-Block) ───────────────────────────────────
-        
+
         // Block cutting.
         //
         // Two separate questions, deliberately not conflated (they used to be,
@@ -808,25 +846,30 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         let mut block_routes = Vec::new();
 
         // Byte estimate per block, index-aligned with merged_streaks.
-        let block_estimates: Vec<u64> = merged_streaks.iter().map(|streak| {
-            let anchor_duration = ((streak.end_tick - streak.start_tick) as f32) / demo_fps.max(1.0);
-            let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
-            crate::sys::disk::calculate_raw_sequence_bytes(
-                config.resolution_width,
-                config.resolution_height,
-                config.capture_fps,
-                clip_duration_secs,
-            )
-        }).collect();
+        let block_estimates: Vec<u64> = merged_streaks
+            .iter()
+            .map(|streak| {
+                let anchor_duration =
+                    ((streak.end_tick - streak.start_tick) as f32) / demo_fps.max(1.0);
+                let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
+                crate::sys::disk::calculate_raw_sequence_bytes(
+                    config.resolution_width,
+                    config.resolution_height,
+                    config.capture_fps,
+                    clip_duration_secs,
+                )
+            })
+            .collect();
 
         let assignments = allocate_blocks_first_fit_decreasing(
             &block_estimates,
             &mut drive_free,
             &mut active_drive_idx,
             FAILOVER_THRESHOLD,
-        ).map_err(|_| std::io::Error::other(
-            "Insufficient space across all mapped drives to allocate a block"
-        ))?;
+        )
+        .map_err(|_| {
+            std::io::Error::other("Insufficient space across all mapped drives to allocate a block")
+        })?;
 
         // Route aliases key off each block's original index in merged_streaks,
         // not allocation order, so the scheduled-command lookup below (which
@@ -879,9 +922,15 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         blocks.sort_by_key(|b| b.block_index);
 
         if job_idx < total_jobs - 1 {
-            helper_cfg_content.push_str(&format!("alias {}_next \"playdemo {}\"\n", demo_name, next_demo_name));
+            helper_cfg_content.push_str(&format!(
+                "alias {}_next \"playdemo {}\"\n",
+                demo_name, next_demo_name
+            ));
         } else {
-            helper_cfg_content.push_str(&format!("alias {}_next \"sys_capture_done_path\"\n", demo_name));
+            helper_cfg_content.push_str(&format!(
+                "alias {}_next \"sys_capture_done_path\"\n",
+                demo_name
+            ));
         }
 
         // Generate scheduled commands
@@ -900,7 +949,12 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         // final clip count, already settled by the merge loop above.
         for (t, echo_cmd) in build_safe_echos(
             initial_delay_ticks,
-            &format!("DEMO_START {} {} {}", job_idx + 1, total_jobs, merged_streaks.len()),
+            &format!(
+                "DEMO_START {} {} {}",
+                job_idx + 1,
+                total_jobs,
+                merged_streaks.len()
+            ),
         ) {
             scheduled_commands.push((t, echo_cmd));
         }
@@ -911,14 +965,18 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         // OS notification (issue #98).
         for (t, echo_cmd) in build_safe_echos(
             initial_delay_ticks,
-            &format!("NEXT_CLIP {} {} {} {}", job_idx + 1, total_jobs, 1, merged_streaks.len()),
+            &format!(
+                "NEXT_CLIP {} {} {} {}",
+                job_idx + 1,
+                total_jobs,
+                1,
+                merged_streaks.len()
+            ),
         ) {
             scheduled_commands.push((t, echo_cmd));
         }
 
         for (i, streak) in merged_streaks.iter().enumerate() {
-
-
             let frame_times_ref = global_arrays
                 .get(std::path::Path::new(&streak.source_demo))
                 .map(|a| a.as_slice())
@@ -949,22 +1007,55 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             let physical_frame = first_kill_frame(streak).max(0) as usize;
             let physical_end_frame = last_kill_frame(streak).max(0) as usize;
 
-            let record_start_tick = find_tick_backwards(physical_frame, config.record_start_lead, frame_times_ref, demo_fps);
+            let record_start_tick = find_tick_backwards(
+                physical_frame,
+                config.record_start_lead,
+                frame_times_ref,
+                demo_fps,
+            );
             // Pre-roll is the settle window: playback drops back to normal speed
             // this far ahead of the record start so audio isn't glitched by the
             // fast-forward, then stopsound flushes just before recording begins.
             // The sound flush is clamped so it can never precede the speed drop
             // (which it would for any pre-roll under a second).
-            let s_speed_tick = find_tick_backwards(record_start_tick.max(0) as usize, config.pre_roll_seconds, frame_times_ref, demo_fps);
+            let s_speed_tick = find_tick_backwards(
+                record_start_tick.max(0) as usize,
+                config.pre_roll_seconds,
+                frame_times_ref,
+                demo_fps,
+            );
             let sound_lead = config.pre_roll_seconds.min(SOUND_FLUSH_LEAD_SECONDS);
-            let s_sound_tick = find_tick_backwards(record_start_tick.max(0) as usize, sound_lead, frame_times_ref, demo_fps);
-            let mut r_stop = find_tick_forwards(physical_end_frame, config.record_stop_trail, frame_times_ref, demo_fps);
-            let mut s_end = find_tick_forwards(r_stop.max(0) as usize, config.post_roll_seconds, frame_times_ref, demo_fps);
+            let s_sound_tick = find_tick_backwards(
+                record_start_tick.max(0) as usize,
+                sound_lead,
+                frame_times_ref,
+                demo_fps,
+            );
+            let mut r_stop = find_tick_forwards(
+                physical_end_frame,
+                config.record_stop_trail,
+                frame_times_ref,
+                demo_fps,
+            );
+            let mut s_end = find_tick_forwards(
+                r_stop.max(0) as usize,
+                config.post_roll_seconds,
+                frame_times_ref,
+                demo_fps,
+            );
 
             let mut is_clutch = false;
             if s_end >= danger_zone {
-                let demo_file_name = std::path::Path::new(&streak.source_demo).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                crate::log_markdown(&format!("⚠️ **EOF Boundary Reached:** Highlight #{} in demo '{}' (Player: {}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch.", i + 1, demo_file_name, streak.target_player.as_deref().unwrap_or("Unknown")));
+                let demo_file_name = std::path::Path::new(&streak.source_demo)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                crate::log_markdown(&format!(
+                    "⚠️ **EOF Boundary Reached:** Highlight #{} in demo '{}' (Player: {}) has a post-roll that exceeds the demo's end frame. Post-roll truncated to save batch.",
+                    i + 1,
+                    demo_file_name,
+                    streak.target_player.as_deref().unwrap_or("Unknown")
+                ));
                 is_clutch = true;
                 r_stop = r_stop.min(exit_frame);
                 s_end = exit_frame;
@@ -992,14 +1083,24 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                 };
                 let target_tick = match custom.relation {
                     CommandRelation::Before => {
-                        let mut t = find_tick_backwards(physical_frame, custom.offset, frame_times_ref, demo_fps);
+                        let mut t = find_tick_backwards(
+                            physical_frame,
+                            custom.offset,
+                            frame_times_ref,
+                            demo_fps,
+                        );
                         if t == s_speed_tick || t == s_sound_tick || t == record_start_tick {
                             t += 1;
                         }
                         t
                     }
                     CommandRelation::After => {
-                        let mut t = find_tick_forwards(physical_end_frame, custom.offset, frame_times_ref, demo_fps);
+                        let mut t = find_tick_forwards(
+                            physical_end_frame,
+                            custom.offset,
+                            frame_times_ref,
+                            demo_fps,
+                        );
                         if t == r_stop {
                             t += 1;
                         }
@@ -1007,12 +1108,23 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                     }
                 };
 
-                for (t, echo_cmd) in build_safe_echos(target_tick, &format!("CUSTOM_CMD{}_{} - Tick {}", idx + 1, relation_str, target_tick)) {
+                for (t, echo_cmd) in build_safe_echos(
+                    target_tick,
+                    &format!(
+                        "CUSTOM_CMD{}_{} - Tick {}",
+                        idx + 1,
+                        relation_str,
+                        target_tick
+                    ),
+                ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
                 let cmd_len = custom.command.len();
                 if cmd_len > crate::patch::CUSTOM_CMD_WARN_LIMIT {
-                    crate::log_markdown(&format!("⚠️ **WARNING:** Custom command exceeds 60 bytes and will not fit in a demo ConsoleCommand frame's 64-byte command field: {}", custom.command));
+                    crate::log_markdown(&format!(
+                        "⚠️ **WARNING:** Custom command exceeds 60 bytes and will not fit in a demo ConsoleCommand frame's 64-byte command field: {}",
+                        custom.command
+                    ));
                 }
 
                 // Playback runs at `host_framerate 0.05` until the pre-roll
@@ -1052,7 +1164,11 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                         custom.command,
                         relation_str.to_lowercase(),
                         custom.offset,
-                        if matches!(custom.relation, CommandRelation::Before) { "before" } else { "after" },
+                        if matches!(custom.relation, CommandRelation::Before) {
+                            "before"
+                        } else {
+                            "after"
+                        },
                         target_tick,
                         where_,
                         fix
@@ -1071,13 +1187,18 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                 scheduled_commands.push((s_speed_tick, "sys_normal_speed".to_string()));
                 scheduled_commands.push((s_speed_tick + 1, "sys_normal_speed".to_string()));
                 scheduled_commands.push((s_speed_tick + 2, "sys_normal_speed".to_string()));
-                for (t, echo_cmd) in build_safe_echos(s_speed_tick, &format!("SPEED_FLUSH - Tick {}", s_speed_tick)) {
+                for (t, echo_cmd) in build_safe_echos(
+                    s_speed_tick,
+                    &format!("SPEED_FLUSH - Tick {}", s_speed_tick),
+                ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
 
                 // At Sound Flush (Stage 1.5)
                 scheduled_commands.push((s_sound_tick, "sys_sound".to_string()));
-                for (t, echo_cmd) in build_safe_echos(s_sound_tick, &format!("AUDIO_SYNC - Tick {}", s_sound_tick)) {
+                for (t, echo_cmd) in
+                    build_safe_echos(s_sound_tick, &format!("AUDIO_SYNC - Tick {}", s_sound_tick))
+                {
                     scheduled_commands.push((t, echo_cmd));
                 }
             }
@@ -1085,13 +1206,17 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             // At Start Frame (Stage 2)
             scheduled_commands.push((record_start_tick, format!("{}_route_{}", demo_name, i)));
             scheduled_commands.push((record_start_tick, "sys_record_start".to_string()));
-            for (t, echo_cmd) in build_safe_echos(record_start_tick, &format!("START_RECORD - Tick {}", record_start_tick)) {
+            for (t, echo_cmd) in build_safe_echos(
+                record_start_tick,
+                &format!("START_RECORD - Tick {}", record_start_tick),
+            ) {
                 scheduled_commands.push((t, echo_cmd));
             }
 
             // At End Frame (Stage 3)
             scheduled_commands.push((r_stop, "sys_record_stop".to_string()));
-            for (t, echo_cmd) in build_safe_echos(r_stop, &format!("STOP_RECORD - Tick {}", r_stop)) {
+            for (t, echo_cmd) in build_safe_echos(r_stop, &format!("STOP_RECORD - Tick {}", r_stop))
+            {
                 scheduled_commands.push((t, echo_cmd));
             }
 
@@ -1101,7 +1226,9 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             let next_block_chained = chained_to_previous.get(i + 1).copied().unwrap_or(false);
             if !next_block_chained {
                 scheduled_commands.push((s_end, "sys_fast_forward".to_string()));
-                for (t, echo_cmd) in build_safe_echos(s_end, &format!("FAST_FORWARD - Tick {}", s_end)) {
+                for (t, echo_cmd) in
+                    build_safe_echos(s_end, &format!("FAST_FORWARD - Tick {}", s_end))
+                {
                     scheduled_commands.push((t, echo_cmd));
                 }
                 // `chained_to_previous.get(i + 1)` also returns the "false"
@@ -1112,7 +1239,13 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                 if i + 1 < merged_streaks.len() {
                     for (t, echo_cmd) in build_safe_echos(
                         s_end,
-                        &format!("NEXT_CLIP {} {} {} {}", job_idx + 1, total_jobs, i + 2, merged_streaks.len()),
+                        &format!(
+                            "NEXT_CLIP {} {} {} {}",
+                            job_idx + 1,
+                            total_jobs,
+                            i + 2,
+                            merged_streaks.len()
+                        ),
                     ) {
                         scheduled_commands.push((t, echo_cmd));
                     }
@@ -1127,7 +1260,11 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
                     for (t, echo_cmd) in echos {
                         scheduled_commands.push((t, echo_cmd));
                     }
-                    let final_tick = if is_clutch { exit_frame } else { s_end + echos_len };
+                    let final_tick = if is_clutch {
+                        exit_frame
+                    } else {
+                        s_end + echos_len
+                    };
                     scheduled_commands.push((final_tick, format!("{}_next", demo_name)));
                 } else {
                     let final_tick = if is_clutch { exit_frame } else { s_end };
@@ -1137,12 +1274,15 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
         }
 
         // Implement Global Breadcrumb Loop
-        let total_demo_frames = merged_streaks.first().map(|s| s.total_demo_frames).unwrap_or(0);
+        let total_demo_frames = merged_streaks
+            .first()
+            .map(|s| s.total_demo_frames)
+            .unwrap_or(0);
         let mut step = 0;
         while step < total_demo_frames {
             scheduled_commands.push((
-                step, 
-                format!("echo \"[dod-studio] BREADCRUMB - Tick {}\"", step)
+                step,
+                format!("echo \"[dod-studio] BREADCRUMB - Tick {}\"", step),
             ));
             step += crate::patch::BREADCRUMB_INTERVAL_TICKS;
         }
@@ -1164,7 +1304,7 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             blocks,
         });
     }
-    
+
     // Create directory junctions for utilized drives
     let game_path_buf = std::path::PathBuf::from(&config.game_path);
     let hl_exe_parent = game_path_buf.parent().unwrap_or(std::path::Path::new(""));
@@ -1176,17 +1316,17 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
             } else {
                 absolute_drive
             };
-            
+
             if !session_dir.exists() {
                 let _ = std::fs::create_dir_all(&session_dir);
             }
-            
+
             let junction_path = hl_exe_parent.join(format!("_route_{}", drive_idx));
             let _ = std::fs::remove_dir(&junction_path);
-            
+
             let junction_str = junction_path.to_str().unwrap_or_default();
             let target_str = session_dir.to_str().unwrap_or_default();
-            
+
             if !junction_str.is_empty() && !target_str.is_empty() {
                 let _ = std::process::Command::new("cmd")
                     .args(["/C", "mklink", "/J", junction_str, target_str])
@@ -1208,10 +1348,15 @@ pub fn build_batch_queue(raw_streaks: Vec<CaptureStreak>, config: &PatcherConfig
     // recomputing a third, narrower (primary-drive-only) answer.
     let drive_headroom: Vec<crate::patch::types::DriveHeadroom> = utilized_drives
         .into_iter()
-        .filter_map(|idx| config.capture_directories.get(idx).map(|p| crate::patch::types::DriveHeadroom {
-            path: p.clone(),
-            free_bytes: drive_free[idx],
-        }))
+        .filter_map(|idx| {
+            config
+                .capture_directories
+                .get(idx)
+                .map(|p| crate::patch::types::DriveHeadroom {
+                    path: p.clone(),
+                    free_bytes: drive_free[idx],
+                })
+        })
         .collect();
 
     Ok((jobs, drive_headroom))
@@ -1239,24 +1384,43 @@ impl Drop for WorkspaceGuard {
     fn drop(&mut self) {
         // Junction link: remove_dir unlinks without touching the junction target.
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[WorkspaceGuard::drop] Failed to remove session_junction {:?}: {}", self.session_junction, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[WorkspaceGuard::drop] Failed to remove session_junction {:?}: {}",
+                self.session_junction,
+                e
+            );
+        }
         // Unlink every dod_pool_N and _route_N junction. `remove_dir` unlinks a
         // junction without touching what it points at, and NotFound is expected
         // for any index this batch did not route to.
-        for junction in self.pool_junctions.iter().chain(self.route_junctions.iter()) {
+        for junction in self
+            .pool_junctions
+            .iter()
+            .chain(self.route_junctions.iter())
+        {
             if let Err(e) = std::fs::remove_dir(junction)
-                && e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("[WorkspaceGuard::drop] Failed to remove pool junction {:?}: {}", junction, e);
-                }
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                log::warn!(
+                    "[WorkspaceGuard::drop] Failed to remove pool junction {:?}: {}",
+                    junction,
+                    e
+                );
+            }
         }
         // Signal dirs (DOD_STUDIO_EXIT_TRIGGER) are directories, not files.
         // Use remove_dir_all; silently ignore NotFound, log anything else.
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[WorkspaceGuard::drop] Failed to remove exit_trigger {:?}: {}", self.exit_trigger, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[WorkspaceGuard::drop] Failed to remove exit_trigger {:?}: {}",
+                self.exit_trigger,
+                e
+            );
+        }
         if let Some(game_root) = self.exit_trigger.parent() {
             crate::shared::paths::clear_capture_scratch(
                 game_root,
@@ -1290,7 +1454,10 @@ pub fn spawn_patch_batch(
         let mut cancelled = false;
         for (idx, job) in jobs.iter().enumerate() {
             let start_pct = (idx as f32 / total_jobs as f32) * 100.0;
-            if tx.send(PatchEvent::Progress(job.source_demo.clone(), start_pct)).is_err() {
+            if tx
+                .send(PatchEvent::Progress(job.source_demo.clone(), start_pct))
+                .is_err()
+            {
                 return;
             }
 
@@ -1298,7 +1465,10 @@ pub fn spawn_patch_batch(
             match patcher.patch(job, &config, &cancel_token_clone) {
                 Ok(()) => {
                     let end_pct = ((idx + 1) as f32 / total_jobs as f32) * 100.0;
-                    if tx.send(PatchEvent::Progress(job.source_demo.clone(), end_pct)).is_err() {
+                    if tx
+                        .send(PatchEvent::Progress(job.source_demo.clone(), end_pct))
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -1309,7 +1479,13 @@ pub fn spawn_patch_batch(
                     break;
                 }
                 Err(e) => {
-                    if tx.send(PatchEvent::Error(format!("Failed to patch {}: {}", job.source_demo, e))).is_err() {
+                    if tx
+                        .send(PatchEvent::Error(format!(
+                            "Failed to patch {}: {}",
+                            job.source_demo, e
+                        )))
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -1358,7 +1534,13 @@ pub fn playdemo_safe_stem(raw: &str) -> String {
 
     let sanitized: String = raw
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect();
     if sanitized.len() <= BASE_BUDGET {
         return sanitized;
@@ -1366,7 +1548,10 @@ pub fn playdemo_safe_stem(raw: &str) -> String {
     // Too long even after sanitizing — truncate, but append a hash of the
     // *original* stem so two long names sharing a prefix don't collide onto
     // the same output file.
-    let hash_suffix = format!("_{:08x}", crate::utils::demo_hasher::fnv1a_hash(raw.as_bytes()) as u32);
+    let hash_suffix = format!(
+        "_{:08x}",
+        crate::utils::demo_hasher::fnv1a_hash(raw.as_bytes()) as u32
+    );
     let keep = BASE_BUDGET.saturating_sub(hash_suffix.len());
     format!("{}{}", &sanitized[..keep], hash_suffix)
 }
@@ -1379,7 +1564,10 @@ pub fn build_preview_patch_jobs(
     let mut grouped: std::collections::HashMap<String, Vec<CaptureStreak>> =
         std::collections::HashMap::new();
     for streak in raw_streaks {
-        grouped.entry(streak.source_demo.clone()).or_default().push(streak);
+        grouped
+            .entry(streak.source_demo.clone())
+            .or_default()
+            .push(streak);
     }
 
     let mut jobs = Vec::new();
@@ -1389,16 +1577,31 @@ pub fn build_preview_patch_jobs(
         streaks.sort_by_key(|s| s.start_tick);
 
         // Build (tick, label) for each streak — same format as the highlight table.
-        let mut director_events: Vec<(i32, String)> = streaks.iter().enumerate().map(|(i, s)| {
-            let label = format!("#{}/{}: {} kills: {}", i + 1,streaks.len(), s.kill_count, s.timeline_string);
-            let preview_tick = find_tick_backwards(s.start_tick as usize, 3.0, &s.frame_times, s.demo_fps);
-            (preview_tick, label)
-        }).collect();
+        let mut director_events: Vec<(i32, String)> = streaks
+            .iter()
+            .enumerate()
+            .map(|(i, s)| {
+                let label = format!(
+                    "#{}/{}: {} kills: {}",
+                    i + 1,
+                    streaks.len(),
+                    s.kill_count,
+                    s.timeline_string
+                );
+                let preview_tick =
+                    find_tick_backwards(s.start_tick as usize, 3.0, &s.frame_times, s.demo_fps);
+                (preview_tick, label)
+            })
+            .collect();
 
         if let Some(first_streak) = streaks.first() {
             let match_frame_idx = 0; // Float time unavailable for match start
             director_events.push((match_frame_idx, "echo [dod-studio] MATCH_START".to_string()));
-            let total_demo_frames = if first_streak.total_demo_frames > 0 { first_streak.total_demo_frames } else { first_streak.frame_times.len() as i32 };
+            let total_demo_frames = if first_streak.total_demo_frames > 0 {
+                first_streak.total_demo_frames
+            } else {
+                first_streak.frame_times.len() as i32
+            };
             let demo_end_tick = total_demo_frames;
             director_events.push((demo_end_tick, "echo [dod-studio] DEMO_END".to_string()));
         }
@@ -1480,12 +1683,12 @@ pub fn build_director_message(text: &str) -> Vec<u8> {
     let mut msg: Vec<u8> = Vec::with_capacity(2 + FIXED_OVERHEAD + text_len + 1);
 
     // Opcode + payload length
-    msg.push(0x33);          // svc_director
+    msg.push(0x33); // svc_director
     msg.push(payload_len);
 
     // Sub-command and effect
-    msg.push(0x06);          // DRC_CMD_MESSAGE
-    msg.push(0x00);          // effect: none
+    msg.push(0x06); // DRC_CMD_MESSAGE
+    msg.push(0x00); // effect: none
 
     // RGBA colour #FFA000FF
     msg.extend_from_slice(&[0xFF, 0xA0, 0x00, 0x00]);
@@ -1495,10 +1698,10 @@ pub fn build_director_message(text: &str) -> Vec<u8> {
     msg.extend_from_slice(&(0.85f32).to_le_bytes());
 
     // Timing
-    msg.extend_from_slice(&(0.5f32).to_le_bytes());  // fade in
-    msg.extend_from_slice(&(0.5f32).to_le_bytes());  // fade out
-    msg.extend_from_slice(&(3.0f32).to_le_bytes());  // hold time
-    msg.extend_from_slice(&(0.0f32).to_le_bytes());  // FX time
+    msg.extend_from_slice(&(0.5f32).to_le_bytes()); // fade in
+    msg.extend_from_slice(&(0.5f32).to_le_bytes()); // fade out
+    msg.extend_from_slice(&(3.0f32).to_le_bytes()); // hold time
+    msg.extend_from_slice(&(0.0f32).to_le_bytes()); // FX time
 
     // Null-terminated text payload
     msg.extend_from_slice(text_bytes);
@@ -1528,7 +1731,7 @@ pub fn build_director_message(text: &str) -> Vec<u8> {
 pub fn build_director_stufftext(command: &str) -> Vec<u8> {
     const MAX_TEXT_BYTES: usize = 253; // keeps payload_len <= 255
 
-    let raw      = command.as_bytes();
+    let raw = command.as_bytes();
     let text_len = raw.len().min(MAX_TEXT_BYTES);
     let text_bytes = &raw[..text_len];
 
@@ -1536,11 +1739,11 @@ pub fn build_director_stufftext(command: &str) -> Vec<u8> {
     let payload_len: u8 = (1 + text_len + 1) as u8;
 
     let mut msg: Vec<u8> = Vec::with_capacity(2 + 1 + text_len + 1);
-    msg.push(0x33);           // svc_director
+    msg.push(0x33); // svc_director
     msg.push(payload_len);
-    msg.push(0x0A);           // DRC_CMD_STUFFTEXT
+    msg.push(0x0A); // DRC_CMD_STUFFTEXT
     msg.extend_from_slice(text_bytes);
-    msg.push(0x00);           // null terminator
+    msg.push(0x00); // null terminator
     msg
 }
 
@@ -1562,7 +1765,10 @@ mod tests {
         // embedded "-" as the start of a new launch parm, so this exact stem
         // loaded as bare "wsod25" via +viewdemo instead of the real demo.
         let stem = playdemo_safe_stem("wsod25-po_r3_sf-warchyld_ih_m2_thunder_h1");
-        assert!(!stem.contains('-'), "sanitized stem must not contain a hyphen: {stem}");
+        assert!(
+            !stem.contains('-'),
+            "sanitized stem must not contain a hyphen: {stem}"
+        );
         assert!(stem.chars().all(|c| c.is_ascii_alphanumeric() || c == '_'));
     }
 
@@ -1581,14 +1787,18 @@ mod tests {
     fn playdemo_safe_stem_disambiguates_names_sharing_a_long_prefix() {
         let a = playdemo_safe_stem("a_very_long_shared_prefix_that_overflows_team1");
         let b = playdemo_safe_stem("a_very_long_shared_prefix_that_overflows_team2");
-        assert_ne!(a, b, "two different overflowing names must not collide: {a} vs {b}");
+        assert_ne!(
+            a, b,
+            "two different overflowing names must not collide: {a} vs {b}"
+        );
     }
 
     #[test]
     fn test_build_batch_queue_merging() {
         let mut config = PatcherConfig::default(); // pre = 200, post = 60
         let temp_game_path = std::env::temp_dir().join("dod_test_mock");
-        std::fs::create_dir_all(temp_game_path.join("dod")).expect("Failed to create dummy dod dir");
+        std::fs::create_dir_all(temp_game_path.join("dod"))
+            .expect("Failed to create dummy dod dir");
         config.game_path = temp_game_path.to_string_lossy().to_string();
         config.primary_media_dir = Some(temp_game_path.clone());
         let raw_streaks = vec![
@@ -1651,19 +1861,29 @@ mod tests {
             },
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         assert_eq!(jobs.len(), 2);
 
         // Every patched demo lands directly in dod/ now -- see issue #8.
-        let expected_dod_dir = std::path::Path::new(&config.game_path).parent().unwrap().join("dod");
+        let expected_dod_dir = std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod");
 
         let primer = &jobs[0];
-        assert_eq!(primer.output_demo, expected_dod_dir.join("dodstudio_primer.dem"));
+        assert_eq!(
+            primer.output_demo,
+            expected_dod_dir.join("dodstudio_primer.dem")
+        );
         assert_eq!(primer.streaks.len(), 0);
 
         let job = &jobs[1];
         assert_eq!(job.source_demo, "demo1.dem");
-        assert_eq!(job.output_demo, expected_dod_dir.join("dodstudio_chain_01.dem"));
+        assert_eq!(
+            job.output_demo,
+            expected_dod_dir.join("dodstudio_chain_01.dem")
+        );
         assert_eq!(job.streaks.len(), 2);
         assert_eq!(job.streaks[0].start_tick, 1000);
         assert_eq!(job.streaks[0].end_tick, 1500); // Merged 1000-1200 and 1300-1500
@@ -1787,7 +2007,11 @@ mod tests {
         let (_jobs, drive_headroom) =
             build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
 
-        assert_eq!(drive_headroom.len(), 1, "the one real block routes to drive 0, so it should be reported");
+        assert_eq!(
+            drive_headroom.len(),
+            1,
+            "the one real block routes to drive 0, so it should be reported"
+        );
         assert_eq!(drive_headroom[0].path, temp_drive);
         assert!(
             drive_headroom[0].free_bytes > 0 && drive_headroom[0].free_bytes < u64::MAX,
@@ -1862,7 +2086,8 @@ mod tests {
 
         {
             let _guard = WorkspaceGuard {
-                session_junction: std::env::temp_dir().join("dod_test_workspace_guard_session_junction_nonexistent"),
+                session_junction: std::env::temp_dir()
+                    .join("dod_test_workspace_guard_session_junction_nonexistent"),
                 exit_trigger: exit_trigger.clone(),
                 pool_junctions: Vec::new(),
                 route_junctions: Vec::new(),
@@ -1891,7 +2116,10 @@ mod tests {
             timeline_string: String::new(),
             duration_string: String::new(),
             player_index: 0,
-            kills: kill_frames.iter().map(|&f| (f, f as f32 / 100.0, "k98".to_string())).collect(),
+            kills: kill_frames
+                .iter()
+                .map(|&f| (f, f as f32 / 100.0, "k98".to_string()))
+                .collect(),
             start_index: 0,
             end_index: kill_frames.len().saturating_sub(1),
             total_demo_frames: 30000,
@@ -1954,14 +2182,19 @@ mod tests {
 
     #[test]
     fn frame_sequence_and_direct_to_video_never_touch_fps_max() {
-        for mode in [crate::patch::CaptureMode::FrameSequence, crate::patch::CaptureMode::DirectToVideo] {
+        for mode in [
+            crate::patch::CaptureMode::FrameSequence,
+            crate::patch::CaptureMode::DirectToVideo,
+        ] {
             let mut config = PatcherConfig::default();
             config.capture_mode = mode;
             config.capture_fps = 120;
             config.obs_capture_fps = 120;
             let commands = final_init_commands(&config);
             assert!(
-                !commands.iter().any(|c| c.starts_with("fps_override") || c.starts_with("fps_max")),
+                !commands
+                    .iter()
+                    .any(|c| c.starts_with("fps_override") || c.starts_with("fps_max")),
                 "{mode:?} should not touch fps_override/fps_max, got: {commands:?}"
             );
         }
@@ -1975,7 +2208,11 @@ mod tests {
         config.custom_commands.clear();
         let f = roll_floors(&config);
         assert_eq!(f.pre_roll, AUDIO_RESYNC_SECONDS);
-        assert!(f.pre_roll_binding.contains("audio"), "{}", f.pre_roll_binding);
+        assert!(
+            f.pre_roll_binding.contains("audio"),
+            "{}",
+            f.pre_roll_binding
+        );
         assert_eq!(f.post_roll, 0.0, "nothing needs post-roll on its own");
 
         // A Scheduled Command further out than that takes over, because
@@ -1987,7 +2224,11 @@ mod tests {
         }];
         let f = roll_floors(&config);
         assert_eq!(f.pre_roll, 8.0);
-        assert!(f.pre_roll_binding.contains("Scheduled"), "{}", f.pre_roll_binding);
+        assert!(
+            f.pre_roll_binding.contains("Scheduled"),
+            "{}",
+            f.pre_roll_binding
+        );
 
         // The start lead covers part of that distance, because the offset
         // anchors to the kill and recording starts a lead before it. The real
@@ -1996,7 +2237,10 @@ mod tests {
         config.record_start_lead = 5.0;
         config.custom_commands[0].offset = 10.0;
         let f = roll_floors(&config);
-        assert_eq!(f.scheduled_before, 5.0, "10s out, 5s of it covered by the lead");
+        assert_eq!(
+            f.scheduled_before, 5.0,
+            "10s out, 5s of it covered by the lead"
+        );
         assert_eq!(f.pre_roll, AUDIO_RESYNC_SECONDS.max(5.0));
 
         // And a lead longer than the offset leaves nothing for the pre-roll.
@@ -2012,7 +2256,10 @@ mod tests {
         }];
         let f = roll_floors(&config);
         assert_eq!(f.post_roll, 3.0);
-        assert_eq!(f.pre_roll, AUDIO_RESYNC_SECONDS, "an After command asks nothing of pre-roll");
+        assert_eq!(
+            f.pre_roll, AUDIO_RESYNC_SECONDS,
+            "an After command asks nothing of pre-roll"
+        );
     }
 
     #[test]
@@ -2021,7 +2268,10 @@ mod tests {
         config.custom_commands.clear();
 
         config.decal_flush = true;
-        assert_eq!(roll_floors(&config).flush_lead, crate::patch::DEFAULT_LEAD_SECONDS);
+        assert_eq!(
+            roll_floors(&config).flush_lead,
+            crate::patch::DEFAULT_LEAD_SECONDS
+        );
 
         config.decal_flush = false;
         assert_eq!(roll_floors(&config).flush_lead, 0.0);
@@ -2033,11 +2283,26 @@ mod tests {
         // post-roll. Either side of that the engine is at host_framerate 0.05.
         let (speed_drop, post_roll_end) = (1000, 2000);
 
-        assert!(runs_during_fast_forward(999, speed_drop, post_roll_end), "before the speed drop");
-        assert!(runs_during_fast_forward(2001, speed_drop, post_roll_end), "after the post-roll");
-        assert!(!runs_during_fast_forward(1000, speed_drop, post_roll_end), "the drop itself");
-        assert!(!runs_during_fast_forward(1500, speed_drop, post_roll_end), "mid-clip");
-        assert!(!runs_during_fast_forward(2000, speed_drop, post_roll_end), "the last post-roll tick");
+        assert!(
+            runs_during_fast_forward(999, speed_drop, post_roll_end),
+            "before the speed drop"
+        );
+        assert!(
+            runs_during_fast_forward(2001, speed_drop, post_roll_end),
+            "after the post-roll"
+        );
+        assert!(
+            !runs_during_fast_forward(1000, speed_drop, post_roll_end),
+            "the drop itself"
+        );
+        assert!(
+            !runs_during_fast_forward(1500, speed_drop, post_roll_end),
+            "mid-clip"
+        );
+        assert!(
+            !runs_during_fast_forward(2000, speed_drop, post_roll_end),
+            "the last post-roll tick"
+        );
     }
 
     #[test]
@@ -2054,10 +2319,15 @@ mod tests {
             streak_with_kills(1300, 1500, &[1300, 1500]),
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         let job = &jobs[1];
 
-        assert_eq!(job.streaks.len(), 1, "the two highlights should merge into one block");
+        assert_eq!(
+            job.streaks.len(),
+            1,
+            "the two highlights should merge into one block"
+        );
         assert_eq!(job.blocks[0].source_streak_indices, vec![0, 1]);
 
         let record_stop = job
@@ -2085,10 +2355,14 @@ mod tests {
         second_demo.source_demo = "demo2.dem".to_string();
         raw_streaks.push(second_demo);
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         assert_eq!(jobs.len(), 3, "primer + one job per demo");
         assert!(
-            jobs[0].scheduled_commands.iter().all(|(_, c)| !c.contains("DEMO_START")),
+            jobs[0]
+                .scheduled_commands
+                .iter()
+                .all(|(_, c)| !c.contains("DEMO_START")),
             "the primer plays no real demo and must not announce one"
         );
 
@@ -2125,7 +2399,8 @@ mod tests {
         raw_streaks.push(second_demo);
         raw_streaks.push(second_demo_b);
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         assert_eq!(jobs.len(), 3, "primer + one job per demo");
 
         for (job, expected_job_idx) in [(&jobs[1], 1), (&jobs[2], 2)] {
@@ -2136,18 +2411,23 @@ mod tests {
                 .map(|(_, c)| c)
                 .collect();
             assert_eq!(
-                next_clip_echoes.len(), 2,
+                next_clip_echoes.len(),
+                2,
                 "expected one NEXT_CLIP for clip 1 and one for clip 2, got {:?}",
                 next_clip_echoes
             );
             assert!(
-                next_clip_echoes.iter().any(|c| c.contains(&format!("NEXT_CLIP {} 2 1 2", expected_job_idx))),
+                next_clip_echoes
+                    .iter()
+                    .any(|c| c.contains(&format!("NEXT_CLIP {} 2 1 2", expected_job_idx))),
                 "missing clip-1-of-2 NEXT_CLIP for job {} in {:?}",
                 expected_job_idx,
                 next_clip_echoes
             );
             assert!(
-                next_clip_echoes.iter().any(|c| c.contains(&format!("NEXT_CLIP {} 2 2 2", expected_job_idx))),
+                next_clip_echoes
+                    .iter()
+                    .any(|c| c.contains(&format!("NEXT_CLIP {} 2 2 2", expected_job_idx))),
                 "missing clip-2-of-2 NEXT_CLIP for job {} in {:?}",
                 expected_job_idx,
                 next_clip_echoes
@@ -2174,7 +2454,8 @@ mod tests {
             streak_with_kills(5000, 5200, &[5000, 5200]),
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         let job = &jobs[1];
 
         assert_eq!(job.streaks.len(), 2, "should not merge");
@@ -2183,7 +2464,11 @@ mod tests {
         assert_eq!(ticks_for(job, "sys_record_stop").len(), 2);
         // Each block drops out of fast-forward for itself, and the first block
         // resumes it afterwards.
-        assert_eq!(ticks_for(job, "sys_normal_speed").len(), 6, "3-frame redundancy per block");
+        assert_eq!(
+            ticks_for(job, "sys_normal_speed").len(),
+            6,
+            "3-frame redundancy per block"
+        );
         assert_eq!(ticks_for(job, "sys_sound").len(), 2);
     }
 
@@ -2200,7 +2485,8 @@ mod tests {
             streak_with_kills(5000, 5200, &[5000, 5200]),
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         let job = &jobs[1];
 
         assert_eq!(job.blocks.len(), 2);
@@ -2228,7 +2514,9 @@ mod tests {
             assert!(
                 b.record_start_tick > 0 && b.record_stop_tick >= b.record_start_tick,
                 "block {} has an unusable record window {}..{}",
-                b.block_index, b.record_start_tick, b.record_stop_tick
+                b.block_index,
+                b.record_start_tick,
+                b.record_stop_tick
             );
         }
     }
@@ -2246,11 +2534,15 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
         let job = &jobs[1];
 
         assert_eq!(
-            job.init_commands.iter().filter(|c| c.starts_with("r_decals")).count(),
+            job.init_commands
+                .iter()
+                .filter(|c| c.starts_with("r_decals"))
+                .count(),
             1,
             "exactly one command may own the ring: {:?}",
             job.init_commands
@@ -2262,7 +2554,9 @@ mod tests {
             job.init_commands
         );
         assert!(
-            !job.scheduled_commands.iter().any(|(_, c)| c.starts_with("r_decals")),
+            !job.scheduled_commands
+                .iter()
+                .any(|(_, c)| c.starts_with("r_decals")),
             "r_decals must never be touched mid-demo — that is what strands decals"
         );
     }
@@ -2282,7 +2576,8 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let pins: Vec<&String> = jobs[1]
             .init_commands
@@ -2309,10 +2604,15 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
-            jobs[1].init_commands.iter().filter(|c| c.starts_with("r_decals")).count(),
+            jobs[1]
+                .init_commands
+                .iter()
+                .filter(|c| c.starts_with("r_decals"))
+                .count(),
             1,
             "the user's r_decals 0 must survive untouched: {:?}",
             jobs[1].init_commands
@@ -2328,10 +2628,14 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(
-            !jobs[1].init_commands.iter().any(|c| c.starts_with("r_decals")),
+            !jobs[1]
+                .init_commands
+                .iter()
+                .any(|c| c.starts_with("r_decals")),
             "with the flush off the pipeline must not touch the cvar at all"
         );
     }
@@ -2349,10 +2653,14 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(
-            !jobs[1].init_commands.iter().any(|c| c.starts_with("r_decals")),
+            !jobs[1]
+                .init_commands
+                .iter()
+                .any(|c| c.starts_with("r_decals")),
             "a maximum sweep must leave the cvar alone: {:?}",
             jobs[1].init_commands
         );
@@ -2395,14 +2703,22 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(
-            !jobs[1].init_commands.iter().any(|c| c.starts_with("r_decals")),
+            !jobs[1]
+                .init_commands
+                .iter()
+                .any(|c| c.starts_with("r_decals")),
             "the config's own 0 already stands, nothing left to pin: {:?}",
             jobs[1].init_commands
         );
-        assert_eq!(crate::patch::ring_limit(&config), 0, "and ring_limit agrees");
+        assert_eq!(
+            crate::patch::ring_limit(&config),
+            0,
+            "and ring_limit agrees"
+        );
     }
 
     #[test]
@@ -2417,10 +2733,14 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(
-            !jobs[1].init_commands.iter().any(|c| c.starts_with("r_decals")),
+            !jobs[1]
+                .init_commands
+                .iter()
+                .any(|c| c.starts_with("r_decals")),
             "the config's own line is already the pin, nothing to append: {:?}",
             jobs[1].init_commands
         );
@@ -2438,10 +2758,14 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert!(
-            !jobs[1].init_commands.iter().any(|c| c.starts_with("r_decals")),
+            !jobs[1]
+                .init_commands
+                .iter()
+                .any(|c| c.starts_with("r_decals")),
             "nothing else sets the cvar, so the pin buys nothing: {:?}",
             jobs[1].init_commands
         );
@@ -2460,7 +2784,8 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let pins: Vec<&String> = jobs[1]
             .init_commands
@@ -2485,7 +2810,8 @@ mod tests {
             vec![streak_with_kills(1000, 1200, &[1000, 1200])],
             &config,
             &std::collections::HashMap::new(),
-        ).unwrap();
+        )
+        .unwrap();
 
         assert_eq!(
             jobs[1].init_commands.last().map(String::as_str),
@@ -2508,10 +2834,15 @@ mod tests {
             streak_with_kills(1400, 1600, &[1400, 1600]),
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         let job = &jobs[1];
 
-        assert_eq!(job.streaks.len(), 2, "recordings don't overlap, so don't merge");
+        assert_eq!(
+            job.streaks.len(),
+            2,
+            "recordings don't overlap, so don't merge"
+        );
         assert_eq!(job.blocks.len(), 2);
         assert_eq!(job.blocks[0].source_streak_indices, vec![0]);
         assert_eq!(job.blocks[1].source_streak_indices, vec![1]);
@@ -2523,17 +2854,21 @@ mod tests {
         // But only the first block exits fast-forward, and nothing re-enters it
         // between the two — playback simply stays at normal speed across the gap.
         assert_eq!(
-            ticks_for(job, "sys_normal_speed").len(), 3,
+            ticks_for(job, "sys_normal_speed").len(),
+            3,
             "only the first block should drop out of fast-forward"
         );
         assert_eq!(
-            ticks_for(job, "sys_sound").len(), 1,
+            ticks_for(job, "sys_sound").len(),
+            1,
             "no fast-forward before the second clip means no audio to flush"
         );
         let fast_forwards = ticks_for(job, "sys_fast_forward");
         let record_stops = ticks_for(job, "sys_record_stop");
         assert!(
-            !fast_forwards.iter().any(|&t| t > record_stops[0] && t < record_stops[1]),
+            !fast_forwards
+                .iter()
+                .any(|&t| t > record_stops[0] && t < record_stops[1]),
             "fast-forward must not be scheduled between the two takes, got {:?}",
             fast_forwards
         );
@@ -2550,7 +2885,8 @@ mod tests {
             streak_with_kills(1250, 1400, &[1250, 1400]),
         ];
 
-        let (jobs, _) = build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+        let (jobs, _) =
+            build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
         let job = &jobs[1];
 
         assert_eq!(job.streaks.len(), 1, "too close to be separate takes");
@@ -2599,7 +2935,8 @@ mod tests {
             &mut drive_free,
             &mut active_drive_idx,
             0,
-        ).expect("FFD should find a placement that naive arrival-order first-fit would miss");
+        )
+        .expect("FFD should find a placement that naive arrival-order first-fit would miss");
 
         assert_eq!(assignments.len(), 3);
         let drive_of = |block: usize| assignments.iter().find(|(b, _)| *b == block).unwrap().1;
@@ -2668,7 +3005,8 @@ mod builder_grouping_tests {
     fn test_build_batch_queue_grouping() {
         let mut config = PatcherConfig::default();
         let temp_game_path = std::env::temp_dir().join("dod_test_mock");
-        std::fs::create_dir_all(temp_game_path.join("dod")).expect("Failed to create dummy dod dir");
+        std::fs::create_dir_all(temp_game_path.join("dod"))
+            .expect("Failed to create dummy dod dir");
         config.game_path = temp_game_path.to_string_lossy().to_string();
         config.primary_media_dir = Some(temp_game_path.clone());
 
@@ -2737,6 +3075,10 @@ mod builder_grouping_tests {
 
         let (jobs, _) = build_batch_queue(raw_streaks, &config, &global_arrays).unwrap();
 
-        assert_eq!(jobs.len(), 3, "Expected exactly 3 patch jobs (1 primer + 2 grouped chains) after grouping by source demo and player");
+        assert_eq!(
+            jobs.len(),
+            3,
+            "Expected exactly 3 patch jobs (1 primer + 2 grouped chains) after grouping by source demo and player"
+        );
     }
 }

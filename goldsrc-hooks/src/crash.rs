@@ -226,7 +226,10 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
     }
 
     let address = unsafe { (*record).ExceptionAddress } as usize;
-    let mut line = format!("CRASH: {what} ({code:#010x}) at {}", describe_address(address));
+    let mut line = format!(
+        "CRASH: {what} ({code:#010x}) at {}",
+        describe_address(address)
+    );
 
     // For an access violation the two parameters are the operation and the
     // address it was aimed at — usually the whole story on its own.

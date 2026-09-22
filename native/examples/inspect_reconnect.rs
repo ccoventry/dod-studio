@@ -32,11 +32,34 @@ fn parse_userinfo(user_info: &dem::types::ByteString) -> std::collections::HashM
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
 enum Event {
-    Connect { slot: u8, name: String, sid: String },
-    Disconnect { slot: u8, name: String },
-    Frags { slot: u8, name: String, frags: i16 },
-    ScoreShort { slot: u8, name: String, score: i16, kills: i16, deaths: i16 },
-    DeathMsg { killer_slot: u8, killer_name: String, victim_slot: u8, victim_name: String, weapon: String },
+    Connect {
+        slot: u8,
+        name: String,
+        sid: String,
+    },
+    Disconnect {
+        slot: u8,
+        name: String,
+    },
+    Frags {
+        slot: u8,
+        name: String,
+        frags: i16,
+    },
+    ScoreShort {
+        slot: u8,
+        name: String,
+        score: i16,
+        kills: i16,
+        deaths: i16,
+    },
+    DeathMsg {
+        killer_slot: u8,
+        killer_name: String,
+        victim_slot: u8,
+        victim_name: String,
+        weapon: String,
+    },
 }
 
 fn main() {
@@ -60,80 +83,112 @@ fn main() {
             frame_idx += 1;
 
             if let FrameData::NetworkMessage(net_msg_box) = &frame.frame_data
-                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages {
-                    for msg in msgs {
-                        match msg {
-                            NetMessage::EngineMessage(eng) => {
-                                if let EngineMessage::SvcUpdateUserInfo(upd) = eng.as_ref() {
-                                    let fields = parse_userinfo(&upd.user_info);
-                                    if fields.is_empty() {
-                                        let name = slot_names
-                                            .get(&upd.index)
-                                            .cloned()
-                                            .unwrap_or_else(|| format!("slot_{}", upd.index));
-                                        events.push((frame_idx, Event::Disconnect {
+                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages
+            {
+                for msg in msgs {
+                    match msg {
+                        NetMessage::EngineMessage(eng) => {
+                            if let EngineMessage::SvcUpdateUserInfo(upd) = eng.as_ref() {
+                                let fields = parse_userinfo(&upd.user_info);
+                                if fields.is_empty() {
+                                    let name = slot_names
+                                        .get(&upd.index)
+                                        .cloned()
+                                        .unwrap_or_else(|| format!("slot_{}", upd.index));
+                                    events.push((
+                                        frame_idx,
+                                        Event::Disconnect {
                                             slot: upd.index,
                                             name,
-                                        }));
-                                    } else if fields.get("*hltv").map(|v| v == "1").unwrap_or(false) {
-                                        // Skip HLTV proxy slots
-                                    } else {
-                                        let name = fields.get("name").cloned().unwrap_or_default();
-                                        let sid = fields.get("*sid").cloned().unwrap_or_else(|| {
-                                            fields.get("*fid").map(|f| format!("fid:{f}")).unwrap_or_default()
-                                        });
-                                        slot_names.insert(upd.index, name.clone());
-                                        events.push((frame_idx, Event::Connect { slot: upd.index, name, sid }));
-                                    }
+                                        },
+                                    ));
+                                } else if fields.get("*hltv").map(|v| v == "1").unwrap_or(false) {
+                                    // Skip HLTV proxy slots
+                                } else {
+                                    let name = fields.get("name").cloned().unwrap_or_default();
+                                    let sid = fields.get("*sid").cloned().unwrap_or_else(|| {
+                                        fields
+                                            .get("*fid")
+                                            .map(|f| format!("fid:{f}"))
+                                            .unwrap_or_default()
+                                    });
+                                    slot_names.insert(upd.index, name.clone());
+                                    events.push((
+                                        frame_idx,
+                                        Event::Connect {
+                                            slot: upd.index,
+                                            name,
+                                            sid,
+                                        },
+                                    ));
                                 }
                             }
-                            NetMessage::UserMessage(usr) => {
-                                let msg_name = null_str(&usr.name);
-                                let slot_name = |slot: u8| {
-                                    slot_names.get(&slot).cloned().unwrap_or_else(|| format!("slot_{}", slot))
-                                };
-                                match msg_name.as_str() {
-                                    "Frags" => {
-                                        if let Ok(UserMessage::Frags(f)) = UserMessage::new(&usr.name, &usr.data) {
-                                            let slot = f.client_index - 1;
-                                            events.push((frame_idx, Event::Frags {
+                        }
+                        NetMessage::UserMessage(usr) => {
+                            let msg_name = null_str(&usr.name);
+                            let slot_name = |slot: u8| {
+                                slot_names
+                                    .get(&slot)
+                                    .cloned()
+                                    .unwrap_or_else(|| format!("slot_{}", slot))
+                            };
+                            match msg_name.as_str() {
+                                "Frags" => {
+                                    if let Ok(UserMessage::Frags(f)) =
+                                        UserMessage::new(&usr.name, &usr.data)
+                                    {
+                                        let slot = f.client_index - 1;
+                                        events.push((
+                                            frame_idx,
+                                            Event::Frags {
                                                 name: slot_name(slot),
                                                 slot,
                                                 frags: f.frags,
-                                            }));
-                                        }
+                                            },
+                                        ));
                                     }
-                                    "ScoreShort" => {
-                                        if let Ok(UserMessage::ScoreShort(s)) = UserMessage::new(&usr.name, &usr.data) {
-                                            let slot = s.client_index - 1;
-                                            events.push((frame_idx, Event::ScoreShort {
+                                }
+                                "ScoreShort" => {
+                                    if let Ok(UserMessage::ScoreShort(s)) =
+                                        UserMessage::new(&usr.name, &usr.data)
+                                    {
+                                        let slot = s.client_index - 1;
+                                        events.push((
+                                            frame_idx,
+                                            Event::ScoreShort {
                                                 name: slot_name(slot),
                                                 slot,
                                                 score: s.score,
                                                 kills: s.kills,
                                                 deaths: s.deaths,
-                                            }));
-                                        }
+                                            },
+                                        ));
                                     }
-                                    "DeathMsg" => {
-                                        if let Ok(UserMessage::DeathMsg(d)) = UserMessage::new(&usr.name, &usr.data) {
-                                            let kslot = d.killer_client_index.saturating_sub(1);
-                                            let vslot = d.victim_client_index.saturating_sub(1);
-                                            events.push((frame_idx, Event::DeathMsg {
+                                }
+                                "DeathMsg" => {
+                                    if let Ok(UserMessage::DeathMsg(d)) =
+                                        UserMessage::new(&usr.name, &usr.data)
+                                    {
+                                        let kslot = d.killer_client_index.saturating_sub(1);
+                                        let vslot = d.victim_client_index.saturating_sub(1);
+                                        events.push((
+                                            frame_idx,
+                                            Event::DeathMsg {
                                                 killer_name: slot_name(kslot),
                                                 killer_slot: kslot,
                                                 victim_name: slot_name(vslot),
                                                 victim_slot: vslot,
                                                 weapon: format!("{:?}", d.weapon),
-                                            }));
-                                        }
+                                            },
+                                        ));
                                     }
-                                    _ => {}
                                 }
+                                _ => {}
                             }
                         }
                     }
                 }
+            }
         }
     }
 

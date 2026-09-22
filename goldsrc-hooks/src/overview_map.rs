@@ -174,7 +174,12 @@ impl Rect {
     }
 
     fn from_fields(f: [i32; 4]) -> Self {
-        Self { x: f[0], y: f[1], w: f[2], h: f[3] }
+        Self {
+            x: f[0],
+            y: f[1],
+            w: f[2],
+            h: f[3],
+        }
     }
 
     /// A rectangle with no area would not draw, and one with a negative size
@@ -233,7 +238,12 @@ fn ghud() -> Result<usize, String> {
     let (object, called) = unsafe {
         let object = ((call_site + GHUD_AT) as *const u32).read_unaligned() as usize;
         let displacement = ((call_site + CALL_AT + 1) as *const i32).read_unaligned();
-        (object, call_site.wrapping_add(CALL_AT + 5).wrapping_add(displacement as usize))
+        (
+            object,
+            call_site
+                .wrapping_add(CALL_AT + 5)
+                .wrapping_add(displacement as usize),
+        )
     };
     if called != compute {
         return Err(format!(
@@ -415,10 +425,46 @@ mod tests {
 
     #[test]
     fn a_rect_with_no_area_is_refused() {
-        assert!(Rect { x: 0, y: 0, w: 0, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: 10, h: 0 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: -10, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: 10, h: 10 }.validate().is_ok());
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 0
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: -10,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: 10,
+                h: 10
+            }
+            .validate()
+            .is_ok()
+        );
     }
 
     /// Negative x and y are legal -- sliding a rect off the left or top edge is
@@ -426,14 +472,46 @@ mod tests {
     /// any screen is a typo.
     #[test]
     fn offscreen_is_allowed_but_absurd_is_not() {
-        assert!(Rect { x: -200, y: -50, w: 100, h: 100 }.validate().is_ok());
-        assert!(Rect { x: COORD_LIMIT, y: 0, w: 10, h: 10 }.validate().is_err());
-        assert!(Rect { x: 0, y: 0, w: COORD_LIMIT, h: 10 }.validate().is_err());
+        assert!(
+            Rect {
+                x: -200,
+                y: -50,
+                w: 100,
+                h: 100
+            }
+            .validate()
+            .is_ok()
+        );
+        assert!(
+            Rect {
+                x: COORD_LIMIT,
+                y: 0,
+                w: 10,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
+        assert!(
+            Rect {
+                x: 0,
+                y: 0,
+                w: COORD_LIMIT,
+                h: 10
+            }
+            .validate()
+            .is_err()
+        );
     }
 
     #[test]
     fn fields_round_trip_in_the_engines_order() {
-        let rect = Rect { x: 1, y: 2, w: 3, h: 4 };
+        let rect = Rect {
+            x: 1,
+            y: 2,
+            w: 3,
+            h: 4,
+        };
         assert_eq!(rect.fields(), [1, 2, 3, 4]);
         assert_eq!(Rect::from_fields(rect.fields()), rect);
     }
@@ -454,7 +532,15 @@ mod tests {
         assert!(is_held(Which::Full));
         assert!(!is_held(Which::Mini));
         assert!(any_held());
-        assert_eq!(held(Which::Full), Some(Rect { x: 10, y: 20, w: 30, h: 40 }));
+        assert_eq!(
+            held(Which::Full),
+            Some(Rect {
+                x: 10,
+                y: 20,
+                w: 30,
+                h: 40
+            })
+        );
         assert_eq!(held(Which::Mini), None);
 
         release();
@@ -465,7 +551,11 @@ mod tests {
     #[test]
     fn status_warns_about_what_moves_with_the_map() {
         clear();
-        assert!(status().contains("where the engine puts it"), "{}", status());
+        assert!(
+            status().contains("where the engine puts it"),
+            "{}",
+            status()
+        );
 
         HOLDING_FULL.store(true, Ordering::Release);
         let text = status();
@@ -479,7 +569,10 @@ mod tests {
         for pattern in [CALL_SITE, COMPUTE] {
             let tokens: Vec<&str> = pattern.split_whitespace().collect();
             assert!(tokens.len() > 8);
-            assert_ne!(tokens[0], "??", "a leading wildcard is rejected by the scanner");
+            assert_ne!(
+                tokens[0], "??",
+                "a leading wildcard is rejected by the scanner"
+            );
             for token in &tokens {
                 assert!(
                     *token == "??" || u8::from_str_radix(token, 16).is_ok(),
@@ -499,9 +592,17 @@ mod tests {
                 assert_eq!(*token, "??", "byte {} is {what}", at + offset);
             }
         };
-        assert_eq!(u8::from_str_radix(tokens[0], 16).unwrap(), 0xb9, "mov ecx, imm32");
+        assert_eq!(
+            u8::from_str_radix(tokens[0], 16).unwrap(),
+            0xb9,
+            "mov ecx, imm32"
+        );
         wildcards(GHUD_AT, "gHUD");
-        assert_eq!(u8::from_str_radix(tokens[CALL_AT], 16).unwrap(), 0xe8, "call rel32");
+        assert_eq!(
+            u8::from_str_radix(tokens[CALL_AT], 16).unwrap(),
+            0xe8,
+            "call rel32"
+        );
         wildcards(CALL_AT + 1, "the displacement");
     }
 

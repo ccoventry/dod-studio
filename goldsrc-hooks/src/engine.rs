@@ -60,7 +60,9 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use windows_sys::Win32::Foundation::HMODULE;
 use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
-use windows_sys::Win32::System::Memory::{VirtualProtect, PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS};
+use windows_sys::Win32::System::Memory::{
+    PAGE_EXECUTE_READWRITE, PAGE_PROTECTION_FLAGS, VirtualProtect,
+};
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
 
 use crate::pe;
@@ -114,16 +116,18 @@ pub type GetLocalPlayerFn = unsafe extern "C" fn() -> *mut c_void;
 /// value by name, returning 0 for one that does not exist.
 pub type GetCvarFloatFn = unsafe extern "C" fn(name: *const c_char) -> f32;
 
-pub type HookUserMsgFn =
-    unsafe extern "C" fn(msg_name: *const c_char, pfn: UserMsgHookFn) -> i32;
+pub type HookUserMsgFn = unsafe extern "C" fn(msg_name: *const c_char, pfn: UserMsgHookFn) -> i32;
 /// `int (*pfnUserMsgHook)(const char *pszName, int iSize, void *pbuf)`.
 pub type UserMsgHookFn =
     unsafe extern "C" fn(name: *const c_char, size: i32, buf: *mut c_void) -> i32;
 pub type ConsolePrintFn = unsafe extern "C" fn(text: *const c_char);
 pub type CmdArgcFn = unsafe extern "C" fn() -> i32;
 pub type CmdArgvFn = unsafe extern "C" fn(arg: i32) -> *const c_char;
-pub type RegisterVariableFn =
-    unsafe extern "C" fn(name: *const c_char, value: *const c_char, flags: i32) -> *mut CvarSPartial;
+pub type RegisterVariableFn = unsafe extern "C" fn(
+    name: *const c_char,
+    value: *const c_char,
+    flags: i32,
+) -> *mut CvarSPartial;
 
 /// `cvar_s` (`common/cvardef.h`). Small, stable, and unchanged since Quake.
 ///
@@ -316,7 +320,11 @@ pub struct ModelSPartial {
 
 impl ModelSPartial {
     pub fn name_str(&self) -> std::borrow::Cow<'_, str> {
-        let end = self.name.iter().position(|&b| b == 0).unwrap_or(self.name.len());
+        let end = self
+            .name
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.name.len());
         String::from_utf8_lossy(&self.name[..end])
     }
 }
@@ -377,7 +385,11 @@ const _: () = assert!(size_of::<StudioSeqDescPartial>() == 176);
 
 impl StudioSeqDescPartial {
     pub fn label_str(&self) -> std::borrow::Cow<'_, str> {
-        let end = self.label.iter().position(|&b| b == 0).unwrap_or(self.label.len());
+        let end = self
+            .label
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(self.label.len());
         String::from_utf8_lossy(&self.label[..end])
     }
 }
@@ -540,7 +552,14 @@ pub fn set_per_frame_callback(callback: fn()) {
     let _ = PER_FRAME_CALLBACK.set(callback);
     if !TIMER_THREAD_STARTED.swap(true, Ordering::AcqRel) {
         unsafe {
-            CreateThread(std::ptr::null(), 0, Some(per_frame_timer_thread), std::ptr::null(), 0, std::ptr::null_mut());
+            CreateThread(
+                std::ptr::null(),
+                0,
+                Some(per_frame_timer_thread),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+            );
         }
     }
 }
@@ -558,7 +577,11 @@ unsafe extern "system" fn per_frame_timer_thread(_lp_param: *mut c_void) -> u32 
     loop {
         unsafe { Sleep(16) };
         if HUD_FRAME_DRIVING.load(Ordering::Acquire) {
-            unsafe { crate::debug::report("per-frame: real HUD_Frame hook is driving, retiring the fallback timer thread") };
+            unsafe {
+                crate::debug::report(
+                    "per-frame: real HUD_Frame hook is driving, retiring the fallback timer thread",
+                )
+            };
             return 0;
         }
         run_per_frame_callback();
@@ -637,9 +660,17 @@ pub fn set_on_engine_ready(callback: fn()) {
 unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, version: i32) -> i32 {
     if !engfuncs.is_null() {
         ENGFUNCS.store(engfuncs, Ordering::Release);
-        unsafe { crate::debug::report(&format!("Initialize: captured pEngfuncs at {engfuncs:p} (interface version {version})")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "Initialize: captured pEngfuncs at {engfuncs:p} (interface version {version})"
+            ))
+        };
     } else {
-        unsafe { crate::debug::report("Initialize: engine passed a null pEnginefuncs -- nothing captured") };
+        unsafe {
+            crate::debug::report(
+                "Initialize: engine passed a null pEnginefuncs -- nothing captured",
+            )
+        };
     }
 
     let real = REAL_INITIALIZE.load(Ordering::Acquire);
@@ -743,7 +774,9 @@ static REAL_CLIENT_CMD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut())
 /// game quit on purpose" from "the game crashed". See issue #205.
 unsafe extern "C" fn hook_client_cmd(text: *const c_char) {
     if !text.is_null() {
-        let raw = unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned();
+        let raw = unsafe { std::ffi::CStr::from_ptr(text) }
+            .to_string_lossy()
+            .into_owned();
         let trimmed = raw.trim();
         if trimmed.eq_ignore_ascii_case("quit") {
             unsafe {
@@ -754,7 +787,12 @@ unsafe extern "C" fn hook_client_cmd(text: *const c_char) {
                 )
             };
         } else {
-            unsafe { crate::debug::report(&format!("client.dll ClientCmd: \"{}\"", trimmed.escape_debug())) };
+            unsafe {
+                crate::debug::report(&format!(
+                    "client.dll ClientCmd: \"{}\"",
+                    trimmed.escape_debug()
+                ))
+            };
         }
     }
 
@@ -784,8 +822,14 @@ unsafe extern "C" fn hook_client_cmd(text: *const c_char) {
 unsafe fn find_gengfuncs(real_initialize: *const u8) -> Option<*mut *mut c_void> {
     let window = unsafe { std::slice::from_raw_parts(real_initialize, 0x60) };
     for k in 0..window.len().saturating_sub(8) {
-        if window[k] == 0xBF && window[k + 5] == 0x50 && window[k + 6] == 0xF3 && window[k + 7] == 0xA5 {
-            let addr = u32::from_le_bytes([window[k + 1], window[k + 2], window[k + 3], window[k + 4]]) as usize;
+        if window[k] == 0xBF
+            && window[k + 5] == 0x50
+            && window[k + 6] == 0xF3
+            && window[k + 7] == 0xA5
+        {
+            let addr =
+                u32::from_le_bytes([window[k + 1], window[k + 2], window[k + 3], window[k + 4]])
+                    as usize;
             // Must land inside client.dll's own image, or the pattern matched
             // something that only looked like the prologue.
             let base = CLIENT_DLL.load(Ordering::Acquire) as usize;
@@ -808,21 +852,33 @@ unsafe fn watch_client_commands() {
         return;
     }
     let Some(gengfuncs) = (unsafe { find_gengfuncs(real_initialize) }) else {
-        unsafe { crate::debug::report("client-cmd watch: couldn't locate client.dll's gEngfuncs copy; not watching") };
+        unsafe {
+            crate::debug::report(
+                "client-cmd watch: couldn't locate client.dll's gEngfuncs copy; not watching",
+            )
+        };
         return;
     };
 
     let slot = unsafe { gengfuncs.add(ENGFUNCS_SLOT_CLIENT_CMD) };
     let real = unsafe { *slot };
     if real.is_null() {
-        unsafe { crate::debug::report("client-cmd watch: pfnClientCmd slot is null; not watching") };
+        unsafe {
+            crate::debug::report("client-cmd watch: pfnClientCmd slot is null; not watching")
+        };
         return;
     }
     REAL_CLIENT_CMD.store(real, Ordering::Release);
 
     unsafe {
         let mut old: PAGE_PROTECTION_FLAGS = 0;
-        if VirtualProtect(slot as *mut c_void, size_of::<*mut c_void>(), PAGE_EXECUTE_READWRITE, &mut old) == 0 {
+        if VirtualProtect(
+            slot as *mut c_void,
+            size_of::<*mut c_void>(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        ) == 0
+        {
             crate::debug::report("client-cmd watch: couldn't make the slot writable; not watching");
             return;
         }
@@ -843,7 +899,11 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 ) -> i32 {
     if !pstudio.is_null() {
         ENGINE_STUDIO.store(pstudio, Ordering::Release);
-        unsafe { crate::debug::report(&format!("HUD_GetStudioModelInterface: captured pstudio at {pstudio:p} (studio interface version {version})")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "HUD_GetStudioModelInterface: captured pstudio at {pstudio:p} (studio interface version {version})"
+            ))
+        };
     }
 
     let real = REAL_GET_STUDIO_MODEL_INTERFACE.load(Ordering::Acquire);
@@ -857,7 +917,11 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_sprite.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
-unsafe extern "C" fn tramp_hud_add_entity(entity_type: i32, ent: *mut c_void, modelname: *const c_char) -> i32 {
+unsafe extern "C" fn tramp_hud_add_entity(
+    entity_type: i32,
+    ent: *mut c_void,
+    modelname: *const c_char,
+) -> i32 {
     if !modelname.is_null() {
         let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
         if crate::hide_sprite::should_hide(&name) {
@@ -891,12 +955,20 @@ unsafe fn swap_slot(
     let entry = unsafe { table.add(slot) };
     let real = unsafe { *entry };
     if real.is_null() {
-        unsafe { crate::debug::report(&format!("F: slot {slot} ({name}) is null -- leaving it alone")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "F: slot {slot} ({name}) is null -- leaving it alone"
+            ))
+        };
         return;
     }
     real_store.store(real, Ordering::Release);
     unsafe { *entry = trampoline };
-    unsafe { crate::debug::report(&format!("F: hooked slot {slot} ({name}), real implementation at {real:p}")) };
+    unsafe {
+        crate::debug::report(&format!(
+            "F: hooked slot {slot} ({name}), real implementation at {real:p}"
+        ))
+    };
 }
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
@@ -905,7 +977,11 @@ unsafe fn swap_slot(
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {
-        unsafe { crate::debug::report("F: real export pointer missing -- cannot forward, client will fail to initialise") };
+        unsafe {
+            crate::debug::report(
+                "F: real export pointer missing -- cannot forward, client will fail to initialise",
+            )
+        };
         return;
     }
     let real: ClientApiFn = unsafe { std::mem::transmute(real) };
@@ -917,9 +993,27 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     }
 
     unsafe {
-        swap_slot(table, SLOT_INITIALIZE, &REAL_INITIALIZE, tramp_initialize as *mut c_void, "Initialize");
-        swap_slot(table, SLOT_HUD_FRAME, &REAL_HUD_FRAME, tramp_hud_frame as *mut c_void, "HUD_Frame");
-        swap_slot(table, SLOT_HUD_ADD_ENTITY, &REAL_HUD_ADD_ENTITY, tramp_hud_add_entity as *mut c_void, "HUD_AddEntity");
+        swap_slot(
+            table,
+            SLOT_INITIALIZE,
+            &REAL_INITIALIZE,
+            tramp_initialize as *mut c_void,
+            "Initialize",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_FRAME,
+            &REAL_HUD_FRAME,
+            tramp_hud_frame as *mut c_void,
+            "HUD_Frame",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_ADD_ENTITY,
+            &REAL_HUD_ADD_ENTITY,
+            tramp_hud_add_entity as *mut c_void,
+            "HUD_AddEntity",
+        );
         swap_slot(
             table,
             SLOT_GET_STUDIO_MODEL_INTERFACE,
@@ -962,9 +1056,15 @@ unsafe extern "system" fn hook_load_library_a(lp_lib_file_name: *const u8) -> HM
     let real: LoadLibraryAFn = unsafe { std::mem::transmute(real) };
     let result = unsafe { real(lp_lib_file_name) };
 
-    if !result.is_null() && unsafe { path_basename_eq_ignore_ascii_case(lp_lib_file_name, "client.dll") } {
+    if !result.is_null()
+        && unsafe { path_basename_eq_ignore_ascii_case(lp_lib_file_name, "client.dll") }
+    {
         CLIENT_DLL.store(result, Ordering::Release);
-        unsafe { crate::debug::report(&format!("LoadLibraryA: client.dll loaded at {result:p}, watching its GetProcAddress lookups")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "LoadLibraryA: client.dll loaded at {result:p}, watching its GetProcAddress lookups"
+            ))
+        };
     }
 
     result
@@ -990,11 +1090,16 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     if (name as usize) >> 16 == 0 {
         return result;
     }
-    let Ok(requested) = (unsafe { std::ffi::CStr::from_ptr(name as *const c_char) }).to_str() else {
+    let Ok(requested) = (unsafe { std::ffi::CStr::from_ptr(name as *const c_char) }).to_str()
+    else {
         return result;
     };
 
-    unsafe { crate::debug::report(&format!("GetProcAddress(client.dll, \"{requested}\") -> {result:p}")) };
+    unsafe {
+        crate::debug::report(&format!(
+            "GetProcAddress(client.dll, \"{requested}\") -> {result:p}"
+        ))
+    };
 
     // "F" is the secured single-callback export, and is what DoD 1.3 actually
     // uses; the four named entries below are the classic convention, kept so
@@ -1002,7 +1107,11 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     match requested {
         "F" => {
             REAL_F.store(result, Ordering::Release);
-            unsafe { crate::debug::report("GetProcAddress: secured \"F\" export intercepted -- returning our wrapper") };
+            unsafe {
+                crate::debug::report(
+                    "GetProcAddress: secured \"F\" export intercepted -- returning our wrapper",
+                )
+            };
             hook_f as *mut c_void
         }
         "Initialize" => {
@@ -1093,14 +1202,28 @@ pub fn install() {
     // loaded in any modern setup (HLAE's own recording pipeline requires
     // it); `sw.dll` (the old software renderer) is not handled here.
     let Some(hw) = wait_for_module("hw.dll", 15_000) else {
-        unsafe { crate::debug::report("goldsrc-hooks: hw.dll never appeared -- sound/animation fixes are inactive this session.") };
+        unsafe {
+            crate::debug::report(
+                "goldsrc-hooks: hw.dll never appeared -- sound/animation fixes are inactive this session.",
+            )
+        };
         return;
     };
 
     // Order matters: GetProcAddress first, so there is no window in which
     // client.dll could load and be resolved before that hook is armed.
-    let hooked_gpa = hook_import(hw, "GetProcAddress", hook_get_proc_address as *mut c_void, &REAL_GET_PROC_ADDRESS);
-    let hooked_lla = hook_import(hw, "LoadLibraryA", hook_load_library_a as *mut c_void, &REAL_LOAD_LIBRARY_A);
+    let hooked_gpa = hook_import(
+        hw,
+        "GetProcAddress",
+        hook_get_proc_address as *mut c_void,
+        &REAL_GET_PROC_ADDRESS,
+    );
+    let hooked_lla = hook_import(
+        hw,
+        "LoadLibraryA",
+        hook_load_library_a as *mut c_void,
+        &REAL_LOAD_LIBRARY_A,
+    );
 
     unsafe {
         crate::debug::report(&format!(
@@ -1111,6 +1234,10 @@ pub fn install() {
     };
 
     if !hooked_gpa || !hooked_lla {
-        unsafe { crate::debug::report("goldsrc-hooks: an IAT slot wasn't found -- sound/animation fixes are inactive this session.") };
+        unsafe {
+            crate::debug::report(
+                "goldsrc-hooks: an IAT slot wasn't found -- sound/animation fixes are inactive this session.",
+            )
+        };
     }
 }

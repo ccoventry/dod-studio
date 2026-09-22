@@ -256,7 +256,9 @@ impl Bsp {
             vis_leaf_count,
             bounds: Vec::new(),
         };
-        bsp.bounds = (0..bsp.faces.len()).map(|i| bsp.compute_bounds(i)).collect();
+        bsp.bounds = (0..bsp.faces.len())
+            .map(|i| bsp.compute_bounds(i))
+            .collect();
         Ok(bsp)
     }
 
@@ -339,9 +341,10 @@ impl Bsp {
             return false;
         };
         if let Some(ti) = self.texinfo.get(face.texinfo.max(0) as usize)
-            && ti.flags & TEX_SPECIAL != 0 {
-                return false;
-            }
+            && ti.flags & TEX_SPECIAL != 0
+        {
+            return false;
+        }
         match self.texture_name(face_index) {
             Some(name) => {
                 let n = name.to_ascii_lowercase();
@@ -460,9 +463,10 @@ impl Bsp {
         let mut best: Option<(usize, f32)> = None;
         for i in self.world_faces() {
             if let Some(d) = self.point_on_face(i, p, tolerance)
-                && best.map(|(_, bd)| d < bd).unwrap_or(true) {
-                    best = Some((i, d));
-                }
+                && best.map(|(_, bd)| d < bd).unwrap_or(true)
+            {
+                best = Some((i, d));
+            }
         }
         best
     }
@@ -768,7 +772,6 @@ fn point_in_polygon(poly: &[[f32; 3]], normal: &[f32; 3], p: &[f32; 3]) -> bool 
     inside
 }
 
-
 // ── Visibility: is a point hidden from a point ───────────────────────────────
 //
 // The flush's whole safety claim is that its decals are never on screen, and
@@ -837,7 +840,10 @@ impl Bsp {
     /// Contents of a leaf, or `CONTENTS_SOLID` for an index the tree should
     /// not have produced — the same conservative reading `leaf_blocks` takes.
     pub fn leaf_contents(&self, leaf: usize) -> i32 {
-        self.leaves.get(leaf).map(|l| l.contents).unwrap_or(CONTENTS_SOLID)
+        self.leaves
+            .get(leaf)
+            .map(|l| l.contents)
+            .unwrap_or(CONTENTS_SOLID)
     }
 
     fn leaf_blocks(&self, leaf: usize) -> bool {
@@ -1017,7 +1023,11 @@ pub fn map_checksum(bytes: &[u8]) -> Result<u32, String> {
     for (n, slot) in table.iter_mut().enumerate() {
         let mut c = n as u32;
         for _ in 0..8 {
-            c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 };
+            c = if c & 1 != 0 {
+                0xEDB8_8320 ^ (c >> 1)
+            } else {
+                c >> 1
+            };
         }
         *slot = c;
     }
@@ -1103,7 +1113,9 @@ mod tests {
             vis_leaf_count: 2,
             bounds: Vec::new(),
         };
-        bsp.bounds = (0..bsp.faces.len()).map(|i| bsp.compute_bounds(i)).collect();
+        bsp.bounds = (0..bsp.faces.len())
+            .map(|i| bsp.compute_bounds(i))
+            .collect();
         bsp
     }
 
@@ -1304,7 +1316,11 @@ mod tests {
         assert_eq!(row.len(), 3);
         assert!(Bsp::pvs_contains(&row, 17), "leaf 17 should be visible");
         for leaf in 1..=16 {
-            assert!(!Bsp::pvs_contains(&row, leaf), "leaf {} should not be", leaf);
+            assert!(
+                !Bsp::pvs_contains(&row, leaf),
+                "leaf {} should not be",
+                leaf
+            );
         }
     }
 
@@ -1342,9 +1358,18 @@ mod tests {
         bsp.vis_leaf_count = 8;
         bsp.visibility = vec![0b0000_0001, 0b0000_0010];
         bsp.leaves = vec![
-            Leaf { contents: CONTENTS_SOLID, vis_offset: -1 },
-            Leaf { contents: -1, vis_offset: 0 },
-            Leaf { contents: -1, vis_offset: 1 },
+            Leaf {
+                contents: CONTENTS_SOLID,
+                vis_offset: -1,
+            },
+            Leaf {
+                contents: -1,
+                vis_offset: 0,
+            },
+            Leaf {
+                contents: -1,
+                vis_offset: 1,
+            },
         ];
 
         let union = bsp.pvs_union(&[1, 2]).unwrap();
@@ -1374,17 +1399,26 @@ mod tests {
     #[test]
     fn decal_draw_point_gives_up_beyond_its_reach() {
         let bsp = synthetic_bsp();
-        assert!(bsp.decal_draw_point(&[80.0, 32.0, 32.0], 4.0, 1.0).is_none());
+        assert!(
+            bsp.decal_draw_point(&[80.0, 32.0, 32.0], 4.0, 1.0)
+                .is_none()
+        );
         // The same point is answerable if the reach is widened to cover it,
         // which is what makes the constant the thing that decides, not the map.
-        assert!(bsp.decal_draw_point(&[80.0, 32.0, 32.0], 32.0, 1.0).is_some());
+        assert!(
+            bsp.decal_draw_point(&[80.0, 32.0, 32.0], 32.0, 1.0)
+                .is_some()
+        );
     }
 
     /// Off the end of the face: on the plane, but there is no surface there.
     #[test]
     fn decal_draw_point_needs_the_face_not_just_its_plane() {
         let bsp = synthetic_bsp();
-        assert!(bsp.decal_draw_point(&[98.0, 500.0, 32.0], 4.0, 1.0).is_none());
+        assert!(
+            bsp.decal_draw_point(&[98.0, 500.0, 32.0], 4.0, 1.0)
+                .is_none()
+        );
     }
 
     /// The whole bug in one assertion.
@@ -1398,7 +1432,11 @@ mod tests {
     fn a_coordinate_inside_a_wall_is_blocked_but_the_decal_on_it_is_not() {
         let mut bsp = synthetic_bsp();
         bsp.faces[0].side = 1;
-        assert_eq!(bsp.face_normal(0), Some([-1.0, 0.0, 0.0]), "normal must face the room");
+        assert_eq!(
+            bsp.face_normal(0),
+            Some([-1.0, 0.0, 0.0]),
+            "normal must face the room"
+        );
 
         let eye = [50.0, 32.0, 32.0];
         let buried = [101.0, 32.0, 32.0];
@@ -1414,7 +1452,11 @@ mod tests {
         let drawn = bsp
             .decal_draw_point(&buried, 4.0, 1.0)
             .expect("one unit inside a wall is well within reach of its face");
-        assert!((drawn[0] - 99.0).abs() < 1e-3, "drawn on the room side: {:?}", drawn);
+        assert!(
+            (drawn[0] - 99.0).abs() < 1e-3,
+            "drawn on the room side: {:?}",
+            drawn
+        );
         assert!(
             !bsp.line_blocked(&eye, &drawn),
             "nothing stands between the room and the face it is looking at"
@@ -1442,7 +1484,11 @@ mod tests {
         // step lands at 80, off the polygon.
         assert_eq!(pts.len(), 4, "{:?}", pts);
         for p in &pts {
-            assert!((p[0] - 98.0).abs() < 1e-3, "lifted 2 units into the room: {:?}", p);
+            assert!(
+                (p[0] - 98.0).abs() < 1e-3,
+                "lifted 2 units into the room: {:?}",
+                p
+            );
             assert_ne!(
                 bsp.leaf_contents(bsp.leaf_at(p)),
                 CONTENTS_SOLID,
@@ -1524,7 +1570,11 @@ mod tests {
         // to the flush would hand it the projection bug back, since a decal
         // aimed inside a wall is drawn on whichever face the engine reaches.
         let bsp = synthetic_bsp();
-        assert_eq!(bsp.face_normal(0), Some([1.0, 0.0, 0.0]), "into the solid side");
+        assert_eq!(
+            bsp.face_normal(0),
+            Some([1.0, 0.0, 0.0]),
+            "into the solid side"
+        );
         assert!(bsp.face_candidates(&FaceSampling::default()).is_empty());
     }
 

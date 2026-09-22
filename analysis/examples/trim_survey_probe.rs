@@ -16,8 +16,13 @@ use std::collections::BTreeMap;
 
 fn main() {
     for path in std::env::args().skip(1) {
-        let Ok(bytes) = std::fs::read(&path) else { continue };
-        let Ok(demo) = open_demo_from_bytes(&bytes) else { println!("{path}: unparseable"); continue };
+        let Ok(bytes) = std::fs::read(&path) else {
+            continue;
+        };
+        let Ok(demo) = open_demo_from_bytes(&bytes) else {
+            println!("{path}: unparseable");
+            continue;
+        };
         println!("\n{path}  ({:.1} MB)", bytes.len() as f64 / 1e6);
         println!("  directory entries: {}", demo.directory.entries.len());
 
@@ -45,47 +50,91 @@ fn main() {
                 };
                 *kinds.entry(k).or_insert(0) += 1;
 
-                let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-                let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+                let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                    continue;
+                };
+                let MessageData::Parsed(msgs) = &bt.1.messages else {
+                    continue;
+                };
                 for m in msgs {
-                    let NetMessage::EngineMessage(em) = m else { continue };
+                    let NetMessage::EngineMessage(em) = m else {
+                        continue;
+                    };
                     let name = match &**em {
                         EngineMessage::SvcServerInfo(_) => "SvcServerInfo",
                         EngineMessage::SvcDeltaDescription(_) => "SvcDeltaDescription",
                         EngineMessage::SvcSpawnBaseline(_) => "SvcSpawnBaseline",
                         EngineMessage::SvcResourceList(_) => "SvcResourceList",
                         EngineMessage::SvcNewUserMsg(_) => "SvcNewUserMsg",
-                        EngineMessage::SvcPacketEntities(_) => { full_pe.push((fi, frame.time)); continue }
-                        EngineMessage::SvcDeltaPacketEntities(_) => { delta_pe += 1; continue }
+                        EngineMessage::SvcPacketEntities(_) => {
+                            full_pe.push((fi, frame.time));
+                            continue;
+                        }
+                        EngineMessage::SvcDeltaPacketEntities(_) => {
+                            delta_pe += 1;
+                            continue;
+                        }
                         _ => continue,
                     };
-                    if init.len() < 4000 { init.push((fi, frame.time, name)); }
+                    if init.len() < 4000 {
+                        init.push((fi, frame.time, name));
+                    }
                 }
             }
 
-            println!("\n  --- entry {ei}: {} frames, t {:.2}..{:.2} ---", entry.frames.len(), tmin, tmax);
+            println!(
+                "\n  --- entry {ei}: {} frames, t {:.2}..{:.2} ---",
+                entry.frames.len(),
+                tmin,
+                tmax
+            );
             let mut ks: Vec<_> = kinds.iter().collect();
-            ks.sort_by(|a,b| b.1.cmp(a.1));
-            println!("     frame kinds: {}", ks.iter().map(|(k,n)| format!("{k} x{n}")).collect::<Vec<_>>().join(", "));
+            ks.sort_by(|a, b| b.1.cmp(a.1));
+            println!(
+                "     frame kinds: {}",
+                ks.iter()
+                    .map(|(k, n)| format!("{k} x{n}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
             let mut counts: BTreeMap<&str, (usize, usize, usize)> = BTreeMap::new(); // name -> (count, first_frame, last_frame)
             for (fi, _, n) in &init {
                 let e = counts.entry(n).or_insert((0, *fi, *fi));
-                e.0 += 1; e.2 = *fi;
+                e.0 += 1;
+                e.2 = *fi;
             }
-            for (n,(c,f,l)) in &counts {
+            for (n, (c, f, l)) in &counts {
                 println!("     {n}: x{c}, frames {f}..{l}");
             }
-            println!("     packet entities: {} full / {} delta", full_pe.len(), delta_pe);
+            println!(
+                "     packet entities: {} full / {} delta",
+                full_pe.len(),
+                delta_pe
+            );
             if full_pe.len() > 1 {
-                let mut gaps: Vec<f32> = full_pe.windows(2).map(|w| w[1].1 - w[0].1).filter(|g| *g>0.0).collect();
-                gaps.sort_by(|a,b| a.partial_cmp(b).unwrap());
+                let mut gaps: Vec<f32> = full_pe
+                    .windows(2)
+                    .map(|w| w[1].1 - w[0].1)
+                    .filter(|g| *g > 0.0)
+                    .collect();
+                gaps.sort_by(|a, b| a.partial_cmp(b).unwrap());
                 if !gaps.is_empty() {
-                    println!("     full-snapshot spacing: median {:.2}s  min {:.2}s  max {:.2}s",
-                        gaps[gaps.len()/2], gaps[0], gaps[gaps.len()-1]);
+                    println!(
+                        "     full-snapshot spacing: median {:.2}s  min {:.2}s  max {:.2}s",
+                        gaps[gaps.len() / 2],
+                        gaps[0],
+                        gaps[gaps.len() - 1]
+                    );
                 }
-                println!("     first full snapshots at frames: {:?}",
-                    full_pe.iter().take(6).map(|(f,t)| format!("{f}@{t:.1}s")).collect::<Vec<_>>());
+                println!(
+                    "     first full snapshots at frames: {:?}",
+                    full_pe
+                        .iter()
+                        .take(6)
+                        .map(|(f, t)| format!("{f}@{t:.1}s"))
+                        .collect::<Vec<_>>()
+                );
             }
         }
     }

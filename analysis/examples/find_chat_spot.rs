@@ -11,7 +11,9 @@ use dod::UserMessage;
 
 fn main() {
     let mut a = std::env::args().skip(1);
-    let path = a.next().expect("usage: find_chat_spot <demo.dem> <substring>");
+    let path = a
+        .next()
+        .expect("usage: find_chat_spot <demo.dem> <substring>");
     let needle = a.next().expect("substring to search for");
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
@@ -20,21 +22,34 @@ fn main() {
     let mut found = 0usize;
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { idx += 1; continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                idx += 1;
+                continue;
+            };
             let seq = bt.1.sequence_info.incoming_sequence;
             let time = f.time;
-            let MessageData::Parsed(msgs) = &bt.1.messages else { idx += 1; continue };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                idx += 1;
+                continue;
+            };
             for m in msgs {
-                let NetMessage::UserMessage(um) = m else { continue };
+                let NetMessage::UserMessage(um) = m else {
+                    continue;
+                };
                 if let Ok(UserMessage::SayText(st)) = UserMessage::new(&um.name, &um.data)
-                    && st.text.contains(&needle) {
-                        found += 1;
-                        println!("frame_idx={idx} t={time:.2}s seq={seq}: client={} text={:?}",
-                            st.client_index, st.text);
-                    }
+                    && st.text.contains(&needle)
+                {
+                    found += 1;
+                    println!(
+                        "frame_idx={idx} t={time:.2}s seq={seq}: client={} text={:?}",
+                        st.client_index, st.text
+                    );
+                }
             }
             idx += 1;
         }
     }
-    if found == 0 { println!("no SayText containing {needle:?} found") }
+    if found == 0 {
+        println!("no SayText containing {needle:?} found")
+    }
 }

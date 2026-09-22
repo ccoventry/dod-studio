@@ -125,7 +125,9 @@ fn usage() -> String {
 }
 
 fn args() -> Vec<String> {
-    let Some(engfuncs) = crate::engine::engfuncs() else { return Vec::new() };
+    let Some(engfuncs) = crate::engine::engfuncs() else {
+        return Vec::new();
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
     (0..argc)
         .filter_map(|i| {
@@ -133,7 +135,11 @@ fn args() -> Vec<String> {
             if ptr.is_null() {
                 return None;
             }
-            Some(unsafe { std::ffi::CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+            Some(
+                unsafe { std::ffi::CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
         .collect()
 }
@@ -167,7 +173,13 @@ pub unsafe extern "C" fn command() {
     let argv = args();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
-    unsafe { crate::debug::report(&format!("hide_sprite: {} -> {}", argv.join(" "), reply.trim())) };
+    unsafe {
+        crate::debug::report(&format!(
+            "hide_sprite: {} -> {}",
+            argv.join(" "),
+            reply.trim()
+        ))
+    };
 }
 
 /// Folded into `dodstudio_debug_status`, gated on being non-empty like

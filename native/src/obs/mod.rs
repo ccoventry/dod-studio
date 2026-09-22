@@ -38,7 +38,7 @@ pub mod session;
 pub use client::{ObsClient, ObsError};
 pub use log_tail::{LogTailer, Marker, MarkerKind};
 pub use provision::{PROFILE_NAME as OBS_PROFILE_NAME, SCENE_NAME as OBS_SCENE_NAME};
-pub use recover::{check as check_orphan, recover as recover_orphan, OrphanReport};
+pub use recover::{OrphanReport, check as check_orphan, recover as recover_orphan};
 pub use session::{ObsSession, RecordedBlock};
 
 /// Stage markers the capture path acts on.

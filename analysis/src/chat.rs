@@ -69,20 +69,21 @@ pub fn use_chat_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             // 1. Try to find the split position based on player name first (if player is resolved)
             let mut split_pos = None;
             if say_text.client_index > 0
-                && let Some(player) = state.find_player_by_client_index(say_text.client_index - 1) {
-                    let p_name = &player.name;
-                    if let Some(name_pos) = cleaned_raw.find(p_name) {
-                        let after_name = &cleaned_raw[name_pos + p_name.len()..];
-                        // `" :  "` (two spaces) is subsumed by `" : "` and
-                        // resolved to the same split position, so it never
-                        // needed an arm of its own.
-                        if after_name.starts_with(" : ") {
-                            split_pos = Some(name_pos + p_name.len() + 1);
-                        } else if after_name.starts_with(":") {
-                            split_pos = Some(name_pos + p_name.len());
-                        }
+                && let Some(player) = state.find_player_by_client_index(say_text.client_index - 1)
+            {
+                let p_name = &player.name;
+                if let Some(name_pos) = cleaned_raw.find(p_name) {
+                    let after_name = &cleaned_raw[name_pos + p_name.len()..];
+                    // `" :  "` (two spaces) is subsumed by `" : "` and
+                    // resolved to the same split position, so it never
+                    // needed an arm of its own.
+                    if after_name.starts_with(" : ") {
+                        split_pos = Some(name_pos + p_name.len() + 1);
+                    } else if after_name.starts_with(":") {
+                        split_pos = Some(name_pos + p_name.len());
                     }
                 }
+            }
 
             let (sender_block, message_text) = if let Some(pos) = split_pos {
                 let sender = &cleaned_raw[..pos];
@@ -249,7 +250,10 @@ fn is_raw_command(s: &str) -> bool {
         return false;
     }
     let first_word = trimmed.split_whitespace().next().unwrap_or("");
-    if first_word.starts_with("ready") && first_word.len() > 5 && first_word.chars().skip(5).all(|c| c.is_ascii_digit()) {
+    if first_word.starts_with("ready")
+        && first_word.len() > 5
+        && first_word.chars().skip(5).all(|c| c.is_ascii_digit())
+    {
         return true;
     }
     false
@@ -270,7 +274,7 @@ pub fn translate_system_message(
         let a = arg?;
         let cleaned = clean_control_chars(a);
         let trimmed = cleaned.trim();
-        
+
         if is_raw_command(trimmed) {
             return Some(String::new());
         }
@@ -364,21 +368,25 @@ pub fn translate_system_message(
         } else {
             let mut parts = vec![token.to_string()];
             if let Some(arg) = a1
-                && !arg.is_empty() {
-                    parts.push(arg.to_string());
-                }
+                && !arg.is_empty()
+            {
+                parts.push(arg.to_string());
+            }
             if let Some(arg) = a2
-                && !arg.is_empty() {
-                    parts.push(arg.to_string());
-                }
+                && !arg.is_empty()
+            {
+                parts.push(arg.to_string());
+            }
             if let Some(arg) = a3
-                && !arg.is_empty() {
-                    parts.push(arg.to_string());
-                }
+                && !arg.is_empty()
+            {
+                parts.push(arg.to_string());
+            }
             if let Some(arg) = a4
-                && !arg.is_empty() {
-                    parts.push(arg.to_string());
-                }
+                && !arg.is_empty()
+            {
+                parts.push(arg.to_string());
+            }
             parts.join(" ")
         }
     };
@@ -445,7 +453,8 @@ mod tests {
         }
 
         // Test translate_embedded_keys directly
-        let embedded_res = translate_embedded_keys("You will respawn as #class_axis_kar98 next round.");
+        let embedded_res =
+            translate_embedded_keys("You will respawn as #class_axis_kar98 next round.");
         if crate::localization::translate_key("#class_axis_kar98").is_some() {
             assert_eq!(embedded_res, "You will respawn as Grenadier next round.");
         }
@@ -552,13 +561,7 @@ mod tests {
     #[test]
     fn test_system_message_sanitization() {
         // Test raw command filtering
-        let res = translate_system_message(
-            "\nready2 3 4\n",
-            None,
-            None,
-            None,
-            None,
-        );
+        let res = translate_system_message("\nready2 3 4\n", None, None, None, None);
         assert_eq!(res, "");
 
         // Test argument raw command filtering
@@ -598,13 +601,14 @@ mod tests {
                 if path.extension().map(|e| e == "dem").unwrap_or(false) {
                     println!("Analyzing chat for untranslated keys in {:?}", path);
                     if let Ok(bytes) = fs::read(&path)
-                        && let Ok(analysis) = crate::Analysis::try_from_bytes(&bytes) {
-                            for msg in &analysis.state.chat_messages {
-                                if msg.text.contains('#') {
-                                    println!("  [UNTRANSLATED] {:?}", msg.text);
-                                }
+                        && let Ok(analysis) = crate::Analysis::try_from_bytes(&bytes)
+                    {
+                        for msg in &analysis.state.chat_messages {
+                            if msg.text.contains('#') {
+                                println!("  [UNTRANSLATED] {:?}", msg.text);
                             }
                         }
+                    }
                 }
             }
         }

@@ -50,9 +50,12 @@ const PATCH_CONCURRENCY: usize = 4;
 /// stays at 4 because it streams frames rather than holding a full analysis.
 const SCAN_CONCURRENCY: usize = 2;
 
-use native::patch::{PatcherConfig, CaptureStreak, CaptureBlock, PatchJob, StreamPatcher, build_batch_queue, build_preview_patch_jobs, CustomCommand, CommandRelation};
-use native::capture_engine::{spawn_capture_engine, CaptureJob, EngineEvent};
+use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
+use native::patch::{
+    CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatchJob, PatcherConfig,
+    StreamPatcher, build_batch_queue, build_preview_patch_jobs,
+};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -145,11 +148,21 @@ pub struct CapturePayload {
     pub decal_ring_limit: Option<u32>,
 }
 
-fn default_initial_delay() -> f32 { 3.0 }
-fn default_fast_forward_speed() -> f32 { 0.05 }
-fn default_resolution_width() -> i32 { 1280 }
-fn default_obs_capture_fps_payload() -> i32 { 120 }
-fn default_resolution_height() -> i32 { 720 }
+fn default_initial_delay() -> f32 {
+    3.0
+}
+fn default_fast_forward_speed() -> f32 {
+    0.05
+}
+fn default_resolution_width() -> i32 {
+    1280
+}
+fn default_obs_capture_fps_payload() -> i32 {
+    120
+}
+fn default_resolution_height() -> i32 {
+    720
+}
 
 /// One custom command row — serialisable across the Tauri IPC boundary.
 /// `relation` is a plain string ("Before" | "After") rather than
@@ -258,7 +271,11 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.game_path = payload.game_path.clone();
     cfg.pre_roll_seconds = payload.pre_roll_seconds;
     cfg.post_roll_seconds = payload.post_roll_seconds;
-    cfg.capture_directories = payload.capture_directories.iter().map(std::path::PathBuf::from).collect();
+    cfg.capture_directories = payload
+        .capture_directories
+        .iter()
+        .map(std::path::PathBuf::from)
+        .collect();
     cfg.capture_fps = payload.capture_fps;
     cfg.obs_capture_fps = payload.obs_capture_fps;
     cfg.record_start_lead = payload.record_start_lead;
@@ -270,13 +287,22 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.resolution_width = payload.resolution_width;
     cfg.resolution_height = payload.resolution_height;
     cfg.ffmpeg_capture = payload.ffmpeg_capture;
-    cfg.ffmpeg_capture_codec = native::patch::CaptureCodec::from_str_id(&payload.ffmpeg_capture_codec);
+    cfg.ffmpeg_capture_codec =
+        native::patch::CaptureCodec::from_str_id(&payload.ffmpeg_capture_codec);
     if !payload.capture_mode.is_empty() {
         cfg.capture_mode = native::patch::CaptureMode::from_str_id(&payload.capture_mode);
     }
     cfg.obs = native::patch::ObsConfig {
-        host: if payload.obs_host.is_empty() { "127.0.0.1".to_string() } else { payload.obs_host.clone() },
-        port: if payload.obs_port == 0 { 4455 } else { payload.obs_port },
+        host: if payload.obs_host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            payload.obs_host.clone()
+        },
+        port: if payload.obs_port == 0 {
+            4455
+        } else {
+            payload.obs_port
+        },
         password: payload.obs_password.clone(),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
@@ -285,14 +311,18 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
     cfg.session_id = payload.session_id.clone();
     cfg.init_commands = payload.init_commands.clone();
-    cfg.custom_commands = payload.custom_commands.iter().map(|c| CustomCommand {
-        command: c.command.clone(),
-        offset: c.offset_seconds,
-        relation: match c.relation.as_str() {
-            "After" => CommandRelation::After,
-            _ => CommandRelation::Before,
-        },
-    }).collect();
+    cfg.custom_commands = payload
+        .custom_commands
+        .iter()
+        .map(|c| CustomCommand {
+            command: c.command.clone(),
+            offset: c.offset_seconds,
+            relation: match c.relation.as_str() {
+                "After" => CommandRelation::After,
+                _ => CommandRelation::Before,
+            },
+        })
+        .collect();
     if let Some(v) = payload.decal_flush {
         cfg.decal_flush = v;
     }
@@ -385,7 +415,11 @@ pub async fn obs_test_connection(
     game_height: i32,
     obs_capture_fps: i32,
 ) -> Result<ObsConnectionReport, String> {
-    let resolved_host = if host.is_empty() { "127.0.0.1".to_string() } else { host };
+    let resolved_host = if host.is_empty() {
+        "127.0.0.1".to_string()
+    } else {
+        host
+    };
     let resolved_port = if port == 0 { 4455 } else { port };
     let url = format!("ws://{resolved_host}:{resolved_port}");
     tokio::task::spawn_blocking(move || {
@@ -518,7 +552,11 @@ pub async fn obs_recover_orphan(
 /// settings file uses so an empty field means "the usual" rather than "".
 fn obs_config(host: String, port: u16, password: String) -> native::patch::ObsConfig {
     native::patch::ObsConfig {
-        host: if host.is_empty() { "127.0.0.1".to_string() } else { host },
+        host: if host.is_empty() {
+            "127.0.0.1".to_string()
+        } else {
+            host
+        },
         port: if port == 0 { 4455 } else { port },
         password,
     }
@@ -645,7 +683,10 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
 /// Runs verification for the batch that just ended and reports it to the
 /// frontend. Phase 1 is observe-only — nothing consumes this to change a
 /// highlight's status yet.
-fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>) {
+fn emit_take_verification(
+    app: &tauri::AppHandle,
+    manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
+) {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
         match guard.as_ref() {
@@ -660,7 +701,10 @@ fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Opti
 
     log_markdown(&format!(
         "[take-verify] session {}: {}/{} takes on disk, {} renderable",
-        manifest.session_id, captured_count, blocks.len(), renderable_count
+        manifest.session_id,
+        captured_count,
+        blocks.len(),
+        renderable_count
     ));
     for block in &blocks {
         log_markdown(&format!(
@@ -671,13 +715,16 @@ fn emit_take_verification(app: &tauri::AppHandle, manifest_slot: &Arc<Mutex<Opti
 
     record_capture_settings(&manifest, &blocks);
 
-    let _ = app.emit("capture_takes_verified", serde_json::json!({
-        "session_id": manifest.session_id,
-        "total_count": blocks.len(),
-        "captured_count": captured_count,
-        "renderable_count": renderable_count,
-        "blocks": blocks,
-    }));
+    let _ = app.emit(
+        "capture_takes_verified",
+        serde_json::json!({
+            "session_id": manifest.session_id,
+            "total_count": blocks.len(),
+            "captured_count": captured_count,
+            "renderable_count": renderable_count,
+            "blocks": blocks,
+        }),
+    );
 }
 
 // ── Public command handler ─────────────────────────────────────────────────────
@@ -728,7 +775,8 @@ pub async fn start_capture_batch_impl(
     // check is only as good as the frontend" reasoning as the separate-HUD
     // guard below: whatever reaches this command directly must be refused
     // independently, not trusted because some UI state claimed it was clean.
-    if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands) {
+    if let Some(err) = first_banned_command_error(&payload.init_commands, &payload.custom_commands)
+    {
         return Err(err);
     }
 
@@ -743,10 +791,7 @@ pub async fn start_capture_batch_impl(
     // leave the manager wedged.
     // ── Guard: reject concurrent batches ──────────────────────────────────────
     {
-        let mut running = manager
-            .is_running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
         if *running {
             return Err(crate::messages::CAPTURE_BATCH_ALREADY_RUNNING.to_string());
         }
@@ -776,16 +821,16 @@ pub async fn start_capture_batch_impl(
         .collect();
 
     if raw_streaks.is_empty() {
-        let mut running = manager
-            .is_running
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
+        let mut running = manager.is_running.lock().unwrap_or_else(|p| p.into_inner());
         *running = false;
-        let _ = app_handle.emit("capture_status", serde_json::json!({
-            "running": false,
-            "error": true,
-            "status": crate::messages::NO_STREAKS_IN_PAYLOAD
-        }));
+        let _ = app_handle.emit(
+            "capture_status",
+            serde_json::json!({
+                "running": false,
+                "error": true,
+                "status": crate::messages::NO_STREAKS_IN_PAYLOAD
+            }),
+        );
         return Err(crate::messages::NO_STREAKS_IN_PAYLOAD.to_string());
     }
 
@@ -800,17 +845,24 @@ pub async fn start_capture_batch_impl(
 
     // ── Offload blocking I/O to a dedicated thread ────────────────────────────
     tokio::task::spawn_blocking(move || {
-        let (patch_jobs, drive_headroom) = match build_batch_queue(raw_streaks, &patcher_config, &std::collections::HashMap::new()) {
+        let (patch_jobs, drive_headroom) = match build_batch_queue(
+            raw_streaks,
+            &patcher_config,
+            &std::collections::HashMap::new(),
+        ) {
             Ok(v) => v,
             Err(e) => {
                 log::error!("build_batch_queue failed: {}", e);
                 let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
                 *running = false;
-                let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                    "running": false,
-                    "error": true,
-                    "status": format!("build_batch_queue failed: {}", e)
-                }));
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": format!("build_batch_queue failed: {}", e)
+                    }),
+                );
                 return;
             }
         };
@@ -827,7 +879,10 @@ pub async fn start_capture_batch_impl(
         {
             let manifest = CaptureManifest {
                 session_id: patcher_config.session_id.clone(),
-                blocks: patch_jobs.iter().flat_map(|j| j.blocks.iter().cloned()).collect(),
+                blocks: patch_jobs
+                    .iter()
+                    .flat_map(|j| j.blocks.iter().cloned())
+                    .collect(),
                 capture_fps: patcher_config.capture_fps,
             };
             let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
@@ -838,10 +893,13 @@ pub async fn start_capture_batch_impl(
             log::warn!("build_batch_queue produced no jobs");
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "status": "No jobs produced"
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "status": "No jobs produced"
+                }),
+            );
             return;
         }
 
@@ -861,9 +919,12 @@ pub async fn start_capture_batch_impl(
         // per-demo like capture_demo_loading -- decal clearing means patching
         // is no longer instant, but a toast per demo patched would still be
         // noise (see issue #98 discussion).
-        let _ = app_handle_clone.emit("capture_patching_started", serde_json::json!({
-            "total": total_patch_jobs,
-        }));
+        let _ = app_handle_clone.emit(
+            "capture_patching_started",
+            serde_json::json!({
+                "total": total_patch_jobs,
+            }),
+        );
         // Completed-count progress rather than positional index -- jobs
         // finish out of order once patched concurrently, so "which index is
         // running" no longer means anything.
@@ -957,30 +1018,41 @@ pub async fn start_capture_batch_impl(
             log::error!("Failed to patch {}: {}", source_demo, e);
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "error": true,
-                "status": format!("Failed to patch {}: {}", source_demo, e)
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "error": true,
+                    "status": format!("Failed to patch {}: {}", source_demo, e)
+                }),
+            );
             return;
         }
         if was_cancelled {
             let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
             *running = false;
-            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                "running": false,
-                "status": "Cancelled"
-            }));
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "status": "Cancelled"
+                }),
+            );
             return;
         }
 
-        let _ = app_handle_clone.emit("capture_patching_finished", serde_json::json!({
-            "total": total_patch_jobs,
-        }));
+        let _ = app_handle_clone.emit(
+            "capture_patching_finished",
+            serde_json::json!({
+                "total": total_patch_jobs,
+            }),
+        );
 
         let capture_jobs: Vec<CaptureJob> = patch_jobs
             .into_iter()
-            .map(|job| CaptureJob { patched_demo_path: job.output_demo })
+            .map(|job| CaptureJob {
+                patched_demo_path: job.output_demo,
+            })
             .collect();
 
         let (engine_tx, engine_rx) = std::sync::mpsc::channel();
@@ -993,101 +1065,133 @@ pub async fn start_capture_batch_impl(
         let app_emitter_for_panic = app_handle_clone.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            let mut total_jobs: u32 = 0;
-            let mut current_idx: u32 = 0;
-            // Running tally of clips captured through and including the
-            // current demo -- updated once per DemoLoading (never per
-            // FastForwardToClip), so every fast-forward-to-clip notification
-            // within a demo reports the same "X of Y clips total" the
-            // demo-loading toast itself would have shown. See issue #98.
-            let mut clips_so_far: u32 = 0;
-            while let Ok(event) = engine_rx.recv() {
-                match event {
-                    EngineEvent::Starting(total) => {
-                        total_jobs = total as u32;
-                        current_idx = 0;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "status": "Starting"
-                        }));
-                    }
-                    EngineEvent::Launching(name) => {
-                        current_idx += 1;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "name": name,
-                            "status": "Launching"
-                        }));
-                    }
-                    EngineEvent::Finished(name) => {
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": true,
-                            "index": current_idx,
-                            "total": total_jobs,
-                            "name": name,
-                            "status": "Finished"
-                        }));
-                    }
-                    EngineEvent::DemoLoading(job_idx, total, clip_count) => {
-                        clips_so_far += clip_count;
-                        let _ = app_emitter.emit("capture_demo_loading", serde_json::json!({
-                            "index": job_idx,
-                            "total": total,
-                            "clip_count": clip_count,
-                            "clips_so_far": clips_so_far,
-                            "total_batch_clips": total_batch_clips,
-                        }));
-                    }
-                    EngineEvent::FastForwardToClip(job_idx, total, clip_idx, clip_count_this_demo) => {
-                        let _ = app_emitter.emit("capture_fast_forward_to_clip", serde_json::json!({
-                            "demo_index": job_idx,
-                            "demo_total": total,
-                            "clip_index": clip_idx,
-                            "clip_count_this_demo": clip_count_this_demo,
-                            "clips_so_far": clips_so_far,
-                            "total_batch_clips": total_batch_clips,
-                        }));
-                    }
-                    EngineEvent::Error(msg) => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "error": true,
-                            "status": msg
-                        }));
-                        break;
-                    }
-                    EngineEvent::AllCompleted => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "status": "Complete",
-                            "index": total_jobs,
-                            "total": total_jobs
-                        }));
-                        emit_take_verification(&app_emitter, &manifest_for_listener);
-                        break;
-                    }
-                    EngineEvent::Cancelled => {
-                        let mut running = is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
-                        *running = false;
-                        let _ = app_emitter.emit("capture_status", serde_json::json!({
-                            "running": false,
-                            "status": "Cancelled"
-                        }));
-                        // A cancelled batch still leaves real finished takes on
-                        // disk — verify anyway rather than discarding them.
-                        emit_take_verification(&app_emitter, &manifest_for_listener);
-                        break;
+                let mut total_jobs: u32 = 0;
+                let mut current_idx: u32 = 0;
+                // Running tally of clips captured through and including the
+                // current demo -- updated once per DemoLoading (never per
+                // FastForwardToClip), so every fast-forward-to-clip notification
+                // within a demo reports the same "X of Y clips total" the
+                // demo-loading toast itself would have shown. See issue #98.
+                let mut clips_so_far: u32 = 0;
+                while let Ok(event) = engine_rx.recv() {
+                    match event {
+                        EngineEvent::Starting(total) => {
+                            total_jobs = total as u32;
+                            current_idx = 0;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": current_idx,
+                                    "total": total_jobs,
+                                    "status": "Starting"
+                                }),
+                            );
+                        }
+                        EngineEvent::Launching(name) => {
+                            current_idx += 1;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": current_idx,
+                                    "total": total_jobs,
+                                    "name": name,
+                                    "status": "Launching"
+                                }),
+                            );
+                        }
+                        EngineEvent::Finished(name) => {
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": true,
+                                    "index": current_idx,
+                                    "total": total_jobs,
+                                    "name": name,
+                                    "status": "Finished"
+                                }),
+                            );
+                        }
+                        EngineEvent::DemoLoading(job_idx, total, clip_count) => {
+                            clips_so_far += clip_count;
+                            let _ = app_emitter.emit(
+                                "capture_demo_loading",
+                                serde_json::json!({
+                                    "index": job_idx,
+                                    "total": total,
+                                    "clip_count": clip_count,
+                                    "clips_so_far": clips_so_far,
+                                    "total_batch_clips": total_batch_clips,
+                                }),
+                            );
+                        }
+                        EngineEvent::FastForwardToClip(
+                            job_idx,
+                            total,
+                            clip_idx,
+                            clip_count_this_demo,
+                        ) => {
+                            let _ = app_emitter.emit(
+                                "capture_fast_forward_to_clip",
+                                serde_json::json!({
+                                    "demo_index": job_idx,
+                                    "demo_total": total,
+                                    "clip_index": clip_idx,
+                                    "clip_count_this_demo": clip_count_this_demo,
+                                    "clips_so_far": clips_so_far,
+                                    "total_batch_clips": total_batch_clips,
+                                }),
+                            );
+                        }
+                        EngineEvent::Error(msg) => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "error": true,
+                                    "status": msg
+                                }),
+                            );
+                            break;
+                        }
+                        EngineEvent::AllCompleted => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "status": "Complete",
+                                    "index": total_jobs,
+                                    "total": total_jobs
+                                }),
+                            );
+                            emit_take_verification(&app_emitter, &manifest_for_listener);
+                            break;
+                        }
+                        EngineEvent::Cancelled => {
+                            let mut running =
+                                is_running_clone.lock().unwrap_or_else(|p| p.into_inner());
+                            *running = false;
+                            let _ = app_emitter.emit(
+                                "capture_status",
+                                serde_json::json!({
+                                    "running": false,
+                                    "status": "Cancelled"
+                                }),
+                            );
+                            // A cancelled batch still leaves real finished takes on
+                            // disk — verify anyway rather than discarding them.
+                            emit_take_verification(&app_emitter, &manifest_for_listener);
+                            break;
+                        }
                     }
                 }
-            }
             }));
 
             if let Err(panic_payload) = result {
@@ -1096,14 +1200,22 @@ pub async fn start_capture_batch_impl(
                     .map(|s| s.to_string())
                     .or_else(|| panic_payload.downcast_ref::<String>().cloned())
                     .unwrap_or_else(|| "unknown panic payload".to_string());
-                log_markdown(&format!("[capture] Event listener thread panicked: {}", msg));
-                let mut running = is_running_for_panic.lock().unwrap_or_else(|p| p.into_inner());
+                log_markdown(&format!(
+                    "[capture] Event listener thread panicked: {}",
+                    msg
+                ));
+                let mut running = is_running_for_panic
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner());
                 *running = false;
-                let _ = app_emitter_for_panic.emit("capture_status", serde_json::json!({
-                    "running": false,
-                    "error": true,
-                    "status": format!("Internal error in capture event listener: {}", msg)
-                }));
+                let _ = app_emitter_for_panic.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "error": true,
+                        "status": format!("Internal error in capture event listener: {}", msg)
+                    }),
+                );
             }
         });
 
@@ -1406,8 +1518,7 @@ fn resolve_preview_env(
         .parent()
         .map(|p| p.join("dod"))
         .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string())?;
-    std::fs::create_dir_all(&dod_dir)
-        .map_err(crate::messages::failed_to_create_dod_directory)?;
+    std::fs::create_dir_all(&dod_dir).map_err(crate::messages::failed_to_create_dod_directory)?;
 
     let patcher_config = PatcherConfig {
         hlae_path: hlae_path.to_string(),
@@ -1433,7 +1544,8 @@ fn patch_bookmark_previews(
     if streaks.is_empty() {
         return Err(crate::messages::NO_HIGHLIGHTS_TO_PREVIEW.to_string());
     }
-    let capture_streaks: Vec<CaptureStreak> = streaks.into_iter().map(CaptureStreak::from).collect();
+    let capture_streaks: Vec<CaptureStreak> =
+        streaks.into_iter().map(CaptureStreak::from).collect();
     let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
     if jobs.is_empty() {
         return Err(crate::messages::FAILED_TO_BUILD_PREVIEW_JOBS.to_string());
@@ -1442,7 +1554,9 @@ fn patch_bookmark_previews(
     let cancel_token = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let mut generated = 0usize;
     for job in &jobs {
-        let sidecar_path = job.output_demo.with_extension(native::shared::paths::PREVIEW_SIDECAR_EXT);
+        let sidecar_path = job
+            .output_demo
+            .with_extension(native::shared::paths::PREVIEW_SIDECAR_EXT);
         if job.output_demo.is_file() && sidecar_path.is_file() {
             // Already previewed in an earlier session — the bookmark set is
             // derived purely from this demo's own highlights, which don't
@@ -1473,9 +1587,12 @@ pub async fn launch_demo_preview(
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) = resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        let (patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
-        let job = jobs.first().ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
 
         let preview_stem = job
             .output_demo
@@ -1614,7 +1731,9 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             resolution_width: settings.resolution_width,
             resolution_height: settings.resolution_height,
             ffmpeg_capture: settings.ffmpeg_capture,
-            ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(&settings.ffmpeg_capture_codec),
+            ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
+                &settings.ffmpeg_capture_codec,
+            ),
             goldsrc_hooks_dll_path: settings.goldsrc_hooks_dll_path.clone(),
             ..PatcherConfig::default()
         };
@@ -1709,10 +1828,9 @@ pub fn kill_engine_processes() -> Result<(), String> {
     use sysinfo::{ProcessExt, SystemExt};
     let sys = sysinfo::System::new_all();
     for process in sys.processes().values() {
-        if is_engine_process_name(process.name())
-            && !process.kill() {
-                log::warn!("Failed to kill engine process pid={}", process.pid());
-            }
+        if is_engine_process_name(process.name()) && !process.kill() {
+            log::warn!("Failed to kill engine process pid={}", process.pid());
+        }
     }
     Ok(())
 }
@@ -1772,8 +1890,8 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
             return Ok(Vec::new());
         }
 
-        let entries = std::fs::read_dir(&dod_dir)
-            .map_err(crate::messages::failed_to_read_dod_directory)?;
+        let entries =
+            std::fs::read_dir(&dod_dir).map_err(crate::messages::failed_to_read_dod_directory)?;
 
         let mut results = Vec::new();
         for entry in entries.flatten() {
@@ -1781,7 +1899,11 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
             if !path.is_file() {
                 continue;
             }
-            let file_name = path.file_name().unwrap_or_default().to_string_lossy().to_string();
+            let file_name = path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
             if !file_name.to_lowercase().ends_with("_preview.dem") {
                 continue;
             }
@@ -1794,7 +1916,9 @@ pub async fn scan_orphaned_previews(game_dir: String) -> Result<Vec<PreviewFileS
                 Ok(m) => m,
                 Err(_) => continue,
             };
-            let sidecar_size = std::fs::metadata(&sidecar_path).map(|m| m.len()).unwrap_or(0);
+            let sidecar_size = std::fs::metadata(&sidecar_path)
+                .map(|m| m.len())
+                .unwrap_or(0);
             let modified_unix_secs = demo_meta
                 .modified()
                 .ok()
@@ -1890,8 +2014,16 @@ mod tests {
             session_id: "session_test".to_string(),
             init_commands: vec!["exec autoexec".to_string()],
             custom_commands: vec![
-                CustomCommandPayload { command: "say after".to_string(), relation: "After".to_string(), offset_seconds: 1.0 },
-                CustomCommandPayload { command: "say unrecognized".to_string(), relation: "Sideways".to_string(), offset_seconds: 1.0 },
+                CustomCommandPayload {
+                    command: "say after".to_string(),
+                    relation: "After".to_string(),
+                    offset_seconds: 1.0,
+                },
+                CustomCommandPayload {
+                    command: "say unrecognized".to_string(),
+                    relation: "Sideways".to_string(),
+                    offset_seconds: 1.0,
+                },
             ],
             decal_flush: None,
             decal_ring_limit: None,
@@ -1985,7 +2117,10 @@ mod tests {
     }
 
     fn read_cfg_commands_blocking(path: String) -> Result<Vec<String>, String> {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         rt.block_on(read_cfg_commands(path))
     }
 
@@ -1996,7 +2131,10 @@ mod tests {
             "// header comment\nmirv_fov 90\n\n  mirv_movie_fps 300  \n// trailing comment\nsensitivity 3\n",
         );
         let commands = read_cfg_commands_blocking(path.clone()).unwrap();
-        assert_eq!(commands, vec!["mirv_fov 90", "mirv_movie_fps 300", "sensitivity 3"]);
+        assert_eq!(
+            commands,
+            vec!["mirv_fov 90", "mirv_movie_fps 300", "sensitivity 3"]
+        );
     }
 
     #[test]
@@ -2082,7 +2220,11 @@ mod tests {
     #[test]
     fn tier_2_and_tier_3_commands_are_not_refused() {
         let err = first_banned_command_error(
-            &["mirv_movie_fps 500".to_string(), "r_decals \"256\"".to_string(), "mirv_fov 90".to_string()],
+            &[
+                "mirv_movie_fps 500".to_string(),
+                "r_decals \"256\"".to_string(),
+                "mirv_fov 90".to_string(),
+            ],
             &[],
         );
         assert!(err.is_none(), "{:?}", err);
@@ -2093,7 +2235,11 @@ mod tests {
         // r_decals/mirv_fov/gl_widescreenfov are exactly how the decal flush
         // is meant to be configured when set once at demo load.
         let err = first_banned_command_error(
-            &["r_decals 512".to_string(), "mirv_fov 105".to_string(), "gl_widescreenfov 1".to_string()],
+            &[
+                "r_decals 512".to_string(),
+                "mirv_fov 105".to_string(),
+                "gl_widescreenfov 1".to_string(),
+            ],
             &[],
         );
         assert!(err.is_none(), "{:?}", err);

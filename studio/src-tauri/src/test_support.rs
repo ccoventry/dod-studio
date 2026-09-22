@@ -111,18 +111,24 @@ mod tests {
         {
             let dir = Scratch::new("test_support_lifecycle");
             path = dir.path().to_path_buf();
-            assert!(path.is_dir(), "the directory should exist while the guard is held");
+            assert!(
+                path.is_dir(),
+                "the directory should exist while the guard is held"
+            );
             std::fs::write(dir.join("file"), b"x").unwrap();
         }
-        assert!(!path.exists(), "the guard should have removed the tree, contents and all");
+        assert!(
+            !path.exists(),
+            "the guard should have removed the tree, contents and all"
+        );
     }
 
     #[test]
     fn a_panicking_test_still_cleans_up() {
         // The whole reason this is a guard rather than a trailing statement:
         // the test that leaves the most behind is the one that fails.
-        let path = std::env::temp_dir()
-            .join(format!("dod_test_support_panic_{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("dod_test_support_panic_{}", std::process::id()));
         let caught = std::panic::catch_unwind(|| {
             let _dir = Scratch::at(path.clone());
             panic!("as a failing test would");
@@ -133,8 +139,8 @@ mod tests {
 
     #[test]
     fn entry_clearing_survives_a_directory_left_by_an_earlier_run() {
-        let path = std::env::temp_dir()
-            .join(format!("dod_test_support_stale_{}", std::process::id()));
+        let path =
+            std::env::temp_dir().join(format!("dod_test_support_stale_{}", std::process::id()));
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join("left_over"), b"from a previous run").unwrap();
 

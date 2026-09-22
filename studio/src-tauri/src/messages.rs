@@ -36,7 +36,9 @@ use std::fmt::Display;
 pub async fn flatten_spawn_blocking<T>(
     handle: tokio::task::JoinHandle<Result<T, String>>,
 ) -> Result<T, String> {
-    handle.await.map_err(|e| format!("Task join error: {}", e))?
+    handle
+        .await
+        .map_err(|e| format!("Task join error: {}", e))?
 }
 
 /// For a `spawn_blocking` closure returning a plain `T` (no inner Result).
@@ -92,15 +94,22 @@ pub const CAPTURE_BATCH_ALREADY_RUNNING: &str = "Capture batch already in progre
 pub const NO_STREAKS_IN_PAYLOAD: &str = "No streaks in payload";
 
 pub fn configure_paths_before(action: &str) -> String {
-    format!("Configure the HLAE and Half-Life executable paths before {}.", action)
+    format!(
+        "Configure the HLAE and Half-Life executable paths before {}.",
+        action
+    )
 }
 
-pub const HLAE_NOT_FOUND_AT_CONFIGURED_PATH: &str = "HLAE executable not found at the configured path.";
-pub const HL_NOT_FOUND_AT_CONFIGURED_PATH: &str = "Half-Life executable not found at the configured path.";
+pub const HLAE_NOT_FOUND_AT_CONFIGURED_PATH: &str =
+    "HLAE executable not found at the configured path.";
+pub const HL_NOT_FOUND_AT_CONFIGURED_PATH: &str =
+    "Half-Life executable not found at the configured path.";
 pub const NO_HIGHLIGHTS_TO_PREVIEW: &str = "This demo has no highlights to preview.";
 pub const FAILED_TO_BUILD_PREVIEW_JOBS: &str = "Failed to build any preview patch jobs.";
-pub const CONFIGURE_OBS_PATH_BEFORE_LAUNCHING: &str = "Configure the OBS executable path before launching.";
-pub const OBS_NOT_FOUND_AT_CONFIGURED_PATH: &str = "OBS executable not found at the configured path.";
+pub const CONFIGURE_OBS_PATH_BEFORE_LAUNCHING: &str =
+    "Configure the OBS executable path before launching.";
+pub const OBS_NOT_FOUND_AT_CONFIGURED_PATH: &str =
+    "OBS executable not found at the configured path.";
 
 pub fn obs_connection_test_failed(err: impl Display) -> String {
     format!("OBS connection test failed to run: {}", err)
@@ -145,9 +154,11 @@ pub fn game_directory_not_found(game_dir: &str) -> String {
 /// Same text independently authored twice (`resolve_preview_env` and
 /// `resolve_dod_dir_for_sweep`) — both derive `dod_dir` from `hl.exe`'s
 /// parent and fail identically when that parent can't be resolved.
-pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str = "Could not resolve the 'dod' directory next to hl.exe";
+pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str =
+    "Could not resolve the 'dod' directory next to hl.exe";
 pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview patch job";
-pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str = "Could not resolve the preview demo's file stem";
+pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
+    "Could not resolve the preview demo's file stem";
 
 pub fn failed_to_read_dod_directory(err: impl Display) -> String {
     format!("Failed to read dod directory: {}", err)
@@ -156,7 +167,8 @@ pub fn failed_to_read_dod_directory(err: impl Display) -> String {
 // ── render_manager.rs ────────────────────────────────────────────────────
 
 pub const RENDER_BATCH_ALREADY_RUNNING_LONG: &str = "A render batch is already running.";
-pub const BATCH_ALREADY_QUEUED: &str = "A batch is already queued — start it or cancel it before scanning again.";
+pub const BATCH_ALREADY_QUEUED: &str =
+    "A batch is already queued — start it or cancel it before scanning again.";
 pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in progress";
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
@@ -166,7 +178,10 @@ pub fn no_such_job(job_id: &str) -> String {
 }
 
 pub fn job_not_queued(job_id: &str, status: impl Display) -> String {
-    format!("Job {} is {} — only a Queued job's codec can be changed", job_id, status)
+    format!(
+        "Job {} is {} — only a Queued job's codec can be changed",
+        job_id, status
+    )
 }
 
 pub fn job_still_rendering(job_id: &str) -> String {
@@ -245,7 +260,8 @@ pub fn failed_to_build_updater(err: impl Display) -> String {
     format!("Failed to build updater: {}", err)
 }
 
-pub const NO_UPDATE_AVAILABLE_TO_INSTALL: &str = "No update available to install — call check_for_update first";
+pub const NO_UPDATE_AVAILABLE_TO_INSTALL: &str =
+    "No update available to install — call check_for_update first";
 
 // ── settings_manager.rs ──────────────────────────────────────────────────
 
@@ -279,8 +295,14 @@ mod tests {
             failed_to_read_file("proj.json", "not found"),
             format!("Failed to read {}: {}", "proj.json", "not found")
         );
-        assert_eq!(HLAE_EXECUTABLE_NOT_FOUND, "HLAE executable not found at specified path.");
-        assert_eq!(HL_EXECUTABLE_NOT_FOUND, "Half-Life executable not found at specified path.");
+        assert_eq!(
+            HLAE_EXECUTABLE_NOT_FOUND,
+            "HLAE executable not found at specified path."
+        );
+        assert_eq!(
+            HL_EXECUTABLE_NOT_FOUND,
+            "Half-Life executable not found at specified path."
+        );
         assert_eq!(
             demo_file_not_found("demo.dem"),
             format!("Demo file not found: {}", "demo.dem")
@@ -289,7 +311,10 @@ mod tests {
             not_a_directory("C:/some/file.txt"),
             format!("Not a directory: {}", "C:/some/file.txt")
         );
-        assert_eq!(analyzer_error("bad header"), format!("Analyzer error: {}", "bad header"));
+        assert_eq!(
+            analyzer_error("bad header"),
+            format!("Analyzer error: {}", "bad header")
+        );
         assert_eq!(
             ffmpeg_could_not_be_resolved("ffmpeg"),
             format!(
@@ -303,15 +328,24 @@ mod tests {
 
     #[test]
     fn capture_manager_messages_match_their_original_inline_text() {
-        assert_eq!(CAPTURE_BATCH_ALREADY_RUNNING, "Capture batch already in progress");
+        assert_eq!(
+            CAPTURE_BATCH_ALREADY_RUNNING,
+            "Capture batch already in progress"
+        );
         assert_eq!(NO_STREAKS_IN_PAYLOAD, "No streaks in payload");
         assert_eq!(
             configure_paths_before("previewing"),
-            format!("Configure the HLAE and Half-Life executable paths before {}.", "previewing")
+            format!(
+                "Configure the HLAE and Half-Life executable paths before {}.",
+                "previewing"
+            )
         );
         assert_eq!(
             configure_paths_before("launching"),
-            format!("Configure the HLAE and Half-Life executable paths before {}.", "launching")
+            format!(
+                "Configure the HLAE and Half-Life executable paths before {}.",
+                "launching"
+            )
         );
         assert_eq!(
             HLAE_NOT_FOUND_AT_CONFIGURED_PATH,
@@ -321,8 +355,14 @@ mod tests {
             HL_NOT_FOUND_AT_CONFIGURED_PATH,
             "Half-Life executable not found at the configured path."
         );
-        assert_eq!(NO_HIGHLIGHTS_TO_PREVIEW, "This demo has no highlights to preview.");
-        assert_eq!(FAILED_TO_BUILD_PREVIEW_JOBS, "Failed to build any preview patch jobs.");
+        assert_eq!(
+            NO_HIGHLIGHTS_TO_PREVIEW,
+            "This demo has no highlights to preview."
+        );
+        assert_eq!(
+            FAILED_TO_BUILD_PREVIEW_JOBS,
+            "Failed to build any preview patch jobs."
+        );
         assert_eq!(
             CONFIGURE_OBS_PATH_BEFORE_LAUNCHING,
             "Configure the OBS executable path before launching."
@@ -349,7 +389,10 @@ mod tests {
         );
         assert_eq!(
             failed_to_patch_preview_demo("demo1.dem", "bad frame"),
-            format!("Failed to patch preview demo for {}: {}", "demo1.dem", "bad frame")
+            format!(
+                "Failed to patch preview demo for {}: {}",
+                "demo1.dem", "bad frame"
+            )
         );
         assert_eq!(
             failed_to_write_preview_sidecar("disk full"),
@@ -375,7 +418,10 @@ mod tests {
             COULD_NOT_RESOLVE_DOD_DIRECTORY,
             "Could not resolve the 'dod' directory next to hl.exe"
         );
-        assert_eq!(FAILED_TO_BUILD_PREVIEW_PATCH_JOB, "Failed to build the preview patch job");
+        assert_eq!(
+            FAILED_TO_BUILD_PREVIEW_PATCH_JOB,
+            "Failed to build the preview patch job"
+        );
         assert_eq!(
             COULD_NOT_RESOLVE_PREVIEW_FILE_STEM,
             "Could not resolve the preview demo's file stem"
@@ -388,13 +434,22 @@ mod tests {
 
     #[test]
     fn render_manager_messages_match_their_original_inline_text() {
-        assert_eq!(RENDER_BATCH_ALREADY_RUNNING_LONG, "A render batch is already running.");
+        assert_eq!(
+            RENDER_BATCH_ALREADY_RUNNING_LONG,
+            "A render batch is already running."
+        );
         assert_eq!(
             BATCH_ALREADY_QUEUED,
             "A batch is already queued — start it or cancel it before scanning again."
         );
-        assert_eq!(RENDER_BATCH_ALREADY_IN_PROGRESS, "Render batch already in progress");
-        assert_eq!(NOTHING_QUEUED_TO_RENDER, "Nothing queued to render — scan for takes first.");
+        assert_eq!(
+            RENDER_BATCH_ALREADY_IN_PROGRESS,
+            "Render batch already in progress"
+        );
+        assert_eq!(
+            NOTHING_QUEUED_TO_RENDER,
+            "Nothing queued to render — scan for takes first."
+        );
         assert_eq!(
             SKIP_ONLY_FOR_OBS_TAKE,
             "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip)."
@@ -402,7 +457,10 @@ mod tests {
         assert_eq!(no_such_job("job-1"), format!("No such job: {}", "job-1"));
         assert_eq!(
             job_not_queued("job-1", "Rendering"),
-            format!("Job {} is {} — only a Queued job's codec can be changed", "job-1", "Rendering")
+            format!(
+                "Job {} is {} — only a Queued job's codec can be changed",
+                "job-1", "Rendering"
+            )
         );
         assert_eq!(
             job_still_rendering("job-1"),
@@ -444,9 +502,18 @@ mod tests {
                 "C:/games/dod/hl.exe"
             )
         );
-        assert_eq!(map_check_failed("panic"), format!("map check failed: {}", "panic"));
-        assert_eq!(config_scan_failed("panic"), format!("config scan failed: {}", "panic"));
-        assert_eq!(map_download_failed("panic"), format!("map download failed: {}", "panic"));
+        assert_eq!(
+            map_check_failed("panic"),
+            format!("map check failed: {}", "panic")
+        );
+        assert_eq!(
+            config_scan_failed("panic"),
+            format!("config scan failed: {}", "panic")
+        );
+        assert_eq!(
+            map_download_failed("panic"),
+            format!("map download failed: {}", "panic")
+        );
     }
 
     #[test]
@@ -481,7 +548,10 @@ mod tests {
         );
         assert_eq!(
             failed_to_write_settings_file("C:/settings.json", "disk full"),
-            format!("Failed to write settings file {:?}: {}", "C:/settings.json", "disk full")
+            format!(
+                "Failed to write settings file {:?}: {}",
+                "C:/settings.json", "disk full"
+            )
         );
     }
 

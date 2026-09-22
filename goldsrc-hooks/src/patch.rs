@@ -20,7 +20,12 @@ pub unsafe fn write_code_bytes(address: usize, bytes: &[u8]) -> bool {
     let target = address as *mut u8;
     let mut old: PAGE_PROTECTION_FLAGS = 0;
     let ok = unsafe {
-        VirtualProtect(target as *mut c_void, bytes.len(), PAGE_EXECUTE_READWRITE, &mut old)
+        VirtualProtect(
+            target as *mut c_void,
+            bytes.len(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        )
     };
     if ok == 0 {
         return false;

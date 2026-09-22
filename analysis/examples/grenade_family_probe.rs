@@ -39,7 +39,9 @@ const SEQ: [&str; 9] = [
 ];
 
 fn seq_name(n: i32) -> String {
-    SEQ.get(n as usize).map(|s| s.to_string()).unwrap_or_else(|| format!("seq{n}"))
+    SEQ.get(n as usize)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("seq{n}"))
 }
 
 fn delta_u32(delta: &dem::types::Delta, field: &str) -> Option<u32> {
@@ -51,7 +53,10 @@ fn delta_u32(delta: &dem::types::Delta, field: &str) -> Option<u32> {
 
 fn main() {
     let paths: Vec<String> = std::env::args().skip(1).collect();
-    assert!(!paths.is_empty(), "usage: grenade_family_probe <pov-demo>...");
+    assert!(
+        !paths.is_empty(),
+        "usage: grenade_family_probe <pov-demo>..."
+    );
 
     // Transitions pooled across every demo given, since one half holds only a
     // few dozen throws.
@@ -83,10 +88,16 @@ fn main() {
                 {
                     stream.push((frame.time, wa.anim));
                 }
-                let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-                let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+                let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                    continue;
+                };
+                let MessageData::Parsed(msgs) = &bt.1.messages else {
+                    continue;
+                };
                 for m in msgs {
-                    let NetMessage::EngineMessage(em) = m else { continue };
+                    let NetMessage::EngineMessage(em) = m else {
+                        continue;
+                    };
                     match &**em {
                         EngineMessage::SvcResourceList(rl) => {
                             for r in &rl.resources {
@@ -114,7 +125,10 @@ fn main() {
             }
         }
 
-        let name = std::path::Path::new(path).file_name().unwrap_or_default().to_string_lossy();
+        let name = std::path::Path::new(path)
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy();
         println!("=== {name}: {} grenade animations", stream.len());
 
         // The first two dozen in order, which is where the state machine shows
@@ -132,7 +146,9 @@ fn main() {
             if w[1].0 - w[0].0 > 20.0 {
                 continue;
             }
-            *transitions.entry((seq_name(w[0].1), seq_name(w[1].1))).or_default() += 1;
+            *transitions
+                .entry((seq_name(w[0].1), seq_name(w[1].1)))
+                .or_default() += 1;
         }
         for (_, s) in &stream {
             *totals.entry(seq_name(*s)).or_default() += 1;

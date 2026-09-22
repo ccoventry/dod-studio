@@ -12,7 +12,8 @@ impl Doer for SvcWeaponAnim {
                 sequence_number,
                 weapon_model_body_group,
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {
