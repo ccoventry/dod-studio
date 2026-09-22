@@ -112,8 +112,12 @@ pub fn apply() -> usize {
     if !ENABLED.load(Ordering::Relaxed) {
         return 0;
     }
-    let Some(engfuncs) = engine::engfuncs() else { return 0 };
-    let Some(studio) = engine::engine_studio() else { return 0 };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return 0;
+    };
+    let Some(studio) = engine::engine_studio() else {
+        return 0;
+    };
 
     let mut replaced = 0;
     // `skip(1)` because entity index 0 is the world, and iterating the slots
@@ -209,7 +213,10 @@ mod tests {
     #[test]
     fn there_is_a_slot_for_every_player_index() {
         assert_eq!(LAST_NORMAL.len(), MAX_PLAYERS + 1);
-        assert!(LAST_NORMAL.len() > MAX_PLAYERS, "index {MAX_PLAYERS} must be addressable");
+        assert!(
+            LAST_NORMAL.len() > MAX_PLAYERS,
+            "index {MAX_PLAYERS} must be addressable"
+        );
     }
 
     /// The prefix is the whole detection rule, and it has to match DoD's own
@@ -256,7 +263,11 @@ mod tests {
         assert!(status().contains("normally"), "{}", status());
 
         ENABLED.store(true, Ordering::Relaxed);
-        assert!(status().contains("not just the spectated player"), "{}", status());
+        assert!(
+            status().contains("not just the spectated player"),
+            "{}",
+            status()
+        );
         assert!(!has_acted());
 
         REPLACED.store(5, Ordering::Relaxed);

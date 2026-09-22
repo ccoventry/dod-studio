@@ -71,7 +71,10 @@ pub fn did_not_identify_as_ffmpeg(path: impl Display) -> String {
 }
 
 pub fn reports_itself_as(path: impl Display, banner: &str) -> String {
-    format!("{} is not FFmpeg — it reports itself as \"{}\"", path, banner)
+    format!(
+        "{} is not FFmpeg — it reports itself as \"{}\"",
+        path, banner
+    )
 }
 
 // ── obs/session.rs ───────────────────────────────────────────────────────
@@ -118,11 +121,17 @@ mod tests {
         );
         assert_eq!(
             served_unreadable_bsp("http://x", "bad bsp"),
-            format!("what {} served is not a readable BSP: {}", "http://x", "bad bsp")
+            format!(
+                "what {} served is not a readable BSP: {}",
+                "http://x", "bad bsp"
+            )
         );
         assert_eq!(
             served_unparseable_map("http://x", "bad map"),
-            format!("what {} served does not parse as a map: {}", "http://x", "bad map")
+            format!(
+                "what {} served does not parse as a map: {}",
+                "http://x", "bad map"
+            )
         );
         assert_eq!(
             served_wrong_build("http://x", 0x1234, 0x5678),
@@ -133,7 +142,10 @@ mod tests {
         );
         assert_eq!(
             could_not_move_existing_aside("old.bsp", "in use"),
-            format!("could not move the existing {} aside: {}", "old.bsp", "in use")
+            format!(
+                "could not move the existing {} aside: {}",
+                "old.bsp", "in use"
+            )
         );
         assert_eq!(
             url_returned_status("http://x", 404),
@@ -143,7 +155,10 @@ mod tests {
 
     #[test]
     fn hlae_ffmpeg_messages_match_their_original_inline_text() {
-        assert_eq!(not_a_file("ffmpeg.exe"), format!("{} is not a file", "ffmpeg.exe"));
+        assert_eq!(
+            not_a_file("ffmpeg.exe"),
+            format!("{} is not a file", "ffmpeg.exe")
+        );
         assert_eq!(
             could_not_run("ffmpeg.exe", "access denied"),
             format!("could not run {}: {}", "ffmpeg.exe", "access denied")

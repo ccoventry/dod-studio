@@ -15,10 +15,10 @@ use std::process::ExitCode;
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Diagnostics::Debug::WriteProcessMemory;
 use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
-use windows_sys::Win32::System::Memory::{VirtualAllocEx, MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE};
+use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAllocEx};
 use windows_sys::Win32::System::Threading::{
-    CreateRemoteThread, OpenProcess, WaitForSingleObject, INFINITE, PROCESS_CREATE_THREAD,
-    PROCESS_QUERY_INFORMATION, PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE,
+    CreateRemoteThread, INFINITE, OpenProcess, PROCESS_CREATE_THREAD, PROCESS_QUERY_INFORMATION,
+    PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, WaitForSingleObject,
 };
 
 fn main() -> ExitCode {
@@ -48,12 +48,18 @@ fn main() -> ExitCode {
 
     unsafe {
         let process: HANDLE = OpenProcess(
-            PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION | PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
+            PROCESS_CREATE_THREAD
+                | PROCESS_QUERY_INFORMATION
+                | PROCESS_VM_OPERATION
+                | PROCESS_VM_WRITE
+                | PROCESS_VM_READ,
             0,
             pid,
         );
         if process.is_null() {
-            eprintln!("OpenProcess({pid}) failed -- is that PID correct, and are you running as the same user (or elevated)?");
+            eprintln!(
+                "OpenProcess({pid}) failed -- is that PID correct, and are you running as the same user (or elevated)?"
+            );
             return ExitCode::FAILURE;
         }
 
@@ -79,7 +85,10 @@ fn main() -> ExitCode {
             &mut written,
         );
         if ok == 0 || written != dll_path_c.len() {
-            eprintln!("WriteProcessMemory failed (wrote {written}/{} bytes)", dll_path_c.len());
+            eprintln!(
+                "WriteProcessMemory failed (wrote {written}/{} bytes)",
+                dll_path_c.len()
+            );
             CloseHandle(process);
             return ExitCode::FAILURE;
         }
@@ -125,6 +134,8 @@ fn main() -> ExitCode {
     }
 
     println!("Injected {dll_path_str} into process {pid}.");
-    println!("Check %APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks.log for its own diagnostics.");
+    println!(
+        "Check %APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks.log for its own diagnostics."
+    );
     ExitCode::SUCCESS
 }

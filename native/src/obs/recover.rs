@@ -23,7 +23,7 @@ use std::path::{Path, PathBuf};
 use crate::patch::ObsConfig;
 
 use super::client::{ObsClient, ObsError};
-use super::session::{fold_into_take, STREAM_FOLDER, TAKE_FOLDER};
+use super::session::{STREAM_FOLDER, TAKE_FOLDER, fold_into_take};
 
 /// What start-up found.
 #[derive(Debug, Clone, serde::Serialize)]

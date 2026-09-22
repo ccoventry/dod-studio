@@ -359,7 +359,9 @@ fn resolve() -> Result<usize, String> {
 
 /// Whether `name` is an element this can hide.
 pub fn find(name: &str) -> Option<usize> {
-    ELEMENTS.iter().position(|e| e.name.eq_ignore_ascii_case(name))
+    ELEMENTS
+        .iter()
+        .position(|e| e.name.eq_ignore_ascii_case(name))
 }
 
 /// Records that `index` should be hidden or shown. The write itself happens in
@@ -419,7 +421,10 @@ pub fn apply() -> Result<usize, String> {
         }
         // Safety: four bytes inside the module, made writable and restored.
         if !unsafe { crate::patch::write_code_bytes(slot, &(want as u32).to_le_bytes()) } {
-            return Err(format!("could not make {}'s vftable writable", element.name));
+            return Err(format!(
+                "could not make {}'s vftable writable",
+                element.name
+            ));
         }
         written += 1;
     }
@@ -481,10 +486,17 @@ mod tests {
     fn names_are_unique_and_typeable() {
         let mut seen = HashSet::new();
         for element in ELEMENTS {
-            assert!(seen.insert(element.name), "{} is listed twice", element.name);
+            assert!(
+                seen.insert(element.name),
+                "{} is listed twice",
+                element.name
+            );
             assert!(!element.name.is_empty());
             assert!(
-                element.name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
+                element
+                    .name
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit()),
                 "{:?} should be lowercase and digits only -- it gets typed into a console",
                 element.name
             );
@@ -526,7 +538,11 @@ mod tests {
     fn the_donor_is_not_one_of_the_hideable_elements() {
         assert!(find(BASE_DRAW_DONOR.name).is_none());
         assert!(!ELEMENTS.iter().any(|e| e.class == BASE_DRAW_DONOR.class));
-        assert!(!ELEMENTS.iter().any(|e| e.vftable_rva == BASE_DRAW_DONOR.vftable_rva));
+        assert!(
+            !ELEMENTS
+                .iter()
+                .any(|e| e.vftable_rva == BASE_DRAW_DONOR.vftable_rva)
+        );
     }
 
     #[test]
@@ -582,10 +598,22 @@ mod tests {
         set_hidden(find("saytext").unwrap(), true);
         let listing = listing();
         for element in ELEMENTS {
-            assert!(listing.contains(element.name), "{} is missing", element.name);
+            assert!(
+                listing.contains(element.name),
+                "{} is missing",
+                element.name
+            );
         }
-        assert!(listing.lines().any(|l| l.contains("saytext") && l.contains(" 1 ")));
-        assert!(listing.lines().any(|l| l.contains("crosshair") && l.contains(" 0 ")));
+        assert!(
+            listing
+                .lines()
+                .any(|l| l.contains("saytext") && l.contains(" 1 "))
+        );
+        assert!(
+            listing
+                .lines()
+                .any(|l| l.contains("crosshair") && l.contains(" 0 "))
+        );
         show_all();
     }
 
@@ -607,7 +635,10 @@ mod tests {
     #[test]
     fn the_no_op_draw_is_exactly_chudbase_draw() {
         assert_eq!(BASE_DRAW_CODE, &[0x33, 0xc0, 0xc2, 0x04, 0x00]);
-        assert_eq!(u16::from_le_bytes([BASE_DRAW_CODE[3], BASE_DRAW_CODE[4]]), 4);
+        assert_eq!(
+            u16::from_le_bytes([BASE_DRAW_CODE[3], BASE_DRAW_CODE[4]]),
+            4
+        );
     }
 
     /// `Draw` is the fourth virtual, after the destructor, `Init` and

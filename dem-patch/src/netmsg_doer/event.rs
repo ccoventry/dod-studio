@@ -35,10 +35,7 @@ impl Doer for SvcEvent {
                     None
                 };
                 let delta = if has_delta.is_some() && has_delta.unwrap() {
-                    Some(parse_delta(
-                        event_decoder,
-                        &mut br,
-                    ))
+                    Some(parse_delta(event_decoder, &mut br))
                 } else {
                     None
                 };

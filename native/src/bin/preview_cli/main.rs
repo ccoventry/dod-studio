@@ -109,13 +109,24 @@ fn main() {
                 if ext.to_lowercase() != "dem" {
                     continue;
                 }
-                process_demo(&file_path, &output_dir, &patcher_config, requested_player, &cancel_token, &mut processed, &mut skipped);
+                process_demo(
+                    &file_path,
+                    &output_dir,
+                    &patcher_config,
+                    requested_player,
+                    &cancel_token,
+                    &mut processed,
+                    &mut skipped,
+                );
             }
         } else if path.is_file() {
             // ── Individual file input ────────────────────────────────────────
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext.to_lowercase() != "dem" {
-                eprintln!("Skipped: {:?} — Not a .dem file", path.file_name().unwrap_or_default());
+                eprintln!(
+                    "Skipped: {:?} — Not a .dem file",
+                    path.file_name().unwrap_or_default()
+                );
                 skipped += 1;
                 continue;
             }
@@ -132,7 +143,15 @@ fn main() {
             }
             println!("Created directory: {:?}", output_dir);
 
-            process_demo(&path, &output_dir, &patcher_config, requested_player, &cancel_token, &mut processed, &mut skipped);
+            process_demo(
+                &path,
+                &output_dir,
+                &patcher_config,
+                requested_player,
+                &cancel_token,
+                &mut processed,
+                &mut skipped,
+            );
         } else {
             eprintln!("Skipped: {:?} — Path not accessible", path);
             skipped += 1;
@@ -199,9 +218,15 @@ fn print_roster(streaks: &[native::patch::CaptureStreak]) {
     let mut by_player: std::collections::HashMap<usize, (String, usize, u32)> =
         std::collections::HashMap::new();
     for s in streaks {
-        let entry = by_player
-            .entry(s.player_index)
-            .or_insert_with(|| (s.target_player.clone().unwrap_or_else(|| "<unnamed>".into()), 0, 0));
+        let entry = by_player.entry(s.player_index).or_insert_with(|| {
+            (
+                s.target_player
+                    .clone()
+                    .unwrap_or_else(|| "<unnamed>".into()),
+                0,
+                0,
+            )
+        });
         entry.1 += 1;
         entry.2 += s.kill_count as u32;
     }
@@ -229,15 +254,22 @@ fn process_demo(
         .unwrap_or_default();
     println!("Processing: {}", original_filename);
 
-    let (_tickrate, mut streaks, is_pov, local_player_idx, _playback_frames, _match_start, _frame_times) =
-        match native::patch::scan_demo_for_highlights(path) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("  Skipped: {} — Scan error: {}", original_filename, e);
-                *skipped += 1;
-                return;
-            }
-        };
+    let (
+        _tickrate,
+        mut streaks,
+        is_pov,
+        local_player_idx,
+        _playback_frames,
+        _match_start,
+        _frame_times,
+    ) = match native::patch::scan_demo_for_highlights(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  Skipped: {} — Scan error: {}", original_filename, e);
+            *skipped += 1;
+            return;
+        }
+    };
 
     // A POV demo already records the only camera it has, and its highlights are
     // filtered to the recording player anyway, so there is nothing for
@@ -246,7 +278,9 @@ fn process_demo(
     let selected_player = if is_pov {
         streaks.retain(|s| Some(s.player_index) == local_player_idx);
         if requested_player.is_some() {
-            println!("  Note: {original_filename} is a POV demo — --player ignored (its camera is already one player's)");
+            println!(
+                "  Note: {original_filename} is a POV demo — --player ignored (its camera is already one player's)"
+            );
         }
         None
     } else {
@@ -263,7 +297,9 @@ fn process_demo(
         let roster = streaks.clone();
         streaks.retain(|s| streak_matches_player(s, want));
         if streaks.is_empty() {
-            println!("  Skipped: {original_filename} — no highlights for a player matching \"{want}\"");
+            println!(
+                "  Skipped: {original_filename} — no highlights for a player matching \"{want}\""
+            );
             print_roster(&roster);
             *skipped += 1;
             return;
@@ -279,7 +315,12 @@ fn process_demo(
     // Taken before `streaks` is moved into the builder.
     let chosen_player = selected_player.map(|_| {
         let s = &streaks[0];
-        (s.player_index, s.target_player.clone().unwrap_or_else(|| format!("p{}", s.player_index)))
+        (
+            s.player_index,
+            s.target_player
+                .clone()
+                .unwrap_or_else(|| format!("p{}", s.player_index)),
+        )
     });
 
     let mut jobs = native::patch::build_preview_patch_jobs(streaks, Some(output_dir));
@@ -299,11 +340,14 @@ fn process_demo(
             let safe = native::patch::playdemo_safe_stem(&format!("{stem}_{index}"));
             job.output_demo = output_dir.join(format!("{safe}_preview.dem"));
         }
-        println!("  Bookmarking only {name} (index {index}) — the camera stays with the auto-director");
+        println!(
+            "  Bookmarking only {name} (index {index}) — the camera stays with the auto-director"
+        );
     }
 
     for job in &jobs {
-        let new_filename = job.output_demo
+        let new_filename = job
+            .output_demo
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_default();

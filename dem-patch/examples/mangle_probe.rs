@@ -38,7 +38,11 @@ impl Rng {
         x.wrapping_mul(0x2545_f491_4f6c_dd1d)
     }
     fn below(&mut self, n: usize) -> usize {
-        if n == 0 { 0 } else { (self.next() % n as u64) as usize }
+        if n == 0 {
+            0
+        } else {
+            (self.next() % n as u64) as usize
+        }
     }
 }
 
@@ -137,7 +141,9 @@ fn roundtrip_dir(dir: &str) {
     let mut paths: Vec<PathBuf> = Vec::new();
     let mut stack = vec![PathBuf::from(dir)];
     while let Some(d) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&d) else { continue };
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
         for e in rd.flatten() {
             let p = e.path();
             if p.is_dir() {
@@ -160,7 +166,11 @@ fn roundtrip_dir(dir: &str) {
                 done += 1;
             }
             Err(e) => {
-                println!("PARSE-ERR {} -- {}", p.display(), first_line(&e.to_string()));
+                println!(
+                    "PARSE-ERR {} -- {}",
+                    p.display(),
+                    first_line(&e.to_string())
+                );
                 refused += 1;
             }
         }
@@ -192,7 +202,12 @@ fn main() {
     let count: u64 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(200);
 
     let src = std::fs::read(src_path).expect("read source demo");
-    println!("source {} ({} bytes), {} mutants", src_path, src.len(), count);
+    println!(
+        "source {} ({} bytes), {} mutants",
+        src_path,
+        src.len(),
+        count
+    );
 
     let exe = std::env::current_exe().expect("current_exe");
     let scratch = std::env::temp_dir().join(format!("dem_mangle_{}", std::process::id()));
@@ -258,10 +273,15 @@ fn main() {
     }
 
     println!();
-    println!("ok {ok}  err {err}  caught-panic {panicked}  ABORTS {}", aborts.len());
+    println!(
+        "ok {ok}  err {err}  caught-panic {panicked}  ABORTS {}",
+        aborts.len()
+    );
     if !sites.is_empty() {
-        println!("
-distinct abort sites:");
+        println!(
+            "
+distinct abort sites:"
+        );
         let mut rows: Vec<_> = sites.iter().collect();
         rows.sort_by(|a, b| b.1.cmp(a.1));
         for (site, n) in rows {

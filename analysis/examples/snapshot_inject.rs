@@ -27,8 +27,8 @@
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
 use dem::types::{
-    Delta, EngineMessage, EntityState, Frame, FrameData, MessageData, NetMessage,
-    SvcClientData, SvcDeltaPacketEntities, SvcPacketEntities, SvcTime, UserMessage,
+    Delta, EngineMessage, EntityState, Frame, FrameData, MessageData, NetMessage, SvcClientData,
+    SvcDeltaPacketEntities, SvcPacketEntities, SvcTime, UserMessage,
 };
 use std::collections::BTreeMap;
 
@@ -115,9 +115,10 @@ fn main() {
                     if let MessageData::Parsed(msgs) = &bt.1.messages {
                         for m in msgs {
                             if let NetMessage::EngineMessage(em) = m
-                                && let EngineMessage::SvcDeltaPacketEntities(pe) = &**em {
-                                    last_delta_seq = pe.delta_sequence.to_u32();
-                                }
+                                && let EngineMessage::SvcDeltaPacketEntities(pe) = &**em
+                            {
+                                last_delta_seq = pe.delta_sequence.to_u32();
+                            }
                         }
                     }
                 }
@@ -125,9 +126,14 @@ fn main() {
             }
         }
     }
-    if joins.is_empty() { println!("no join found -- nothing to inject"); return }
+    if joins.is_empty() {
+        println!("no join found -- nothing to inject");
+        return;
+    }
     println!("{} join(s) found:", joins.len());
-    for (i, t, j) in &joins { println!("  frame {i} (t={t:.2}s), incoming_sequence jumps by {j}") }
+    for (i, t, j) in &joins {
+        println!("  frame {i} (t={t:.2}s), incoming_sequence jumps by {j}")
+    }
     // Replay the whole demo once, merging every entity's fields into one state,
     // and take a copy of that state as each join goes past. Replaying up to each
     // join separately would be the same work over again per join.
@@ -145,14 +151,24 @@ fn main() {
     let mut acc: BTreeMap<u16, EntAcc> = BTreeMap::new();
     if let Some(entry0) = demo.directory.entries.first() {
         for f in &entry0.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
-                let EngineMessage::SvcSpawnBaseline(sb) = &**em else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
+                let EngineMessage::SvcSpawnBaseline(sb) = &**em else {
+                    continue;
+                };
                 for es in &sb.entities {
                     let e = acc.entry(es.entity_index).or_default();
-                    for (k, v) in es.delta.iter() { e.fields.insert(k.clone(), v.clone()); }
+                    for (k, v) in es.delta.iter() {
+                        e.fields.insert(k.clone(), v.clone());
+                    }
                 }
             }
         }
@@ -182,28 +198,41 @@ fn main() {
                 client_at_join.push(client_acc.clone());
                 next_join += 1;
             }
-            if next_join >= joins.len() { break 'replay }
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            if next_join >= joins.len() {
+                break 'replay;
+            }
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
                 let NetMessage::EngineMessage(em) = m else {
                     // `CurWeapon` payload is `[is_active: u8, weapon: u8, clip_ammo: u8]`
                     // (dod::lib.rs `cur_weapon`). Only the is_active=true half of a
                     // switch pair says what's actually in hand right now.
                     if let NetMessage::UserMessage(um) = m
-                        && um.name.starts_with(b"CurWeapon") && um.data.len() == 3 && um.data[0] != 0 {
-                            client_acc.cur_weapon = Some((um.id, um.data.clone()));
-                        }
+                        && um.name.starts_with(b"CurWeapon")
+                        && um.data.len() == 3
+                        && um.data[0] != 0
+                    {
+                        client_acc.cur_weapon = Some((um.id, um.data.clone()));
+                    }
                     continue;
                 };
                 match &**em {
                     EngineMessage::SvcClientData(cd) => {
-                        for (k, v) in cd.client_data.iter() { client_acc.fields.insert(k.clone(), v.clone()); }
+                        for (k, v) in cd.client_data.iter() {
+                            client_acc.fields.insert(k.clone(), v.clone());
+                        }
                         if let Some(weapons) = &cd.weapon_data {
                             for w in weapons {
                                 let idx = w.weapon_index.to_u32();
                                 let slot = client_acc.weapons.entry(idx).or_default();
-                                for (k, v) in w.weapon_data.iter() { slot.insert(k.clone(), v.clone()); }
+                                for (k, v) in w.weapon_data.iter() {
+                                    slot.insert(k.clone(), v.clone());
+                                }
                             }
                         }
                     }
@@ -211,17 +240,26 @@ fn main() {
                         for es in &pe.entity_states {
                             let e = acc.entry(es.entity_index).or_default();
                             e.custom = es.has_custom_delta;
-                            for (k, v) in es.delta.iter() { e.fields.insert(k.clone(), v.clone()); }
+                            for (k, v) in es.delta.iter() {
+                                e.fields.insert(k.clone(), v.clone());
+                            }
                             updates += 1;
                         }
                     }
                     EngineMessage::SvcDeltaPacketEntities(pe) => {
                         for es in &pe.entity_states {
-                            if es.remove_entity { acc.remove(&es.entity_index); continue }
+                            if es.remove_entity {
+                                acc.remove(&es.entity_index);
+                                continue;
+                            }
                             let Some(d) = &es.delta else { continue };
                             let e = acc.entry(es.entity_index).or_default();
-                            if let Some(c) = es.has_custom_delta { e.custom = c; }
-                            for (k, v) in d.iter() { e.fields.insert(k.clone(), v.clone()); }
+                            if let Some(c) = es.has_custom_delta {
+                                e.custom = c;
+                            }
+                            for (k, v) in d.iter() {
+                                e.fields.insert(k.clone(), v.clone());
+                            }
                             updates += 1;
                         }
                     }
@@ -230,9 +268,15 @@ fn main() {
             }
         }
     }
-    while at_join.len() < joins.len() { at_join.push(acc.clone()) }
-    while client_at_join.len() < joins.len() { client_at_join.push(client_acc.clone()) }
-    println!("baseline seeded {baseline_seeded} entities; replayed {updates} entity updates on top");
+    while at_join.len() < joins.len() {
+        at_join.push(acc.clone())
+    }
+    while client_at_join.len() < joins.len() {
+        client_at_join.push(client_acc.clone())
+    }
+    println!(
+        "baseline seeded {baseline_seeded} entities; replayed {updates} entity updates on top"
+    );
 
     // Encode each join's state as a full snapshot. Absolute indices throughout:
     // unambiguous, and it avoids depending on the incremental index arithmetic
@@ -262,44 +306,57 @@ fn main() {
     //   never observed in real full snapshots, but not structurally
     //   impossible for a set reconstructed from scratch rather than walked
     //   live by a server.
-    let snapshots: Vec<SvcPacketEntities> = at_join.iter().enumerate().map(|(n, state)| {
-        let live: Vec<(&u16, &EntAcc)> = state.iter().filter(|(idx, _)| **idx != 0).collect();
-        let players = live.iter().filter(|(i, _)| **i >= 1 && **i <= 32).count();
-        println!("  join {}: {} live entities ({players} player-slot, {} world, entity 0 excluded)",
-            n + 1, live.len(), live.len() - players);
+    let snapshots: Vec<SvcPacketEntities> = at_join
+        .iter()
+        .enumerate()
+        .map(|(n, state)| {
+            let live: Vec<(&u16, &EntAcc)> = state.iter().filter(|(idx, _)| **idx != 0).collect();
+            let players = live.iter().filter(|(i, _)| **i >= 1 && **i <= 32).count();
+            println!(
+                "  join {}: {} live entities ({players} player-slot, {} world, entity 0 excluded)",
+                n + 1,
+                live.len(),
+                live.len() - players
+            );
 
-        let mut running: u32 = 0;
-        let mut states: Vec<EntityState> = Vec::with_capacity(live.len());
-        for (idx, e) in live {
-            let idx32 = *idx as u32;
-            let gap = idx32 - running; // ascending BTreeMap keys, entity 0 excluded: always > 0
-            let (increment_entity_number, is_absolute_entity_index, absolute_entity_index, entity_index_difference) =
-                if gap == 1 {
+            let mut running: u32 = 0;
+            let mut states: Vec<EntityState> = Vec::with_capacity(live.len());
+            for (idx, e) in live {
+                let idx32 = *idx as u32;
+                let gap = idx32 - running; // ascending BTreeMap keys, entity 0 excluded: always > 0
+                let (
+                    increment_entity_number,
+                    is_absolute_entity_index,
+                    absolute_entity_index,
+                    entity_index_difference,
+                ) = if gap == 1 {
                     (true, None, None, None)
                 } else if gap <= 63 {
                     (false, Some(false), None, Some(dem::nbit_num!(gap, 6)))
                 } else {
                     (false, Some(true), Some(dem::nbit_num!(idx32, 11)), None)
                 };
-            running = idx32;
-            states.push(EntityState {
-                entity_index: *idx,
-                increment_entity_number,
-                is_absolute_entity_index,
-                absolute_entity_index,
-                entity_index_difference,
-                has_custom_delta: e.custom,
-                has_baseline_index: false,
-                baseline_index: None,
-                delta: e.fields.clone(),
-            });
-        }
-        SvcPacketEntities {
-            entity_count: dem::nbit_num!(states.len() as u32, 16),
-            entity_states: states,
-        }
-    }).collect();
-    let live_counts: Vec<u32> = at_join.iter()
+                running = idx32;
+                states.push(EntityState {
+                    entity_index: *idx,
+                    increment_entity_number,
+                    is_absolute_entity_index,
+                    absolute_entity_index,
+                    entity_index_difference,
+                    has_custom_delta: e.custom,
+                    has_baseline_index: false,
+                    baseline_index: None,
+                    delta: e.fields.clone(),
+                });
+            }
+            SvcPacketEntities {
+                entity_count: dem::nbit_num!(states.len() as u32, 16),
+                entity_states: states,
+            }
+        })
+        .collect();
+    let live_counts: Vec<u32> = at_join
+        .iter()
         .map(|s| s.keys().filter(|i| **i != 0).count() as u32)
         .collect();
 
@@ -325,14 +382,21 @@ fn main() {
     // avoid would be a strange way to fix a different bug.
     fn build_ramp(
         template: &Frame,
-        start_seq: i32, start_time: f32, start_delta_seq: u32,
-        end_seq: i32, entity_count: u32,
+        start_seq: i32,
+        start_time: f32,
+        start_delta_seq: u32,
+        end_seq: i32,
+        entity_count: u32,
         client_state: &ClientAcc,
     ) -> Vec<Frame> {
-        let FrameData::NetworkMessage(tbt) = &template.frame_data else { return Vec::new() };
+        let FrameData::NetworkMessage(tbt) = &template.frame_data else {
+            return Vec::new();
+        };
         let seq_gap = (end_seq as i64 - start_seq as i64).max(0);
         let n_steps = (seq_gap.saturating_sub(1) as usize).min(MAX_SMOOTH_FRAMES);
-        if n_steps == 0 { return Vec::new() }
+        if n_steps == 0 {
+            return Vec::new();
+        }
         // A no-op template for svc_clientdata (structure cloned, content zeroed).
         // The first live test crashed with "World::ParseClientData: couldn't
         // uncompress delta frame %i" (Core.dll) -- a *separate*, per-player
@@ -350,7 +414,9 @@ fn main() {
                     },
                     _ => None,
                 })
-            } else { None };
+            } else {
+                None
+            };
         // The no-op structure feeds the history ring, but empty content on
         // *every* frame leaves the client predicting whatever weapon/ammo it
         // had before the join, right through the ramp -- a live test caught
@@ -361,14 +427,21 @@ fn main() {
         // back to empty, since the state is now actually established rather
         // than assumed.
         let full_client_data = client_state.fields.clone();
-        let full_weapon_data: Option<Vec<dem::types::ClientDataWeaponData>> = if client_state.weapons.is_empty() {
-            None
-        } else {
-            Some(client_state.weapons.iter().map(|(idx, fields)| dem::types::ClientDataWeaponData {
-                weapon_index: dem::nbit_num!(*idx, 6),
-                weapon_data: fields.clone(),
-            }).collect())
-        };
+        let full_weapon_data: Option<Vec<dem::types::ClientDataWeaponData>> =
+            if client_state.weapons.is_empty() {
+                None
+            } else {
+                Some(
+                    client_state
+                        .weapons
+                        .iter()
+                        .map(|(idx, fields)| dem::types::ClientDataWeaponData {
+                            weapon_index: dem::nbit_num!(*idx, 6),
+                            weapon_data: fields.clone(),
+                        })
+                        .collect(),
+                )
+            };
         // NOT `tbt.1.info.timestamp` -- that field is 0.0 on every frame checked
         // in this capture (confirmed directly, not assumed), unrelated to demo
         // playback time. The real per-frame time is the outer `Frame.time`.
@@ -376,72 +449,85 @@ fn main() {
         // of toward the join's real end time -- caught by `bridge_ceiling`
         // flagging exactly `n_steps` frames as stepping backwards in time.
         let end_time = template.time;
-        (1..=n_steps).map(|i| {
-            let frac = i as f64 / (n_steps + 1) as f64;
-            let seq_i = start_seq as i64 + (frac * seq_gap as f64).round() as i64;
-            let time_i = start_time + (end_time - start_time) * frac as f32;
-            let delta_seq_i = (start_delta_seq as i64 + (frac * seq_gap as f64).round() as i64) as u32 & 0xff;
-            // `info.timestamp` is left as the template's own value (0.0 in
-            // every real frame checked) rather than set to `time_i` -- matching
-            // real captures exactly rather than inventing a value nothing else
-            // in the file has.
-            let info = tbt.1.info.clone();
-            let mut sequence_info = tbt.1.sequence_info.clone();
-            sequence_info.incoming_sequence = seq_i as i32;
-            let no_op = SvcDeltaPacketEntities {
-                entity_count: dem::nbit_num!(entity_count, 16),
-                delta_sequence: dem::nbit_num!(delta_seq_i, 8),
-                entity_states: Vec::new(),
-            };
-            let mut msgs = vec![
-                NetMessage::EngineMessage(Box::new(EngineMessage::SvcTime(SvcTime { time: time_i }))),
-            ];
-            if let Some(cd) = &clientdata_template {
-                // Structural fields (has_delta_update_mask/delta_update_mask)
-                // cloned as-is throughout. Content: the real accumulated state
-                // on the first step only (a one-time refresh, same shape as the
-                // entity snapshot), empty afterward -- "no further change from
-                // what step 1 just established".
-                let (client_data, weapon_data) = if i == 1 {
-                    (full_client_data.clone(), full_weapon_data.clone())
-                } else {
-                    (Delta::new(), None)
+        (1..=n_steps)
+            .map(|i| {
+                let frac = i as f64 / (n_steps + 1) as f64;
+                let seq_i = start_seq as i64 + (frac * seq_gap as f64).round() as i64;
+                let time_i = start_time + (end_time - start_time) * frac as f32;
+                let delta_seq_i =
+                    (start_delta_seq as i64 + (frac * seq_gap as f64).round() as i64) as u32 & 0xff;
+                // `info.timestamp` is left as the template's own value (0.0 in
+                // every real frame checked) rather than set to `time_i` -- matching
+                // real captures exactly rather than inventing a value nothing else
+                // in the file has.
+                let info = tbt.1.info.clone();
+                let mut sequence_info = tbt.1.sequence_info.clone();
+                sequence_info.incoming_sequence = seq_i as i32;
+                let no_op = SvcDeltaPacketEntities {
+                    entity_count: dem::nbit_num!(entity_count, 16),
+                    delta_sequence: dem::nbit_num!(delta_seq_i, 8),
+                    entity_states: Vec::new(),
                 };
-                msgs.push(NetMessage::EngineMessage(Box::new(EngineMessage::SvcClientData(SvcClientData {
-                    has_delta_update_mask: cd.has_delta_update_mask,
-                    delta_update_mask: cd.delta_update_mask.clone(),
-                    client_data,
-                    weapon_data,
-                }))));
-            }
-            // Same one-time-refresh shape as the clientdata above: `CurWeapon`
-            // is what actually drives which weapon's fire sound the client
-            // predicts, and it is not part of `SvcClientData` at all -- a
-            // separate user message. Replaying the last real one here, once,
-            // stops the join from starting the client on a stale weapon.
-            if i == 1
-                && let Some((id, data)) = &client_state.cur_weapon {
+                let mut msgs = vec![NetMessage::EngineMessage(Box::new(EngineMessage::SvcTime(
+                    SvcTime { time: time_i },
+                )))];
+                if let Some(cd) = &clientdata_template {
+                    // Structural fields (has_delta_update_mask/delta_update_mask)
+                    // cloned as-is throughout. Content: the real accumulated state
+                    // on the first step only (a one-time refresh, same shape as the
+                    // entity snapshot), empty afterward -- "no further change from
+                    // what step 1 just established".
+                    let (client_data, weapon_data) = if i == 1 {
+                        (full_client_data.clone(), full_weapon_data.clone())
+                    } else {
+                        (Delta::new(), None)
+                    };
+                    msgs.push(NetMessage::EngineMessage(Box::new(
+                        EngineMessage::SvcClientData(SvcClientData {
+                            has_delta_update_mask: cd.has_delta_update_mask,
+                            delta_update_mask: cd.delta_update_mask.clone(),
+                            client_data,
+                            weapon_data,
+                        }),
+                    )));
+                }
+                // Same one-time-refresh shape as the clientdata above: `CurWeapon`
+                // is what actually drives which weapon's fire sound the client
+                // predicts, and it is not part of `SvcClientData` at all -- a
+                // separate user message. Replaying the last real one here, once,
+                // stops the join from starting the client on a stale weapon.
+                if i == 1
+                    && let Some((id, data)) = &client_state.cur_weapon
+                {
                     msgs.push(NetMessage::UserMessage(UserMessage {
                         id: *id,
                         name: b"CurWeapon".to_vec(),
                         data: data.clone(),
                     }));
                 }
-            msgs.push(NetMessage::EngineMessage(Box::new(EngineMessage::SvcDeltaPacketEntities(no_op))));
-            Frame {
-                time: time_i,
-                // Unique and monotonic, continuing from the template's own
-                // ordinal -- not `template.frame` repeated on every ramp frame.
-                // `Core.dll`'s per-player clientdata history ring is keyed by
-                // this number; ~2000 frames sharing one value is exactly the
-                // kind of collision "couldn't uncompress delta frame %i" reports.
-                frame: template.frame + i as i32,
-                frame_data: FrameData::NetworkMessage(Box::new((
-                    tbt.0.clone(),
-                    dem::types::NetworkMessage { info, sequence_info, message_length: 0, messages: MessageData::Parsed(msgs) },
-                ))),
-            }
-        }).collect()
+                msgs.push(NetMessage::EngineMessage(Box::new(
+                    EngineMessage::SvcDeltaPacketEntities(no_op),
+                )));
+                Frame {
+                    time: time_i,
+                    // Unique and monotonic, continuing from the template's own
+                    // ordinal -- not `template.frame` repeated on every ramp frame.
+                    // `Core.dll`'s per-player clientdata history ring is keyed by
+                    // this number; ~2000 frames sharing one value is exactly the
+                    // kind of collision "couldn't uncompress delta frame %i" reports.
+                    frame: template.frame + i as i32,
+                    frame_data: FrameData::NetworkMessage(Box::new((
+                        tbt.0.clone(),
+                        dem::types::NetworkMessage {
+                            info,
+                            sequence_info,
+                            message_length: 0,
+                            messages: MessageData::Parsed(msgs),
+                        },
+                    ))),
+                }
+            })
+            .collect()
     }
 
     // *Replace* the first post-join delta packet rather than sitting in front of
@@ -456,7 +542,8 @@ fn main() {
     let mut idx = 0usize;
     let mut ramp_frames_total = 0usize;
     for entry in demo.directory.entries.iter_mut().skip(1) {
-        let mut new_frames: Vec<Frame> = Vec::with_capacity(entry.frames.len() + ramp_frames_total.max(64));
+        let mut new_frames: Vec<Frame> =
+            Vec::with_capacity(entry.frames.len() + ramp_frames_total.max(64));
         for mut f in entry.frames.drain(..) {
             let here = idx;
             idx += 1;
@@ -464,59 +551,106 @@ fn main() {
             if ramped < joins.len() && here == joins[ramped].0 {
                 let ramp = build_ramp(
                     &f,
-                    join_prev_seq[ramped], joins[ramped].1, join_prev_delta_seq[ramped],
-                    if let FrameData::NetworkMessage(bt) = &f.frame_data { bt.1.sequence_info.incoming_sequence } else { join_prev_seq[ramped] },
+                    join_prev_seq[ramped],
+                    joins[ramped].1,
+                    join_prev_delta_seq[ramped],
+                    if let FrameData::NetworkMessage(bt) = &f.frame_data {
+                        bt.1.sequence_info.incoming_sequence
+                    } else {
+                        join_prev_seq[ramped]
+                    },
                     live_counts[ramped],
                     &client_at_join[ramped],
                 );
-                println!("  join {}: smoothed with {} synthetic no-op frames (gap was {})",
-                    ramped + 1, ramp.len(), joins[ramped].2);
+                println!(
+                    "  join {}: smoothed with {} synthetic no-op frames (gap was {})",
+                    ramped + 1,
+                    ramp.len(),
+                    joins[ramped].2
+                );
                 ramp_frames_total += ramp.len();
                 new_frames.extend(ramp);
                 ramped += 1;
             }
 
-            if injected < joins.len() && here > joins[injected].0
+            if injected < joins.len()
+                && here > joins[injected].0
                 && let FrameData::NetworkMessage(bt) = &mut f.frame_data
-                    && let MessageData::Parsed(msgs) = &mut bt.1.messages
-                        && let Some(at) = msgs.iter().position(|m| matches!(m, NetMessage::EngineMessage(em)
-                            if matches!(**em, EngineMessage::SvcDeltaPacketEntities(_))))
-                        {
-                            msgs[at] = NetMessage::EngineMessage(Box::new(
-                                EngineMessage::SvcPacketEntities(snapshots[injected].clone())));
-                            println!("  join {}: replaced the first delta packet after it with its snapshot, at t={:.2}s",
-                                injected + 1, f.time);
-                            injected += 1;
-                        }
+                && let MessageData::Parsed(msgs) = &mut bt.1.messages
+                && let Some(at) = msgs.iter().position(|m| {
+                    matches!(m, NetMessage::EngineMessage(em)
+                            if matches!(**em, EngineMessage::SvcDeltaPacketEntities(_)))
+                })
+            {
+                msgs[at] = NetMessage::EngineMessage(Box::new(EngineMessage::SvcPacketEntities(
+                    snapshots[injected].clone(),
+                )));
+                println!(
+                    "  join {}: replaced the first delta packet after it with its snapshot, at t={:.2}s",
+                    injected + 1,
+                    f.time
+                );
+                injected += 1;
+            }
 
             new_frames.push(f);
         }
         entry.frames = new_frames;
     }
     if injected < joins.len() {
-        println!("only {injected} of {} joins got a snapshot -- no frame carrying entity data followed the rest",
-            joins.len());
+        println!(
+            "only {injected} of {} joins got a snapshot -- no frame carrying entity data followed the rest",
+            joins.len()
+        );
     }
-    if injected == 0 { return }
+    if injected == 0 {
+        return;
+    }
 
     let out = demo.write_to_bytes();
     std::fs::write(&output, &out).expect("write");
     println!("wrote {output} ({:.1} MB)", out.len() as f64 / 1e6);
     match open_demo_from_bytes(&out) {
         Ok(d) => {
-            let fulls: usize = d.directory.entries.iter().flat_map(|e| e.frames.iter())
-                .filter_map(|f| if let FrameData::NetworkMessage(bt) = &f.frame_data {
-                    if let MessageData::Parsed(ms) = &bt.1.messages { Some(ms) } else { None } } else { None })
+            let fulls: usize = d
+                .directory
+                .entries
+                .iter()
+                .flat_map(|e| e.frames.iter())
+                .filter_map(|f| {
+                    if let FrameData::NetworkMessage(bt) = &f.frame_data {
+                        if let MessageData::Parsed(ms) = &bt.1.messages {
+                            Some(ms)
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                })
                 .flatten()
-                .filter(|m| matches!(m, NetMessage::EngineMessage(em)
-                    if matches!(**em, EngineMessage::SvcPacketEntities(_)))).count();
-            println!("re-parse OK: {} frames, {fulls} full snapshots now present",
-                d.directory.entries.iter().map(|e| e.frames.len()).sum::<usize>());
+                .filter(|m| {
+                    matches!(m, NetMessage::EngineMessage(em)
+                    if matches!(**em, EngineMessage::SvcPacketEntities(_)))
+                })
+                .count();
+            println!(
+                "re-parse OK: {} frames, {fulls} full snapshots now present",
+                d.directory
+                    .entries
+                    .iter()
+                    .map(|e| e.frames.len())
+                    .sum::<usize>()
+            );
         }
         Err(e) => println!("re-parse FAILED: {e}"),
     }
     match analysis::Analysis::try_from_bytes(&out) {
-        Ok(an) => println!("analysis OK: map={:?} players={}", an.state.initial_map_name, an.state.players.len()),
+        Ok(an) => println!(
+            "analysis OK: map={:?} players={}",
+            an.state.initial_map_name,
+            an.state.players.len()
+        ),
         Err(e) => println!("analysis failed: {e}"),
     }
 }

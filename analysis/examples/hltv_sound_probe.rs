@@ -12,7 +12,9 @@ use dod::UserMessage;
 use std::collections::HashMap;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: hltv_sound_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: hltv_sound_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -26,8 +28,12 @@ fn main() {
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
             frame_no += 1;
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
                 match m {
                     NetMessage::EngineMessage(em) => match &**em {
@@ -54,9 +60,11 @@ fn main() {
                     },
                     NetMessage::UserMessage(um) => {
                         if let Ok(UserMessage::DeathMsg(d)) = UserMessage::new(&um.name, &um.data)
-                            && d.killer_client_index != d.victim_client_index && d.killer_client_index > 0 {
-                                kill_frames.push((frame_no, format!("{:?}", d.weapon)));
-                            }
+                            && d.killer_client_index != d.victim_client_index
+                            && d.killer_client_index > 0
+                        {
+                            kill_frames.push((frame_no, format!("{:?}", d.weapon)));
+                        }
                     }
                 }
             }
@@ -65,14 +73,23 @@ fn main() {
 
     println!("=== {} ===", path);
     println!("total frames: {}", frame_no);
-    println!("total fire-type events (SvcEvent+SvcEventReliable): {}", fire_frames.len());
+    println!(
+        "total fire-type events (SvcEvent+SvcEventReliable): {}",
+        fire_frames.len()
+    );
     println!("distinct event indices seen: {}", event_hist.len());
-    println!("event script resources named via SvcResourceList: {}", event_names.len());
+    println!(
+        "event script resources named via SvcResourceList: {}",
+        event_names.len()
+    );
     println!("\nEvent histogram (index -> name -> count), sorted by count desc:");
     let mut hist: Vec<(&u32, &usize)> = event_hist.iter().collect();
     hist.sort_by_key(|(_, c)| std::cmp::Reverse(**c));
     for (idx, count) in hist.iter().take(40) {
-        let name = event_names.get(idx).cloned().unwrap_or_else(|| "<unknown>".to_string());
+        let name = event_names
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| "<unknown>".to_string());
         println!("  idx={:<4} count={:<6} {}", idx, count, name);
     }
 

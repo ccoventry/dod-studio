@@ -64,8 +64,8 @@ use dem::types::{
 
 use super::decal_strip::MAX_OVERLAP_DECALS;
 use super::decal_strip::{
-    build_world_decal, cluster, connected_patches, decal_texture_index, distance, extent,
-    frame_ordinals, strip_decal_messages, survey, tangent_axes, DecalCleanOptions,
+    DecalCleanOptions, build_world_decal, cluster, connected_patches, decal_texture_index,
+    distance, extent, frame_ordinals, strip_decal_messages, survey, tangent_axes,
 };
 
 /// Every decal texture index the demo actually uses, commonest first.
@@ -513,7 +513,11 @@ fn look_at(
 /// beats far and peripheral — because the viewer cannot steer toward it and
 /// only gets whatever the recorded player happened to look at. Consecutive
 /// samples during one long look are collapsed into a single sighting.
-fn sightings_for(anchor: &[f32; 3], cameras: &[CameraSample], opts: &ProbeOptions) -> Vec<Sighting> {
+fn sightings_for(
+    anchor: &[f32; 3],
+    cameras: &[CameraSample],
+    opts: &ProbeOptions,
+) -> Vec<Sighting> {
     let mut chronological: Vec<Sighting> = Vec::new();
     let mut last = f32::NEG_INFINITY;
     let mut best_of_run: Option<Sighting> = None;
@@ -655,7 +659,10 @@ impl Target {
 fn densest_band(values: &[f32], half: f32) -> Option<f32> {
     let mut best: Option<(usize, f32)> = None;
     for &centre in values {
-        let n = values.iter().filter(|v| (**v - centre).abs() <= half).count();
+        let n = values
+            .iter()
+            .filter(|v| (**v - centre).abs() <= half)
+            .count();
         if best.map(|(b, _)| n > b).unwrap_or(true) {
             best = Some((n, centre));
         }
@@ -825,9 +832,10 @@ fn choose_targets(
 
     for axis in 0..3 {
         if let Some(forced) = opts.axis
-            && axis != forced {
-                continue;
-            }
+            && axis != forced
+        {
+            continue;
+        }
         let values: Vec<f32> = harvested.iter().map(|p| p[axis]).collect();
 
         for (value, idxs) in cluster(&values, opts.plane_tolerance) {
@@ -870,9 +878,10 @@ fn choose_targets(
                 let anchor = target.anchor();
 
                 if let Some(centre) = region
-                    && distance(&anchor, &centre) > opts.near_radius {
-                        continue;
-                    }
+                    && distance(&anchor, &centre) > opts.near_radius
+                {
+                    continue;
+                }
 
                 let (closest, dwell) = approach(&anchor, cameras, opts.require_approach);
                 // No occlusion test exists here, so "the camera pointed this
@@ -1155,9 +1164,10 @@ fn collect_cameras(demo: &dem::types::Demo) -> Vec<CameraSample> {
             if let MessageData::Parsed(messages) = &net_msg_box.1.messages {
                 for msg in messages {
                     if let NetMessage::EngineMessage(eng) = msg
-                        && let EngineMessage::SvcTime(t) = eng.as_ref() {
-                            svc_time = t.time;
-                        }
+                        && let EngineMessage::SvcTime(t) = eng.as_ref()
+                    {
+                        svc_time = t.time;
+                    }
                 }
             }
 
@@ -1322,9 +1332,11 @@ pub fn probe_decal_offsets(
         return Err("no offsets to probe".into());
     }
     if opts.offsets.windows(2).any(|w| w[1] <= w[0]) {
-        return Err("offsets must be strictly ascending — a row's hole count is \
+        return Err(
+            "offsets must be strictly ascending — a row's hole count is \
                     only readable as a threshold if they are"
-            .into());
+                .into(),
+        );
     }
     if opts.offsets[0] < 0.0 {
         return Err("offsets are magnitudes; the OUT and IN rows apply the sign".into());
@@ -1355,8 +1367,8 @@ pub fn probe_decal_offsets(
         ..opts.clone()
     };
 
-    let mut demo =
-        open_demo_from_bytes(demo_bytes).map_err(|e| format!("Could not parse demo file: {}", e))?;
+    let mut demo = open_demo_from_bytes(demo_bytes)
+        .map_err(|e| format!("Could not parse demo file: {}", e))?;
 
     // One window spanning the whole demo, so the survey harvests decals and a
     // texture index from every frame rather than from capture windows it has
@@ -1374,8 +1386,8 @@ pub fn probe_decal_offsets(
             let (t1, t2) = tangent_axes(axis);
             let columns: Vec<f32> = (0..opts.offsets.len())
                 .map(|j| {
-                    a[t1] + (j as f32 - (opts.offsets.len() as f32 - 1.0) / 2.0)
-                        * opts.column_spacing
+                    a[t1]
+                        + (j as f32 - (opts.offsets.len() as f32 - 1.0) / 2.0) * opts.column_spacing
                 })
                 .collect();
             vec![Target {
@@ -1396,7 +1408,7 @@ pub fn probe_decal_offsets(
         (Some(_), None) => {
             return Err("--anchor needs --axis: without a normal there is no \
                         direction to offset along"
-                .into())
+                .into());
         }
         (None, _) => {
             // Spawn is where a POV camera spends by far the most time: the demo
@@ -1407,10 +1419,10 @@ pub fn probe_decal_offsets(
                 .near
                 .or_else(|| opts.near_at.and_then(|t| camera_at(&cameras, t)))
                 .or_else(|| {
-                opts.spawn_only
-                    .then_some(())
-                    .and(spawn_position(&cameras, 200).or(survey.grounded_origin))
-            });
+                    opts.spawn_only
+                        .then_some(())
+                        .and(spawn_position(&cameras, 200).or(survey.grounded_origin))
+                });
 
             // Grids near spawn get looked at; grids chosen from the whole map
             // sit on the best-evidenced walls, which are usually the contested
@@ -1478,21 +1490,25 @@ pub fn probe_decal_offsets(
 
     for target in targets.iter_mut() {
         if opts.shift_right != 0.0
-            && let Some(dir) = rightward_in_plane(target, &cameras, opts) {
-                let (col, row) = (target.col_axis, target.row_axis);
-                let (dc, dr) = (dir[col] * opts.shift_right, dir[row] * opts.shift_right);
-                for c in target.columns.iter_mut() {
-                    *c += dc;
-                }
-                target.row_center += dr;
+            && let Some(dir) = rightward_in_plane(target, &cameras, opts)
+        {
+            let (col, row) = (target.col_axis, target.row_axis);
+            let (dc, dr) = (dir[col] * opts.shift_right, dir[row] * opts.shift_right);
+            for c in target.columns.iter_mut() {
+                *c += dc;
             }
+            target.row_center += dr;
+        }
         let target = &*target;
         let anchor = target.anchor();
         let outward = outward_sign(target, &anchor, &cameras);
         let probes = build_probes(target, outward, opts);
         let (closest, dwell) = approach(&anchor, &cameras, opts.require_approach);
         let stack = opts.stack.clamp(1, MAX_OVERLAP_DECALS - 1);
-        let beacon = opts.beacon_texture.map(|_| build_beacon(target, opts)).unwrap_or_default();
+        let beacon = opts
+            .beacon_texture
+            .map(|_| build_beacon(target, opts))
+            .unwrap_or_default();
         all_positions.extend(
             probes
                 .iter()
@@ -1554,15 +1570,17 @@ pub fn probe_decal_offsets(
             out_row_in_view: {
                 let mut delta = [0.0f32; 3];
                 delta[target.row_axis] = opts.row_gap;
-                sightings_for(&anchor, &cameras, opts).first().and_then(|best| {
-                    let cam = cameras
-                        .iter()
-                        .find(|c| (c.svc_time - best.svc_time).abs() < 0.05)?;
-                    let fwd = normalized(&cam.forward)?;
-                    let right = normalized(&cross(&fwd, &[0.0, 0.0, 1.0]))?;
-                    let up = cross(&right, &fwd);
-                    Some([dot(&delta, &fwd), dot(&delta, &right), dot(&delta, &up)])
-                })
+                sightings_for(&anchor, &cameras, opts)
+                    .first()
+                    .and_then(|best| {
+                        let cam = cameras
+                            .iter()
+                            .find(|c| (c.svc_time - best.svc_time).abs() < 0.05)?;
+                        let fwd = normalized(&cam.forward)?;
+                        let right = normalized(&cross(&fwd, &[0.0, 0.0, 1.0]))?;
+                        let up = cross(&right, &fwd);
+                        Some([dot(&delta, &fwd), dot(&delta, &right), dot(&delta, &up)])
+                    })
             },
             in_region: region
                 .map(|c| distance(&anchor, &c) <= opts.near_radius)
@@ -1939,9 +1957,10 @@ pub fn camera_at_time(demo_bytes: &[u8], svc_time: f32) -> Result<CameraView, St
             if let MessageData::Parsed(messages) = &net_msg_box.1.messages {
                 for msg in messages {
                     if let NetMessage::EngineMessage(eng) = msg
-                        && let EngineMessage::SvcTime(t) = eng.as_ref() {
-                            now = t.time;
-                        }
+                        && let EngineMessage::SvcTime(t) = eng.as_ref()
+                    {
+                        now = t.time;
+                    }
                 }
             }
             let rp = &net_msg_box.1.info.refparams;
@@ -2039,9 +2058,10 @@ pub fn best_view_for(
             if let MessageData::Parsed(messages) = &net_msg_box.1.messages {
                 for msg in messages {
                     if let NetMessage::EngineMessage(eng) = msg
-                        && let EngineMessage::SvcTime(t) = eng.as_ref() {
-                            now = t.time;
-                        }
+                        && let EngineMessage::SvcTime(t) = eng.as_ref()
+                    {
+                        now = t.time;
+                    }
                 }
             }
             let rp = &net_msg_box.1.info.refparams;

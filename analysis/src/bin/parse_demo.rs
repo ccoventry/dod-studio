@@ -47,7 +47,10 @@ fn read_next_frame(file: &mut std::fs::File, demo_protocol: i32) -> Option<(Fram
 
         let mut msg_bytes = vec![0u8; msg_len as usize];
         if let Err(e) = file.read_exact(&mut msg_bytes) {
-            panic!("UnexpectedEof at pos {} for NetMsg tick {} with msg_len {}: {:?}", pos, frame_num, msg_len, e);
+            panic!(
+                "UnexpectedEof at pos {} for NetMsg tick {} with msg_len {}: {:?}",
+                pos, frame_num, msg_len, e
+            );
         }
         payload.extend_from_slice(&msg_bytes);
     } else if frame_type == 2 || frame_type == 5 {
@@ -124,7 +127,10 @@ fn main() {
 
     let proto_a = i32::from_le_bytes(header_a[8..12].try_into().unwrap());
     let proto_b = i32::from_le_bytes(header_b[8..12].try_into().unwrap());
-    println!("Protocol A (primer): {}, Protocol B (chain): {}", proto_a, proto_b);
+    println!(
+        "Protocol A (primer): {}, Protocol B (chain): {}",
+        proto_a, proto_b
+    );
 
     // Seek to first directory entry's frames
     let dir_offset_a = i32::from_le_bytes(header_a[540..544].try_into().unwrap());
@@ -132,22 +138,33 @@ fn main() {
 
     // We'll seek to Playback entry frames (Entry #1)
     // First read Entry #1 offset
-    file_a.seek(SeekFrom::Start(dir_offset_a as u64 + 4 + 92)).unwrap();
+    file_a
+        .seek(SeekFrom::Start(dir_offset_a as u64 + 4 + 92))
+        .unwrap();
     let mut offset_bytes_a = [0u8; 4];
     file_a.seek(SeekFrom::Current(84)).unwrap(); // skip entry type, description, flags, cd_track, track_time, frame_count
     file_a.read_exact(&mut offset_bytes_a).unwrap();
     let playback_offset_a = i32::from_le_bytes(offset_bytes_a);
 
-    file_b.seek(SeekFrom::Start(dir_offset_b as u64 + 4 + 92)).unwrap();
+    file_b
+        .seek(SeekFrom::Start(dir_offset_b as u64 + 4 + 92))
+        .unwrap();
     let mut offset_bytes_b = [0u8; 4];
     file_b.seek(SeekFrom::Current(84)).unwrap();
     file_b.read_exact(&mut offset_bytes_b).unwrap();
     let playback_offset_b = i32::from_le_bytes(offset_bytes_b);
 
-    println!("Playback offset A: {}, Playback offset B: {}", playback_offset_a, playback_offset_b);
+    println!(
+        "Playback offset A: {}, Playback offset B: {}",
+        playback_offset_a, playback_offset_b
+    );
 
-    file_a.seek(SeekFrom::Start(playback_offset_a as u64)).unwrap();
-    file_b.seek(SeekFrom::Start(playback_offset_b as u64)).unwrap();
+    file_a
+        .seek(SeekFrom::Start(playback_offset_a as u64))
+        .unwrap();
+    file_b
+        .seek(SeekFrom::Start(playback_offset_b as u64))
+        .unwrap();
 
     let mut frame_count_a = 0;
     let mut frame_count_b = 0;
@@ -175,31 +192,57 @@ fn main() {
 
         // Lookahead up to 30 frames in B to find alignment
         let mut align_offset = None;
-        if info_a.frame_type != info_b.frame_type 
-            || info_a.frame_num != info_b.frame_num 
-            || payload_a.len() != payload_b.len() 
+        if info_a.frame_type != info_b.frame_type
+            || info_a.frame_num != info_b.frame_num
+            || payload_a.len() != payload_b.len()
         {
-            println!("Mismatch at A #{} (pos {}) / B #{} (pos {}):", frame_count_a, info_a.pos, frame_count_b, info_b.pos);
-            println!("  Frame A: type={}, time={}, num={}, payload_len={}", info_a.frame_type, info_a.time, info_a.frame_num, payload_a.len());
+            println!(
+                "Mismatch at A #{} (pos {}) / B #{} (pos {}):",
+                frame_count_a, info_a.pos, frame_count_b, info_b.pos
+            );
+            println!(
+                "  Frame A: type={}, time={}, num={}, payload_len={}",
+                info_a.frame_type,
+                info_a.time,
+                info_a.frame_num,
+                payload_a.len()
+            );
             if info_a.frame_type == 3 {
-                println!("    Payload A: '{}'", String::from_utf8_lossy(&payload_a).trim_matches('\0'));
+                println!(
+                    "    Payload A: '{}'",
+                    String::from_utf8_lossy(&payload_a).trim_matches('\0')
+                );
             }
-            println!("  Frame B: type={}, time={}, num={}, payload_len={}", info_b.frame_type, info_b.time, info_b.frame_num, payload_b.len());
+            println!(
+                "  Frame B: type={}, time={}, num={}, payload_len={}",
+                info_b.frame_type,
+                info_b.time,
+                info_b.frame_num,
+                payload_b.len()
+            );
             if info_b.frame_type == 3 {
-                println!("    Payload B: '{}'", String::from_utf8_lossy(&payload_b).trim_matches('\0'));
+                println!(
+                    "    Payload B: '{}'",
+                    String::from_utf8_lossy(&payload_b).trim_matches('\0')
+                );
             }
             println!("  Searching lookahead...");
             let current_pos_b = file_b.stream_position().unwrap();
             let mut temp_file_b = std::fs::File::open(path_b).unwrap();
             temp_file_b.seek(SeekFrom::Start(current_pos_b)).unwrap();
-            
+
             for k in 1..=30 {
-                if let Some((peek_info_b, peek_payload_b)) = read_next_frame(&mut temp_file_b, proto_b) {
-                    if peek_info_b.frame_type == info_a.frame_type 
-                        && peek_info_b.frame_num == info_a.frame_num 
+                if let Some((peek_info_b, peek_payload_b)) =
+                    read_next_frame(&mut temp_file_b, proto_b)
+                {
+                    if peek_info_b.frame_type == info_a.frame_type
+                        && peek_info_b.frame_num == info_a.frame_num
                         && peek_payload_b.len() == payload_a.len()
                     {
-                        println!("  Found lookahead match in B at +{} frames (pos {})", k, peek_info_b.pos);
+                        println!(
+                            "  Found lookahead match in B at +{} frames (pos {})",
+                            k, peek_info_b.pos
+                        );
                         align_offset = Some(k);
                         break;
                     }
@@ -216,7 +259,9 @@ fn main() {
             for _ in 0..k {
                 let current_b = next_b.clone().unwrap().0;
                 history_b.push_back(current_b);
-                if history_b.len() > 10 { history_b.pop_front(); }
+                if history_b.len() > 10 {
+                    history_b.pop_front();
+                }
                 frame_count_b += 1;
                 next_b = read_next_frame(&mut file_b, proto_b);
             }
@@ -226,23 +271,41 @@ fn main() {
         // Compare them
         if info_a.frame_type != info_b.frame_type {
             println!("DIVERGENCE DETECTED!");
-            println!("  Frame A (primer) #{} at pos {}: type={}, time={}, num={}", frame_count_a, info_a.pos, info_a.frame_type, info_a.time, info_a.frame_num);
+            println!(
+                "  Frame A (primer) #{} at pos {}: type={}, time={}, num={}",
+                frame_count_a, info_a.pos, info_a.frame_type, info_a.time, info_a.frame_num
+            );
             if info_a.frame_type == 3 {
-                println!("    Payload A: '{}'", String::from_utf8_lossy(&payload_a).trim_matches('\0'));
+                println!(
+                    "    Payload A: '{}'",
+                    String::from_utf8_lossy(&payload_a).trim_matches('\0')
+                );
             }
-            println!("  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}", frame_count_b, info_b.pos, info_b.frame_type, info_b.time, info_b.frame_num);
+            println!(
+                "  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}",
+                frame_count_b, info_b.pos, info_b.frame_type, info_b.time, info_b.frame_num
+            );
             if info_b.frame_type == 3 {
-                println!("    Payload B: '{}'", String::from_utf8_lossy(&payload_b).trim_matches('\0'));
+                println!(
+                    "    Payload B: '{}'",
+                    String::from_utf8_lossy(&payload_b).trim_matches('\0')
+                );
             }
 
             // Print history A and B
             println!("  Last 10 frames in A:");
             for (h_idx, f) in history_a.iter().enumerate() {
-                println!("    [{}] pos: {}, type: {}, time: {}, num: {}", h_idx, f.pos, f.frame_type, f.time, f.frame_num);
+                println!(
+                    "    [{}] pos: {}, type: {}, time: {}, num: {}",
+                    h_idx, f.pos, f.frame_type, f.time, f.frame_num
+                );
             }
             println!("  Last 10 frames in B:");
             for (h_idx, f) in history_b.iter().enumerate() {
-                println!("    [{}] pos: {}, type: {}, time: {}, num: {}", h_idx, f.pos, f.frame_type, f.time, f.frame_num);
+                println!(
+                    "    [{}] pos: {}, type: {}, time: {}, num: {}",
+                    h_idx, f.pos, f.frame_type, f.time, f.frame_num
+                );
             }
 
             // Dump B lookahead
@@ -251,13 +314,26 @@ fn main() {
             temp_file_b.seek(SeekFrom::Start(current_pos_b)).unwrap();
             println!("  Next 30 frames in B:");
             for k in 1..=30 {
-                if let Some((peek_info_b, peek_payload_b)) = read_next_frame(&mut temp_file_b, proto_b) {
+                if let Some((peek_info_b, peek_payload_b)) =
+                    read_next_frame(&mut temp_file_b, proto_b)
+                {
                     let payload_str = if peek_info_b.frame_type == 3 {
-                        format!("cmd='{}'", String::from_utf8_lossy(&peek_payload_b).trim_matches('\0'))
+                        format!(
+                            "cmd='{}'",
+                            String::from_utf8_lossy(&peek_payload_b).trim_matches('\0')
+                        )
                     } else {
                         format!("len={}", peek_payload_b.len())
                     };
-                    println!("    [{}] pos={}, type={}, time={}, num={}, {}", k, peek_info_b.pos, peek_info_b.frame_type, peek_info_b.time, peek_info_b.frame_num, payload_str);
+                    println!(
+                        "    [{}] pos={}, type={}, time={}, num={}, {}",
+                        k,
+                        peek_info_b.pos,
+                        peek_info_b.frame_type,
+                        peek_info_b.time,
+                        peek_info_b.frame_num,
+                        payload_str
+                    );
                 } else {
                     break;
                 }
@@ -267,23 +343,49 @@ fn main() {
 
         if info_a.frame_num != info_b.frame_num {
             println!("TICK MISMATCH!");
-            println!("  Frame A (primer) #{} at pos {}: type={}, time={}, num={}", frame_count_a, info_a.pos, info_a.frame_type, info_a.time, info_a.frame_num);
-            println!("  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}", frame_count_b, info_b.pos, info_b.frame_type, info_b.time, info_b.frame_num);
+            println!(
+                "  Frame A (primer) #{} at pos {}: type={}, time={}, num={}",
+                frame_count_a, info_a.pos, info_a.frame_type, info_a.time, info_a.frame_num
+            );
+            println!(
+                "  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}",
+                frame_count_b, info_b.pos, info_b.frame_type, info_b.time, info_b.frame_num
+            );
             break;
         }
 
         if payload_a.len() != payload_b.len() {
             println!("PAYLOAD LENGTH MISMATCH!");
-            println!("  Frame A (primer) #{} at pos {}: type={}, time={}, num={}, payload_len={}", frame_count_a, info_a.pos, info_a.frame_type, info_a.time, info_a.frame_num, payload_a.len());
-            println!("  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}, payload_len={}", frame_count_b, info_b.pos, info_b.frame_type, info_b.time, info_b.frame_num, payload_b.len());
+            println!(
+                "  Frame A (primer) #{} at pos {}: type={}, time={}, num={}, payload_len={}",
+                frame_count_a,
+                info_a.pos,
+                info_a.frame_type,
+                info_a.time,
+                info_a.frame_num,
+                payload_a.len()
+            );
+            println!(
+                "  Frame B (chain)  #{} at pos {}: type={}, time={}, num={}, payload_len={}",
+                frame_count_b,
+                info_b.pos,
+                info_b.frame_type,
+                info_b.time,
+                info_b.frame_num,
+                payload_b.len()
+            );
             break;
         }
 
         // Advance both
         history_a.push_back(info_a.clone());
-        if history_a.len() > 10 { history_a.pop_front(); }
+        if history_a.len() > 10 {
+            history_a.pop_front();
+        }
         history_b.push_back(info_b.clone());
-        if history_b.len() > 10 { history_b.pop_front(); }
+        if history_b.len() > 10 {
+            history_b.pop_front();
+        }
 
         frame_count_a += 1;
         frame_count_b += 1;

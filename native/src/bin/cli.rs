@@ -1,15 +1,15 @@
 //! Demo analyzer that runs in a terminal and produces text output.
 
 #[cfg(not(target_arch = "wasm32"))]
-use analysis::{Analysis, MortalityState, Round, SteamId, Team, Mortality};
+use analysis::{Analysis, Mortality, MortalityState, Round, SteamId, Team};
 #[cfg(not(target_arch = "wasm32"))]
 use clap::{Parser, Subcommand, ValueEnum};
 #[cfg(not(target_arch = "wasm32"))]
 use humantime::{format_duration, format_rfc3339_seconds};
 #[cfg(not(target_arch = "wasm32"))]
-use native::{FileInfo, run_analyzer};
+use native::patch::{PatchOptions, patch_demo_highlights};
 #[cfg(not(target_arch = "wasm32"))]
-use native::patch::{patch_demo_highlights, PatchOptions};
+use native::{FileInfo, run_analyzer};
 #[cfg(not(target_arch = "wasm32"))]
 use serde_json::{Value, json};
 #[cfg(not(target_arch = "wasm32"))]
@@ -27,7 +27,10 @@ fn main() {
 
     if let Some(command) = args.command {
         match command {
-            Commands::Analyze { demo_paths, output_format } => {
+            Commands::Analyze {
+                demo_paths,
+                output_format,
+            } => {
                 run_analyze_subcommand(demo_paths, output_format);
             }
             Commands::PatchStreak {
@@ -65,7 +68,9 @@ fn main() {
         }
     } else {
         if args.demo_paths.is_empty() {
-            eprintln!("Error: Please specify at least one demo file to analyze, or use a subcommand.");
+            eprintln!(
+                "Error: Please specify at least one demo file to analyze, or use a subcommand."
+            );
             std::process::exit(1);
         }
         run_analyze_subcommand(args.demo_paths, args.output_format);
@@ -127,7 +132,13 @@ fn run_patch_streak_subcommand(
             return Err(format!(
                 "Could not find player matching query '{}'. Available players: {}",
                 player_query,
-                analysis.state.players.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", ")
+                analysis
+                    .state
+                    .players
+                    .iter()
+                    .map(|p| p.name.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ));
         }
     };
@@ -144,7 +155,9 @@ fn run_patch_streak_subcommand(
         // If weapon query is provided, check if any kill in the streak matches
         if let Some(ref w_query) = weapon_query {
             let matched = streak.kills.iter().any(|(_, weapon, _)| {
-                format!("{:?}", weapon).to_lowercase().contains(&w_query.to_lowercase())
+                format!("{:?}", weapon)
+                    .to_lowercase()
+                    .contains(&w_query.to_lowercase())
             });
             if !matched {
                 continue;
@@ -169,8 +182,8 @@ fn run_patch_streak_subcommand(
     }
 
     println!("Reading raw demo bytes...");
-    let demo_bytes = std::fs::read(&input)
-        .map_err(|e| format!("Failed to read input demo file: {}", e))?;
+    let demo_bytes =
+        std::fs::read(&input).map_err(|e| format!("Failed to read input demo file: {}", e))?;
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -178,7 +191,9 @@ fn run_patch_streak_subcommand(
         None
     };
 
-    let player_deaths = player.mortality.iter()
+    let player_deaths = player
+        .mortality
+        .iter()
         .filter(|change| matches!(change.mortality(), Mortality::Dead))
         .map(|change| change.time().real_offset.as_secs_f32())
         .collect::<Vec<_>>();
@@ -471,7 +486,11 @@ impl Display for Markdown {
                 self.1.state.team_scores.get_team_score(Team::Axis),
             );
 
-            let allies_name = if self.1.state.allies_are_british { "British" } else { "Allies" };
+            let allies_name = if self.1.state.allies_are_british {
+                "British"
+            } else {
+                "Allies"
+            };
 
             let match_result_fragment = format!(
                 ": {} ({}) {} Axis ({})",
@@ -651,10 +670,11 @@ impl Display for Markdown {
                         for (_, weapon, _) in &kill_streak.kills {
                             let name = format!("{weapon:?}");
                             if let Some((last_name, count)) = grouped.last_mut()
-                                && *last_name == name {
-                                    *count += 1;
-                                    continue;
-                                }
+                                && *last_name == name
+                            {
+                                *count += 1;
+                                continue;
+                            }
                             grouped.push((name, 1));
                         }
                         let weapons_used = grouped

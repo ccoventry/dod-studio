@@ -65,8 +65,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 
 use crate::detour;
 use crate::engine;
-use crate::scan;
 use crate::names::console_name;
+use crate::scan;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -211,7 +211,10 @@ static HOOK_WANTED: AtomicBool = AtomicBool::new(false);
 
 /// The block list. `Vec<i32>` of player indices; `allow_list` inverts the sense
 /// so the listed players are the only ones that get through.
-static BLOCK: Mutex<BlockList> = Mutex::new(BlockList { ids: Vec::new(), allow_list: false });
+static BLOCK: Mutex<BlockList> = Mutex::new(BlockList {
+    ids: Vec::new(),
+    allow_list: false,
+});
 
 #[derive(Default)]
 struct BlockList {
@@ -280,7 +283,9 @@ unsafe fn verify_stock(base: usize) -> Result<(), String> {
             u32::from(unsafe { read_u8(base, rva) })
         };
         if got != want {
-            return Err(format!("count at +{rva:#x} reads {got:#x}, expected {want:#x}"));
+            return Err(format!(
+                "count at +{rva:#x} reads {got:#x}, expected {want:#x}"
+            ));
         }
     }
     for &(rva, width) in OFFSET_SITES {
@@ -290,7 +295,9 @@ unsafe fn verify_stock(base: usize) -> Result<(), String> {
             u32::from(unsafe { read_u8(base, rva) })
         };
         if got != STOCK_OFFSET as u32 {
-            return Err(format!("y offset at +{rva:#x} reads {got:#x}, expected {STOCK_OFFSET:#x}"));
+            return Err(format!(
+                "y offset at +{rva:#x} reads {got:#x}, expected {STOCK_OFFSET:#x}"
+            ));
         }
     }
     Ok(())
@@ -369,7 +376,11 @@ fn apply_max(max: i32) -> Result<(), String> {
     ensure_verified(base)?;
 
     let reverting = max == STOCK_MAX;
-    let array = if reverting { base + ARRAY_RVA } else { buffer() };
+    let array = if reverting {
+        base + ARRAY_RVA
+    } else {
+        buffer()
+    };
 
     for &(rva, field) in ARRAY_REFS {
         let value = (array + field) as u32;
@@ -452,26 +463,28 @@ static OFFSET_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
 /// computed has already been stored, and the next read of `eax` is a fresh load
 /// -- so the stub may use both freely.
 fn offset_stub(active: usize, value: usize, resume: usize) -> Vec<u8> {
-    let substitute: Vec<u8> = [0xa1u8]                                  // mov eax, [abs32]
+    let substitute: Vec<u8> = [0xa1u8] // mov eax, [abs32]
         .into_iter()
         .chain((value as u32).to_le_bytes())
-        .chain([0x89, 0x44, 0x24, 0x04])                                // mov [esp+4], eax
+        .chain([0x89, 0x44, 0x24, 0x04]) // mov [esp+4], eax
         .collect();
 
-    let mut code = vec![0x80, 0x3d];                                    // cmp byte ptr [abs32],
+    let mut code = vec![0x80, 0x3d]; // cmp byte ptr [abs32],
     code.extend_from_slice(&(active as u32).to_le_bytes());
-    code.push(0x00);                                                    //   0
-    code.extend_from_slice(&[0x74, substitute.len() as u8]);            // je over the substitution
+    code.push(0x00); //   0
+    code.extend_from_slice(&[0x74, substitute.len() as u8]); // je over the substitution
     code.extend_from_slice(&substitute);
     code.extend_from_slice(Y_STOLEN);
-    code.extend_from_slice(&[0xff, 0x25]);                              // jmp dword ptr [abs32]
+    code.extend_from_slice(&[0xff, 0x25]); // jmp dword ptr [abs32]
     code.extend_from_slice(&(resume as u32).to_le_bytes());
     code
 }
 
 /// Installs the y detour, once.
 fn ensure_offset_detour(base: usize) -> Result<(), String> {
-    let mut slot = OFFSET_DETOUR.lock().map_err(|_| "the detour lock is poisoned".to_string())?;
+    let mut slot = OFFSET_DETOUR
+        .lock()
+        .map_err(|_| "the detour lock is poisoned".to_string())?;
     if slot.is_some() {
         return Ok(());
     }
@@ -559,7 +572,10 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
         let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
-        let blocked = BLOCK.lock().map(|list| list.blocks(killer, victim)).unwrap_or(false);
+        let blocked = BLOCK
+            .lock()
+            .map(|list| list.blocks(killer, victim))
+            .unwrap_or(false);
         if blocked {
             // 1 is what the engine's own dispatcher treats as handled.
             return 1;
@@ -580,8 +596,12 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
 /// handler on the next connect, which is precisely when we need to prepend
 /// ourselves again — so the repetition is the mechanism, not waste.
 fn install_hook() {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(name) = CString::new("DeathMsg") else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(name) = CString::new("DeathMsg") else {
+        return;
+    };
     unsafe { (engfuncs.pfn_hook_user_msg)(name.as_ptr(), hooked_death_msg) };
 }
 
@@ -605,7 +625,11 @@ const _: () = assert!(
 /// grown it, otherwise `client.dll`'s own.
 fn current_array(base: usize) -> (usize, i32) {
     let max = PATCHED_MAX.load(Ordering::Acquire);
-    if max == 0 { (base + ARRAY_RVA, STOCK_MAX) } else { (buffer(), max) }
+    if max == 0 {
+        (base + ARRAY_RVA, STOCK_MAX)
+    } else {
+        (buffer(), max)
+    }
 }
 
 /// Re-dates the notice `fake` just added, so it lives from *now*.
@@ -636,8 +660,12 @@ fn current_array(base: usize) -> (usize, i32) {
 /// A real notice never hits this: it arrives while the game is drawing. So the
 /// fix belongs here rather than in the hook.
 fn restamp_display_time(base: usize) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(cvar) = CString::new("hud_deathnotice_time") else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(cvar) = CString::new("hud_deathnotice_time") else {
+        return;
+    };
     // Truncated, because that is what the game does to it.
     let lifetime = unsafe { (engfuncs.pfn_get_cvar_float)(cvar.as_ptr()) }.trunc();
     let expires = engine::client_time() as f32 + lifetime;
@@ -706,7 +734,11 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     //
     // Blocked means *reported*, never silently dropped: a command that prints
     // success and shows nothing is the worst of the three possible behaviours.
-    if BLOCK.lock().map(|list| list.blocks(killer, victim)).unwrap_or(false) {
+    if BLOCK
+        .lock()
+        .map(|list| list.blocks(killer, victim))
+        .unwrap_or(false)
+    {
         return Err(format!(
             "the block list hides frags involving {killer} -> {victim}, so nothing was shown. `{COMMAND} block clear` stops hiding."
         ));
@@ -715,7 +747,13 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     // Straight to client.dll's own handler rather than through our own hook:
     // the hook's only job is the block check, which has already happened here,
     // and the engine is not involved in dispatching it either way.
-    unsafe { original(name.as_ptr(), payload.len() as i32, payload.as_mut_ptr() as *mut c_void) };
+    unsafe {
+        original(
+            name.as_ptr(),
+            payload.len() as i32,
+            payload.as_mut_ptr() as *mut c_void,
+        )
+    };
     if let Some(base) = engine::client_module_base() {
         restamp_display_time(base);
     }
@@ -758,7 +796,11 @@ pub(crate) fn status() -> String {
     format!(
         "{COMMAND}: max = {} line(s), offset = y {}, blocking {block}\n",
         if max == 0 { STOCK_MAX } else { max },
-        if offset == OFFSET_UNSET { STOCK_OFFSET } else { offset },
+        if offset == OFFSET_UNSET {
+            STOCK_OFFSET
+        } else {
+            offset
+        },
     )
 }
 
@@ -769,20 +811,32 @@ fn parse_weapon(arg: &str) -> Result<i32, String> {
         if (1..WEAPON_SPRITES.len() as i32).contains(&index) {
             return Ok(index);
         }
-        return Err(format!("weapon index {index} is out of range (1..={})", WEAPON_SPRITES.len() - 1));
+        return Err(format!(
+            "weapon index {index} is out of range (1..={})",
+            WEAPON_SPRITES.len() - 1
+        ));
     }
     let wanted = arg.trim().to_ascii_lowercase();
-    let with_prefix = if wanted.starts_with("d_") { wanted.clone() } else { format!("d_{wanted}") };
+    let with_prefix = if wanted.starts_with("d_") {
+        wanted.clone()
+    } else {
+        format!("d_{wanted}")
+    };
     for (index, name) in WEAPON_SPRITES.iter().enumerate().skip(1) {
         if *name == with_prefix {
             return Ok(index as i32);
         }
     }
-    Err(format!("no weapon called {arg:?} -- try a name like d_garand, or an index 1..={}", WEAPON_SPRITES.len() - 1))
+    Err(format!(
+        "no weapon called {arg:?} -- try a name like d_garand, or an index 1..={}",
+        WEAPON_SPRITES.len() - 1
+    ))
 }
 
 fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else { return Vec::new() };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return Vec::new();
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
     (0..argc)
         .filter_map(|i| {
@@ -790,7 +844,11 @@ fn args() -> Vec<String> {
             if ptr.is_null() {
                 return None;
             }
-            Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+            Some(
+                unsafe { CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
         .collect()
 }
@@ -830,7 +888,9 @@ fn dispatch(argv: &[String]) -> String {
                     Ok(()) => format!("{COMMAND}: offset = y {y}\n"),
                     Err(why) => format!("{COMMAND} offset: {why}\n"),
                 },
-                Err(_) => format!("{COMMAND} offset: expected a number or \"default\", got {value:?}\n"),
+                Err(_) => {
+                    format!("{COMMAND} offset: expected a number or \"default\", got {value:?}\n")
+                }
             }
         }
         "block" => {
@@ -880,7 +940,10 @@ fn dispatch(argv: &[String]) -> String {
         }
         "fake" => {
             let (Some(k), Some(v), Some(w)) = (argv.get(2), argv.get(3), argv.get(4)) else {
-                return format!("{COMMAND} fake: need <killer> <victim> <weapon>\n{}", usage());
+                return format!(
+                    "{COMMAND} fake: need <killer> <victim> <weapon>\n{}",
+                    usage()
+                );
             };
             let (Ok(killer), Ok(victim)) = (k.parse::<i32>(), v.parse::<i32>()) else {
                 return format!("{COMMAND} fake: killer and victim must be player indices\n");
@@ -918,11 +981,11 @@ mod tests {
             code,
             vec![
                 0x80, 0x3d, 0x11, 0x11, 0x11, 0x11, 0x00, // cmp byte [active], 0
-                0x74, 0x09,                               // je  over the substitution
-                0xa1, 0x22, 0x22, 0x22, 0x22,             // mov eax, [value]
-                0x89, 0x44, 0x24, 0x04,                   // mov [esp+4], eax
-                0x53, 0x55, 0x56, 0x57, 0x33, 0xff,       // the stolen instructions
-                0xff, 0x25, 0x33, 0x33, 0x33, 0x33,       // jmp dword [resume]
+                0x74, 0x09, // je  over the substitution
+                0xa1, 0x22, 0x22, 0x22, 0x22, // mov eax, [value]
+                0x89, 0x44, 0x24, 0x04, // mov [esp+4], eax
+                0x53, 0x55, 0x56, 0x57, 0x33, 0xff, // the stolen instructions
+                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // jmp dword [resume]
             ]
         );
     }
@@ -933,7 +996,10 @@ mod tests {
         // `je` displacement: too small lands mid-instruction, too large skips
         // an instruction the game needs. Derive it from the bytes themselves.
         let code = offset_stub(0xaaaa_aaaa, 0xbbbb_bbbb, 0xcccc_cccc);
-        let je_at = code.iter().position(|&b| b == 0x74).expect("a je in the stub");
+        let je_at = code
+            .iter()
+            .position(|&b| b == 0x74)
+            .expect("a je in the stub");
         let landing = je_at + 2 + code[je_at + 1] as usize;
         assert_eq!(
             &code[landing..landing + Y_STOLEN.len()],
@@ -1000,7 +1066,10 @@ mod tests {
         for &(_, width, kind) in COUNT_SITES {
             let value = kind.value_for(MAX_LINES);
             if width == 1 {
-                assert!(value <= 0x7f, "{value} will not fit the imm8 it is written into");
+                assert!(
+                    value <= 0x7f,
+                    "{value} will not fit the imm8 it is written into"
+                );
             }
         }
     }
@@ -1011,7 +1080,10 @@ mod tests {
         // slot 0, except the two that deliberately point at slot 1 (the
         // memmove source). Anything else means a transcription slip.
         for &(rva, field) in ARRAY_REFS {
-            assert!(field < 2 * ITEM, "reference at {rva:#x} has field offset {field:#x}");
+            assert!(
+                field < 2 * ITEM,
+                "reference at {rva:#x} has field offset {field:#x}"
+            );
         }
     }
 
@@ -1037,7 +1109,10 @@ mod tests {
 
     #[test]
     fn a_block_list_hides_only_the_listed_players() {
-        let list = BlockList { ids: vec![3, 7], allow_list: false };
+        let list = BlockList {
+            ids: vec![3, 7],
+            allow_list: false,
+        };
         assert!(list.blocks(3, 9));
         assert!(list.blocks(9, 7));
         assert!(!list.blocks(1, 2));
@@ -1045,15 +1120,24 @@ mod tests {
 
     #[test]
     fn an_allow_list_hides_everything_else() {
-        let list = BlockList { ids: vec![3], allow_list: true };
+        let list = BlockList {
+            ids: vec![3],
+            allow_list: true,
+        };
         assert!(!list.blocks(3, 9), "a frag involving 3 must still show");
-        assert!(list.blocks(1, 2), "a frag with nobody listed must be hidden");
+        assert!(
+            list.blocks(1, 2),
+            "a frag with nobody listed must be hidden"
+        );
     }
 
     #[test]
     fn an_empty_list_blocks_nothing_in_either_mode() {
         for allow_list in [false, true] {
-            let list = BlockList { ids: Vec::new(), allow_list };
+            let list = BlockList {
+                ids: Vec::new(),
+                allow_list,
+            };
             assert!(!list.blocks(1, 2));
         }
     }

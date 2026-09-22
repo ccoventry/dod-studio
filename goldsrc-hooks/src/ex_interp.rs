@@ -195,7 +195,10 @@ mod tests {
     #[test]
     fn the_pattern_is_well_formed_and_the_ceiling_is_its_only_wildcard() {
         let tokens: Vec<&str> = PATTERN.split_whitespace().collect();
-        assert_ne!(tokens[0], "??", "a leading wildcard is rejected by the scanner");
+        assert_ne!(
+            tokens[0], "??",
+            "a leading wildcard is rejected by the scanner"
+        );
         for (i, token) in tokens.iter().enumerate() {
             let wildcard = (CEILING_AT..CEILING_AT + 4).contains(&i);
             if wildcard {
@@ -216,7 +219,11 @@ mod tests {
     #[test]
     fn the_ceiling_offset_lands_on_the_right_instruction() {
         let tokens: Vec<&str> = PATTERN.split_whitespace().collect();
-        assert_eq!(u8::from_str_radix(tokens[0], 16).unwrap(), 0xbf, "mov edi, imm32");
+        assert_eq!(
+            u8::from_str_radix(tokens[0], 16).unwrap(),
+            0xbf,
+            "mov edi, imm32"
+        );
         assert_eq!(
             i32::from_le_bytes([
                 u8::from_str_radix(tokens[1], 16).unwrap(),

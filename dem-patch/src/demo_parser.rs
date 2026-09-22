@@ -1,15 +1,15 @@
 use std::{ffi::OsStr, fs::OpenOptions, io::Read, path::Path};
 
 use nom::{
+    Parser,
     bytes::complete::take,
     combinator::{map, verify},
-    multi::{count, many0, many_till},
-    number::complete::{le_f32, le_i16, le_i32, le_i8, le_u16, le_u32, le_u8},
-    Parser,
+    multi::{count, many_till, many0},
+    number::complete::{le_f32, le_i8, le_i16, le_i32, le_u8, le_u16, le_u32},
 };
 
 use crate::{
-    nom_helper::{nom_fail, take_point_float, Result},
+    nom_helper::{Result, nom_fail, take_point_float},
     parse_netmsg,
     types::{
         Aux, AuxRefCell, ClientData, ConsoleCommand, Demo, DemoBuffer, DemoInfo, Directory,
@@ -118,7 +118,8 @@ pub fn parse_header(i: &[u8]) -> Result<Header> {
             map_checksum,
             directory_offset,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_directory<'a>(
@@ -135,7 +136,8 @@ pub fn parse_directory<'a>(
     map(
         count(local_parse_directory_entry, entry_count as usize),
         |entries| Directory { entries },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 /// Parse a fallback directory for demo files that were not finalized by a client.
@@ -165,7 +167,8 @@ pub fn parse_fallback_directory<'a>(
         verify(parser, |frame| {
             matches!(frame.frame_data, FrameData::NextSection)
         }),
-    ).parse(frames_start)?;
+    )
+    .parse(frames_start)?;
 
     loading_frames.push(next_section_frame);
 
@@ -229,7 +232,8 @@ pub fn parse_directory_entry<'a>(
         le_i32,
         le_i32,
         le_i32,
-    ).parse(i)?;
+    )
+        .parse(i)?;
 
     // frame_count is unreliable
     // parse until NextSection and stop for current entry
@@ -315,7 +319,8 @@ pub fn parse_frame(
 pub fn parse_console_command(i: &[u8]) -> Result<ConsoleCommand> {
     map(take(64usize), |command: &[u8]| ConsoleCommand {
         command: command.into(),
-    }).parse(i)
+    })
+    .parse(i)
 }
 
 pub fn parse_client_data(i: &[u8]) -> Result<ClientData> {
@@ -327,7 +332,8 @@ pub fn parse_client_data(i: &[u8]) -> Result<ClientData> {
             weapon_bits,
             fov,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_event(i: &[u8]) -> Result<Event> {
@@ -339,7 +345,8 @@ pub fn parse_event(i: &[u8]) -> Result<Event> {
             delay,
             args,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_event_args(i: &[u8]) -> Result<EventArgs> {
@@ -385,14 +392,16 @@ pub fn parse_event_args(i: &[u8]) -> Result<EventArgs> {
             bparam1,
             bparam2,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_weapon_animation(i: &[u8]) -> Result<WeaponAnimation> {
     map((le_i32, le_i32), |(anim, body)| WeaponAnimation {
         anim,
         body,
-    }).parse(i)
+    })
+    .parse(i)
 }
 
 pub fn parse_sound(i: &[u8]) -> Result<Sound> {
@@ -411,7 +420,8 @@ pub fn parse_sound(i: &[u8]) -> Result<Sound> {
             flags,
             pitch,
         },
-    ).parse(i);
+    )
+    .parse(i);
 
     res
 }
@@ -421,7 +431,8 @@ pub fn parse_demo_buffer(i: &[u8]) -> Result<DemoBuffer> {
 
     map(take(buffer_length), |buffer: &[u8]| DemoBuffer {
         buffer: buffer.to_vec(),
-    }).parse(i)
+    })
+    .parse(i)
 }
 
 pub fn parse_network_messages(
@@ -490,7 +501,8 @@ pub fn parse_network_messages_info(i: &[u8]) -> Result<DemoInfo> {
             view,
             viewmodel,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_refparams(i: &[u8]) -> Result<RefParams> {
@@ -597,7 +609,8 @@ pub fn parse_refparams(i: &[u8]) -> Result<RefParams> {
             next_view,
             only_client_draw,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_usercmd(i: &[u8]) -> Result<UserCmd> {
@@ -655,7 +668,8 @@ pub fn parse_usercmd(i: &[u8]) -> Result<UserCmd> {
             impact_index,
             impact_position,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_movevars(i: &[u8]) -> Result<MoveVars> {
@@ -718,7 +732,8 @@ pub fn parse_movevars(i: &[u8]) -> Result<MoveVars> {
             skycolor,
             skyvec,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }
 
 pub fn parse_sequence_info(i: &[u8]) -> Result<SequenceInfo> {
@@ -741,5 +756,6 @@ pub fn parse_sequence_info(i: &[u8]) -> Result<SequenceInfo> {
             reliable_sequence,
             last_reliable_sequence,
         },
-    ).parse(i)
+    )
+    .parse(i)
 }

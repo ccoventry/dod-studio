@@ -83,9 +83,15 @@ pub fn poll() {
     if !LOG.load(Ordering::Relaxed) {
         return;
     }
-    let Some(base) = engine::client_module_base() else { return };
-    let Some(mode) = read_i32(base, MODE_RVA) else { return };
-    let Some(target) = read_i32(base, TARGET_RVA) else { return };
+    let Some(base) = engine::client_module_base() else {
+        return;
+    };
+    let Some(mode) = read_i32(base, MODE_RVA) else {
+        return;
+    };
+    let Some(target) = read_i32(base, TARGET_RVA) else {
+        return;
+    };
     let viewmodel = crate::anim_fix::current_viewmodel_entity();
 
     let mode_changed = LAST_MODE.swap(mode, Ordering::Relaxed) != mode;

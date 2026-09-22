@@ -33,7 +33,9 @@ const GRID_SIZE: f32 = 48.0;
 /// `delta_description_t` field names carry it as parsed off the wire.
 fn origin_component(delta: &Delta, axis: usize) -> Option<f32> {
     let key = format!("origin[{axis}]\0");
-    delta.get(&key).and_then(|v| (v.len() >= 4).then(|| f32::from_le_bytes([v[0], v[1], v[2], v[3]])))
+    delta
+        .get(&key)
+        .and_then(|v| (v.len() >= 4).then(|| f32::from_le_bytes([v[0], v[1], v[2], v[3]])))
 }
 
 /// One entity's delta against the harvest's running state: updates its last-
@@ -101,11 +103,22 @@ fn quantize(p: [f32; 3]) -> (i32, i32, i32) {
 /// but it is the only signal an HLTV header actually gives, and rejecting
 /// every HLTV recording wastes precisely the demos this feature cares most
 /// about -- HLTV sees every player, not just whoever a POV recorder was.
-pub fn harvest_player_positions(bytes: &[u8], want_checksum: u32, want_map_name: &str) -> Result<HashSet<(i32, i32, i32)>, String> {
+pub fn harvest_player_positions(
+    bytes: &[u8],
+    want_checksum: u32,
+    want_map_name: &str,
+) -> Result<HashSet<(i32, i32, i32)>, String> {
     let demo = open_demo_from_bytes(bytes).map_err(|e| format!("parse: {e}"))?;
     if demo.header.map_checksum == 0 {
         let name = String::from_utf8_lossy(
-            &demo.header.map_name.0.iter().copied().take_while(|b| *b != 0).collect::<Vec<u8>>(),
+            &demo
+                .header
+                .map_name
+                .0
+                .iter()
+                .copied()
+                .take_while(|b| *b != 0)
+                .collect::<Vec<u8>>(),
         )
         .trim()
         .to_lowercase();
@@ -128,14 +141,22 @@ pub fn harvest_player_positions(bytes: &[u8], want_checksum: u32, want_map_name:
 
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 let ents: Vec<(u16, &Delta)> = match &**em {
-                    EngineMessage::SvcPacketEntities(pe) => {
-                        pe.entity_states.iter().map(|e| (e.entity_index, &e.delta)).collect()
-                    }
+                    EngineMessage::SvcPacketEntities(pe) => pe
+                        .entity_states
+                        .iter()
+                        .map(|e| (e.entity_index, &e.delta))
+                        .collect(),
                     EngineMessage::SvcDeltaPacketEntities(pe) => pe
                         .entity_states
                         .iter()
@@ -162,13 +183,20 @@ pub fn harvest_player_positions(bytes: &[u8], want_checksum: u32, want_map_name:
 /// coordinates are not guaranteed to line up) before it silently corrupts
 /// the cloud. `want_map_name` only matters for an HLTV recording, whose
 /// header carries no usable checksum -- see `harvest_player_positions`.
-pub fn harvest_directory(dir: &Path, want_checksum: u32, want_map_name: &str) -> Result<HashSet<(i32, i32, i32)>, String> {
+pub fn harvest_directory(
+    dir: &Path,
+    want_checksum: u32,
+    want_map_name: &str,
+) -> Result<HashSet<(i32, i32, i32)>, String> {
     let mut merged: HashSet<(i32, i32, i32)> = HashSet::new();
     let entries = std::fs::read_dir(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
     for entry in entries {
         let entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path();
-        if !path.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")) {
+        if !path
+            .extension()
+            .is_some_and(|e| e.eq_ignore_ascii_case("dem"))
+        {
             continue;
         }
         let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
@@ -199,11 +227,19 @@ fn point_to_aabb_distance(min: [f32; 3], max: [f32; 3], p: [f32; 3]) -> f32 {
 /// grid cells and a map has at most a few hundred candidate entities, so this
 /// is well under a second even unindexed -- not worth a spatial structure for
 /// a tool run interactively, once, per map.
-pub fn distance_to_nearest_player(cloud: &HashSet<(i32, i32, i32)>, min: [f32; 3], max: [f32; 3]) -> f32 {
+pub fn distance_to_nearest_player(
+    cloud: &HashSet<(i32, i32, i32)>,
+    min: [f32; 3],
+    max: [f32; 3],
+) -> f32 {
     cloud
         .iter()
         .map(|&(x, y, z)| {
-            let p = [x as f32 * GRID_SIZE, y as f32 * GRID_SIZE, z as f32 * GRID_SIZE];
+            let p = [
+                x as f32 * GRID_SIZE,
+                y as f32 * GRID_SIZE,
+                z as f32 * GRID_SIZE,
+            ];
             point_to_aabb_distance(min, max, p)
         })
         .fold(f32::INFINITY, f32::min)
@@ -226,7 +262,8 @@ const BASE_MARGIN: f32 = 256.0;
 const SIZE_FACTOR: f32 = 0.5;
 
 pub fn reads_as_background(distance: f32, min: [f32; 3], max: [f32; 3]) -> bool {
-    let diagonal = ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2) + (max[2] - min[2]).powi(2)).sqrt();
+    let diagonal =
+        ((max[0] - min[0]).powi(2) + (max[1] - min[1]).powi(2) + (max[2] - min[2]).powi(2)).sqrt();
     distance > BASE_MARGIN + diagonal * SIZE_FACTOR
 }
 
@@ -236,7 +273,10 @@ mod tests {
 
     #[test]
     fn point_inside_box_is_zero_distance() {
-        assert_eq!(point_to_aabb_distance([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [5.0, 5.0, 5.0]), 0.0);
+        assert_eq!(
+            point_to_aabb_distance([0.0, 0.0, 0.0], [10.0, 10.0, 10.0], [5.0, 5.0, 5.0]),
+            0.0
+        );
     }
 
     #[test]
@@ -264,7 +304,10 @@ mod tests {
         let building = ([0.0, 0.0, 0.0], [400.0, 400.0, 200.0]);
         let small_dist = point_to_aabb_distance(small.0, small.1, [358.0, 0.0, 0.0]);
         let building_dist = point_to_aabb_distance(building.0, building.1, [750.0, 0.0, 0.0]);
-        assert!((small_dist - building_dist).abs() < 1e-3, "both boxes should have the same clearance");
+        assert!(
+            (small_dist - building_dist).abs() < 1e-3,
+            "both boxes should have the same clearance"
+        );
         assert!(reads_as_background(small_dist, small.0, small.1));
         assert!(!reads_as_background(building_dist, building.0, building.1));
     }
@@ -314,6 +357,9 @@ mod tests {
         moved_x_only.insert("origin[0]\0".to_string(), 500.0f32.to_le_bytes().to_vec());
         ingest_entity(1, &moved_x_only, &mut last, &mut cells);
 
-        assert!(cells.contains(&quantize([500.0, 0.0, 0.0])), "the y/z axes should carry forward as 0.0");
+        assert!(
+            cells.contains(&quantize([500.0, 0.0, 0.0])),
+            "the y/z axes should carry forward as 0.0"
+        );
     }
 }

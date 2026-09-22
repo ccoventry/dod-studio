@@ -111,7 +111,8 @@ pub struct TextStats {
 /// Case is *not* folded: these are looked up verbatim in `titles.txt`, so two
 /// strings differing in case are two different lookups.
 fn clean(text: &str) -> String {
-    text.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string()
+    text.trim_matches(|c: char| c == '\0' || c.is_whitespace())
+        .to_string()
 }
 
 /// Every on-screen string this map declares.
@@ -158,8 +159,7 @@ pub fn hide_map_text(demo: &mut Demo, strings: &BTreeSet<String>) -> TextStats {
                 if clean(&String::from_utf8_lossy(&user.name)) != HUD_TEXT {
                     continue;
                 }
-                let Ok(UserMessage::HudText(text)) =
-                    UserMessage::new(&user.name, &user.data)
+                let Ok(UserMessage::HudText(text)) = UserMessage::new(&user.name, &user.data)
                 else {
                     continue;
                 };
@@ -223,7 +223,10 @@ mod tests {
                 "MAP_AXIS_VICTORY2".to_string(),
             ])
         );
-        assert_eq!(text.hints, BTreeSet::from(["MAP_SPAWN_WARNING".to_string()]));
+        assert_eq!(
+            text.hints,
+            BTreeSet::from(["MAP_SPAWN_WARNING".to_string()])
+        );
     }
 
     /// `ambient_generic` uses `message` for a wav path. Keying on the classname
@@ -240,10 +243,16 @@ mod tests {
         let text = map_text(&entities(ANZIO));
         assert!(text.selected(TextSelection::default()).is_empty());
 
-        let hints = text.selected(TextSelection { round_result: false, hints: true });
+        let hints = text.selected(TextSelection {
+            round_result: false,
+            hints: true,
+        });
         assert_eq!(hints, BTreeSet::from(["MAP_SPAWN_WARNING".to_string()]));
 
-        let both = text.selected(TextSelection { round_result: true, hints: true });
+        let both = text.selected(TextSelection {
+            round_result: true,
+            hints: true,
+        });
         assert_eq!(both.len(), 3);
     }
 
@@ -272,7 +281,10 @@ mod tests {
     #[test]
     fn dods_own_prompts_are_never_selected() {
         let text = map_text(&entities(ANZIO));
-        let all = text.selected(TextSelection { round_result: true, hints: true });
+        let all = text.selected(TextSelection {
+            round_result: true,
+            hints: true,
+        });
         assert!(!all.contains("#Clan_allies_ready"));
         assert!(!all.contains("#Clan_axis_ready"));
     }

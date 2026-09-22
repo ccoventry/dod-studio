@@ -41,8 +41,8 @@
 // 4096-slot ring would need.
 
 use super::bsp;
-use super::decal_atlas;
 use super::cfg_scan;
+use super::decal_atlas;
 use dem::open_demo_from_bytes;
 use dem::types::{
     ByteString, ConsoleCommand, EngineMessage, Frame, FrameData, MessageData, NetMessage,
@@ -722,7 +722,9 @@ pub(super) fn frame_ordinals(demo: &dem::types::Demo) -> Vec<(usize, usize, i32)
 }
 
 pub(super) fn in_window(ordinal: i32, keep_windows: &[(i32, i32)]) -> bool {
-    keep_windows.iter().any(|&(s, e)| ordinal >= s && ordinal <= e)
+    keep_windows
+        .iter()
+        .any(|&(s, e)| ordinal >= s && ordinal <= e)
 }
 
 /// How long before a clip the sweep should finish, in seconds of demo time.
@@ -926,9 +928,10 @@ pub(super) fn survey(
                 // coordinates), hence the separate arm.
                 if let TempEntity::TePlayerDecal(p) = &te.entity {
                     if p.len() >= 7
-                        && let Some(pos) = decal_position(&p[1..7]) {
-                            out.harvested.push(pos);
-                        }
+                        && let Some(pos) = decal_position(&p[1..7])
+                    {
+                        out.harvested.push(pos);
+                    }
                     continue;
                 }
 
@@ -1034,9 +1037,10 @@ fn atlas_key(header: &dem::types::Header, opts: &DecalCleanOptions) -> Option<de
     let mut key = decal_atlas::MapKey::from_header(header)?;
     if key.checksum == 0
         && let Some(dir) = &opts.maps_dir
-            && let Ok(found) = bsp::map_checksum_of_file(&dir.join(format!("{}.bsp", key.name))) {
-                key.checksum = found;
-            }
+        && let Ok(found) = bsp::map_checksum_of_file(&dir.join(format!("{}.bsp", key.name)))
+    {
+        key.checksum = found;
+    }
     Some(key)
 }
 
@@ -1118,7 +1122,11 @@ struct Visibility<'a> {
 }
 
 impl<'a> Visibility<'a> {
-    fn new(bsp: Option<&'a bsp::Bsp>, cameras: &[([f32; 3], [f32; 3])], opts: &DecalCleanOptions) -> Self {
+    fn new(
+        bsp: Option<&'a bsp::Bsp>,
+        cameras: &[([f32; 3], [f32; 3])],
+        opts: &DecalCleanOptions,
+    ) -> Self {
         // Cameras cluster hard — thousands of samples collapse to a handful of
         // rooms — so the union is computed over distinct leaves, not samples.
         let camera_pvs = bsp.and_then(|b| {
@@ -1249,22 +1257,17 @@ impl<'a> Visibility<'a> {
 
     /// In-clip camera samples from which any of these positions is on screen.
     /// Must be zero.
-    fn on_camera_frames(
-        &self,
-        positions: &[[f32; 3]],
-        cameras: &[([f32; 3], [f32; 3])],
-    ) -> usize {
+    fn on_camera_frames(&self, positions: &[[f32; 3]], cameras: &[([f32; 3], [f32; 3])]) -> usize {
         // Measured on the drawn surface, the same rule the selection applied.
         // Counting the coordinates instead reports zero for a sweep that covers
         // a wall the camera is looking straight at.
-        let drawn: Vec<[f32; 3]> = positions.iter().filter_map(|p| self.draw_point(p)).collect();
+        let drawn: Vec<[f32; 3]> = positions
+            .iter()
+            .filter_map(|p| self.draw_point(p))
+            .collect();
         cameras
             .iter()
-            .filter(|(eye, fwd)| {
-                drawn
-                    .iter()
-                    .any(|p| self.on_screen_from(p, eye, fwd))
-            })
+            .filter(|(eye, fwd)| drawn.iter().any(|p| self.on_screen_from(p, eye, fwd)))
             .count()
     }
 }
@@ -1415,16 +1418,12 @@ fn resolve_flush_positions(
     // case it exists for is the opposite one: a map nothing has been harvested
     // from yet, where everything above comes back nearly empty.
     if pool.len() < wanted
-        && let Some(map) = visibility.bsp {
-            let sampled = map.face_candidates(&bsp::FaceSampling::default());
-            placement.map_sampled = sampled.len();
-            placement.map_safe = absorb(
-                &sampled,
-                FlushSource::MapGeometry,
-                &mut pool,
-                &mut source,
-            );
-        }
+        && let Some(map) = visibility.bsp
+    {
+        let sampled = map.face_candidates(&bsp::FaceSampling::default());
+        placement.map_sampled = sampled.len();
+        placement.map_safe = absorb(&sampled, FlushSource::MapGeometry, &mut pool, &mut source);
+    }
     if pool.len() < wanted && !opts.map_geometry_only {
         absorb(
             &survey.floor_candidates,
@@ -1471,7 +1470,6 @@ fn legacy_single_position(
     opts: &DecalCleanOptions,
     reference: [f32; 3],
 ) -> (Vec<[f32; 3]>, Option<FlushSource>) {
-
     // Two independent disqualifiers, because neither alone is sufficient:
     //
     //  - Distance: the camera physically walking over the spot. Spawn is also
@@ -1769,123 +1767,123 @@ pub fn clean_demo_decals(
 
     // ── Pass 2: flush bursts ahead of each capture window ────────────────────
     if opts.flush_burst
-        && let (false, Some(texture_index)) = (flush_positions.is_empty(), texture_index) {
-            // Eligible carriers, in global frame order: parsed network frames
-            // small enough that a handful of extra 9-byte messages cannot push
-            // the packet near the engine's buffer ceiling. Built across every
-            // entry at once so a window is never confined to one entry's frames.
-            // Every frame with its ordinal and its own timestamp, so the burst
-            // deadline can be a duration walked through real times rather than
-            // a frame count standing in for one.
-            let all_frames = frame_ordinals(&demo);
-            let all_times: Vec<f32> = all_frames
-                .iter()
-                .map(|&(entry_idx, frame_idx, _)| {
-                    demo.directory.entries[entry_idx]
-                        .frames
-                        .get(frame_idx)
-                        .map(|f| f.time)
-                        .unwrap_or(f32::NAN)
-                })
-                .collect();
+        && let (false, Some(texture_index)) = (flush_positions.is_empty(), texture_index)
+    {
+        // Eligible carriers, in global frame order: parsed network frames
+        // small enough that a handful of extra 9-byte messages cannot push
+        // the packet near the engine's buffer ceiling. Built across every
+        // entry at once so a window is never confined to one entry's frames.
+        // Every frame with its ordinal and its own timestamp, so the burst
+        // deadline can be a duration walked through real times rather than
+        // a frame count standing in for one.
+        let all_frames = frame_ordinals(&demo);
+        let all_times: Vec<f32> = all_frames
+            .iter()
+            .map(|&(entry_idx, frame_idx, _)| {
+                demo.directory.entries[entry_idx]
+                    .frames
+                    .get(frame_idx)
+                    .map(|f| f.time)
+                    .unwrap_or(f32::NAN)
+            })
+            .collect();
 
-            let eligible: Vec<(usize, usize, i32)> = all_frames
-                .iter()
-                .copied()
-                // Never inside a clip being recorded. The sweep's whole job is
-                // to turn the decal ring in the gap BEFORE a clip; a carrier
-                // landing inside one turns the ring while that clip is being
-                // filmed, which can unlink the bullet holes the firefight is
-                // putting up — decals disappearing mid-shot, the exact artefact
-                // this feature removes. At a 256 ring the burst is 68 frames
-                // and never reached that far; at the 4,096 maximum it is 1,028
-                // and reached into an earlier clip on 10 of 85 demos.
-                .filter(|&(_, _, ordinal)| !in_window(ordinal, keep_windows))
-                .filter(|&(entry_idx, frame_idx, _)| {
-                    crate::patch::is_injectable_frame(&demo, entry_idx, frame_idx)
-                })
-                .collect();
+        let eligible: Vec<(usize, usize, i32)> = all_frames
+            .iter()
+            .copied()
+            // Never inside a clip being recorded. The sweep's whole job is
+            // to turn the decal ring in the gap BEFORE a clip; a carrier
+            // landing inside one turns the ring while that clip is being
+            // filmed, which can unlink the bullet holes the firefight is
+            // putting up — decals disappearing mid-shot, the exact artefact
+            // this feature removes. At a 256 ring the burst is 68 frames
+            // and never reached that far; at the 4,096 maximum it is 1,028
+            // and reached into an earlier clip on 10 of 85 demos.
+            .filter(|&(_, _, ordinal)| !in_window(ordinal, keep_windows))
+            .filter(|&(entry_idx, frame_idx, _)| {
+                crate::patch::is_injectable_frame(&demo, entry_idx, frame_idx)
+            })
+            .collect();
 
-            let mut used: std::collections::HashSet<(usize, usize)> =
-                std::collections::HashSet::new();
-            let mut plan: Vec<(usize, usize, usize)> = Vec::new();
+        let mut used: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
+        let mut plan: Vec<(usize, usize, usize)> = Vec::new();
 
-            for &(window_start, _) in keep_windows {
-                let deadline =
-                    deadline_before(window_start, opts.lead_seconds, &all_frames, &all_times)
-                        .unwrap_or(window_start - FALLBACK_LEAD_FRAMES);
-                let mut remaining = burst_count;
+        for &(window_start, _) in keep_windows {
+            let deadline =
+                deadline_before(window_start, opts.lead_seconds, &all_frames, &all_times)
+                    .unwrap_or(window_start - FALLBACK_LEAD_FRAMES);
+            let mut remaining = burst_count;
 
-                // Walk backwards from the deadline so the sweep finishes as
-                // late as possible — nothing after it can re-dirty a wall.
-                let start_at = match eligible.iter().rposition(|&(_, _, ord)| ord <= deadline) {
-                    Some(p) => p,
-                    None => {
-                        stats.bursts_short.push((window_start, 0, burst_count));
-                        continue;
-                    }
-                };
-
-                for slot in (0..=start_at).rev() {
-                    if remaining == 0 {
-                        break;
-                    }
-                    let (entry_idx, frame_idx, ordinal) = eligible[slot];
-                    if !used.insert((entry_idx, frame_idx)) {
-                        continue;
-                    }
-                    if in_window(ordinal, keep_windows) {
-                        stats.burst_frames_inside_clip += 1;
-                    }
-                    let take = remaining.min(opts.max_per_frame);
-                    plan.push((entry_idx, frame_idx, take));
-                    remaining -= take;
+            // Walk backwards from the deadline so the sweep finishes as
+            // late as possible — nothing after it can re-dirty a wall.
+            let start_at = match eligible.iter().rposition(|&(_, _, ord)| ord <= deadline) {
+                Some(p) => p,
+                None => {
+                    stats.bursts_short.push((window_start, 0, burst_count));
+                    continue;
                 }
+            };
 
-                if remaining > 0 {
-                    stats
-                        .bursts_short
-                        .push((window_start, burst_count - remaining, burst_count));
+            for slot in (0..=start_at).rev() {
+                if remaining == 0 {
+                    break;
                 }
-                if remaining < burst_count {
-                    stats.bursts_placed += 1;
+                let (entry_idx, frame_idx, ordinal) = eligible[slot];
+                if !used.insert((entry_idx, frame_idx)) {
+                    continue;
                 }
+                if in_window(ordinal, keep_windows) {
+                    stats.burst_frames_inside_clip += 1;
+                }
+                let take = remaining.min(opts.max_per_frame);
+                plan.push((entry_idx, frame_idx, take));
+                remaining -= take;
             }
 
-            // Walk the position list so no spot receives more than
-            // DECALS_PER_POSITION consecutive decals. Exceeding
-            // MAX_OVERLAP_DECALS at one spot makes the engine recycle instead
-            // of allocate, which stops the ring advancing and voids the sweep.
-            let mut placed_here = 0usize;
-            let mut pos_idx = 0usize;
+            if remaining > 0 {
+                stats
+                    .bursts_short
+                    .push((window_start, burst_count - remaining, burst_count));
+            }
+            if remaining < burst_count {
+                stats.bursts_placed += 1;
+            }
+        }
 
-            for (entry_idx, frame_idx, count) in plan {
-                let Some(frame) = demo
-                    .directory
-                    .entries
-                    .get_mut(entry_idx)
-                    .and_then(|e| e.frames.get_mut(frame_idx))
-                else {
-                    continue;
-                };
-                let FrameData::NetworkMessage(net_msg_box) = &mut frame.frame_data else {
-                    continue;
-                };
-                let MessageData::Parsed(messages) = &mut net_msg_box.1.messages else {
-                    continue;
-                };
-                for _ in 0..count {
-                    let pos = flush_positions[pos_idx % flush_positions.len()];
-                    messages.push(build_world_decal(&pos, texture_index));
-                    stats.flush_decals_injected += 1;
-                    placed_here += 1;
-                    if placed_here >= DECALS_PER_POSITION {
-                        placed_here = 0;
-                        pos_idx += 1;
-                    }
+        // Walk the position list so no spot receives more than
+        // DECALS_PER_POSITION consecutive decals. Exceeding
+        // MAX_OVERLAP_DECALS at one spot makes the engine recycle instead
+        // of allocate, which stops the ring advancing and voids the sweep.
+        let mut placed_here = 0usize;
+        let mut pos_idx = 0usize;
+
+        for (entry_idx, frame_idx, count) in plan {
+            let Some(frame) = demo
+                .directory
+                .entries
+                .get_mut(entry_idx)
+                .and_then(|e| e.frames.get_mut(frame_idx))
+            else {
+                continue;
+            };
+            let FrameData::NetworkMessage(net_msg_box) = &mut frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(messages) = &mut net_msg_box.1.messages else {
+                continue;
+            };
+            for _ in 0..count {
+                let pos = flush_positions[pos_idx % flush_positions.len()];
+                messages.push(build_world_decal(&pos, texture_index));
+                stats.flush_decals_injected += 1;
+                placed_here += 1;
+                if placed_here >= DECALS_PER_POSITION {
+                    placed_here = 0;
+                    pos_idx += 1;
                 }
             }
         }
+    }
 
     // ── Pin r_decals so the ring stays small and never strands a slot ────────
     if opts.inject_r_decals_command {
@@ -1953,7 +1951,12 @@ pub fn strip_decals_outside_windows(
         inject_r_decals_command: false,
         ..Default::default()
     };
-    clean_demo_decals(demo_bytes, keep_windows, &opts, crate::patch::Cancel::never())
+    clean_demo_decals(
+        demo_bytes,
+        keep_windows,
+        &opts,
+        crate::patch::Cancel::never(),
+    )
 }
 
 // ── Batch-pipeline pre-pass ──────────────────────────────────────────────────
@@ -2051,7 +2054,6 @@ fn scratch_path(source_demo: &str) -> std::path::PathBuf {
     ))
 }
 
-
 /// Extra half-angle allowed beyond the frame's own corner.
 ///
 /// Cameras are sampled every fourth in-window frame, so a fast turn can carry a
@@ -2128,16 +2130,19 @@ pub fn capture_fov_from_init(init_commands: &[String]) -> Option<f32> {
         // falls through to the default, which is the whole bug this exists
         // to prevent.
         if let Ok(v) = cfg_scan::unquote(rest.trim()).parse::<f32>()
-            && v > 0.0 {
-                return Some(v);
-            }
+            && v > 0.0
+        {
+            return Some(v);
+        }
     }
     None
 }
 
 /// The mod folder holding the game's configs, for a configured `hl.exe`.
 fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
-    let dir = std::path::Path::new(&config.game_path).parent()?.join("dod");
+    let dir = std::path::Path::new(&config.game_path)
+        .parent()?
+        .join("dod");
     dir.is_dir().then_some(dir)
 }
 
@@ -2176,9 +2181,10 @@ pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
     for cvar in ["mirv_fov", "default_fov"] {
         if let Some(setting) = scan.effective(cvar)
             && let Ok(v) = setting.value.parse::<f32>()
-                && v > 0.0 {
-                    return v;
-                }
+            && v > 0.0
+        {
+            return v;
+        }
     }
     config.capture_fov
 }
@@ -2215,7 +2221,15 @@ fn warn_about_game_cfgs(config: &PatcherConfig) {
 
     let lines: Vec<String> = found
         .iter()
-        .map(|s| format!("`{} {}` in `{}` line {}", s.cvar, s.value, s.file_name(), s.line))
+        .map(|s| {
+            format!(
+                "`{} {}` in `{}` line {}",
+                s.cvar,
+                s.value,
+                s.file_name(),
+                s.line
+            )
+        })
         .collect();
 
     crate::log_markdown(&format!(
@@ -2635,15 +2649,16 @@ fn report(
     // in shot — but it narrows the margin against a camera turn falling between
     // two samples.
     if let Some(nearest) = stats.min_camera_distance
-        && nearest < opts.min_camera_clearance {
-            crate::log_markdown(&format!(
-                "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
+        && nearest < opts.min_camera_clearance
+    {
+        crate::log_markdown(&format!(
+            "ℹ️ **Decal flush spots are closer to the camera than preferred** — nearest \
                  approach {:.0} units against a {:.0}-unit preference. The surface each one is \
                  drawn on cleared the line-of-sight test, so none should be in shot; this is the \
                  margin narrowing, not a decal on screen.",
-                nearest, opts.min_camera_clearance
-            ));
-        }
+            nearest, opts.min_camera_clearance
+        ));
+    }
 
     // The one outright defect this pass can introduce: its own decals on
     // screen. The cone test is sampled every fourth frame, so a non-zero count
@@ -2679,8 +2694,8 @@ fn report(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::Scratch;
     use crate::patch::types::CaptureBlock;
+    use crate::test_support::Scratch;
 
     /// `source_demo` deliberately points at nothing: every case below must
     /// decide to skip before it ever opens the file, so a read attempt would
@@ -2763,7 +2778,10 @@ mod tests {
             !opts.inject_r_decals_command,
             "the pipeline must not insert a console-command frame — init_commands owns r_decals"
         );
-        assert_eq!(opts.ring_limit, 128, "the configured ring size must reach the sweep");
+        assert_eq!(
+            opts.ring_limit, 128,
+            "the configured ring size must reach the sweep"
+        );
     }
 
     #[test]
@@ -2784,7 +2802,11 @@ mod tests {
     /// A game folder laid out as the engine expects: `hl.exe` with `dod/`
     /// beside it. Returns the path to the exe, and the guard the caller must
     /// hold -- dropping it here would delete the folder before it was read.
-    fn fake_game(tag: &str, config_cfg: &str, movie_cfg: Option<&str>) -> (Scratch, std::path::PathBuf) {
+    fn fake_game(
+        tag: &str,
+        config_cfg: &str,
+        movie_cfg: Option<&str>,
+    ) -> (Scratch, std::path::PathBuf) {
         let root = Scratch::new(format_args!("fov_cfg_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
@@ -2809,7 +2831,11 @@ mod tests {
             ..PatcherConfig::default()
         };
 
-        assert_eq!(capture_fov(&config), config.capture_fov, "init commands say nothing");
+        assert_eq!(
+            capture_fov(&config),
+            config.capture_fov,
+            "init commands say nothing"
+        );
         assert_eq!(capture_fov_resolved(&config), 105.0, "the config does");
     }
 
@@ -2947,7 +2973,12 @@ mod tests {
             ..Default::default()
         };
 
-        assert_eq!(atlas_key(&header_for("dod_anzio", 0), &opts).unwrap().checksum, 0);
+        assert_eq!(
+            atlas_key(&header_for("dod_anzio", 0), &opts)
+                .unwrap()
+                .checksum,
+            0
+        );
     }
 
     #[test]
@@ -2957,14 +2988,21 @@ mod tests {
         // "was one stated?" by comparing against the default would read that as
         // silence and hand every defaulted install to its movie.cfg — here,
         // rendering the cone for 105 when the user asked for 90.
-        let (_root, exe) = fake_game("states_default", "exec movie.cfg\n", Some("mirv_fov \"105\"\n"));
+        let (_root, exe) = fake_game(
+            "states_default",
+            "exec movie.cfg\n",
+            Some("mirv_fov \"105\"\n"),
+        );
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             init_commands: vec!["mirv_fov 90".to_string()],
             ..PatcherConfig::default()
         };
 
-        assert_eq!(config.capture_fov, 90.0, "the default this could be confused with");
+        assert_eq!(
+            config.capture_fov, 90.0,
+            "the default this could be confused with"
+        );
         assert_eq!(capture_fov_from_init(&config.init_commands), Some(90.0));
         assert_eq!(capture_fov_resolved(&config), 90.0, "the user asked for 90");
     }
@@ -2996,31 +3034,51 @@ mod tests {
             ..PatcherConfig::default()
         };
 
-        assert_eq!(ring_limit(&config), 0, "the config's own value now wins, same as mirv_fov's would");
+        assert_eq!(
+            ring_limit(&config),
+            0,
+            "the config's own value now wins, same as mirv_fov's would"
+        );
     }
 
     #[test]
     fn a_nonzero_r_decals_the_game_config_sets_is_adopted() {
-        let (_root, exe) = fake_game("decals_from_config", "exec movie.cfg\n", Some("r_decals \"512\"\n"));
+        let (_root, exe) = fake_game(
+            "decals_from_config",
+            "exec movie.cfg\n",
+            Some("r_decals \"512\"\n"),
+        );
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             decal_ring_limit: 128,
             ..PatcherConfig::default()
         };
 
-        assert_eq!(ring_limit(&config), 512, "the config's value, not the app's own default");
+        assert_eq!(
+            ring_limit(&config),
+            512,
+            "the config's value, not the app's own default"
+        );
     }
 
     #[test]
     fn an_init_command_still_outranks_a_game_config_for_r_decals() {
-        let (_root, exe) = fake_game("decals_init_outranks", "exec movie.cfg\n", Some("r_decals \"0\"\n"));
+        let (_root, exe) = fake_game(
+            "decals_init_outranks",
+            "exec movie.cfg\n",
+            Some("r_decals \"0\"\n"),
+        );
         let config = PatcherConfig {
             game_path: exe.to_string_lossy().to_string(),
             init_commands: vec!["r_decals 512".to_string()],
             ..PatcherConfig::default()
         };
 
-        assert_eq!(ring_limit(&config), 512, "stated in Initial Commands, so it wins outright");
+        assert_eq!(
+            ring_limit(&config),
+            512,
+            "stated in Initial Commands, so it wins outright"
+        );
     }
 
     #[test]
@@ -3109,9 +3167,11 @@ mod tests {
         let job = job_with_blocks(vec![block(0, 1000, 2000)]);
 
         assert_eq!(ring_limit(&config), 0);
-        assert!(prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
-            .unwrap()
-            .is_none());
+        assert!(
+            prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -3122,9 +3182,11 @@ mod tests {
         };
         let job = job_with_blocks(vec![block(0, 1000, 2000)]);
 
-        assert!(prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
-            .unwrap()
-            .is_none());
+        assert!(
+            prepare_flushed_source(&job, &config, crate::patch::Cancel::never())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -3133,9 +3195,15 @@ mod tests {
         // to keep clean and nothing to strip against.
         let job = job_with_blocks(Vec::new());
 
-        assert!(prepare_flushed_source(&job, &PatcherConfig::default(), crate::patch::Cancel::never())
+        assert!(
+            prepare_flushed_source(
+                &job,
+                &PatcherConfig::default(),
+                crate::patch::Cancel::never()
+            )
             .unwrap()
-            .is_none());
+            .is_none()
+        );
     }
 
     #[test]
@@ -3145,9 +3213,15 @@ mod tests {
         let job = job_with_blocks(vec![block(0, 1000, 2000), block(1, 0, 0)]);
 
         assert!(keep_windows_for(&job).is_none());
-        assert!(prepare_flushed_source(&job, &PatcherConfig::default(), crate::patch::Cancel::never())
+        assert!(
+            prepare_flushed_source(
+                &job,
+                &PatcherConfig::default(),
+                crate::patch::Cancel::never()
+            )
             .unwrap()
-            .is_none());
+            .is_none()
+        );
     }
 
     #[test]
@@ -3250,7 +3324,11 @@ mod tests {
         // Coplanar is not contiguous: two stretches of wall at the same x with
         // a doorway between them must not get tiles hung across the gap.
         let mut members = wall_patch(100.0, &[0.0, 20.0, 40.0, 60.0], &[0.0, 20.0]);
-        members.extend(wall_patch(100.0, &[900.0, 920.0, 940.0, 960.0], &[0.0, 20.0]));
+        members.extend(wall_patch(
+            100.0,
+            &[900.0, 920.0, 940.0, 960.0],
+            &[0.0, 20.0],
+        ));
 
         let tiles = tile_positions(&members);
         assert!(!tiles.is_empty());
@@ -3324,7 +3402,11 @@ mod tests {
         // "generous" against a 90-degree FOV, was under even the 45-degree
         // horizontal half-angle.
         const OLD_FIXED_CONE: f32 = 40.0;
-        for (fov, w, h) in [(90.0f32, 1920, 1080), (90.0, 1280, 960), (105.0, 1920, 1080)] {
+        for (fov, w, h) in [
+            (90.0f32, 1920, 1080),
+            (90.0, 1280, 960),
+            (105.0, 1920, 1080),
+        ] {
             assert!(
                 on_screen_half_angle(fov, w, h) > OLD_FIXED_CONE,
                 "fov {} at {}x{} still fits inside the old fixed cone",
@@ -3341,7 +3423,12 @@ mod tests {
         // the axis than a 16:9 corner at the same horizontal FOV.
         let wide = on_screen_half_angle(90.0, 1920, 1080);
         let tall = on_screen_half_angle(90.0, 1280, 960);
-        assert!(tall > wide, "4:3 {:.1} should exceed 16:9 {:.1}", tall, wide);
+        assert!(
+            tall > wide,
+            "4:3 {:.1} should exceed 16:9 {:.1}",
+            tall,
+            wide
+        );
     }
 
     #[test]
@@ -3417,12 +3504,18 @@ mod tests {
 
         sweep_stale_scratch(&dir);
 
-        assert!(!stale.exists(), "an orphaned scratch demo should be removed");
+        assert!(
+            !stale.exists(),
+            "an orphaned scratch demo should be removed"
+        );
         assert!(
             fresh.exists(),
             "a scratch demo young enough to belong to a running capture must survive"
         );
-        assert!(other.exists(), "files that are not ours must never be touched");
+        assert!(
+            other.exists(),
+            "files that are not ours must never be touched"
+        );
 
         let _ = std::fs::remove_dir_all(&dir);
     }

@@ -322,9 +322,7 @@ impl Demo {
 
 #[cfg(test)]
 mod cancellable_write_tests {
-    use crate::types::{
-        ByteString, Demo, Directory, DirectoryEntry, Frame, FrameData, Header,
-    };
+    use crate::types::{ByteString, Demo, Directory, DirectoryEntry, Frame, FrameData, Header};
 
     /// Enough frames to cross `CANCEL_CHECK_FRAMES` several times over, so a
     /// check that only ran per entry (there is one) would not be enough.
@@ -369,8 +367,14 @@ mod cancellable_write_tests {
     #[test]
     fn a_check_that_never_fires_writes_the_whole_demo() {
         let demo = demo();
-        let cancellable = demo.write_to_bytes_cancellable(&|| false).expect("not cancelled");
-        assert_eq!(cancellable, demo.write_to_bytes(), "must match the plain writer byte for byte");
+        let cancellable = demo
+            .write_to_bytes_cancellable(&|| false)
+            .expect("not cancelled");
+        assert_eq!(
+            cancellable,
+            demo.write_to_bytes(),
+            "must match the plain writer byte for byte"
+        );
     }
 
     #[test]

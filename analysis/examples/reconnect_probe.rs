@@ -21,7 +21,9 @@ struct P {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: reconnect_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: reconnect_probe <demo>");
     let Ok(bytes) = std::fs::read(&path) else {
         return;
     };
@@ -53,8 +55,12 @@ fn main() {
                                 .trim_matches(|c| c == '\0' || c == '\\')
                                 .split('\\')
                                 .collect();
-                            let f: HashMap<&str, &str> =
-                                parts.as_chunks::<2>().0.iter().map(|&[k, v]| (k, v)).collect();
+                            let f: HashMap<&str, &str> = parts
+                                .as_chunks::<2>()
+                                .0
+                                .iter()
+                                .map(|&[k, v]| (k, v))
+                                .collect();
                             if f.is_empty() {
                                 slot_sid.remove(&ui.index);
                                 continue;
@@ -98,9 +104,10 @@ fn main() {
                             UserMessage::DeathMsg(d) => {
                                 if d.killer_client_index > 0
                                     && d.killer_client_index != d.victim_client_index
-                                    && let Some(sid) = slot_sid.get(&(d.killer_client_index - 1)) {
-                                        players.entry(sid.clone()).or_default().derived_kills += 1;
-                                    }
+                                    && let Some(sid) = slot_sid.get(&(d.killer_client_index - 1))
+                                {
+                                    players.entry(sid.clone()).or_default().derived_kills += 1;
+                                }
                             }
                             _ => {}
                         }

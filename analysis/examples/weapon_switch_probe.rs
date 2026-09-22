@@ -65,10 +65,16 @@ fn main() {
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 let states: Vec<(u16, Option<u32>)> = match &**em {
                     EngineMessage::SvcResourceList(rl) => {
                         for r in &rl.resources {
@@ -107,7 +113,10 @@ fn main() {
                         continue;
                     }
                     last.insert(idx, w);
-                    let name = model_names.get(&w).map(|n| short(n)).unwrap_or_else(|| format!("#{w}"));
+                    let name = model_names
+                        .get(&w)
+                        .map(|n| short(n))
+                        .unwrap_or_else(|| format!("#{w}"));
                     changes.entry(idx).or_default().push((frame.time, name));
                 }
             }
@@ -115,7 +124,10 @@ fn main() {
     }
 
     let total: usize = changes.values().map(|v| v.len()).sum();
-    println!("tracked {} player entities, {total} weapon changes", changes.len());
+    println!(
+        "tracked {} player entities, {total} weapon changes",
+        changes.len()
+    );
     println!("weapon-switch bursts: {min_changes}+ changes inside {window}s\n");
     let mut found = 0;
     let mut keys: Vec<_> = changes.keys().copied().collect();

@@ -59,7 +59,9 @@ fn note_sequence(
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: grenade_timing_probe <demo>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: grenade_timing_probe <demo>");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -104,10 +106,16 @@ fn main() {
                 }
             }
 
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcResourceList(rl) => {
                         for r in &rl.resources {
@@ -157,8 +165,9 @@ fn main() {
                         if let Some(idx) = delta_u32(&cd.client_data, "viewmodel")
                             && let Some(name) = model_names.get(&idx)
                         {
-                            viewmodel =
-                                name.trim_matches(|ch: char| ch == '\0' || ch.is_whitespace()).to_string();
+                            viewmodel = name
+                                .trim_matches(|ch: char| ch == '\0' || ch.is_whitespace())
+                                .to_string();
                         }
                     }
                     EngineMessage::SvcSound(s) => {
@@ -167,7 +176,9 @@ fn main() {
                             .as_ref()
                             .map(|b| b.to_u32())
                             .or_else(|| s.sound_index_short.as_ref().map(|b| b.to_u32()));
-                        let Some(name) = index.and_then(|i| sound_names.get(&i)) else { continue };
+                        let Some(name) = index.and_then(|i| sound_names.get(&i)) else {
+                            continue;
+                        };
                         if !name.contains("grenthrow") {
                             continue;
                         }
@@ -189,8 +200,11 @@ fn main() {
     }
 
     println!("=== {path} ===");
-    let grenade_seqs: usize =
-        seen_sequences.iter().filter(|(s, _)| GRENADE_ATTACK_SEQUENCES.contains(s)).map(|(_, n)| *n).sum();
+    let grenade_seqs: usize = seen_sequences
+        .iter()
+        .filter(|(s, _)| GRENADE_ATTACK_SEQUENCES.contains(s))
+        .map(|(_, n)| *n)
+        .sum();
     println!(
         "player sequence updates seen: {} ({} distinct), of which grenade attacks: {grenade_seqs}",
         seen_sequences.values().sum::<usize>(),
@@ -218,7 +232,10 @@ fn main() {
     // A wind-up that lands in the same frame as the throw is not a signal --
     // there is no time to play anything before the throw.
     let same_frame = gaps.iter().filter(|g| **g < 0.05).count();
-    println!("landing within 50ms of the throw (no usable lead): {same_frame} of {}", gaps.len());
+    println!(
+        "landing within 50ms of the throw (no usable lead): {same_frame} of {}",
+        gaps.len()
+    );
     report_cook(&mut cook_gaps);
 }
 

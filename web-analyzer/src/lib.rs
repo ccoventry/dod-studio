@@ -15,7 +15,10 @@ fn init() {
 /// while parsing — the browser equivalent of the desktop app's
 /// `analyzer_progress` event.
 #[wasm_bindgen(js_name = analyzeDemo)]
-pub fn analyze_demo(bytes: &[u8], progress_cb: Option<js_sys::Function>) -> Result<JsValue, JsValue> {
+pub fn analyze_demo(
+    bytes: &[u8],
+    progress_cb: Option<js_sys::Function>,
+) -> Result<JsValue, JsValue> {
     let analysis = Analysis::try_from_bytes_with_progress(bytes, |processed, total| {
         if let Some(cb) = &progress_cb {
             let _ = cb.call2(

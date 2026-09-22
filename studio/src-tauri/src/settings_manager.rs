@@ -157,33 +157,79 @@ pub struct AppSettings {
     pub auto_check_updates: bool,
 }
 
-fn default_resolution_width() -> i32 { 1280 }
-fn default_obs_capture_fps() -> i32 { 120 }
-fn default_resolution_height() -> i32 { 720 }
-fn default_initial_delay() -> f32 { 3.0 }
-fn default_fast_forward_speed() -> f32 { 0.05 }
-fn default_render_codec() -> String { "prores".to_string() }
-fn default_render_fps() -> i32 { 300 }
-fn default_render_max_concurrent() -> i32 { 2 }
-fn default_analyzer_explorer_width() -> i32 { 260 }
-fn default_decal_flush() -> bool { true }
+fn default_resolution_width() -> i32 {
+    1280
+}
+fn default_obs_capture_fps() -> i32 {
+    120
+}
+fn default_resolution_height() -> i32 {
+    720
+}
+fn default_initial_delay() -> f32 {
+    3.0
+}
+fn default_fast_forward_speed() -> f32 {
+    0.05
+}
+fn default_render_codec() -> String {
+    "prores".to_string()
+}
+fn default_render_fps() -> i32 {
+    300
+}
+fn default_render_max_concurrent() -> i32 {
+    2
+}
+fn default_analyzer_explorer_width() -> i32 {
+    260
+}
+fn default_decal_flush() -> bool {
+    true
+}
 fn default_capture_codec() -> String {
-    native::patch::CaptureCodec::default().to_str_id().to_string()
+    native::patch::CaptureCodec::default()
+        .to_str_id()
+        .to_string()
 }
 fn default_capture_mode() -> String {
-    native::patch::CaptureMode::default().to_str_id().to_string()
+    native::patch::CaptureMode::default()
+        .to_str_id()
+        .to_string()
 }
-fn default_obs_host() -> String { "127.0.0.1".to_string() }
-fn default_obs_port() -> u16 { 4455 }
-fn default_notify_patching() -> bool { true }
-fn default_notify_demo_loading() -> bool { true }
-fn default_notify_between_clips() -> bool { true }
-fn default_notify_captures_done() -> bool { true }
-fn default_notify_renders_done() -> bool { true }
-fn default_notify_error() -> bool { true }
-fn default_notify_updates() -> bool { true }
-fn default_update_channel() -> String { "stable".to_string() }
-fn default_auto_check_updates() -> bool { true }
+fn default_obs_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_obs_port() -> u16 {
+    4455
+}
+fn default_notify_patching() -> bool {
+    true
+}
+fn default_notify_demo_loading() -> bool {
+    true
+}
+fn default_notify_between_clips() -> bool {
+    true
+}
+fn default_notify_captures_done() -> bool {
+    true
+}
+fn default_notify_renders_done() -> bool {
+    true
+}
+fn default_notify_error() -> bool {
+    true
+}
+fn default_notify_updates() -> bool {
+    true
+}
+fn default_update_channel() -> String {
+    "stable".to_string()
+}
+fn default_auto_check_updates() -> bool {
+    true
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -263,9 +309,10 @@ impl AppSettings {
         let path = settings_path();
         if path.exists()
             && let Ok(content) = fs::read_to_string(&path)
-                && let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
-                    return settings;
-                }
+            && let Ok(settings) = serde_json::from_str::<AppSettings>(&content)
+        {
+            return settings;
+        }
         Self::default()
     }
 
@@ -339,6 +386,9 @@ mod tests {
         assert_eq!(restored.capture_fps, original.capture_fps);
         assert_eq!(restored.fast_forward_speed, original.fast_forward_speed);
         assert_eq!(restored.render_codec, original.render_codec);
-        assert_eq!(restored.render_custom_codec_args, original.render_custom_codec_args);
+        assert_eq!(
+            restored.render_custom_codec_args,
+            original.render_custom_codec_args
+        );
     }
 }

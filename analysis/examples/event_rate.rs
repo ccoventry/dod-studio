@@ -19,7 +19,9 @@ use dod::UserMessage;
 const BUCKET: f32 = 60.0;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: event_rate <demo.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: event_rate <demo.dem>");
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
 
@@ -31,17 +33,30 @@ fn main() {
     for entry in demo.directory.entries.iter().skip(1) {
         for f in &entry.frames {
             let b = (f.time / BUCKET).max(0.0) as usize;
-            if b > 100_000 { continue }
-            while buckets.len() <= b { buckets.push(0); frames_per_bucket.push(0) }
+            if b > 100_000 {
+                continue;
+            }
+            while buckets.len() <= b {
+                buckets.push(0);
+                frames_per_bucket.push(0)
+            }
             frames_per_bucket[b] += 1;
-            let FrameData::NetworkMessage(bt) = &f.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &f.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
                 if let NetMessage::UserMessage(um) = m
-                    && matches!(UserMessage::new(&um.name, &um.data), Ok(UserMessage::DeathMsg(_))) {
-                        buckets[b] += 1;
-                        total += 1;
-                    }
+                    && matches!(
+                        UserMessage::new(&um.name, &um.data),
+                        Ok(UserMessage::DeathMsg(_))
+                    )
+                {
+                    buckets[b] += 1;
+                    total += 1;
+                }
             }
         }
     }
@@ -50,8 +65,13 @@ fn main() {
     println!("  min   frames   deaths");
     for (i, (d, fr)) in buckets.iter().zip(&frames_per_bucket).enumerate() {
         let bar = "#".repeat((*d).min(60));
-        let flag = if *fr == 0 { "  <- no frames at all (hole)" }
-            else if *d == 0 { "  <- frames but no deaths" } else { "" };
+        let flag = if *fr == 0 {
+            "  <- no frames at all (hole)"
+        } else if *d == 0 {
+            "  <- frames but no deaths"
+        } else {
+            ""
+        };
         println!("  {i:>3} {fr:>8} {d:>8} {bar}{flag}");
     }
 }

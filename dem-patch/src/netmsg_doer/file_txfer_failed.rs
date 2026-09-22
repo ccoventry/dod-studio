@@ -8,7 +8,8 @@ impl Doer for SvcFileTxferFailed {
     fn parse(i: &[u8], _: AuxRefCell) -> Result<Self> {
         map(null_string, |file_name| SvcFileTxferFailed {
             file_name: file_name.to_vec(),
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

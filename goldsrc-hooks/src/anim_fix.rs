@@ -61,8 +61,8 @@
 //! the engine interfaces this crate captures itself.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use crate::engine::{self, ClEntityS, ModelSPartial, StudioHdrPartial, StudioSeqDescPartial};
 
@@ -148,15 +148,35 @@ struct DeployableWeapon {
 // (or "up_"/"down_") first-person sequence-family split as the third-person
 // p_*bu.mdl / p_*bd.mdl model swap.
 const DEPLOYABLE_WEAPONS: &[DeployableWeapon] = &[
-    DeployableWeapon { viewmodel_match: "mg42", deployed_marker: "bd.mdl", undeployed_marker: "bu.mdl" },
-    DeployableWeapon { viewmodel_match: "mg34", deployed_marker: "bd.mdl", undeployed_marker: "bu.mdl" },
-    DeployableWeapon { viewmodel_match: "bar", deployed_marker: "bd.mdl", undeployed_marker: "bu.mdl" },
-    DeployableWeapon { viewmodel_match: "bren", deployed_marker: "bd.mdl", undeployed_marker: "bu.mdl" },
+    DeployableWeapon {
+        viewmodel_match: "mg42",
+        deployed_marker: "bd.mdl",
+        undeployed_marker: "bu.mdl",
+    },
+    DeployableWeapon {
+        viewmodel_match: "mg34",
+        deployed_marker: "bd.mdl",
+        undeployed_marker: "bu.mdl",
+    },
+    DeployableWeapon {
+        viewmodel_match: "bar",
+        deployed_marker: "bd.mdl",
+        undeployed_marker: "bu.mdl",
+    },
+    DeployableWeapon {
+        viewmodel_match: "bren",
+        deployed_marker: "bd.mdl",
+        undeployed_marker: "bu.mdl",
+    },
     // Also matches v_scopedfg42.mdl, which is correct: it has the same
     // up_*/down_* sequence set. It ships only p_scopedfg42bu.mdl with no "bd"
     // counterpart, so its deploy state simply always reads as up, which is
     // what a scoped FG42 does.
-    DeployableWeapon { viewmodel_match: "fg42", deployed_marker: "bd.mdl", undeployed_marker: "bu.mdl" },
+    DeployableWeapon {
+        viewmodel_match: "fg42",
+        deployed_marker: "bd.mdl",
+        undeployed_marker: "bu.mdl",
+    },
     // v_30cal.mdl has the same upidle/downidle first-person split, but its
     // p_30cal*.mdl set (p_30cal / p_30calpr / p_30calr / p_30calsr) has no
     // matching bd/bu third-person pair -- DoD 1.3's 30cal is normally a
@@ -167,7 +187,9 @@ const DEPLOYABLE_WEAPONS: &[DeployableWeapon] = &[
 ];
 
 fn find_deployable_weapon(viewmodel_name: &str) -> Option<&'static DeployableWeapon> {
-    DEPLOYABLE_WEAPONS.iter().find(|w| viewmodel_name.contains(w.viewmodel_match))
+    DEPLOYABLE_WEAPONS
+        .iter()
+        .find(|w| viewmodel_name.contains(w.viewmodel_match))
 }
 
 /// What the player being spectated is doing, read off their own body animation.
@@ -218,7 +240,10 @@ fn deploy_state_from_body_sequence(label: &str) -> Option<DeployState> {
     // the same "down" first-person sequence family.
     if label.starts_with("bipod_") || label.starts_with("sandbag_") {
         Some(DeployState::Down)
-    } else if ["stand_", "crouch_", "prone_", "sprint_"].iter().any(|p| label.starts_with(p)) {
+    } else if ["stand_", "crouch_", "prone_", "sprint_"]
+        .iter()
+        .any(|p| label.starts_with(p))
+    {
         Some(DeployState::Up)
     } else {
         None
@@ -347,7 +372,9 @@ fn note_held_model(spectated: &ClEntityS) {
         *LAST_HELD_MODEL.lock().unwrap() = None;
         return;
     }
-    let Some(studio) = engine::engine_studio() else { return };
+    let Some(studio) = engine::engine_studio() else {
+        return;
+    };
     let held = unsafe { (studio.get_model_by_index)(spectated.curstate.weaponmodel) };
     if held.is_null() {
         return;
@@ -457,7 +484,9 @@ fn model_sequence_info(model: *mut ModelSPartial) -> Vec<(String, f64)> {
         return cached.clone();
     }
 
-    let Some(studio) = engine::engine_studio() else { return Vec::new() };
+    let Some(studio) = engine::engine_studio() else {
+        return Vec::new();
+    };
     let extradata = unsafe { (studio.mod_extradata)(model) };
     if extradata.is_null() {
         return Vec::new();
@@ -484,8 +513,9 @@ fn model_sequence_info(model: *mut ModelSPartial) -> Vec<(String, f64)> {
 
     let mut labels = Vec::with_capacity(numseq.max(0) as usize);
     for i in 0..numseq {
-        let entry = unsafe { base.add(seqindex as usize + i as usize * size_of::<StudioSeqDescPartial>()) }
-            as *const StudioSeqDescPartial;
+        let entry =
+            unsafe { base.add(seqindex as usize + i as usize * size_of::<StudioSeqDescPartial>()) }
+                as *const StudioSeqDescPartial;
         let (fps, frames) = unsafe { ((*entry).fps, (*entry).numframes) };
         // A sequence with a nonsense rate or frame count gets zero rather than
         // an absurd duration -- callers treat zero as "don't know".
@@ -507,7 +537,10 @@ fn model_sequence_duration(model: *mut ModelSPartial, sequence: i32) -> f64 {
     if sequence < 0 {
         return 0.0;
     }
-    model_sequence_info(model).get(sequence as usize).map(|(_, d)| *d).unwrap_or(0.0)
+    model_sequence_info(model)
+        .get(sequence as usize)
+        .map(|(_, d)| *d)
+        .unwrap_or(0.0)
 }
 
 /// Just the labels, for everything that only needs to name a sequence.
@@ -519,7 +552,10 @@ pub(crate) fn sequence_labels(model: *mut ModelSPartial) -> Vec<String> {
 }
 
 fn model_sequence_strings(model: *mut ModelSPartial) -> Vec<String> {
-    model_sequence_info(model).into_iter().map(|(label, _)| label).collect()
+    model_sequence_info(model)
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect()
 }
 
 fn sequence_family(label: &str) -> Option<DeployState> {
@@ -539,17 +575,27 @@ fn swap_family_prefix(label: &str, target: DeployState) -> String {
         Some(current) if current != target => {
             let prefix_len = if current == DeployState::Up { 2 } else { 4 };
             let rest = &label[prefix_len..];
-            let new_prefix = if target == DeployState::Up { "up" } else { "down" };
+            let new_prefix = if target == DeployState::Up {
+                "up"
+            } else {
+                "down"
+            };
             format!("{new_prefix}{rest}")
         }
         _ => label.to_string(),
     }
 }
 
-fn apply_deploy_state_to_sequence(sequence: i32, state: Option<DeployState>, viewmodel: *mut ModelSPartial) -> i32 {
+fn apply_deploy_state_to_sequence(
+    sequence: i32,
+    state: Option<DeployState>,
+    viewmodel: *mut ModelSPartial,
+) -> i32 {
     let Some(state) = state else { return sequence };
     let labels = model_sequence_strings(viewmodel);
-    let Some(current_label) = labels.get(sequence.max(0) as usize) else { return sequence };
+    let Some(current_label) = labels.get(sequence.max(0) as usize) else {
+        return sequence;
+    };
 
     let wanted = swap_family_prefix(current_label, state);
     labels
@@ -561,7 +607,11 @@ fn apply_deploy_state_to_sequence(sequence: i32, state: Option<DeployState>, vie
         .unwrap_or(sequence)
 }
 
-fn animation_lookup_sequence(label: &str, state: Option<DeployState>, viewmodel: *mut ModelSPartial) -> i32 {
+fn animation_lookup_sequence(
+    label: &str,
+    state: Option<DeployState>,
+    viewmodel: *mut ModelSPartial,
+) -> i32 {
     animation_lookup_any(&[label], state, viewmodel)
 }
 
@@ -570,7 +620,11 @@ fn animation_lookup_sequence(label: &str, state: Option<DeployState>, viewmodel:
 /// DoD's models are not consistent about what they call things -- a firing
 /// animation is `shoot` on some weapons and `fire` on others -- so the caller
 /// gives the names worth trying rather than assuming one.
-fn animation_lookup_any(candidates: &[&str], state: Option<DeployState>, viewmodel: *mut ModelSPartial) -> i32 {
+fn animation_lookup_any(
+    candidates: &[&str],
+    state: Option<DeployState>,
+    viewmodel: *mut ModelSPartial,
+) -> i32 {
     let labels = model_sequence_strings(viewmodel);
 
     // Exact match first, substring only as a fallback. Several models list a
@@ -588,7 +642,10 @@ fn animation_lookup_any(candidates: &[&str], state: Option<DeployState>, viewmod
     }
     for candidate in candidates {
         let needle = candidate.to_lowercase();
-        if let Some(i) = labels.iter().position(|l| l.to_lowercase().contains(&needle)) {
+        if let Some(i) = labels
+            .iter()
+            .position(|l| l.to_lowercase().contains(&needle))
+        {
             return apply_deploy_state_to_sequence(i as i32, state, viewmodel);
         }
     }
@@ -607,7 +664,10 @@ fn animation_lookup_any(candidates: &[&str], state: Option<DeployState>, viewmod
 /// readable from the model name at that moment and the animation falls back to
 /// whichever family was last known. Worth knowing before reading "deploy state
 /// unknown" in a log as a failure.
-fn get_spectated_deploy_state(weapon: &DeployableWeapon, entity: &ClEntityS) -> Option<DeployState> {
+fn get_spectated_deploy_state(
+    weapon: &DeployableWeapon,
+    entity: &ClEntityS,
+) -> Option<DeployState> {
     let studio = engine::engine_studio()?;
     let weapon_model = unsafe { (studio.get_model_by_index)(entity.curstate.weaponmodel) };
     if weapon_model.is_null() {
@@ -641,10 +701,16 @@ fn play_viewmodel_animation(
         // Worth seeing: it means the model had no sequence matching what the
         // deploy state asked for, which is a gap in the up/down mapping rather
         // than a no-op.
-        unsafe { crate::debug::report(&format!("anim_fix: {reason} -- no matching sequence found, nothing played")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "anim_fix: {reason} -- no matching sequence found, nothing played"
+            ))
+        };
         return;
     }
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
 
     let played = ANIMATIONS_PLAYED.fetch_add(1, Ordering::Relaxed) + 1;
     if played % ANIMATION_SUMMARY_EVERY == 0 {
@@ -684,13 +750,20 @@ fn play_viewmodel_animation(
             // Never empty the hand in the first place.
             LEVEL_NEVER_EMPTY => {
                 unsafe {
-                    crate::debug::report("anim_fix: skipping the throw animation, so the grenade stays in hand")
+                    crate::debug::report(
+                        "anim_fix: skipping the throw animation, so the grenade stays in hand",
+                    )
                 };
                 return;
             }
             LEVEL_REDRAW_NOW | LEVEL_LOOKAHEAD => {
-                let ends = engine::client_time() + model_sequence_duration(viewmodel, sequence).max(0.05);
-                let at = if level() == LEVEL_LOOKAHEAD { ends + LOOKAHEAD_SECONDS } else { ends };
+                let ends =
+                    engine::client_time() + model_sequence_duration(viewmodel, sequence).max(0.05);
+                let at = if level() == LEVEL_LOOKAHEAD {
+                    ends + LOOKAHEAD_SECONDS
+                } else {
+                    ends
+                };
                 REDRAW_AFTER.store(at.to_bits(), Ordering::Relaxed);
             }
             // LEVEL_EMPTY_HAND: play it and leave the hand as it lands.
@@ -868,13 +941,19 @@ fn stage_name(stage: i32) -> &'static str {
     match stage {
         STAGE_DISABLED => "disabled (dodstudio_hltv_show_viewmodel_animations is 0)",
         STAGE_NO_ENGFUNCS => "waiting for engfuncs",
-        STAGE_NOT_SPECTATING => "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view",
+        STAGE_NOT_SPECTATING => {
+            "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view"
+        }
         STAGE_NO_VIEWMODEL_ENTITY => "no viewmodel entity",
         STAGE_NO_VIEWMODEL_MODEL => "viewmodel entity has no model",
-        STAGE_NOT_A_DEPLOYABLE_WEAPON => "viewmodel is not one of the deployable weapons (MG42/MG34/BAR/Bren)",
+        STAGE_NOT_A_DEPLOYABLE_WEAPON => {
+            "viewmodel is not one of the deployable weapons (MG42/MG34/BAR/Bren)"
+        }
         STAGE_NO_SPECTATED_PLAYER => "spectated entity is missing or is not a player",
         STAGE_RUNNING => "running -- all preconditions met",
-        STAGE_VIEWMODEL_MISMATCH => "viewmodel is not the weapon the spectated player is holding (ignored this frame)",
+        STAGE_VIEWMODEL_MISMATCH => {
+            "viewmodel is not the weapon the spectated player is holding (ignored this frame)"
+        }
         _ => "unknown",
     }
 }
@@ -886,7 +965,12 @@ fn stage_name(stage: i32) -> &'static str {
 static LAST_TRACE: Mutex<Option<(i32, usize, usize, i32)>> = Mutex::new(None);
 
 fn stage(stage: i32) {
-    stage_with(stage, std::ptr::null_mut::<u8>(), std::ptr::null_mut::<u8>(), -1);
+    stage_with(
+        stage,
+        std::ptr::null_mut::<u8>(),
+        std::ptr::null_mut::<u8>(),
+        -1,
+    );
 }
 
 /// Records how far this frame got, logging only when the stage, either
@@ -1040,12 +1124,22 @@ pub fn apply() {
 
     let viewmodel_entity = unsafe { (engfuncs.get_view_model)() };
     if viewmodel_entity.is_null() {
-        stage_with(STAGE_NO_VIEWMODEL_ENTITY, viewmodel_entity, std::ptr::null_mut::<u8>(), -1);
+        stage_with(
+            STAGE_NO_VIEWMODEL_ENTITY,
+            viewmodel_entity,
+            std::ptr::null_mut::<u8>(),
+            -1,
+        );
         return;
     }
     let viewmodel_model = unsafe { (*viewmodel_entity).model };
     if viewmodel_model.is_null() {
-        stage_with(STAGE_NO_VIEWMODEL_MODEL, viewmodel_entity, viewmodel_model, unsafe { (*viewmodel_entity).index });
+        stage_with(
+            STAGE_NO_VIEWMODEL_MODEL,
+            viewmodel_entity,
+            viewmodel_model,
+            unsafe { (*viewmodel_entity).index },
+        );
         return;
     }
     let viewmodel_name = unsafe { (*viewmodel_model).name_str() }.into_owned();
@@ -1058,7 +1152,12 @@ pub fn apply() {
     let viewmodel_index = unsafe { (*viewmodel_entity).index };
     let spectated = unsafe { (engfuncs.get_entity_by_index)(viewmodel_index) };
     if spectated.is_null() || unsafe { (*spectated).player } == 0 {
-        stage_with(STAGE_NO_SPECTATED_PLAYER, viewmodel_entity, viewmodel_model, viewmodel_index);
+        stage_with(
+            STAGE_NO_SPECTATED_PLAYER,
+            viewmodel_entity,
+            viewmodel_model,
+            viewmodel_index,
+        );
         return;
     }
     let spectated = unsafe { &*spectated };
@@ -1076,7 +1175,12 @@ pub fn apply() {
     // This has to come before any of the previous-state trackers are touched,
     // or the flap still registers as a change on the next agreeing frame.
     if viewmodel_matches_held_weapon(&viewmodel_name, spectated) == Some(false) {
-        stage_with(STAGE_VIEWMODEL_MISMATCH, viewmodel_entity, viewmodel_model, viewmodel_index);
+        stage_with(
+            STAGE_VIEWMODEL_MISMATCH,
+            viewmodel_entity,
+            viewmodel_model,
+            viewmodel_index,
+        );
         return;
     }
 
@@ -1102,7 +1206,12 @@ pub fn apply() {
         };
     }
 
-    stage_with(STAGE_RUNNING, viewmodel_entity, viewmodel_model, viewmodel_index);
+    stage_with(
+        STAGE_RUNNING,
+        viewmodel_entity,
+        viewmodel_model,
+        viewmodel_index,
+    );
 
     // The spectated player's own body animation. Replicated, so unlike almost
     // anything else about another player's weapon it survives into an HLTV
@@ -1136,7 +1245,9 @@ pub fn apply() {
             Some(seen)
         }
         // Only worth remembering for a weapon that has the two families at all.
-        None if deployable.is_some() => i32_to_deploy_state(LAST_KNOWN_DEPLOY_STATE.load(Ordering::Relaxed)),
+        None if deployable.is_some() => {
+            i32_to_deploy_state(LAST_KNOWN_DEPLOY_STATE.load(Ordering::Relaxed))
+        }
         None => None,
     };
 
@@ -1146,9 +1257,11 @@ pub fn apply() {
     CURRENT_VIEWMODEL.store(viewmodel_model, Ordering::Relaxed);
     CURRENT_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     let previous_state = i32_to_deploy_state(PREVIOUS_DEPLOY_STATE.load(Ordering::Relaxed));
-    let deploy_state_changed = previous_state.is_some() && state.is_some() && previous_state != state;
+    let deploy_state_changed =
+        previous_state.is_some() && state.is_some() && previous_state != state;
 
-    let viewmodel_changed = viewmodel_changed_to_a_new_weapon(viewmodel_model, engine::client_time());
+    let viewmodel_changed =
+        viewmodel_changed_to_a_new_weapon(viewmodel_model, engine::client_time());
 
     if switched_players {
         // Snap the new viewmodel straight to the right family's idle so it
@@ -1156,11 +1269,21 @@ pub fn apply() {
         // left it on -- and adopt it as the weapon in hand, so the change of
         // camera is not mistaken for the new player drawing it.
         adopt_viewmodel_without_drawing(viewmodel_model);
-        play_viewmodel_animation(animation_lookup_sequence("idle", state, viewmodel_model), "spectated player changed", state, viewmodel_model);
+        play_viewmodel_animation(
+            animation_lookup_sequence("idle", state, viewmodel_model),
+            "spectated player changed",
+            state,
+            viewmodel_model,
+        );
     } else if deploy_state_changed {
         // TODO(R&D, unverified live): play the "uptodown"/"downtoup"-style
         // transition sequence here instead of snapping straight to idle.
-        play_viewmodel_animation(animation_lookup_sequence("idle", state, viewmodel_model), "bipod deploy state changed", state, viewmodel_model);
+        play_viewmodel_animation(
+            animation_lookup_sequence("idle", state, viewmodel_model),
+            "bipod deploy state changed",
+            state,
+            viewmodel_model,
+        );
     } else {
         // Classify the action from the spectated player's body animation, not
         // the viewmodel's. Only on a *change* of sequence: the label persists
@@ -1218,7 +1341,12 @@ pub fn apply() {
             // queued -- otherwise it would fire again a moment later and
             // restart the animation this line just began.
             REDRAW_AFTER.store(0, Ordering::Relaxed);
-            play_viewmodel_animation(animation_lookup_sequence("draw", state, viewmodel_model), "weapon changed", state, viewmodel_model);
+            play_viewmodel_animation(
+                animation_lookup_sequence("draw", state, viewmodel_model),
+                "weapon changed",
+                state,
+                viewmodel_model,
+            );
         }
     }
 
@@ -1289,13 +1417,31 @@ pub(crate) mod tests {
     fn body_sequences_carry_the_deploy_state_in_every_stance() {
         // The whole point of preferring this over the p_*bu/bd model name: a
         // prone or sprinting machine gunner still reports a state here.
-        assert_eq!(deploy_state_from_body_sequence("prone_mg_shoot"), Some(DeployState::Up));
-        assert_eq!(deploy_state_from_body_sequence("sprint_bren_aim"), Some(DeployState::Up));
-        assert_eq!(deploy_state_from_body_sequence("stand_mg_aim"), Some(DeployState::Up));
-        assert_eq!(deploy_state_from_body_sequence("crouch_bar_reload"), Some(DeployState::Up));
+        assert_eq!(
+            deploy_state_from_body_sequence("prone_mg_shoot"),
+            Some(DeployState::Up)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("sprint_bren_aim"),
+            Some(DeployState::Up)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("stand_mg_aim"),
+            Some(DeployState::Up)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("crouch_bar_reload"),
+            Some(DeployState::Up)
+        );
 
-        assert_eq!(deploy_state_from_body_sequence("bipod_mg_shoot"), Some(DeployState::Down));
-        assert_eq!(deploy_state_from_body_sequence("sandbag_bren_reload"), Some(DeployState::Down));
+        assert_eq!(
+            deploy_state_from_body_sequence("bipod_mg_shoot"),
+            Some(DeployState::Down)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("sandbag_bren_reload"),
+            Some(DeployState::Down)
+        );
 
         // Sequences with no stance prefix say nothing either way, and must not
         // be read as "not deployed".
@@ -1358,7 +1504,10 @@ pub(crate) mod tests {
     /// can cost at most the animation at the boundary.
     #[test]
     fn a_time_jump_does_not_leave_the_state_stuck() {
-        let (a, b) = (std::ptr::without_provenance_mut::<ModelSPartial>(1), std::ptr::without_provenance_mut::<ModelSPartial>(2));
+        let (a, b) = (
+            std::ptr::without_provenance_mut::<ModelSPartial>(1),
+            std::ptr::without_provenance_mut::<ModelSPartial>(2),
+        );
         let _statics = reset_settle_state();
         LAST_FIRE_PLAYED.store(0f64.to_bits(), Ordering::Relaxed);
 
@@ -1377,7 +1526,10 @@ pub(crate) mod tests {
         // And normal-speed firing resumes immediately, at the real cyclic rate
         // rather than being held off by the stale timestamp.
         assert!(claim_fire(after + 2.0));
-        assert!(!claim_fire(after + 2.0 + FIRE_DEDUP_SECONDS / 2.0), "same shot");
+        assert!(
+            !claim_fire(after + 2.0 + FIRE_DEDUP_SECONDS / 2.0),
+            "same shot"
+        );
         assert!(claim_fire(after + 2.1), "next round");
     }
 
@@ -1394,11 +1546,17 @@ pub(crate) mod tests {
     /// recording would. This used to assert the opposite, on a misdiagnosis.
     #[test]
     fn rapid_switching_still_draws_each_time() {
-        let (a, b) = (std::ptr::without_provenance_mut::<ModelSPartial>(1), std::ptr::without_provenance_mut::<ModelSPartial>(2));
+        let (a, b) = (
+            std::ptr::without_provenance_mut::<ModelSPartial>(1),
+            std::ptr::without_provenance_mut::<ModelSPartial>(2),
+        );
         let _statics = reset_settle_state();
 
         assert!(!viewmodel_changed_to_a_new_weapon(a, 0.0));
-        assert!(!viewmodel_changed_to_a_new_weapon(a, 1.0), "nothing to differ from yet");
+        assert!(
+            !viewmodel_changed_to_a_new_weapon(a, 1.0),
+            "nothing to differ from yet"
+        );
 
         // A kar -> pistol -> kar flick, the case reported from live testing.
         // Each leg is held ~0.2s, far under the old 0.4s window that swallowed
@@ -1417,19 +1575,34 @@ pub(crate) mod tests {
     /// back within a frame or two, which should read as no switch at all.
     #[test]
     fn a_weapon_that_only_flashes_past_does_not_swallow_the_next_draw() {
-        let (a, b) = (std::ptr::without_provenance_mut::<ModelSPartial>(1), std::ptr::without_provenance_mut::<ModelSPartial>(2));
+        let (a, b) = (
+            std::ptr::without_provenance_mut::<ModelSPartial>(1),
+            std::ptr::without_provenance_mut::<ModelSPartial>(2),
+        );
         let c = std::ptr::without_provenance_mut::<ModelSPartial>(3);
         let _statics = reset_settle_state();
-        assert!(!viewmodel_changed_to_a_new_weapon(a, 0.0), "the first weapon seen is not a switch");
+        assert!(
+            !viewmodel_changed_to_a_new_weapon(a, 0.0),
+            "the first weapon seen is not a switch"
+        );
 
         // The real case this comes from: DoD passes through a weapon slot on
         // the way to another one. A player alternating MP40 and stick grenade
         // put a spade in between for 18-61ms. Every one of these is a change
         // and every one draws -- a transient is cut short by the next, which
         // is what a POV recording of the same input shows.
-        assert!(viewmodel_changed_to_a_new_weapon(b, 1.000), "flashed-past weapon");
-        assert!(viewmodel_changed_to_a_new_weapon(c, 1.018), "18ms later -- must not be swallowed");
-        assert!(viewmodel_changed_to_a_new_weapon(b, 1.043), "25ms later -- nor this");
+        assert!(
+            viewmodel_changed_to_a_new_weapon(b, 1.000),
+            "flashed-past weapon"
+        );
+        assert!(
+            viewmodel_changed_to_a_new_weapon(c, 1.018),
+            "18ms later -- must not be swallowed"
+        );
+        assert!(
+            viewmodel_changed_to_a_new_weapon(b, 1.043),
+            "25ms later -- nor this"
+        );
 
         // What must still never happen: the same weapon reporting twice.
         assert!(!viewmodel_changed_to_a_new_weapon(b, 1.044));
@@ -1438,7 +1611,10 @@ pub(crate) mod tests {
 
     #[test]
     fn a_weapon_switch_draws_on_the_very_first_frame() {
-        let (a, b) = (std::ptr::without_provenance_mut::<ModelSPartial>(1), std::ptr::without_provenance_mut::<ModelSPartial>(2));
+        let (a, b) = (
+            std::ptr::without_provenance_mut::<ModelSPartial>(1),
+            std::ptr::without_provenance_mut::<ModelSPartial>(2),
+        );
         let _statics = reset_settle_state();
 
         assert!(!viewmodel_changed_to_a_new_weapon(a, 0.0));
@@ -1447,14 +1623,20 @@ pub(crate) mod tests {
         // `b` appears and stays. The draw plays on that frame -- not after the
         // window, which is what made every draw land ~55ms late in a live
         // session.
-        assert!(viewmodel_changed_to_a_new_weapon(b, 1.0), "draw is immediate");
+        assert!(
+            viewmodel_changed_to_a_new_weapon(b, 1.0),
+            "draw is immediate"
+        );
 
         // And only once -- it must not restart every frame afterwards, inside
         // the window or long past it.
         assert!(!viewmodel_changed_to_a_new_weapon(b, 1.025));
         for i in 1..10 {
             let t = 1.0 + i as f64 * 0.1;
-            assert!(!viewmodel_changed_to_a_new_weapon(b, t), "re-reported at t={t}");
+            assert!(
+                !viewmodel_changed_to_a_new_weapon(b, t),
+                "re-reported at t={t}"
+            );
         }
     }
 
@@ -1462,7 +1644,10 @@ pub(crate) mod tests {
     /// weapon. 61 of one session's draws came from this.
     #[test]
     fn a_spectator_change_adopts_the_weapon_without_drawing() {
-        let (a, b) = (std::ptr::without_provenance_mut::<ModelSPartial>(1), std::ptr::without_provenance_mut::<ModelSPartial>(2));
+        let (a, b) = (
+            std::ptr::without_provenance_mut::<ModelSPartial>(1),
+            std::ptr::without_provenance_mut::<ModelSPartial>(2),
+        );
         let _statics = reset_settle_state();
 
         assert!(!viewmodel_changed_to_a_new_weapon(a, 0.0));
@@ -1488,9 +1673,19 @@ pub(crate) mod tests {
             assert!(is_throw_label(label), "{label}");
         }
         for label in [
-            "shoot", "shoot1", "up_shoot", "launch", "fire", "slash1", "draw", "reload", "idle",
+            "shoot",
+            "shoot1",
+            "up_shoot",
+            "launch",
+            "fire",
+            "slash1",
+            "draw",
+            "reload",
+            "idle",
             // Near misses that must not match.
-            "throw_empty", "pinpull", "holster",
+            "throw_empty",
+            "pinpull",
+            "holster",
         ] {
             assert!(!is_throw_label(label), "{label}");
         }
@@ -1575,7 +1770,10 @@ pub(crate) mod tests {
         assert_eq!(later_at - now_at, LOOKAHEAD_SECONDS);
 
         // 3 is the only one that suppresses the throw outright.
-        assert_eq!(level_description(LEVEL_NEVER_EMPTY), "no throw animation, grenade stays in hand");
+        assert_eq!(
+            level_description(LEVEL_NEVER_EMPTY),
+            "no throw animation, grenade stays in hand"
+        );
         for other in [LEVEL_EMPTY_HAND, LEVEL_REDRAW_NOW, LEVEL_LOOKAHEAD] {
             assert_ne!(other, LEVEL_NEVER_EMPTY);
         }
@@ -1589,7 +1787,10 @@ pub(crate) mod tests {
         for n in LEVEL_OFF..=LEVEL_MAX {
             let d = level_description(n);
             assert!(!d.is_empty(), "option {n} has no description");
-            assert!(seen.insert(d), "option {n} reuses another option's description");
+            assert!(
+                seen.insert(d),
+                "option {n} reuses another option's description"
+            );
         }
     }
 
@@ -1611,7 +1812,10 @@ pub(crate) mod tests {
     #[test]
     fn family_prefix_swaps_both_spellings() {
         assert_eq!(swap_family_prefix("upidle", DeployState::Down), "downidle");
-        assert_eq!(swap_family_prefix("down_reload", DeployState::Up), "up_reload");
+        assert_eq!(
+            swap_family_prefix("down_reload", DeployState::Up),
+            "up_reload"
+        );
         // Already in the target family, and unfamilied labels, are untouched.
         assert_eq!(swap_family_prefix("upshoot", DeployState::Up), "upshoot");
         assert_eq!(swap_family_prefix("reload", DeployState::Down), "reload");

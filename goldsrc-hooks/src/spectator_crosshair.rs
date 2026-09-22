@@ -312,7 +312,9 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
 
     let style = if matching { requested_style() } else { 0 };
     let Some(want) = wanted(present, style) else {
-        return Err(format!("{STYLE_CVAR} resolved to {style}, which is not a tile"));
+        return Err(format!(
+            "{STYLE_CVAR} resolved to {style}, which is not a tile"
+        ));
     };
 
     // Compared by bytes, not by `style` against `read_state`'s canonical
@@ -357,7 +359,10 @@ pub fn status() -> String {
         ),
     };
     if crosshair::hidden() {
-        format!("{text} (moot right now -- {} is 1, so nothing is drawn)", crosshair::NAME)
+        format!(
+            "{text} (moot right now -- {} is 1, so nothing is drawn)",
+            crosshair::NAME
+        )
     } else {
         text
     }
@@ -373,10 +378,19 @@ mod tests {
     #[test]
     fn every_patched_field_lands_on_a_wildcard() {
         let tokens: Vec<&str> = PATTERN.split_whitespace().collect();
-        assert_eq!(tokens.len(), SPAN, "the pattern must describe the whole span");
+        assert_eq!(
+            tokens.len(),
+            SPAN,
+            "the pattern must describe the whole span"
+        );
         for at in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT] {
             for (offset, token) in tokens.iter().skip(at).take(4).enumerate() {
-                assert_eq!(*token, "??", "byte {} should be a rect immediate", at + offset);
+                assert_eq!(
+                    *token,
+                    "??",
+                    "byte {} should be a rect immediate",
+                    at + offset
+                );
             }
         }
         assert_eq!(tokens[HANDLE_AT], "??", "the handle displacement");
@@ -591,7 +605,10 @@ mod tests {
             .iter()
             .map(|t| u8::from_str_radix(t, 16).unwrap_or(0))
             .collect();
-        for (at, value) in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT].iter().zip(STOCK_RECT) {
+        for (at, value) in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT]
+            .iter()
+            .zip(STOCK_RECT)
+        {
             span[*at..*at + 4].copy_from_slice(&value.to_le_bytes());
         }
         span[HANDLE_AT] = STOCK_HANDLE;

@@ -101,13 +101,19 @@ pub fn map_reference(demo: &Path) -> Result<MapReference, String> {
 
     let raw = &head[MAP_NAME_AT..MAP_NAME_AT + MAP_NAME_LEN];
     let name: String = String::from_utf8_lossy(
-        &raw.iter().copied().take_while(|b| *b != 0).collect::<Vec<u8>>(),
+        &raw.iter()
+            .copied()
+            .take_while(|b| *b != 0)
+            .collect::<Vec<u8>>(),
     )
     .trim()
     .to_lowercase();
 
     if name.is_empty() || !is_safe_map_name(&name) {
-        return Err(format!("{}: header carries no usable map name", demo.display()));
+        return Err(format!(
+            "{}: header carries no usable map name",
+            demo.display()
+        ));
     }
 
     let checksum = u32::from_le_bytes([
@@ -254,7 +260,10 @@ mod tests {
             map_name: "dod_anzio".to_string(),
             expected_checksum: Some(1),
         };
-        assert!(matches!(status_of(&wants, &maps), MapStatus::Unreadable { .. }));
+        assert!(matches!(
+            status_of(&wants, &maps),
+            MapStatus::Unreadable { .. }
+        ));
     }
 
     #[test]

@@ -15,7 +15,10 @@ pub fn is_hltv_demo(path: &std::path::Path) -> Result<bool, std::io::Error> {
 
     if header.len() >= crate::patch::HLTV_HEADER_SIZE {
         let hltv_proxy_name = b"HLTV Proxy";
-        if header.windows(hltv_proxy_name.len()).any(|window| window == hltv_proxy_name) {
+        if header
+            .windows(hltv_proxy_name.len())
+            .any(|window| window == hltv_proxy_name)
+        {
             return Ok(true);
         }
     }
@@ -30,7 +33,18 @@ pub fn is_hltv_demo(path: &std::path::Path) -> Result<bool, std::io::Error> {
 
 pub fn scan_demo_for_highlights(
     path: &std::path::Path,
-) -> Result<(f32, Vec<CaptureStreak>, bool, Option<usize>, i32, Option<i32>, std::sync::Arc<Vec<f32>>), String> {
+) -> Result<
+    (
+        f32,
+        Vec<CaptureStreak>,
+        bool,
+        Option<usize>,
+        i32,
+        Option<i32>,
+        std::sync::Arc<Vec<f32>>,
+    ),
+    String,
+> {
     scan_demo_for_highlights_with_analysis(path).map(|(result, _analysis)| result)
 }
 
@@ -41,7 +55,21 @@ pub fn scan_demo_for_highlights(
 // same demo from scratch the next time it's opened in the Demo Analyzer.
 pub fn scan_demo_for_highlights_with_analysis(
     path: &std::path::Path,
-) -> Result<((f32, Vec<CaptureStreak>, bool, Option<usize>, i32, Option<i32>, std::sync::Arc<Vec<f32>>), analysis::Analysis), String> {
+) -> Result<
+    (
+        (
+            f32,
+            Vec<CaptureStreak>,
+            bool,
+            Option<usize>,
+            i32,
+            Option<i32>,
+            std::sync::Arc<Vec<f32>>,
+        ),
+        analysis::Analysis,
+    ),
+    String,
+> {
     match is_hltv_demo(path) {
         Ok(true) => return Err("Unsupported HLTV proxy demo format".to_string()),
         Err(e) => return Err(format!("Failed to read demo header: {}", e)),
@@ -55,9 +83,17 @@ pub fn scan_demo_for_highlights_with_analysis(
 
     let mut frame_times: Vec<f32> = Vec::with_capacity(analysis.demo_info.playback_frames as usize);
     if bytes.len() >= crate::patch::DEMO_HEADER_SIZE {
-        let directory_offset = i32::from_le_bytes(bytes[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE].try_into().unwrap()) as usize;
+        let directory_offset = i32::from_le_bytes(
+            bytes[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE]
+                .try_into()
+                .unwrap(),
+        ) as usize;
         let mut pos = crate::patch::DEMO_HEADER_SIZE;
-        let end = if directory_offset > 0 && directory_offset <= bytes.len() { directory_offset } else { bytes.len() };
+        let end = if directory_offset > 0 && directory_offset <= bytes.len() {
+            directory_offset
+        } else {
+            bytes.len()
+        };
         while pos + crate::patch::FRAME_HEADER_SIZE <= end {
             let type_byte = bytes[pos];
             if type_byte > 9 && type_byte != 255 {
@@ -67,35 +103,49 @@ pub fn scan_demo_for_highlights_with_analysis(
                 break;
             }
             if type_byte != 255 {
-                let time = f32::from_le_bytes(bytes[pos+1..pos+5].try_into().unwrap());
+                let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
                 frame_times.push(time);
             }
             pos += crate::patch::FRAME_HEADER_SIZE;
             match type_byte {
                 0 | 1 => {
                     let total_fixed_size = NETWORK_HEADER_ALIGNMENT;
-                    if pos + total_fixed_size > end { break; }
-                    let len = i32::from_le_bytes(bytes[pos+crate::patch::NETMSG_INFO_SIZE..pos+total_fixed_size].try_into().unwrap()) as usize;
+                    if pos + total_fixed_size > end {
+                        break;
+                    }
+                    let len = i32::from_le_bytes(
+                        bytes[pos + crate::patch::NETMSG_INFO_SIZE..pos + total_fixed_size]
+                            .try_into()
+                            .unwrap(),
+                    ) as usize;
                     if len > MAX_PAYLOAD_LIMIT_BYTES {
-                        return Err(format!("Scanner alignment lost! Read impossible packet size: {} bytes at pos {}", len, pos));
+                        return Err(format!(
+                            "Scanner alignment lost! Read impossible packet size: {} bytes at pos {}",
+                            len, pos
+                        ));
                     }
                     pos += total_fixed_size + len;
-                },
-                2 | 255 => {},
+                }
+                2 | 255 => {}
                 3 => pos += crate::patch::CMD_FRAME_SIZE,
                 4 => pos += crate::patch::CLIENT_DATA_FRAME_SIZE,
                 6 => pos += crate::patch::EVENT_FRAME_SIZE,
                 7 => pos += 8,
                 8 => {
-                    if pos + 8 > end { break; }
-                    let len = u32::from_le_bytes(bytes[pos+4..pos+8].try_into().unwrap()) as usize;
+                    if pos + 8 > end {
+                        break;
+                    }
+                    let len =
+                        u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
                     pos += 24 + len;
-                },
+                }
                 9 => {
-                    if pos + 4 > end { break; }
-                    let len = u32::from_le_bytes(bytes[pos..pos+4].try_into().unwrap()) as usize;
+                    if pos + 4 > end {
+                        break;
+                    }
+                    let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
                     pos += 4 + len;
-                },
+                }
                 _ => break,
             }
         }
@@ -114,7 +164,7 @@ pub fn scan_demo_for_highlights_with_analysis(
     } else {
         100.0
     };
-    
+
     // Fallback if the demo header has garbage values
     if !tickrate.is_normal() || !(10.0..=1000.0).contains(&tickrate) {
         tickrate = 100.0;
@@ -124,7 +174,6 @@ pub fn scan_demo_for_highlights_with_analysis(
 
     // ── Per-player life-bounded streak iteration ────────────────────────────────────────────
     for player in &analysis.state.players {
-
         // Skip players that are not (or are no longer) in a connected slot.
         // Disconnected entries have no valid client_id to anchor the patcher.
         let player_index = match player.connection {
@@ -133,8 +182,9 @@ pub fn scan_demo_for_highlights_with_analysis(
         };
 
         for kill_streak in &player.kill_streaks {
-
-            let kills_raw: Vec<(i32, f32, String)> = kill_streak.kills.iter()
+            let kills_raw: Vec<(i32, f32, String)> = kill_streak
+                .kills
+                .iter()
                 .map(|(time, weapon, _victim)| {
                     let abs_time = time.real_offset.as_secs_f32();
                     let tick = time.frame_index as i32;
@@ -146,7 +196,9 @@ pub fn scan_demo_for_highlights_with_analysis(
                 continue;
             }
 
-            let viewdemo_times: Vec<f32> = kill_streak.kills.iter()
+            let viewdemo_times: Vec<f32> = kill_streak
+                .kills
+                .iter()
                 .map(|(time, _, _)| time.viewdemo_offset.as_secs_f32())
                 .collect();
 

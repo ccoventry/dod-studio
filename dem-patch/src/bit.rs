@@ -1,5 +1,3 @@
-
-
 use bitvec::{field::BitField, order::Lsb0, slice::BitSlice as _BitSlice};
 
 use self::types::BitVec;

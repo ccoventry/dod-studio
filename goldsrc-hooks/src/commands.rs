@@ -92,8 +92,12 @@ static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_m
 static CVARS_LIVE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn console_print(text: &str) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(c_text) = CString::new(text) else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(c_text) = CString::new(text) else {
+        return;
+    };
     unsafe { (engfuncs.pfn_console_print)(c_text.as_ptr()) };
 }
 
@@ -115,7 +119,11 @@ fn register(name: &str, default: &str) -> Option<*mut CvarSPartial> {
     std::mem::forget(c_default);
 
     if cvar.is_null() {
-        unsafe { crate::debug::report(&format!("commands: pfnRegisterVariable returned null for {name}")) };
+        unsafe {
+            crate::debug::report(&format!(
+                "commands: pfnRegisterVariable returned null for {name}"
+            ))
+        };
         return None;
     }
     match unsafe { (*cvar).name_str() } {
@@ -260,15 +268,27 @@ fn poll_code_patch(
 }
 
 fn describe_scoreboard(on: bool) -> &'static str {
-    if on { "1 (+showscores blocked)" } else { "0 (normal)" }
+    if on {
+        "1 (+showscores blocked)"
+    } else {
+        "0 (normal)"
+    }
 }
 
 fn describe_voice(on: bool) -> &'static str {
-    if on { "1 (voice commands silent)" } else { "0 (normal)" }
+    if on {
+        "1 (voice commands silent)"
+    } else {
+        "0 (normal)"
+    }
 }
 
 fn describe_crosshair(on: bool) -> &'static str {
-    if on { "1 (crosshair hidden)" } else { "0 (normal)" }
+    if on {
+        "1 (crosshair hidden)"
+    } else {
+        "0 (normal)"
+    }
 }
 
 /// Reads the cvar, clears the remembered stances when it is turned off, and
@@ -288,7 +308,11 @@ fn poll_hand_signals() {
         unsafe {
             crate::debug::report(&format!(
                 "commands: {HAND_SIGNALS_NAME} = {}",
-                if wanted { "1 (gestures replaced)" } else { "0 (normal)" }
+                if wanted {
+                    "1 (gestures replaced)"
+                } else {
+                    "0 (normal)"
+                }
             ))
         };
     }
@@ -316,13 +340,18 @@ fn poll_ex_interp() {
         Ok(true) => {
             EX_INTERP_COMPLAINED.store(0, Ordering::Relaxed);
             unsafe {
-                crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} -- {}", ex_interp::status()))
+                crate::debug::report(&format!(
+                    "commands: {EX_INTERP_NAME} = {wanted} -- {}",
+                    ex_interp::status()
+                ))
             };
         }
         Err(why) => {
             if EX_INTERP_COMPLAINED.swap(wanted, Ordering::Relaxed) != wanted {
                 unsafe {
-                    crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} not applied -- {why}"))
+                    crate::debug::report(&format!(
+                        "commands: {EX_INTERP_NAME} = {wanted} not applied -- {why}"
+                    ))
                 };
             }
         }
@@ -348,7 +377,9 @@ fn poll_overviewmap() {
         Err(why) => {
             if !OVERVIEWMAP_COMPLAINED.swap(true, Ordering::Relaxed) {
                 unsafe {
-                    crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} not applied -- {why}"))
+                    crate::debug::report(&format!(
+                        "commands: {OVERVIEWMAP_NAME} not applied -- {why}"
+                    ))
                 };
             }
         }
@@ -380,7 +411,9 @@ fn poll_hudelements() {
             }
             if !HUDELEMENT_COMPLAINED.swap(true, Ordering::Relaxed) {
                 unsafe {
-                    crate::debug::report(&format!("commands: {HUDELEMENT_NAME} not applied yet -- {why}"))
+                    crate::debug::report(&format!(
+                        "commands: {HUDELEMENT_NAME} not applied yet -- {why}"
+                    ))
                 };
             }
         }
@@ -388,7 +421,11 @@ fn poll_hudelements() {
 }
 
 fn describe_spectator_crosshair(on: bool) -> &'static str {
-    if on { "1 (spectator crosshair follows cl_xhair_style)" } else { "0 (normal)" }
+    if on {
+        "1 (spectator crosshair follows cl_xhair_style)"
+    } else {
+        "0 (normal)"
+    }
 }
 
 /// Copies the cvars into the flags the rest of the crate reads. Registered as
@@ -405,8 +442,16 @@ pub fn poll() {
     if CVARS_LIVE.load(Ordering::Relaxed) {
         poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
         poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
-        poll_flag(HELD_MODELS_NAME, &CVAR_HELD_MODELS, &anim_fix::LOG_HELD_MODELS);
-        poll_flag(SPECTATOR_TARGET_LOG_NAME, &CVAR_SPECTATOR_TARGET_LOG, &spectator_target::LOG);
+        poll_flag(
+            HELD_MODELS_NAME,
+            &CVAR_HELD_MODELS,
+            &anim_fix::LOG_HELD_MODELS,
+        );
+        poll_flag(
+            SPECTATOR_TARGET_LOG_NAME,
+            &CVAR_SPECTATOR_TARGET_LOG,
+            &spectator_target::LOG,
+        );
         poll_attenuation();
         poll_code_patch(
             SCOREBOARD_NAME,
@@ -481,9 +526,21 @@ pub fn poll() {
 fn status_text() -> String {
     let bit = |on: bool| if on { "1" } else { "0" };
     let mut lines: Vec<String> = vec![
-        format!("{SCOREBOARD_NAME} = {} -- {}", bit(scoreboard::suppressed()), scoreboard::status()),
-        format!("{VOICE_NAME} = {} -- {}", bit(voice::muted()), voice::status()),
-        format!("{CROSSHAIR_NAME} = {} -- {}", bit(crosshair::hidden()), crosshair::status()),
+        format!(
+            "{SCOREBOARD_NAME} = {} -- {}",
+            bit(scoreboard::suppressed()),
+            scoreboard::status()
+        ),
+        format!(
+            "{VOICE_NAME} = {} -- {}",
+            bit(voice::muted()),
+            voice::status()
+        ),
+        format!(
+            "{CROSSHAIR_NAME} = {} -- {}",
+            bit(crosshair::hidden()),
+            crosshair::status()
+        ),
         format!(
             "{SPECTATOR_CROSSHAIR_NAME} = {} -- {}",
             bit(spectator_crosshair::matching()),
@@ -577,7 +634,9 @@ unsafe extern "C" fn cmd_status() {
 /// Reads argv(1) (if present) as "0"/"1" and stores it into `flag`, then prints
 /// the resulting state.
 fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
 
     // Cmd_Argc counts the command name itself, so a bare invocation is 1 and an
     // argument makes it 2. Bare is a query, not a no-op.
@@ -598,23 +657,38 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
                 }
                 other => {
                     console_print(&format!("{name}: expected 0 or 1, got \"{other}\"\n"));
-                    unsafe { crate::debug::report(&format!("commands: {name} rejected argument \"{other}\"")) };
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "commands: {name} rejected argument \"{other}\""
+                        ))
+                    };
                     return;
                 }
             }
         }
     }
 
-    let state = if flag.load(Ordering::Relaxed) { "1 (on)" } else { "0 (off)" };
+    let state = if flag.load(Ordering::Relaxed) {
+        "1 (on)"
+    } else {
+        "0 (off)"
+    };
     if assigned {
         console_print(&format!("{name} = {state}\n"));
     } else {
-        console_print(&format!("{name} = {state}\nusage: {name} <0|1>\n{}\n", status()));
+        console_print(&format!(
+            "{name} = {state}\nusage: {name} <0|1>\n{}\n",
+            status()
+        ));
     }
     unsafe {
         crate::debug::report(&format!(
             "commands: {name} = {state} ({}, argc={argc})",
-            if assigned { "set" } else { "queried, unchanged" }
+            if assigned {
+                "set"
+            } else {
+                "queried, unchanged"
+            }
         ))
     };
 }
@@ -631,7 +705,9 @@ unsafe extern "C" fn cmd_animation_fix() {
 /// instead of a flag. Only reached on the fallback path, when cvar
 /// registration failed -- the cvar itself is what normally carries this.
 fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
 
     let argc = unsafe { (engfuncs.cmd_argc)() };
     let mut assigned = false;
@@ -641,14 +717,23 @@ fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
             let value = unsafe { CStr::from_ptr(arg1 as *const c_char) }.to_string_lossy();
             match value.trim().parse::<i32>() {
                 Ok(n) => {
-                    level.store(n.clamp(anim_fix::LEVEL_OFF, anim_fix::LEVEL_MAX), Ordering::Relaxed);
+                    level.store(
+                        n.clamp(anim_fix::LEVEL_OFF, anim_fix::LEVEL_MAX),
+                        Ordering::Relaxed,
+                    );
                     assigned = true;
                 }
                 Err(_) => {
                     let max = anim_fix::LEVEL_MAX;
-                    console_print(&format!("{name}: expected 0-{max}, got \"{}\"\n", value.trim()));
+                    console_print(&format!(
+                        "{name}: expected 0-{max}, got \"{}\"\n",
+                        value.trim()
+                    ));
                     unsafe {
-                        crate::debug::report(&format!("commands: {name} rejected argument \"{}\"", value.trim()))
+                        crate::debug::report(&format!(
+                            "commands: {name} rejected argument \"{}\"",
+                            value.trim()
+                        ))
                     };
                     return;
                 }
@@ -671,7 +756,11 @@ fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
     unsafe {
         crate::debug::report(&format!(
             "commands: {name} = {state} ({}, argc={argc})",
-            if assigned { "set" } else { "queried, unchanged" }
+            if assigned {
+                "set"
+            } else {
+                "queried, unchanged"
+            }
         ))
     };
 }
@@ -687,7 +776,9 @@ fn handle_code_patch(
     current: fn() -> bool,
     status: fn() -> String,
 ) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
 
     if unsafe { (engfuncs.cmd_argc)() } >= 2 {
         let arg1 = unsafe { (engfuncs.cmd_argv)(1) };
@@ -771,13 +862,18 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
 /// value cannot carry, and there are thirteen of them -- thirteen cvars would
 /// bury everything else in the console's type-ahead.
 unsafe extern "C" fn cmd_hudelement() {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
 
     let argv = |n: i32| -> Option<String> {
         let raw = unsafe { (engfuncs.cmd_argv)(n) };
         (!raw.is_null()).then(|| {
-            unsafe { CStr::from_ptr(raw as *const c_char) }.to_string_lossy().trim().to_owned()
+            unsafe { CStr::from_ptr(raw as *const c_char) }
+                .to_string_lossy()
+                .trim()
+                .to_owned()
         })
     };
 
@@ -812,7 +908,9 @@ unsafe extern "C" fn cmd_hudelement() {
     };
 
     if argc < 3 {
-        console_print(&format!("{HUDELEMENT_NAME}: expected {HUDELEMENT_NAME} {name} <0|1>\n"));
+        console_print(&format!(
+            "{HUDELEMENT_NAME}: expected {HUDELEMENT_NAME} {name} <0|1>\n"
+        ));
         return;
     }
     let Some(raw) = argv(2) else { return };
@@ -820,7 +918,9 @@ unsafe extern "C" fn cmd_hudelement() {
         "0" => false,
         "1" => true,
         other => {
-            console_print(&format!("{HUDELEMENT_NAME}: expected 0 or 1, got \"{other}\"\n"));
+            console_print(&format!(
+                "{HUDELEMENT_NAME}: expected 0 or 1, got \"{other}\"\n"
+            ));
             return;
         }
     };
@@ -841,7 +941,8 @@ unsafe extern "C" fn cmd_hudelement() {
         return;
     }
 
-    let index = index.expect("validated above: not `all`, so `find` succeeded or we already returned");
+    let index =
+        index.expect("validated above: not `all`, so `find` succeeded or we already returned");
     hudelement::set_hidden(index, on);
     let bit = if on { "1" } else { "0" };
     // Applied here as well as in `poll`, so the console reports the real
@@ -853,7 +954,11 @@ unsafe extern "C" fn cmd_hudelement() {
         }
         Err(why) => {
             console_print(&format!("{HUDELEMENT_NAME}: {why}\n"));
-            unsafe { crate::debug::report(&format!("commands: {HUDELEMENT_NAME} {name} failed -- {why}")) };
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {HUDELEMENT_NAME} {name} failed -- {why}"
+                ))
+            };
         }
     }
 }
@@ -863,14 +968,18 @@ unsafe extern "C" fn cmd_hudelement() {
 unsafe extern "C" fn cmd_clear_decals() {
     match decals::clear() {
         Ok(removed) => {
-            console_print(&format!("{CLEAR_DECALS_NAME}: removed {removed} decal(s)\n"));
+            console_print(&format!(
+                "{CLEAR_DECALS_NAME}: removed {removed} decal(s)\n"
+            ));
             unsafe {
                 crate::debug::report(&format!("commands: {CLEAR_DECALS_NAME} removed {removed}"))
             };
         }
         Err(why) => {
             console_print(&format!("{CLEAR_DECALS_NAME}: {why}\n"));
-            unsafe { crate::debug::report(&format!("commands: {CLEAR_DECALS_NAME} failed -- {why}")) };
+            unsafe {
+                crate::debug::report(&format!("commands: {CLEAR_DECALS_NAME} failed -- {why}"))
+            };
         }
     }
 }
@@ -887,12 +996,17 @@ unsafe extern "C" fn cmd_hand_signals() {
 /// value, and two cvars per rectangle would be eight names in the type-ahead
 /// for something set once.
 unsafe extern "C" fn cmd_overviewmap() {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
     let argv = |n: i32| -> Option<String> {
         let raw = unsafe { (engfuncs.cmd_argv)(n) };
         (!raw.is_null()).then(|| {
-            unsafe { CStr::from_ptr(raw as *const c_char) }.to_string_lossy().trim().to_owned()
+            unsafe { CStr::from_ptr(raw as *const c_char) }
+                .to_string_lossy()
+                .trim()
+                .to_owned()
         })
     };
 
@@ -930,7 +1044,9 @@ unsafe extern "C" fn cmd_overviewmap() {
 
     let mut fields = [0_i32; 4];
     for (index, slot) in fields.iter_mut().enumerate() {
-        let Some(raw) = argv(2 + index as i32) else { return };
+        let Some(raw) = argv(2 + index as i32) else {
+            return;
+        };
         match raw.parse::<i32>() {
             Ok(value) => *slot = value,
             Err(_) => {
@@ -939,7 +1055,12 @@ unsafe extern "C" fn cmd_overviewmap() {
             }
         }
     }
-    let rect = overview_map::Rect { x: fields[0], y: fields[1], w: fields[2], h: fields[3] };
+    let rect = overview_map::Rect {
+        x: fields[0],
+        y: fields[1],
+        w: fields[2],
+        h: fields[3],
+    };
 
     match overview_map::hold(which, rect).and_then(|()| overview_map::apply()) {
         Ok(_) => {
@@ -980,27 +1101,41 @@ unsafe extern "C" fn cmd_log_spectator_target() {
 /// How far boosted gunshots carry. Separate from the on/off toggle because it
 /// is the value you actually want to sweep while listening.
 unsafe extern "C" fn cmd_gunshot_attenuation() {
-    let Some(engfuncs) = engine::engfuncs() else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
 
     if unsafe { (engfuncs.cmd_argc)() } >= 2 {
         let arg1 = unsafe { (engfuncs.cmd_argv)(1) };
         if !arg1.is_null() {
-            let raw = unsafe { CStr::from_ptr(arg1 as *const c_char) }.to_string_lossy().into_owned();
+            let raw = unsafe { CStr::from_ptr(arg1 as *const c_char) }
+                .to_string_lossy()
+                .into_owned();
             match raw.trim().parse::<f32>() {
                 Ok(value) => match sound_fix::set_carry_attenuation(value) {
                     Ok(()) => {
                         console_print(&format!("{ATTENUATION_NAME} = {value}\n"));
-                        unsafe { crate::debug::report(&format!("commands: {ATTENUATION_NAME} = {value} (set)")) };
+                        unsafe {
+                            crate::debug::report(&format!(
+                                "commands: {ATTENUATION_NAME} = {value} (set)"
+                            ))
+                        };
                         return;
                     }
                     Err(why) => {
                         console_print(&format!("{ATTENUATION_NAME}: {why}\n"));
-                        unsafe { crate::debug::report(&format!("commands: {ATTENUATION_NAME} rejected \"{raw}\" -- {why}")) };
+                        unsafe {
+                            crate::debug::report(&format!(
+                                "commands: {ATTENUATION_NAME} rejected \"{raw}\" -- {why}"
+                            ))
+                        };
                         return;
                     }
                 },
                 Err(_) => {
-                    console_print(&format!("{ATTENUATION_NAME}: expected a number, got \"{raw}\"\n"));
+                    console_print(&format!(
+                        "{ATTENUATION_NAME}: expected a number, got \"{raw}\"\n"
+                    ));
                     return;
                 }
             }
@@ -1026,8 +1161,12 @@ pub(crate) fn add_commands(names: &[&str], function: engine::ConsoleCommandFn) {
 }
 
 fn add_command(name: &str, function: engine::ConsoleCommandFn) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(c_name) = CString::new(name) else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(c_name) = CString::new(name) else {
+        return;
+    };
     unsafe { (engfuncs.pfn_add_command)(c_name.as_ptr(), function) };
     // Leak intentionally: pfnAddCommand keeps this pointer for the life of the
     // engine session, the same lifetime as the DLL itself.
@@ -1067,7 +1206,11 @@ fn install_fallback_commands() {
 /// after registration, wins over it.
 pub fn install() {
     if engine::engfuncs().is_none() {
-        unsafe { crate::debug::report("commands::install called before engfuncs were captured -- this is a bug in install ordering") };
+        unsafe {
+            crate::debug::report(
+                "commands::install called before engfuncs were captured -- this is a bug in install ordering",
+            )
+        };
         return;
     }
 
@@ -1080,17 +1223,32 @@ pub fn install() {
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
     add_commands(crate::objicons::COMMAND_NAMES, crate::objicons::command);
-    add_commands(crate::hide_sprite::COMMAND_NAMES, crate::hide_sprite::command);
+    add_commands(
+        crate::hide_sprite::COMMAND_NAMES,
+        crate::hide_sprite::command,
+    );
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
-    let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
+    let gunshots = register(
+        GUNSHOTS_FIX_NAME,
+        bit(sound_fix::ENABLED.load(Ordering::Relaxed)),
+    );
     let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
-    let attenuation = register(ATTENUATION_NAME, &sound_fix::carry_attenuation().to_string());
-    let held_models = register(HELD_MODELS_NAME, bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)));
-    let spectator_target_log = register(SPECTATOR_TARGET_LOG_NAME, bit(spectator_target::LOG.load(Ordering::Relaxed)));
+    let attenuation = register(
+        ATTENUATION_NAME,
+        &sound_fix::carry_attenuation().to_string(),
+    );
+    let held_models = register(
+        HELD_MODELS_NAME,
+        bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
+    );
+    let spectator_target_log = register(
+        SPECTATOR_TARGET_LOG_NAME,
+        bit(spectator_target::LOG.load(Ordering::Relaxed)),
+    );
     // These three default to the game's own behaviour. Nothing this DLL does
     // should change what a session looks like until it is asked to -- which is
     // why the mute defaults to 0 while the other two default to 1.
@@ -1239,16 +1397,44 @@ mod tests {
     /// the byte-level tests check widths and encodings, not sense.
     #[test]
     fn one_means_suppressed_for_every_suppression_cvar() {
-        assert!(describe_scoreboard(true).contains("blocked"), "{}", describe_scoreboard(true));
-        assert!(describe_scoreboard(false).contains("normal"), "{}", describe_scoreboard(false));
+        assert!(
+            describe_scoreboard(true).contains("blocked"),
+            "{}",
+            describe_scoreboard(true)
+        );
+        assert!(
+            describe_scoreboard(false).contains("normal"),
+            "{}",
+            describe_scoreboard(false)
+        );
 
-        assert!(describe_crosshair(true).contains("hidden"), "{}", describe_crosshair(true));
-        assert!(describe_crosshair(false).contains("normal"), "{}", describe_crosshair(false));
+        assert!(
+            describe_crosshair(true).contains("hidden"),
+            "{}",
+            describe_crosshair(true)
+        );
+        assert!(
+            describe_crosshair(false).contains("normal"),
+            "{}",
+            describe_crosshair(false)
+        );
 
-        assert!(describe_voice(true).contains("silent"), "{}", describe_voice(true));
-        assert!(describe_voice(false).contains("normal"), "{}", describe_voice(false));
+        assert!(
+            describe_voice(true).contains("silent"),
+            "{}",
+            describe_voice(true)
+        );
+        assert!(
+            describe_voice(false).contains("normal"),
+            "{}",
+            describe_voice(false)
+        );
 
-        for d in [describe_scoreboard(true), describe_crosshair(true), describe_voice(true)] {
+        for d in [
+            describe_scoreboard(true),
+            describe_crosshair(true),
+            describe_voice(true),
+        ] {
             assert!(d.starts_with('1'), "{d}");
         }
     }
@@ -1278,7 +1464,10 @@ mod tests {
     /// piece of `install_fallback_commands()` a unit test can observe.
     #[test]
     fn install_fallback_commands_registers_the_per_frame_prologue() {
-        assert!(!engine::per_frame_prologue_is_set(), "some earlier test already registered one");
+        assert!(
+            !engine::per_frame_prologue_is_set(),
+            "some earlier test already registered one"
+        );
         install_fallback_commands();
         assert!(engine::per_frame_prologue_is_set());
     }

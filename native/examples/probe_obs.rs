@@ -199,7 +199,10 @@ fn tail_log(path: &Path) {
             // Buffering is markers separated by real demo time arriving in one
             // read — not merely arriving close together, which adjacent
             // scheduled commands are supposed to do.
-            let burst = same_read && tick_delta.map(|t| t.abs() > BURST_TICK_GAP).unwrap_or(false);
+            let burst = same_read
+                && tick_delta
+                    .map(|t| t.abs() > BURST_TICK_GAP)
+                    .unwrap_or(false);
 
             println!(
                 "  +{:>8.3}s  {:<44} {:>9}{:>12}{}",
@@ -252,21 +255,57 @@ const WANTED: &[(&str, &str)] = &[
     ("StopRecord", "required — returns outputPath"),
     ("GetRecordStatus", "required — per-block verification"),
     ("GetRecordDirectory", "required — preflight + disk check"),
-    ("GetVideoSettings", "required — the rate that replaces mirv_movie_fps"),
+    (
+        "GetVideoSettings",
+        "required — the rate that replaces mirv_movie_fps",
+    ),
     ("SetRecordDirectory", "Option A per-block export routing"),
     ("SplitRecordFile", "Option B"),
     ("GetSceneList", "scene picker (read-only)"),
-    ("GetSceneItemList", "scene picker — what a scene contains (read-only)"),
-    ("GetInputList", "scene picker — is anything pointed at hl.exe (read-only)"),
-    ("GetInputSettings", "scene picker — which window a capture targets (read-only)"),
-    ("GetSceneCollectionList", "scene picker — scene names are per-collection"),
-    ("SetCurrentProgramScene", "switch to the chosen scene (reversible mutation)"),
-    ("SetVideoSettings", "canvas/output resolution and FPS — PROFILE-WIDE"),
-    ("GetProfileList", "profiles — where video settings actually live"),
-    ("SetCurrentProfile", "switch to a dod-studio profile (reversible)"),
-    ("CreateProfile", "make a dod-studio profile instead of editing theirs"),
-    ("GetSceneItemTransform", "a source's placement, in canvas coordinates"),
-    ("SetSceneItemTransform", "re-fit a source after a canvas change"),
+    (
+        "GetSceneItemList",
+        "scene picker — what a scene contains (read-only)",
+    ),
+    (
+        "GetInputList",
+        "scene picker — is anything pointed at hl.exe (read-only)",
+    ),
+    (
+        "GetInputSettings",
+        "scene picker — which window a capture targets (read-only)",
+    ),
+    (
+        "GetSceneCollectionList",
+        "scene picker — scene names are per-collection",
+    ),
+    (
+        "SetCurrentProgramScene",
+        "switch to the chosen scene (reversible mutation)",
+    ),
+    (
+        "SetVideoSettings",
+        "canvas/output resolution and FPS — PROFILE-WIDE",
+    ),
+    (
+        "GetProfileList",
+        "profiles — where video settings actually live",
+    ),
+    (
+        "SetCurrentProfile",
+        "switch to a dod-studio profile (reversible)",
+    ),
+    (
+        "CreateProfile",
+        "make a dod-studio profile instead of editing theirs",
+    ),
+    (
+        "GetSceneItemTransform",
+        "a source's placement, in canvas coordinates",
+    ),
+    (
+        "SetSceneItemTransform",
+        "re-fit a source after a canvas change",
+    ),
 ];
 
 /// Input kinds worth recognising when reporting what a scene holds.
@@ -303,11 +342,26 @@ fn run_obs(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--host" => { a.host = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
-            "--port" => { a.port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455); i += 2; }
-            "--password" => { a.password = args.get(i + 1).cloned(); i += 2; }
-            "--record" => { a.record = args.get(i + 1).and_then(|s| s.parse().ok()).or(Some(5)); i += 2; }
-            other => { eprintln!("unknown argument: {}", other); std::process::exit(2); }
+            "--host" => {
+                a.host = args.get(i + 1).cloned().unwrap_or_default();
+                i += 2;
+            }
+            "--port" => {
+                a.port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455);
+                i += 2;
+            }
+            "--password" => {
+                a.password = args.get(i + 1).cloned();
+                i += 2;
+            }
+            "--record" => {
+                a.record = args.get(i + 1).and_then(|s| s.parse().ok()).or(Some(5));
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown argument: {}", other);
+                std::process::exit(2);
+            }
         }
     }
 
@@ -344,7 +398,11 @@ fn run_obs(args: &[String]) {
                 println!(
                     "    {:<20} {:<4}  {}",
                     name,
-                    if available.contains(name) { "YES" } else { "NO" },
+                    if available.contains(name) {
+                        "YES"
+                    } else {
+                        "NO"
+                    },
                     why
                 );
             }
@@ -377,7 +435,10 @@ fn run_obs(args: &[String]) {
     };
 
     // ── The measurement that matters ──────────────────────────────────────────
-    println!("\n  recording {}s — timing the gap that Option A has to absorb", secs);
+    println!(
+        "\n  recording {}s — timing the gap that Option A has to absorb",
+        secs
+    );
 
     // A Game Capture source whose target process is gone records black, and the
     // resulting file is valid in every other respect: right resolution, right
@@ -404,8 +465,14 @@ fn run_obs(args: &[String]) {
 
     let t0 = Instant::now();
     match client.request("StartRecord", serde_json::json!({})) {
-        Ok(_) => println!("    StartRecord returned         +{:.3}s", t0.elapsed().as_secs_f64()),
-        Err(e) => { println!("    StartRecord failed: {}", e); return; }
+        Ok(_) => println!(
+            "    StartRecord returned         +{:.3}s",
+            t0.elapsed().as_secs_f64()
+        ),
+        Err(e) => {
+            println!("    StartRecord failed: {}", e);
+            return;
+        }
     }
     match client.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STARTED", Duration::from_secs(15)) {
         Some(_) => println!(
@@ -427,7 +494,9 @@ fn run_obs(args: &[String]) {
         ),
         Err(e) => println!("\n    StopRecord failed: {}", e),
     }
-    if let Some(ev) = client.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED", Duration::from_secs(30)) {
+    if let Some(ev) =
+        client.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED", Duration::from_secs(30))
+    {
         println!(
             "    file finalised               +{:.3}s\n    outputPath: {}",
             t1.elapsed().as_secs_f64(),
@@ -458,18 +527,36 @@ fn run_ffmpeg_mode(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--host" => { host = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
-            "--port" => { port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455); i += 2; }
-            "--password" => { password = args.get(i + 1).cloned(); i += 2; }
-            "--dir" => { target = args.get(i + 1).cloned().unwrap_or(target); i += 2; }
-            other => { eprintln!("unknown argument: {}", other); std::process::exit(2); }
+            "--host" => {
+                host = args.get(i + 1).cloned().unwrap_or_default();
+                i += 2;
+            }
+            "--port" => {
+                port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455);
+                i += 2;
+            }
+            "--password" => {
+                password = args.get(i + 1).cloned();
+                i += 2;
+            }
+            "--dir" => {
+                target = args.get(i + 1).cloned().unwrap_or(target);
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown argument: {}", other);
+                std::process::exit(2);
+            }
         }
     }
 
     let url = format!("ws://{}:{}", host, port);
     let mut client = match ObsClient::connect(&url, password.as_deref()) {
         Ok(c) => c,
-        Err(e) => { eprintln!("connect failed: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("connect failed: {}", e);
+            std::process::exit(1);
+        }
     };
 
     // Back up first, and refuse to touch anything if the backup is incomplete.
@@ -488,7 +575,12 @@ fn run_ffmpeg_mode(args: &[String]) {
 
     println!("  backup taken:");
     for (cat, key, val) in &backup {
-        println!("    {}/{:<12} = {}", cat, key, val.clone().unwrap_or_else(|| "(unset)".into()));
+        println!(
+            "    {}/{:<12} = {}",
+            cat,
+            key,
+            val.clone().unwrap_or_else(|| "(unset)".into())
+        );
     }
     println!("    record directory  = {}\n", orig_dir);
 
@@ -500,15 +592,28 @@ fn run_ffmpeg_mode(args: &[String]) {
         match val {
             Some(v) => {
                 let ok = profile_set(&mut client, cat, key, v);
-                println!("    {}/{:<12} -> {}   [{}]", cat, key, v, if ok { "ok" } else { "FAILED" });
+                println!(
+                    "    {}/{:<12} -> {}   [{}]",
+                    cat,
+                    key,
+                    v,
+                    if ok { "ok" } else { "FAILED" }
+                );
             }
             None => println!("    {}/{:<12} was unset; left alone", cat, key),
         }
     }
     let ok = client
-        .request("SetRecordDirectory", serde_json::json!({ "recordDirectory": orig_dir }))
+        .request(
+            "SetRecordDirectory",
+            serde_json::json!({ "recordDirectory": orig_dir }),
+        )
         .is_ok();
-    println!("    record directory -> {}   [{}]", orig_dir, if ok { "ok" } else { "FAILED" });
+    println!(
+        "    record directory -> {}   [{}]",
+        orig_dir,
+        if ok { "ok" } else { "FAILED" }
+    );
 
     match profile_get(&mut client, "AdvOut", "RecType") {
         Some(t) => println!("\n  recording type is now: {}", t),
@@ -526,38 +631,63 @@ fn ffmpeg_mode_experiment(client: &mut ObsClient, target: &str) -> Result<(), St
         return Err("SetProfileParameter refused".into());
     }
     let now = profile_get(client, "AdvOut", "RecType").unwrap_or_default();
-    println!("     readback: {}   [{}]", now, if now == "FFmpegOutput" { "TOOK" } else { "IGNORED" });
+    println!(
+        "     readback: {}   [{}]",
+        now,
+        if now == "FFmpegOutput" {
+            "TOOK"
+        } else {
+            "IGNORED"
+        }
+    );
     if now != "FFmpegOutput" {
         return Err("could not switch mode; nothing further is meaningful".into());
     }
 
     let path_before = profile_get(client, "AdvOut", "FFFilePath");
-    let dir_before = client
-        .request("GetRecordDirectory", serde_json::json!({}))?
-        ["recordDirectory"].as_str().unwrap_or_default().to_string();
+    let dir_before =
+        client.request("GetRecordDirectory", serde_json::json!({}))?["recordDirectory"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
     println!("\n  2. before SetRecordDirectory");
-    println!("     AdvOut/FFFilePath     : {}", path_before.clone().unwrap_or_else(|| "(unset)".into()));
+    println!(
+        "     AdvOut/FFFilePath     : {}",
+        path_before.clone().unwrap_or_else(|| "(unset)".into())
+    );
     println!("     GetRecordDirectory    : {}", dir_before);
 
     println!("\n  3. SetRecordDirectory -> {}", target);
-    client.request("SetRecordDirectory", serde_json::json!({ "recordDirectory": target }))?;
+    client.request(
+        "SetRecordDirectory",
+        serde_json::json!({ "recordDirectory": target }),
+    )?;
 
     let path_after = profile_get(client, "AdvOut", "FFFilePath");
-    let dir_after = client
-        .request("GetRecordDirectory", serde_json::json!({}))?
-        ["recordDirectory"].as_str().unwrap_or_default().to_string();
+    let dir_after = client.request("GetRecordDirectory", serde_json::json!({}))?["recordDirectory"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     println!("\n  4. after");
-    println!("     AdvOut/FFFilePath     : {}", path_after.clone().unwrap_or_else(|| "(unset)".into()));
+    println!(
+        "     AdvOut/FFFilePath     : {}",
+        path_after.clone().unwrap_or_else(|| "(unset)".into())
+    );
     println!("     GetRecordDirectory    : {}", dir_after);
 
     println!("\n  VERDICT");
-    let ff_followed = path_after.as_deref().map(|p| same_dir(p, target)).unwrap_or(false);
+    let ff_followed = path_after
+        .as_deref()
+        .map(|p| same_dir(p, target))
+        .unwrap_or(false);
     let get_followed = same_dir(&dir_after, target);
     if ff_followed {
         println!("     SetRecordDirectory steers the Custom Output path.");
         println!("     Lossless capture and Option A per-block routing can coexist.");
     } else if get_followed {
-        println!("     GetRecordDirectory reports the new path, but AdvOut/FFFilePath did NOT change.");
+        println!(
+            "     GetRecordDirectory reports the new path, but AdvOut/FFFilePath did NOT change."
+        );
         println!("     The request is steering the *standard* output only, so in Custom Output");
         println!("     mode the recording would still land in the old place. Per-block routing");
         println!("     and lossless capture are mutually exclusive unless FFFilePath is written");
@@ -633,7 +763,11 @@ fn dump_record_mode(client: &mut ObsClient) {
         println!(
             "    recording type  : {}{}",
             rec_type,
-            if custom { "   <-- Custom Output (FFmpeg)" } else { "   (Standard)" }
+            if custom {
+                "   <-- Custom Output (FFmpeg)"
+            } else {
+                "   (Standard)"
+            }
         );
         if custom {
             for (label, cat, key) in [
@@ -646,20 +780,39 @@ fn dump_record_mode(client: &mut ObsClient) {
                 ("encoder settings", "AdvOut", "FFVCustom"),
                 ("path", "AdvOut", "FFFilePath"),
             ] {
-                println!("      {:<18}: {}", label, get(cat, key).unwrap_or_else(|| "(unset)".into()));
+                println!(
+                    "      {:<18}: {}",
+                    label,
+                    get(cat, key).unwrap_or_else(|| "(unset)".into())
+                );
             }
             println!(
                 "\n    NOTE: Custom Output (FFmpeg) has its own path field (FFFilePath).\n\
                  \x20   Whether SetRecordDirectory steers it is what `probe_obs routing` tests."
             );
         } else {
-            println!("      container       : {}", get("AdvOut", "RecFormat2").unwrap_or_else(|| "(unset)".into()));
-            println!("      encoder         : {}", get("AdvOut", "RecEncoder").unwrap_or_else(|| "(unset)".into()));
+            println!(
+                "      container       : {}",
+                get("AdvOut", "RecFormat2").unwrap_or_else(|| "(unset)".into())
+            );
+            println!(
+                "      encoder         : {}",
+                get("AdvOut", "RecEncoder").unwrap_or_else(|| "(unset)".into())
+            );
         }
     } else {
-        println!("      container       : {}", get("SimpleOutput", "RecFormat2").unwrap_or_else(|| "(unset)".into()));
-        println!("      quality         : {}", get("SimpleOutput", "RecQuality").unwrap_or_else(|| "(unset)".into()));
-        println!("      encoder         : {}", get("SimpleOutput", "RecEncoder").unwrap_or_else(|| "(unset)".into()));
+        println!(
+            "      container       : {}",
+            get("SimpleOutput", "RecFormat2").unwrap_or_else(|| "(unset)".into())
+        );
+        println!(
+            "      quality         : {}",
+            get("SimpleOutput", "RecQuality").unwrap_or_else(|| "(unset)".into())
+        );
+        println!(
+            "      encoder         : {}",
+            get("SimpleOutput", "RecEncoder").unwrap_or_else(|| "(unset)".into())
+        );
     }
 }
 
@@ -690,11 +843,26 @@ fn run_routing(args: &[String]) {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--host" => { host = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
-            "--port" => { port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455); i += 2; }
-            "--password" => { password = args.get(i + 1).cloned(); i += 2; }
-            "--dir" => { target = args.get(i + 1).cloned(); i += 2; }
-            other => { eprintln!("unknown argument: {}", other); std::process::exit(2); }
+            "--host" => {
+                host = args.get(i + 1).cloned().unwrap_or_default();
+                i += 2;
+            }
+            "--port" => {
+                port = args.get(i + 1).and_then(|s| s.parse().ok()).unwrap_or(4455);
+                i += 2;
+            }
+            "--password" => {
+                password = args.get(i + 1).cloned();
+                i += 2;
+            }
+            "--dir" => {
+                target = args.get(i + 1).cloned();
+                i += 2;
+            }
+            other => {
+                eprintln!("unknown argument: {}", other);
+                std::process::exit(2);
+            }
         }
     }
     let Some(target) = target else {
@@ -709,7 +877,10 @@ fn run_routing(args: &[String]) {
     let url = format!("ws://{}:{}", host, port);
     let mut client = match ObsClient::connect(&url, password.as_deref()) {
         Ok(c) => c,
-        Err(e) => { eprintln!("connect failed: {}", e); std::process::exit(1); }
+        Err(e) => {
+            eprintln!("connect failed: {}", e);
+            std::process::exit(1);
+        }
     };
 
     let original = client
@@ -758,16 +929,18 @@ fn routing_experiment(client: &mut ObsClient, target: &str) -> Result<(), String
         "SetRecordDirectory",
         serde_json::json!({ "recordDirectory": target }),
     )?;
-    let readback = client
-        .request("GetRecordDirectory", serde_json::json!({}))?
-        ["recordDirectory"]
+    let readback = client.request("GetRecordDirectory", serde_json::json!({}))?["recordDirectory"]
         .as_str()
         .unwrap_or_default()
         .to_string();
     println!(
         "     readback: {}   [{}]",
         readback,
-        if same_dir(&readback, target) { "TOOK" } else { "IGNORED" }
+        if same_dir(&readback, target) {
+            "TOOK"
+        } else {
+            "IGNORED"
+        }
     );
 
     // A directory listing before and after is what actually answers where the
@@ -804,13 +977,23 @@ fn routing_experiment(client: &mut ObsClient, target: &str) -> Result<(), String
     let reported = stop["outputPath"].as_str().unwrap_or("");
     println!(
         "     outputPath: {}",
-        if reported.is_empty() { "(EMPTY — take verification cannot key off this)" } else { reported }
+        if reported.is_empty() {
+            "(EMPTY — take verification cannot key off this)"
+        } else {
+            reported
+        }
     );
-    if let Some(ev) = client.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED", Duration::from_secs(30)) {
+    if let Some(ev) =
+        client.wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED", Duration::from_secs(30))
+    {
         let ev_path = ev["outputPath"].as_str().unwrap_or("");
         println!(
             "     RecordStateChanged outputPath: {}",
-            if ev_path.is_empty() { "(empty)" } else { ev_path }
+            if ev_path.is_empty() {
+                "(empty)"
+            } else {
+                ev_path
+            }
         );
     }
 
@@ -818,7 +1001,10 @@ fn routing_experiment(client: &mut ObsClient, target: &str) -> Result<(), String
     let after = dir_snapshot(target);
     let new: Vec<&String> = after.iter().filter(|f| !before.contains(*f)).collect();
     if new.is_empty() {
-        println!("     NOTHING new in {} — the output went elsewhere.", target);
+        println!(
+            "     NOTHING new in {} — the output went elsewhere.",
+            target
+        );
         println!("     That means SetRecordDirectory does not steer this recording mode,");
         println!("     and Option A's per-block drive routing does not work here.");
     } else {
@@ -896,15 +1082,14 @@ fn dump_scenes(client: &mut ObsClient) {
         let name = scene["sceneName"].as_str().unwrap_or("?");
         println!("\n    scene: {}", name);
 
-        let items = match client
-            .request("GetSceneItemList", serde_json::json!({ "sceneName": name }))
-        {
-            Ok(d) => d["sceneItems"].as_array().cloned().unwrap_or_default(),
-            Err(e) => {
-                println!("      (could not list items: {})", e);
-                continue;
-            }
-        };
+        let items =
+            match client.request("GetSceneItemList", serde_json::json!({ "sceneName": name })) {
+                Ok(d) => d["sceneItems"].as_array().cloned().unwrap_or_default(),
+                Err(e) => {
+                    println!("      (could not list items: {})", e);
+                    continue;
+                }
+            };
         if items.is_empty() {
             println!("      (empty)");
             continue;
@@ -918,27 +1103,24 @@ fn dump_scenes(client: &mut ObsClient) {
                 .and_then(|i| i["inputKind"].as_str())
                 .unwrap_or("(not an input — a scene or group)");
             let note = describe_input_kind(kind);
-            println!(
-                "      {:<28} {:<32} {}",
-                truncate(source, 28),
-                kind,
-                note
-            );
+            println!("      {:<28} {:<32} {}", truncate(source, 28), kind, note);
 
             // For a capture source, which window it is pointed at is the whole
             // question — a Game Capture aimed at something else is exactly the
             // misconfiguration a picker should be able to report.
             if matches!(kind, "game_capture" | "window_capture")
-                && let Ok(s) = client
-                    .request("GetInputSettings", serde_json::json!({ "inputName": source }))
-                {
-                    let settings = &s["inputSettings"];
-                    let window = settings["window"].as_str().unwrap_or("(default/any)");
-                    println!("      {:<28} -> window: {}", "", window);
-                    if window.to_lowercase().contains("hl.exe") {
-                        println!("      {:<28} -> POINTED AT THE GAME", "");
-                    }
+                && let Ok(s) = client.request(
+                    "GetInputSettings",
+                    serde_json::json!({ "inputName": source }),
+                )
+            {
+                let settings = &s["inputSettings"];
+                let window = settings["window"].as_str().unwrap_or("(default/any)");
+                println!("      {:<28} -> window: {}", "", window);
+                if window.to_lowercase().contains("hl.exe") {
+                    println!("      {:<28} -> POINTED AT THE GAME", "");
                 }
+            }
         }
     }
 
@@ -1002,12 +1184,17 @@ impl ObsClient {
             .set_read_timeout(Some(Duration::from_millis(200)))
             .map_err(|e| e.to_string())?;
         let (ws, _) = tungstenite::client(
-            url.parse::<tungstenite::http::Uri>().map_err(|e| e.to_string())?,
+            url.parse::<tungstenite::http::Uri>()
+                .map_err(|e| e.to_string())?,
             stream,
         )
         .map_err(|e| format!("websocket handshake: {}", e))?;
 
-        let mut client = Self { ws, next_id: 0, last_close: None };
+        let mut client = Self {
+            ws,
+            next_id: 0,
+            last_close: None,
+        };
 
         // op 0 Hello -> op 1 Identify -> op 2 Identified.
         let hello = client
@@ -1017,9 +1204,8 @@ impl ObsClient {
         let mut identify = serde_json::json!({ "rpcVersion": 1 });
         let auth_required = hello["authentication"].is_object();
         if let Some(auth) = hello["authentication"].as_object() {
-            let password = password.ok_or(
-                "OBS requires authentication but no --password was given",
-            )?;
+            let password =
+                password.ok_or("OBS requires authentication but no --password was given")?;
             let challenge = auth["challenge"].as_str().unwrap_or_default();
             let salt = auth["salt"].as_str().unwrap_or_default();
             identify["authentication"] =
@@ -1043,12 +1229,20 @@ impl ObsClient {
                     "OBS closed the connection before Identified: {}\n\
                      (auth was {} by the server)",
                     reason,
-                    if auth_required { "required" } else { "not required" }
+                    if auth_required {
+                        "required"
+                    } else {
+                        "not required"
+                    }
                 ),
                 None => format!(
                     "no Identified (op 2) and no close frame within 10s — auth was {} by the \
                      server. This is not a password failure; the server said nothing at all.",
-                    if auth_required { "required" } else { "not required" }
+                    if auth_required {
+                        "required"
+                    } else {
+                        "not required"
+                    }
                 ),
             });
         }
@@ -1065,7 +1259,9 @@ impl ObsClient {
     /// passes. Anything else is discarded — this probe has no use for events it
     /// did not ask for, and buffering them would only hide ordering.
     fn read_op(&mut self, op: u64, timeout: Duration) -> Option<serde_json::Value> {
-        self.read_until(timeout, |m| (m["op"].as_u64() == Some(op)).then(|| m["d"].clone()))
+        self.read_until(timeout, |m| {
+            (m["op"].as_u64() == Some(op)).then(|| m["d"].clone())
+        })
     }
 
     /// The generic read loop. `f` decides whether a message is the one being
@@ -1181,7 +1377,9 @@ fn auth_string(password: &str, salt: &str, challenge: &str) -> String {
 
     let b64 = base64::engine::general_purpose::STANDARD;
     let secret = b64.encode(Sha256::digest(format!("{}{}", password, salt).as_bytes()));
-    b64.encode(Sha256::digest(format!("{}{}", secret, challenge).as_bytes()))
+    b64.encode(Sha256::digest(
+        format!("{}{}", secret, challenge).as_bytes(),
+    ))
 }
 
 #[cfg(test)]

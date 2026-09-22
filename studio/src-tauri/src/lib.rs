@@ -1,10 +1,10 @@
-mod capture_manager;
-mod render_manager;
-mod settings_manager;
 mod audit_manager;
+mod capture_manager;
 mod dir_browser;
 mod map_manager;
 mod messages;
+mod render_manager;
+mod settings_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -12,17 +12,23 @@ mod updater_manager;
 #[cfg(test)]
 mod test_support;
 
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-use capture_manager::{CaptureManager, CapturePayload, launch_demo_preview, generate_all_previews, launch_standalone_game, launch_obs, check_engine_processes, kill_engine_processes, scan_orphaned_previews, delete_orphaned_previews, read_cfg_commands};
+use audit_manager::{AuditManager, SerializedDuplicateGroup};
+use capture_manager::{
+    CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
+    generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
+    launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
+};
 use render_manager::{
-    RenderManager, queue_render_batch, start_queued_render, cancel_render_batch,
-    cancel_render_job, reset_render_job, reset_all_render_jobs, remove_render_job,
-    remove_non_rendering_render_jobs, set_render_job_codec, get_export_pool_free_gb,
-    get_render_required_estimate_gb,
-    check_render_autosave, discard_render_autosave, recover_render_batch,
+    RenderManager, cancel_render_batch, cancel_render_job, check_render_autosave,
+    discard_render_autosave, get_export_pool_free_gb, get_render_required_estimate_gb,
+    queue_render_batch, recover_render_batch, remove_non_rendering_render_jobs, remove_render_job,
+    reset_all_render_jobs, reset_render_job, set_render_job_codec, start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
-use audit_manager::{AuditManager, SerializedDuplicateGroup};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 
 // ── ScanManager ────────────────────────────────────────────────────────────────
 
@@ -103,7 +109,8 @@ async fn run_demo_audit(
         Arc::clone(&state.is_running),
         Arc::clone(&state.cancel_token),
         paths,
-    ).await
+    )
+    .await
 }
 
 #[tauri::command]
@@ -178,7 +185,8 @@ async fn scan_directory(
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
-    ).await
+    )
+    .await
 }
 
 #[tauri::command]
@@ -228,7 +236,11 @@ fn diagnose_capture_output_paths(paths: Vec<String>) -> Vec<CaptureOutputDiagnos
                 native::sys::disk::PathStatus::NotADirectory => "not_a_directory",
             };
             let usable = native::sys::disk::get_available_bytes(&p) != u64::MAX;
-            CaptureOutputDiagnostic { path: path_str, status, usable }
+            CaptureOutputDiagnostic {
+                path: path_str,
+                status,
+                usable,
+            }
         })
         .collect()
 }
@@ -428,7 +440,9 @@ async fn analyze_demo_full(
         let mut last_emit = std::time::Instant::now() - std::time::Duration::from_secs(1);
         let progress_cb = |processed: usize, total: usize| {
             let now = std::time::Instant::now();
-            if now.duration_since(last_emit) >= std::time::Duration::from_millis(33) || processed == total {
+            if now.duration_since(last_emit) >= std::time::Duration::from_millis(33)
+                || processed == total
+            {
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
@@ -497,7 +511,10 @@ pub fn run() {
             if migration.skipped.is_empty() {
                 String::new()
             } else {
-                format!("; left {} already present at the destination", migration.skipped.len())
+                format!(
+                    "; left {} already present at the destination",
+                    migration.skipped.len()
+                )
             },
             if migration.failed.is_empty() {
                 String::new()

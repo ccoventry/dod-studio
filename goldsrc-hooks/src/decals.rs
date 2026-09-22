@@ -136,7 +136,9 @@ unsafe fn read_u32(address: usize) -> u32 {
 /// Safety: five mapped, readable bytes.
 unsafe fn call_target(call_site: usize) -> usize {
     let displacement = unsafe { read_u32(call_site + 1) } as i32;
-    call_site.wrapping_add(5).wrapping_add(displacement as usize)
+    call_site
+        .wrapping_add(5)
+        .wrapping_add(displacement as usize)
 }
 
 /// Finds the pool and `R_DecalUnlink` in the loaded engine.
@@ -205,7 +207,12 @@ pub fn resolve() -> Result<Pool, String> {
     UNLINK.store(unlink, Ordering::Release);
     RESOLVED_BASE.store(base, Ordering::Release);
 
-    Ok(Pool { base: pool_base, end: pool_end, decal_count, unlink })
+    Ok(Pool {
+        base: pool_base,
+        end: pool_end,
+        decal_count,
+        unlink,
+    })
 }
 
 /// Unlinks and zeroes every decal in the pool, returning how many were in use.
@@ -269,7 +276,10 @@ mod tests {
     /// spelling and `scan::Pattern` is case-insensitive -- so a test that
     /// compared case-sensitively would be testing the spelling, not the bytes.
     fn tokens(pattern: &str) -> Vec<String> {
-        pattern.split_whitespace().map(str::to_ascii_lowercase).collect()
+        pattern
+            .split_whitespace()
+            .map(str::to_ascii_lowercase)
+            .collect()
     }
 
     /// Both patterns have to parse, and neither may start with a wildcard --
@@ -280,7 +290,11 @@ mod tests {
         for pattern in [REMOVE_LOOP, DECAL_INIT] {
             let tokens = tokens(pattern);
             assert!(tokens.len() > 16, "too short to be unique");
-            assert_ne!(tokens[0].as_str(), "??", "a leading wildcard is rejected by the scanner");
+            assert_ne!(
+                tokens[0].as_str(),
+                "??",
+                "a leading wildcard is rejected by the scanner"
+            );
             for token in &tokens {
                 assert!(
                     token == "??" || u8::from_str_radix(token, 16).is_ok(),
@@ -306,7 +320,12 @@ mod tests {
         assert_eq!(tokens(REMOVE_LOOP)[UNLINK_CALL_AT].as_str(), "e8");
         wildcards(REMOVE_LOOP, UNLINK_CALL_AT + 1, 4, "the unlink call");
         wildcards(DECAL_INIT, INIT_POOL_BASE_AT, 4, "R_DecalInit (pool base)");
-        wildcards(DECAL_INIT, INIT_DECAL_COUNT_AT, 4, "R_DecalInit (gDecalCount)");
+        wildcards(
+            DECAL_INIT,
+            INIT_DECAL_COUNT_AT,
+            4,
+            "R_DecalInit (gDecalCount)",
+        );
     }
 
     /// `R_DecalInit`'s `memset` length is a fixed immediate in the pattern, and
@@ -334,18 +353,29 @@ mod tests {
         let remove = tokens(REMOVE_LOOP);
         // `6A 1C` -- push sizeof(decal_t) to memset.
         let push = remove.iter().position(|t| t == "6a").expect("a push imm8");
-        assert_eq!(u8::from_str_radix(&remove[push + 1], 16).unwrap() as usize, DECAL_SIZE);
+        assert_eq!(
+            u8::from_str_radix(&remove[push + 1], 16).unwrap() as usize,
+            DECAL_SIZE
+        );
         // `83 C6 1C` -- add esi, sizeof(decal_t).
         let add = remove
             .windows(2)
             .position(|w| w[0] == "83" && w[1] == "c6")
             .expect("the stride");
-        assert_eq!(u8::from_str_radix(&remove[add + 2], 16).unwrap() as usize, DECAL_SIZE);
+        assert_eq!(
+            u8::from_str_radix(&remove[add + 2], 16).unwrap() as usize,
+            DECAL_SIZE
+        );
     }
 
     #[test]
     fn slots_are_counted_from_the_span() {
-        let pool = Pool { base: 0x1000, end: 0x1000 + 0x1c000, decal_count: 0, unlink: 0 };
+        let pool = Pool {
+            base: 0x1000,
+            end: 0x1000 + 0x1c000,
+            decal_count: 0,
+            unlink: 0,
+        };
         assert_eq!(pool.slots(), 4096);
     }
 

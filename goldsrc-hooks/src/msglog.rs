@@ -144,7 +144,10 @@ static MESSAGES: &[(&str, usize)] = &[
 ];
 
 fn find_thunk(name: &str) -> Option<usize> {
-    MESSAGES.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|&(_, rva)| rva)
+    MESSAGES
+        .iter()
+        .find(|(n, _)| n.eq_ignore_ascii_case(name))
+        .map(|&(_, rva)| rva)
 }
 
 /// What `dodstudio_msglog` is currently set to watch.
@@ -178,7 +181,11 @@ fn is_wanted(name: &str) -> bool {
 
 fn hex_dump(bytes: &[u8]) -> String {
     let shown = &bytes[..bytes.len().min(MAX_DUMP)];
-    let mut out = shown.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ");
+    let mut out = shown
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(" ");
     if bytes.len() > MAX_DUMP {
         out.push_str(&format!(" … ({} more byte(s))", bytes.len() - MAX_DUMP));
     }
@@ -211,14 +218,23 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
                 .map(|log| log.get(name.as_ref()).is_some_and(|last| last == bytes))
                 .unwrap_or(false);
             if !repeat {
-                unsafe { crate::debug::report(&format!("msglog: {name} ({size} byte(s)) {}", hex_dump(bytes))) };
+                unsafe {
+                    crate::debug::report(&format!(
+                        "msglog: {name} ({size} byte(s)) {}",
+                        hex_dump(bytes)
+                    ))
+                };
                 if let Ok(mut log) = LAST_LOGGED.lock() {
                     log.insert(name.into_owned(), bytes.to_vec());
                 }
             }
         }
     }
-    let name_str = if name.is_null() { None } else { Some(unsafe { CStr::from_ptr(name) }.to_string_lossy()) };
+    let name_str = if name.is_null() {
+        None
+    } else {
+        Some(unsafe { CStr::from_ptr(name) }.to_string_lossy())
+    };
     match name_str.as_deref().and_then(original_thunk) {
         Some(original) => unsafe { original(name, size, buf) },
         // No thunk on record for this name (should not happen -- we only
@@ -229,8 +245,12 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
 }
 
 fn install_hook(name: &str) {
-    let Some(engfuncs) = engine::engfuncs() else { return };
-    let Ok(c_name) = CString::new(name) else { return };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let Ok(c_name) = CString::new(name) else {
+        return;
+    };
     unsafe { (engfuncs.pfn_hook_user_msg)(c_name.as_ptr(), hooked_msg) };
 }
 
@@ -293,7 +313,9 @@ fn usage() -> String {
 }
 
 fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else { return Vec::new() };
+    let Some(engfuncs) = engine::engfuncs() else {
+        return Vec::new();
+    };
     let argc = unsafe { (engfuncs.cmd_argc)() };
     (0..argc)
         .filter_map(|i| {
@@ -301,7 +323,11 @@ fn args() -> Vec<String> {
             if ptr.is_null() {
                 return None;
             }
-            Some(unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+            Some(
+                unsafe { CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
         })
         .collect()
 }
@@ -319,7 +345,11 @@ fn resolve_names(rest: &[String]) -> Result<Vec<String>, Vec<String>> {
             None => unknown.push(token.clone()),
         }
     }
-    if unknown.is_empty() { Ok(canonical) } else { Err(unknown) }
+    if unknown.is_empty() {
+        Ok(canonical)
+    } else {
+        Err(unknown)
+    }
 }
 
 fn dispatch(argv: &[String]) -> String {
@@ -354,7 +384,11 @@ fn dispatch(argv: &[String]) -> String {
     let canonical = match resolve_names(rest) {
         Ok(names) => names,
         Err(unknown) => {
-            return format!("{COMMAND}: no message(s) called {}\n{}", unknown.join(", "), usage());
+            return format!(
+                "{COMMAND}: no message(s) called {}\n{}",
+                unknown.join(", "),
+                usage()
+            );
         }
     };
     let reply = format!("{COMMAND}: logging {}\n", canonical.join(", "));
@@ -380,11 +414,18 @@ mod tests {
     fn every_message_name_has_a_distinct_lowercase_form() {
         // is_wanted/find_thunk match case-insensitively, so two entries that
         // only differ by case would make one permanently unreachable.
-        let mut lower: Vec<String> = MESSAGES.iter().map(|(n, _)| n.to_ascii_lowercase()).collect();
+        let mut lower: Vec<String> = MESSAGES
+            .iter()
+            .map(|(n, _)| n.to_ascii_lowercase())
+            .collect();
         let before = lower.len();
         lower.sort();
         lower.dedup();
-        assert_eq!(lower.len(), before, "two MESSAGES entries collide case-insensitively");
+        assert_eq!(
+            lower.len(),
+            before,
+            "two MESSAGES entries collide case-insensitively"
+        );
     }
 
     #[test]

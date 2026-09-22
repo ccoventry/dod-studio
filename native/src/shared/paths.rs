@@ -89,7 +89,10 @@ impl AppDataMigration {
 /// call repeatedly and never overwrites newer state with older.
 pub fn migrate_legacy_appdata_dir() -> AppDataMigration {
     let base = appdata_base();
-    migrate_appdata_dir_between(&base.join(LEGACY_APPDATA_DIR_NAME), &base.join(APPDATA_DIR_NAME))
+    migrate_appdata_dir_between(
+        &base.join(LEGACY_APPDATA_DIR_NAME),
+        &base.join(APPDATA_DIR_NAME),
+    )
 }
 
 fn migrate_appdata_dir_between(legacy: &Path, current: &Path) -> AppDataMigration {
@@ -122,14 +125,23 @@ fn migrate_appdata_dir_between(legacy: &Path, current: &Path) -> AppDataMigratio
 /// colliding with a file is still a plain skip; nothing here overwrites
 /// existing content, only merges past a directory that happens to already
 /// exist.
-fn merge_dir_entries(source: &Path, destination: &Path, prefix: &str, report: &mut AppDataMigration) {
+fn merge_dir_entries(
+    source: &Path,
+    destination: &Path,
+    prefix: &str,
+    report: &mut AppDataMigration,
+) {
     let Ok(entries) = std::fs::read_dir(source) else {
         return;
     };
 
     for entry in entries.flatten() {
         let entry_name = entry.file_name().to_string_lossy().into_owned();
-        let name = if prefix.is_empty() { entry_name.clone() } else { format!("{prefix}/{entry_name}") };
+        let name = if prefix.is_empty() {
+            entry_name.clone()
+        } else {
+            format!("{prefix}/{entry_name}")
+        };
         let source_path = entry.path();
         let destination_path = destination.join(&entry_name);
 
@@ -241,7 +253,11 @@ pub fn take_key(take_folder: &Path) -> Option<String> {
         take_folder
     };
     let take_name = block_folder.file_name()?.to_string_lossy().to_lowercase();
-    let session = block_folder.parent()?.file_name()?.to_string_lossy().to_lowercase();
+    let session = block_folder
+        .parent()?
+        .file_name()?
+        .to_string_lossy()
+        .to_lowercase();
     Some(format!("{}/{}", session, take_name))
 }
 
@@ -304,7 +320,10 @@ pub fn clear_capture_scratch(
     if auto_clear_logs {
         remove_scratch_file(&console_log_path(game_root), "Auto-clear Logs");
         remove_scratch_file(&dod_dir.join("dodstudio_helper.cfg"), "Auto-clear Logs");
-        remove_scratch_file(&dod_dir.join("dodstudio_capture_done.cfg"), "Auto-clear Logs");
+        remove_scratch_file(
+            &dod_dir.join("dodstudio_capture_done.cfg"),
+            "Auto-clear Logs",
+        );
         remove_scratch_file(&dod_dir.join("dod_quit.cfg"), "Auto-clear Logs");
         // Legacy only: nothing has written a per-chain cfg since the helper cfg
         // absorbed those aliases. Kept so a user upgrading from a build that
@@ -417,8 +436,13 @@ mod tests {
 
     #[test]
     fn test_take_key_uses_last_two_components_lowercased() {
-        let key = take_key(Path::new(r"D:\Captures\Session_20260818_142233\Dodstudio_Chain_01_b0"));
-        assert_eq!(key, Some("session_20260818_142233/dodstudio_chain_01_b0".to_string()));
+        let key = take_key(Path::new(
+            r"D:\Captures\Session_20260818_142233\Dodstudio_Chain_01_b0",
+        ));
+        assert_eq!(
+            key,
+            Some("session_20260818_142233/dodstudio_chain_01_b0".to_string())
+        );
     }
 
     #[test]
@@ -426,7 +450,9 @@ mod tests {
         // The same take copied to a different drive must produce the same key —
         // this is the whole reason the absolute path isn't used.
         let a = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0"));
-        let b = take_key(Path::new(r"X:\somewhere\else\session_1\dodstudio_chain_01_b0"));
+        let b = take_key(Path::new(
+            r"X:\somewhere\else\session_1\dodstudio_chain_01_b0",
+        ));
         assert_eq!(a, b);
         assert!(a.is_some());
     }
@@ -453,14 +479,21 @@ mod tests {
         // subfolder. Both must resolve to the same key or auto-Rendered can
         // never correlate a finished render back to its highlights.
         let capture_side = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0"));
-        let render_side = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0\take0000"));
+        let render_side = take_key(Path::new(
+            r"D:\Captures\session_1\dodstudio_chain_01_b0\take0000",
+        ));
         assert_eq!(capture_side, render_side);
-        assert_eq!(capture_side, Some("session_1/dodstudio_chain_01_b0".to_string()));
+        assert_eq!(
+            capture_side,
+            Some("session_1/dodstudio_chain_01_b0".to_string())
+        );
     }
 
     #[test]
     fn test_take_key_handles_higher_numbered_takes() {
-        let key = take_key(Path::new(r"D:\Captures\session_1\dodstudio_chain_01_b0\take0003"));
+        let key = take_key(Path::new(
+            r"D:\Captures\session_1\dodstudio_chain_01_b0\take0003",
+        ));
         assert_eq!(key, Some("session_1/dodstudio_chain_01_b0".to_string()));
     }
 
@@ -472,7 +505,10 @@ mod tests {
 
         remove_console_log(&root);
 
-        assert!(!log.exists(), "qconsole.log beside hl.exe should be removed");
+        assert!(
+            !log.exists(),
+            "qconsole.log beside hl.exe should be removed"
+        );
     }
 
     /// Cleanup runs whether or not the engine was launched with `-condebug`,
@@ -621,7 +657,10 @@ mod auto_clear_previews_tests {
 
         clear_capture_scratch(&root, false, false, true, false);
 
-        assert!(demo.exists(), "a demo the user named this way is not ours to delete");
+        assert!(
+            demo.exists(),
+            "a demo the user named this way is not ours to delete"
+        );
     }
 
     /// The sidecar is the only thing marking a `_preview.dem` as ours. If it is
@@ -642,7 +681,11 @@ mod auto_clear_previews_tests {
         let root = scratch("orphan");
         let (demo, sidecar) = make_preview(&root.join("dod"), "locked");
 
-        let handle = std::fs::OpenOptions::new().read(true).share_mode(1).open(&demo).unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&demo)
+            .unwrap();
         assert!(
             std::fs::remove_file(&demo).is_err(),
             "the fixture itself is wrong if a plain remove_file succeeds here"
@@ -697,7 +740,11 @@ mod remove_file_retrying_tests {
         let file = dir.join("dodstudio_chain_02.dem");
         std::fs::write(&file, b"demo").unwrap();
 
-        let handle = std::fs::OpenOptions::new().read(true).share_mode(1).open(&file).unwrap();
+        let handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1)
+            .open(&file)
+            .unwrap();
         assert!(
             std::fs::remove_file(&file).is_err(),
             "the fixture itself is wrong if a plain remove_file succeeds while this handle is open"
@@ -742,10 +789,16 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), r#"{"hlae_path":"x"}"#);
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            r#"{"hlae_path":"x"}"#
+        );
         assert!(current.join("logs").join("activity_20260917.md").is_file());
         assert!(report.moved.contains(&"settings.json".to_string()));
-        assert!(report.legacy_removed, "an emptied legacy dir should be removed");
+        assert!(
+            report.legacy_removed,
+            "an emptied legacy dir should be removed"
+        );
         assert!(!legacy.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -759,11 +812,17 @@ mod appdata_migration_tests {
         let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
         let current = root.join(APPDATA_DIR_NAME);
         write(&legacy.join("settings.json"), "old-settings");
-        write(&current.join("logs").join("activity_20260917.md"), "# new log");
+        write(
+            &current.join("logs").join("activity_20260917.md"),
+            "# new log",
+        );
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "old-settings");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "old-settings"
+        );
         assert!(report.moved.contains(&"settings.json".to_string()));
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -777,9 +836,15 @@ mod appdata_migration_tests {
         let root = scratch("logs_merge");
         let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
         let current = root.join(APPDATA_DIR_NAME);
-        write(&legacy.join("logs").join("activity_20260822.md"), "# a month of history");
+        write(
+            &legacy.join("logs").join("activity_20260822.md"),
+            "# a month of history",
+        );
         write(&legacy.join("logs").join("crash_log.md"), "# crash");
-        write(&current.join("logs").join("dodstudio_goldsrc_hooks.log"), "the DLL's own log, written first");
+        write(
+            &current.join("logs").join("dodstudio_goldsrc_hooks.log"),
+            "the DLL's own log, written first",
+        );
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
@@ -788,15 +853,26 @@ mod appdata_migration_tests {
             "# a month of history",
             "legacy history must not be stranded just because the new logs folder already existed"
         );
-        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "# crash");
         assert_eq!(
-            std::fs::read_to_string(current.join("logs").join("dodstudio_goldsrc_hooks.log")).unwrap(),
+            std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(),
+            "# crash"
+        );
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("dodstudio_goldsrc_hooks.log"))
+                .unwrap(),
             "the DLL's own log, written first",
             "the file already at the destination must not be overwritten"
         );
-        assert!(report.moved.contains(&"logs/activity_20260822.md".to_string()));
+        assert!(
+            report
+                .moved
+                .contains(&"logs/activity_20260822.md".to_string())
+        );
         assert!(report.moved.contains(&"logs/crash_log.md".to_string()));
-        assert!(report.legacy_removed, "the legacy dir should be fully drained and removed");
+        assert!(
+            report.legacy_removed,
+            "the legacy dir should be fully drained and removed"
+        );
         assert!(!legacy.exists());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -814,9 +890,15 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "live");
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(),
+            "live"
+        );
         assert_eq!(report.skipped, vec!["logs/crash_log.md".to_string()]);
-        assert!(!report.legacy_removed, "the legacy dir still holds the skipped file");
+        assert!(
+            !report.legacy_removed,
+            "the legacy dir still holds the skipped file"
+        );
         assert!(legacy.join("logs").join("crash_log.md").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -831,9 +913,15 @@ mod appdata_migration_tests {
 
         let report = migrate_appdata_dir_between(&legacy, &current);
 
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "live");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "live"
+        );
         assert_eq!(report.skipped, vec!["settings.json".to_string()]);
-        assert!(!report.legacy_removed, "the legacy dir still holds the skipped file");
+        assert!(
+            !report.legacy_removed,
+            "the legacy dir still holds the skipped file"
+        );
         assert!(legacy.join("settings.json").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -846,7 +934,10 @@ mod appdata_migration_tests {
             &root.join(APPDATA_DIR_NAME),
         );
         assert!(!report.did_something());
-        assert!(!root.join(APPDATA_DIR_NAME).exists(), "must not create the new dir for nothing");
+        assert!(
+            !root.join(APPDATA_DIR_NAME).exists(),
+            "must not create the new dir for nothing"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -863,7 +954,10 @@ mod appdata_migration_tests {
 
         assert!(first.did_something());
         assert!(!second.did_something());
-        assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "s");
+        assert_eq!(
+            std::fs::read_to_string(current.join("settings.json")).unwrap(),
+            "s"
+        );
         let _ = std::fs::remove_dir_all(&root);
     }
 }

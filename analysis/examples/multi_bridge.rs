@@ -47,7 +47,9 @@ struct Run {
 
 impl Run {
     fn plausible(&self) -> bool {
-        if self.frames < MIN_RUN { return false }
+        if self.frames < MIN_RUN {
+            return false;
+        }
         let per = self.bytes as f64 / self.frames as f64;
         self.swallows == 0
             && self.backwards <= 2
@@ -61,7 +63,11 @@ impl Run {
 /// happened to give up at -- splicing at the latter leaves an orphan header
 /// whose length field is then read out of whatever follows.
 fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Run {
-    let mut r = Run { cut: start, first_time: f32::NAN, ..Default::default() };
+    let mut r = Run {
+        cut: start,
+        first_time: f32::NAN,
+        ..Default::default()
+    };
     let mut pos = start;
     let mut prev_time = -1.0f32;
     while r.frames < cap && pos + FRAME_HEADER_SIZE <= end {
@@ -69,34 +75,68 @@ fn walk(bytes: &[u8], start: usize, end: usize, cap: usize) -> Run {
         r.cut = frame_start;
         let t = bytes[pos];
         let time = f32::from_le_bytes(bytes[pos + 1..pos + 5].try_into().unwrap());
-        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) { break }
+        if (t > 9 && t != 255) || !time.is_finite() || !(0.0..=100_000.0).contains(&time) {
+            break;
+        }
         pos += FRAME_HEADER_SIZE;
         match t {
             5 | 2 | 255 => {}
             0 | 1 => {
-                if pos + NETWORK_HEADER_ALIGNMENT > end { break }
-                let l = i32::from_le_bytes(bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT].try_into().unwrap());
-                if l < 0 || l as usize > MAX_PAYLOAD { break }
+                if pos + NETWORK_HEADER_ALIGNMENT > end {
+                    break;
+                }
+                let l = i32::from_le_bytes(
+                    bytes[pos + NETMSG_INFO_SIZE..pos + NETWORK_HEADER_ALIGNMENT]
+                        .try_into()
+                        .unwrap(),
+                );
+                if l < 0 || l as usize > MAX_PAYLOAD {
+                    break;
+                }
                 pos += NETWORK_HEADER_ALIGNMENT + l as usize;
             }
             3 => pos += 64,
             4 => pos += 32,
             6 => pos += 84,
             7 => pos += 8,
-            8 => { if pos + 8 > end { break } let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize; pos += 24 + l; }
-            9 => { if pos + 4 > end { break } let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize; pos += 4 + l; }
+            8 => {
+                if pos + 8 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos + 4..pos + 8].try_into().unwrap()) as usize;
+                pos += 24 + l;
+            }
+            9 => {
+                if pos + 4 > end {
+                    break;
+                }
+                let l = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
+                pos += 4 + l;
+            }
             _ => break,
         }
-        if pos > end { break }
+        if pos > end {
+            break;
+        }
         if t != 255 && t != 5 {
-            if r.first_time.is_nan() { r.first_time = time }
-            if time + 0.001 < prev_time { r.backwards += 1 }
+            if r.first_time.is_nan() {
+                r.first_time = time
+            }
+            if time + 0.001 < prev_time {
+                r.backwards += 1
+            }
             prev_time = time;
             r.last_time = time;
         }
-        if t == 4 { r.t4 += 1 }
-        if t == 9 { r.t9 += 1 }
-        if pos - frame_start > SWALLOW && t != 0 && t != 1 { r.swallows += 1 }
+        if t == 4 {
+            r.t4 += 1
+        }
+        if t == 9 {
+            r.t9 += 1
+        }
+        if pos - frame_start > SWALLOW && t != 0 && t != 1 {
+            r.swallows += 1
+        }
         r.frames += 1;
         r.cut = pos;
     }
@@ -118,17 +158,31 @@ fn next_resume(bytes: &[u8], e0: usize, from: usize, end: usize, after_time: f32
     let mut tried = 0usize;
     while scan + FRAME_HEADER_SIZE < end {
         let t = bytes[scan];
-        if t > 9 && t != 255 { scan += 1; continue }
+        if t > 9 && t != 255 {
+            scan += 1;
+            continue;
+        }
         let time = f32::from_le_bytes(bytes[scan + 1..scan + 5].try_into().unwrap());
-        if !time.is_finite() || time < after_time || time > 100_000.0 { scan += 1; continue }
+        if !time.is_finite() || time < after_time || time > 100_000.0 {
+            scan += 1;
+            continue;
+        }
         let quick = walk(bytes, scan, end, 400);
-        if quick.frames < 400 || quick.swallows > 0 || quick.backwards > 2 { scan += 1; continue }
+        if quick.frames < 400 || quick.swallows > 0 || quick.backwards > 2 {
+            scan += 1;
+            continue;
+        }
         let run = walk(bytes, scan, end, MIN_RUN * 4);
-        if !run.plausible() { scan += 1; continue }
+        if !run.plausible() {
+            scan += 1;
+            continue;
+        }
 
         tried += 1;
         if verify(&exe, &probe_demo(bytes, e0, scan, run.cut)) {
-            if tried > 1 { println!("    ({tried} candidates tried; the earlier ones did not parse)") }
+            if tried > 1 {
+                println!("    ({tried} candidates tried; the earlier ones did not parse)")
+            }
             return Some(scan);
         }
         scan += 1;
@@ -143,7 +197,9 @@ fn next_resume(bytes: &[u8], e0: usize, from: usize, end: usize, after_time: f32
 fn verify_child() -> ! {
     use std::io::Read;
     let mut probe = Vec::new();
-    if std::io::stdin().read_to_end(&mut probe).is_err() { std::process::exit(2) }
+    if std::io::stdin().read_to_end(&mut probe).is_err() {
+        std::process::exit(2)
+    }
     match dem::open_demo_from_bytes(&probe) {
         Ok(_) => std::process::exit(0),
         Err(_) => std::process::exit(1),
@@ -159,9 +215,13 @@ fn verify(exe: &std::path::Path, probe: &[u8]) -> bool {
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn() else { return false };
+        .spawn()
+    else {
+        return false;
+    };
     if let Some(mut si) = child.stdin.take()
-        && si.write_all(probe).is_err() { /* child died early; the wait below reports it */ }
+        && si.write_all(probe).is_err()
+    { /* child died early; the wait below reports it */ }
     child.wait().map(|s| s.success()).unwrap_or(false)
 }
 
@@ -183,7 +243,9 @@ fn walk_collect(bytes: &[u8], start: usize, end: usize) -> (Run, Vec<usize>) {
     let mut pos = start;
     loop {
         let step = walk(bytes, pos, end, 1);
-        if step.frames == 0 { break }
+        if step.frames == 0 {
+            break;
+        }
         starts.push(pos);
         pos = step.cut;
     }
@@ -196,18 +258,33 @@ fn walk_collect(bytes: &[u8], start: usize, end: usize) -> (Run, Vec<usize>) {
 /// before it are intact -- their headers survive while their message payloads do
 /// not, which is why a run of segments can walk perfectly and still fail to
 /// parse. Back off a frame at a time (doubling) until the parser accepts it.
-fn trim_to_parse(bytes: &[u8], e0: usize, seg: (usize, usize), starts: &[usize]) -> Option<(usize, usize)> {
+fn trim_to_parse(
+    bytes: &[u8],
+    e0: usize,
+    seg: (usize, usize),
+    starts: &[usize],
+) -> Option<(usize, usize)> {
     let exe = std::env::current_exe().expect("exe");
     let mut k = 0usize;
     loop {
-        if k >= starts.len() { return None }
-        let stop = if k == 0 { seg.1 } else { starts[starts.len() - k] };
+        if k >= starts.len() {
+            return None;
+        }
+        let stop = if k == 0 {
+            seg.1
+        } else {
+            starts[starts.len() - k]
+        };
         if verify(&exe, &probe_demo(bytes, e0, seg.0, stop)) {
-            if k > 0 { println!("    trimmed {k} damaged frames off the end of this segment") }
+            if k > 0 {
+                println!("    trimmed {k} damaged frames off the end of this segment")
+            }
             return Some((seg.0, stop));
         }
         k = if k == 0 { 1 } else { k * 2 };
-        if k > 4096 { return None }
+        if k > 4096 {
+            return None;
+        }
     }
 }
 
@@ -219,15 +296,21 @@ fn trim_to_parse(bytes: &[u8], e0: usize, seg: (usize, usize), starts: &[usize])
 fn entry0_end(bytes: &[u8], end: usize) -> Option<usize> {
     let mut pos = DEMO_HEADER_SIZE;
     loop {
-        if pos + FRAME_HEADER_SIZE > end { return None }
+        if pos + FRAME_HEADER_SIZE > end {
+            return None;
+        }
         let t = bytes[pos];
         let step = walk(bytes, pos, end, 1);
-        if step.frames == 0 { return None }
+        if step.frames == 0 {
+            return None;
+        }
         pos = step.cut;
         if t == 5 {
             while pos + FRAME_HEADER_SIZE <= end && bytes[pos] == 5 {
                 let s = walk(bytes, pos, end, 1);
-                if s.frames == 0 { break }
+                if s.frames == 0 {
+                    break;
+                }
                 pos = s.cut;
             }
             return Some(pos);
@@ -235,13 +318,19 @@ fn entry0_end(bytes: &[u8], end: usize) -> Option<usize> {
     }
 }
 
-fn put_i32(v: &mut Vec<u8>, x: i32) { v.extend_from_slice(&x.to_le_bytes()) }
-fn put_f32(v: &mut Vec<u8>, x: f32) { v.extend_from_slice(&x.to_le_bytes()) }
+fn put_i32(v: &mut Vec<u8>, x: i32) {
+    v.extend_from_slice(&x.to_le_bytes())
+}
+fn put_f32(v: &mut Vec<u8>, x: f32) {
+    v.extend_from_slice(&x.to_le_bytes())
+}
 
 fn dir_entry(o: &mut Vec<u8>, t: i32, d: &str, tt: f32, fc: i32, fo: i32, fl: i32) {
     put_i32(o, t);
     let mut b = [0u8; 64];
-    for (i, c) in d.bytes().take(63).enumerate() { b[i] = c }
+    for (i, c) in d.bytes().take(63).enumerate() {
+        b[i] = c
+    }
     o.extend_from_slice(&b);
     put_i32(o, 0);
     put_i32(o, -1);
@@ -256,31 +345,63 @@ fn dir_entry(o: &mut Vec<u8>, t: i32, d: &str, tt: f32, fc: i32, fo: i32, fl: i3
 fn assemble(bytes: &[u8], e0: usize, segments: &[(usize, usize)]) -> Vec<u8> {
     let mut out = Vec::new();
     out.extend_from_slice(&bytes[..DEMO_HEADER_SIZE]);
-    for (s, e) in segments { out.extend_from_slice(&bytes[*s..*e]) }
+    for (s, e) in segments {
+        out.extend_from_slice(&bytes[*s..*e])
+    }
     out.push(5);
     put_f32(&mut out, 0.0);
     put_i32(&mut out, 0);
     let dir = out.len();
     put_i32(&mut out, 2);
-    dir_entry(&mut out, 0, "LOADING", 0.0, 0, DEMO_HEADER_SIZE as i32, (e0 - DEMO_HEADER_SIZE) as i32);
-    dir_entry(&mut out, 1, "Playback", 0.0, 0, e0 as i32, (dir - e0) as i32);
+    dir_entry(
+        &mut out,
+        0,
+        "LOADING",
+        0.0,
+        0,
+        DEMO_HEADER_SIZE as i32,
+        (e0 - DEMO_HEADER_SIZE) as i32,
+    );
+    dir_entry(
+        &mut out,
+        1,
+        "Playback",
+        0.0,
+        0,
+        e0 as i32,
+        (dir - e0) as i32,
+    );
     out[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].copy_from_slice(&(dir as i32).to_le_bytes());
     out
 }
 
 fn main() {
     let argv: Vec<String> = std::env::args().collect();
-    if argv.len() > 1 && argv[1] == "--verify" { verify_child() }
+    if argv.len() > 1 && argv[1] == "--verify" {
+        verify_child()
+    }
 
-    let path = std::env::args().nth(1).expect("usage: multi_bridge <demo> <out.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: multi_bridge <demo> <out.dem>");
     let out_path = std::env::args().nth(2).expect("out.dem");
     let bytes = std::fs::read(&path).expect("read");
-    let dir_off = i32::from_le_bytes(bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE].try_into().unwrap()) as usize;
-    let end = if dir_off > 0 && dir_off <= bytes.len() { dir_off } else { bytes.len() };
+    let dir_off = i32::from_le_bytes(
+        bytes[DIRECTORY_OFFSET_POS..DEMO_HEADER_SIZE]
+            .try_into()
+            .unwrap(),
+    ) as usize;
+    let end = if dir_off > 0 && dir_off <= bytes.len() {
+        dir_off
+    } else {
+        bytes.len()
+    };
     let e0 = entry0_end(&bytes, end).expect("entry0");
     println!("{path}");
-    println!("  frame area {DEMO_HEADER_SIZE}..{end} ({:.1} MB), entry 0 ends at {e0}",
-        (end - DEMO_HEADER_SIZE) as f64 / 1e6);
+    println!(
+        "  frame area {DEMO_HEADER_SIZE}..{end} ({:.1} MB), entry 0 ends at {e0}",
+        (end - DEMO_HEADER_SIZE) as f64 / 1e6
+    );
 
     // Walk, cut, resume, repeat.
     let mut segments: Vec<(usize, usize)> = Vec::new();
@@ -297,18 +418,30 @@ fn main() {
                     let kept = starts.iter().filter(|s| **s < seg.1).count();
                     segments.push(seg);
                     frames_kept += kept;
-                    if run.last_time > 0.0 { last_time = run.last_time }
+                    if run.last_time > 0.0 {
+                        last_time = run.last_time
+                    }
                 }
                 None => println!("    this segment never parses; dropping it"),
             }
         }
         if run.cut >= end.saturating_sub(64) {
-            println!("  segment {}: {} frames to t={:.2}s -- reached the end",
-                segments.len(), run.frames, run.last_time);
+            println!(
+                "  segment {}: {} frames to t={:.2}s -- reached the end",
+                segments.len(),
+                run.frames,
+                run.last_time
+            );
             break;
         }
-        println!("  segment {}: {} frames, t={:.2}s -> {:.2}s, breaks at byte {}",
-            segments.len(), run.frames, run.first_time, run.last_time, run.cut);
+        println!(
+            "  segment {}: {} frames, t={:.2}s -> {:.2}s, breaks at byte {}",
+            segments.len(),
+            run.frames,
+            run.first_time,
+            run.last_time,
+            run.cut
+        );
         if hole == MAX_HOLES {
             println!("  giving up after {MAX_HOLES} holes");
             break;
@@ -316,7 +449,10 @@ fn main() {
         match next_resume(&bytes, e0, run.cut + 1, end, last_time) {
             Some(next) => {
                 dropped_bytes += next - run.cut;
-                println!("    resumes at byte {next} ({} bytes of rubble skipped)", next - run.cut);
+                println!(
+                    "    resumes at byte {next} ({} bytes of rubble skipped)",
+                    next - run.cut
+                );
                 pos = next;
             }
             None => {
@@ -329,21 +465,30 @@ fn main() {
     let out = assemble(&bytes, e0, &segments);
     std::fs::write(&out_path, &out).expect("write");
 
-    println!("\n  {} segments, {frames_kept} frames walked, {dropped_bytes} bytes of rubble dropped",
-        segments.len());
+    println!(
+        "\n  {} segments, {frames_kept} frames walked, {dropped_bytes} bytes of rubble dropped",
+        segments.len()
+    );
     println!("  wrote {out_path} ({:.1} MB)", out.len() as f64 / 1e6);
     match dem::open_demo_from_bytes(&out) {
         Ok(d) => {
             let total: usize = d.directory.entries.iter().map(|e| e.frames.len()).sum();
-            println!("  parse OK: {total} frames across {} entries", d.directory.entries.len());
+            println!(
+                "  parse OK: {total} frames across {} entries",
+                d.directory.entries.len()
+            );
             // Parsing is not the same as carrying the recording. A directory
             // entry ends at the first section-end frame inside it, so a wrong
             // entry 0 boundary yields a demo that parses perfectly and holds 32
             // frames out of half a million. Say so rather than leave it to be
             // noticed.
             if total * 10 < frames_kept * 9 {
-                println!("  WRONG: the walk kept {frames_kept} frames but only {total} survive the directory");
-                println!("         -- an entry is ending early, most likely at a section-end frame");
+                println!(
+                    "  WRONG: the walk kept {frames_kept} frames but only {total} survive the directory"
+                );
+                println!(
+                    "         -- an entry is ending early, most likely at a section-end frame"
+                );
             }
         }
         Err(e) => println!("  parse FAILS: {e}"),

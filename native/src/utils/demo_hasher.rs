@@ -1,6 +1,6 @@
-use std::path::Path;
 use std::fs;
 use std::io::Read;
+use std::path::Path;
 
 pub fn fnv1a_hash(data: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325;

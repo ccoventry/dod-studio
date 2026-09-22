@@ -168,7 +168,8 @@ mod tests {
 
     #[test]
     fn a_take_is_found_from_either_folder_render_studio_hands_out() {
-        let (_root, block, take) = block_with_take("finds", "session_20260827_120000", "dodstudio_chain_01_b0");
+        let (_root, block, take) =
+            block_with_take("finds", "session_20260827_120000", "dodstudio_chain_01_b0");
         write(&block, &SessionMeta::new("session_20260827_120000", 120)).expect("write");
 
         // The scanner admits a take at the block folder or at the nested
@@ -183,8 +184,12 @@ mod tests {
         // 120, then more at 300. Each batch gets its own session folder and each
         // take carries its own file, so neither can speak for the other.
         let root = Scratch::new("take_meta_two_batches");
-        let slow = root.join("session_20260827_120000").join("dodstudio_chain_01_b0");
-        let fast = root.join("session_20260827_130000").join("dodstudio_chain_01_b0");
+        let slow = root
+            .join("session_20260827_120000")
+            .join("dodstudio_chain_01_b0");
+        let fast = root
+            .join("session_20260827_130000")
+            .join("dodstudio_chain_01_b0");
         std::fs::create_dir_all(&slow).expect("dirs");
         std::fs::create_dir_all(&fast).expect("dirs");
         write(&slow, &SessionMeta::new("session_20260827_120000", 120)).expect("write");
@@ -255,7 +260,8 @@ mod tests {
 
     #[test]
     fn the_warning_states_the_direction_and_the_factor() {
-        let (_root, block, take) = block_with_take("mismatch", "session_x", "dodstudio_chain_01_b0");
+        let (_root, block, take) =
+            block_with_take("mismatch", "session_x", "dodstudio_chain_01_b0");
         write(&block, &SessionMeta::new("s", 120)).expect("write");
 
         // The bug as it actually happened: captured at 120, rendered at 300.

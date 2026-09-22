@@ -69,15 +69,9 @@ impl Doer for SvcPacketEntities {
             let between = entity_index > 0 && entity_index <= aux.max_client as u16;
 
             let delta = if between {
-                parse_delta(
-                    entity_state_player_decoder,
-                    &mut br,
-                )
+                parse_delta(entity_state_player_decoder, &mut br)
             } else if has_custom_delta {
-                parse_delta(
-                    custom_entity_state_decoder,
-                    &mut br,
-                )
+                parse_delta(custom_entity_state_decoder, &mut br)
             } else {
                 parse_delta(entity_state_decoder, &mut br)
             };
@@ -93,7 +87,7 @@ impl Doer for SvcPacketEntities {
                 baseline_index,
                 delta,
             });
-        
+
             // Belt and braces: the footer check above already ends the loop on
             // an exhausted reader, but nothing should be able to keep pushing
             // entities after a read has gone bad. #225.

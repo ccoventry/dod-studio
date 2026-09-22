@@ -39,7 +39,9 @@ struct Played {
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: svc_sound_probe <demo> [substring]");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: svc_sound_probe <demo> [substring]");
     let filter = std::env::args().nth(2).unwrap_or_default().to_lowercase();
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
@@ -56,10 +58,16 @@ fn main() {
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
             frame_no += 1;
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 match &**em {
                     EngineMessage::SvcResourceList(rl) => {
                         for r in &rl.resources {
@@ -101,7 +109,9 @@ fn main() {
                     EngineMessage::SvcSpawnStaticSound(s) => {
                         match sound_names.get(&(s.sound_index as u32)) {
                             Some(name) => {
-                                let e = statics.entry(name.clone()).or_insert((0, frame_no, frame_no));
+                                let e = statics
+                                    .entry(name.clone())
+                                    .or_insert((0, frame_no, frame_no));
                                 e.0 += 1;
                                 e.2 = frame_no;
                             }
@@ -121,14 +131,19 @@ fn main() {
         sound_names.len()
     );
 
-    let mut rows: Vec<(String, Played)> =
-        played.into_iter().filter(|(n, _)| filter.is_empty() || n.to_lowercase().contains(&filter)).collect();
+    let mut rows: Vec<(String, Played)> = played
+        .into_iter()
+        .filter(|(n, _)| filter.is_empty() || n.to_lowercase().contains(&filter))
+        .collect();
     rows.sort_by_key(|(_, p)| std::cmp::Reverse(p.total));
 
     if rows.is_empty() {
         println!("no svc_sound matching {filter:?} -- it is not carried on this path at all");
     } else {
-        println!("{:<44} {:>7} {:>12}  entities", "svc_sound", "played", "with entity");
+        println!(
+            "{:<44} {:>7} {:>12}  entities",
+            "svc_sound", "played", "with entity"
+        );
         for (name, p) in rows.iter().take(30) {
             let mut ents: Vec<u32> = p.entities.clone();
             ents.sort_unstable();
@@ -142,15 +157,20 @@ fn main() {
         .collect();
     static_rows.sort_by_key(|(_, c)| std::cmp::Reverse(c.0));
     if static_rows.is_empty() {
-        println!("
-no svc_spawnstaticsound matching {filter:?}");
+        println!(
+            "
+no svc_spawnstaticsound matching {filter:?}"
+        );
     } else {
         // A map's placed ambience is registered once, in the signon block, so it
         // sits at the very first frames. A sound the map *triggers* -- the
         // round-win music -- arrives on the same message but spread through the
         // demo, so the frame range is what tells the two apart.
-        println!("
-{:<44} {:>7} {:>9} {:>9}", "svc_spawnstaticsound", "spawned", "first", "last");
+        println!(
+            "
+{:<44} {:>7} {:>9} {:>9}",
+            "svc_spawnstaticsound", "spawned", "first", "last"
+        );
         for (name, (count, first, last)) in static_rows.iter().take(30) {
             println!("{name:<44} {count:>7} {first:>9} {last:>9}");
         }

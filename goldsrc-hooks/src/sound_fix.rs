@@ -36,7 +36,7 @@
 //! a gunshot from reloads, footsteps, voice lines, etc. -- no need to also
 //! track weapon-fire *events* the way the animation fix does.
 
-use std::ffi::{c_char, c_void, CStr};
+use std::ffi::{CStr, c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
 use crate::engine::{self, EventApiPartial};
@@ -100,7 +100,10 @@ fn is_weapon_fire(sample: *const c_char) -> bool {
     if sample.is_null() {
         return false;
     }
-    unsafe { CStr::from_ptr(sample) }.to_bytes().windows(6).any(|w| w == b"_shoot")
+    unsafe { CStr::from_ptr(sample) }
+        .to_bytes()
+        .windows(6)
+        .any(|w| w == b"_shoot")
 }
 
 type EvPlaySoundFn = unsafe extern "C" fn(i32, *mut f32, i32, *const c_char, f32, f32, i32, i32);
@@ -120,7 +123,11 @@ unsafe extern "C" fn hook_ev_play_sound(
     let real: EvPlaySoundFn = unsafe { std::mem::transmute(real) };
 
     if CALLS.fetch_add(1, Ordering::Relaxed) == 0 {
-        unsafe { crate::debug::report("sound_fix: EV_PlaySound hook is live (first sound played through it)") };
+        unsafe {
+            crate::debug::report(
+                "sound_fix: EV_PlaySound hook is live (first sound played through it)",
+            )
+        };
     }
 
     let is_fire = is_weapon_fire(sample);
@@ -132,7 +139,9 @@ unsafe extern "C" fn hook_ev_play_sound(
         // state; the two are toggled separately.
         crate::anim_fix::on_weapon_fired(ent);
     }
-    let spectating = engine::engfuncs().map(|e| unsafe { (e.is_spectate_only)() } != 0).unwrap_or(false);
+    let spectating = engine::engfuncs()
+        .map(|e| unsafe { (e.is_spectate_only)() } != 0)
+        .unwrap_or(false);
     let should_boost = ENABLED.load(Ordering::Relaxed) && is_fire && spectating;
 
     // Only ever *lower* the attenuation, and leave the volume alone -- the
@@ -141,7 +150,9 @@ unsafe extern "C" fn hook_ev_play_sound(
     let carry = carry_attenuation();
     if should_boost && attenuation > carry {
         if BOOSTED.fetch_add(1, Ordering::Relaxed) == 0 {
-            let name = unsafe { CStr::from_ptr(sample) }.to_string_lossy().into_owned();
+            let name = unsafe { CStr::from_ptr(sample) }
+                .to_string_lossy()
+                .into_owned();
             unsafe {
                 crate::debug::report(&format!(
                     "sound_fix: first extended gunshot -- \"{name}\" (volume {volume} left as-is, attenuation {attenuation} -> {carry})"
@@ -152,10 +163,29 @@ unsafe extern "C" fn hook_ev_play_sound(
     } else {
         // The most likely reason a take sounds unchanged with the fix on: the
         // gunshots are there, but IsSpectateOnly() is false so nothing boosts.
-        if is_fire && ENABLED.load(Ordering::Relaxed) && !spectating && SKIPPED_NOT_SPECTATING.fetch_add(1, Ordering::Relaxed) == 0 {
-            unsafe { crate::debug::report("sound_fix: saw a weapon-fire sample but IsSpectateOnly() is false, so it was left alone -- the fix only acts while spectating") };
+        if is_fire
+            && ENABLED.load(Ordering::Relaxed)
+            && !spectating
+            && SKIPPED_NOT_SPECTATING.fetch_add(1, Ordering::Relaxed) == 0
+        {
+            unsafe {
+                crate::debug::report(
+                    "sound_fix: saw a weapon-fire sample but IsSpectateOnly() is false, so it was left alone -- the fix only acts while spectating",
+                )
+            };
         }
-        unsafe { real(ent, origin, channel, sample, volume, attenuation, f_flags, pitch) };
+        unsafe {
+            real(
+                ent,
+                origin,
+                channel,
+                sample,
+                volume,
+                attenuation,
+                f_flags,
+                pitch,
+            )
+        };
     }
 }
 
@@ -164,7 +194,11 @@ unsafe extern "C" fn hook_ev_play_sound(
 /// needs a valid `p_event_api` pointer to patch.
 pub fn install() {
     let Some(engfuncs) = engine::engfuncs() else {
-        unsafe { crate::debug::report("sound_fix::install called before engfuncs were captured -- this is a bug in install ordering") };
+        unsafe {
+            crate::debug::report(
+                "sound_fix::install called before engfuncs were captured -- this is a bug in install ordering",
+            )
+        };
         return;
     };
 

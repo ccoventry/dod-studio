@@ -16,18 +16,23 @@ fn inspect_demo(path: &str) {
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
             if let FrameData::NetworkMessage(net_msg_box) = &frame.frame_data
-                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages {
-                    for msg in msgs {
-                        if let dem::types::NetMessage::UserMessage(user_msg) = msg {
-                            let name = String::from_utf8_lossy(&user_msg.name)
-                                .trim_end_matches('\0')
-                                .to_string();
-                            if name == "RoundState" || name == "ClanTimer" || name == "TeamScore" || name == "ScoreShort" {
-                                events.push((frame.time, name, format!("{:?}", user_msg.data)));
-                            }
+                && let MessageData::Parsed(msgs) = &net_msg_box.1.messages
+            {
+                for msg in msgs {
+                    if let dem::types::NetMessage::UserMessage(user_msg) = msg {
+                        let name = String::from_utf8_lossy(&user_msg.name)
+                            .trim_end_matches('\0')
+                            .to_string();
+                        if name == "RoundState"
+                            || name == "ClanTimer"
+                            || name == "TeamScore"
+                            || name == "ScoreShort"
+                        {
+                            events.push((frame.time, name, format!("{:?}", user_msg.data)));
                         }
                     }
                 }
+            }
         }
     }
     println!("Early allied demo events (Time <= 45.0):");
@@ -39,14 +44,26 @@ fn inspect_demo(path: &str) {
 
     let analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
     println!("CLAN MATCH: map_name: {}", analysis.demo_info.map_name);
-    println!("CLAN MATCH: clan_match_detected: {}", analysis.state.clan_match_detected);
-    println!("CLAN MATCH: match_start_witnessed: {}", analysis.state.match_start_witnessed);
+    println!(
+        "CLAN MATCH: clan_match_detected: {}",
+        analysis.state.clan_match_detected
+    );
+    println!(
+        "CLAN MATCH: match_start_witnessed: {}",
+        analysis.state.match_start_witnessed
+    );
     println!("CLAN MATCH: started_late: {}", analysis.state.started_late);
     println!("CLAN MATCH: ended_early: {}", analysis.state.ended_early);
-    println!("CLAN MATCH: first_time_left: {:?}", analysis.state.first_time_left);
-    println!("CLAN MATCH: last_time_left: {:?}", analysis.state.last_time_left);
+    println!(
+        "CLAN MATCH: first_time_left: {:?}",
+        analysis.state.first_time_left
+    );
+    println!(
+        "CLAN MATCH: last_time_left: {:?}",
+        analysis.state.last_time_left
+    );
     println!("CLAN MATCH: map_changed: {}", analysis.state.map_changed);
-    
+
     println!("Flagged players (pre-demo or reconnected):");
     let mut flagged_count = 0;
     for p in &analysis.state.players {

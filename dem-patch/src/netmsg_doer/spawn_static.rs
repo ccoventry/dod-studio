@@ -24,7 +24,8 @@ impl Doer for SvcSpawnStatic {
             ),
         ) = (
             le_i16, le_i8, le_i8, le_i16, le_i8, le_i16, le_i8, le_i16, le_i8, le_i16, le_i8, le_i8,
-        ).parse(i)?;
+        )
+            .parse(i)?;
 
         let (i, render_color) = if has_render_mode != 0 {
             map(take(3usize), |what: &[u8]| Some(what.to_vec())).parse(i)?

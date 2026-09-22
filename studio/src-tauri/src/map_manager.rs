@@ -9,8 +9,8 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
-use native::patch::map_check::{self, MapStatus};
 use crate::capture_manager::CustomCommandPayload;
+use native::patch::map_check::{self, MapStatus};
 use native::patch::map_fetch;
 use serde::{Deserialize, Serialize};
 
@@ -34,7 +34,8 @@ pub struct MapCheckRow {
 /// Where maps live for a configured `hl.exe`, or an error a person can act on.
 fn maps_dir(game_path: &str) -> Result<PathBuf, String> {
     let exe = Path::new(game_path);
-    map_check::maps_dir_for_exe(exe).ok_or_else(|| crate::messages::no_map_folder_beside_exe(game_path))
+    map_check::maps_dir_for_exe(exe)
+        .ok_or_else(|| crate::messages::no_map_folder_beside_exe(game_path))
 }
 
 /// Check a list of demos against the map library.
@@ -264,8 +265,7 @@ pub struct CfgReport {
 /// what the configs and init commands left it at. The rest displace each other.
 fn application_order(commands: &[CustomCommandPayload]) -> Vec<&CustomCommandPayload> {
     let is_after = |c: &CustomCommandPayload| c.relation == "After";
-    let mut before: Vec<&CustomCommandPayload> =
-        commands.iter().filter(|c| !is_after(c)).collect();
+    let mut before: Vec<&CustomCommandPayload> = commands.iter().filter(|c| !is_after(c)).collect();
     before.sort_by(|a, b| {
         b.offset_seconds
             .partial_cmp(&a.offset_seconds)
@@ -424,12 +424,14 @@ pub async fn scan_game_configs(
             .into_iter()
             .filter(|s| !named.contains(&s.cvar.to_lowercase()))
             .filter(|s| {
-                let is_fov_cvar =
-                    s.cvar.eq_ignore_ascii_case("mirv_fov") || s.cvar.eq_ignore_ascii_case("default_fov");
+                let is_fov_cvar = s.cvar.eq_ignore_ascii_case("mirv_fov")
+                    || s.cvar.eq_ignore_ascii_case("default_fov");
                 !is_fov_cvar || capture_fov_stated
             })
             .filter(|s| {
-                !s.cvar.eq_ignore_ascii_case("r_decals") || !cfg.decal_flush || r_decals_stated_in_init
+                !s.cvar.eq_ignore_ascii_case("r_decals")
+                    || !cfg.decal_flush
+                    || r_decals_stated_in_init
             })
             .map(|s| CfgWarningRow {
                 cvar: s.cvar.clone(),
@@ -440,10 +442,11 @@ pub async fn scan_game_configs(
             .collect();
 
         // Refused outright, in both lists — see BANNED_COMMANDS' doc comment.
-        let banned_init: Vec<BannedCommandRow> = native::patch::cfg_scan::banned_commands(&init_commands)
-            .into_iter()
-            .map(|(cvar, command)| BannedCommandRow { cvar, command })
-            .collect();
+        let banned_init: Vec<BannedCommandRow> =
+            native::patch::cfg_scan::banned_commands(&init_commands)
+                .into_iter()
+                .map(|(cvar, command)| BannedCommandRow { cvar, command })
+                .collect();
 
         // Does nothing wherever found — see NOOP_IN_INIT_COMMANDS's doc
         // comment for why. Only mirv_movie_filename is checked against the
@@ -451,10 +454,15 @@ pub async fn scan_game_configs(
         // appear there in the first place — the scanner follows a config's
         // own `exec` as the real exec chain it is rather than recording it as
         // a setting, and `quit` takes no argument to record as one either.
-        let mut noop_init: Vec<NoopCommandRow> = native::patch::cfg_scan::noop_commands_in_init(&init_commands)
-            .into_iter()
-            .map(|(cvar, command)| NoopCommandRow { cvar, command, source: "Initial Commands".to_string() })
-            .collect();
+        let mut noop_init: Vec<NoopCommandRow> =
+            native::patch::cfg_scan::noop_commands_in_init(&init_commands)
+                .into_iter()
+                .map(|(cvar, command)| NoopCommandRow {
+                    cvar,
+                    command,
+                    source: "Initial Commands".to_string(),
+                })
+                .collect();
         for &cvar in native::patch::cfg_scan::NOOP_IN_INIT_COMMANDS {
             if let Some(setting) = scan.effective(cvar) {
                 noop_init.push(NoopCommandRow {
@@ -471,10 +479,11 @@ pub async fn scan_game_configs(
         let mut custom = Vec::new();
         let command_texts: Vec<String> =
             custom_commands.iter().map(|c| c.command.clone()).collect();
-        let mut banned_scheduled: Vec<BannedCommandRow> = native::patch::cfg_scan::banned_commands(&command_texts)
-            .into_iter()
-            .map(|(cvar, command)| BannedCommandRow { cvar, command })
-            .collect();
+        let mut banned_scheduled: Vec<BannedCommandRow> =
+            native::patch::cfg_scan::banned_commands(&command_texts)
+                .into_iter()
+                .map(|(cvar, command)| BannedCommandRow { cvar, command })
+                .collect();
         // Fine as Initial Commands — that's how the decal flush is meant to be
         // configured — but refused outright here: see
         // `cfg_scan::SCHEDULED_BANNED_COMMANDS`.
@@ -487,10 +496,15 @@ pub async fn scan_game_configs(
         // they arrive — see NOOP_EVERYWHERE_COMMANDS. mirv_movie_filename is
         // not included here: scheduled, it is dangerous rather than inert
         // (already reported above via banned_scheduled).
-        let noop_scheduled: Vec<NoopCommandRow> = native::patch::cfg_scan::noop_commands_in_scheduled(&command_texts)
-            .into_iter()
-            .map(|(cvar, command)| NoopCommandRow { cvar, command, source: "Scheduled Commands".to_string() })
-            .collect();
+        let noop_scheduled: Vec<NoopCommandRow> =
+            native::patch::cfg_scan::noop_commands_in_scheduled(&command_texts)
+                .into_iter()
+                .map(|(cvar, command)| NoopCommandRow {
+                    cvar,
+                    command,
+                    source: "Scheduled Commands".to_string(),
+                })
+                .collect();
         // Every scheduled `r_decals` breaks the flush, however many there are,
         // so the hazard list is not deduplicated the way the overrides are.
         for (cvar, command) in native::patch::cfg_scan::mid_demo_hazards(&command_texts) {
@@ -719,8 +733,11 @@ mod tests {
         let root = Scratch::new(format_args!("cfgrep_{tag}"));
         let dod = root.join("dod");
         std::fs::create_dir_all(&dod).unwrap();
-        std::fs::write(dod.join("config.cfg"), "bind \"F7\" \"r_decals 4000\"\nexec movie.cfg\n")
-            .unwrap();
+        std::fs::write(
+            dod.join("config.cfg"),
+            "bind \"F7\" \"r_decals 4000\"\nexec movie.cfg\n",
+        )
+        .unwrap();
         std::fs::write(
             dod.join("movie.cfg"),
             // hud_deathnotice_time is here because it is the cvar people
@@ -841,7 +858,10 @@ mod tests {
             .filter(|c| c.cvar.eq_ignore_ascii_case("hud_deathnotice_time"))
             .collect();
         assert_eq!(rows.len(), 1, "{:?}", r.custom);
-        assert_eq!(rows[0].command, "hud_deathnotice_time 555", "the one that displaces");
+        assert_eq!(
+            rows[0].command, "hud_deathnotice_time 555",
+            "the one that displaces"
+        );
     }
 
     #[test]
@@ -861,7 +881,10 @@ mod tests {
             .filter(|c| c.cvar.eq_ignore_ascii_case("hud_deathnotice_time"))
             .collect();
         assert_eq!(rows.len(), 1, "{:?}", r.custom);
-        assert_eq!(rows[0].command, "hud_deathnotice_time 555", "10s back runs before 2s back");
+        assert_eq!(
+            rows[0].command, "hud_deathnotice_time 555",
+            "10s back runs before 2s back"
+        );
     }
 
     #[test]
@@ -876,15 +899,15 @@ mod tests {
             ],
         );
 
-        assert_eq!(r.custom.iter().filter(|c| c.kind == "hazard").count(), 2, "{:?}", r.custom);
+        assert_eq!(
+            r.custom.iter().filter(|c| c.kind == "hazard").count(),
+            2,
+            "{:?}",
+            r.custom
+        );
     }
 
-    fn report(
-        tag: &str,
-        init: &[&str],
-        custom: &[&str],
-        fps: i32,
-    ) -> CfgReport {
+    fn report(tag: &str, init: &[&str], custom: &[&str], fps: i32) -> CfgReport {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()
@@ -906,7 +929,10 @@ mod tests {
         // Decals is on — with it off, nothing pins the cvar at all, so a
         // config setting it really is invisible to the pipeline. That is
         // the genuinely silent case this category exists for.
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game("unseen");
         let r = rt
             .block_on(scan_game_configs(
@@ -919,7 +945,9 @@ mod tests {
             .unwrap();
 
         assert!(
-            r.unseen.iter().any(|u| u.cvar == "r_decals" && u.value == "0"),
+            r.unseen
+                .iter()
+                .any(|u| u.cvar == "r_decals" && u.value == "0"),
             "{:?}",
             r.unseen
         );
@@ -970,23 +998,46 @@ mod tests {
 
     #[test]
     fn r_drawentities_and_cl_lw_in_initial_commands_are_reported_as_banned() {
-        let r = report("banned_fatal_init", &["r_drawentities 0", "cl_lw 0"], &[], 120);
+        let r = report(
+            "banned_fatal_init",
+            &["r_drawentities 0", "cl_lw 0"],
+            &[],
+            120,
+        );
 
         let cvars: Vec<&str> = r.banned_init.iter().map(|b| b.cvar.as_str()).collect();
-        assert_eq!(cvars, vec!["r_drawentities", "cl_lw"], "{:?}", r.banned_init);
+        assert_eq!(
+            cvars,
+            vec!["r_drawentities", "cl_lw"],
+            "{:?}",
+            r.banned_init
+        );
     }
 
     #[test]
     fn r_drawentities_and_cl_lw_in_scheduled_commands_are_reported_as_banned() {
-        let r = report("banned_fatal_scheduled", &[], &["r_drawentities 0", "cl_lw 0"], 120);
+        let r = report(
+            "banned_fatal_scheduled",
+            &[],
+            &["r_drawentities 0", "cl_lw 0"],
+            120,
+        );
 
         let cvars: Vec<&str> = r.banned_scheduled.iter().map(|b| b.cvar.as_str()).collect();
-        assert_eq!(cvars, vec!["r_drawentities", "cl_lw"], "{:?}", r.banned_scheduled);
+        assert_eq!(
+            cvars,
+            vec!["r_drawentities", "cl_lw"],
+            "{:?}",
+            r.banned_scheduled
+        );
     }
 
     #[test]
     fn a_config_setting_r_drawentities_to_zero_is_reported_as_fatal() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_with_r_drawentities("fatal_config", "0", true);
         let r = rt
             .block_on(scan_game_configs(
@@ -1010,7 +1061,10 @@ mod tests {
         // The engine clamps it back to 1.0 on its own, so the line is inert
         // and flagging it would block a capture over nothing. Confirmed live:
         // setting r_drawentities with cheats off does not close the game.
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_with_r_drawentities("fatal_no_cheats", "0", false);
         let r = rt
             .block_on(scan_game_configs(
@@ -1027,7 +1081,10 @@ mod tests {
 
     #[test]
     fn a_config_setting_r_drawentities_to_one_is_not_reported_as_fatal() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_with_r_drawentities("fatal_config_ok", "1", true);
         let r = rt
             .block_on(scan_game_configs(
@@ -1056,7 +1113,10 @@ mod tests {
     fn mirv_movie_filename_a_config_states_is_reported_as_a_noop() {
         // fake_game()'s config.cfg has a bind, not an assignment — this needs
         // a fixture that actually assigns the cvar.
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_with_mirv_movie_filename("noop_config");
         let r = rt
             .block_on(scan_game_configs(
@@ -1070,12 +1130,21 @@ mod tests {
 
         assert_eq!(r.noop_init.len(), 1, "{:?}", r.noop_init);
         assert_eq!(r.noop_init[0].cvar, "mirv_movie_filename");
-        assert!(r.noop_init[0].source.contains("movie.cfg"), "{:?}", r.noop_init[0]);
+        assert!(
+            r.noop_init[0].source.contains("movie.cfg"),
+            "{:?}",
+            r.noop_init[0]
+        );
     }
 
     #[test]
     fn exec_and_quit_in_initial_commands_are_reported_as_noops() {
-        let r = report("noop_exec_quit_init", &["exec somefile.cfg", "quit"], &[], 120);
+        let r = report(
+            "noop_exec_quit_init",
+            &["exec somefile.cfg", "quit"],
+            &[],
+            120,
+        );
 
         let flagged: Vec<&str> = r.noop_init.iter().map(|n| n.cvar.as_str()).collect();
         assert_eq!(flagged, vec!["exec", "quit"], "{:?}", r.noop_init);
@@ -1084,19 +1153,39 @@ mod tests {
 
     #[test]
     fn exec_and_quit_in_scheduled_commands_are_reported_as_noops() {
-        let r = report("noop_exec_quit_scheduled", &[], &["exec somefile.cfg", "quit"], 120);
+        let r = report(
+            "noop_exec_quit_scheduled",
+            &[],
+            &["exec somefile.cfg", "quit"],
+            120,
+        );
 
         let flagged: Vec<&str> = r.noop_scheduled.iter().map(|n| n.cvar.as_str()).collect();
         assert_eq!(flagged, vec!["exec", "quit"], "{:?}", r.noop_scheduled);
-        assert!(r.noop_scheduled.iter().all(|n| n.source == "Scheduled Commands"));
+        assert!(
+            r.noop_scheduled
+                .iter()
+                .all(|n| n.source == "Scheduled Commands")
+        );
     }
 
     #[test]
     fn mirv_movie_filename_scheduled_is_banned_not_reported_as_a_noop() {
-        let r = report("noop_vs_banned_scheduled", &[], &["mirv_movie_filename foo"], 120);
+        let r = report(
+            "noop_vs_banned_scheduled",
+            &[],
+            &["mirv_movie_filename foo"],
+            120,
+        );
 
         assert!(r.noop_scheduled.is_empty(), "{:?}", r.noop_scheduled);
-        assert!(r.banned_scheduled.iter().any(|b| b.cvar == "mirv_movie_filename"), "{:?}", r.banned_scheduled);
+        assert!(
+            r.banned_scheduled
+                .iter()
+                .any(|b| b.cvar == "mirv_movie_filename"),
+            "{:?}",
+            r.banned_scheduled
+        );
     }
 
     #[test]
@@ -1116,7 +1205,12 @@ mod tests {
         // only scheduling one of them is refused (see the test below).
         let r = report(
             "not_banned",
-            &["mirv_movie_fps 500", "r_decals \"256\"", "mirv_fov 90", "gl_widescreenfov 1"],
+            &[
+                "mirv_movie_fps 500",
+                "r_decals \"256\"",
+                "mirv_fov 90",
+                "gl_widescreenfov 1",
+            ],
             &["mirv_movie_fps 500"],
             120,
         );
@@ -1137,13 +1231,21 @@ mod tests {
         );
 
         let flagged: Vec<&str> = r.banned_scheduled.iter().map(|b| b.cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["r_decals", "mirv_fov", "gl_widescreenfov"], "{:?}", r.banned_scheduled);
+        assert_eq!(
+            flagged,
+            vec!["r_decals", "mirv_fov", "gl_widescreenfov"],
+            "{:?}",
+            r.banned_scheduled
+        );
         assert!(r.banned_init.is_empty());
     }
 
     #[test]
     fn the_default_ring_is_reported_when_nothing_states_r_decals() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_without_r_decals("decal_default_unset");
         let r = rt
             .block_on(scan_game_configs(
@@ -1154,7 +1256,10 @@ mod tests {
                 Some(true),
             ))
             .unwrap();
-        assert_eq!(r.decal_default_ring, Some(native::patch::PatcherConfig::default().decal_ring_limit));
+        assert_eq!(
+            r.decal_default_ring,
+            Some(native::patch::PatcherConfig::default().decal_ring_limit)
+        );
     }
 
     #[test]
@@ -1202,7 +1307,10 @@ mod tests {
         // above) and is now genuinely a noop case, so this one needs a
         // fixture that states nothing at all — falling through to the app's
         // nonzero default.
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_without_r_decals("decal_noop_nonzero");
         let r = rt
             .block_on(scan_game_configs(
@@ -1218,7 +1326,10 @@ mod tests {
 
     #[test]
     fn a_nonzero_r_decals_a_config_states_is_not_reported_as_a_flush_noop() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game_with_r_decals("decal_noop_config_nonzero", "512");
         let r = rt
             .block_on(scan_game_configs(
@@ -1230,12 +1341,19 @@ mod tests {
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
-        assert!(!r.overrides.iter().any(|o| o.cvar == "r_decals"), "{:?}", r.overrides);
+        assert!(
+            !r.overrides.iter().any(|o| o.cvar == "r_decals"),
+            "{:?}",
+            r.overrides
+        );
     }
 
     #[test]
     fn a_zero_r_decals_is_not_reported_as_a_flush_noop_when_flush_is_off() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game("decal_noop_flush_off");
         let r = rt
             .block_on(scan_game_configs(
@@ -1251,7 +1369,10 @@ mod tests {
 
     #[test]
     fn the_default_ring_is_not_reported_when_flush_is_off() {
-        let rt = tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap();
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
         let (_dir, game) = fake_game("decal_default_flush_off");
         let r = rt
             .block_on(scan_game_configs(
@@ -1275,7 +1396,9 @@ mod tests {
         let r = report("quoted_decals", &["r_decals \"512\""], &[], 120);
 
         assert!(
-            !r.shadowed.iter().any(|s| s.cvar.eq_ignore_ascii_case("r_decals")),
+            !r.shadowed
+                .iter()
+                .any(|s| s.cvar.eq_ignore_ascii_case("r_decals")),
             "the user's own r_decals must not be reported as dead: {:?}",
             r.shadowed
         );
@@ -1309,7 +1432,9 @@ mod tests {
         assert!(r.shadowed[0].winner_from_app, "the app appended the winner");
 
         assert!(
-            !r.overrides.iter().any(|o| o.command == "mirv_movie_fps 500"),
+            !r.overrides
+                .iter()
+                .any(|o| o.command == "mirv_movie_fps 500"),
             "a command that never applies overrides nothing: {:?}",
             r.overrides
         );
@@ -1323,7 +1448,10 @@ mod tests {
         assert_eq!(hazards.len(), 1, "{:?}", r.custom);
         assert_eq!(hazards[0].cvar, "r_decals");
         assert_eq!(
-            r.custom.iter().filter(|c| c.command == "r_decals 128").count(),
+            r.custom
+                .iter()
+                .filter(|c| c.command == "r_decals 128")
+                .count(),
             1,
             "the hazard must not also be listed as an ordinary override"
         );

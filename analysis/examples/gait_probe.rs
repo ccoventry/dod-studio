@@ -56,7 +56,8 @@ fn gait_name(i: i32) -> &'static str {
 }
 
 fn key(k: &str) -> String {
-    k.trim_matches(|c: char| c == '\0' || c.is_whitespace()).to_string()
+    k.trim_matches(|c: char| c == '\0' || c.is_whitespace())
+        .to_string()
 }
 fn as_f32(v: &[u8]) -> Option<f32> {
     (v.len() >= 4).then(|| f32::from_le_bytes([v[0], v[1], v[2], v[3]]))
@@ -108,17 +109,24 @@ fn main() {
 
         for entry in &demo.directory.entries {
             for frame in &entry.frames {
-                let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-                let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+                let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                    continue;
+                };
+                let MessageData::Parsed(msgs) = &bt.1.messages else {
+                    continue;
+                };
                 for m in msgs {
-                    let NetMessage::EngineMessage(em) = m else { continue };
+                    let NetMessage::EngineMessage(em) = m else {
+                        continue;
+                    };
                     match &**em {
                         EngineMessage::SvcClientData(cd) => {
                             if let Some((_, v)) =
                                 cd.client_data.iter().find(|(k, _)| key(k) == "maxspeed")
-                                && let Some(f) = as_f32(v) {
-                                    *t.maxspeed.entry(f.round() as i32).or_insert(0) += 1;
-                                }
+                                && let Some(f) = as_f32(v)
+                            {
+                                *t.maxspeed.entry(f.round() as i32).or_insert(0) += 1;
+                            }
                         }
                         // Player entities are indices 1..=32. Most updates
                         // arrive as deltas, not full snapshots, so both carry.
@@ -167,12 +175,26 @@ fn main() {
         rows.sort_by(|a, b| b.1.cmp(a.1));
         for (idx, n) in rows {
             let pctg = 100.0 * *n as f64 / gtotal.max(1) as f64;
-            println!("     {:>3} {:<16} x{:<8} {:>5.1}%", idx, gait_name(*idx), n, pctg);
+            println!(
+                "     {:>3} {:<16} x{:<8} {:>5.1}%",
+                idx,
+                gait_name(*idx),
+                n,
+                pctg
+            );
         }
         println!(
             "  maxspeed on player entities: {}   fuser4 (stamina) on player entities: {}",
-            if t.ent_maxspeed == 0 { "ABSENT".to_string() } else { format!("{}", t.ent_maxspeed) },
-            if t.ent_fuser4 == 0 { "ABSENT".to_string() } else { format!("{}", t.ent_fuser4) },
+            if t.ent_maxspeed == 0 {
+                "ABSENT".to_string()
+            } else {
+                format!("{}", t.ent_maxspeed)
+            },
+            if t.ent_fuser4 == 0 {
+                "ABSENT".to_string()
+            } else {
+                format!("{}", t.ent_fuser4)
+            },
         );
     }
 }

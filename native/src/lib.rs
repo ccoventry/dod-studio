@@ -19,9 +19,9 @@ pub mod patch;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
+pub mod shared;
 pub mod sys;
 pub mod utils;
-pub mod shared;
 
 mod messages;
 
@@ -171,15 +171,23 @@ where
 
     if let Some(cache_path) = &cache_path
         && let Ok(bytes) = fs::read(cache_path)
-            && let Ok(entry) = serde_json::from_slice::<AnalyzerCacheEntry>(&bytes)
-                && entry.size_bytes == size_bytes && entry.modified_unix_secs == modified_unix_secs {
-                    return Ok((entry.file_info, entry.analysis, true));
-                }
+        && let Ok(entry) = serde_json::from_slice::<AnalyzerCacheEntry>(&bytes)
+        && entry.size_bytes == size_bytes
+        && entry.modified_unix_secs == modified_unix_secs
+    {
+        return Ok((entry.file_info, entry.analysis, true));
+    }
 
     let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
 
     if let Some(cache_path) = &cache_path {
-        write_analyzer_cache_entry(cache_path, size_bytes, modified_unix_secs, &file_info, &analysis);
+        write_analyzer_cache_entry(
+            cache_path,
+            size_bytes,
+            modified_unix_secs,
+            &file_info,
+            &analysis,
+        );
     }
 
     Ok((file_info, analysis, false))
@@ -215,7 +223,9 @@ fn write_analyzer_cache_entry(
 /// failure — cache warming must never affect the caller's own result.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn warm_analyzer_cache(demo_path: &PathBuf, analysis: &Analysis) {
-    let Ok(metadata) = fs::metadata(demo_path) else { return };
+    let Ok(metadata) = fs::metadata(demo_path) else {
+        return;
+    };
     let size_bytes = metadata.len();
     let modified_unix_secs = metadata
         .modified()
@@ -224,14 +234,25 @@ pub fn warm_analyzer_cache(demo_path: &PathBuf, analysis: &Analysis) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let Some(cache_path) = analyzer_cache_path(demo_path) else { return };
-    let Ok(file_info) = build_file_info(demo_path) else { return };
+    let Some(cache_path) = analyzer_cache_path(demo_path) else {
+        return;
+    };
+    let Ok(file_info) = build_file_info(demo_path) else {
+        return;
+    };
 
-    write_analyzer_cache_entry(&cache_path, size_bytes, modified_unix_secs, &file_info, analysis);
+    write_analyzer_cache_entry(
+        &cache_path,
+        size_bytes,
+        modified_unix_secs,
+        &file_info,
+        analysis,
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-static SESSION_HEADER_WRITTEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static SESSION_HEADER_WRITTEN: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Date string (`YYYYMMDD`) `log_markdown` last wrote to, so a session
 /// running past midnight can be detected and cross-referenced between the
@@ -294,7 +315,9 @@ pub fn activity_log_path() -> std::path::PathBuf {
 /// chronological order.
 #[cfg(not(target_arch = "wasm32"))]
 fn prune_old_activity_logs(dir: &std::path::Path) {
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
     let mut files: Vec<std::path::PathBuf> = entries
         .flatten()
         .map(|e| e.path())
@@ -326,7 +349,8 @@ pub fn log_markdown(msg: &str) {
         let _ = std::fs::create_dir_all(&dir);
         let today = Local::now().format("%Y%m%d").to_string();
         let log_path_md = dir.join(format!("activity_{}.md", today));
-        let is_first_write = !SESSION_HEADER_WRITTEN.swap(true, std::sync::atomic::Ordering::SeqCst);
+        let is_first_write =
+            !SESSION_HEADER_WRITTEN.swap(true, std::sync::atomic::Ordering::SeqCst);
 
         let mut last_date = LAST_LOG_DATE.lock().unwrap_or_else(|e| e.into_inner());
         if is_first_write {
@@ -336,12 +360,28 @@ pub fn log_markdown(msg: &str) {
             // leave a pointer in both files so this doesn't just look like the
             // session stopped mid-file to someone reading yesterday's log.
             let prev_path = dir.join(format!("activity_{}.md", last_date.as_deref().unwrap()));
-            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&prev_path) {
-                let _ = writeln!(f, "\n(session continues past midnight — see activity_{}.md)\n", today);
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&prev_path)
+            {
+                let _ = writeln!(
+                    f,
+                    "\n(session continues past midnight — see activity_{}.md)\n",
+                    today
+                );
                 let _ = f.sync_all();
             }
-            if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(&log_path_md) {
-                let _ = writeln!(f, "(continued from activity_{}.md — same session, crossed midnight)\n", last_date.as_deref().unwrap());
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .append(true)
+                .create(true)
+                .open(&log_path_md)
+            {
+                let _ = writeln!(
+                    f,
+                    "(continued from activity_{}.md — same session, crossed midnight)\n",
+                    last_date.as_deref().unwrap()
+                );
                 let _ = f.sync_all();
             }
         }
@@ -355,7 +395,11 @@ pub fn log_markdown(msg: &str) {
         {
             if is_first_write {
                 let time_str = Local::now().format("%Y-%m-%d @ %H:%M %Z").to_string();
-                let _ = writeln!(f, "\n\n========== New Session: {} ====================\n", time_str);
+                let _ = writeln!(
+                    f,
+                    "\n\n========== New Session: {} ====================\n",
+                    time_str
+                );
             }
             let time_str = Local::now().format("%H:%M:%S").to_string();
             let _ = writeln!(f, "* [{}] {}", time_str, msg);

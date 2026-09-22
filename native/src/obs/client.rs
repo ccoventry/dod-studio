@@ -17,7 +17,7 @@
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 /// How long a single request waits for its reply.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
@@ -53,7 +53,10 @@ pub enum ObsError {
     /// Carries whether OBS said the password was wrong (close code 4009) as
     /// opposed to anything else, because those want completely different
     /// advice: one is "check the password", the other is "this is a bug".
-    Auth { wrong_password: bool, detail: String },
+    Auth {
+        wrong_password: bool,
+        detail: String,
+    },
     /// A request was refused by OBS, with its own message.
     Request { request: String, detail: String },
     /// The connection dropped or a reply never came.
@@ -68,7 +71,10 @@ impl std::fmt::Display for ObsError {
                 "could not reach OBS ({d}). Is OBS running, with Tools -> WebSocket Server \
                  Settings enabled?"
             ),
-            Self::Auth { wrong_password: true, .. } => write!(
+            Self::Auth {
+                wrong_password: true,
+                ..
+            } => write!(
                 f,
                 "OBS rejected the password. Copy it from Tools -> WebSocket Server Settings -> \
                  Show Connect Info rather than retyping it."
@@ -157,8 +163,8 @@ impl ObsClient {
     /// only used if the server's Hello asks for it.
     pub fn connect(url: &str, password: &str) -> Result<Self, ObsError> {
         let host = url.trim_start_matches("ws://");
-        let stream = TcpStream::connect(host)
-            .map_err(|e| ObsError::Connect(format!("{host}: {e}")))?;
+        let stream =
+            TcpStream::connect(host).map_err(|e| ObsError::Connect(format!("{host}: {e}")))?;
         stream
             .set_read_timeout(Some(SOCKET_READ_TIMEOUT))
             .map_err(|e| ObsError::Connect(e.to_string()))?;
@@ -168,7 +174,11 @@ impl ObsClient {
         let (ws, _) = tungstenite::client(uri, stream)
             .map_err(|e| ObsError::Connect(format!("websocket handshake: {e}")))?;
 
-        let mut client = Self { ws, next_id: 0, last_close: None };
+        let mut client = Self {
+            ws,
+            next_id: 0,
+            last_close: None,
+        };
 
         let hello = client
             .read_op(0, Duration::from_secs(10))
@@ -189,7 +199,10 @@ impl ObsClient {
         client.send(json!({ "op": 1, "d": identify }))?;
 
         if client.read_op(2, Duration::from_secs(10)).is_none() {
-            let detail = client.last_close.clone().unwrap_or_else(|| "no reply".into());
+            let detail = client
+                .last_close
+                .clone()
+                .unwrap_or_else(|| "no reply".into());
             // 4009 is obs-websocket's own "authentication failed". Anything
             // else is not a password problem and should not be reported as one.
             return Err(ObsError::Auth {
@@ -216,7 +229,11 @@ impl ObsClient {
         let version = self.request("GetVersion", json!({}))?;
         let available: Vec<String> = version["availableRequests"]
             .as_array()
-            .map(|v| v.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
         let missing_requests = REQUIRED_REQUESTS
             .iter()
@@ -225,18 +242,29 @@ impl ObsClient {
             .collect();
 
         let status = self.request("GetRecordStatus", json!({}))?;
-        let stream = self.request("GetStreamStatus", json!({})).unwrap_or(json!({}));
+        let stream = self
+            .request("GetStreamStatus", json!({}))
+            .unwrap_or(json!({}));
         let dir = self.request("GetRecordDirectory", json!({}))?;
         let video = self.request("GetVideoSettings", json!({}))?;
-        let scene = self.request("GetCurrentProgramScene", json!({})).unwrap_or(json!({}));
+        let scene = self
+            .request("GetCurrentProgramScene", json!({}))
+            .unwrap_or(json!({}));
         let collection = self
             .request("GetSceneCollectionList", json!({}))
             .unwrap_or(json!({}));
-        let current_profile = self.profile_list().map(|(_, current)| current).unwrap_or_default();
+        let current_profile = self
+            .profile_list()
+            .map(|(_, current)| current)
+            .unwrap_or_default();
 
         let fps_num = video["fpsNumerator"].as_f64().unwrap_or(0.0);
         let fps_den = video["fpsDenominator"].as_f64().unwrap_or(1.0);
-        let fps = if fps_den > 0.0 { fps_num / fps_den } else { 0.0 };
+        let fps = if fps_den > 0.0 {
+            fps_num / fps_den
+        } else {
+            0.0
+        };
 
         let canvas_width = video["baseWidth"].as_i64().unwrap_or(0);
         let canvas_height = video["baseHeight"].as_i64().unwrap_or(0);
@@ -275,7 +303,10 @@ impl ObsClient {
 
         Ok(ObsPreflight {
             obs_version: version["obsVersion"].as_str().unwrap_or("?").to_string(),
-            websocket_version: version["obsWebSocketVersion"].as_str().unwrap_or("?").to_string(),
+            websocket_version: version["obsWebSocketVersion"]
+                .as_str()
+                .unwrap_or("?")
+                .to_string(),
             missing_requests,
             recording: status["outputActive"].as_bool().unwrap_or(false),
             streaming: stream["outputActive"].as_bool().unwrap_or(false),
@@ -285,7 +316,10 @@ impl ObsClient {
             output_width,
             output_height,
             fps,
-            current_scene: scene["currentProgramSceneName"].as_str().unwrap_or("").to_string(),
+            current_scene: scene["currentProgramSceneName"]
+                .as_str()
+                .unwrap_or("")
+                .to_string(),
             current_profile,
             scene_collection: collection["currentSceneCollectionName"]
                 .as_str()
@@ -338,10 +372,12 @@ impl ObsClient {
 
     /// Where OBS is currently set to write recordings.
     pub fn record_directory(&mut self) -> Result<String, ObsError> {
-        Ok(self.request("GetRecordDirectory", json!({}))?["recordDirectory"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string())
+        Ok(
+            self.request("GetRecordDirectory", json!({}))?["recordDirectory"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        )
     }
 
     /// `(outputTotalFrames, outputSkippedFrames)` from `GetStats` — system-
@@ -453,11 +489,12 @@ impl ObsClient {
     }
 
     pub fn current_scene(&mut self) -> Result<String, ObsError> {
-        Ok(self.request("GetCurrentProgramScene", json!({}))?
-            ["currentProgramSceneName"]
-            .as_str()
-            .unwrap_or_default()
-            .to_string())
+        Ok(
+            self.request("GetCurrentProgramScene", json!({}))?["currentProgramSceneName"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        )
     }
 
     /// Profile names and the currently active one, for the settings picker.
@@ -468,9 +505,16 @@ impl ObsClient {
         let list = self.request("GetProfileList", json!({}))?;
         let profiles = list["profiles"]
             .as_array()
-            .map(|v| v.iter().filter_map(|s| s.as_str().map(str::to_string)).collect())
+            .map(|v| {
+                v.iter()
+                    .filter_map(|s| s.as_str().map(str::to_string))
+                    .collect()
+            })
             .unwrap_or_default();
-        let current = list["currentProfileName"].as_str().unwrap_or_default().to_string();
+        let current = list["currentProfileName"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         Ok((profiles, current))
     }
 
@@ -604,16 +648,20 @@ impl ObsClient {
     /// a real possibility on someone else's OBS install and not worth failing
     /// provisioning over.
     pub fn set_input_mute(&mut self, name: &str, muted: bool) -> Result<(), ObsError> {
-        self.request("SetInputMute", json!({ "inputName": name, "inputMuted": muted }))?;
+        self.request(
+            "SetInputMute",
+            json!({ "inputName": name, "inputMuted": muted }),
+        )?;
         Ok(())
     }
 
     /// The scene item id of `source` inside `scene` — needed for
     /// `SetSceneItemTransform`, which addresses items by id rather than name.
     pub fn scene_item_id(&mut self, scene: &str, source: &str) -> Result<i64, ObsError> {
-        Ok(self
-            .request("GetSceneItemId", json!({ "sceneName": scene, "sourceName": source }))?
-            ["sceneItemId"]
+        Ok(self.request(
+            "GetSceneItemId",
+            json!({ "sceneName": scene, "sourceName": source }),
+        )?["sceneItemId"]
             .as_i64()
             .unwrap_or(0))
     }
@@ -701,7 +749,11 @@ impl ObsClient {
             .wait_for_record_state("OBS_WEBSOCKET_OUTPUT_STOPPED", RECORD_STOP_TIMEOUT)
             .and_then(|e| e["outputPath"].as_str().map(str::to_string))
             .filter(|p| !p.is_empty());
-        match event_path.or(if reply_path.is_empty() { None } else { Some(reply_path) }) {
+        match event_path.or(if reply_path.is_empty() {
+            None
+        } else {
+            Some(reply_path)
+        }) {
             Some(p) => Ok(p),
             None => Err(ObsError::Transport(
                 "OBS stopped recording but reported no output path".into(),
@@ -727,7 +779,9 @@ impl ObsClient {
     }
 
     fn read_op(&mut self, op: u64, timeout: Duration) -> Option<Value> {
-        self.read_until(timeout, |m| (m["op"].as_u64() == Some(op)).then(|| m["d"].clone()))
+        self.read_until(timeout, |m| {
+            (m["op"].as_u64() == Some(op)).then(|| m["d"].clone())
+        })
     }
 
     fn read_until<T>(
@@ -747,7 +801,7 @@ impl ObsClient {
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     ) =>
                 {
-                    continue
+                    continue;
                 }
                 Err(_) => return None,
             };

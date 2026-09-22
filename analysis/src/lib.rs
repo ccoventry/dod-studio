@@ -28,16 +28,16 @@ use dem::{
 use dod::UserMessage;
 use std::time::Duration;
 
-pub use crate::{
-    chat::{ChatMessage, ChatType, translate_system_message},
-    localization::{get_active_language, set_active_language, translate_key},
-    mortality::{MortalityState, Mortality, MortalityChange},
-    player::{Connection, Player, PlayerGlobalId, SteamId},
-    round::Round,
-};
 #[cfg(not(target_arch = "wasm32"))]
 pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
+pub use crate::{
+    chat::{ChatMessage, ChatType, translate_system_message},
+    localization::{get_active_language, set_active_language, translate_key},
+    mortality::{Mortality, MortalityChange, MortalityState},
+    player::{Connection, Player, PlayerGlobalId, SteamId},
+    round::Round,
+};
 pub use dod::{Team, Weapon};
 
 #[derive(Debug)]
@@ -170,18 +170,20 @@ impl From<Demo> for DemoInfo {
         'outer: for entry in &value.directory.entries {
             for frame in &entry.frames {
                 if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for msg in msgs {
-                            if let NetMessage::EngineMessage(eng_msg) = msg
-                                && matches!(
-                                    **eng_msg,
-                                    EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
-                                ) {
-                                    is_hltv = true;
-                                    break 'outer;
-                                }
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for msg in msgs {
+                        if let NetMessage::EngineMessage(eng_msg) = msg
+                            && matches!(
+                                **eng_msg,
+                                EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
+                            )
+                        {
+                            is_hltv = true;
+                            break 'outer;
                         }
                     }
+                }
             }
         }
         let demo_type = if is_hltv {
@@ -292,7 +294,8 @@ fn extract_ip_port(s: &str) -> Option<String> {
                 }
                 let host_str = &s[k..i];
                 // Must contain at least one dot to be a valid domain or IP
-                if host_str.contains('.') && !host_str.starts_with('.') && !host_str.ends_with('.') {
+                if host_str.contains('.') && !host_str.starts_with('.') && !host_str.ends_with('.')
+                {
                     let port_str = &s[i + 1..j];
                     return Some(format!("{}:{}", host_str, port_str));
                 }
@@ -304,7 +307,9 @@ fn extract_ip_port(s: &str) -> Option<String> {
 
 pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
-        let hostname = String::from_utf8_lossy(&msg.hostname).trim_end_matches('\0').to_string();
+        let hostname = String::from_utf8_lossy(&msg.hostname)
+            .trim_end_matches('\0')
+            .to_string();
         state.server_name = Some(hostname.clone());
         if let Some(addr) = extract_ip_port(&hostname) {
             state.server_address = Some(addr);
@@ -319,8 +324,14 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
             .to_string();
         if let Some(ref initial) = state.initial_map_name {
             if initial != &clean_map {
-                let has_gameplay = state.rounds.iter().any(|r| matches!(r, Round::Completed { .. }))
-                    || state.players.iter().any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
+                let has_gameplay = state
+                    .rounds
+                    .iter()
+                    .any(|r| matches!(r, Round::Completed { .. }))
+                    || state
+                        .players
+                        .iter()
+                        .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
                 if has_gameplay {
                     state.map_changed = true;
                 } else {
@@ -345,12 +356,13 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
     }
 
     if let AnalyzerEvent::Frame(frame) = event
-        && let FrameData::ConsoleCommand(cmd) = &frame.frame_data {
-            let cmd_str = String::from_utf8_lossy(cmd.command.as_slice());
-            if let Some(addr) = extract_ip_port(&cmd_str) {
-                state.server_address = Some(addr);
-            }
+        && let FrameData::ConsoleCommand(cmd) = &frame.frame_data
+    {
+        let cmd_str = String::from_utf8_lossy(cmd.command.as_slice());
+        if let Some(addr) = extract_ip_port(&cmd_str) {
+            state.server_address = Some(addr);
         }
+    }
 
     use_time_left_updates(state, event);
 
@@ -372,7 +384,9 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
         };
 
         let is_natural_end = state.map_changed
-            || state.last_time_left.is_some_and(|tl| tl <= Duration::from_secs(10))
+            || state
+                .last_time_left
+                .is_some_and(|tl| tl <= Duration::from_secs(10))
             || is_close_to_match_end(match_duration);
 
         state.ended_early = if is_natural_end {
@@ -435,12 +449,10 @@ pub fn use_pov_stats_updates(state: &mut AnalyzerState, event: &AnalyzerEvent) {
             }
             UserMessage::Health(msg) => {
                 let health_val = msg.0 as u32;
-                if state.pov_stats.has_received_health
-                    && health_val < state.pov_stats.prev_health {
-                        state.pov_stats.hits_taken += 1;
-                        state.pov_stats.total_damage_taken +=
-                            state.pov_stats.prev_health - health_val;
-                    }
+                if state.pov_stats.has_received_health && health_val < state.pov_stats.prev_health {
+                    state.pov_stats.hits_taken += 1;
+                    state.pov_stats.total_damage_taken += state.pov_stats.prev_health - health_val;
+                }
                 state.pov_stats.prev_health = health_val;
                 state.pov_stats.has_received_health = true;
             }
@@ -523,9 +535,10 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
             }
         }
     } else {
-        let any_british = state.players.iter().any(|p| {
-            p.class.as_ref().map(|c| c.is_british()).unwrap_or(false)
-        });
+        let any_british = state
+            .players
+            .iter()
+            .any(|p| p.class.as_ref().map(|c| c.is_british()).unwrap_or(false));
         if any_british {
             state.allies_are_british = true;
             for player in &mut state.players {
@@ -535,10 +548,14 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
             }
             state.team_scores.convert_allies_to_british();
             for round in &mut state.rounds {
-                if let Round::Completed { winner_stats: Some((winner_team, _)), .. } = round
-                    && *winner_team == Team::Allies {
-                        *winner_team = Team::British;
-                    }
+                if let Round::Completed {
+                    winner_stats: Some((winner_team, _)),
+                    ..
+                } = round
+                    && *winner_team == Team::Allies
+                {
+                    *winner_team = Team::British;
+                }
             }
             for chat in &mut state.chat_messages {
                 if chat.sender_team == Some(Team::Allies) {
@@ -614,29 +631,27 @@ impl Analysis {
             for frame in &entry.frames {
                 process_event(&mut state, &AnalyzerEvent::Frame(frame));
                 if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for net_msg in msgs {
-                            match net_msg {
-                                NetMessage::EngineMessage(engine_msg) => {
-                                    process_event(
-                                        &mut state,
-                                        &AnalyzerEvent::EngineMessage(engine_msg),
-                                    );
-                                }
-                                NetMessage::UserMessage(user_msg) => {
-                                    if is_relevant_message(user_msg.name.as_ref())
-                                        && let Ok(msg) =
-                                            UserMessage::new(&user_msg.name, &user_msg.data)
-                                        {
-                                            process_event(
-                                                &mut state,
-                                                &AnalyzerEvent::UserMessage(msg),
-                                            );
-                                        }
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if is_relevant_message(user_msg.name.as_ref())
+                                    && let Ok(msg) =
+                                        UserMessage::new(&user_msg.name, &user_msg.data)
+                                {
+                                    process_event(&mut state, &AnalyzerEvent::UserMessage(msg));
                                 }
                             }
                         }
                     }
+                }
 
                 processed_frames += 1;
                 if processed_frames % 500 == 0 || processed_frames == total_frames {
@@ -695,7 +710,9 @@ pub struct DemoFingerprint {
     pub event_signature: Vec<String>,
 }
 
-pub fn parse_fingerprint(bytes: &[u8]) -> Result<(String, String, u64, Vec<String>, Option<String>), std::io::Error> {
+pub fn parse_fingerprint(
+    bytes: &[u8],
+) -> Result<(String, String, u64, Vec<String>, Option<String>), std::io::Error> {
     let (mut input, header) = dem::demo_parser::parse_header(bytes)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
 
@@ -715,122 +732,165 @@ pub fn parse_fingerprint(bytes: &[u8]) -> Result<(String, String, u64, Vec<Strin
     let mut event_signature: Vec<String> = Vec::with_capacity(10);
     let mut server_ip: Option<String> = None;
 
-    let mut client_id_to_player_id: std::collections::HashMap<u8, String> = std::collections::HashMap::new();
+    let mut client_id_to_player_id: std::collections::HashMap<u8, String> =
+        std::collections::HashMap::new();
 
     let aux = dem::types::Aux::new2();
 
     while !input.is_empty() {
-        match dem::demo_parser::parse_frame(input, dem::types::MessageDataParseMode::Parse, aux.clone()) {
+        match dem::demo_parser::parse_frame(
+            input,
+            dem::types::MessageDataParseMode::Parse,
+            aux.clone(),
+        ) {
             Ok((next_input, frame)) => {
                 input = next_input;
                 frames_parsed += 1;
 
                 if let dem::types::FrameData::NetworkMessage(box_type) = &frame.frame_data
-                    && let dem::types::MessageData::Parsed(msgs) = &box_type.1.messages {
-                        for net_msg in msgs {
-                            match net_msg {
-                                dem::types::NetMessage::EngineMessage(engine_msg) => {
-                                    match &**engine_msg {
-                                        dem::types::EngineMessage::SvcServerInfo(info) => {
-                                            let hostname = String::from_utf8_lossy(&info.hostname)
-                                                .trim_end_matches('\0')
-                                                .to_string();
-                                            if let Some(addr) = extract_ip_port(&hostname) {
-                                                server_ip = Some(addr);
-                                            }
-                                            client_slot = Some(info.player_index);
+                    && let dem::types::MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            dem::types::NetMessage::EngineMessage(engine_msg) => {
+                                match &**engine_msg {
+                                    dem::types::EngineMessage::SvcServerInfo(info) => {
+                                        let hostname = String::from_utf8_lossy(&info.hostname)
+                                            .trim_end_matches('\0')
+                                            .to_string();
+                                        if let Some(addr) = extract_ip_port(&hostname) {
+                                            server_ip = Some(addr);
                                         }
-                                        dem::types::EngineMessage::SvcUpdateUserInfo(user_info) => {
-                                            let fields = user_info
-                                                .user_info
-                                                .to_str()
-                                                .map(|s| s.trim_matches(['\0', '\\']).split('\\').collect::<Vec<_>>())
-                                                .unwrap_or_default()
-                                                .as_chunks::<2>()
-                                                .0
-                                                .iter()
-                                                .fold(std::collections::HashMap::new(), |mut map, [key, value]| {
+                                        client_slot = Some(info.player_index);
+                                    }
+                                    dem::types::EngineMessage::SvcUpdateUserInfo(user_info) => {
+                                        let fields = user_info
+                                            .user_info
+                                            .to_str()
+                                            .map(|s| {
+                                                s.trim_matches(['\0', '\\'])
+                                                    .split('\\')
+                                                    .collect::<Vec<_>>()
+                                            })
+                                            .unwrap_or_default()
+                                            .as_chunks::<2>()
+                                            .0
+                                            .iter()
+                                            .fold(
+                                                std::collections::HashMap::new(),
+                                                |mut map, [key, value]| {
                                                     map.insert(*key, *value);
                                                     map
-                                                });
+                                                },
+                                            );
 
-                                            if fields.is_empty() {
-                                                client_id_to_player_id.remove(&user_info.index);
-                                                continue;
+                                        if fields.is_empty() {
+                                            client_id_to_player_id.remove(&user_info.index);
+                                            continue;
+                                        }
+
+                                        // Skip HLTV slots from roster
+                                        if let Some(&"1") = fields.get("*hltv") {
+                                            continue;
+                                        }
+
+                                        let id_opt = fields
+                                            .get("*sid")
+                                            .map(|s| s.to_string())
+                                            .or_else(|| {
+                                                fields
+                                                    .get("*fid")
+                                                    .map(|fid| format!("PLAYER_{fid}"))
+                                            })
+                                            .or_else(|| fields.get("name").map(|n| n.to_string()));
+
+                                        if let Some(id) = id_opt {
+                                            if Some(user_info.index) == client_slot {
+                                                recorder_id = Some(id.clone());
                                             }
-
-                                            // Skip HLTV slots from roster
-                                            if let Some(&"1") = fields.get("*hltv") {
-                                                continue;
-                                            }
-
-                                            let id_opt = fields
-                                                .get("*sid")
-                                                .map(|s| s.to_string())
-                                                .or_else(|| fields.get("*fid").map(|fid| format!("PLAYER_{fid}")))
-                                                .or_else(|| fields.get("name").map(|n| n.to_string()));
-
-                                            if let Some(id) = id_opt {
-                                                if Some(user_info.index) == client_slot {
-                                                    recorder_id = Some(id.clone());
-                                                }
-                                                client_id_to_player_id.insert(user_info.index, id.clone());
-                                                if !roster_accumulator.contains(&id) {
-                                                    roster_accumulator.push(id);
-                                                }
+                                            client_id_to_player_id
+                                                .insert(user_info.index, id.clone());
+                                            if !roster_accumulator.contains(&id) {
+                                                roster_accumulator.push(id);
                                             }
                                         }
-                                        dem::types::EngineMessage::SvcStuffText(stuff) => {
-                                            let cmd = String::from_utf8_lossy(stuff.command.as_slice());
-                                            if let Some(addr) = extract_ip_port(&cmd) {
-                                                server_ip = Some(addr);
+                                    }
+                                    dem::types::EngineMessage::SvcStuffText(stuff) => {
+                                        let cmd = String::from_utf8_lossy(stuff.command.as_slice());
+                                        if let Some(addr) = extract_ip_port(&cmd) {
+                                            server_ip = Some(addr);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            dem::types::NetMessage::UserMessage(user_msg) => {
+                                if is_relevant_message(user_msg.name.as_ref())
+                                    && let Ok(msg) =
+                                        dod::UserMessage::new(&user_msg.name, &user_msg.data)
+                                {
+                                    match msg {
+                                        dod::UserMessage::TextMsg(text_msg) => {
+                                            let is_commencing =
+                                                text_msg.text.contains("#Game_Commencing")
+                                                    || text_msg.arg1.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg2.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg3.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    })
+                                                    || text_msg.arg4.as_ref().is_some_and(|s| {
+                                                        s.contains("#Game_Commencing")
+                                                    });
+                                            if is_commencing {
+                                                match_started = true;
+                                                event_signature.clear();
                                             }
+                                        }
+                                        dod::UserMessage::RoundState(dod::RoundState::Reset) => {
+                                            match_started = true;
+                                            event_signature.clear();
+                                        }
+                                        dod::UserMessage::DeathMsg(death) if match_started => {
+                                            let killer_id = if death.killer_client_index == 0 {
+                                                "world".to_string()
+                                            } else {
+                                                client_id_to_player_id
+                                                    .get(&(death.killer_client_index - 1))
+                                                    .cloned()
+                                                    .unwrap_or_else(|| {
+                                                        format!(
+                                                            "slot_{}",
+                                                            death.killer_client_index - 1
+                                                        )
+                                                    })
+                                            };
+                                            let victim_id = client_id_to_player_id
+                                                .get(&(death.victim_client_index - 1))
+                                                .cloned()
+                                                .unwrap_or_else(|| {
+                                                    format!(
+                                                        "slot_{}",
+                                                        death.victim_client_index - 1
+                                                    )
+                                                });
+
+                                            let event_str = format!(
+                                                "{}>{}:{:?}",
+                                                killer_id, victim_id, death.weapon
+                                            );
+                                            event_signature.push(event_str);
                                         }
                                         _ => {}
                                     }
                                 }
-                                dem::types::NetMessage::UserMessage(user_msg) => {
-                                    if is_relevant_message(user_msg.name.as_ref())
-                                        && let Ok(msg) = dod::UserMessage::new(&user_msg.name, &user_msg.data) {
-                                            match msg {
-                                                dod::UserMessage::TextMsg(text_msg) => {
-                                                    let is_commencing = text_msg.text.contains("#Game_Commencing")
-                                                        || text_msg.arg1.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg2.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg3.as_ref().is_some_and(|s| s.contains("#Game_Commencing"))
-                                                        || text_msg.arg4.as_ref().is_some_and(|s| s.contains("#Game_Commencing"));
-                                                    if is_commencing {
-                                                        match_started = true;
-                                                        event_signature.clear();
-                                                    }
-                                                }
-                                                dod::UserMessage::RoundState(dod::RoundState::Reset) => {
-                                                    match_started = true;
-                                                    event_signature.clear();
-                                                }
-                                                dod::UserMessage::DeathMsg(death)
-                                                    if match_started => {
-                                                        let killer_id = if death.killer_client_index == 0 {
-                                                            "world".to_string()
-                                                        } else {
-                                                            client_id_to_player_id.get(&(death.killer_client_index - 1))
-                                                                .cloned()
-                                                                .unwrap_or_else(|| format!("slot_{}", death.killer_client_index - 1))
-                                                        };
-                                                        let victim_id = client_id_to_player_id.get(&(death.victim_client_index - 1))
-                                                            .cloned()
-                                                            .unwrap_or_else(|| format!("slot_{}", death.victim_client_index - 1));
-
-                                                        let event_str = format!("{}>{}:{:?}", killer_id, victim_id, death.weapon);
-                                                        event_signature.push(event_str);
-                                                    }
-                                                _ => {}
-                                            }
-                                        }
-                                }
                             }
                         }
                     }
+                }
 
                 // Check patience limit fail-safe
                 if frames_parsed > patience_limit && !match_started {
@@ -955,28 +1015,29 @@ mod tests {
                     );
                     process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
                     if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                        && let MessageData::Parsed(msgs) = &box_type.1.messages {
-                            for net_msg in msgs {
-                                match net_msg {
-                                    NetMessage::EngineMessage(engine_msg) => {
+                        && let MessageData::Parsed(msgs) = &box_type.1.messages
+                    {
+                        for net_msg in msgs {
+                            match net_msg {
+                                NetMessage::EngineMessage(engine_msg) => {
+                                    process_event(
+                                        &mut state_unopt,
+                                        &AnalyzerEvent::EngineMessage(engine_msg),
+                                    );
+                                }
+                                NetMessage::UserMessage(user_msg) => {
+                                    if let Ok(msg) =
+                                        UserMessage::new(&user_msg.name, &user_msg.data)
+                                    {
                                         process_event(
                                             &mut state_unopt,
-                                            &AnalyzerEvent::EngineMessage(engine_msg),
+                                            &AnalyzerEvent::UserMessage(msg),
                                         );
-                                    }
-                                    NetMessage::UserMessage(user_msg) => {
-                                        if let Ok(msg) =
-                                            UserMessage::new(&user_msg.name, &user_msg.data)
-                                        {
-                                            process_event(
-                                                &mut state_unopt,
-                                                &AnalyzerEvent::UserMessage(msg),
-                                            );
-                                        }
                                     }
                                 }
                             }
                         }
+                    }
                     let new_live = matches!(
                         state_unopt.clan_match_detection,
                         ClanMatchDetection::MatchIsLive
@@ -1084,9 +1145,21 @@ mod tests {
                 i
             );
             assert_eq!(p_l.stats, p_r.stats, "Player {} stats mismatched", i);
-            assert_eq!(p_l.stats_seeded, p_r.stats_seeded, "Player {} stats_seeded mismatched", i);
-            assert_eq!(p_l.has_pre_demo_activity, p_r.has_pre_demo_activity, "Player {} has_pre_demo_activity mismatched", i);
-            assert_eq!(p_l.has_reconnected, p_r.has_reconnected, "Player {} has_reconnected mismatched", i);
+            assert_eq!(
+                p_l.stats_seeded, p_r.stats_seeded,
+                "Player {} stats_seeded mismatched",
+                i
+            );
+            assert_eq!(
+                p_l.has_pre_demo_activity, p_r.has_pre_demo_activity,
+                "Player {} has_pre_demo_activity mismatched",
+                i
+            );
+            assert_eq!(
+                p_l.has_reconnected, p_r.has_reconnected,
+                "Player {} has_reconnected mismatched",
+                i
+            );
 
             // kill_streaks
             assert_eq!(
@@ -1292,17 +1365,35 @@ mod tests {
             let file_bytes = fs::read(path).unwrap();
             let analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
             println!("CLAN MATCH: map_name: {}", analysis.demo_info.map_name);
-            println!("CLAN MATCH: clan_match_detected: {}", analysis.state.clan_match_detected);
-            println!("CLAN MATCH: match_start_witnessed: {}", analysis.state.match_start_witnessed);
+            println!(
+                "CLAN MATCH: clan_match_detected: {}",
+                analysis.state.clan_match_detected
+            );
+            println!(
+                "CLAN MATCH: match_start_witnessed: {}",
+                analysis.state.match_start_witnessed
+            );
             println!("CLAN MATCH: started_late: {}", analysis.state.started_late);
             println!("CLAN MATCH: ended_early: {}", analysis.state.ended_early);
-            println!("CLAN MATCH: first_time_left: {:?}", analysis.state.first_time_left);
-            println!("CLAN MATCH: last_time_left: {:?}", analysis.state.last_time_left);
+            println!(
+                "CLAN MATCH: first_time_left: {:?}",
+                analysis.state.first_time_left
+            );
+            println!(
+                "CLAN MATCH: last_time_left: {:?}",
+                analysis.state.last_time_left
+            );
             println!("CLAN MATCH: map_changed: {}", analysis.state.map_changed);
-            println!("CLAN MATCH: initial_map_name: {:?}", analysis.state.initial_map_name);
+            println!(
+                "CLAN MATCH: initial_map_name: {:?}",
+                analysis.state.initial_map_name
+            );
             for p in &analysis.state.players {
                 if p.has_pre_demo_activity {
-                    println!("CLAN MATCH: Player {} has pre-demo activity! Stats: {:?}", p.name, p.stats);
+                    println!(
+                        "CLAN MATCH: Player {} has pre-demo activity! Stats: {:?}",
+                        p.name, p.stats
+                    );
                 }
             }
         } else {
@@ -1326,8 +1417,14 @@ mod tests {
         let mut state = AnalyzerState::default();
         state.clan_match_detected = false;
         state.rounds.push(Round::Completed {
-            start_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
-            end_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
+            start_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
+            end_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
             winner_stats: None,
         });
         use_general_finalization(&mut state, &AnalyzerEvent::Finalization);
@@ -1337,8 +1434,14 @@ mod tests {
         let mut state = AnalyzerState::default();
         state.clan_match_detected = false;
         state.rounds.push(Round::Completed {
-            start_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
-            end_time: crate::time::GameTime { real_offset: Duration::ZERO, ..Default::default() },
+            start_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
+            end_time: crate::time::GameTime {
+                real_offset: Duration::ZERO,
+                ..Default::default()
+            },
             winner_stats: None,
         });
         state.current_time.real_offset = Duration::from_secs(1195);
@@ -1374,7 +1477,14 @@ mod tests {
             assert!(res.is_ok());
             let (map_name, server_ip, roster_hash, event_signature, recorder_id) = res.unwrap();
             assert!(!map_name.is_empty());
-            println!("Map: {}, Server: {}, Roster Hash: {}, Events: {}, Recorder: {:?}", map_name, server_ip, roster_hash, event_signature.len(), recorder_id);
+            println!(
+                "Map: {}, Server: {}, Roster Hash: {}, Events: {}, Recorder: {:?}",
+                map_name,
+                server_ip,
+                roster_hash,
+                event_signature.len(),
+                recorder_id
+            );
         }
     }
 }

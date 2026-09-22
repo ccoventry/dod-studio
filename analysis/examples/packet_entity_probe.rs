@@ -35,15 +35,26 @@ struct Peak {
 
 fn measure(bytes: &[u8]) -> Option<Peak> {
     let demo = open_demo_from_bytes(bytes).ok()?;
-    let mut peak =
-        Peak { entities: 0, time: 0.0, over_legacy: 0, first_breach: None, opening: Vec::new() };
+    let mut peak = Peak {
+        entities: 0,
+        time: 0.0,
+        over_legacy: 0,
+        first_breach: None,
+        opening: Vec::new(),
+    };
 
     for entry in &demo.directory.entries {
         for frame in &entry.frames {
-            let FrameData::NetworkMessage(bt) = &frame.frame_data else { continue };
-            let MessageData::Parsed(msgs) = &bt.1.messages else { continue };
+            let FrameData::NetworkMessage(bt) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &bt.1.messages else {
+                continue;
+            };
             for m in msgs {
-                let NetMessage::EngineMessage(em) = m else { continue };
+                let NetMessage::EngineMessage(em) = m else {
+                    continue;
+                };
                 let count = match &**em {
                     EngineMessage::SvcPacketEntities(pe) => pe.entity_count.to_u32() as usize,
                     EngineMessage::SvcDeltaPacketEntities(pe) => pe.entity_count.to_u32() as usize,
@@ -69,7 +80,9 @@ fn measure(bytes: &[u8]) -> Option<Peak> {
 }
 
 fn main() {
-    let root = std::env::args().nth(1).expect("usage: packet_entity_probe <folder-or-demo>");
+    let root = std::env::args()
+        .nth(1)
+        .expect("usage: packet_entity_probe <folder-or-demo>");
     let root = std::path::PathBuf::from(root);
 
     let mut demos: Vec<std::path::PathBuf> = Vec::new();
@@ -85,9 +98,14 @@ fn main() {
     }
     demos.sort();
 
-    println!("{:<58} {:>6} {:>10} {:>9}  verdict", "demo", "peak", "at (demo s)", "over 256");
+    println!(
+        "{:<58} {:>6} {:>10} {:>9}  verdict",
+        "demo", "peak", "at (demo s)", "over 256"
+    );
     for path in &demos {
-        let Ok(bytes) = std::fs::read(path) else { continue };
+        let Ok(bytes) = std::fs::read(path) else {
+            continue;
+        };
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         match measure(&bytes) {
             Some(p) => {
@@ -98,9 +116,15 @@ fn main() {
                 } else {
                     "ok"
                 };
-                println!("{name:<58} {:>6} {:>10.1} {:>9}  {verdict}", p.entities, p.time, p.over_legacy);
+                println!(
+                    "{name:<58} {:>6} {:>10.1} {:>9}  {verdict}",
+                    p.entities, p.time, p.over_legacy
+                );
                 if let Some((t, c)) = p.first_breach {
-                    println!("    first over {LEGACY_LIMIT} at demo t={t:.1}s ({c} entities); opening snapshots: {:?}", p.opening);
+                    println!(
+                        "    first over {LEGACY_LIMIT} at demo t={t:.1}s ({c} entities); opening snapshots: {:?}",
+                        p.opening
+                    );
                 }
             }
             None => println!("{name:<58} {:>6}", "<unparseable>"),

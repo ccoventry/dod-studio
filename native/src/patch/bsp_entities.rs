@@ -42,7 +42,10 @@ pub struct MapEntity {
 impl MapEntity {
     /// First value for `key`, or `None`.
     pub fn get(&self, key: &str) -> Option<&str> {
-        self.pairs.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str())
+        self.pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     }
 
     pub fn classname(&self) -> &str {
@@ -64,8 +67,14 @@ impl MapEntity {
     /// `renderamt` key is not faintly visible, it is *invisible*, and that is
     /// what makes it free to remove.
     pub fn render(&self) -> (i32, i32) {
-        let mode = self.get("rendermode").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-        let amt = self.get("renderamt").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+        let mode = self
+            .get("rendermode")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
+        let amt = self
+            .get("renderamt")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(0);
         (mode, amt)
     }
 }
@@ -120,7 +129,9 @@ pub fn parse_entity_text(text: &str) -> Result<Vec<MapEntity>, String> {
 /// Returns the contents and the byte index just past the closing quote.
 fn take_quoted(text: &str, at: usize) -> Result<(String, usize), String> {
     let rest = &text[at + 1..];
-    let end = rest.find('"').ok_or_else(|| format!("entity lump: unterminated string at {at}"))?;
+    let end = rest
+        .find('"')
+        .ok_or_else(|| format!("entity lump: unterminated string at {at}"))?;
     Ok((rest[..end].to_string(), at + 1 + end + 1))
 }
 
@@ -315,12 +326,17 @@ mod tests {
     #[test]
     fn rewriting_entities_preserves_every_other_lump() {
         let original = synthetic_bsp(SAMPLE);
-        let trimmed = rewrite_entity_lump(&original, "{\n\"classname\" \"worldspawn\"\n}\n").unwrap();
+        let trimmed =
+            rewrite_entity_lump(&original, "{\n\"classname\" \"worldspawn\"\n}\n").unwrap();
         for index in 1..LUMP_COUNT {
             let (o1, l1) = lump_span(&original, index).unwrap();
             let (o2, l2) = lump_span(&trimmed, index).unwrap();
             assert_eq!(l1, l2, "lump {index} changed length");
-            assert_eq!(&original[o1..o1 + l1], &trimmed[o2..o2 + l2], "lump {index} changed bytes");
+            assert_eq!(
+                &original[o1..o1 + l1],
+                &trimmed[o2..o2 + l2],
+                "lump {index} changed bytes"
+            );
         }
     }
 

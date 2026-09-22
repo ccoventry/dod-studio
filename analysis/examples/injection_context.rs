@@ -5,7 +5,9 @@ use dem::open_demo_from_bytes;
 use dem::types::{EngineMessage, FrameData, MessageData, NetMessage};
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: injection_context <demo.dem>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: injection_context <demo.dem>");
     let bytes = std::fs::read(&path).expect("read");
     let demo = open_demo_from_bytes(&bytes).expect("parse");
 
@@ -18,8 +20,11 @@ fn main() {
     for entry in demo.directory.entries.iter() {
         for f in &entry.frames {
             if let FrameData::NetworkMessage(bt) = &f.frame_data
-                && let MessageData::Parsed(msgs) = &bt.1.messages {
-                    let names: Vec<&str> = msgs.iter().map(|m| match m {
+                && let MessageData::Parsed(msgs) = &bt.1.messages
+            {
+                let names: Vec<&str> = msgs
+                    .iter()
+                    .map(|m| match m {
                         NetMessage::EngineMessage(em) => match &**em {
                             EngineMessage::SvcPacketEntities(_) => "svc_packetentities(FULL)",
                             EngineMessage::SvcDeltaPacketEntities(_) => "svc_deltapacketentities",
@@ -30,27 +35,37 @@ fn main() {
                             _ => "other",
                         },
                         NetMessage::UserMessage(_) => "usermsg",
-                    }).collect();
-                    if names.contains(&"svc_packetentities(FULL)") {
-                        injection_points.push(idx);
-                    }
-                    rows.push((idx, f.time, names.join(",")));
+                    })
+                    .collect();
+                if names.contains(&"svc_packetentities(FULL)") {
+                    injection_points.push(idx);
                 }
+                rows.push((idx, f.time, names.join(",")));
+            }
             idx += 1;
         }
     }
 
     println!("{path}");
-    println!("{} network-message frames total, {} full SvcPacketEntities found",
-        rows.len(), injection_points.len());
+    println!(
+        "{} network-message frames total, {} full SvcPacketEntities found",
+        rows.len(),
+        injection_points.len()
+    );
     for &at in &injection_points {
         let row = rows.iter().position(|(i, ..)| *i == at).unwrap();
         let lo = row.saturating_sub(10);
         let hi = (row + 15).min(rows.len());
-        println!("\n=== injection at network-frame {at} (t={:.2}s) ===", rows[row].1);
+        println!(
+            "\n=== injection at network-frame {at} (t={:.2}s) ===",
+            rows[row].1
+        );
         for r in lo..hi {
             let marker = if r == row { " <-- INJECTED" } else { "" };
-            println!("  frame {:>7} t={:>8.2}s  {}{marker}", rows[r].0, rows[r].1, rows[r].2);
+            println!(
+                "  frame {:>7} t={:>8.2}s  {}{marker}",
+                rows[r].0, rows[r].1, rows[r].2
+            );
         }
     }
 }

@@ -29,11 +29,14 @@ fn main() {
                     .to_string();
 
                 let escaped = cmd_str.replace("\\", "\\\\").replace("\"", "\\\"");
-                results.push(format!(r#"{{"i":{},"t":{},"cmd":"{}"}}"#, index, frame.frame, escaped));
+                results.push(format!(
+                    r#"{{"i":{},"t":{},"cmd":"{}"}}"#,
+                    index, frame.frame, escaped
+                ));
             }
             index += 1;
         }
     }
-    
+
     println!("[{}]", results.join(","));
 }

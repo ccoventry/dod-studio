@@ -1,6 +1,10 @@
-use std::path::PathBuf;
-use std::sync::{Arc, mpsc::Sender, atomic::{AtomicBool, Ordering}};
 use crate::log_markdown;
+use std::path::PathBuf;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+    mpsc::Sender,
+};
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct CaptureJob {
@@ -101,7 +105,11 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
         sys.refresh_processes();
-        if !sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe")) {
+        if !sys
+            .processes()
+            .values()
+            .any(|p| p.name().eq_ignore_ascii_case("hl.exe"))
+        {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -144,13 +152,23 @@ impl CaptureCleanupGuard {
     ) -> Self {
         // Pre-clean any stale signal dirs/junctions from a previous aborted run.
         if let Err(e) = std::fs::remove_dir_all(&exit_trigger)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::new] Failed to pre-clean exit_trigger {:?}: {}", exit_trigger, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::new] Failed to pre-clean exit_trigger {:?}: {}",
+                exit_trigger,
+                e
+            );
+        }
         if let Err(e) = std::fs::remove_dir(&session_junction)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::new] Failed to pre-clean session_junction {:?}: {}", session_junction, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::new] Failed to pre-clean session_junction {:?}: {}",
+                session_junction,
+                e
+            );
+        }
         Self {
             exit_trigger,
             session_junction,
@@ -176,21 +194,32 @@ impl Drop for CaptureCleanupGuard {
         // to report to, and a cleanup path that panics is worse than one that
         // quietly does nothing.
         if let Some(obs) = self.obs.take()
-            && let Ok(mut guard) = obs.lock() {
-                if let Some(client) = guard.as_mut() {
-                    client.stop_record_quietly();
-                }
-                *guard = None;
+            && let Ok(mut guard) = obs.lock()
+        {
+            if let Some(client) = guard.as_mut() {
+                client.stop_record_quietly();
             }
+            *guard = None;
+        }
 
         if let Err(e) = std::fs::remove_dir_all(&self.exit_trigger)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::drop] Failed to remove exit_trigger {:?}: {}", self.exit_trigger, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::drop] Failed to remove exit_trigger {:?}: {}",
+                self.exit_trigger,
+                e
+            );
+        }
         if let Err(e) = std::fs::remove_dir(&self.session_junction)
-            && e.kind() != std::io::ErrorKind::NotFound {
-                log::warn!("[GC::drop] Failed to remove session_junction {:?}: {}", self.session_junction, e);
-            }
+            && e.kind() != std::io::ErrorKind::NotFound
+        {
+            log::warn!(
+                "[GC::drop] Failed to remove session_junction {:?}: {}",
+                self.session_junction,
+                e
+            );
+        }
 
         if let Some(game_root) = self.exit_trigger.parent() {
             crate::shared::paths::clear_capture_scratch(
@@ -262,7 +291,7 @@ pub fn spawn_capture_engine(
 
             let exit_trigger = hl_exe_parent.join("DOD_STUDIO_EXIT_TRIGGER");
             let session_junction = hl_exe_parent.join("dodstudio_session");
-            
+
             let mut _cleanup_guard = CaptureCleanupGuard::new(
                 exit_trigger.clone(),
                 session_junction.clone(),
@@ -1028,7 +1057,10 @@ mod tests {
         assert!(!dod.join("dodstudio_primer.dem").exists());
         assert!(!dod.join("dodstudio_chain_01.dem").exists());
         assert!(!dod.join("dodstudio_chain_02.dem").exists());
-        assert!(dod.join("not_a_chain_demo.dem").exists(), "must not touch an unrelated file");
+        assert!(
+            dod.join("not_a_chain_demo.dem").exists(),
+            "must not touch an unrelated file"
+        );
     }
 
     /// `save_local_patched_copy` means the user asked to keep these files --

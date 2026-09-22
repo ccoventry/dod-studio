@@ -14,7 +14,8 @@ impl Doer for SvcParticle {
                 count,
                 color,
             },
-        ).parse(i)
+        )
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

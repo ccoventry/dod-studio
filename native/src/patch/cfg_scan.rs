@@ -81,7 +81,8 @@ impl CfgScan {
     /// configs it actually executes. Last one wins, as the console does.
     pub fn effective(&self, cvar: &str) -> Option<&CvarSetting> {
         self.settings
-            .iter().rfind(|s| s.auto_executed && s.cvar.eq_ignore_ascii_case(cvar))
+            .iter()
+            .rfind(|s| s.auto_executed && s.cvar.eq_ignore_ascii_case(cvar))
     }
 
     /// Every watched cvar that an executed config sets.
@@ -309,8 +310,16 @@ pub struct FatalCvar {
 }
 
 pub const FATAL_CVARS: &[FatalCvar] = &[
-    FatalCvar { cvar: "r_drawentities", required: "1", needs_sv_cheats: true },
-    FatalCvar { cvar: "cl_lw", required: "1", needs_sv_cheats: false },
+    FatalCvar {
+        cvar: "r_drawentities",
+        required: "1",
+        needs_sv_cheats: true,
+    },
+    FatalCvar {
+        cvar: "cl_lw",
+        required: "1",
+        needs_sv_cheats: false,
+    },
 ];
 
 /// Whether an executed config turns cheats on, which is what decides if a
@@ -425,8 +434,12 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// it fires mid-clip — between one block's route alias and the next — and
 /// genuinely misroutes that block's frames, which is the danger it was
 /// originally banned everywhere for.
-pub const SCHEDULED_BANNED_COMMANDS: &[&str] =
-    &["r_decals", "mirv_fov", "gl_widescreenfov", "mirv_movie_filename"];
+pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
+    "r_decals",
+    "mirv_fov",
+    "gl_widescreenfov",
+    "mirv_movie_filename",
+];
 
 /// Commands GoldSrc itself silently drops whenever they arrive via a demo's
 /// own message stream — Initial Commands (STUFFTEXT, injected right after
@@ -616,9 +629,10 @@ pub fn scan_cached(game_dir: &Path) -> std::sync::Arc<CfgScan> {
     let key = normalise(game_dir);
 
     if let Ok(read) = cache.read()
-        && let Some(hit) = read.get(&key) {
-            return std::sync::Arc::clone(hit);
-        }
+        && let Some(hit) = read.get(&key)
+    {
+        return std::sync::Arc::clone(hit);
+    }
 
     let scanned = std::sync::Arc::new(scan(game_dir));
     if let Ok(mut write) = cache.write() {
@@ -752,7 +766,9 @@ fn commands_in(line: &str) -> Vec<String> {
 /// `+mlook` and `-attack` are commands with a sign prefix, never assignments.
 fn is_cvar_name(token: &str) -> bool {
     let mut chars = token.chars();
-    chars.next().is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
         && token.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
@@ -816,7 +832,11 @@ mod tests {
     fn a_subcommand_is_not_an_assignment() {
         // `mirv_fov handleZoom enabled 1` appears in real movie configs.
         let dir = scratch("subcommand");
-        std::fs::write(dir.join("config.cfg"), "mirv_fov handleZoom enabled \"1\"\n").unwrap();
+        std::fs::write(
+            dir.join("config.cfg"),
+            "mirv_fov handleZoom enabled \"1\"\n",
+        )
+        .unwrap();
 
         assert!(scan(&dir).effective("mirv_fov").is_none());
     }
@@ -875,7 +895,10 @@ mod tests {
         assert_eq!(hits[0].cvar, "mirv_movie_fps");
         assert_eq!(hits[0].shadowed_value, "500");
         assert_eq!(hits[0].winner_value, "120");
-        assert_eq!(hits[0].winner_index, 3, "so a caller can tell who appended it");
+        assert_eq!(
+            hits[0].winner_index, 3,
+            "so a caller can tell who appended it"
+        );
     }
 
     #[test]
@@ -883,10 +906,7 @@ mod tests {
         // Setting the ring mid-demo strands every decal above the new limit and
         // breaks the flush, while the capture still completes and still looks
         // plausible — so this is the one that has to be caught by name.
-        let hits = mid_demo_hazards(&[
-            "sensitivity 3".to_string(),
-            "R_Decals 128".to_string(),
-        ]);
+        let hits = mid_demo_hazards(&["sensitivity 3".to_string(), "R_Decals 128".to_string()]);
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "r_decals");
@@ -899,10 +919,7 @@ mod tests {
         // capture_fov_resolved, read once as a pre-pass before the demo
         // plays — a Scheduled Command changing it mid-clip doesn't
         // retroactively resize anything the flush already decided.
-        let hits = mid_demo_hazards(&[
-            "sensitivity 3".to_string(),
-            "mirv_fov 105".to_string(),
-        ]);
+        let hits = mid_demo_hazards(&["sensitivity 3".to_string(), "mirv_fov 105".to_string()]);
 
         assert_eq!(hits.len(), 1);
         assert_eq!(hits[0].0, "mirv_fov");
@@ -1033,7 +1050,11 @@ mod tests {
         // A config that sets it wrong and then corrects it is not a hazard --
         // that is genuinely the value the engine ends up running with.
         let dir = scratch("fatal_corrected");
-        std::fs::write(dir.join("config.cfg"), "r_drawentities \"0\"\nr_drawentities \"1\"\n").unwrap();
+        std::fs::write(
+            dir.join("config.cfg"),
+            "r_drawentities \"0\"\nr_drawentities \"1\"\n",
+        )
+        .unwrap();
 
         let scan = scan(&dir);
         assert!(fatal_cvar_hazards(&scan).is_empty());
@@ -1123,7 +1144,15 @@ mod tests {
         ]);
 
         let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["r_decals", "mirv_fov", "gl_widescreenfov", "mirv_movie_filename"]);
+        assert_eq!(
+            flagged,
+            vec![
+                "r_decals",
+                "mirv_fov",
+                "gl_widescreenfov",
+                "mirv_movie_filename"
+            ]
+        );
     }
 
     #[test]
@@ -1191,7 +1220,10 @@ mod tests {
             "mirv_movie_fps 120".to_string(),
         ];
 
-        assert_eq!(effective_in(&commands, "mirv_movie_fps").as_deref(), Some("120"));
+        assert_eq!(
+            effective_in(&commands, "mirv_movie_fps").as_deref(),
+            Some("120")
+        );
         assert_eq!(effective_in(&commands, "mirv_fov"), None);
         assert_eq!(
             assigned_cvar("mirv_movie_fps 500"),
@@ -1202,11 +1234,13 @@ mod tests {
 
     #[test]
     fn repeating_the_same_value_shadows_nothing_worth_saying() {
-        assert!(self_overrides(&[
-            "mirv_movie_fps 120".to_string(),
-            "mirv_movie_fps 120".to_string(),
-        ])
-        .is_empty());
+        assert!(
+            self_overrides(&[
+                "mirv_movie_fps 120".to_string(),
+                "mirv_movie_fps 120".to_string(),
+            ])
+            .is_empty()
+        );
     }
 
     #[test]
@@ -1214,7 +1248,11 @@ mod tests {
         let dir = scratch("agrees");
         std::fs::write(dir.join("config.cfg"), "mirv_fov \"105\"\n").unwrap();
 
-        assert!(scan(&dir).overrides_in(&["mirv_fov 105".to_string()]).is_empty());
+        assert!(
+            scan(&dir)
+                .overrides_in(&["mirv_fov 105".to_string()])
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1230,8 +1268,14 @@ mod tests {
 
         let scan = scan(&dir);
         assert_eq!(scan.effective("volume").unwrap().value, "0.5");
-        assert!(scan.effective("+mlook").is_none(), "a verb is not an assignment");
-        assert!(scan.effective("stopsound").is_none(), "nor is a bare command");
+        assert!(
+            scan.effective("+mlook").is_none(),
+            "a verb is not an assignment"
+        );
+        assert!(
+            scan.effective("stopsound").is_none(),
+            "nor is a bare command"
+        );
         assert_eq!(
             scan.overrides_in(&["volume 1".to_string()]).len(),
             1,

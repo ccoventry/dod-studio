@@ -8,7 +8,8 @@ impl Doer for SvcDisconnect {
     fn parse(i: &[u8], _: AuxRefCell) -> Result<Self> {
         map(null_string, |reason| Self {
             reason: reason.to_vec(),
-        }).parse(i)
+        })
+        .parse(i)
     }
 
     fn write(&self, _: AuxRefCell) -> ByteVec {

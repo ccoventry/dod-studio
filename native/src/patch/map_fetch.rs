@@ -78,16 +78,17 @@ pub fn fetch_map(
     // Already here and already right: say so and touch nothing.
     if target.is_file()
         && let (Some(want), Ok(found)) = (expected, bsp::map_checksum_of_file(&target))
-            && want == found {
-                return Ok(FetchOutcome {
-                    map_name: map_name.to_string(),
-                    installed: target,
-                    checksum: found,
-                    bytes: 0,
-                    replaced: None,
-                    already_correct: true,
-                });
-            }
+        && want == found
+    {
+        return Ok(FetchOutcome {
+            map_name: map_name.to_string(),
+            installed: target,
+            checksum: found,
+            bytes: 0,
+            replaced: None,
+            already_correct: true,
+        });
+    }
 
     std::fs::create_dir_all(maps_dir)
         .map_err(|e| crate::messages::labeled(maps_dir.display(), e))?;
@@ -96,15 +97,15 @@ pub fn fetch_map(
 
     // What arrived, not what was asked for. A mirror can serve an error page
     // with a 200, and an error page is not a map.
-    let checksum = bsp::map_checksum(&body)
-        .map_err(|e| crate::messages::served_unreadable_bsp(&url, e))?;
-    bsp::Bsp::parse(&body)
-        .map_err(|e| crate::messages::served_unparseable_map(&url, e))?;
+    let checksum =
+        bsp::map_checksum(&body).map_err(|e| crate::messages::served_unreadable_bsp(&url, e))?;
+    bsp::Bsp::parse(&body).map_err(|e| crate::messages::served_unparseable_map(&url, e))?;
 
     if let Some(want) = expected
-        && checksum != want {
-            return Err(crate::messages::served_wrong_build(&url, checksum, want));
-        }
+        && checksum != want
+    {
+        return Err(crate::messages::served_wrong_build(&url, checksum, want));
+    }
 
     // Write beside the target so the rename cannot cross a volume, then move
     // the old file aside before putting the new one in place.
