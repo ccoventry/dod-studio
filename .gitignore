@@ -68,7 +68,7 @@ __pycache__/
 *.pyc
 
 # === Tauri Artifacts ===
-desktop-studio/src-tauri/gen/
+studio/src-tauri/gen/
 
 # === Claude Code harness state ===
 .claude/scheduled_tasks.lock

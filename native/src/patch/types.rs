@@ -470,7 +470,7 @@ fn default_capture_fov() -> f32 {
 /// Where `dodstudio_goldsrc_hooks.dll` lives if nothing overrides it: Tauri's Windows
 /// bundler places `bundle.resources` entries under a `resources` folder
 /// beside the installed app's own executable, and
-/// `desktop-studio/src-tauri/tauri.conf.json` maps this crate's release
+/// `studio/src-tauri/tauri.conf.json` maps this crate's release
 /// build to `resources/goldsrc-hooks/dodstudio_goldsrc_hooks.dll` there. In a dev
 /// build (`npm run tauri dev`) that folder won't exist -- Studio ->
 /// Configuration -> Paths' override field is the way to point at

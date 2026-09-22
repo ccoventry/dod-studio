@@ -1,7 +1,7 @@
 // strings.js
 //
 // Single centralized source for every user-facing English string in the
-// desktop-studio frontend. NOT an i18n system — no language switching, no
+// studio frontend. NOT an i18n system — no language switching, no
 // key-based lookup abstraction beyond plain named constants/functions. The
 // point is purely "one place to find/edit any UI string."
 //

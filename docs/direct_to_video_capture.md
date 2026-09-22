@@ -205,7 +205,7 @@ to trade quality for speed.
   `-i video.<ext> -i sound.wav` with `-c:v copy`. The `hud_only` case is harder and may not be
   copyable at all: it currently `alphamerge`s two BMP sequences, which means decoding both videos
   and re-encoding the result.
-- **`desktop-studio/src-tauri/src/capture_manager.rs`** — `take_folder_has_content` and
+- **`studio/src-tauri/src/capture_manager.rs`** — `take_folder_has_content` and
   `VerifiedBlock`'s two tiers, if the output layout changes shape.
 - **`native/src/hlcr/take_meta.rs`** — records the capture FPS per take and warns when a render
   interprets it at a different rate. A video take should carry the same record and the existing

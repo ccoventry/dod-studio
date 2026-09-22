@@ -19,7 +19,7 @@ Read this before judging the codebase by whichever part you happen to open.
 | `dem-patch/` — demo reader/writer | **Stable** | Vendored fork of the [`dem`](https://github.com/khanghugo/dem) crate. See *Why the fork* below. |
 | `hl-demo-auditor/` — duplicate finder | **Stable** | Small, self-contained. |
 | `native/` — capture engine & patcher | **Active development** | Works, but rough edges. Under near-continuous change. |
-| `desktop-studio/` — Tauri UI | **Active development** | Capture Studio and Render Studio are functional but **not polished**. Expect UI inconsistencies and in-flight refactors. |
+| `studio/` — Tauri UI | **Active development** | Capture Studio and Render Studio are functional but **not polished**. Expect UI inconsistencies and in-flight refactors. |
 | `web-analyzer/` — browser demo viewer | **Active development** | `analysis/` compiled to wasm, deployed to GitHub Pages on every push to `main`. |
 
 If you are here to look at demo parsing or stats extraction, `dod/` and
@@ -29,7 +29,7 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
 > [!NOTE]
 > **The GUI was rewritten.** Earlier revisions shipped an `egui` desktop app
 > with a WebAssembly target. That has been removed. The current frontend is
-> Tauri v2 + Vite under `desktop-studio/`, and the old `dod-studio-gui` binary
+> Tauri v2 + Vite under `studio/`, and the old `dod-studio-gui` binary
 > and `trunk serve` workflow no longer exist.
 
 ---
@@ -42,7 +42,7 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
     native/           capture engine, demo patcher, take management, FFmpeg
     hl-demo-auditor/  duplicate-demo detector
     benchmark/        parsing/patching performance harness
-    desktop-studio/   Tauri v2 + Vite frontend
+    studio/   Tauri v2 + Vite frontend
     web-analyzer/     analysis/ compiled to wasm, browser-based demo viewer
 
 ## Quick start
@@ -57,7 +57,7 @@ Headless preview CLI (accepts a demo or a folder):
 
 Desktop app:
 
-    cd desktop-studio
+    cd studio
     npm install
     npm run tauri dev
 

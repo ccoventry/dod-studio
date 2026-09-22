@@ -1,11 +1,11 @@
 // messages.rs
 // native's own error-string catalog — the same idea as
-// desktop-studio/src-tauri/src/messages.rs (itself the counterpart to the
+// studio/src-tauri/src/messages.rs (itself the counterpart to the
 // frontend's strings.js), but crate-local: native has no direct UI of its
 // own, but many of its `Result<T, String>` errors bubble straight through a
-// Tauri command (desktop-studio's messages.rs wraps them with extra context,
+// Tauri command (studio's messages.rs wraps them with extra context,
 // e.g. `failed_to_patch_preview_demo`, but the inner text — what actually
-// went wrong — is authored here). Scoped to the modules desktop-studio's
+// went wrong — is authored here). Scoped to the modules studio's
 // Tauri layer actually calls (patch::map_fetch, shared::hlae_ffmpeg,
 // obs::session) — native's CLI probe binaries (native/src/bin/*) are never
 // reachable from the app and are out of scope. Issue #33.

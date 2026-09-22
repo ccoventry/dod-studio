@@ -5,9 +5,9 @@ independent Python/PySide6 rewrite of the render tool lives in the sibling
 repo `../HLCR` (`ui/main_window.py`, `ui/styles.py`, `workers/render_job.py`,
 `workers/scanner.py`, `core/*.py`) and is referenced once already in
 `archive/tauri_parity_audit.md` (§5, the H.264 codec-default decision). The user
-wants dod-studio' Render Studio tab (`desktop-studio/index.html`'s
-`#render-studio-panel`, `desktop-studio/src/render_pane.js`, backed by
-`native/src/hlcr/` + `desktop-studio/src-tauri`'s `render_manager.rs`) to
+wants dod-studio' Render Studio tab (`studio/index.html`'s
+`#render-studio-panel`, `studio/src/render_pane.js`, backed by
+`native/src/hlcr/` + `studio/src-tauri`'s `render_manager.rs`) to
 move closer to what HLCR does. This doc is the field-by-field diff a
 research pass produced, so whoever picks this up doesn't have to re-derive
 it. Not triaged into Medium/Low priority yet — do that once the user picks
@@ -32,7 +32,7 @@ don't regress these while porting).
 - **GAP — Global aggregate progress bar.** HLCR shows one fixed-width
   `QProgressBar` averaging every active job's % (`ui/main_window.py:247-251`,
   `914-927`) above the per-job bars. dod-studio only has per-job progress bars
-  (`desktop-studio/src/render_pane.js:156-161`), no at-a-glance batch total.
+  (`studio/src/render_pane.js:156-161`), no at-a-glance batch total.
 - **GAP — Table checkbox multi-select + bulk actions.** HLCR's queue table
   has a checkbox column plus Select All/Deselect All/Delete Selected
   (`ui/main_window.py:265-268`, `929-1007`). dod-studio' render jobs table

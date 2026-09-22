@@ -1,5 +1,5 @@
 // ============================================================
-// desktop-studio/src-tauri/src/capture_manager.rs
+// studio/src-tauri/src/capture_manager.rs
 //
 // Headless CaptureManager — bridges the native patch pipeline
 // into Tauri's managed-state system.

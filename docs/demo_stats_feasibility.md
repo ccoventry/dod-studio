@@ -84,7 +84,7 @@ CLI entry point) is in the artifact's "What would make it usable for the league"
   merge. If you're on one of those branches and want the probes, `git show
   dev:analysis/examples/<file>` rather than assuming they're in your working tree.
 - **README rewritten** with a component-maturity table (stable: `dod/`, `analysis/`,
-  `dem-patch/`, `hl-demo-auditor/`; active development: `native/`, `desktop-studio/`), the
+  `dem-patch/`, `hl-demo-auditor/`; active development: `native/`, `studio/`), the
   `dem`-fork rationale, and the localization key convention.
 
 ## One thing worth knowing if you're evaluating the `dem` crate independently

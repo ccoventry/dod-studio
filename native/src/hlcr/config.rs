@@ -34,7 +34,7 @@ pub struct RenderConfig {
 impl RenderCodec {
     /// Maps the frontend's codec-select string values to the enum used by
     /// `run_render_job`. Unrecognized values fall back to ProRes, matching
-    /// `desktop-studio`'s prior `codec_args_and_ext()` default.
+    /// `studio`'s prior `codec_args_and_ext()` default.
     pub fn from_str_id(id: &str) -> Self {
         match id {
             "h264" => Self::H264Software,

@@ -2,7 +2,7 @@
 #
 # Pins the policy explicitly instead of leaving git to re-guess it every status
 # check under core.autocrlf — the guess can false-positive a byte-identical
-# file as "modified" (seen repeatedly on desktop-studio/src-tauri/Cargo.toml).
+# file as "modified" (seen repeatedly on studio/src-tauri/Cargo.toml).
 #
 # Every tracked text file in this repo is already stored LF-clean in the index,
 # so the catch-all below codifies what is already true rather than rewriting

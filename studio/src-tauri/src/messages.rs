@@ -1,5 +1,5 @@
 // messages.rs
-// Rust-side counterpart to desktop-studio/src/strings.js: the Tauri command
+// Rust-side counterpart to studio/src/strings.js: the Tauri command
 // layer's own authored user-facing error/status text, centralized so the
 // same message can't drift into two different wordings at two call sites
 // (see the "Task join error: {}" cluster below, previously duplicated

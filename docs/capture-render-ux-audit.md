@@ -48,7 +48,7 @@ real percentage if the event payload carries `index`/`total`; when it doesn't
 **50%** and leaves it there until the batch ends:
 
 ```js
-// desktop-studio/src/capture_pane.js:517-524
+// studio/src/capture_pane.js:517-524
 if (payload.index !== undefined && payload.total && payload.total > 0) {
   const pct = Math.min(100, Math.round((payload.index / payload.total) * 100));
   progressBar.style.width = `${pct}%`;
@@ -113,7 +113,7 @@ another, or vice versa, because there are three separate implementations of
 "is there enough room":
 
 1. **JS pre-flight** — `computeRequiredCaptureBytes` in
-   `desktop-studio/src/capture_pane.js:63-121` re-implements the pre/post-roll
+   `studio/src/capture_pane.js:63-121` re-implements the pre/post-roll
    merge-window billing logic in JavaScript to decide whether to disable the
    Start button.
 2. **Rust AOT allocation** — `allocate_blocks_first_fit_decreasing` +
@@ -172,7 +172,7 @@ Commands) attaches its text-field listener to `'input'`, which fires per
 keystroke:
 
 ```js
-// desktop-studio/src/list_editor.js:75-79
+// studio/src/list_editor.js:75-79
 input.addEventListener('input', (e) => {
   const v = field.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
   setFieldValue(items, idx, field, v);
@@ -200,8 +200,8 @@ it doesn't change when values are visible in the DOM, only when they hit disk.
 **(d) Risk vs. guardrails.** Low, UI-only, no guardrail implicated. Purely a
 responsiveness/IO-volume issue.
 
-**(e) UI-only or engine?** UI-only (`desktop-studio/src/list_editor.js`,
-`desktop-studio/src/main.js`).
+**(e) UI-only or engine?** UI-only (`studio/src/list_editor.js`,
+`studio/src/main.js`).
 
 ---
 
@@ -313,7 +313,7 @@ cancel latency) is minor.
 render jobs with no guardrail tied to actual hardware:
 
 ```js
-// desktop-studio/src/render_pane.js:302
+// studio/src/render_pane.js:302
 const maxConcurrentVal = Math.min(8, Math.max(1, parseInt(...) || 2));
 ```
 
@@ -381,7 +381,7 @@ pick `Captured` or `Rendered` directly, with no confirmation and no visual
 difference from a status the pipeline actually verified on disk:
 
 ```js
-// desktop-studio/src/detail_pane.js:482-487
+// studio/src/detail_pane.js:482-487
 statusSelect.addEventListener('change', (e) => {
   streak.status = e.target.value;
   statusSelect.style.color = statusColors[e.target.value] || '#888';
@@ -407,7 +407,7 @@ manually, not verified on disk") so the Master Queue counts stay honest.
 **(d) Risk vs. guardrails.** Low — a data-integrity/trust issue in the UI
 layer, not a process or memory-safety concern.
 
-**(e) UI-only or engine?** UI-only (`desktop-studio/src/detail_pane.js`).
+**(e) UI-only or engine?** UI-only (`studio/src/detail_pane.js`).
 
 ---
 
@@ -428,7 +428,7 @@ row back to its file on disk.
 **(c) Implementation sketch.** The IPC command already exists and is already
 wired up elsewhere in the app (`auditor_pane.js:213`, calling
 `ipc_bridge.js`'s `revealInExplorer(path)`, backed by a Tauri command). This is
-purely a frontend wiring gap in `desktop-studio/src/render_pane.js`'s
+purely a frontend wiring gap in `studio/src/render_pane.js`'s
 `renderJobsTable()` (add a button next to the existing cancel/reset/view-log
 actions, using `job.output_path` from the `RenderJob` autosave schema in
 `native/src/hlcr/autosave.rs:16-25`, which already carries it).
