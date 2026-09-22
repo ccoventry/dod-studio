@@ -18,11 +18,25 @@ on:
     # runs at all and sit stuck as "expected, waiting" with no way to
     # satisfy the rule short of a stub workflow -- cheaper to always run
     # than to carry that trap.
+  # Runs on dev too, and that run is the only one that saves the Rust cache
+  # (`save-if` below). GitHub scopes a cache to the ref that saved it: a PR can
+  # restore its base branch's cache but never another PR's. With only PR runs,
+  # dev never had one, so every PR compiled all ~400 crates from scratch --
+  # "No cache found", 8-10 minutes a job -- and each saved ~900 MB nobody
+  # could read, evicting the rest.
+  push:
+    branches: [dev]
 
 jobs:
   rust-tests:
     name: Rust workspace tests
     runs-on: windows-latest
+    env:
+      # No debug info in test builds: nothing here reads it, and on Windows
+      # generating and linking it is a real share of the build. Panic messages
+      # still carry file:line.
+      CARGO_PROFILE_DEV_DEBUG: "0"
+      CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
       - uses: actions/checkout@v4
 
@@ -31,6 +45,8 @@ jobs:
           targets: i686-pc-windows-msvc
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/dev' }}
 
       # studio's build script validates every `bundle.resources` entry
       # in tauri.conf.json exists on disk, and one of them is this 32-bit
@@ -81,6 +97,8 @@ jobs:
         run: cargo fmt --all --check
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.ref == 'refs/heads/dev' }}
 
       # studio's build script validates every `bundle.resources` entry
       # in tauri.conf.json exists on disk, and one of them is this 32-bit
