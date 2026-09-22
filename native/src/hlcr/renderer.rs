@@ -371,6 +371,14 @@ pub async fn run_render_job(
                 codec_args.extend_from_slice(&["-c:v", "dnxhd", "-profile:v", "dnxhr_hq", "-pix_fmt", "yuv422p"]);
                 ".mov"
             }
+            super::config::RenderCodec::HuffYuv => {
+                codec_args.extend_from_slice(&["-c:v", "huffyuv", "-pix_fmt", "yuv422p"]);
+                ".avi"
+            }
+            super::config::RenderCodec::Uncompressed => {
+                codec_args.extend_from_slice(&["-c:v", "rawvideo", "-pix_fmt", "yuv422p"]);
+                ".avi"
+            }
             // `is_source_copy` already returned before this match — it has
             // its own extension and never runs an FFmpeg encode at all. Not
             // `unreachable!()`: release builds run with `panic = "abort"`
@@ -397,7 +405,8 @@ pub async fn run_render_job(
     // same PCM bytes remuxed into a .mov container instead, where ffmpeg uses
     // the older/broadly-supported `sowt` tag, play back correctly everywhere).
     // AAC sidesteps the whole box-tag mess and is the standard choice for MP4
-    // audio; ProRes/DNxHD stay lossless PCM since those already output .mov.
+    // audio; every other codec here (ProRes/DNxHD's .mov, HuffYUV/rawvideo's
+    // .avi) stays lossless PCM since none of them are .mp4.
     let audio_codec_args: &[&str] = if file_ext == ".mp4" {
         &["-c:a", "aac", "-b:a", "192k"]
     } else {

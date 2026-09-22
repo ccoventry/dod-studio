@@ -13,6 +13,12 @@ pub enum RenderCodec {
     H264Software,
     ProRes,
     DnxHr,
+    /// Lossless. Pairs with the AVI container, HuffYUV's native home and the
+    /// one every decoder actually expects it in.
+    HuffYuv,
+    /// `-c:v rawvideo` — no compression at all, not even the intra-frame
+    /// kind HuffYUV does. Same AVI container as HuffYUV, for the same reason.
+    Uncompressed,
     /// "Skip" — leave an OBS take exactly as OBS wrote it: no FFmpeg pass at
     /// all, just a copy into the export pool under the pipeline's naming.
     /// Only meaningful for a clip with its own muxed-in audio (`ClipData.wav_file
@@ -40,6 +46,8 @@ impl RenderCodec {
             "h264" => Self::H264Software,
             "h264_nvenc" => Self::NvencH264,
             "dnxhr" => Self::DnxHr,
+            "huffyuv" => Self::HuffYuv,
+            "uncompressed" => Self::Uncompressed,
             "source_copy" => Self::SourceCopy,
             _ => Self::ProRes,
         }
@@ -53,6 +61,8 @@ impl RenderCodec {
             Self::H264Software => "h264",
             Self::NvencH264 => "h264_nvenc",
             Self::DnxHr => "dnxhr",
+            Self::HuffYuv => "huffyuv",
+            Self::Uncompressed => "uncompressed",
             Self::ProRes => "prores",
             Self::SourceCopy => "source_copy",
         }
@@ -65,6 +75,8 @@ impl RenderCodec {
             Self::H264Software => "H.264 (Software)",
             Self::NvencH264 => "H.264 (NVENC)",
             Self::DnxHr => "DNxHR",
+            Self::HuffYuv => "HuffYUV",
+            Self::Uncompressed => "Uncompressed",
             Self::ProRes => "ProRes",
             Self::SourceCopy => "Skip (Keep Original)",
         }
@@ -122,7 +134,15 @@ mod tests {
         // to_str_id/from_str_id must stay inverses — autosave recovery
         // (render_manager.rs's recover_render_batch) round-trips a persisted
         // codec through exactly this pair.
-        for codec in [RenderCodec::NvencH264, RenderCodec::H264Software, RenderCodec::ProRes, RenderCodec::DnxHr, RenderCodec::SourceCopy] {
+        for codec in [
+            RenderCodec::NvencH264,
+            RenderCodec::H264Software,
+            RenderCodec::ProRes,
+            RenderCodec::DnxHr,
+            RenderCodec::HuffYuv,
+            RenderCodec::Uncompressed,
+            RenderCodec::SourceCopy,
+        ] {
             assert_eq!(RenderCodec::from_str_id(codec.to_str_id()), codec);
         }
     }

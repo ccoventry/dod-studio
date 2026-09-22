@@ -463,6 +463,8 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
+    CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
     CODEC_H264_NVENC: 'H.264 (NVENC GPU, MP4)',
     SOURCE_FPS_LABEL: 'Source FPS:',
