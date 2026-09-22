@@ -11,7 +11,7 @@
 //! client interface through a single `F` export instead. See `engine.rs`'s
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
-//! Implements two fixes and two control surfaces, each independent of the
+//! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
 //! - `sound_fix`: force full-volume weapon-fire audio while spectating.
 //! - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -25,6 +25,10 @@
 //! - `msglog`: the `dodtools_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
+//! - `hide_sprite`: the `dodtools_hide_sprite <model-path>...` command --
+//!   suppress specific map-placed `env_sprite` entities by model path, an
+//!   allow-list rather than a blanket toggle. Full design write-up in the
+//!   module doc itself (issue #315).
 //! - `scoreboard`: the `dodtools_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -34,8 +38,17 @@
 //! - `crosshair`: the `dodtools_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
+//! - `objicons`: the `dodtools_objectives` command -- place the objective
+//!   (territory flag) icon row and timer, which the game itself draws at a
+//!   different y while spectating than it does in a POV demo. Full design
+//!   write-up in `docs/goldsrc_objective_icons.md`.
+//! - `spectator_crosshair`: the `dodtools_match_pov_crosshair` cvar -- draw the
+//!   spectator crosshair from the same sprite and tile a player's own
+//!   `cl_xhair_style` picks, since the two are drawn by different code paths
+//!   and do not otherwise share a look.
 //!
-//! The last three are all in `docs/goldsrc_hud_suppression.md`.
+//! The scoreboard/voice/crosshair/spectator_crosshair four are all in
+//! `docs/goldsrc_hud_suppression.md`.
 //!
 //! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
 //! at a `dodtools_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
@@ -66,10 +79,14 @@ mod deathmsg;
 mod detour;
 mod debug;
 mod engine;
+mod ex_interp;
 mod hand_signals;
+mod hide_sprite;
 mod hudelement;
 mod msglog;
 mod names;
+mod objicons;
+mod overview_map;
 mod patch;
 mod pe;
 mod scan;

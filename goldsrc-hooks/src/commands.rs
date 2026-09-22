@@ -1,4 +1,4 @@
-//! The `dodtools_*` console surface: nine cvars and three commands.
+//! The `dodtools_*` console surface: eleven cvars and eight commands.
 //!
 //! ## Why cvars rather than commands
 //!
@@ -47,8 +47,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, hand_signals, hudelement, scoreboard, sound_fix,
-    spectator_crosshair, spectator_target, voice,
+    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
+    sound_fix, spectator_crosshair, spectator_target, voice,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -68,6 +68,8 @@ const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
+const EX_INTERP_NAME: &str = ex_interp::NAME;
+const OVERVIEWMAP_NAME: &str = overview_map::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -83,6 +85,7 @@ static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut()
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -213,6 +216,8 @@ static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static HUDELEMENT_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static EX_INTERP_COMPLAINED: AtomicI32 = AtomicI32::new(0);
+static OVERVIEWMAP_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Three of these cvars do not set a flag the rest of the crate reads -- they
 /// write to `client.dll`'s code. Those are handed to their `apply` every frame
@@ -288,6 +293,66 @@ fn poll_hand_signals() {
         };
     }
     hand_signals::apply();
+}
+
+/// Reads the ceiling out of the cvar and writes it into the engine's clamp.
+///
+/// Its own poll rather than `poll_code_patch`'s because the setting is a value,
+/// not a flag -- and it complains on the *value* rather than once, so changing
+/// the cvar to another bad number says so again while an unchanged bad one
+/// stays quiet.
+fn poll_ex_interp() {
+    let ptr = CVAR_EX_INTERP.load(Ordering::Relaxed);
+    if ptr.is_null() {
+        return;
+    }
+    let wanted = unsafe { (*ptr).value };
+    if !wanted.is_finite() {
+        return;
+    }
+    let wanted = wanted as i32;
+    match ex_interp::set_max(wanted) {
+        Ok(false) => EX_INTERP_COMPLAINED.store(0, Ordering::Relaxed),
+        Ok(true) => {
+            EX_INTERP_COMPLAINED.store(0, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} -- {}", ex_interp::status()))
+            };
+        }
+        Err(why) => {
+            if EX_INTERP_COMPLAINED.swap(wanted, Ordering::Relaxed) != wanted {
+                unsafe {
+                    crate::debug::report(&format!("commands: {EX_INTERP_NAME} = {wanted} not applied -- {why}"))
+                };
+            }
+        }
+    }
+}
+
+/// Re-asserts any held overview-map rectangle. `VidInit` recomputes both on a
+/// resolution change or a level load, so holding one means writing it again.
+fn poll_overviewmap() {
+    if !overview_map::any_held() {
+        return;
+    }
+    match overview_map::apply() {
+        Ok(0) => OVERVIEWMAP_COMPLAINED.store(false, Ordering::Relaxed),
+        Ok(written) => {
+            OVERVIEWMAP_COMPLAINED.store(false, Ordering::Relaxed);
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {OVERVIEWMAP_NAME} re-applied {written} field(s) -- VidInit had recomputed them"
+                ))
+            };
+        }
+        Err(why) => {
+            if !OVERVIEWMAP_COMPLAINED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} not applied -- {why}"))
+                };
+            }
+        }
+    }
 }
 
 /// `dodtools_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
@@ -374,10 +439,15 @@ pub fn poll() {
             describe_spectator_crosshair,
         );
         poll_hand_signals();
+        poll_ex_interp();
     }
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
+    // dodtools_overviewmap keeps its own state -- held rects, not a cvar --
+    // so it belongs here alongside hudelement rather than in the gated block
+    // above.
+    poll_overviewmap();
     // Re-prepends our DeathMsg handler when the engine has rebuilt the user
     // message list (it frees the whole list on disconnect). A no-op otherwise.
     crate::deathmsg::poll();
@@ -445,6 +515,11 @@ fn status_text() -> String {
     if let Some(msglog) = crate::msglog::status_line() {
         lines.push(msglog);
     }
+    // Same reasoning as msglog above: hiding is off by default and a
+    // permanent "hiding nothing" line would be noise in the common case.
+    if let Some(hide_sprite) = crate::hide_sprite::status_line() {
+        lines.push(hide_sprite);
+    }
     // The one setting the console's own type-ahead cannot report, because it
     // is a command rather than a cvar -- which is the reason the rest are left
     // out of here and this is not.
@@ -460,6 +535,14 @@ fn status_text() -> String {
     // question the cvar's own value cannot answer.
     if hand_signals::ENABLED.load(Ordering::Relaxed) || hand_signals::has_acted() {
         lines.push(format!("hand signals: {}", hand_signals::status()));
+    }
+    // Reported whenever it differs from the engine's own ceiling: the cvar says
+    // what was asked for, this says what the engine is actually clamping to.
+    if ex_interp::active() != 0 && ex_interp::active() != ex_interp::STOCK_MS {
+        lines.push(format!("interpolation: {}", ex_interp::status()));
+    }
+    if overview_map::any_held() {
+        lines.push(format!("overview map: {}", overview_map::status()));
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -798,6 +881,89 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
+/// `dodtools_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+///
+/// A command rather than a cvar: four numbers and a name do not fit in one
+/// value, and two cvars per rectangle would be eight names in the type-ahead
+/// for something set once.
+unsafe extern "C" fn cmd_overviewmap() {
+    let Some(engfuncs) = engine::engfuncs() else { return };
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+    let argv = |n: i32| -> Option<String> {
+        let raw = unsafe { (engfuncs.cmd_argv)(n) };
+        (!raw.is_null()).then(|| {
+            unsafe { CStr::from_ptr(raw as *const c_char) }.to_string_lossy().trim().to_owned()
+        })
+    };
+
+    if argc < 2 {
+        console_print(&format!(
+            "usage: {OVERVIEWMAP_NAME} <full|mini> <x> <y> <w> <h>\n       {OVERVIEWMAP_NAME} default   (let the game place them again)\n{}",
+            overview_map::listing()
+        ));
+        return;
+    }
+
+    let Some(first) = argv(1) else { return };
+    if first.eq_ignore_ascii_case("default") {
+        overview_map::release();
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: released; the next resolution change or level load recomputes them\n"
+        ));
+        unsafe { crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} default")) };
+        return;
+    }
+
+    let Some(which) = overview_map::Which::parse(&first) else {
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: no rect called \"{first}\" -- try full, mini or default\n"
+        ));
+        return;
+    };
+    if argc < 6 {
+        console_print(&format!(
+            "{OVERVIEWMAP_NAME}: {} needs four numbers -- x y w h\n",
+            which.name()
+        ));
+        return;
+    }
+
+    let mut fields = [0_i32; 4];
+    for (index, slot) in fields.iter_mut().enumerate() {
+        let Some(raw) = argv(2 + index as i32) else { return };
+        match raw.parse::<i32>() {
+            Ok(value) => *slot = value,
+            Err(_) => {
+                console_print(&format!("{OVERVIEWMAP_NAME}: \"{raw}\" is not a number\n"));
+                return;
+            }
+        }
+    }
+    let rect = overview_map::Rect { x: fields[0], y: fields[1], w: fields[2], h: fields[3] };
+
+    match overview_map::hold(which, rect).and_then(|()| overview_map::apply()) {
+        Ok(_) => {
+            console_print(&format!(
+                "{OVERVIEWMAP_NAME} {} = {rect}   (shown while _cl_minimap is {})\n",
+                which.name(),
+                which.mode()
+            ));
+            unsafe {
+                crate::debug::report(&format!(
+                    "commands: {OVERVIEWMAP_NAME} {} = {rect}",
+                    which.name()
+                ))
+            };
+        }
+        Err(why) => {
+            console_print(&format!("{OVERVIEWMAP_NAME}: {why}\n"));
+            unsafe {
+                crate::debug::report(&format!("commands: {OVERVIEWMAP_NAME} failed -- {why}"))
+            };
+        }
+    }
+}
+
 unsafe extern "C" fn cmd_log_held_models() {
     handle_toggle(HELD_MODELS_NAME, &anim_fix::LOG_HELD_MODELS, || {
         "logs the third-person model the spectated player holds, each time it changes".into()
@@ -909,12 +1075,15 @@ pub fn install() {
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
-    // Always a command, never a cvar: it has subcommands and a variable number
-    // of arguments, which a cvar's single value cannot carry.
+    // Always commands, never cvars: both have subcommands and a variable
+    // number of arguments, which a cvar's single value cannot carry.
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
+    add_commands(crate::objicons::COMMAND_NAMES, crate::objicons::command);
+    add_commands(crate::hide_sprite::COMMAND_NAMES, crate::hide_sprite::command);
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
+    add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(GUNSHOTS_FIX_NAME, bit(sound_fix::ENABLED.load(Ordering::Relaxed)));
@@ -930,6 +1099,9 @@ pub fn install() {
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
     let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
     let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
+    // Defaults to the engine's own ceiling, so registering it changes nothing
+    // until someone asks for more.
+    let ex_interp_cvar = register(EX_INTERP_NAME, &ex_interp::STOCK_MS.to_string());
 
     let (
         Some(gunshots),
@@ -942,6 +1114,7 @@ pub fn install() {
         Some(crosshair_cvar),
         Some(spectator_crosshair_cvar),
         Some(hand_signals_cvar),
+        Some(ex_interp_cvar),
     ) = (
         gunshots,
         animation,
@@ -953,6 +1126,7 @@ pub fn install() {
         crosshair_cvar,
         spectator_crosshair_cvar,
         hand_signals_cvar,
+        ex_interp_cvar,
     )
     else {
         install_fallback_commands();
@@ -969,12 +1143,13 @@ pub fn install() {
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
     CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
+    CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME} and command {STATUS_NAME}"
         ))
     };
 }
