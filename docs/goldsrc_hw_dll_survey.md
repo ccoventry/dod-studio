@@ -82,7 +82,7 @@ other direction, now confirmed against the whole database rather than a
 `strings` dump.
 
 So on the DoD client side we have the module entirely to ourselves, and
-`dodtools_deathmsg` and `dodtools_objectives` cannot be colliding with anything
+`dodstudio_deathmsg` and `dodstudio_objectives` cannot be colliding with anything
 of HLAE's. That is worth knowing with certainty rather than by inference.
 
 ---
@@ -503,7 +503,7 @@ What *is* reachable is **emptying** it, which is the thing the pipeline actually
 wanted. `R_DecalInit` alone would be a crash — it wipes the pool without
 unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
 renderer still walks. The engine's own remove functions unlink first, and
-`dodtools_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
+`dodstudio_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
 
 Note this is the one finding here that is **pre-Anniversary only**: the
 Anniversary engine compiles the remove loop differently, so `R_DecalUnlink`

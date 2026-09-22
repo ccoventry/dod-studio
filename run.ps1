@@ -6,7 +6,7 @@ Stop-Process -Name $ExeName -Force -ErrorAction SilentlyContinue
 
 # 2. Build the frontend — tauri.conf.json's frontendDist ("../dist") is embedded
 # into the binary at compile time, so it must exist and be current before cargo build.
-Push-Location desktop-studio
+Push-Location studio
 npm run build
 $frontendExit = $LASTEXITCODE
 Pop-Location

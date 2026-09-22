@@ -112,7 +112,7 @@ pub const LEVEL_MAX: i32 = LEVEL_LOOKAHEAD;
 /// empty for anything like the 3.5s option 1 produced.
 const LOOKAHEAD_SECONDS: f64 = 1.0;
 
-/// What each option is, for `dodtools_debug_status` and the startup line.
+/// What each option is, for `dodstudio_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -511,6 +511,13 @@ fn model_sequence_duration(model: *mut ModelSPartial, sequence: i32) -> f64 {
 }
 
 /// Just the labels, for everything that only needs to name a sequence.
+/// The same list, for anything outside this module that needs to know what a
+/// sequence index is called. `hand_signals` asks whether a label starts with
+/// `hs_`, and a cached walk is what keeps that a per-frame-cheap question.
+pub(crate) fn sequence_labels(model: *mut ModelSPartial) -> Vec<String> {
+    model_sequence_strings(model)
+}
+
 fn model_sequence_strings(model: *mut ModelSPartial) -> Vec<String> {
     model_sequence_info(model).into_iter().map(|(label, _)| label).collect()
 }
@@ -859,7 +866,7 @@ const STAGE_VIEWMODEL_MISMATCH: i32 = 8;
 
 fn stage_name(stage: i32) -> &'static str {
     match stage {
-        STAGE_DISABLED => "disabled (dodtools_hltv_show_viewmodel_animations is 0)",
+        STAGE_DISABLED => "disabled (dodstudio_hltv_show_viewmodel_animations is 0)",
         STAGE_NO_ENGFUNCS => "waiting for engfuncs",
         STAGE_NOT_SPECTATING => "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view",
         STAGE_NO_VIEWMODEL_ENTITY => "no viewmodel entity",
@@ -908,7 +915,7 @@ fn stage_with<A, B>(stage: i32, entity: *mut A, model: *mut B, index: i32) {
     };
 }
 
-/// One-line summary for the `dodtools_hltv_show_viewmodel_animations` status reply.
+/// One-line summary for the `dodstudio_hltv_show_viewmodel_animations` status reply.
 pub fn status() -> String {
     let seen = SEEN_VIEWMODELS.lock().unwrap();
     let count = seen.as_ref().map(|s| s.len()).unwrap_or(0);
@@ -1224,7 +1231,7 @@ pub fn apply() {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// Every label below is copied from a dump of the real
@@ -1516,9 +1523,15 @@ mod tests {
     /// the level to 1 can decide what another test observes. That was
     /// survivable while the statics only held pointers; it stopped being so
     /// once the level became a thing tests deliberately vary.
+    ///
+    /// `pub(crate)`: `commands.rs`'s own test also stores into `LEVEL`
+    /// directly (issue #321) and needs this same lock, not a second one --
+    /// two independent mutexes would serialise each module's tests against
+    /// themselves but not against each other, which is exactly the race
+    /// #321 hit.
     static TEST_STATICS: Mutex<()> = Mutex::new(());
 
-    fn lock_statics() -> std::sync::MutexGuard<'static, ()> {
+    pub(crate) fn lock_statics() -> std::sync::MutexGuard<'static, ()> {
         // A poisoned lock means some other test panicked, which is already
         // being reported -- take it anyway rather than cascading a second
         // failure into every test that follows.
@@ -1568,7 +1581,7 @@ mod tests {
         }
     }
 
-    /// Every option in range needs its own description -- `dodtools_debug_status`
+    /// Every option in range needs its own description -- `dodstudio_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

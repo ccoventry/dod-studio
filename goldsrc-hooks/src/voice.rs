@@ -1,4 +1,4 @@
-//! `dodtools_mute_voice_commands`: silence DoD's spoken voice commands without
+//! `dodstudio_mute_voice_commands`: silence DoD's spoken voice commands without
 //! overwriting the game's own `.wav` files.
 //!
 //! ## The problem this exists for
@@ -211,7 +211,7 @@ pub fn muted() -> bool {
     MUTED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_debug_status`.
+/// One line for `dodstudio_debug_status`.
 pub fn status() -> String {
     if !muted() {
         return "voice commands play normally".into();

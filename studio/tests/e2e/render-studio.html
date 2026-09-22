@@ -1,0 +1,104 @@
+<!doctype html>
+<!--
+  Minimal Render Studio test harness for the Playwright e2e suite.
+
+  This is deliberately NOT the real app shell (index.html/main.js) — booting
+  the whole app would mean stubbing every other panel's own IPC calls just to
+  get past its DOMContentLoaded handler. render_pane.js only touches the DOM
+  elements below (grep 'render_pane.js` for querySelector('#...') calls if
+  this ever needs to grow), so this harness carries just those, wires
+  `initRenderUI` up directly, and lets a test drive it exactly like the real
+  panel — same unmodified render_pane.js, same unmodified ipc_bridge.js, only
+  the Tauri IPC imports are swapped for tests/e2e/mocks/ (see
+  vite.config.e2e.js).
+-->
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Render Studio test harness</title>
+</head>
+<body>
+  <div id="render-status-row">
+    <button id="scan-render-btn">Scan for Takes</button>
+    <button id="start-render-btn">Start Render Batch</button>
+    <button id="cancel-render-btn" disabled>Cancel All</button>
+    <button id="reset-all-render-btn" disabled>Reset All</button>
+    <button id="remove-all-render-btn" disabled>Remove All (Not Rendering)</button>
+    <p id="render-status">Status: Waiting...</p>
+    <div id="render-job-container"></div>
+  </div>
+
+  <div id="render-settings-row">
+    <select id="render-codec-select">
+      <option value="prores">ProRes 422 HQ</option>
+      <option value="dnxhr">DNxHR HQ</option>
+      <option value="h264">H.264 (Software, MP4)</option>
+      <option value="h264_nvenc">H.264 (NVENC GPU, MP4)</option>
+      <option value="custom">Custom (paste FFmpeg args)</option>
+    </select>
+    <div id="render-custom-codec-group" style="display: none;">
+      <input type="text" id="render-custom-codec-input" />
+    </div>
+    <input type="number" id="render-fps-input" value="300" min="1" max="1000" />
+    <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" />
+    <input type="text" id="ffmpeg-override-path-input" />
+    <span id="render-export-pool-free">0.0 GB</span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Clip Name</th><th>Stream</th><th>Frames</th><th>Date</th>
+        <th>Settings</th><th>Status</th><th>Speed</th><th>Progress</th><th>File Size</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody id="render-jobs-tbody">
+      <tr><td colspan="10" class="table-empty">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+    </tbody>
+  </table>
+
+  <div id="render-footer-pool-free">Export Pool Free: 0.0 GB</div>
+  <div id="render-footer-required-space">Required (Over-estimated): 0.00 GB</div>
+  <div id="render-footer-queue-summary">0 queued &middot; 0 rendering &middot; 0 done</div>
+
+  <div id="render-error-log-modal" class="modal" style="display: none;">
+    <h3 id="render-error-log-title">FFmpeg Error Log</h3>
+    <pre id="render-error-log-body"></pre>
+    <button id="render-error-log-close-btn">Close</button>
+  </div>
+
+  <div id="render-recovery-modal" class="modal" style="display: none;">
+    <span id="render-recovery-source"></span>
+    <span id="render-recovery-completed"></span>
+    <span id="render-recovery-pending"></span>
+    <button id="render-recovery-recover-btn">Recover</button>
+    <button id="render-recovery-discard-btn">Discard</button>
+  </div>
+
+  <script type="module">
+    import { initRenderUI, checkRenderRecoveryOnStartup } from '../../src/render_pane.js';
+
+    // Test-controlled inputs, set via page.evaluate before Scan/Start is
+    // clicked — mirrors what main.js's own closures over `targetDrives`/
+    // `renderExportDirs` arrays provide to the real panel (Render Studio's
+    // scan input is the same shared Capture Locations list Capture Studio
+    // writes to, not its own separate list — see #81).
+    window.__testCaptureLocations = [];
+    window.__testExportDirs = [];
+    window.__testSettingsChangeCount = 0;
+
+    initRenderUI(
+      () => window.__testCaptureLocations,
+      () => window.__testExportDirs,
+      () => { window.__testSettingsChangeCount += 1; },
+      null, // takeTracking — the highlight/take-index integration is out of
+            // scope for this harness; render_pane.js already guards every
+            // use of it behind `takeTracking?.` /`getTakeIndex ? ... : null`.
+    );
+
+    window.__testCheckRecovery = () => checkRenderRecoveryOnStartup(() => {});
+
+    window.__renderPaneReady = true;
+  </script>
+</body>
+</html>

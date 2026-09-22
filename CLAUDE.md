@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) and offline IDE agen
 
 ## Project Overview
 
-`dod-tools` is a high-performance pipeline for capturing, patching, and analyzing **Day of Defeat 1.3** (GoldSrc engine) demo files (`.dem`). It drives **HLAE** (Half-Life Advanced Effects) and `hl.exe` headlessly to batch-record highlight clips out of recorded matches, transcodes the results via FFmpeg, and parses demos for match analytics (scoreboards, kills, chat, rounds). The active desktop application is a Tauri + Vite frontend (`desktop-studio/`).
+`dod-studio` is a high-performance pipeline for capturing, patching, and analyzing **Day of Defeat 1.3** (GoldSrc engine) demo files (`.dem`). It drives **HLAE** (Half-Life Advanced Effects) and `hl.exe` headlessly to batch-record highlight clips out of recorded matches, transcodes the results via FFmpeg, and parses demos for match analytics (scoreboards, kills, chat, rounds). The active desktop application is a Tauri + Vite frontend (`studio/`).
 
 ---
 
@@ -23,7 +23,7 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
   - `src/bin/cli/main.rs` → `preview_cli` binary: Headless entry point with drag-and-drop support.
 - **`hl-demo-auditor/`** — Standalone duplicate-demo detector using size + header hash (`fnv1a_hash`).
 - **`benchmark/`** — Performance benchmarking binary for the parsing/patching pipeline.
-- **`desktop-studio/`** — Active Tauri v2 + Vite/JS frontend workspace (`src-tauri/` backend and `src/*.js` frontend modules).
+- **`studio/`** — Active Tauri v2 + Vite/JS frontend workspace (`src-tauri/` backend and `src/*.js` frontend modules).
 - **`web-analyzer/`** — `analysis` compiled to `wasm32-unknown-unknown`, deployed to GitHub Pages on every push to `main` (`.github/workflows/deploy_web.yml`). Static frontend lives in `www/`.
 
 > The GoldSrc HLDEMO → Xash3D IDEM transcoder for the browser preview viewer moved out of this repo entirely: it now lives at `ccoventry/dod-web-demo-viewer` (`xash-transcode/` + a hand-synced copy of `dem-patch/`), since that's the repo the browser preview viewer itself lives in. dod-tools' old `experimental/xash-transcode` branch is kept only as a historical record — do not add new commits to it, and do not open PRs against it. See `docs/web_preview_viewer.md` in the new repo before touching that code.
@@ -44,8 +44,8 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
     # Run headless preview CLI
     cargo run -p native --bin preview_cli -- <path-to-demo-or-folder>
 
-    # Desktop App Dev Loop (Run from desktop-studio/)
-    cd desktop-studio
+    # Desktop App Dev Loop (Run from studio/)
+    cd studio
     npm install
     npm run tauri dev     # Launch Tauri window with Vite HMR
     npm run dev           # Vite dev server only

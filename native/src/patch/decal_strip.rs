@@ -2000,7 +2000,7 @@ const SCRATCH_STALE_AFTER: std::time::Duration = std::time::Duration::from_secs(
 
 /// Filename prefix identifying a flush scratch demo, so the sweep can recognise
 /// its own leavings and nothing else.
-const SCRATCH_PREFIX: &str = "dodtools_decalflush_";
+const SCRATCH_PREFIX: &str = "dodstudio_decalflush_";
 
 fn sweep_stale_scratch(dir: &std::path::Path) {
     let Ok(entries) = std::fs::read_dir(dir) else {
@@ -2155,7 +2155,7 @@ fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
 /// it used to be the one deliberate exception, on the reasoning that adopting
 /// a `movie.cfg`'s `r_decals 0` would silently stand the flush down. That
 /// objection is gone now that a resolved 0 with Flush Decals on is its own
-/// loud, reported fact (`decal_flush_is_noop` in the desktop-studio report)
+/// loud, reported fact (`decal_flush_is_noop` in the studio report)
 /// rather than something this function would have hidden by disagreeing with
 /// the config. User-requested symmetry, 2026-09-05.
 ///
@@ -2701,7 +2701,7 @@ mod tests {
 
     fn block(block_index: usize, record_start_tick: i32, record_stop_tick: i32) -> CaptureBlock {
         CaptureBlock {
-            demo_name: "dodtools_chain_01".to_string(),
+            demo_name: "dodstudio_chain_01".to_string(),
             block_index,
             drive_index: 0,
             take_folder: std::path::PathBuf::from("take"),

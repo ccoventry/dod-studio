@@ -229,7 +229,7 @@ fn load_pass(map: &mut HashMap<String, String>, filter_lang: &str, amxx_code: &s
         // A single `.parent()` hop only finds a sibling `localizations/`
         // folder for binaries that run from the workspace root. Debug/dev
         // builds run from deeply nested target dirs (e.g. the Tauri app's
-        // `desktop-studio/src-tauri/target/debug/`) whose exe directory is
+        // `studio/src-tauri/target/debug/`) whose exe directory is
         // several levels below the workspace-root `localizations/` folder
         // that ships beside the top-level Cargo.toml — every `translate_key`
         // call silently returned `None` there (weapon names rendered blank).

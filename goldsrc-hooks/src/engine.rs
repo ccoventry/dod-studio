@@ -1,6 +1,7 @@
 //! Captures the engine's `cl_enginefuncs_s` table (`pEngfuncs`), the
-//! `engine_studio_api_s` table (`pstudio`), and a genuine per-frame callback,
-//! by intercepting how `hw.dll` resolves `client.dll`'s entry points in the
+//! `engine_studio_api_s` table (`pstudio`), a genuine per-frame callback, and
+//! a per-entity suppress-or-forward hook for `hide_sprite.rs`, by
+//! intercepting how `hw.dll` resolves `client.dll`'s entry points in the
 //! first place.
 //!
 //! ## Why this isn't the "obvious" export hook
@@ -41,14 +42,18 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps three of its 43 slots for our
+//!   `cldll_func_t` table, then swaps four of its 43 slots for our
 //!   trampolines before handing it back to the engine.
-//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_GetStudioModelInterface"`
-//!   (classic non-secured builds) -- we return the trampoline directly.
+//! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` /
+//!   `"HUD_GetStudioModelInterface"` (classic non-secured builds) -- we
+//!   return the trampoline directly.
 //!
 //! Either way the trampolines receive what we need as ordinary arguments:
 //! `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface` hands
-//! us `pstudio`, and `HUD_Frame` gives a real per-frame tick.
+//! us `pstudio`, `HUD_Frame` gives a real per-frame tick, and `HUD_AddEntity`
+//! hands us the model path of every entity about to be added to the render
+//! list -- the only one of the four that isn't a one-time capture, since it
+//! runs the suppress/forward decision itself, once per entity.
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -461,6 +466,17 @@ pub fn client_module_base() -> Option<usize> {
     (base != 0).then_some(base)
 }
 
+/// The loaded engine's base address, or `None` before `hw.dll` exists.
+///
+/// Unlike `client.dll`, which is unloaded and reloaded between demos and so is
+/// tracked through the IAT hook, `hw.dll` is loaded once and stays for the
+/// session -- asking the loader each time is both correct and cheap.
+pub fn engine_module_base() -> Option<usize> {
+    let name = c"hw.dll";
+    let handle = unsafe { GetModuleHandleA(name.as_ptr() as *const u8) };
+    (!handle.is_null()).then_some(handle as usize)
+}
+
 /// Returns the captured engine function table, once `client.dll` has loaded
 /// and been successfully signature-scanned. `None` before that.
 pub fn engfuncs() -> Option<&'static ClEngineFuncsPartial> {
@@ -512,6 +528,14 @@ pub fn set_per_frame_prologue(callback: fn()) {
     let _ = PER_FRAME_PROLOGUE.set(callback);
 }
 
+/// Whether something has called `set_per_frame_prologue` yet -- issue #324's
+/// regression test needs to observe this without a real engine to drive
+/// `run_per_frame_callback` itself.
+#[cfg(test)]
+pub(crate) fn per_frame_prologue_is_set() -> bool {
+    PER_FRAME_PROLOGUE.get().is_some()
+}
+
 pub fn set_per_frame_callback(callback: fn()) {
     let _ = PER_FRAME_CALLBACK.set(callback);
     if !TIMER_THREAD_STARTED.swap(true, Ordering::AcqRel) {
@@ -556,11 +580,13 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
+const SLOT_HUD_ADD_ENTITY: usize = 20;
 const SLOT_HUD_FRAME: usize = 33;
 const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
     "a cldll_func_t slot index is outside the table F actually writes"
@@ -570,6 +596,10 @@ type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
 type GetStudioModelInterfaceFn =
     unsafe extern "C" fn(i32, *mut *mut c_void, *mut EngineStudioApiPartial) -> i32;
+/// `int (*pHudAddEntity)(int type, cl_entity_t *ent, const char *modelname)`.
+/// `ent` is passed through opaquely -- nothing here reads its fields, only
+/// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
+type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
 /// The secured single-callback export: fills the caller-provided buffer with
 /// `CLDLL_FUNC_SLOTS` function pointers. `__cdecl`, one pointer argument --
 /// confirmed from `hw.dll`'s call site (`push edx; call eax; add esp, 4`).
@@ -577,6 +607,7 @@ type ClientApiFn = unsafe extern "C" fn(*mut *mut c_void);
 
 static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
@@ -823,6 +854,27 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     unsafe { real(version, ppinterface, pstudio) }
 }
 
+/// Called once per entity the engine is about to add to the render list.
+/// Returning 0 suppresses that one entity; see `hide_sprite.rs`'s module doc
+/// for the evidence behind that contract and why it isn't patched.
+unsafe extern "C" fn tramp_hud_add_entity(entity_type: i32, ent: *mut c_void, modelname: *const c_char) -> i32 {
+    if !modelname.is_null() {
+        let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
+        if crate::hide_sprite::should_hide(&name) {
+            return 0;
+        }
+    }
+
+    let real = REAL_HUD_ADD_ENTITY.load(Ordering::Acquire);
+    if real.is_null() {
+        // Can't tell the entity apart from one that should draw, so the safe
+        // side to fail on is the one that changes nothing: let it through.
+        return 1;
+    }
+    let real: HudAddEntityFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(entity_type, ent, modelname) }
+}
+
 /// Swaps one slot of the `cldll_func_t` table `F` just filled for our own
 /// trampoline, stashing the real pointer so the trampoline can chain to it.
 ///
@@ -849,7 +901,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the three slots we care about before the engine ever reads them.
+/// replaces the four slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {
@@ -867,6 +919,7 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     unsafe {
         swap_slot(table, SLOT_INITIALIZE, &REAL_INITIALIZE, tramp_initialize as *mut c_void, "Initialize");
         swap_slot(table, SLOT_HUD_FRAME, &REAL_HUD_FRAME, tramp_hud_frame as *mut c_void, "HUD_Frame");
+        swap_slot(table, SLOT_HUD_ADD_ENTITY, &REAL_HUD_ADD_ENTITY, tramp_hud_add_entity as *mut c_void, "HUD_AddEntity");
         swap_slot(
             table,
             SLOT_GET_STUDIO_MODEL_INTERFACE,
@@ -944,7 +997,7 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     unsafe { crate::debug::report(&format!("GetProcAddress(client.dll, \"{requested}\") -> {result:p}")) };
 
     // "F" is the secured single-callback export, and is what DoD 1.3 actually
-    // uses; the three named entries below are the classic convention, kept so
+    // uses; the four named entries below are the classic convention, kept so
     // this works unchanged on a non-secured client.dll too.
     match requested {
         "F" => {
@@ -959,6 +1012,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_Frame" => {
             REAL_HUD_FRAME.store(result, Ordering::Release);
             tramp_hud_frame as *mut c_void
+        }
+        "HUD_AddEntity" => {
+            REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
+            tramp_hud_add_entity as *mut c_void
         }
         "HUD_GetStudioModelInterface" => {
             REAL_GET_STUDIO_MODEL_INTERFACE.store(result, Ordering::Release);

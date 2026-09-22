@@ -11,9 +11,13 @@ name: CI
 on:
   pull_request:
     branches: [dev, main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    # Deliberately no paths-ignore for **.md/docs/**: dev-protection's
+    # ruleset requires these three checks by name on every PR, and GitHub
+    # only skips a workflow when *every* changed file matches
+    # paths-ignore. A PR that manages to do that would trigger no check
+    # runs at all and sit stuck as "expected, waiting" with no way to
+    # satisfy the rule short of a stub workflow -- cheaper to always run
+    # than to carry that trap.
 
 jobs:
   rust-tests:
@@ -28,13 +32,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # desktop-studio's build script validates every `bundle.resources` entry
+      # studio's build script validates every `bundle.resources` entry
       # in tauri.conf.json exists on disk, and one of them is this 32-bit
       # companion DLL (goldsrc-hooks/README.md). GoldSrc is a 32-bit engine, so
       # it needs its own cross-build; the rest of the app is native 64-bit.
       #
       # Without this the WHOLE WORKSPACE fails to build here, not just the DLL's
-      # own target -- a missing resource fails desktop-studio's build script,
+      # own target -- a missing resource fails studio's build script,
       # and that gates the crate. `--release` because the resource path names
       # the release profile, matching release_experimental.yml / release_stable.yml.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
@@ -71,13 +75,13 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      # desktop-studio's build script validates every `bundle.resources` entry
+      # studio's build script validates every `bundle.resources` entry
       # in tauri.conf.json exists on disk, and one of them is this 32-bit
       # companion DLL (goldsrc-hooks/README.md). GoldSrc is a 32-bit engine, so
       # it needs its own cross-build; the rest of the app is native 64-bit.
       #
       # Without this the WHOLE WORKSPACE fails to build here, not just the DLL's
-      # own target -- a missing resource fails desktop-studio's build script,
+      # own target -- a missing resource fails studio's build script,
       # and that gates the crate. `--release` because the resource path names
       # the release profile, matching release_experimental.yml / release_stable.yml.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
@@ -104,7 +108,7 @@ jobs:
     runs-on: windows-latest
     defaults:
       run:
-        working-directory: desktop-studio
+        working-directory: studio
     steps:
       - uses: actions/checkout@v4
 
@@ -112,7 +116,7 @@ jobs:
         with:
           node-version: "24"
           cache: "npm"
-          cache-dependency-path: desktop-studio/package-lock.json
+          cache-dependency-path: studio/package-lock.json
 
       - run: npm ci
 

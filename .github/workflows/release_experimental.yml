@@ -1,4 +1,4 @@
-name: Release desktop-studio (Experimental)
+name: Release studio (Experimental)
 
 # Manual only, on demand — this is a separate, deliberately lower-friction
 # channel for trying dev before it's promoted to main, not a build that fires
@@ -54,10 +54,10 @@ jobs:
         with:
           node-version: lts/*
           cache: npm
-          cache-dependency-path: desktop-studio/package-lock.json
+          cache-dependency-path: studio/package-lock.json
 
       - name: Install frontend dependencies
-        working-directory: desktop-studio
+        working-directory: studio
         run: npm ci
 
       # Same manual, not-committed-back version stamp as release_stable.yml,
@@ -85,7 +85,7 @@ jobs:
           node -e "
             const fs = require('fs');
             const version = process.env.EXPERIMENTAL_VERSION;
-            for (const path of ['desktop-studio/src-tauri/tauri.conf.json', 'desktop-studio/package.json']) {
+            for (const path of ['studio/src-tauri/tauri.conf.json', 'studio/package.json']) {
               const json = JSON.parse(fs.readFileSync(path, 'utf8'));
               json.version = version;
               fs.writeFileSync(path, JSON.stringify(json, null, 2) + '\n');
@@ -95,7 +95,7 @@ jobs:
           # bakes CARGO_PKG_VERSION into the compiled binary from Cargo.toml,
           # which is what tauri-action actually uses for bundle filenames and
           # the published latest.json, so it needs the same stamp.
-          sed -i "s/^version = \".*\"/version = \"${EXPERIMENTAL_VERSION}\"/" desktop-studio/src-tauri/Cargo.toml
+          sed -i "s/^version = \".*\"/version = \"${EXPERIMENTAL_VERSION}\"/" studio/src-tauri/Cargo.toml
           echo "EXPERIMENTAL_VERSION=${EXPERIMENTAL_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Build, sign, and publish experimental build
@@ -105,9 +105,9 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
-          projectPath: desktop-studio
+          projectPath: studio
           tagName: experimental-latest
-          releaseName: "DoD Tools Studio ${{ steps.version.outputs.EXPERIMENTAL_VERSION }} (experimental)"
+          releaseName: "DoD Studio ${{ steps.version.outputs.EXPERIMENTAL_VERSION }} (experimental)"
           releaseBody: "On-demand experimental build from `dev` — not for general use. Built from commit ${{ github.sha }}."
           releaseDraft: false
           prerelease: true

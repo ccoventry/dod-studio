@@ -9,7 +9,7 @@ scratch/
 !scratch/debug.rs
 
 # === Project Configuration & Caches ===
-.dod-tools-cache.json
+.dod-studio-cache.json
 settings.json
 hlcr_config.json
 /demo_deduplication_report.md
@@ -63,8 +63,12 @@ native/local/crash_log.md
 **/node_modules/
 **/dist/
 
+# === Python (goldsrc-hooks/tools' offline binary-analysis scripts) ===
+__pycache__/
+*.pyc
+
 # === Tauri Artifacts ===
-desktop-studio/src-tauri/gen/
+studio/src-tauri/gen/
 
 # === Claude Code harness state ===
 .claude/scheduled_tasks.lock

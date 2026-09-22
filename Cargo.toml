@@ -6,7 +6,7 @@ members = [
     "native",
     "hl-demo-auditor",
     "benchmark",
-    "desktop-studio/src-tauri",
+    "studio/src-tauri",
     "web-analyzer",
     # Vendored fork of the `dem` crate, wired in below via [patch.crates-io].
     # Membership and patching are independent: being a member is what puts it
@@ -49,7 +49,7 @@ dirs = "5.0"
 indexmap = { version = "2.14.0", features = ["std"] }
 # Pinned at 0.29 by native/src/sys/disk.rs and capture_engine.rs, which use the
 # extension-trait API (SystemExt/ProcessExt/DiskExt) that sysinfo 0.30 removed.
-# desktop-studio was independently on 0.30, so both were being compiled. Moving
+# studio was independently on 0.30, so both were being compiled. Moving
 # the whole workspace to a current sysinfo means rewriting the disk-headroom
 # query, which is load-bearing for capture routing — separate change.
 sysinfo = "0.29"
@@ -63,7 +63,7 @@ opt-level = 3
 lto = true
 codegen-units = 1
 panic = "abort"
-# Moved up from desktop-studio/src-tauri/Cargo.toml, where Cargo ignored it and
+# Moved up from studio/src-tauri/Cargo.toml, where Cargo ignored it and
 # warned about it on every workspace command.
 strip = true
 

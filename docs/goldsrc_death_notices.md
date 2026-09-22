@@ -3,7 +3,7 @@
 > **Status 2026-09-16 — implemented and live-tested.**
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on branch
 > `feat/goldsrc-hooks-companion-dll`. One console command,
-> `dodtools_deathmsg`, with four subcommands.
+> `dodstudio_deathmsg`, with four subcommands.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -314,6 +314,15 @@ All three paths converge at `+0x2af20` with y in `[esp+4]`, so the detour goes
 there and sets the **result**. One value, the same meaning everywhere, mode 2
 included.
 
+> **"Spectator mode" above is the wrong name, established later.** The call at
+> `+0x2aeba` is `client.dll+0x228e0`, which returns `_cl_minimap`'s value — and
+> only while a spectator predicate holds and `gHUD`'s FOV field is still 90. So
+> "mode 2" is **the overview map at full size**, not a spectator mode: the kill
+> feed takes its y from the map's own layout while the full map is up. Nothing
+> above changes — the detour sets the result on every path regardless — but the
+> name did. Worked out in `docs/goldsrc_objective_icons.md` §5, where the same
+> branch matters to the objective icons.
+
 **The span.** `+0x2af20` is `53 55 56 57 33 ff` —
 `push ebx / push ebp / push esi / push edi / xor edi, edi`. Six bytes: a
 five-byte `jmp rel32` plus one `nop`. `Draw`'s only inbound branch into that
@@ -349,13 +358,13 @@ are checked against `Y_STOLEN` before anything is written.
 ## 4. The console surface
 
 ```
-dodtools_deathmsg max <4..127>      lines shown at once (default 4)
-dodtools_deathmsg offset <0..127>   y the feed starts at (default 20)
-dodtools_deathmsg offset default    put the y back
-dodtools_deathmsg block <id>...     hide frags involving these players
-dodtools_deathmsg block !<id>...    hide everything EXCEPT these players
-dodtools_deathmsg block clear       stop hiding anything
-dodtools_deathmsg fake <killer> <victim> <weapon>
+dodstudio_deathmsg max <4..127>      lines shown at once (default 4)
+dodstudio_deathmsg offset <0..127>   y the feed starts at (default 20)
+dodstudio_deathmsg offset default    put the y back
+dodstudio_deathmsg block <id>...     hide frags involving these players
+dodstudio_deathmsg block !<id>...    hide everything EXCEPT these players
+dodstudio_deathmsg block clear       stop hiding anything
+dodstudio_deathmsg fake <killer> <victim> <weapon>
 ```
 
 `max 4` restores the shipped bytes exactly, array included, so there is always a

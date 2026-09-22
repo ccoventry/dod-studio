@@ -161,11 +161,13 @@ machinery rather than a new mechanism. It is also the technique HLAE's own
 process.
 
 When the engine asks `client.dll` for `"F"`, we return our own wrapper: it calls the real
-`F` so the table gets filled exactly as normal, then swaps slots 0, 33 and 39 for
+`F` so the table gets filled exactly as normal, then swaps slots 0, 20, 33 and 39 for
 trampolines before the engine ever reads them. The trampolines receive what we need as
 plain arguments — `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface`
-hands us `pstudio`, and `HUD_Frame` is a genuine per-frame tick (replacing the ~60Hz
-timer thread that stood in for it). Lookups of `"Initialize"`, `"HUD_Frame"` and
+hands us `pstudio`, `HUD_Frame` is a genuine per-frame tick (replacing the ~60Hz
+timer thread that stood in for it), and `HUD_AddEntity` (issue #315) hands
+`hide_sprite.rs` the model path of every entity about to be added to the render list, to
+suppress by name. Lookups of `"Initialize"`, `"HUD_Frame"`, `"HUD_AddEntity"` and
 `"HUD_GetStudioModelInterface"` are handled the same way, so a non-secured `client.dll`
 works through the identical code path with no byte patterns and no hardcoded offsets.
 
@@ -481,7 +483,7 @@ read overflow`); and the constant it used, `DRC_CMD_INEYE = 5`, is actually
 `DRC_CMD_TIMESCALE` — so even once the framing was fixed, the message being
 sent was not the one intended. Neither mattered in the end.
 
-`MESSAGE` (6) and `STUFFTEXT` (10), the two commands dod-tools injects for
+`MESSAGE` (6) and `STUFFTEXT` (10), the two commands dod-studio injects for
 bookmarks, sit inside the handled range. That is why those work, and it
 corroborates the command numbering above.
 

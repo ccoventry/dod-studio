@@ -1,4 +1,4 @@
-# Versioning & Releases (desktop-studio)
+# Versioning & Releases (studio)
 
 How version numbers get assigned, where they live, and how the two update
 channels (`stable`, `experimental`) relate to `main`/`dev`. Written up because
@@ -11,10 +11,10 @@ Four files carry a `version` field, but they don't all mean the same thing:
 
 | File | What it's for |
 |---|---|
-| `desktop-studio/src-tauri/Cargo.toml` | **The real one.** Rust bakes this into the compiled binary as `CARGO_PKG_VERSION`, and `tauri-action` reads it for bundle filenames and the published `latest.json` manifest the updater actually polls. |
-| `desktop-studio/src-tauri/tauri.conf.json` | Display value only (About box, window title). Stamped to match Cargo.toml's version at release time so they never disagree. |
-| `desktop-studio/package.json` | Same — display/tooling only, stamped to match. |
-| Root `Cargo.toml` | The Cargo **workspace's** own version (currently `0.10.0`) — unrelated to the app's version above. This is the whole `dod-tools` workspace (native/analysis/dem-patch/etc.), not desktop-studio specifically. Don't confuse the two when checking "what version are we on."
+| `studio/src-tauri/Cargo.toml` | **The real one.** Rust bakes this into the compiled binary as `CARGO_PKG_VERSION`, and `tauri-action` reads it for bundle filenames and the published `latest.json` manifest the updater actually polls. |
+| `studio/src-tauri/tauri.conf.json` | Display value only (About box, window title). Stamped to match Cargo.toml's version at release time so they never disagree. |
+| `studio/package.json` | Same — display/tooling only, stamped to match. |
+| Root `Cargo.toml` | The Cargo **workspace's** own version (currently `0.10.0`) — unrelated to the app's version above. This is the whole `dod-studio` workspace (native/analysis/dem-patch/etc.), not studio specifically. Don't confuse the two when checking "what version are we on."
 
 **Important:** the release workflows stamp `tauri.conf.json`/`package.json`/`Cargo.toml` with the computed release version *during the CI run only* — that stamp is **not committed back** to the repo. The checked-in versions in these files stay whatever they were (currently `0.1.0` everywhere) until someone deliberately bumps them as part of a release PR (see "Bumping minor/major" below). So `git grep version` in this repo will not tell you what's actually been released — check GitHub Releases instead.
 
@@ -48,7 +48,7 @@ Published as a **prerelease**, always overwriting the same fixed tag `experiment
 
 ## Bumping to a new minor or major version
 
-Not automatic on either channel — deliberately a human decision. Edit `desktop-studio/src-tauri/Cargo.toml`'s `version` field (e.g. `0.1.0` → `0.2.0`) as part of whatever PR is landing the milestone that justifies it, same as any other code change. The next push to `main` after that lands will have no existing `v0.2.*` tags yet, so `release_stable.yml`'s patch computation naturally starts that new line at `0.2.0`.
+Not automatic on either channel — deliberately a human decision. Edit `studio/src-tauri/Cargo.toml`'s `version` field (e.g. `0.1.0` → `0.2.0`) as part of whatever PR is landing the milestone that justifies it, same as any other code change. The next push to `main` after that lands will have no existing `v0.2.*` tags yet, so `release_stable.yml`'s patch computation naturally starts that new line at `0.2.0`.
 
 ## Open questions (not yet decided — your call)
 

@@ -133,7 +133,7 @@ KNOWN_FUNCTIONS = {
 # after it with no padding, so a linear scan reads straight through into the
 # next function and keeps going until *that* one hits padding -- 879 bytes,
 # for a function that is actually 45. Found by disassembly while chasing
-# #296 (`dodtools_hide_hudelement`) and confirmed again here for #269.
+# #296 (`dodstudio_hide_hudelement`) and confirmed again here for #269.
 # `elements()` consults this before trusting the heuristic.
 KNOWN_FUNCTION_ENDS = {
     0x38000: 0x3802D,  # CHudSpectator::Draw

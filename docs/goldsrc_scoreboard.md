@@ -1,6 +1,6 @@
 # Hiding DoD's scoreboard without editing `ScoreBoard.res`
 
-How `dodtools_hide_scoreboard` works, what it does not cover, and the evidence for
+How `dodstudio_hide_scoreboard` works, what it does not cover, and the evidence for
 each claim. Everything here is from offline analysis of DoD 1.3's `client.dll`
 (`pefile` + `capstone`, the house method in
 `docs/goldsrc_client_dll_internals.md` §10) plus a parse of real demos.
@@ -142,13 +142,13 @@ string, rather than trusting that the signature found the right function.
 ## 4. Using it
 
 ```
-dodtools_hide_scoreboard 1     block +showscores
-dodtools_hide_scoreboard 0     back to the game's own behaviour (the default)
-dodtools_hide_scoreboard       report the current state
-dodtools_debug_status                report it alongside every other setting
+dodstudio_hide_scoreboard 1     block +showscores
+dodstudio_hide_scoreboard 0     back to the game's own behaviour (the default)
+dodstudio_hide_scoreboard       report the current state
+dodstudio_debug_status                report it alongside every other setting
 ```
 
-It is a cvar, so it also takes `+dodtools_hide_scoreboard 1` on the launch line or
+It is a cvar, so it also takes `+dodstudio_hide_scoreboard 1` on the launch line or
 a line in any `.cfg` the session execs — which is the useful form for an
 unattended capture, since it is then set before the first demo loads.
 

@@ -2,12 +2,12 @@
 
 ## Tech Stack Core
 - **Language/Runtime:** Rust targeting native desktop, plus a `wasm32-unknown-unknown` compilation gate retained in `native/` for cfg-isolating non-wasm-safe code (no active wasm GUI target — see Historical Notes).
-- **UI Framework:** Tauri v2 backend + Vite/JS frontend (`desktop-studio/`), current since the `feature/tauri-migration` merge to `dev` (2026-08-18).
+- **UI Framework:** Tauri v2 backend + Vite/JS frontend (`studio/`), current since the `feature/tauri-migration` merge to `dev` (2026-08-18).
 
 ## Workspace Module Boundaries
 - `native/`: Core engine — direct GoldSrc hooks, binary stream patching (`patch/`), FFmpeg transcoding (`hlcr/`), and `native/src/shared/` (shared types/path-resolution helpers — nested inside `native/`, not a top-level workspace crate).
-- `desktop-studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`.
-- `desktop-studio/src/`: Vite/JS frontend modules (one file per pane, e.g. `capture_pane.js`/`render_pane.js`). No native threading or direct `std::fs` — everything crosses the Tauri IPC boundary.
+- `studio/src-tauri/`: Tauri backend — Rust command handlers bridging the frontend to `native`/`analysis`/`hl-demo-auditor`.
+- `studio/src/`: Vite/JS frontend modules (one file per pane, e.g. `capture_pane.js`/`render_pane.js`). No native threading or direct `std::fs` — everything crosses the Tauri IPC boundary.
 
 ## State, Memory, & Concurrency Rules
 - **State Ingestion (historical, egui-era):** Originally described as immediate-mode execution feeding a bounded sync channel into UI state blocks. Now: telemetry/progress crosses the Tauri IPC boundary as events; see CLAUDE.md's "Telemetry Throttling" rule for the current, accurate guidance (~30fps/33ms throttling via an `Arc<AtomicU32>` debouncer).
@@ -34,10 +34,10 @@
 
 ## Filesystem & IO Routing
 - **NTFS `read_dir` Non-Determinism:** `std::fs::read_dir` order is non-deterministic on Windows. Sort shared state collections (`QUEUED_DEMOS`) precisely at the background ingestion layer using `binary_search_by` and `insert`. Do not use `.push()` followed by `.sort_by()` to avoid O(N log N) overhead choking the thread.
-- **Filesystem Semantics:** Enforce `remove_dir_all` strictly for HLAE/Engine signal folders (`DOD_TOOLS_EXIT_TRIGGER`). Reserve `remove_file` for persistent configuration artifacts.
+- **Filesystem Semantics:** Enforce `remove_dir_all` strictly for HLAE/Engine signal folders (`DOD_STUDIO_EXIT_TRIGGER`). Reserve `remove_file` for persistent configuration artifacts.
 - **Waterfall Resolution Pattern:** External tools (e.g., FFmpeg) must utilize a prioritized resolution chain: User Override -> Bundled Local -> System Path.
 - **Data Portability:** Path resolution (Saved Path -> Project Root -> Last Used Directory -> Game Directory) must be dynamically computed in memory. Never destructively overwrite relative saved JSON paths with locally resolved absolute paths.
-- **Watermarking Pattern:** Output generated assets tracking using 1:1 sidecar files (`.dodtools_preview`) to maintain atomic cleanup and file-system renaming resilience, avoiding master list locks.
+- **Watermarking Pattern:** Output generated assets tracking using 1:1 sidecar files (`.dodstudio_preview`) to maintain atomic cleanup and file-system renaming resilience, avoiding master list locks.
 - **`game_path` Names `hl.exe`, Not the Folder.** Every consumer reads `Path::new(&config.game_path).parent()` and joins from there, so a value pointing at the directory silently resolves one level too high — `dod_dir` becomes the game folder's *parent* plus `dod`. Nothing errors; the code just reads and writes somewhere else. This was live in the builder's own test helper, where it put every test's helper and chain `.cfg` files into a single shared `%TEMP%/dod`.
 - **A Test Run Must Not Write Outside the Repo and Its Scratch.** `log_markdown` resolved its
   destination straight from `get_appdata_dir()`, so `cargo test` appended fixture sessions into the
@@ -45,12 +45,12 @@
   their own session headers, indistinguishable from a genuine capture that failed. That matters more
   here than it would elsewhere: the activity log is this project's primary record of what a capture
   did, and the whole decal-flush investigation was reconstructed from it. `activity_log_dir()` now
-  redirects through `DOD_TOOLS_LOG_DIR`, falling back to a temp scratch under `cfg(test)`. The env
+  redirects through `DOD_STUDIO_LOG_DIR`, falling back to a temp scratch under `cfg(test)`. The env
   var is checked **first**, because `cfg(test)` only covers this crate's own unit tests — an
   integration test, a bin target, or another crate's tests linking this one as an ordinary
   dependency all compile it without `cfg(test)` and would otherwise write to the real log. Verified
   by running the whole workspace suite and confirming the real log's size and mtime are unchanged.
-- **A Test That Writes Into a Game Folder Needs Its Own.** `build_batch_queue` writes `dodtools_helper.cfg` and `dodtools_chain_*.cfg` into the game folder, and deletes the previous run's on the way in. Tests sharing one folder therefore delete each other's files mid-write — a sharing violation on Windows, surfacing as an `Err` from a call every test unwraps, on a random subset of tests, only under parallelism. Name the folder from `std::thread::current().name()`: unique per test, stable across runs, so temp usage stays bounded instead of growing by one folder per run.
+- **A Test That Writes Into a Game Folder Needs Its Own.** `build_batch_queue` writes `dodstudio_helper.cfg` and `dodstudio_chain_*.cfg` into the game folder, and deletes the previous run's on the way in. Tests sharing one folder therefore delete each other's files mid-write — a sharing violation on Windows, surfacing as an `Err` from a call every test unwraps, on a random subset of tests, only under parallelism. Name the folder from `std::thread::current().name()`: unique per test, stable across runs, so temp usage stays bounded instead of growing by one folder per run.
 
 ## Architectural Non-Goals
 - No support for native engine multi-threading layers operating inside immediate-mode UI thread blocks.
@@ -61,9 +61,9 @@
 - **Two-Tier Block Cutting (2026-08-18):** `build_batch_queue` used to ask one question — "do the pre/post-roll windows collide?" — and answer it by merging the two highlights into a single take, which produced one clip full of dead air whenever only the *speed-change* bookkeeping overlapped. Now split in two, both via `patch::builder::blocks_merge` with different padding: highlights merge into one take only when their **recordings** overlap (start-lead/stop-trail) or sit closer than `MIN_TAKE_SEPARATION_SECONDS` (a conservative guard against a `mirv_recordmovie` stop/start cycle too tight to flush a take); otherwise they stay separate takes, and if the fast-forward round trip between them doesn't fit, it's simply dropped — playback stays at normal speed across the gap (`chained_to_previous`, which also suppresses the `stopsound` flush, since that only exists to repair fast-forward audio drift). Both tiers key off `first_kill_frame`/`last_kill_frame` so the decision uses the same frames the record marks do, and a Kill Range edit moves both together.
 - **First-Fit-Decreasing Bin-Packing (2026-08-18):** The `Chronological` allocation strategy (Next Fit, no drive backtracking — could fail a batch outright even with enough total free space across drives) was removed entirely; `DriveAllocationStrategy` no longer exists. `build_batch_queue` now always allocates each demo's clip blocks largest-byte-estimate-first (First-Fit-Decreasing) across the configured capture drives, so a big clip doesn't get stranded because an earlier, smaller clip already claimed the only drive with room for it.
 - **Junction-Based Pathing:** Bypassed GoldSrc string limit and escape constraints by generating temporary OS-level directory junctions (`_route_N`) in the game directory. **Both junction families are owned by `WorkspaceGuard`** (2026-08-26): `dod_pool_N` created in `capture_engine`, and `_route_N` created in `build_batch_queue`. The latter leaked for a long time because the function that creates them returns long before a batch ends, so it has no position from which to clean up — the only thing that ever removed one was the *next* batch reusing that index. Anything created beside `hl.exe` has to be registered with the guard that outlives the capture, not cleaned where it was made. `remove_dir` unlinks a junction without touching its target, and `NotFound` is expected for indices a batch never routed to.
-- **Alias Injection:** The VDM generation now maps `mirv_movie_filename` commands to the generated junctions via aliases in `dodtools_helper.cfg`.
+- **Alias Injection:** The VDM generation now maps `mirv_movie_filename` commands to the generated junctions via aliases in `dodstudio_helper.cfg`.
 - **GC Architecture:** Garbage collection policies (configuration) are decoupled from mechanisms (execution), ensuring the `Drop` trait remains lightweight.
 
 ## Historical Notes (pre-Tauri-migration, egui era — kept for context, not current architecture)
-- The original UI was `egui`/`eframe` (native immediate-mode Rust GUI, `native/src/bin/gui/`), fully replaced by the Tauri v2 + Vite/JS frontend and merged to `dev` 2026-08-18 (merge commit `00e540d`). That directory and every `egui`/`eframe` dependency are gone from the workspace — `desktop-studio/src-tauri/src/capture_manager.rs` even carries an explicit "MUST NOT import any egui / eframe symbols" comment as a guardrail against drift back.
+- The original UI was `egui`/`eframe` (native immediate-mode Rust GUI, `native/src/bin/gui/`), fully replaced by the Tauri v2 + Vite/JS frontend and merged to `dev` 2026-08-18 (merge commit `00e540d`). That directory and every `egui`/`eframe` dependency are gone from the workspace — `studio/src-tauri/src/capture_manager.rs` even carries an explicit "MUST NOT import any egui / eframe symbols" comment as a guardrail against drift back.
 - One dated UI-state fix from that era, kept only as a historical record: background-thread capacity errors were once surfaced by storing them in the `egui` temporary context, gated on `current_state == CaptureStudioState::Select` (an enum that no longer exists) — not applicable to the current architecture, mentioned here only in case old commit history references it.

@@ -1,4 +1,4 @@
-//! `dodtools_scoreboard`: stop a POV demo's recorded TAB presses from putting
+//! `dodstudio_scoreboard`: stop a POV demo's recorded TAB presses from putting
 //! the scoreboard on screen.
 //!
 //! ## The problem this exists for
@@ -183,7 +183,7 @@ pub fn suppressed() -> bool {
     SUPPRESSED.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_debug_status`.
+/// One line for `dodstudio_debug_status`.
 pub fn status() -> String {
     if !suppressed() {
         return "the scoreboard behaves normally; a POV demo's recorded TAB presses will show it"
