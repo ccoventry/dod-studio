@@ -123,6 +123,9 @@ pub struct AppSettings {
     pub save_local_patched_copy: bool,
     #[serde(default = "default_render_codec")]
     pub render_codec: String,
+    /// Raw FFmpeg args, only meaningful when `render_codec == "custom"`.
+    #[serde(default)]
+    pub render_custom_codec_args: String,
     #[serde(default = "default_render_fps")]
     pub render_fps: i32,
     #[serde(default = "default_render_max_concurrent")]
@@ -231,6 +234,7 @@ impl Default for AppSettings {
             custom_commands: Vec::new(),
             save_local_patched_copy: false,
             render_codec: default_render_codec(),
+            render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
             render_max_concurrent: default_render_max_concurrent(),
             render_export_dirs: Vec::new(),
@@ -335,5 +339,6 @@ mod tests {
         assert_eq!(restored.capture_fps, original.capture_fps);
         assert_eq!(restored.fast_forward_speed, original.fast_forward_speed);
         assert_eq!(restored.render_codec, original.render_codec);
+        assert_eq!(restored.render_custom_codec_args, original.render_custom_codec_args);
     }
 }

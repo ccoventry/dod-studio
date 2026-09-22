@@ -31,6 +31,11 @@ pub struct RenderSessionData {
     pub source_folder: String,
     pub fps: u32,
     pub target_codec: String,
+    /// Raw FFmpeg video-codec args, only meaningful when `target_codec` is
+    /// `"custom"`. `#[serde(default)]` so an autosave file written before
+    /// this field existed still parses.
+    #[serde(default)]
+    pub target_custom_codec_args: String,
     /// All jobs — both Pending (incomplete) and Completed.
     pub jobs: Vec<RenderJob>,
 }

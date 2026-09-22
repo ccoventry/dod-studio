@@ -20,6 +20,7 @@ function job(overrides = {}) {
     output_size_bytes: null,
     take_folder: 'C:\\captures\\demo1\\chain_01_b0\\take0000',
     codec_id: 'prores',
+    custom_codec_args: '',
     skip_available: false,
     ...overrides,
   };
@@ -195,6 +196,46 @@ test.describe('scan stages a batch, Start is a separate step', () => {
   });
 });
 
+test.describe('Custom codec', () => {
+  test('the args input is only visible while Custom is selected', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(page.locator('#render-custom-codec-group')).toBeHidden();
+
+    await page.selectOption('#render-codec-select', 'custom');
+    await expect(page.locator('#render-custom-codec-group')).toBeVisible();
+
+    await page.selectOption('#render-codec-select', 'prores');
+    await expect(page.locator('#render-custom-codec-group')).toBeHidden();
+  });
+
+  test('Scan is refused when Custom is selected with no args entered', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => { window.__testCaptureLocations = ['C:\\captures']; });
+    await page.selectOption('#render-codec-select', 'custom');
+
+    await page.locator('#scan-render-btn').click();
+
+    expect(await invocationsFor(page, 'queue_render_batch')).toHaveLength(0);
+  });
+
+  test('Scan sends the typed args as custom_codec_args once Custom is filled in', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__testCaptureLocations = ['C:\\captures'];
+      window.__mockInvokeHandlers['queue_render_batch'] = () => 0;
+    });
+    await page.selectOption('#render-codec-select', 'custom');
+    await page.locator('#render-custom-codec-input').fill('-c:v mpeg4 -q:v 3');
+
+    await page.locator('#scan-render-btn').click();
+
+    const calls = await invocationsFor(page, 'queue_render_batch');
+    expect(calls).toHaveLength(1);
+    expect(calls[0].payload.codec).toBe('custom');
+    expect(calls[0].payload.custom_codec_args).toBe('-c:v mpeg4 -q:v 3');
+  });
+});
+
 test.describe('File Size column', () => {
   test('shows a dash for Queued/Rendering — never a per-row estimate', async ({ page }) => {
     await gotoHarness(page);
@@ -360,7 +401,7 @@ test.describe('Skip (keep original) toggle', () => {
     await emitSnapshot(page, [job({ id: '0', status: 'Queued', skip_available: true, codec_id: 'prores' })]);
     await page.locator('tr[data-job-id="0"] .render-job-skip-checkbox').check();
     const calls = await invocationsFor(page, 'set_render_job_codec');
-    expect(calls).toEqual([{ jobId: '0', codec: 'source_copy' }]);
+    expect(calls).toEqual([{ jobId: '0', codec: 'source_copy', customCodecArgs: '' }]);
   });
 
   test("unchecking Skip restores the job's own prior codec, not whatever the panel currently shows", async ({ page }) => {
@@ -373,7 +414,7 @@ test.describe('Skip (keep original) toggle', () => {
 
     const calls = await invocationsFor(page, 'set_render_job_codec');
     const last = calls[calls.length - 1];
-    expect(last).toEqual({ jobId: '0', codec: 'prores' });
+    expect(last).toEqual({ jobId: '0', codec: 'prores', customCodecArgs: '' });
   });
 
   test('settings summary omits the fps suffix once Skip is confirmed', async ({ page }) => {

@@ -13,6 +13,21 @@ pub enum RenderCodec {
     H264Software,
     ProRes,
     DnxHr,
+    /// Lossless. Pairs with the AVI container, HuffYUV's native home and the
+    /// one every decoder actually expects it in.
+    HuffYuv,
+    /// `-c:v rawvideo` — no compression at all, not even the intra-frame
+    /// kind HuffYUV does. Same AVI container as HuffYUV, for the same reason.
+    Uncompressed,
+    /// An escape hatch: `RenderConfig::custom_codec_args` is split on
+    /// whitespace and passed to FFmpeg verbatim in place of the `-c:v ...`
+    /// block every other variant hardcodes here. For a codec this dropdown
+    /// doesn't have yet -- no allow-list, no parsing beyond the split;
+    /// FFmpeg itself is the validator, the same way a bad codec typed
+    /// directly at a terminal would be. Container is always `.mkv`, which
+    /// accepts nearly anything, since there is no way to know what a given
+    /// custom codec needs.
+    Custom,
     /// "Skip" — leave an OBS take exactly as OBS wrote it: no FFmpeg pass at
     /// all, just a copy into the export pool under the pipeline's naming.
     /// Only meaningful for a clip with its own muxed-in audio (`ClipData.wav_file
@@ -28,6 +43,11 @@ pub struct RenderConfig {
     pub export_directories: Vec<PathBuf>,
     pub fps: u32,
     pub target_codec: RenderCodec,
+    /// Raw FFmpeg video-codec args (e.g. `-c:v mpeg4 -q:v 3`), only read
+    /// when `target_codec` is `RenderCodec::Custom`. `#[serde(default)]` so
+    /// a config file written before this field existed still loads.
+    #[serde(default)]
+    pub custom_codec_args: String,
     pub max_concurrent_renders: usize,
 }
 
@@ -40,6 +60,9 @@ impl RenderCodec {
             "h264" => Self::H264Software,
             "h264_nvenc" => Self::NvencH264,
             "dnxhr" => Self::DnxHr,
+            "huffyuv" => Self::HuffYuv,
+            "uncompressed" => Self::Uncompressed,
+            "custom" => Self::Custom,
             "source_copy" => Self::SourceCopy,
             _ => Self::ProRes,
         }
@@ -53,6 +76,9 @@ impl RenderCodec {
             Self::H264Software => "h264",
             Self::NvencH264 => "h264_nvenc",
             Self::DnxHr => "dnxhr",
+            Self::HuffYuv => "huffyuv",
+            Self::Uncompressed => "uncompressed",
+            Self::Custom => "custom",
             Self::ProRes => "prores",
             Self::SourceCopy => "source_copy",
         }
@@ -65,6 +91,9 @@ impl RenderCodec {
             Self::H264Software => "H.264 (Software)",
             Self::NvencH264 => "H.264 (NVENC)",
             Self::DnxHr => "DNxHR",
+            Self::HuffYuv => "HuffYUV",
+            Self::Uncompressed => "Uncompressed",
+            Self::Custom => "Custom",
             Self::ProRes => "ProRes",
             Self::SourceCopy => "Skip (Keep Original)",
         }
@@ -79,6 +108,7 @@ impl Default for RenderConfig {
             export_directories: Vec::new(),
             fps: 300,
             target_codec: RenderCodec::ProRes,
+            custom_codec_args: String::new(),
             max_concurrent_renders: 2,
         }
     }
@@ -122,7 +152,16 @@ mod tests {
         // to_str_id/from_str_id must stay inverses — autosave recovery
         // (render_manager.rs's recover_render_batch) round-trips a persisted
         // codec through exactly this pair.
-        for codec in [RenderCodec::NvencH264, RenderCodec::H264Software, RenderCodec::ProRes, RenderCodec::DnxHr, RenderCodec::SourceCopy] {
+        for codec in [
+            RenderCodec::NvencH264,
+            RenderCodec::H264Software,
+            RenderCodec::ProRes,
+            RenderCodec::DnxHr,
+            RenderCodec::HuffYuv,
+            RenderCodec::Uncompressed,
+            RenderCodec::Custom,
+            RenderCodec::SourceCopy,
+        ] {
             assert_eq!(RenderCodec::from_str_id(codec.to_str_id()), codec);
         }
     }

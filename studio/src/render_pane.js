@@ -41,6 +41,17 @@ function getSelectedCodec() {
   return document.querySelector('#render-codec-select')?.value || 'prores';
 }
 
+/** The batch panel's current Custom-codec FFmpeg args text, if any. */
+function getCustomCodecArgs() {
+  return document.querySelector('#render-custom-codec-input')?.value?.trim() || '';
+}
+
+/** Shows the Custom-args input only while Custom is the selected codec. */
+function syncCustomCodecVisibility() {
+  const group = document.querySelector('#render-custom-codec-group');
+  if (group) group.style.display = getSelectedCodec() === 'custom' ? '' : 'none';
+}
+
 function statusColor(status) {
   switch (status) {
     case 'Finished': return '#4caf50';
@@ -165,8 +176,10 @@ function wireSettingsCell(cell) {
       // queued job's settings never silently pick up a later panel change.
       const row = cb.closest('tr');
       const codecVal = cb.checked ? 'source_copy' : (row?.dataset.lastCodec || getSelectedCodec());
+      // Only carries meaning for codecVal === 'custom'; harmless otherwise.
+      const customArgsVal = cb.checked ? '' : (row?.dataset.lastCustomArgs ?? getCustomCodecArgs());
       cb.disabled = true;
-      setRenderJobCodec(jobId, codecVal)
+      setRenderJobCodec(jobId, codecVal, customArgsVal)
         .catch((err) => {
           showToast(STRINGS.RENDER.setJobCodecFailed(err), 'error');
           cb.checked = wasChecked;
@@ -234,8 +247,11 @@ function updateJobRow(row, j) {
   // Remembers the last codec this job actually rendered under (i.e. never
   // "source_copy" itself) so unchecking Skip later can restore exactly that,
   // not whatever the batch panel currently shows — see `wireSettingsCell`.
+  // lastCustomArgs rides along for the same reason: codec_id alone is just
+  // "custom", not the args string that made it mean something.
   if (j.codec_id !== 'source_copy') {
     row.dataset.lastCodec = j.codec_id;
+    row.dataset.lastCustomArgs = j.custom_codec_args || '';
   }
 
   const settingsKey = `${j.settings_summary}|${j.skip_available}|${j.status === 'Queued'}|${j.codec_id}`;
@@ -516,6 +532,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       }
 
       const codecVal = getSelectedCodec();
+      const customCodecArgsVal = getCustomCodecArgs();
+      if (codecVal === 'custom' && !customCodecArgsVal) {
+        showToast(STRINGS.RENDER.CUSTOM_CODEC_ARGS_REQUIRED, 'error');
+        return;
+      }
       const fpsVal = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
       const maxConcurrentVal = Math.min(8, Math.max(1, parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2));
       checkNvencConcurrencyWarning();
@@ -531,6 +552,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const renderPayload = {
         render_directories: captureLocations,
         codec: codecVal,
+        custom_codec_args: customCodecArgsVal,
         fps: fpsVal,
         ffmpeg_path: ffmpegPathVal || null,
         export_directories: exportDirs,
@@ -637,6 +659,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   }
   if (codecEl) codecEl.addEventListener('change', checkNvencConcurrencyWarning);
   if (maxConcurrentEl) maxConcurrentEl.addEventListener('change', checkNvencConcurrencyWarning);
+  // Reflects whatever the select already shows at setup time too — it may
+  // have just been restored from settings.render_codec to "custom" before
+  // this runs, and the args input needs to be visible from the first paint.
+  if (codecEl) codecEl.addEventListener('change', syncCustomCodecVisibility);
+  syncCustomCodecVisibility();
 
   // Paints once at startup (before any snapshot has arrived, so before
   // anything could have changed) — the `render_jobs_snapshot` listener above
