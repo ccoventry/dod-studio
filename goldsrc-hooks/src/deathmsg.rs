@@ -400,11 +400,13 @@ fn apply_max(max: i32) -> Result<(), String> {
 // ── The y detour ─────────────────────────────────────────────────────────────
 //
 // `Draw` picks the feed's y down three paths -- a plain 20, a screen-scaled
-// term plus 20 when the spectator-HUD flag is set, and the spectator layout's
-// own numbers in mode 2 -- and all three converge with y in `[esp+4]` just
-// before the function saves its registers. Detouring that convergence sets the
-// *result*, so one value means the same thing on every path, including mode 2,
-// which holds no immediate to patch at all.
+// term plus 20 when the spectator-HUD flag is set, and the overview map's own
+// layout numbers while it's up at full size ("mode 2" -- not a spectator
+// mode, see docs/goldsrc_death_notices.md's corrigendum) -- and all three
+// converge with y in `[esp+4]` just before the function saves its registers.
+// Detouring that convergence sets the *result*, so one value means the same
+// thing on every path, including mode 2, which holds no immediate to patch
+// at all.
 //
 // This is the technique HLAE uses for the same job; see
 // `docs/goldsrc_death_notices.md`.
