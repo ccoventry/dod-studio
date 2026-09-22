@@ -11,9 +11,13 @@ name: CI
 on:
   pull_request:
     branches: [dev, main]
-    paths-ignore:
-      - '**.md'
-      - 'docs/**'
+    # Deliberately no paths-ignore for **.md/docs/**: dev-protection's
+    # ruleset requires these three checks by name on every PR, and GitHub
+    # only skips a workflow when *every* changed file matches
+    # paths-ignore. A PR that manages to do that would trigger no check
+    # runs at all and sit stuck as "expected, waiting" with no way to
+    # satisfy the rule short of a stub workflow -- cheaper to always run
+    # than to carry that trap.
 
 jobs:
   rust-tests:
