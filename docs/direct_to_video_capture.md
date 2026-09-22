@@ -161,8 +161,8 @@ bytes. Kept as written because the questions are what the probe was designed aro
   scheduled capture commands. See the decal-ring entry in `docs/goldsrc_dod_quirks.md` for how that
   failure looks — a capture that completes normally and is wrong.
 
-So this belongs in `dodtools_helper.cfg`, alongside the existing aliases, executed via the
-`+exec dodtools_helper.cfg` already on the HLAE command line. Path escaping in it follows the
+So this belongs in `dodstudio_helper.cfg`, alongside the existing aliases, executed via the
+`+exec dodstudio_helper.cfg` already on the HLAE command line. Path escaping in it follows the
 existing rule: forward slashes become `\\\\`.
 
 ---
@@ -193,7 +193,7 @@ to trade quality for speed.
 
 ## Where this touches the codebase
 
-- **`native/src/patch/builder.rs`** — `final_init_commands` and the `dodtools_helper.cfg` writer.
+- **`native/src/patch/builder.rs`** — `final_init_commands` and the `dodstudio_helper.cfg` writer.
   The `enabled` and `options` lines go here. `mirv_movie_separate_hud` already branches nearby and
   decides whether `hudColor`/`hudAlpha` need their own options.
 - **`native/src/hlcr/scanner.rs`** — `is_renderable_take` currently requires a `.wav` **and** a
@@ -252,7 +252,7 @@ capture that runs and produces no video.
    and look — items 2 and 3 above decide how much of the rest is a small change or a large one.
 2. **FFmpeg availability.** Detection, the offer, and the never-overwrite rule. Independent of
    everything else and safe to land first.
-3. **Emit the commands.** `enabled` and `options` into `dodtools_helper.cfg`, behind a setting that
+3. **Emit the commands.** `enabled` and `options` into `dodstudio_helper.cfg`, behind a setting that
    is off by default. Codec choice exposed, not hardcoded.
 4. **Teach the scanner the new shape**, on both sides of the shared predicate at once.
 5. **The mux.** Stream-copy plus audio for the simple case. Decide separately whether separate-HUD

@@ -1,4 +1,4 @@
-//! `dodtools_hide_hudelement`: hide any one of DoD's HUD elements, by name.
+//! `dodstudio_hide_hudelement`: hide any one of DoD's HUD elements, by name.
 //!
 //! ## One dword, not a code patch
 //!
@@ -197,7 +197,7 @@ pub const ELEMENTS: &[Element] = &[
         name: "crosshair",
         class: ".?AVCHudDoDCrossHair@@",
         vftable_rva: 0xac134,
-        what: "the crosshair, POV and spectator alike (dodtools_hide_crosshair does this too)",
+        what: "the crosshair, POV and spectator alike (dodstudio_hide_crosshair does this too)",
     },
     Element {
         name: "deathnotice",
@@ -440,7 +440,7 @@ pub fn listing() -> String {
     out
 }
 
-/// One line for `dodtools_status`.
+/// One line for `dodstudio_status`.
 pub fn status() -> String {
     let hidden: Vec<&str> = ELEMENTS
         .iter()

@@ -1,7 +1,7 @@
-//! `dodtools_hide_sprite` — suppress specific map-placed `env_sprite`
+//! `dodstudio_hide_sprite` — suppress specific map-placed `env_sprite`
 //! entities by their model path (e.g. `sprites/mapsprites/caparea.spr`).
 //!
-//! ## Why `dodtools_hide_hudelement` can't reach this
+//! ## Why `dodstudio_hide_hudelement` can't reach this
 //!
 //! That module (issue #265) patches the classic 2D HUD element list —
 //! `CHud::Redraw` walking `CHudBase`-derived elements' vftable slot 3. An
@@ -38,12 +38,12 @@
 //!
 //! ## Design: an allow-list, not a blanket toggle
 //!
-//! Deliberately not a `dodtools_hide_map_sprites 1` switch. Most of
+//! Deliberately not a `dodstudio_hide_map_sprites 1` switch. Most of
 //! `sprites/mapsprites/`'s neighbours are decorative and meaningful —
 //! smoke, fire, tracers — and indiscriminately suppressing every map-placed
 //! sprite would remove things nobody asked to have removed. This command
 //! only ever hides model paths named explicitly, the same shape
-//! `dodtools_deathmsg block <id>...` already uses for players.
+//! `dodstudio_deathmsg block <id>...` already uses for players.
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
@@ -65,7 +65,7 @@
 //! genuine `env_sprite`: the capture-area icon and the crosshair are both
 //! ordinary 2D HUD elements (`CHudDodIcons`/`CHudDoDCrossHair`), which this
 //! command was never able to reach in the first place -- see "Why
-//! `dodtools_hide_hudelement` can't reach this" above, which turns out to cut
+//! `dodstudio_hide_hudelement` can't reach this" above, which turns out to cut
 //! both ways.
 
 use std::sync::RwLock;
@@ -156,7 +156,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of model paths, replacing whatever was hidden
     // before -- the same "each call restates the whole set" shape
-    // `dodtools_deathmsg block <id>...` and `dodtools_msglog <name>...` use.
+    // `dodstudio_deathmsg block <id>...` and `dodstudio_msglog <name>...` use.
     if let Ok(mut list) = HIDDEN.write() {
         *list = rest.to_vec();
     }
@@ -170,7 +170,7 @@ pub unsafe extern "C" fn command() {
     unsafe { crate::debug::report(&format!("hide_sprite: {} -> {}", argv.join(" "), reply.trim())) };
 }
 
-/// Folded into `dodtools_debug_status`, gated on being non-empty like
+/// Folded into `dodstudio_debug_status`, gated on being non-empty like
 /// `msglog`'s own status line -- off by default, and a permanent "hiding
 /// nothing" line would be noise in the overwhelmingly common case.
 pub(crate) fn status_line() -> Option<String> {

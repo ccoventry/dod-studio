@@ -1,4 +1,4 @@
-//! `dodtools_crosshair`: hide DoD's crosshair, and make it stay hidden.
+//! `dodstudio_crosshair`: hide DoD's crosshair, and make it stay hidden.
 //!
 //! ## Why the stock cvar is not enough
 //!
@@ -41,7 +41,7 @@
 //!
 //! Patching the function needs neither: one signature on the function itself,
 //! five bytes, and reverting restores the five bytes the signature already
-//! proves were there. The general `dodtools_hudelement` command in #265 is
+//! proves were there. The general `dodstudio_hudelement` command in #265 is
 //! still worth having -- this is not it, and does not block it.
 //!
 //! ## It covers both the POV and the spectator crosshair
@@ -177,7 +177,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_debug_status`.
+/// One line for `dodstudio_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();

@@ -1,6 +1,6 @@
 //! Finds every `StatusIcon` user message in a demo and reports the icon name
 //! DoD actually sent, plus enable/disable and color -- `CHudStatusIcons`
-//! (`dodtools_hide_hudelement statusicons`) draws whatever icon name arrives
+//! (`dodstudio_hide_hudelement statusicons`) draws whatever icon name arrives
 //! here. Not in the `dod` crate's typed `UserMessage` enum, so this reads the
 //! wire format directly: byte enable, C-string icon name, then [r,g,b] only
 //! if enabling (confirmed against the real client.dll's

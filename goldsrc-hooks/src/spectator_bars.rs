@@ -1,4 +1,4 @@
-//! R&D for a `dodtools_hide_spectator_bars` cvar to hide the top and bottom
+//! R&D for a `dodstudio_hide_spectator_bars` cvar to hide the top and bottom
 //! spectator UI without needing `mirv_recordmovie_start` running. **Parked,
 //! not wired into the crate** (`lib.rs` doesn't declare this as a `mod`) --
 //! two live-tested approaches both turned out to be dead ends; see the
@@ -78,7 +78,7 @@
 //! on these two objects at all during ordinary play. A virtual call site
 //! can't be enumerated by scanning for a fixed address the way a direct
 //! `call rel32` can, so [`HIT_COUNT`] answers it empirically instead -- the
-//! trampoline increments it on every invocation, and `dodtools_debug_status`
+//! trampoline increments it on every invocation, and `dodstudio_debug_status`
 //! reports it.
 //!
 //! ## Confirmed dead: the hit count is 0 (2026-09-21, same session)
@@ -139,7 +139,7 @@
 //! The user already has a working, no-code fix for the top bar --
 //! `Spectator.res`'s `visible`/`enabled` keys, edited by hand. They'd be
 //! fine with the same thing for the bottom bar instead of a
-//! `dodtools_hide_spectator_bars` command, which changes the actual
+//! `dodstudio_hide_spectator_bars` command, which changes the actual
 //! question worth investigating next: not "how do we force `CBottomBar`
 //! hidden at runtime" but "why does `BottomSpectator.res`'s `visible` key
 //! not reach `CBottomBar` the way `Spectator.res`'s reaches
@@ -210,7 +210,7 @@ static BUILT_BASE: AtomicUsize = AtomicUsize::new(0);
 /// baked in at build time), not by anything on the Rust side.
 static HIT_COUNT: AtomicU32 = AtomicU32::new(0);
 
-/// How many times the trampoline has run, for `dodtools_debug_status`.
+/// How many times the trampoline has run, for `dodstudio_debug_status`.
 pub fn hit_count() -> u32 {
     HIT_COUNT.load(Ordering::Relaxed)
 }
@@ -366,7 +366,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodtools_debug_status`.
+/// One line for `dodstudio_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "both spectator bars draw normally".into();

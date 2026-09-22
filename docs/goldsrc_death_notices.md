@@ -3,7 +3,7 @@
 > **Status 2026-09-16 — implemented and live-tested.**
 > Lives in `goldsrc-hooks/src/deathmsg.rs`, on branch
 > `feat/goldsrc-hooks-companion-dll`. One console command,
-> `dodtools_deathmsg`, with four subcommands.
+> `dodstudio_deathmsg`, with four subcommands.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -358,13 +358,13 @@ are checked against `Y_STOLEN` before anything is written.
 ## 4. The console surface
 
 ```
-dodtools_deathmsg max <4..127>      lines shown at once (default 4)
-dodtools_deathmsg offset <0..127>   y the feed starts at (default 20)
-dodtools_deathmsg offset default    put the y back
-dodtools_deathmsg block <id>...     hide frags involving these players
-dodtools_deathmsg block !<id>...    hide everything EXCEPT these players
-dodtools_deathmsg block clear       stop hiding anything
-dodtools_deathmsg fake <killer> <victim> <weapon>
+dodstudio_deathmsg max <4..127>      lines shown at once (default 4)
+dodstudio_deathmsg offset <0..127>   y the feed starts at (default 20)
+dodstudio_deathmsg offset default    put the y back
+dodstudio_deathmsg block <id>...     hide frags involving these players
+dodstudio_deathmsg block !<id>...    hide everything EXCEPT these players
+dodstudio_deathmsg block clear       stop hiding anything
+dodstudio_deathmsg fake <killer> <victim> <weapon>
 ```
 
 `max 4` restores the shipped bytes exactly, array included, so there is always a

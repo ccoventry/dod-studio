@@ -1,6 +1,6 @@
 # The spectator top/bottom bars: why one `.res` edit sticks and the other doesn't
 
-R&D into a `dodtools_hide_spectator_bars`-style command, prompted by the user
+R&D into a `dodstudio_hide_spectator_bars`-style command, prompted by the user
 asking why HLAE's `mirv_movie_hidepanels`/`mirv_disable_specmenu` don't help
 (`mirv_movie_hidepanels` only hides panels *from the capture*, leaving them
 on screen — confirmed from the advancedfx wiki, not from memory; the wiki
@@ -224,7 +224,7 @@ bar-specific.
 
 ---
 
-## Attempted and parked: `dodtools_hide_spectator_bars`
+## Attempted and parked: `dodstudio_hide_spectator_bars`
 
 **Status (2026-09-21): parked.** Not wired into the crate (`goldsrc-hooks/src/spectator_bars.rs`
 exists on disk, but `lib.rs` doesn't declare it as a `mod`) after two live
@@ -294,7 +294,7 @@ never going to be a full fix anyway.
 That leaves one real open question, which a static scan can't answer for an
 indirect (virtual) call site: is `SetVisible` ever called on these two
 objects at all during ordinary play? `spectator_bars.rs` had the trampoline
-increment a hit counter, surfaced in `dodtools_debug_status`, to settle it
+increment a hit counter, surfaced in `dodstudio_debug_status`, to settle it
 empirically rather than by more guessing.
 
 **Second live test, same day: the hit count was 0.** `SetVisible` is
@@ -337,7 +337,7 @@ parent/sibling panel `BottomSpectator.res` doesn't even have a section for,
 drawn unconditionally by something else).
 
 **Narrower goal for next time, per a 2026-09-21 conversation with the
-user:** a `dodtools_hide_spectator_bars` command was never the requirement
+user:** a `dodstudio_hide_spectator_bars` command was never the requirement
 -- the user already has a working, no-code fix for the top bar
 (`Spectator.res`'s `visible`/`enabled` keys, edited by hand) and would be
 satisfied with the same thing working for the bottom bar, instead of a

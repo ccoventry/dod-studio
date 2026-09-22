@@ -1,6 +1,6 @@
 # Raising GoldSrc's interpolation ceiling
 
-How `dodtools_ex_interp_max` works, and why the engine's own 200 ms path does
+How `dodstudio_ex_interp_max` works, and why the engine's own 200 ms path does
 not. Answers #271.
 
 Offline analysis of the pre-Anniversary `hw.dll` (`pefile` + `capstone`),
@@ -106,8 +106,8 @@ VAC-secured and nothing goes near it.
 ## 6. The setting
 
 ```
-dodtools_ex_interp_max 250     raise the clamp's ceiling to 250 ms
-dodtools_ex_interp_max 100     put the engine's own ceiling back
+dodstudio_ex_interp_max 250     raise the clamp's ceiling to 250 ms
+dodstudio_ex_interp_max 100     put the engine's own ceiling back
 ```
 
 A cvar rather than a command, because it holds a value, and it defaults to 100

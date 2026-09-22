@@ -1,8 +1,8 @@
 # Silencing and hiding things DoD draws, without editing game files
 
-`dodtools_mute_voice_commands` and `dodtools_hide_crosshair`, and why each needed a
+`dodstudio_mute_voice_commands` and `dodstudio_hide_crosshair`, and why each needed a
 patch rather than a setting. Companion to `docs/goldsrc_scoreboard.md`, which
-covers `dodtools_hide_scoreboard`.
+covers `dodstudio_hide_scoreboard`.
 
 Everything here is from offline analysis of DoD 1.3's `client.dll` (`pefile` +
 `capstone`, the house method in `docs/goldsrc_client_dll_internals.md` §10),
@@ -35,7 +35,7 @@ the install.
 
 ---
 
-## 2. `dodtools_mute_voice_commands`
+## 2. `dodstudio_mute_voice_commands`
 
 ### Where the sound comes from
 
@@ -115,7 +115,7 @@ system that has nothing to do with these callbacks.
 
 ---
 
-## 3. `dodtools_hide_crosshair`
+## 3. `dodstudio_hide_crosshair`
 
 ### Why the stock cvar is not enough
 
@@ -155,7 +155,7 @@ Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — i
 one dword and cheaper. It also needs the vftable's address at runtime, which
 means resolving RTTI in the loaded module or signature-matching the constructor
 that stores it. Patching the function needs neither. The general
-`dodtools_hudelement` command in #265 is still worth having; this is not it and
+`dodstudio_hudelement` command in #265 is still worth having; this is not it and
 does not block it.
 
 ### Both the POV and the spectator crosshair
@@ -187,7 +187,7 @@ is.
 
 ## 4. Re-applied every frame, from the bytes
 
-All four settings (including `dodtools_hide_scoreboard`) are handed to their
+All four settings (including `dodstudio_hide_scoreboard`) are handed to their
 `apply` every frame rather than compared against a cached flag.
 
 That is not defensive habit. **If the engine ever unloads and reloads
@@ -236,7 +236,7 @@ already have a working `.res` workaround.
 
 ---
 
-## 6. `dodtools_match_pov_crosshair`
+## 6. `dodstudio_match_pov_crosshair`
 
 The other half of §3's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:
@@ -306,7 +306,7 @@ stock rect alone rather than guessing.
 
 ### It loses to §3, by construction
 
-`dodtools_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
+`dodstudio_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
 patches instructions *inside* a function that is then never reached, so hiding
 wins with no interlock written anywhere.
 
@@ -319,7 +319,7 @@ between the two views is still open.
 
 ---
 
-## 7. `dodtools_hide_hudelement` -- the general case
+## 7. `dodstudio_hide_hudelement` -- the general case
 
 Sections 2, 3 and 6 each patch one function for one purpose, and section 3's
 own module doc says why it is not this: patching a function needs no vftable

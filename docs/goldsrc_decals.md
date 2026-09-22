@@ -1,6 +1,6 @@
 # Clearing GoldSrc decals at runtime
 
-How `dodtools_clear_decals` works, and why the pipeline's existing decal
+How `dodstudio_clear_decals` works, and why the pipeline's existing decal
 hygiene had to be so much more elaborate. Answers the R&D question in #290.
 
 Everything here is from offline analysis of the pre-Anniversary `hw.dll`
@@ -73,7 +73,7 @@ the surfaces are being rebuilt in the same breath. Mid-demo it is a use of
 freed structure contents.
 
 What makes the engine's own *remove* functions safe is that they unlink first.
-So `dodtools_clear_decals` is that loop with the flag test dropped:
+So `dodstudio_clear_decals` is that loop with the flag test dropped:
 
 ```rust
 for slot in pool {
@@ -133,7 +133,7 @@ verifier against the Anniversary `hw.dll` shows exactly that:
 
 ## 6. What this does not replace yet
 
-`dodtools_clear_decals` is a console command that clears on demand. The capture
+`dodstudio_clear_decals` is a console command that clears on demand. The capture
 pipeline still does its own thing, because wiring the two together is a
 separate decision:
 
@@ -143,5 +143,5 @@ separate decision:
 - but the flush burst is live-proven and this is not, so nothing was switched
   over on the strength of a static analysis.
 
-The obvious first live test is: load a demo, shoot a wall, `dodtools_clear_decals`,
+The obvious first live test is: load a demo, shoot a wall, `dodstudio_clear_decals`,
 and see whether the holes go and the game keeps running.

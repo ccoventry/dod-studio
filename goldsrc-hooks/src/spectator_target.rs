@@ -1,4 +1,4 @@
-//! `dodtools_log_spectator_target` — logs `CHudSpectator`'s own idea of who
+//! `dodstudio_log_spectator_target` — logs `CHudSpectator`'s own idea of who
 //! is being followed side by side with the entity the engine actually
 //! renders a first-person viewmodel for, whenever either one changes.
 //!
@@ -39,7 +39,7 @@
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodtools_hltv_show_viewmodel_animations` is
+//! only has fresh data while `dodstudio_hltv_show_viewmodel_animations` is
 //! on (any level). Turn that on too when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!

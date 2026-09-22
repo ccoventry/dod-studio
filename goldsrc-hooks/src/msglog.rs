@@ -1,4 +1,4 @@
-//! `dodtools_msglog` — dump chosen DoD user messages and their payloads to
+//! `dodstudio_msglog` — dump chosen DoD user messages and their payloads to
 //! the log, forwarded to the game untouched.
 //!
 //! Every investigation of "what does the client actually receive, and when"
@@ -34,7 +34,7 @@
 //! back, is suppressed -- most of these resend the same state every tick
 //! while nothing changes, and a log that is one entry per actual change is
 //! the one worth reading. The command's own replies (what's now being
-//! watched) still go to the console, like every other `dodtools_*` command.
+//! watched) still go to the console, like every other `dodstudio_*` command.
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
@@ -147,7 +147,7 @@ fn find_thunk(name: &str) -> Option<usize> {
     MESSAGES.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|&(_, rva)| rva)
 }
 
-/// What `dodtools_msglog` is currently set to watch.
+/// What `dodstudio_msglog` is currently set to watch.
 enum Wanted {
     None,
     All,
@@ -259,7 +259,7 @@ pub fn poll() {
     }
 }
 
-/// The command's own reply to a bare `dodtools_msglog` -- always something,
+/// The command's own reply to a bare `dodstudio_msglog` -- always something,
 /// including "logging nothing", since a query should never come back empty.
 fn status() -> String {
     match WANTED.lock() {
@@ -272,7 +272,7 @@ fn status() -> String {
     }
 }
 
-/// Folded into `dodtools_debug_status`. `None` while logging is off, so that
+/// Folded into `dodstudio_debug_status`. `None` while logging is off, so that
 /// command's gate on the two other opt-in diagnostics (`anim_fix`,
 /// `sound_fix`) can treat this the same way -- see `commands.rs`.
 pub(crate) fn status_line() -> Option<String> {
@@ -350,7 +350,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of message names, replacing whatever was
     // wanted before -- the same "each call restates the whole set" shape
-    // `dodtools_deathmsg block <id>...` uses.
+    // `dodstudio_deathmsg block <id>...` uses.
     let canonical = match resolve_names(rest) {
         Ok(names) => names,
         Err(unknown) => {
@@ -419,7 +419,7 @@ mod tests {
     fn a_mixed_known_and_unknown_list_is_rejected_wholesale() {
         // Silently dropping just the bad name and logging the rest would
         // hide a typo instead of naming it -- the same reasoning
-        // dodtools_hide_hudelement's own fix (commit 3e44cd7) applied.
+        // dodstudio_hide_hudelement's own fix (commit 3e44cd7) applied.
         let err = resolve_names(&["SayText".to_string(), "Nope".to_string()]).unwrap_err();
         assert_eq!(err, vec!["Nope".to_string()]);
     }
