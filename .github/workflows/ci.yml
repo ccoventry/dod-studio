@@ -70,8 +70,15 @@ jobs:
       #   rustup run 1.98.1 cargo clippy --workspace --all-targets -- -D warnings
       - uses: dtolnay/rust-toolchain@1.98.1
         with:
-          components: clippy
+          components: clippy, rustfmt
           targets: i686-pc-windows-msvc
+
+      # First, and before the build: it needs no compile, so a formatting slip
+      # fails in seconds instead of after a full clippy build. Same pinned
+      # toolchain as clippy for the same reason -- rustfmt's output can shift
+      # between releases. To fix locally: `rustup run 1.98.1 cargo fmt --all`.
+      - name: cargo fmt --check
+        run: cargo fmt --all --check
 
       - uses: Swatinem/rust-cache@v2
 
@@ -95,11 +102,6 @@ jobs:
       # [workspace.lints.clippy], one commented entry per judgement that clippy
       # is wrong for this codebase. Add there, with a reason, rather than
       # loosening this step.
-      #
-      # No `cargo fmt --check` alongside it, deliberately: this tree has never
-      # been rustfmt-formatted (847 files differ), so gating on it would mean a
-      # whole-repo reformat that conflicts with every open branch. That is a
-      # separate decision, not a side effect of adding a lint gate.
       - name: cargo clippy -D warnings
         run: cargo clippy --workspace --all-targets -- -D warnings
 

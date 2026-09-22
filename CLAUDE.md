@@ -51,6 +51,14 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
     npm run dev           # Vite dev server only
     npm run build         # Production Vite build
 
+### Formatting
+
+The tree is rustfmt-formatted and CI's Clippy job gates on `cargo fmt --all --check` (#235). Format with the CI-pinned toolchain, not your default one, since rustfmt output can shift between releases:
+
+    rustup run 1.98.1 cargo fmt --all
+
+The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone so `git blame` skips it.
+
 ---
 
 ## System Guardrails & Agent Directives

@@ -1,0 +1,8 @@
+# rustfmt defaults, on purpose (#235). This file exists so a bare `rustfmt`
+# run on one file (an editor, not `cargo fmt`) formats it the same way CI's
+# `cargo fmt --all --check` does -- cargo passes the edition, rustfmt alone
+# would not.
+#
+# max_width stays at 100: 120 and 140 were measured and change about as many
+# lines as 100 does, so a wider limit buys nothing and costs the familiar default.
+style_edition = "2024"
