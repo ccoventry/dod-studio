@@ -67,6 +67,49 @@ of which crash identically to the untrimmed map. This only helps recordings
 made *after* a trimmed map is deployed. See #207 for the original problem and
 #231 for the fix that actually addresses it.
 
+### Map sounds and text
+
+| Probe | Question it answers |
+| --- | --- |
+| `mute_map_sounds` | What does this map play on a capture or a round win, and can it be silenced? |
+| `hide_map_text` | What does this map put on screen, and can it be hidden? |
+
+The other one here that writes a file. It reads the sound names out of the
+map's own entity lump -- `dod_control_point`'s `point_*_capsound` keyvalues,
+and the `ambient_generic` the `dod_control_point_master` fires at round end --
+and replaces the demo messages carrying them with `SvcNop`, the same move
+`decal_strip` makes for decals.
+
+`hide_map_text` is its counterpart for #287. The strings come from the same
+lump -- `dod_score_ent`'s `message` for the round result, `env_message`'s for a
+hint like anzio's mortar warning -- and the messages carrying them are nopped
+the same way. Both carriers #287 first suspected, `TE_TEXTMESSAGE` and
+`svc_centerprint`, turned out to carry nothing at all; the channel is `HudText`,
+which DoD's own clan-match prompts share, so selecting by what the map declares
+is what keeps those prompts alive.
+
+`--list` stops after printing what it found, which answers "what would this map
+lose?" without writing anything. See `native/src/patch/sound_mute.rs` and
+`map_text.rs` for why the selection is structural rather than a name list, and
+#284/#285/#287 for the measurements.
+
+### The capture scanner
+
+| Probe | Question it answers |
+| --- | --- |
+| `hltv_scan_probe` | Does the scanner's HLTV guard fire, and what would the scan find without it? |
+
+Written for #247, which reports that HLTV demos cannot be captured because
+`scanner.rs` rejects them at the header. It runs the scanner's own entry point
+rather than describing it, then runs the same analysis the scanner would have
+run next and reports the streaks its per-player loop would have walked.
+
+The answer on this library: **the guard never fires.** It reads the first 512
+bytes looking for the literal `"HLTV Proxy"`, and that string does not appear
+anywhere in any of the 37 demos here -- not in the header, not in 54MB of
+frames. Meanwhile eight of them are HLTV by the `analysis` crate's own
+`SvcHltv` test, and all eight scan fine and produce 161-177 streaks each.
+
 ### Capture backends
 
 | Probe | Question it answers |

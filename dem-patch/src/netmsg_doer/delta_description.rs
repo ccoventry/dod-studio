@@ -1,5 +1,3 @@
-use std::str::from_utf8;
-
 use crate::nom_helper::nom_fail;
 use crate::types::{Delta, DeltaDecoder, DeltaDecoderS};
 
@@ -70,13 +68,24 @@ impl Doer for SvcDeltaDescription {
             });
         }
 
+        // A read that ran past the end of this message's bytes means the
+        // demo is malformed. Reject it here, where the caller's normal
+        // parse-error path can skip the file -- the alternative is an
+        // out-of-bounds index, and `panic = "abort"` makes that fatal to the
+        // whole process rather than to this one demo. See #225.
+        if br.is_bad_read() {
+            return nom_fail("SvcDeltaDescription: read past the end of the message");
+        }
+
         let range = br.get_consumed_bytes();
         let clone = &clone[..range];
         let (i, _) = take(range)(i)?;
 
         // mutate delta_decoders
+        // `name` is a null-terminated string straight off disk; a corrupted
+        // one is not a reason to abort the process. #225.
         aux.delta_decoders
-            .insert(from_utf8(name).unwrap().to_owned(), decoder.clone());
+            .insert(String::from_utf8_lossy(name).into_owned(), decoder.clone());
 
         Ok((
             i,

@@ -25,7 +25,7 @@
 #![allow(mismatched_lifetime_syntaxes)]
 
 use std::{ffi::OsStr, path::Path};
-use nom::{combinator::all_consuming, multi::many0};
+use nom::{combinator::all_consuming, multi::many0, Parser};
 use types::{AuxRefCell, ByteVec, DeltaDecoderTable, Demo, NetMessage};
 
 use nom_helper::Result;
@@ -55,7 +55,7 @@ pub extern crate bitvec;
 ///
 pub fn parse_netmsg(i: &[u8], aux: AuxRefCell) -> Result<Vec<NetMessage>> {
     let parser = move |i| NetMessage::parse(i, aux.clone());
-    all_consuming(many0(parser))(i)
+    all_consuming(many0(parser)).parse(i)
 }
 
 /// Should be used for replacing `data.msg` of each frame.
@@ -218,5 +218,64 @@ mod test {
                 })
             })
             .unwrap_or_else(|e| panic!("could not read the test fixture directory: {e}"));
+    }
+
+    /// A malformed demo must come back as `Err`, never as a panic.
+    ///
+    /// The distinction is not cosmetic. The release profile sets
+    /// `panic = "abort"`, so the `catch_unwind` in
+    /// `Analysis::try_from_bytes_with_progress` cannot contain a panic raised
+    /// in here -- a single corrupted file in a scanned folder would take the
+    /// whole process down instead of being skipped with a diagnostic. Before
+    /// #225, 248 of 400 randomly mangled demos did exactly that.
+    ///
+    /// These run under the test profile, which unwinds, so a regression shows
+    /// up as a failing test rather than as a dead test runner.
+    mod malformed_input_is_an_error_not_a_crash {
+        use super::*;
+
+        fn fixture() -> Vec<u8> {
+            std::fs::read("./src/tests/demotest.dem").expect("fixture")
+        }
+
+        /// The header's `directory_offset` is signed and is used as an index
+        /// into the file.
+        #[test]
+        fn a_directory_offset_past_the_end_is_refused() {
+            let mut bytes = fixture();
+            bytes[540..544].copy_from_slice(&0x7fff_ffffu32.to_le_bytes());
+            assert!(open_demo_from_bytes(&bytes).is_err());
+        }
+
+        #[test]
+        fn a_negative_directory_offset_is_refused() {
+            let mut bytes = fixture();
+            bytes[540..544].copy_from_slice(&(-8i32).to_le_bytes());
+            assert!(open_demo_from_bytes(&bytes).is_err());
+        }
+
+        /// Cutting the file anywhere past the header must not panic. Most cuts
+        /// land mid-frame; a few happen to be parseable.
+        #[test]
+        fn truncation_at_every_offset_past_the_header_is_survivable() {
+            let bytes = fixture();
+            for at in 544..bytes.len() {
+                let _ = open_demo_from_bytes(&bytes[..at]);
+            }
+        }
+
+        /// Every single-byte value at every position past the header. This is
+        /// the fixture, so it is small enough to be exhaustive.
+        #[test]
+        fn any_single_byte_corruption_past_the_header_is_survivable() {
+            let bytes = fixture();
+            for at in 544..bytes.len() {
+                for v in [0x00u8, 0x01, 0x7f, 0x80, 0xfe, 0xff] {
+                    let mut mutant = bytes.clone();
+                    mutant[at] = v;
+                    let _ = open_demo_from_bytes(&mutant);
+                }
+            }
+        }
     }
 }

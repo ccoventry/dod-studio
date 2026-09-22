@@ -11,7 +11,7 @@
 //! client interface through a single `F` export instead. See `engine.rs`'s
 //! module docs and `docs/goldsrc_client_dll_internals.md`.
 //!
-//! Implements two fixes and one control surface, each independent of the
+//! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
 //! - `sound_fix`: force full-volume weapon-fire audio while spectating.
 //! - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -22,13 +22,46 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
+//! - `msglog`: the `dodtools_msglog` command -- dump chosen DoD user messages
+//!   and their payloads to the log, forwarded to the game untouched. Full
+//!   design write-up in the module doc itself.
+//! - `hide_sprite`: the `dodtools_hide_sprite <model-path>...` command --
+//!   suppress specific map-placed `env_sprite` entities by model path, an
+//!   allow-list rather than a blanket toggle. Full design write-up in the
+//!   module doc itself (issue #315).
+//! - `scoreboard`: the `dodtools_hide_scoreboard` cvar -- stop a POV demo's
+//!   recorded TAB presses from putting the scoreboard over the shot, without
+//!   editing `ScoreBoard.res`. Full design write-up in
+//!   `docs/goldsrc_scoreboard.md`.
+//! - `voice`: the `dodtools_mute_voice_commands` cvar -- silence "fire in the
+//!   hole!" and the rest, without overwriting the game's own `.wav` files.
+//! - `crosshair`: the `dodtools_hide_crosshair` cvar -- hide the crosshair and have
+//!   it stay hidden, which the stock `crosshair` cvar cannot do because
+//!   `CHud::Redraw` forces the value back every frame.
+//! - `objicons`: the `dodtools_objectives` command -- place the objective
+//!   (territory flag) icon row and timer, which the game itself draws at a
+//!   different y while spectating than it does in a POV demo. Full design
+//!   write-up in `docs/goldsrc_objective_icons.md`.
+//! - `spectator_crosshair`: the `dodtools_match_pov_crosshair` cvar -- draw the
+//!   spectator crosshair from the same sprite and tile a player's own
+//!   `cl_xhair_style` picks, since the two are drawn by different code paths
+//!   and do not otherwise share a look.
+//!
+//! The scoreboard/voice/crosshair/spectator_crosshair four are all in
+//! `docs/goldsrc_hud_suppression.md`.
+//!
+//! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
+//! at a `dodtools_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
+//! then tracing what it itself calls) both turned out to be dead ends --
+//! see `docs/goldsrc_spectator_bars.md` for what's been ruled out and what
+//! the real next step is (a live memory watch, not more static analysis).
 //!
 //! See each module's docs for the full R&D reasoning.
 //!
 //! Both are `dodstudio_*` **cvars**, so they behave like any other engine
-//! setting: `dodstudio_hltv_animation_fix 1` from the console, `+dodstudio_hltv_animation_fix 1`
+//! setting: `dodstudio_hltv_show_viewmodel_animations 1` from the console, `+dodstudio_hltv_show_viewmodel_animations 1`
 //! on the launch line, or a line in any `.cfg` the user execs. `commands.rs`
-//! copies them into the runtime flags once per frame, and `dodstudio_status`
+//! copies them into the runtime flags once per frame, and `dodstudio_debug_status`
 //! reports what each fix is actually doing rather than only what it is set to.
 //!
 //! The `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME` / `GOLDSRC_HOOKS_ANIM_FIX`
@@ -40,15 +73,28 @@
 mod anim_fix;
 mod commands;
 mod crash;
+mod crosshair;
+mod decals;
 mod deathmsg;
 mod detour;
 mod debug;
 mod engine;
+mod ex_interp;
+mod hand_signals;
+mod hide_sprite;
+mod hudelement;
+mod msglog;
 mod names;
+mod objicons;
+mod overview_map;
 mod patch;
 mod pe;
 mod scan;
+mod scoreboard;
 mod sound_fix;
+mod spectator_crosshair;
+mod spectator_target;
+mod voice;
 
 use std::sync::atomic::Ordering;
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
@@ -82,7 +128,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// The animation fix starts **off**, like the sound fix: a capture pipeline
 /// should not silently alter viewmodel animations for anyone who happens to
 /// have the DLL loaded. Pick an iteration per session with
-/// `dodstudio_hltv_animation_fix <0-5>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
+/// `dodstudio_hltv_show_viewmodel_animations <0-4>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
 /// have it start on one -- see `anim_fix::LEVEL` for what each is.
 ///
 /// It was on through live testing, because a session that begins by
@@ -108,7 +154,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // obvious from the log rather than mistaken for a broken hook.
     unsafe {
         debug::report(&format!(
-            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_animation_fix toggle live)",
+            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations toggle live)",
             if sound_fix::ENABLED.load(Ordering::Relaxed) { "ON" } else { "off" },
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
@@ -159,7 +205,7 @@ fn install_fixes() {
     // it's safe to install even if that capture hasn't landed yet.
     anim_fix::install();
 
-    // In-game dodstudio_hltv_gunshots_fix / dodstudio_hltv_animation_fix
+    // In-game dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();

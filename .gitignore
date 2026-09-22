@@ -63,6 +63,10 @@ native/local/crash_log.md
 **/node_modules/
 **/dist/
 
+# === Python (goldsrc-hooks/tools' offline binary-analysis scripts) ===
+__pycache__/
+*.pyc
+
 # === Tauri Artifacts ===
 desktop-studio/src-tauri/gen/
 
