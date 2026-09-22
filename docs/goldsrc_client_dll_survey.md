@@ -546,6 +546,12 @@ input, not confirmed which physical bind maps to which bit.
    would mean intercepting the VGUI2 panel itself (a different mechanism
    class, likely a `CreateInterface`/panel-factory hook, not a vftable-slot
    patch) — out of scope for a quick follow-up, not attempted here.
+   **Update:** `docs/goldsrc_spectator_bars.md` picks this back up and gets
+   further — `CDoDSpectatorGUI` *is* real, RTTI-confirmed, and constructed at
+   runtime; `+0x1a9d564` turns out to be a much bigger shared interface
+   (141 xrefs, offsets past `+0x368`) and not the panel itself. Still not
+   finished — the container object's own address isn't resolved yet — but the
+   open questions are narrower than "out of scope."
 3. **Whether the `54` is reachable at its source.** Yes, more directly than
    §6 states: all four `54 * ScreenHeight / 480` sites read the *same* single
    `.rdata` float, `+0xab7a8` (confirmed by byte search — one address, four
