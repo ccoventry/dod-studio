@@ -75,7 +75,7 @@ impl AppDataMigration {
     }
 }
 
-/// Moves `%APPDATA%\dod-studio`'s contents into `%APPDATA%\dod-studio` (#257).
+/// Moves `%APPDATA%\dod-tools`'s contents into `%APPDATA%\dod-studio` (#257).
 ///
 /// Moves **entry by entry** rather than renaming the directory, which matters
 /// more than it looks: any binary that logs -- `preview_cli`, a test, the
@@ -84,8 +84,9 @@ impl AppDataMigration {
 /// and strand `settings.json` in the old folder forever. Per-entry means the
 /// order things happen to run in cannot lose the user's settings.
 ///
-/// An entry that already exists at the destination is left alone, so this is
-/// safe to call repeatedly and never overwrites newer state with older.
+/// An entry that already exists at the destination and is not itself a
+/// directory colliding with a directory is left alone, so this is safe to
+/// call repeatedly and never overwrites newer state with older.
 pub fn migrate_legacy_appdata_dir() -> AppDataMigration {
     let base = appdata_base();
     migrate_appdata_dir_between(&base.join(LEGACY_APPDATA_DIR_NAME), &base.join(APPDATA_DIR_NAME))
@@ -96,30 +97,61 @@ fn migrate_appdata_dir_between(legacy: &Path, current: &Path) -> AppDataMigratio
     if !legacy.is_dir() || legacy == current {
         return report;
     }
-    let Ok(entries) = std::fs::read_dir(legacy) else {
-        return report;
-    };
     if std::fs::create_dir_all(current).is_err() {
         return report;
     }
 
-    for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let destination = current.join(entry.file_name());
-        if destination.exists() {
-            report.skipped.push(name);
-            continue;
-        }
-        match std::fs::rename(entry.path(), &destination) {
-            Ok(()) => report.moved.push(name),
-            Err(e) => report.failed.push((name, e.to_string())),
-        }
-    }
+    merge_dir_entries(legacy, current, "", &mut report);
 
     // Only ever removes an empty directory -- `remove_dir` fails rather than
     // recursing, so anything that could not be moved is still there afterwards.
     report.legacy_removed = std::fs::remove_dir(legacy).is_ok();
     report
+}
+
+/// Moves every entry of `source` into `destination`, recursing into a
+/// subdirectory that collides with one already at the destination instead of
+/// skipping it wholesale.
+///
+/// `logs/` is the collision that motivated this: the companion DLL computes
+/// `%APPDATA%\dod-studio\logs` directly, independent of this migration, so the
+/// very first time it runs it creates that folder on its own -- almost always
+/// before this migration gets a turn. A plain top-level skip then treats the
+/// whole `logs` entry as "already present" and strands the user's entire log
+/// history (potentially months of it) in the old location permanently. A file
+/// colliding with a file is still a plain skip; nothing here overwrites
+/// existing content, only merges past a directory that happens to already
+/// exist.
+fn merge_dir_entries(source: &Path, destination: &Path, prefix: &str, report: &mut AppDataMigration) {
+    let Ok(entries) = std::fs::read_dir(source) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let entry_name = entry.file_name().to_string_lossy().into_owned();
+        let name = if prefix.is_empty() { entry_name.clone() } else { format!("{prefix}/{entry_name}") };
+        let source_path = entry.path();
+        let destination_path = destination.join(&entry_name);
+
+        if !destination_path.exists() {
+            match std::fs::rename(&source_path, &destination_path) {
+                Ok(()) => report.moved.push(name),
+                Err(e) => report.failed.push((name, e.to_string())),
+            }
+            continue;
+        }
+
+        if source_path.is_dir() && destination_path.is_dir() {
+            merge_dir_entries(&source_path, &destination_path, &name, report);
+            // Only succeeds once the merge above has moved everything out --
+            // anything left behind (a skipped file-vs-file collision) keeps
+            // this directory around too, the same "nothing lost silently"
+            // guarantee the top-level legacy dir gets.
+            let _ = std::fs::remove_dir(&source_path);
+        } else {
+            report.skipped.push(name);
+        }
+    }
 }
 
 /// Extension of the hidden sidecar that marks a `_preview.dem` as this app's.
@@ -733,6 +765,59 @@ mod appdata_migration_tests {
 
         assert_eq!(std::fs::read_to_string(current.join("settings.json")).unwrap(), "old-settings");
         assert!(report.moved.contains(&"settings.json".to_string()));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// The exact bug this recursion exists for: the companion DLL creates the
+    /// *new* `logs` folder on its own before this migration ever runs, so a
+    /// plain top-level skip would strand months of history in the old
+    /// location. Both legacy's and the DLL's own log files must survive.
+    #[test]
+    fn merges_a_colliding_logs_folder_instead_of_stranding_it() {
+        let root = scratch("logs_merge");
+        let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
+        let current = root.join(APPDATA_DIR_NAME);
+        write(&legacy.join("logs").join("activity_20260822.md"), "# a month of history");
+        write(&legacy.join("logs").join("crash_log.md"), "# crash");
+        write(&current.join("logs").join("dodstudio_goldsrc_hooks.log"), "the DLL's own log, written first");
+
+        let report = migrate_appdata_dir_between(&legacy, &current);
+
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("activity_20260822.md")).unwrap(),
+            "# a month of history",
+            "legacy history must not be stranded just because the new logs folder already existed"
+        );
+        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "# crash");
+        assert_eq!(
+            std::fs::read_to_string(current.join("logs").join("dodstudio_goldsrc_hooks.log")).unwrap(),
+            "the DLL's own log, written first",
+            "the file already at the destination must not be overwritten"
+        );
+        assert!(report.moved.contains(&"logs/activity_20260822.md".to_string()));
+        assert!(report.moved.contains(&"logs/crash_log.md".to_string()));
+        assert!(report.legacy_removed, "the legacy dir should be fully drained and removed");
+        assert!(!legacy.exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A genuine file-vs-file collision inside a merged directory is still
+    /// left alone, not overwritten -- the recursion must not weaken that
+    /// guarantee just because it now looks one level deeper.
+    #[test]
+    fn a_colliding_file_inside_a_merged_directory_is_still_skipped_not_overwritten() {
+        let root = scratch("logs_merge_collision");
+        let legacy = root.join(LEGACY_APPDATA_DIR_NAME);
+        let current = root.join(APPDATA_DIR_NAME);
+        write(&legacy.join("logs").join("crash_log.md"), "stale");
+        write(&current.join("logs").join("crash_log.md"), "live");
+
+        let report = migrate_appdata_dir_between(&legacy, &current);
+
+        assert_eq!(std::fs::read_to_string(current.join("logs").join("crash_log.md")).unwrap(), "live");
+        assert_eq!(report.skipped, vec!["logs/crash_log.md".to_string()]);
+        assert!(!report.legacy_removed, "the legacy dir still holds the skipped file");
+        assert!(legacy.join("logs").join("crash_log.md").is_file());
         let _ = std::fs::remove_dir_all(&root);
     }
 
