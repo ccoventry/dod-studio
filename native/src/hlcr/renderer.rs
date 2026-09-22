@@ -349,7 +349,9 @@ pub async fn run_render_job(
     // the selected codec (QuickTime-style alpha), matching dev's own
     // behaviour and the dropdown's "MP4" label applying only to the
     // non-alpha H.264 variants.
-    let mut codec_args: Vec<&'static str> = Vec::new();
+    // Not `'static`: the Custom arm below borrows from `config.custom_codec_args`,
+    // an owned `String` that lives only as long as this function call.
+    let mut codec_args: Vec<&str> = Vec::new();
     let file_ext = if is_hud {
         codec_args.extend_from_slice(&["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le"]);
         ".mov"
@@ -378,6 +380,24 @@ pub async fn run_render_job(
             super::config::RenderCodec::Uncompressed => {
                 codec_args.extend_from_slice(&["-c:v", "rawvideo", "-pix_fmt", "yuv422p"]);
                 ".avi"
+            }
+            // No allow-list, no parsing beyond the whitespace split --
+            // FFmpeg itself is what validates this, exactly as it would a
+            // codec typed directly at a terminal. `config` is owned by this
+            // call and lives for the rest of the function, so these `&str`
+            // slices staying borrowed from it (rather than `'static`, like
+            // every other arm's literals) is fine.
+            super::config::RenderCodec::Custom => {
+                if config.custom_codec_args.trim().is_empty() {
+                    let _ = tx.send(RenderUpdate::Finished(
+                        job_id.clone(),
+                        false,
+                        Some("Custom codec selected but no FFmpeg arguments were entered.".to_string()),
+                    ));
+                    return;
+                }
+                codec_args.extend(config.custom_codec_args.split_whitespace());
+                ".mkv"
             }
             // `is_source_copy` already returned before this match — it has
             // its own extension and never runs an FFmpeg encode at all. Not
@@ -765,6 +785,7 @@ mod tests {
             export_directories: vec![export_dir.to_path_buf()],
             fps: 300,
             target_codec: RenderCodec::SourceCopy,
+            custom_codec_args: String::new(),
             max_concurrent_renders: 1,
         }
     }

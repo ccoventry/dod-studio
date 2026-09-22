@@ -279,7 +279,7 @@ export async function diagnoseCaptureOutputPaths(paths) {
 
 export async function queueRenderBatch(payload) {
   // payload must match RenderBatchPayload:
-  //   { render_directories, codec, fps, ffmpeg_path?, export_directories, max_concurrent_renders }
+  //   { render_directories, codec, custom_codec_args?, fps, ffmpeg_path?, export_directories, max_concurrent_renders }
   // Resolves to the number of takes found and staged as Queued jobs.
   return invoke("queue_render_batch", { payload: payload })
     .catch((err) => {
@@ -350,8 +350,8 @@ export async function removeNonRenderingRenderJobs() {
     });
 }
 
-export async function setRenderJobCodec(jobId, codec) {
-  return invoke("set_render_job_codec", { jobId, codec })
+export async function setRenderJobCodec(jobId, codec, customCodecArgs) {
+  return invoke("set_render_job_codec", { jobId, codec, customCodecArgs: customCodecArgs ?? null })
     .catch((err) => {
       console.error("IPC Execution Error (set_render_job_codec):", err);
       throw err;

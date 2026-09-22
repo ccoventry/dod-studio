@@ -31,6 +31,10 @@ use tauri::{AppHandle, Emitter};
 pub struct RenderBatchPayload {
     pub render_directories: Vec<String>,
     pub codec: String,
+    /// Raw FFmpeg args, only read when `codec == "custom"`. Defaulted for
+    /// backward compat with a frontend build that predates the Custom codec.
+    #[serde(default)]
+    pub custom_codec_args: String,
     pub fps: u32,
     pub ffmpeg_path: Option<String>,
     /// JIT multi-drive export pool, priority order — `run_render_job` picks
@@ -90,6 +94,10 @@ struct RenderJobRuntime {
     // change made to the panel afterward, and never silently ignores one
     // either: the Settings column shows precisely what's about to run.
     codec: RenderCodec,
+    /// Raw FFmpeg args this job renders with when `codec == RenderCodec::Custom`
+    /// — snapshotted alongside `codec` for the same reason: Reset always
+    /// re-runs with exactly what the job was queued with.
+    custom_codec_args: String,
     fps: u32,
 }
 
@@ -123,6 +131,11 @@ pub struct RenderJobView {
     /// `set_render_job_codec` expects back, and what the frontend checks
     /// against `"source_copy"` to show the Skip toggle as checked.
     pub codec_id: String,
+    /// This job's raw custom-codec args, when `codec_id == "custom"` —
+    /// empty otherwise. The frontend carries this forward across a Skip
+    /// toggle the same way it already does `codec_id`, so unchecking Skip
+    /// restores the actual args, not just the fact that the codec was Custom.
+    pub custom_codec_args: String,
     /// Whether "Skip (keep original)" is an offerable choice for this job —
     /// only true for an OBS-shaped clip (its own muxed-in audio, not HUD/alpha,
     /// a captured video). `set_render_job_codec` enforces the same rule; this
@@ -133,6 +146,14 @@ pub struct RenderJobView {
 impl RenderJobRuntime {
     fn to_view(&self) -> RenderJobView {
         let is_source_copy = self.codec == RenderCodec::SourceCopy;
+        // Custom's `label()` is just the fixed word "Custom" -- the actual
+        // args live in `custom_codec_args`, so the summary has to build them
+        // in specially rather than through `label()` alone.
+        let codec_label = if self.codec == RenderCodec::Custom {
+            format!("Custom ({})", self.custom_codec_args)
+        } else {
+            self.codec.label().to_string()
+        };
         RenderJobView {
             id: self.id.clone(),
             name: self.clip.base_name.clone(),
@@ -145,15 +166,12 @@ impl RenderJobRuntime {
             error_log: self.error_log.clone(),
             // Skip mode never reads `fps` — showing it would imply a setting
             // that has no effect on a plain file copy.
-            settings_summary: if is_source_copy {
-                self.codec.label().to_string()
-            } else {
-                format!("{} @ {}fps", self.codec.label(), self.fps)
-            },
+            settings_summary: if is_source_copy { codec_label } else { format!("{} @ {}fps", codec_label, self.fps) },
             output_path: self.output_path.clone(),
             output_size_bytes: self.output_size_bytes,
             take_folder: self.clip.take_folder.clone(),
             codec_id: self.codec.to_str_id().to_string(),
+            custom_codec_args: self.custom_codec_args.clone(),
             skip_available: clip_is_skip_eligible(&self.clip),
         }
     }
@@ -219,6 +237,7 @@ fn write_autosave(render_session: &Arc<Mutex<Option<RenderSessionData>>>, jobs: 
         source_folder: config.source_folder.clone(),
         fps: config.fps,
         target_codec: config.target_codec.to_str_id().to_string(),
+        target_custom_codec_args: config.custom_codec_args.clone(),
         jobs: jobs.iter().map(|j| AutosaveJob {
             take_folder: j.clip.take_folder.clone(),
             output_path: j.output_path.clone(),
@@ -406,6 +425,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                             // batch-wide, so still comes from config.
                             let mut job_config = config.clone();
                             job_config.target_codec = job.codec;
+                            job_config.custom_codec_args = job.custom_codec_args.clone();
                             job_config.fps = job.fps;
                             job_config.max_concurrent_renders = effective_concurrent;
                             let tx2 = tx.clone();
@@ -522,6 +542,7 @@ pub async fn queue_render_batch(
         export_directories,
         fps: payload.fps.max(1),
         target_codec: RenderCodec::from_str_id(&payload.codec),
+        custom_codec_args: payload.custom_codec_args.clone(),
         max_concurrent_renders: payload.max_concurrent_renders.max(1),
     };
 
@@ -536,6 +557,7 @@ pub async fn queue_render_batch(
         output_size_bytes: None,
         cancel_flag: Arc::new(AtomicBool::new(false)),
         codec: config.target_codec,
+        custom_codec_args: config.custom_codec_args.clone(),
         fps: config.fps,
     }).collect();
 
@@ -608,7 +630,13 @@ pub async fn cancel_render_batch(app: AppHandle, state: tauri::State<'_, RenderM
 /// settings are fixed, matching `reset_render_job`'s own doc comment on why
 /// per-job settings never change out from under a job in flight.
 #[tauri::command]
-pub async fn set_render_job_codec(app: AppHandle, state: tauri::State<'_, RenderManager>, job_id: String, codec: String) -> Result<(), String> {
+pub async fn set_render_job_codec(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+    job_id: String,
+    codec: String,
+    custom_codec_args: Option<String>,
+) -> Result<(), String> {
     let requested = RenderCodec::from_str_id(&codec);
     let mut jobs = state.jobs.lock().unwrap();
     let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) else {
@@ -621,6 +649,10 @@ pub async fn set_render_job_codec(app: AppHandle, state: tauri::State<'_, Render
         return Err(crate::messages::SKIP_ONLY_FOR_OBS_TAKE.to_string());
     }
     job.codec = requested;
+    // Only meaningful when `requested == Custom`, but set unconditionally --
+    // the frontend always sends the value that belongs with `codec` (empty
+    // for every built-in codec), so there is nothing to special-case here.
+    job.custom_codec_args = custom_codec_args.unwrap_or_default();
     log_markdown(&format!("[render] set_render_job_codec {} -> {}", job_id, requested.to_str_id()));
     drop(jobs);
     emit_jobs_snapshot(&app, &state.jobs);
@@ -897,6 +929,7 @@ pub fn recover_render_batch(state: tauri::State<'_, RenderManager>) -> Result<Ve
     // for the batch, and needs re-toggling by hand if that was Skip.
     let recovered_codec = RenderCodec::from_str_id(&session.target_codec);
     let recovered_fps = session.fps;
+    let recovered_custom_codec_args = session.target_custom_codec_args.clone();
 
     let jobs: Vec<RenderJobRuntime> = session.jobs.iter().enumerate().map(|(i, rj)| {
         let (status, progress) = if rj.status == AutosaveJobStatus::Completed {
@@ -942,6 +975,7 @@ pub fn recover_render_batch(state: tauri::State<'_, RenderManager>) -> Result<Ve
             output_size_bytes,
             cancel_flag: Arc::new(AtomicBool::new(false)),
             codec: recovered_codec,
+            custom_codec_args: recovered_custom_codec_args.clone(),
             fps: recovered_fps,
         }
     }).collect();

@@ -454,6 +454,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
 
     const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
+    const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
 
@@ -504,6 +505,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       custom_commands,
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
+      render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
       render_export_dirs: renderExportDirs
@@ -660,6 +662,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.render_codec) {
         const inputEl = document.querySelector('#render-codec-select');
         if (inputEl) inputEl.value = settings.render_codec;
+      }
+      if (settings.render_custom_codec_args) {
+        const inputEl = document.querySelector('#render-custom-codec-input');
+        if (inputEl) inputEl.value = settings.render_custom_codec_args;
       }
       if (settings.render_fps) {
         const inputEl = document.querySelector('#render-fps-input');

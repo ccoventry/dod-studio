@@ -513,7 +513,12 @@
                     <option value="uncompressed" data-str="RENDER.CODEC_UNCOMPRESSED">Uncompressed (AVI, huge)</option>
                     <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
                     <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                    <option value="custom" data-str="RENDER.CODEC_CUSTOM">Custom (paste FFmpeg args)</option>
                   </select>
+                </div>
+                <div class="control-group" id="render-custom-codec-group" style="display: none;">
+                  <label for="render-custom-codec-input" data-str="RENDER.CUSTOM_CODEC_LABEL">Custom FFmpeg args:</label>
+                  <input type="text" id="render-custom-codec-input" data-str-placeholder="RENDER.CUSTOM_CODEC_PLACEHOLDER" placeholder="-c:v mpeg4 -q:v 3" style="width: 260px;" />
                 </div>
                 <div class="control-group">
                   <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL">Source FPS:</label>
