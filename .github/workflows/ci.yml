@@ -58,10 +58,10 @@ jobs:
       # and that gates the crate. `--release` because the resource path names
       # the release profile, matching release_experimental.yml / release_stable.yml.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
-        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc
+        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --locked
 
       - name: cargo test --workspace
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   clippy:
     name: Clippy
@@ -110,7 +110,7 @@ jobs:
       # and that gates the crate. `--release` because the resource path names
       # the release profile, matching release_experimental.yml / release_stable.yml.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
-        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc
+        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --locked
 
       # --all-targets so examples and test code are linted too: native/examples/
       # is where the R&D probes live, and letting them rot silently is how the
@@ -121,7 +121,7 @@ jobs:
       # is wrong for this codebase. Add there, with a reason, rather than
       # loosening this step.
       - name: cargo clippy -D warnings
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
   frontend-tests:
     name: Frontend e2e tests
