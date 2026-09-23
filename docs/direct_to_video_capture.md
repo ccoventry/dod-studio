@@ -1,7 +1,7 @@
 # Direct-to-Video Capture (`mirv_movie_ffmpeg`)
 
 > **Status 2026-08-28 — shipped and verified in game. Merged to `dev` in PR #68.**
-> Tracks [#42](https://github.com/ccoventry/dod-tools/issues/42), which stays open for what remains.
+> Tracks [#42](https://github.com/ccoventry/dod-studio/issues/42), which stays open for what remains.
 >
 > **Working end to end:** capture through `mirv_movie_ffmpeg`, take verification, Render Studio
 > scanning and rendering, frame counts and render progress from the AVI header, a lossless capture
@@ -12,13 +12,13 @@
 > **Still open:** the stream-copy fast path — remuxing instead of re-encoding for the simple
 > non-HUD case, which was the headline win — is not built; every take still goes through a full
 > render. Capture-time codec throughput is unmeasured. The launch-flag set is not bisected
-> ([#69](https://github.com/ccoventry/dod-tools/issues/69)).
+> ([#69](https://github.com/ccoventry/dod-studio/issues/69)).
 >
 > Read `docs/goldsrc_dod_quirks.md` and `docs/hlae_protocols.md` first — the engine and HLAE facts
 > this rests on are recorded there and must not be re-derived.
 >
 > The sibling direction, OBS as an alternate capture method, is
-> [#65](https://github.com/ccoventry/dod-tools/issues/65) and is next. Scoped 2026-08-28 as a
+> [#65](https://github.com/ccoventry/dod-studio/issues/65) and is next. Scoped 2026-08-28 as a
 > lower-quality convenience option rather than a replacement, with **Separate HUD explicitly out**.
 > It still has to answer how a non-BMP capture artefact flows through take verification, Render
 > Studio's admission predicate and export routing — questions this document already answers for the
@@ -119,7 +119,7 @@ Three seconds of the captured footage, re-encoded (a BMP frame at this resolutio
 
 So a **lossless** intermediate is already a ~2-4x saving with no quality cost at all, which is the
 headline: this does not require accepting worse output. Anything lossy is far smaller again, and is
-the trade the people in [#65](https://github.com/ccoventry/dod-tools/issues/65) are already making
+the trade the people in [#65](https://github.com/ccoventry/dod-studio/issues/65) are already making
 deliberately.
 
 **These are transcode sizes, not capture-time measurements.** HLAE pipes frames to FFmpeg live, so

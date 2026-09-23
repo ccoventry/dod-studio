@@ -10,9 +10,9 @@ use tauri_plugin_updater::{Update, UpdaterExt};
 /// `dev` on demand).
 /// See issue #133 / docs/archive is not relevant here — this is new.
 const STABLE_ENDPOINT: &str =
-    "https://github.com/ccoventry/dod-tools/releases/latest/download/latest.json";
+    "https://github.com/ccoventry/dod-studio/releases/latest/download/latest.json";
 const EXPERIMENTAL_ENDPOINT: &str =
-    "https://github.com/ccoventry/dod-tools/releases/download/experimental-latest/latest.json";
+    "https://github.com/ccoventry/dod-studio/releases/download/experimental-latest/latest.json";
 
 fn endpoint_for_channel(channel: &str) -> Result<url::Url, String> {
     let raw = match channel {

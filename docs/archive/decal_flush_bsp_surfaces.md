@@ -2,7 +2,7 @@
 
 > **Status 2026-08-27 — stages 1, 2, 3, 4 and 6 built and measured; 3 also verified in game.
 > Stage 5 declined, deliberately.**
-> The R&D direction for the decal flush ([#60](https://github.com/ccoventry/dod-tools/issues/60)).
+> The R&D direction for the decal flush ([#60](https://github.com/ccoventry/dod-studio/issues/60)).
 >
 > - **Stage 1 built** (`a4bed14`, `1c86571`): `native/src/patch/bsp.rs` reads BSP v30 geometry,
 >   leaves, the node tree and visibility.

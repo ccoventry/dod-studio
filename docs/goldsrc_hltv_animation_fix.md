@@ -3,7 +3,7 @@
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
 > Lives in `goldsrc-hooks/src/anim_fix.rs`, on branch
 > `feat/goldsrc-hooks-companion-dll`. Tracked by
-> [#204](https://github.com/ccoventry/dod-tools/issues/204).
+> [#204](https://github.com/ccoventry/dod-studio/issues/204).
 > Defaults **off**. It is a cvar: turn it on in the console with
 > `dodstudio_hltv_show_viewmodel_animations 1`, on the launch line with
 > `+dodstudio_hltv_show_viewmodel_animations 1`, or from any `.cfg` the session execs.

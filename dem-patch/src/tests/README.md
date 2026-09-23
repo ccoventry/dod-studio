@@ -7,7 +7,7 @@ should be genuinely tiny.
 
 `demotest.dem` (731 bytes) is **not** a trimmed-down real recording — trimming one
 down to a minimal, still-valid fixture turned out to be trickier than it sounds (see
-[issue #16](https://github.com/ccoventry/dod-tools/issues/16)'s original discussion).
+[issue #16](https://github.com/ccoventry/dod-studio/issues/16)'s original discussion).
 It's a demo built entirely in code instead: one directory entry holding the smallest
 frame sequence `parse_directory`/`write_to_bytes` actually round-trip —
 `DemoStart`, one `ConsoleCommand`, `NextSection`. A `NetworkMessage` frame needs a

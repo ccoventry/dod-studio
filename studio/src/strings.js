@@ -1112,7 +1112,7 @@ export const STRINGS = {
   ABOUT_MODAL: {
     BLURB: 'A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.',
     CREDIT: 'Built by ccoventry',
-    GITHUB_LINK: 'github.com/ccoventry/dod-tools',
+    GITHUB_LINK: 'github.com/ccoventry/dod-studio',
   },
 
   // ── Update check/install modal (issue #133) ──────────────────────────────

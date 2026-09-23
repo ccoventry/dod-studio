@@ -6,7 +6,7 @@ binary — the HLTV animation fix, the gunshot fix, `dodstudio_deathmsg` and
 feature needed and no wider. This is the wide pass: what else is in here, what
 controlling it would let a movie-maker do, and how much work each would be.
 
-Opened as [issue #255](https://github.com/ccoventry/dod-tools/issues/255).
+Opened as [issue #255](https://github.com/ccoventry/dod-studio/issues/255).
 Companion to `docs/goldsrc_client_dll_internals.md` (how the client library is
 entered at all), `docs/goldsrc_death_notices.md` (the kill feed) and
 `docs/goldsrc_objective_icons.md` (the objective HUD).

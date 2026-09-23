@@ -4,7 +4,7 @@ Sibling to `docs/goldsrc_client_dll_survey.md`. That one covers DoD's client
 library, where we have the module to ourselves. This one covers the engine,
 where we do not.
 
-Opened as [issue #256](https://github.com/ccoventry/dod-tools/issues/256), which
+Opened as [issue #256](https://github.com/ccoventry/dod-studio/issues/256), which
 sets the order: **subtraction first.** HLAE patches `hw.dll` heavily, two hooks
 over one span destroy each other, and the list of what HLAE already solves is
 also a list of what is probably a duplicate rather than a gain.
