@@ -140,6 +140,10 @@ jobs:
 
       - run: npm ci
 
-      - run: npx playwright install --with-deps chromium
+      # No `--with-deps`: on Windows it installs the Server-Media-Foundation
+      # Windows feature, which took 3m20s of this job's 4m37s. The browser
+      # download itself is ~17s, too little to be worth caching. Chromium
+      # doesn't need that feature to run these tests.
+      - run: npx playwright install chromium
 
       - run: npm run test:e2e
