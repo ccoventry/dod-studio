@@ -12,7 +12,7 @@ current as of `audit/capture-render-ux` (branched from `feature/capture-block-ma
 **Section 1 — Friction Points**
 | # | Finding | Status |
 |---|---|---|
-| 1 | Capture progress is a black box | Open — tracked as [issue #36](https://github.com/ccoventry/dod-tools/issues/36) |
+| 1 | Capture progress is a black box | Open — tracked as [issue #36](https://github.com/ccoventry/dod-studio/issues/36) |
 | 2 | Three disagreeing disk-space gates | ✅ Fixed 2026-08-23 (`fix/capture-disk-space-gates`) |
 | 3 | Settings written to disk on every keystroke | ✅ Fixed — `sprint_history_archive.md` §4 |
 | 4 | Export-dir fallback computed three times | ✅ Fixed — `sprint_history_archive.md` §3 |
@@ -28,7 +28,7 @@ current as of `audit/capture-render-ux` (branched from `feature/capture-block-ma
 | 1 | "Reveal in Explorer" on render jobs/takes | ✅ Fixed — `sprint_history_archive.md` §1 |
 | 2 | Burn kill-timeline label into rendered clip | Open — not yet tracked as an issue |
 | 3 | Concatenate selected rendered clips into one movie | Open — not yet tracked as an issue |
-| 4 | Live capture progress with current-clip name and ETA | Partially covered by [issue #36](https://github.com/ccoventry/dod-tools/issues/36) (progress/current-clip; ETA not explicitly scoped there) |
+| 4 | Live capture progress with current-clip name and ETA | Partially covered by [issue #36](https://github.com/ccoventry/dod-studio/issues/36) (progress/current-clip; ETA not explicitly scoped there) |
 | 5 | Named render presets | Open — not yet tracked as an issue |
 | 6 | Watch-folder auto-import for new demos | Open — not yet tracked as an issue |
 | 7 | Export a highlight/take manifest (EDL-style) | Open — not yet tracked as an issue |

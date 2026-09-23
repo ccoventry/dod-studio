@@ -3,7 +3,7 @@
 Status: **Tiers 1a/1b/2/3 implemented and committed** (`00be056` perf commit,
 `ee86ea1` follow-up `run.ps1` fix — unrelated, just adjacent history on the
 same branch). **Tier 4/5 not started**, tracked as
-[GitHub issue #37](https://github.com/ccoventry/dod-tools/issues/37) — still
+[GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) — still
 blocked on the future-stats review exactly as originally planned, see that
 section, it's unchanged.
 Written so a fresh chat (clean context) can pick this up without re-deriving
@@ -297,7 +297,7 @@ best-effort, never fails the scan itself.
 
 ### Tier 4/5 — BLOCKED on the future-stats question below, not just "later"
 
-Tracked as [issue #37](https://github.com/ccoventry/dod-tools/issues/37). Kept in full below since it's the technical detail an implementer of that issue will actually need (which message types, which fields, why the sequencing with the stats work matters).
+Tracked as [issue #37](https://github.com/ccoventry/dod-studio/issues/37). Kept in full below since it's the technical detail an implementer of that issue will actually need (which message types, which fields, why the sequencing with the stats work matters).
 
 - **Selective netmessage parsing** (skip decoding message bodies for the
   74.6% the analyzer never reads, e.g. don't decode `SvcSound`/`SvcClientData`

@@ -1,7 +1,7 @@
 # Day of Defeat 1.3 `client.dll` Internals
 
 Static reverse-engineering notes for DoD 1.3's client library, produced to unblock
-[issue #204](https://github.com/ccoventry/dod-tools/issues/204) (the `goldsrc-hooks`
+[issue #204](https://github.com/ccoventry/dod-studio/issues/204) (the `goldsrc-hooks`
 companion DLL could not capture `pEngfuncs`). Everything below was derived offline from
 the shipped binary — no running game, no debugger, no patched engine — and each claim
 names the evidence it rests on.

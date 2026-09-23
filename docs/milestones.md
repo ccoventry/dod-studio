@@ -40,7 +40,7 @@ IMMUTABLE MILESTONES ARCHITECTURE RULES:
 - [x] Task: Capture Studio High-Priority Parity Backlog Resolved — Closed all three remaining audited High Priority gaps: full `AppSettings` persistence for every Export Configuration field (resolution, HUD, auto-clear flags, timing, media dirs, target drives, custom commands); an overlap-merged pre-flight disk estimator with a hard Launch-button lock (including the zero-drive case) replacing the old post-click soft warning; and a `sysinfo`-backed running-process guard with a "Half-Life Preview Detector" modal (Force Relaunch / Copy View Command / Cancel) gating preview launches against a still-running `hl.exe`/`hlae.exe`.
 - [x] Task: "Clear Previews" Audit Modal — Sweeps `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (identified by their hidden `.dodstudio_preview` sidecar), reports reclaimable disk space, and purges them from a modal via new `scan_orphaned_previews`/`delete_orphaned_previews` IPC commands.
 - [x] Task: Standalone Game Launch — Restored the "Launch Game (HLAE)" button; boots `hl.exe` with no demo loaded, applying persisted resolution/HUD/init-command settings, and reuses the existing running-process guard modal via a generalized `requestProcessGuardedLaunch()` hook shared with the preview-launch path.
-- [x] Task: Demo Analyzer Load Performance Tiers 1-3 — On-disk analysis cache (cold ~1.3s -> warm cache-hit ~10-15ms), throttled progress events, dead-code removal, and Capture Studio folder scans warming the analyzer cache. Tier 4/5 (selective netmessage parsing) tracked as [issue #37](https://github.com/ccoventry/dod-tools/issues/37), blocked on a future player-stats review — see `docs/demo_analyzer_load_performance.md`.
+- [x] Task: Demo Analyzer Load Performance Tiers 1-3 — On-disk analysis cache (cold ~1.3s -> warm cache-hit ~10-15ms), throttled progress events, dead-code removal, and Capture Studio folder scans warming the analyzer cache. Tier 4/5 (selective netmessage parsing) tracked as [issue #37](https://github.com/ccoventry/dod-studio/issues/37), blocked on a future player-stats review — see `docs/demo_analyzer_load_performance.md`.
 - [x] Task: Branch Merge Readiness Verification (2026-08-16) — `cargo build --workspace` and `cargo test --workspace --no-fail-fast` both clean except 4 pre-existing `analysis` crate failures (3 localization loader/test key-prefix mismatches, 1 missing local demo fixture) confirmed present identically at the `dev` merge-base (`80feaaf`) — not a regression introduced by this branch. `feature/tauri-migration` currently contains all of `dev`'s history (`dev`'s tip *is* the merge-base), so there is no divergence to reconcile before merging.
 - [x] Task: Fix pre-existing `analysis` localization test/loader key-prefix mismatch and missing-fixture `test_inspect_lenn_demo`, independent of the merge itself. **Resolved** — see `engineering_backlog.md`'s "Fix pre-existing `analysis` test debt" entry (found already fixed 2026-08-23, this box was just never ticked).
 - [x] Task: Save/Load Project Session Fixed (2026-08-16) — was calling `@tauri-apps/plugin-fs` directly, which only ever succeeds inside the app's own AppConfig/AppData dirs; routed through new unscoped `save_project_session`/`load_project_session` Tauri commands instead.
@@ -61,7 +61,7 @@ IMMUTABLE MILESTONES ARCHITECTURE RULES:
 - [x] Refactor: Life-Bounded Streaks — Extracted life-bounded streak definitions from the `analysis` crate. The Capture Studio now natively limits "killstreaks" to events bounded by `DeathMsg` or `ServerReset`, avoiding arbitrary temporal-gap logic that causes recording cross-talk.
 
 ### Task D: Architectural Decoupling & File Cleanup
-- Now tracked as [issue #55](https://github.com/ccoventry/dod-tools/issues/55).
+- Now tracked as [issue #55](https://github.com/ccoventry/dod-studio/issues/55).
 
 ### Phase 11 & 12 Enhancements (Deferred)
 - [x] Feature: Batch Queue UI Re-integration — Absorbed by the Master-Detail workspace UI, which supports native batch queuing, scheduling, and multi-demo dispatch.
@@ -69,7 +69,7 @@ IMMUTABLE MILESTONES ARCHITECTURE RULES:
 - [x] Task: Rendering & Finalization — Handling the resulting `.mov` files. **Superseded** — shipped as the native FFmpeg transcoding pipeline, see "Rendering & Finalization" in the archived Active Sprint Priorities above.
 
 ### Task E: Google Takeout Gemini Logs Parsing (Knowledge Harvest)
-- Now tracked as [issue #56](https://github.com/ccoventry/dod-tools/issues/56).
+- Now tracked as [issue #56](https://github.com/ccoventry/dod-studio/issues/56).
 
 ## ✅ Completed Tasks
 

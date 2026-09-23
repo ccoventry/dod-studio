@@ -15,10 +15,10 @@
 > context but no longer the plan.
 
 > **Status 2026-08-28 — built and tested against a live OBS.** Tracks
-> [#65](https://github.com/ccoventry/dod-tools/issues/65), in PRs
-> [#72](https://github.com/ccoventry/dod-tools/pull/72) (this document) →
-> [#73](https://github.com/ccoventry/dod-tools/pull/73) (`probe_obs`) →
-> [#74](https://github.com/ccoventry/dod-tools/pull/74) (the feature).
+> [#65](https://github.com/ccoventry/dod-studio/issues/65), in PRs
+> [#72](https://github.com/ccoventry/dod-studio/pull/72) (this document) →
+> [#73](https://github.com/ccoventry/dod-studio/pull/73) (`probe_obs`) →
+> [#74](https://github.com/ccoventry/dod-studio/pull/74) (the feature).
 >
 > **What has actually been run:** a full batch producing playable clips with audio; a cancel
 > mid-recording; OBS killed between blocks; OBS killed mid-recording; dod-studio killed mid-batch and
@@ -484,7 +484,7 @@ Recommendation: re-encode, and expose "leave the take as OBS wrote it" as the sk
 the user to change OBS's keyframe interval — see below. **Unless Custom Output is in play, in which
 case there is a better answer** — see the next section.
 
-**Scoped as [issue #82](https://github.com/ccoventry/dod-tools/issues/82), 2026-08-28 — read that
+**Scoped as [issue #82](https://github.com/ccoventry/dod-studio/issues/82), 2026-08-28 — read that
 before building this.** The recommendation above turned out to rest on a gap: `scan_folder_background`
 (`native/src/hlcr/scanner.rs`) hard-requires a `sound.wav` to discover a take at all, so an OBS take
 — which has no wav, its audio already being in the video — is never scanned into a `ClipData` and
@@ -506,7 +506,7 @@ ship with this**: nothing on disk records how many seconds of pre-roll/post-roll
 block actually has, so "render" currently re-encodes the whole clip (codec conversion, export-pool
 routing, pipeline naming) without cutting the head/tail. That gap — and the capture-side metadata it
 needs — is tracked separately as
-[issue #84](https://github.com/ccoventry/dod-tools/issues/84).
+[issue #84](https://github.com/ccoventry/dod-studio/issues/84).
 
 ---
 

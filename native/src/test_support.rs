@@ -20,7 +20,7 @@
 //! panics never reaches it, and a panicking test is exactly the one that leaves
 //! the most behind. Hence a guard with a `Drop`, which the unwinder runs.
 //!
-//! [issue #253]: https://github.com/ccoventry/dod-tools/issues/253
+//! [issue #253]: https://github.com/ccoventry/dod-studio/issues/253
 
 use std::path::{Path, PathBuf};
 
