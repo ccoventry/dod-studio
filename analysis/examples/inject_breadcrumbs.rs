@@ -9,7 +9,7 @@
 //!
 //! Reuses the same `ConsoleCommand` frame injection the capture pipeline uses
 //! for scheduled commands (`native/patch/highlevel.rs`) -- append-then-sort
-//! by `time`, `frame: 0`, well under the 64-byte Cbuf_AddTextToBuffer limit.
+//! by `time`, `frame: 0`, well under the demo format's 64-byte `char command[64]` field.
 //!
 //!     cargo run --release -p analysis --example inject_breadcrumbs -- <in.dem> <out.dem> [interval_secs]
 use dem::open_demo_from_bytes;
