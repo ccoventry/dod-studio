@@ -86,6 +86,7 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
           }
         }' -f prId="$PR_ID" -f issueId="$ISSUE_ID"
   Still include `Closes #NN` in the PR body too — the GraphQL call is in addition to that, not a replacement for it.
+- **Issues close when their PR merges into `dev`**, not at release — `close_issues_on_dev.yml` does it from that same link data, since GitHub's own keywords only fire on the default branch (`main`). `[R&D]` issues and bare `(#NN)` commit-subject matches get the `on-dev` label instead, for a human call. So only link a PR as closing an issue when it finishes it; for partial work write "Part of #NN", which links nothing.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
 ---

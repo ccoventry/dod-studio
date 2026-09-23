@@ -1,0 +1,87 @@
+# An issue closes when the PR that fixes it merges into `dev`, not when that
+# work later reaches `main` in a release. Open means "work left to do"; which
+# release shipped a fix is the release notes' job. Keeping done issues open
+# until a release buried them among the real work (2026-09-22: six finished
+# issues found by hand among 112 open ones).
+#
+# GitHub's own closing keywords never fire here, because `dev` isn't the
+# default branch (`main` is, deliberately). So this does it instead, from
+# GitHub's own Development-link data (closingIssuesReferences): set by a
+# "Closes #NN" in the PR body, or by the GraphQL `addCloseIssueReferences`
+# call CLAUDE.md prescribes. Native and precise: if GitHub says the PR closes
+# an issue, it does.
+#
+# Two cases get the `on-dev` label instead of a close, for a human to judge:
+#
+#  1. `[R&D]` issues. A probe PR routinely says "close #NN" while the
+#     question it probes stays open (#221 / #206).
+#  2. Issue numbers found only as "(#NN)" in a commit subject, with no native
+#     link. That is this repo's commit convention, but it marks partial work
+#     too ("chore(deps): ... (#234)" was only part of #234), so it is never
+#     enough to close on.
+name: Close issues merged to dev
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [dev]
+
+permissions:
+  issues: write
+  pull-requests: read
+
+jobs:
+  close:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close (or label) issues fixed by this PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -e
+
+          linked=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json closingIssuesReferences \
+            -q '.closingIssuesReferences[].number')
+
+          from_subjects=""
+          if [ -z "$linked" ]; then
+            echo "No native Development links on #$PR_NUMBER — falling back to commit subjects (label only)."
+            from_subjects=$(gh pr view "$PR_NUMBER" --repo "$REPO" --json commits \
+              -q '.commits[].messageHeadline' \
+              | grep -oE '\(#[0-9]+\)' \
+              | tr -d '()#' \
+              | sort -un) || true
+          fi
+
+          for n in $linked $from_subjects; do
+            # repos/{owner}/{repo}/issues/N returns PRs too (with a
+            # non-null pull_request field) — skip those rather than
+            # acting on a PR number that happened to match the pattern.
+            info=$(gh api "repos/$REPO/issues/$n" \
+              -q '.state + "|" + (.pull_request != null | tostring) + "|" + .title' 2>/dev/null) || continue
+            state="${info%%|*}"
+            rest="${info#*|}"
+            is_pr="${rest%%|*}"
+            subject="${rest#*|}"
+            [ "$state" = "open" ] || continue
+            [ "$is_pr" = "false" ] || continue
+
+            native=false
+            for l in $linked; do [ "$l" = "$n" ] && native=true; done
+
+            case "$subject" in
+              "[R&D]"*) native=false ;;
+            esac
+
+            if [ "$native" = "true" ]; then
+              echo "Closing #$n: $subject"
+              gh issue close "$n" --repo "$REPO" --reason completed \
+                --comment "Closed by #$PR_NUMBER, merged into \`dev\`. Ships in the next release."
+            else
+              echo "Labeling #$n as on-dev (needs a human call): $subject"
+              gh issue edit "$n" --add-label "on-dev" --repo "$REPO"
+            fi
+          done
