@@ -441,21 +441,31 @@ impl Miss {
     }
 }
 
-/// One line of the miss list: what to show after the name, and how many
-/// loads hit it (a sprite's frames count separately).
+/// One line of the miss list: what to show after the name, how many loads
+/// hit it (a sprite's frames count separately), what it belongs to and the
+/// map that was loading when it was recorded.
 struct MissEntry {
     detail: String,
     loads: u32,
+    owner: String,
+    first_map: String,
 }
 
-/// Every miss this session. Entries are keyed by (map, why, asset type,
-/// name), the map being its position in `maps` -- the order maps were
-/// loaded -- so the list prints map by map, then grouped by why, and a
-/// texture loaded again on the same map only bumps its count. Written at map
-/// load only.
+/// What one map uses, as [`owner_of`] keys: its world textures, models,
+/// sprites, detail textures and sky faces. Needed because the game loads a
+/// texture only once per session -- a second map that shares it never
+/// reaches the hook, but should still count it among its own misses.
+struct MapUses {
+    name: String,
+    uses: std::collections::HashSet<String>,
+}
+
+/// Every miss this session, once each, keyed by (why, asset type, name) so
+/// the list prints grouped and sorted; and every map loaded, in load order,
+/// with what it uses.
 struct MissLog {
-    maps: Vec<String>,
-    entries: std::collections::BTreeMap<(usize, Miss, &'static str, String), MissEntry>,
+    maps: Vec<MapUses>,
+    entries: std::collections::BTreeMap<(Miss, &'static str, String), MissEntry>,
 }
 static MISSES: Mutex<MissLog> = Mutex::new(MissLog {
     maps: Vec::new(),
@@ -464,23 +474,29 @@ static MISSES: Mutex<MissLog> = Mutex::new(MissLog {
 /// Bounds the list; misses past it are only counted.
 const MAX_MISSES: usize = 2000;
 static MISSES_DROPPED: AtomicU32 = AtomicU32::new(0);
-/// What a miss is filed under when no map is loaded (or the engine can't say).
+/// Where a miss recorded with no map loaded (at startup, say) is listed.
 const NO_MAP: &str = "(no map)";
 
-/// The map being loaded, as the engine names it (`maps/dod_anzio.bsp`),
-/// trimmed to `dod_anzio`.
-fn current_map() -> String {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return NO_MAP.to_string();
-    };
+/// The engine's level name (`maps/dod_anzio.bsp`), or `None` when it has
+/// none. Borrowed straight from the engine, no allocation, so it's cheap
+/// enough to check every frame.
+fn level_name_bytes() -> Option<&'static [u8]> {
+    let engfuncs = engine::engfuncs()?;
     // Safety: a pointer into the engine's client state, valid for the
     // session; checked for null before reading.
     let raw = unsafe { (engfuncs.pfn_get_level_name)() };
     if raw.is_null() {
-        return NO_MAP.to_string();
+        return None;
     }
-    let full = unsafe { std::ffi::CStr::from_ptr(raw) }.to_string_lossy();
-    map_short_name(&full)
+    let bytes = unsafe { std::ffi::CStr::from_ptr(raw) }.to_bytes();
+    (!bytes.is_empty()).then_some(bytes)
+}
+
+/// The map being loaded, trimmed to `dod_anzio`.
+fn current_map() -> String {
+    level_name_bytes()
+        .map(|b| map_short_name(&String::from_utf8_lossy(b)))
+        .unwrap_or_else(|| NO_MAP.to_string())
 }
 
 /// `maps/dod_anzio.bsp` -> `dod_anzio`; empty -> [`NO_MAP`].
@@ -497,6 +513,20 @@ fn map_short_name(level: &str) -> String {
     }
 }
 
+/// What a miss belongs to, in the same terms [`MapUses`] records: a world
+/// texture by its name, a skin by its model, a frame by its sprite, a detail
+/// texture or sky face by its path.
+fn owner_of(kind: &str, name: &str) -> String {
+    let lower = name.replace('\\', "/").to_ascii_lowercase();
+    let asset = match kind {
+        "model" => lower
+            .rfind(".mdl")
+            .map_or(lower.as_str(), |at| &lower[..at + 4]),
+        _ => lower.as_str(),
+    };
+    format!("{kind}:{asset}")
+}
+
 fn record_miss(why: Miss, kind: &'static str, name: &str, detail: impl FnOnce() -> String) {
     record_miss_on(&current_map(), why, kind, name, detail);
 }
@@ -511,14 +541,7 @@ fn record_miss_on(
     let Ok(mut log) = MISSES.lock() else {
         return;
     };
-    let map_at = match log.maps.iter().position(|m| m == map) {
-        Some(at) => at,
-        None => {
-            log.maps.push(map.to_string());
-            log.maps.len() - 1
-        }
-    };
-    let key = (map_at, why, kind, name.to_string());
+    let key = (why, kind, name.to_string());
     if let Some(entry) = log.entries.get_mut(&key) {
         entry.loads += 1;
     } else if log.entries.len() < MAX_MISSES {
@@ -527,11 +550,32 @@ fn record_miss_on(
             MissEntry {
                 detail: detail(),
                 loads: 1,
+                owner: owner_of(kind, name),
+                first_map: map.to_string(),
             },
         );
     } else {
         MISSES_DROPPED.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+/// Adds `uses` to what `map` uses, giving it an entry (at the end, so maps
+/// stay in load order) the first time it's seen.
+fn add_map_uses(map: &str, uses: impl IntoIterator<Item = String>) {
+    let Ok(mut log) = MISSES.lock() else {
+        return;
+    };
+    let at = match log.maps.iter().position(|m| m.name == map) {
+        Some(at) => at,
+        None => {
+            log.maps.push(MapUses {
+                name: map.to_string(),
+                uses: Default::default(),
+            });
+            log.maps.len() - 1
+        }
+    };
+    log.maps[at].uses.extend(uses);
 }
 
 /// World texture names the pipeline never builds: tool brushes the map
@@ -569,6 +613,11 @@ fn miss_display_name(texture_type: u32, identifier: &str) -> String {
 }
 
 /// The miss list, as console lines -- every map, or just `only_map`.
+///
+/// A miss is listed under every map that uses what it belongs to, plus the
+/// map that was loading when it was recorded, so each map's count is its
+/// real total; one several maps share names the others. Misses recorded
+/// with no map loaded are listed under [`NO_MAP`].
 fn misses_report(only_map: Option<&str>) -> Vec<String> {
     let Ok(log) = MISSES.lock() else {
         return vec![format!("{MISSES_NAME}: the list's lock is poisoned\n")];
@@ -577,73 +626,116 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
         .get()
         .map(String::as_str)
         .unwrap_or("not chosen yet");
-    let wanted = |map_at: usize| only_map.is_none_or(|m| log.maps[map_at].eq_ignore_ascii_case(m));
-    let shown: Vec<_> = log
-        .entries
+    let on = |map: &str, e: &MissEntry| {
+        e.first_map == map
+            || log
+                .maps
+                .iter()
+                .any(|m| m.name == map && m.uses.contains(&e.owner))
+    };
+    // Every map with anything to show, in load order; one only ever seen as
+    // a miss's `first_map` (no inventory taken, e.g. NO_MAP) goes last.
+    let mut all_maps: Vec<&str> = log.maps.iter().map(|m| m.name.as_str()).collect();
+    for e in log.entries.values() {
+        if !all_maps.contains(&e.first_map.as_str()) {
+            all_maps.push(&e.first_map);
+        }
+    }
+
+    let mut lines = Vec::new();
+    let mut total = 0;
+    for map in all_maps
         .iter()
-        .filter(|((m, ..), _)| wanted(*m))
-        .collect();
-    let scope = only_map.map_or("this session".to_string(), |m| format!("on {m}"));
-    if shown.is_empty() {
-        let known = if log.maps.is_empty() {
-            String::new()
-        } else {
-            format!(" (maps with misses: {})", log.maps.join(", "))
+        .filter(|m| only_map.is_none_or(|o| m.eq_ignore_ascii_case(o)))
+    {
+        let here: Vec<_> = log.entries.iter().filter(|(_, e)| on(map, e)).collect();
+        if here.is_empty() {
+            continue;
+        }
+        total += here.len();
+        let others_of = |e: &MissEntry| -> Vec<&str> {
+            all_maps
+                .iter()
+                .copied()
+                .filter(|o| o != map && on(o, e))
+                .collect()
         };
+        lines.push(format!(
+            "== {map}: {} ({} on purpose, {} shared with other maps) ==\n",
+            here.len(),
+            here.iter()
+                .filter(|((w, ..), _)| *w == Miss::OnPurpose)
+                .count(),
+            here.iter()
+                .filter(|(_, e)| !others_of(e).is_empty())
+                .count()
+        ));
+        let mut current = None;
+        for ((why, kind, name), entry) in &here {
+            if current != Some(*why) {
+                current = Some(*why);
+                let n = here.iter().filter(|((w, ..), _)| w == why).count();
+                lines.push(format!("-- {} ({n}):\n", why.heading()));
+            }
+            let loads = match (*kind, entry.loads) {
+                (_, 1) => String::new(),
+                ("sprite", n) => format!(" ({n} frame loads)"),
+                (_, n) => format!(" ({n} loads)"),
+            };
+            let others = others_of(entry);
+            let also = if others.is_empty() {
+                String::new()
+            } else {
+                format!(" [also on {}]", others.join(", "))
+            };
+            lines.push(format!(
+                "  {kind:<6} {name}  {}{loads}{also}\n",
+                entry.detail
+            ));
+        }
+    }
+
+    let scope = only_map.map_or("this session".to_string(), |m| format!("on {m}"));
+    if total == 0 {
         return vec![format!(
-            "{MISSES_NAME}: every HD-eligible texture loaded {scope} was replaced (style {style:?}){known}\n"
+            "{MISSES_NAME}: every HD-eligible texture loaded {scope} was replaced (style {style:?})\n"
         )];
     }
-    let mut lines = vec![format!(
-        "{MISSES_NAME}: {} texture(s) kept their original {scope} (style {style:?}). \
-         Anything the game keeps loaded between maps (most sprites and models) is listed \
-         under the first map that loaded it.\n",
-        shown.len()
-    )];
-    let mut current = None;
-    for ((map_at, why, kind, name), entry) in &shown {
-        if current.is_none_or(|(m, _)| m != *map_at) {
-            let n = shown.iter().filter(|((m, ..), _)| m == map_at).count();
-            lines.push(format!("== {} ({n}) ==\n", log.maps[*map_at]));
-            current = None;
-        }
-        if current != Some((*map_at, *why)) {
-            current = Some((*map_at, *why));
-            let n = shown
-                .iter()
-                .filter(|((m, w, ..), _)| m == map_at && w == why)
-                .count();
-            lines.push(format!("-- {} ({n}):\n", why.heading()));
-        }
-        let loads = match (*kind, entry.loads) {
-            (_, 1) => String::new(),
-            ("sprite", n) => format!(" ({n} frame loads)"),
-            (_, n) => format!(" ({n} loads)"),
-        };
-        lines.push(format!("  {kind:<6} {name}  {}{loads}\n", entry.detail));
-    }
+    let unique = if only_map.is_some() {
+        String::new()
+    } else {
+        format!(", {} different texture(s)", log.entries.len())
+    };
+    lines.insert(
+        0,
+        format!(
+            "{MISSES_NAME}: {total} miss(es) {scope}{unique} (style {style:?}). \
+             A texture several maps use is listed under each of them.\n"
+        ),
+    );
     let dropped = MISSES_DROPPED.load(Ordering::Relaxed);
     if dropped > 0 {
-        lines.push(format!("  ...and {dropped} more not listed\n"));
+        lines.push(format!(
+            "  ...and {dropped} more not recorded (list full)\n"
+        ));
     }
     lines
 }
 
 /// `dodstudio_hd_misses` prints the list, map by map;
 /// `dodstudio_hd_misses <map>` just that map's (e.g. `dod_anzio`);
-/// `dodstudio_hd_misses clear` empties it.
+/// `dodstudio_hd_misses clear` forgets the misses recorded so far.
 pub unsafe extern "C" fn misses_command() {
     let args = misses_args();
     let arg = args.get(1).map(String::as_str);
     if arg.is_some_and(|a| a.eq_ignore_ascii_case("clear")) {
         if let Ok(mut log) = MISSES.lock() {
-            log.maps.clear();
             log.entries.clear();
         }
         MISSES_DROPPED.store(0, Ordering::Relaxed);
         crate::commands::console_print(&format!(
-            "{MISSES_NAME}: list cleared
-"
+            "{MISSES_NAME}: list cleared. The game doesn't load a texture it still has, \
+             so those won't be listed again until it restarts.\n"
         ));
         return;
     }
@@ -654,8 +746,7 @@ pub unsafe extern "C" fn misses_command() {
     }
     unsafe {
         crate::debug::report(&format!(
-            "texture_hires: {MISSES_NAME} --
-{}",
+            "texture_hires: {MISSES_NAME} --\n{}",
             lines.concat()
         ))
     };
@@ -679,6 +770,215 @@ fn misses_args() -> Vec<String> {
             )
         })
         .collect()
+}
+
+/// Set once [`install`] succeeds: [`poll_map`] does nothing without the hook.
+static HOOK_ACTIVE: AtomicBool = AtomicBool::new(false);
+/// The engine's `cl.model_precache[512]` (every model and sprite the current
+/// map loaded, index 1 on; index 1 is the map itself), once found; 0 before,
+/// `usize::MAX` if it couldn't be.
+static PRECACHE_TABLE: AtomicUsize = AtomicUsize::new(0);
+const PRECACHE_SLOTS: usize = 512;
+/// What [`poll_map`] last saw: the level name's hash and how many models it
+/// had. Either changing means there's something new to record.
+static LAST_LEVEL: AtomicU32 = AtomicU32::new(0);
+static LAST_MODEL_COUNT: AtomicU32 = AtomicU32::new(0);
+
+/// Finds `cl.model_precache` through the studio API's `GetModelByIndex`,
+/// which in this build is `push index; call CL_GetModelByIndex`, whose body
+/// bounds-checks the index against 0x200 and then reads
+/// `mov esi, [edi*4 + model_precache]`. Every byte relied on is checked;
+/// anything else means "not found", and misses are then filed only under
+/// the map loading when they were recorded.
+fn find_precache_table() -> Option<usize> {
+    let studio = engine::engine_studio()?;
+    let wrapper = studio.get_model_by_index as *const () as usize;
+    // push ebp; mov ebp, esp; mov eax, [ebp+8]; push eax; call rel32
+    check_span(wrapper, &[0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x50]).ok()?;
+    let body = unsafe { call_target(wrapper + 7) }.ok()?;
+    // cmp edi, 0x200 at +0x0b; mov esi, [edi*4 + table] at +0x1b.
+    check_span(body + 0x0b, &[0x81, 0xFF, 0x00, 0x02, 0x00, 0x00]).ok()?;
+    let table = unsafe { operand_after(body + 0x1b, &[0x8B, 0x34, 0xBD]) }.ok()?;
+    (table != 0).then_some(table)
+}
+
+fn precache_table() -> Option<usize> {
+    match PRECACHE_TABLE.load(Ordering::Acquire) {
+        0 => {
+            // Not until the client has asked for the studio API; only a
+            // failed match is final.
+            engine::engine_studio()?;
+            let found = find_precache_table();
+            PRECACHE_TABLE.store(found.unwrap_or(usize::MAX), Ordering::Release);
+            let msg = match found {
+                Some(t) => format!("texture_hires: model precache list at {t:#x}"),
+                None => "texture_hires: model precache list not found; misses are listed only \
+                         under the map loading when they were recorded"
+                    .to_string(),
+            };
+            unsafe { crate::debug::report(&msg) };
+            found
+        }
+        usize::MAX => None,
+        t => Some(t),
+    }
+}
+
+/// How many models the current map has loaded so far. No allocation: this
+/// runs every frame.
+fn precache_count(table: usize) -> u32 {
+    (1..PRECACHE_SLOTS)
+        // Safety: a 512-entry pointer array in hw.dll's .data, found above.
+        .take_while(|i| {
+            !unsafe { *((table + i * 4) as *const *const engine::ModelSPartial) }.is_null()
+        })
+        .count() as u32
+}
+
+/// The current map's models and sprites, by path (`models/v_garand.mdl`,
+/// `sprites/muzzleflash1.spr`, `maps/dod_anzio.bsp`), in precache order.
+fn precached_models(table: usize) -> Vec<String> {
+    let mut out = Vec::new();
+    for i in 1..PRECACHE_SLOTS {
+        // Safety: a 512-entry pointer array in hw.dll's .data, found above.
+        let model = unsafe { *((table + i * 4) as *const *const engine::ModelSPartial) };
+        if model.is_null() {
+            break;
+        }
+        // Safety: a model_t the engine keeps for the session (mod_known);
+        // its name is a NUL-padded char[64].
+        let name = unsafe { &(*model).name };
+        let len = name.iter().position(|&b| b == 0).unwrap_or(name.len());
+        out.push(String::from_utf8_lossy(&name[..len]).into_owned());
+    }
+    out
+}
+
+/// What the map's own files say it uses: every texture name in its BSP, its
+/// sky's six faces and the detail textures in its `_detail.txt`, as
+/// [`owner_of`] keys. Read from disk, once per map.
+fn map_file_uses(map: &str) -> Vec<String> {
+    let mut uses = Vec::new();
+    let dir = game_dir();
+    let bsp = [
+        dir.join("maps").join(format!("{map}.bsp")),
+        dir.with_file_name("dod_downloads")
+            .join("maps")
+            .join(format!("{map}.bsp")),
+    ]
+    .into_iter()
+    .find_map(|p| std::fs::read(p).ok());
+    let mut sky = "desert".to_string();
+    if let Some(bsp) = bsp {
+        let (textures, skyname) = bsp_textures_and_sky(&bsp);
+        uses.extend(textures.into_iter().map(|t| owner_of("world", &t)));
+        if let Some(s) = skyname {
+            sky = s;
+        }
+    }
+    for face in ["rt", "bk", "lf", "ft", "up", "dn"] {
+        uses.push(owner_of("sky", &format!("{SKY_PREFIX}{sky}{face}.tga")));
+    }
+    if let Ok(text) = std::fs::read_to_string(dir.join("maps").join(format!("{map}_detail.txt"))) {
+        uses.extend(detail_file_uses(&text));
+    }
+    uses
+}
+
+/// A `<map>_detail.txt`'s detail textures: each line is `<texture>
+/// <detail name> <xscale> <yscale>`, and the loader reads `gfx/<detail
+/// name>.tga`.
+fn detail_file_uses(text: &str) -> Vec<String> {
+    text.lines()
+        .filter(|l| !l.trim_start().starts_with("//"))
+        .filter_map(|l| l.split_whitespace().nth(1))
+        .map(|d| owner_of("detail", &format!("gfx/{d}.tga")))
+        .collect()
+}
+
+/// The texture names in a BSP (version 30) and its worldspawn `skyname`.
+/// Anything malformed just yields less.
+fn bsp_textures_and_sky(bsp: &[u8]) -> (Vec<String>, Option<String>) {
+    let int = |at: usize| -> Option<i32> {
+        bsp.get(at..at + 4)
+            .map(|b| i32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
+    let lump = |n: usize| -> Option<(usize, usize)> {
+        let off = usize::try_from(int(4 + n * 8)?).ok()?;
+        let len = usize::try_from(int(8 + n * 8)?).ok()?;
+        (off.checked_add(len)? <= bsp.len()).then_some((off, len))
+    };
+    let mut names = Vec::new();
+    if let Some((off, _)) = lump(2) {
+        let count = int(off).and_then(|n| usize::try_from(n).ok()).unwrap_or(0);
+        for i in 0..count.min(4096) {
+            let Some(rel) = int(off + 4 + i * 4) else {
+                break;
+            };
+            let Some(at) = usize::try_from(rel).ok().map(|r| off + r) else {
+                continue;
+            };
+            if let Some(raw) = bsp.get(at..at + 16) {
+                let len = raw.iter().position(|&b| b == 0).unwrap_or(16);
+                if len > 0 {
+                    names.push(String::from_utf8_lossy(&raw[..len]).into_owned());
+                }
+            }
+        }
+    }
+    let sky = lump(0).and_then(|(off, len)| {
+        let text = String::from_utf8_lossy(&bsp[off..off + len]);
+        let at = text.find("\"skyname\"")? + "\"skyname\"".len();
+        let rest = &text[at..];
+        let open = rest.find('"')? + 1;
+        let close = rest[open..].find('"')? + open;
+        let name = rest[open..close].trim().to_ascii_lowercase();
+        (!name.is_empty()).then_some(name)
+    });
+    (names, sky)
+}
+
+/// Called every frame (`commands::poll`). Costs a level-name hash and a walk
+/// of the precache list until one of them changes -- a new map, or more of
+/// the current one loaded -- and then records what the map uses, so
+/// `dodstudio_hd_misses` can list a texture under every map that shares it.
+pub fn poll_map() {
+    if !HOOK_ACTIVE.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(level) = level_name_bytes() else {
+        return;
+    };
+    let hash = fnv1a32(&[level]);
+    let table = precache_table();
+    let count = table.map(precache_count).unwrap_or(0);
+    let new_level = LAST_LEVEL.load(Ordering::Relaxed) != hash;
+    if !new_level && LAST_MODEL_COUNT.load(Ordering::Relaxed) == count {
+        return;
+    }
+    LAST_LEVEL.store(hash, Ordering::Relaxed);
+    LAST_MODEL_COUNT.store(count, Ordering::Relaxed);
+
+    let map = map_short_name(&String::from_utf8_lossy(level));
+    let mut uses: Vec<String> = table
+        .map(precached_models)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|m| {
+            let lower = m.replace('\\', "/").to_ascii_lowercase();
+            if lower.ends_with(".spr") {
+                Some(owner_of("sprite", &lower))
+            } else if lower.ends_with(".mdl") {
+                Some(owner_of("model", &lower))
+            } else {
+                None
+            }
+        })
+        .collect();
+    if new_level {
+        uses.extend(map_file_uses(&map));
+    }
+    add_map_uses(&map, uses);
 }
 
 /// Whether to write a debug-log line for every load. Off by default -- a map
@@ -1884,6 +2184,7 @@ pub fn install() -> Result<(), String> {
     };
     detours.push(swap);
     *slot = Some(detours);
+    HOOK_ACTIVE.store(true, Ordering::Release);
     Ok(())
 }
 
@@ -1931,7 +2232,7 @@ pub fn status() -> String {
             let on_purpose = m
                 .entries
                 .keys()
-                .filter(|(_, w, ..)| *w == Miss::OnPurpose)
+                .filter(|(w, ..)| *w == Miss::OnPurpose)
                 .count();
             format!(
                 "; {} texture(s) kept their original ({} of them on purpose) -- {MISSES_NAME} lists them by map",
@@ -2267,42 +2568,129 @@ mod tests {
     }
 
     #[test]
-    fn misses_list_by_map_in_load_order_worst_first() {
+    fn misses_are_listed_under_every_map_that_uses_them() {
         // The list is process-wide; this test is the only one that writes it.
+        add_map_uses(
+            "dod_zalec",
+            [
+                "world:clip".to_string(),
+                "model:models/m.mdl".to_string(),
+                "sprite:sprites/a.spr".to_string(),
+            ],
+        );
         record_miss_on("dod_zalec", Miss::OnPurpose, "world", "CLIP", || {
             "tool".into()
         });
-        record_miss_on("dod_zalec", Miss::WrongVersion, "model", "m g.bmp", || {
-            "x".into()
-        });
+        record_miss_on(
+            "dod_zalec",
+            Miss::WrongVersion,
+            "model",
+            "models/m.mdl g.bmp",
+            || "x".into(),
+        );
         record_miss_on("dod_zalec", Miss::NoFile, "sprite", "sprites/a.spr", || {
             "y".into()
         });
         record_miss_on("dod_zalec", Miss::NoFile, "sprite", "sprites/a.spr", || {
             unreachable!("a repeat keeps the first detail")
         });
+        // The second map shares the sprite and the tool texture, which the
+        // game never loads again -- only its own wall reaches the hook.
+        add_map_uses(
+            "dod_anzio",
+            [
+                "world:wall".to_string(),
+                "world:clip".to_string(),
+                "sprite:sprites/a.spr".to_string(),
+            ],
+        );
         record_miss_on("dod_anzio", Miss::NoFile, "world", "wall", || "z".into());
+        record_miss_on(
+            NO_MAP,
+            Miss::NoFile,
+            "sprite",
+            "sprites/startup.spr",
+            || "s".into(),
+        );
+
         let report = misses_report(None).concat();
         let at = |s: &str| {
             report
                 .find(s)
                 .unwrap_or_else(|| panic!("{s:?} in {report}"))
         };
-        // Maps in load order, not alphabetical; each map's groups worst first.
-        assert!(at("== dod_zalec (3) ==") < at("== dod_anzio (1) =="));
-        assert!(at(Miss::WrongVersion.heading()) < at(Miss::NoFile.heading()));
-        assert!(at(Miss::NoFile.heading()) < at(Miss::OnPurpose.heading()));
-        assert!(report.contains("sprites/a.spr  y (2 frame loads)"));
-        assert!(report.contains("4 texture(s) kept their original this session"));
+        // Maps in load order, each with its real total; NO_MAP last.
+        assert!(
+            at("== dod_zalec: 3 (1 on purpose, 2 shared")
+                < at("== dod_anzio: 3 (1 on purpose, 2 shared")
+        );
+        assert!(at("== dod_anzio") < at(&format!("== {NO_MAP}: 1")));
+        assert!(report.contains("sprites/a.spr  y (2 frame loads) [also on dod_anzio]"));
+        assert!(report.contains("sprites/a.spr  y (2 frame loads) [also on dod_zalec]"));
+        assert!(report.contains("7 miss(es) this session, 5 different texture(s)"));
+        // Within a map, worst first.
+        let zalec = &report[at("== dod_zalec")..at("== dod_anzio")];
+        let wrong = zalec.find(Miss::WrongVersion.heading()).unwrap();
+        let none = zalec.find(Miss::NoFile.heading()).unwrap();
+        let fine = zalec.find(Miss::OnPurpose.heading()).unwrap();
+        assert!(wrong < none && none < fine);
 
         let anzio = misses_report(Some("DOD_ANZIO")).concat();
-        assert!(anzio.contains("1 texture(s) kept their original on DOD_ANZIO"));
-        assert!(!anzio.contains("dod_zalec ("));
+        assert!(anzio.contains("3 miss(es) on DOD_ANZIO (style"));
+        assert!(!anzio.contains("== dod_zalec"));
         assert!(
             misses_report(Some("dod_caen"))
                 .concat()
                 .contains("was replaced")
         );
+    }
+
+    #[test]
+    fn owners_match_what_maps_record() {
+        assert_eq!(
+            owner_of("model", "models/V_Garand.mdl garand.bmp"),
+            "model:models/v_garand.mdl"
+        );
+        assert_eq!(owner_of("sprite", "sprites/A.spr"), "sprite:sprites/a.spr");
+        assert_eq!(
+            owner_of("detail", "GFX\\Detail\\X.tga"),
+            "detail:gfx/detail/x.tga"
+        );
+        assert_eq!(
+            detail_file_uses("{fence detail/dt_fence 8 8\n// x y\n\nwall detail\\d2 4 4"),
+            ["detail:gfx/detail/dt_fence.tga", "detail:gfx/detail/d2.tga"]
+        );
+    }
+
+    #[test]
+    fn bsp_texture_names_and_sky_are_read() {
+        // A minimal BSP: header (version + 15 lumps), an entity lump and a
+        // texture lump holding two miptex names.
+        let entities = b"{\n\"classname\" \"worldspawn\"\n\"skyname\" \"Kraftstoff\"\n}\n\0";
+        let mut textures = Vec::new();
+        textures.extend_from_slice(&2i32.to_le_bytes());
+        textures.extend_from_slice(&12i32.to_le_bytes());
+        textures.extend_from_slice(&52i32.to_le_bytes());
+        for name in [&b"{Fence"[..], &b"WALL01"[..]] {
+            let mut miptex = [0u8; 40];
+            miptex[..name.len()].copy_from_slice(name);
+            textures.extend_from_slice(&miptex);
+        }
+        let header = 4 + 15 * 8;
+        let mut bsp = vec![0u8; header];
+        bsp[..4].copy_from_slice(&30i32.to_le_bytes());
+        let put = |bsp: &mut Vec<u8>, lump: usize, data: &[u8]| {
+            let off = bsp.len();
+            bsp[4 + lump * 8..8 + lump * 8].copy_from_slice(&(off as i32).to_le_bytes());
+            bsp[8 + lump * 8..12 + lump * 8].copy_from_slice(&(data.len() as i32).to_le_bytes());
+            bsp.extend_from_slice(data);
+        };
+        put(&mut bsp, 0, entities);
+        put(&mut bsp, 2, &textures);
+        let (names, sky) = bsp_textures_and_sky(&bsp);
+        assert_eq!(names, ["{Fence", "WALL01"]);
+        assert_eq!(sky.as_deref(), Some("kraftstoff"));
+        assert_eq!(bsp_textures_and_sky(&[1, 2, 3]), (vec![], None));
     }
 
     #[test]

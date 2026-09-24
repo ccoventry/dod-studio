@@ -509,6 +509,9 @@ pub fn poll() {
     spectator_target::poll();
     // Same reason, for whichever messages dodstudio_msglog currently wants.
     crate::msglog::poll();
+    // Notes what each map uses, for dodstudio_hd_misses. A no-op unless the
+    // HD hook is installed, and cheap until a new map loads.
+    texture_hires::poll_map();
 }
 
 /// Everything in one place, for debugging -- not the settings surface a

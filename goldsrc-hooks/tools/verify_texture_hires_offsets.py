@@ -18,6 +18,9 @@ Checks:
     into the hook span, and it shares GL_Upload8's texgamma table.
   - No branch anywhere in either function lands inside a detoured span (other
     than on its first byte).
+  - The studio API's GetModelByIndex calls CL_GetModelByIndex, whose
+    `mov esi, [edi*4 + model_precache]` is where find_precache_table reads
+    the per-map model list from.
 
 Run after touching the patterns or offsets in texture_hires.rs. Not part of
 `cargo test`: it needs the real DLL, which CI does not have. Requires pefile
@@ -184,6 +187,23 @@ def main():
                     if s < t < s + n:
                         check(False, f"{ins.address:#x} {ins.mnemonic} lands inside the span at {s:#x}")
     check(img[lt2_start: lt2_start + 3] == b"\x55\x8b\xec", "GL_LoadTexture2 prologue where expected")
+
+    # dodstudio_hd_misses' per-map list: find_precache_table follows the studio
+    # API's GetModelByIndex (slot 5) into CL_GetModelByIndex and reads
+    # cl.model_precache from `mov esi, [edi*4 + table]`.
+    bodies = find_all(img, parse(
+        "55 8B EC 83 EC 10 56 57 8B 7D 08 81 FF 00 02 00 00 7C 08 5F 33 C0 5E 8B E5 5D C3 8B 34 BD"))
+    check(len(bodies) == 1, f"CL_GetModelByIndex matches once ({[hex(base + b) for b in bodies]})")
+    # Two thin `push index; call CL_GetModelByIndex` wrappers exist; the one
+    # the studio API hands the client is in slot 5 of a table code points at.
+    wrappers = [w for w in find_all(img, parse("55 8B EC 8B 45 08 50 E8"))
+                if bodies and call(w + 7) == bodies[0]]
+    tables = [(w, i - 0x14) for w in wrappers
+              for i in range(0, len(img) - 4, 4) if img[i:i + 4] == struct.pack("<I", base + w)]
+    referenced = [(w, t) for w, t in tables if struct.pack("<I", base + t) in img]
+    check(len(referenced) == 1,
+          f"a GetModelByIndex wrapper sits in slot 5 of a table the code points at "
+          f"({[(hex(base + w), hex(base + t)) for w, t in referenced]})")
     print("ok   no branch lands inside a detoured span" if not failures else "")
 
     print(f"\nGL_LoadTexture2 tail +{tail:#x}, GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
