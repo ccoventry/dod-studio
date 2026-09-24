@@ -156,8 +156,10 @@ a verifier per patched site, which checks the Rust constants against a real
 `client.dll`.
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
-detail textures and skies as the game loads them (opt-in:
-`GOLDSRC_HOOKS_TEXTURE_HIRES=1`). `tools/hd/` holds the scripts that build
+detail textures and skies as the game loads them: on when there's a
+`dod/dodstudio_hd` folder, `dodstudio_hd 0/1` in game, and
+`GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
+the scripts that build
 those files; see its README.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because

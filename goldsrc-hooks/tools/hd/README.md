@@ -2,7 +2,7 @@
 
 These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod\dodstudio_hd\`, which you can delete to go back to stock.
 
-The hook only runs with `GOLDSRC_HOOKS_TEXTURE_HIRES=1` set; see the crate README.
+The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd 0` in the game console (or `movie.cfg`) turns it off.
 
 ## Step by step (no coding needed)
 
@@ -29,13 +29,16 @@ python build_all.py ultrasharp
 
 This finds your DoD install by itself (the one DoD Studio launches) and fills `dod\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
 
-**5. Turn it on in the game.** The HD textures are loaded by DoD Studio's hook DLL, which is off unless `GOLDSRC_HOOKS_TEXTURE_HIRES=1` is set. To set it once for good, paste this and then restart DoD Studio:
+**5. Start the game from DoD Studio.** That's it: DoD Studio's hook DLL sees the new `dodstudio_hd` folder and turns HD on by itself. In game, `dodstudio_debug_status` in the console shows how many textures were replaced.
+
+To switch it off or on, use the console or a line in `movie.cfg`:
 
 ```
-setx GOLDSRC_HOOKS_TEXTURE_HIRES 1
+dodstudio_hd 0
+dodstudio_hd 1
 ```
 
-In game, `dodstudio_debug_status` in the console shows how many textures were replaced.
+A change applies to what loads next: walls, detail textures and skies from the next demo, models and sprites already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
 
 ### More examples
 
@@ -85,7 +88,7 @@ python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\do
 python compare.py compare.png
 ```
 
-**Go back to stock:** delete the `dod\dodstudio_hd` folder, or run `setx GOLDSRC_HOOKS_TEXTURE_HIRES 0` and restart DoD Studio.
+**Go back to stock:** put `dodstudio_hd 0` in `movie.cfg`, or delete the `dod\dodstudio_hd` folder.
 
 ## What you need
 

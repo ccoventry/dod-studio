@@ -101,10 +101,11 @@
 //! ```
 //!
 //! `dodstudio_hd_style <name>` (default `ultrasharp`; `GOLDSRC_HOOKS_HD_STYLE`
-//! if the cvar can't be registered) picks the style subfolder, once, at the
-//! first map load: the engine keeps every texture it has uploaded, so a change
-//! mid-session would only reach textures not loaded yet. A style folder that
-//! doesn't exist simply means "originals" (plus overrides). Deleting the style
+//! if the cvar can't be registered) picks the style subfolder. It's followed
+//! every frame, but the engine keeps what it has already loaded: a change
+//! reaches walls, detail textures and skies from the next map, and models and
+//! sprites loaded earlier only after a restart. A style folder that doesn't
+//! exist simply means "originals" (plus overrides). Deleting the style
 //! folders you don't use is fine.
 //!
 //! Map textures are `world\<style>\<name>_<hash>.tga`. `<name>` is the texture's name,
@@ -145,9 +146,17 @@
 //! best: the engine rounds anything else, down as often as up). The folder is
 //! indexed once, on the first world-texture load of the session.
 //!
-//! ## Opt-in
+//! ## On and off
 //!
-//! Installed only with `GOLDSRC_HOOKS_TEXTURE_HIRES=1`. Live-tested 2026-09-23
+//! `dodstudio_hd 1` / `0`, with the same timing as the style. It starts on
+//! when there's a `dod/dodstudio_hd` folder (nothing to load otherwise), and
+//! `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` overrides that; see [`starts_on`] for
+//! why the starting value is decided before any `.cfg` runs. Started off, the
+//! hook isn't installed at all until `dodstudio_hd 1` asks for it, and is then
+//! installed between frames on the game's own thread. Turned off, it only
+//! stops replacing: the raised limits and the leftover-texture fix stay.
+//!
+//! Live-tested 2026-09-23
 //! across several wsod25 maps in one session (lennon2, railroad2_test,
 //! armory_b6, harrington, anzio) at `gl_max_size 1024`: no crash, about 97% of
 //! world texture loads replaced (the rest are sky/tool textures the replacement
@@ -156,7 +165,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_READWRITE, VirtualAlloc};
 
@@ -342,21 +351,68 @@ const SPRITES_DIR: &str = "dodstudio_hd/sprites";
 /// e.g. one texture a particular model got wrong, taken from another style.
 const OVERRIDES: &str = "overrides";
 
-/// `dodstudio_hd_style`: which style subfolder to use. Read once, when the
-/// first HD folder is indexed (the first map load), because the engine keeps
-/// every texture it has uploaded -- changing it later in a session would only
-/// affect textures not loaded yet. Set it in `movie.cfg` or on the launch line.
+/// `dodstudio_hd_style`: which style subfolder to use. Read every frame (see
+/// [`poll_hd`]); a change applies to whatever loads next. The engine keeps
+/// what it has loaded, so textures on screen stay as they are: walls, detail
+/// textures and skies follow from the next map, models and sprites loaded
+/// earlier only after a restart. Set it in `movie.cfg` to have it from the
+/// first map.
 pub const STYLE_NAME: &str = console_name!("hd_style");
 pub const DEFAULT_STYLE: &str = "ultrasharp";
 /// Fallback when the cvar could not be registered.
 const STYLE_ENV: &str = "GOLDSRC_HOOKS_HD_STYLE";
 static STYLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
-static ACTIVE_STYLE: OnceLock<String> = OnceLock::new();
+/// The style in force; empty until first asked for.
+static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
+/// Hash of the style cvar's text as last seen by [`poll_hd`], so a frame
+/// where it hasn't changed costs a hash and nothing else.
+static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
+
+/// `dodstudio_hd`: HD replacements on (1) or off (0). Same timing as the
+/// style: a change applies to what loads next.
+pub const HD_NAME: &str = console_name!("hd");
+static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// The switch's current value; what every replacement path checks.
+static ENABLED: AtomicBool = AtomicBool::new(false);
+/// Set when the switch or style changed after a map had loaded: some of what's
+/// on screen was loaded the other way until the game restarts.
+static CHANGED_MID_SESSION: AtomicBool = AtomicBool::new(false);
 
 /// Called by `commands.rs` once `dodstudio_hd_style` is registered.
 pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
     STYLE_CVAR.store(cvar, Ordering::Release);
+}
+
+/// Called by `commands.rs` once `dodstudio_hd` is registered.
+pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
+    HD_CVAR.store(cvar, Ordering::Release);
+}
+
+/// Whether HD starts on, and so whether `lib.rs` installs the hook at
+/// startup: `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` decides outright; unset,
+/// it's on when there's a `dod/dodstudio_hd` folder to load from.
+///
+/// Startup is when it has to be decided: the engine loads a few sprites
+/// (muzzle flashes, shell casings) while the game starts, before any `.cfg`
+/// runs, so a `dodstudio_hd 1` in `movie.cfg` alone would come too late for
+/// them.
+pub fn starts_on() -> bool {
+    match std::env::var("GOLDSRC_HOOKS_TEXTURE_HIRES") {
+        Ok(v) if v.trim() == "1" => true,
+        Ok(v) if v.trim() == "0" => false,
+        _ => game_dir().join("dodstudio_hd").is_dir(),
+    }
+}
+
+/// Sets the switch's starting value, before the cvar exists.
+pub fn set_enabled(on: bool) {
+    ENABLED.store(on, Ordering::Release);
+}
+
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Acquire)
 }
 
 /// A style name as a folder name: lowercase letters, digits, `-` and `_` only,
@@ -370,27 +426,49 @@ fn clean_style(raw: &str) -> Option<String> {
     .then_some(s)
 }
 
-/// The style in force this session, fixed the first time it's asked for.
-fn active_style() -> &'static str {
-    ACTIVE_STYLE.get_or_init(|| {
-        let cvar = STYLE_CVAR.load(Ordering::Acquire);
-        // Safety: a cvar_t the engine registered for us and keeps for the
-        // session; its `string` is always a valid C string.
-        let from_cvar = (!cvar.is_null())
-            .then(|| unsafe { (*cvar).string })
-            .filter(|p| !p.is_null())
-            .map(|p| {
-                unsafe { std::ffi::CStr::from_ptr(p) }
-                    .to_string_lossy()
-                    .into_owned()
-            });
-        let chosen = from_cvar
-            .or_else(|| std::env::var(STYLE_ENV).ok())
-            .and_then(|s| clean_style(&s))
-            .unwrap_or_else(|| DEFAULT_STYLE.to_string());
+/// The style cvar's raw text, or `None` if it isn't registered.
+fn style_cvar_bytes() -> Option<&'static [u8]> {
+    let cvar = STYLE_CVAR.load(Ordering::Acquire);
+    // Safety: a cvar_t the engine registered for us and keeps for the
+    // session; its `string` is always a valid C string.
+    let p = (!cvar.is_null()).then(|| unsafe { (*cvar).string })?;
+    (!p.is_null()).then(|| unsafe { std::ffi::CStr::from_ptr(p) }.to_bytes())
+}
+
+/// What the cvar (or, without it, the environment) asks for, as a folder name.
+fn chosen_style() -> String {
+    style_cvar_bytes()
+        .map(|b| String::from_utf8_lossy(b).into_owned())
+        .or_else(|| std::env::var(STYLE_ENV).ok())
+        .and_then(|s| clean_style(&s))
+        .unwrap_or_else(|| DEFAULT_STYLE.to_string())
+}
+
+/// The style in force now.
+fn active_style() -> String {
+    if let Ok(s) = ACTIVE_STYLE.read()
+        && !s.is_empty()
+    {
+        return s.clone();
+    }
+    let chosen = chosen_style();
+    if let Ok(mut s) = ACTIVE_STYLE.write()
+        && s.is_empty()
+    {
+        *s = chosen.clone();
         unsafe { crate::debug::report(&format!("texture_hires: HD style {chosen:?}")) };
-        chosen
-    })
+    }
+    chosen
+}
+
+/// The style for reports: the one in force, or "not chosen yet".
+fn style_label() -> String {
+    ACTIVE_STYLE
+        .read()
+        .ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| s.clone())
+        .unwrap_or_else(|| "not chosen yet".to_string())
 }
 
 /// `<type>/<active style>` and `<type>/overrides`, in that order -- later wins.
@@ -401,7 +479,99 @@ fn style_dirs(type_dir: &str) -> [String; 2] {
     ]
 }
 
-/// World textures seen, and how many were replaced.
+/// One HD folder's index: built on first use, dropped when the style changes
+/// so the next use builds the new style's.
+struct Cached<T>(RwLock<Option<Arc<T>>>);
+
+impl<T> Cached<T> {
+    const fn new() -> Self {
+        Self(RwLock::new(None))
+    }
+
+    fn get(&self, build: impl FnOnce() -> T) -> Arc<T> {
+        if let Some(v) = self.peek() {
+            return v;
+        }
+        let v = Arc::new(build());
+        if let Ok(mut slot) = self.0.write() {
+            *slot = Some(v.clone());
+        }
+        v
+    }
+
+    fn peek(&self) -> Option<Arc<T>> {
+        self.0.read().ok().and_then(|slot| slot.clone())
+    }
+
+    fn clear(&self) {
+        if let Ok(mut slot) = self.0.write() {
+            *slot = None;
+        }
+    }
+}
+
+/// Called every frame (`commands::poll`): follows `dodstudio_hd` and
+/// `dodstudio_hd_style`. A frame where neither changed costs a float read and
+/// a hash of the style text.
+pub fn poll_hd() {
+    let cvar = HD_CVAR.load(Ordering::Acquire);
+    if !cvar.is_null() {
+        // Safety: registered by us, kept by the engine for the session.
+        let on = unsafe { (*cvar).value } != 0.0;
+        if ENABLED.swap(on, Ordering::AcqRel) != on {
+            if on && let Err(why) = install() {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "texture_hires: {HD_NAME} 1, but the hook couldn't install -- {why}"
+                    ))
+                };
+            }
+            settings_changed(&format!("{HD_NAME} {}", on as u8));
+        }
+    }
+    if let Some(bytes) = style_cvar_bytes() {
+        let hash = fnv1a32(&[bytes]);
+        if STYLE_SEEN.swap(hash, Ordering::AcqRel) != hash {
+            let chosen = chosen_style();
+            let changed = ACTIVE_STYLE.write().ok().is_some_and(|mut s| {
+                let was = std::mem::replace(&mut *s, chosen.clone());
+                !was.is_empty() && was != chosen
+            });
+            if changed {
+                for index in [&INDEX, &MODEL_INDEX, &SPRITE_INDEX] {
+                    index.clear();
+                }
+                DETAIL_INDEX.clear();
+                SKY_INDEX.clear();
+                settings_changed(&format!("{STYLE_NAME} {chosen}"));
+            }
+        }
+    }
+}
+
+/// After the switch or style changes: forget which leftover map textures
+/// were identical, so the next map reloads its walls rather than reusing
+/// ones loaded the old way; and note it if a map had already loaded.
+fn settings_changed(what: &str) {
+    if let Ok(mut hashes) = RECORD_HASH.lock() {
+        hashes.clear();
+    }
+    let mid = WORLD_SEEN.load(Ordering::Relaxed) > 0;
+    if mid {
+        CHANGED_MID_SESSION.store(true, Ordering::Relaxed);
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "texture_hires: {what}{}",
+            if mid {
+                " -- walls, detail and skies follow from the next map; models and sprites already loaded after a restart"
+            } else {
+                ""
+            }
+        ))
+    };
+}
+// World textures seen, and how many were replaced.
 static WORLD_SEEN: AtomicU32 = AtomicU32::new(0);
 static REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Model skins seen, and how many were replaced.
@@ -634,10 +804,7 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
     let Ok(log) = MISSES.lock() else {
         return vec![format!("{MISSES_NAME}: the list's lock is poisoned\n")];
     };
-    let style = ACTIVE_STYLE
-        .get()
-        .map(String::as_str)
-        .unwrap_or("not chosen yet");
+    let style = style_label();
     let on = |map: &str, e: &MissEntry| {
         e.first_map == map
             || log
@@ -1028,7 +1195,7 @@ static SKY_HEIGHT_IMM: AtomicUsize = AtomicUsize::new(0);
 static SKY_CURRENT_DIMS: Mutex<(u32, u32)> = Mutex::new((SKY_STOCK_SIDE, SKY_STOCK_SIDE));
 /// Sky faces replaced this session, and the folder's index.
 static SKY_REPLACED: AtomicU32 = AtomicU32::new(0);
-static SKY_INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
+static SKY_INDEX: Cached<HashMap<String, String>> = Cached::new();
 
 /// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
 /// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
@@ -1043,9 +1210,9 @@ static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
 
 /// The replacement folders' indexes, built on first use: map textures, model
 /// skins and sprite frames.
-static INDEX: OnceLock<Index> = OnceLock::new();
-static MODEL_INDEX: OnceLock<Index> = OnceLock::new();
-static SPRITE_INDEX: OnceLock<Index> = OnceLock::new();
+static INDEX: Cached<Index> = Cached::new();
+static MODEL_INDEX: Cached<Index> = Cached::new();
+static SPRITE_INDEX: Cached<Index> = Cached::new();
 
 struct Index {
     dir: PathBuf,
@@ -1105,7 +1272,7 @@ const DETAIL_PATH_CAP: usize = 0x104;
 /// Every HD detail texture for the active style (and overrides), by its
 /// lowercased path under `gfx/detail/`, to the path to hand the engine
 /// instead. Built on the first detail load of the session.
-static DETAIL_INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
+static DETAIL_INDEX: Cached<HashMap<String, String>> = Cached::new();
 /// Detail textures loaded from [`DETAIL_DIR`] this session.
 static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
 
@@ -1218,7 +1385,7 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
     };
     let gamma_at = GAMMA_TABLE.load(Ordering::Acquire);
     let dither_at = DITHER_VALUE.load(Ordering::Acquire);
-    if frame.is_null() || buffer.is_null() || gamma_at == 0 || dither_at == 0 {
+    if !enabled() || frame.is_null() || buffer.is_null() || gamma_at == 0 || dither_at == 0 {
         return stock();
     }
     let path = unsafe { std::slice::from_raw_parts(frame.sub(SKY_PATH_OFFSET), SKY_PATH_CAP) };
@@ -1231,7 +1398,8 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
     let Some(rest) = original.strip_prefix(SKY_PREFIX) else {
         return stock();
     };
-    let Some(engine_path) = SKY_INDEX.get_or_init(build_sky_index).get(rest) else {
+    let sky_index = SKY_INDEX.get(build_sky_index);
+    let Some(engine_path) = sky_index.get(rest) else {
         record_miss(Miss::NoFile, "sky", &original, || "no HD face".to_string());
         return stock();
     };
@@ -1388,14 +1556,17 @@ unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
     let Some(len) = buf.iter().position(|&b| b == 0) else {
         return;
     };
+    if !enabled() {
+        return;
+    }
     let original = String::from_utf8_lossy(&buf[..len]).into_owned();
-    let index = DETAIL_INDEX.get_or_init(build_detail_index);
+    let index = DETAIL_INDEX.get(build_detail_index);
     let max = if DETAIL_RAISED.load(Ordering::Acquire) {
         DETAIL_MAX_BYTES
     } else {
         DETAIL_STOCK_BYTES
     };
-    let Some(new) = detail_override(&original, index) else {
+    let Some(new) = detail_override(&original, &index) else {
         if in_game_dirs(&original) {
             record_miss(Miss::NoFile, "detail", &original, || {
                 "no HD copy".to_string()
@@ -1781,6 +1952,9 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     {
         hashes.insert(record as usize, hash);
     }
+    if !enabled() {
+        return std::ptr::null();
+    }
 
     ANY_SEEN.fetch_add(1, Ordering::Relaxed);
     let (seen, replaced, kind, index, build): (_, _, _, _, fn() -> Index) = match texture_type {
@@ -1876,7 +2050,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         );
     }
 
-    let index = index.get_or_init(build);
+    let index = index.get(build);
     let stem = file_stem_name(&name);
     let mut real_name = None;
     let has_name = index.files.keys().any(|(n, _)| *n == stem);
@@ -1887,7 +2061,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let hash = fnv1a32(&[indices, pal]);
     let path = match index.files.get(&(stem.clone(), hash)) {
         Some(path) => path,
-        None => match renamed_by_engine(index, &stem, hash) {
+        None => match renamed_by_engine(&index, &stem, hash) {
             Some((original, path)) => {
                 if log {
                     unsafe {
@@ -2525,7 +2699,7 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     let files = INDEX
-        .get()
+        .peek()
         .map(|i| format!("{} file(s) in {}", i.files.len(), i.dir.display()))
         .unwrap_or_else(|| "folder not read yet".to_string());
     let models = format!(
@@ -2533,7 +2707,7 @@ pub fn status() -> String {
         MODEL_REPLACED.load(Ordering::Relaxed),
         MODEL_SEEN.load(Ordering::Relaxed),
         MODEL_INDEX
-            .get()
+            .peek()
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
@@ -2542,7 +2716,7 @@ pub fn status() -> String {
         SPRITE_REPLACED.load(Ordering::Relaxed),
         SPRITE_SEEN.load(Ordering::Relaxed),
         SPRITE_INDEX
-            .get()
+            .peek()
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
@@ -2575,11 +2749,14 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     format!(
-        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
-        ACTIVE_STYLE
-            .get()
-            .map(String::as_str)
-            .unwrap_or("not chosen yet"),
+        "{NAME}: {HD_NAME} {}{}; style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
+        if enabled() { "1 (on)" } else { "0 (off)" },
+        if CHANGED_MID_SESSION.load(Ordering::Relaxed) {
+            ", changed this session: some of what's loaded is still the old way until a restart"
+        } else {
+            ""
+        },
+        style_label(),
         SKY_REPLACED.load(Ordering::Relaxed),
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
@@ -2603,7 +2780,7 @@ pub fn status() -> String {
 /// Whether the hook has seen any texture load this session -- gates whether
 /// `status_text()` includes this module's line at all.
 pub fn has_observed() -> bool {
-    ANY_SEEN.load(Ordering::Relaxed) > 0
+    HOOK_ACTIVE.load(Ordering::Relaxed) || ANY_SEEN.load(Ordering::Relaxed) > 0
 }
 
 #[cfg(test)]

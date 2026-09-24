@@ -137,9 +137,9 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// like a broken hook.
 const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
-/// Whether to install `texture_hires`'s world-texture swap (and its raised
-/// upload ceiling) this session. See the module docs and the `GOLDSRC_HOOKS_TEXTURE_HIRES`
-/// env-flag above.
+/// Whether to install `texture_hires` at startup: see
+/// `texture_hires::starts_on`. Off, `dodstudio_hd 1` can still install it
+/// later in the session.
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
@@ -156,13 +156,13 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
         Ordering::Relaxed,
     );
-    // texture_hires detours hw.dll's own internal code rather than an
-    // IAT/GetProcAddress seam, and its swap has not been live-tested yet. Off
-    // unless asked for; see the module docs.
-    TEXTURE_HIRES_ENABLED.store(
-        env_flag("GOLDSRC_HOOKS_TEXTURE_HIRES", false),
-        Ordering::Relaxed,
-    );
+    // HD textures: on when there's a dod/dodstudio_hd folder to load from,
+    // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
+    // texture_hires::starts_on for why startup decides). `dodstudio_hd` turns
+    // it on and off in game.
+    let hd = texture_hires::starts_on();
+    TEXTURE_HIRES_ENABLED.store(hd, Ordering::Relaxed);
+    texture_hires::set_enabled(hd);
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
@@ -240,9 +240,7 @@ fn install_fixes() {
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {
             Ok(()) => unsafe {
-                debug::report(
-                    "goldsrc-hooks: texture_hires hook installed (GOLDSRC_HOOKS_TEXTURE_HIRES=1)",
-                )
+                debug::report("goldsrc-hooks: texture_hires hook installed (HD textures on)")
             },
             Err(why) => unsafe {
                 debug::report(&format!(

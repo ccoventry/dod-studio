@@ -509,8 +509,9 @@ pub fn poll() {
     spectator_target::poll();
     // Same reason, for whichever messages dodstudio_msglog currently wants.
     crate::msglog::poll();
-    // Notes what each map uses, for dodstudio_hd_misses. A no-op unless the
-    // HD hook is installed, and cheap until a new map loads.
+    // Follows dodstudio_hd / dodstudio_hd_style, then notes what each map
+    // uses for dodstudio_hd_misses. Cheap unless one of them changed.
+    texture_hires::poll_hd();
     texture_hires::poll_map();
 }
 
@@ -1306,6 +1307,11 @@ pub fn install() {
     // style without it.
     if let Some(style) = register(texture_hires::STYLE_NAME, texture_hires::DEFAULT_STYLE) {
         texture_hires::set_style_cvar(style);
+    }
+    // Same for the HD switch; texture_hires::poll_hd follows it, and installs
+    // the hook if it's turned on in a session that started without it.
+    if let Some(hd) = register(texture_hires::HD_NAME, bit(texture_hires::enabled())) {
+        texture_hires::set_hd_cvar(hd);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
