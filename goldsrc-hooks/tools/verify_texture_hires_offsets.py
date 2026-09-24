@@ -18,6 +18,9 @@ Checks:
     into the hook span, and it shares GL_Upload8's texgamma table.
   - No branch anywhere in either function lands inside a detoured span (other
     than on its first byte).
+  - GL_LoadTexture2's cache lookup (LOAD_TEXTURE2_HEAD) matches once, at the
+    function's entry; its name-matched span and servercount operand are where
+    install_stale_fix expects.
   - The studio API's GetModelByIndex calls CL_GetModelByIndex, whose
     `mov esi, [edi*4 + model_precache]` is where find_precache_table reads
     the per-map model list from.
@@ -46,6 +49,17 @@ LOAD_TEXTURE2_TAIL = (
     "57 E8 ?? ?? ?? ?? 83 C4 1C"
 )
 TAIL_BRANCH, TAIL_RESUME, TAIL_CALL32, TAIL_UPLOAD8_ARGS, TAIL_CALL8, TAIL_AFTER = 24, 30, 52, 62, 84, 92
+LOAD_TEXTURE2_HEAD = (
+    "55 8B EC B8 0C 40 00 00 E8 ?? ?? ?? ?? 8B 45 08 53 33 DB 56 8A 08 57 84 C9 "
+    "89 5D F4 74 61 33 F6 BF ?? ?? ?? ?? 3B 35 ?? ?? ?? ?? 7D 5F 66 83 7F 04 00 7D 0C 85 DB 75 1C 8B DF 46 "
+    "83 C7 54 EB E5 8B 55 08 8D 4F 14 51 52 E8 ?? ?? ?? ?? 83 C4 08 85 C0 74 06 46 83 C7 54 EB CB 8B 45 10 "
+    "8B 4F 08 3B C1 75 0A 8B 4D 14 8B 47 0C 3B C8 74 59 8B 45 08 8A 50 03 8A 08 FE C2 84 C9 88 50 03 75 9F "
+    "68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 85 DB 75 6D 8B 0D ?? ?? ?? ?? 8D 04 CD 00 00 00 00 2B C1 41 81 "
+    "F9 C0 12 00 00 89 0D ?? ?? ?? ?? 8D 04 40 8D 34 85 ?? ?? ?? ?? 7C 47 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 "
+    "C4 04 EB 38 66 83 7F 04 00 7E 0B 66 8B 15 ?? ?? ?? ?? 66 89 57 04"
+)
+HEAD_NAME_MATCHED, HEAD_SERVERCOUNT = 0x5A, 0xCE
+NAME_MATCHED_STOLEN = bytes([0x8B, 0x45, 0x10, 0x8B, 0x4F, 0x08])
 BRANCH_STOLEN = bytes([0x83, 0x7D, 0x0C, 0x05, 0x75, 0x20])
 
 UPLOAD32 = (
@@ -177,8 +191,27 @@ def main():
     # Every direct branch in both functions: none may land inside a span
     # except on its first byte.
     md = Cs(CS_ARCH_X86, CS_MODE_32)
-    spans = [(base + tail + TAIL_BRANCH, 6), (base + up32 + SIZE_CHECK, 10)]
     lt2_start = tail - 0x2BD  # GL_LoadTexture2 begins 0x2bd bytes before the tail
+
+    # The leftover-texture fix (install_stale_fix): the cache lookup at the
+    # function's start, the span it detours once a name matched, and the
+    # servercount global it reads.
+    heads = find_all(img, parse(LOAD_TEXTURE2_HEAD))
+    check(heads == [lt2_start], f"LOAD_TEXTURE2_HEAD matches once, at GL_LoadTexture2's entry ({[hex(base + h) for h in heads]})")
+    check(img[lt2_start + HEAD_NAME_MATCHED: lt2_start + HEAD_NAME_MATCHED + 6] == NAME_MATCHED_STOLEN,
+          "name-matched span bytes")
+    check(img[lt2_start + HEAD_NAME_MATCHED - 8: lt2_start + HEAD_NAME_MATCHED - 6] == bytes([0x74, 0x06]),
+          "the je after the name compare targets the span's first byte")
+    sc_at = lt2_start + HEAD_SERVERCOUNT
+    servercount = u32(sc_at + 3) if img[sc_at: sc_at + 3] == bytes([0x66, 0x8B, 0x15]) else None
+    # The record's servercount is written from the same global when a world
+    # texture is created (`mov cx, word ptr [servercount]`).
+    check(servercount is not None and struct.pack("<I", servercount) in img[lt2_start: tail]
+          and img.find(bytes([0x66, 0x8B, 0x0D]) + struct.pack("<I", servercount), lt2_start, tail) > 0,
+          f"servercount operand is the global new world records are stamped with ({servercount and hex(servercount)})")
+
+    spans = [(base + tail + TAIL_BRANCH, 6), (base + up32 + SIZE_CHECK, 10),
+             (base + lt2_start + HEAD_NAME_MATCHED, 6)]
     for start, end in ((lt2_start, tail + TAIL_AFTER + 0x30), (up32, up32 + 0x310)):
         for ins in md.disasm(img[start:end], base + start):
             if ins.mnemonic.startswith(("j", "loop")) and ins.op_str.startswith("0x"):

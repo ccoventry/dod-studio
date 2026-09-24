@@ -76,6 +76,18 @@
 //! each TGA into a 1 MB buffer, so anything over 512x512 fails to load. With
 //! the ceiling raised, [`raise_detail_limit`] makes that 4 MB (1024x1024).
 //!
+//! ## Same-named textures on consecutive maps
+//!
+//! `GL_LoadTexture2` reuses a cached texture on a name-and-size match, and
+//! the previous map's world textures are still cached while the next map
+//! loads. Stock, that shows the earlier map's texture wherever the later map
+//! has a same-named, same-sized one with different pixels (railroad2_test's
+//! `dr2` on railroad2_s9a, harrington's `kl_door` on rennes_b2), and renames
+//! a same-named one of a different size. [`install_stale_fix`] makes the
+//! lookup skip a world texture left over from an earlier map unless its
+//! pixels are identical; [`renamed_by_engine`] still covers the rename in
+//! case that fix isn't installed.
+//!
 //! ## Replacement files
 //!
 //! Everything lives under one folder, `<game>\dod\dodstudio_hd\`, so it can be
@@ -1700,14 +1712,42 @@ fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, Str
     Ok(img)
 }
 
-/// Called by the swap stub with `GL_LoadTexture2`'s frame pointer. Returns
-/// `PENDING`'s address to upload a replacement, or null to carry on unchanged.
+/// FNV-1a of a paletted upload's pixels and palette -- the replacement key's
+/// hash -- or `None` when the arguments don't describe one.
+///
+/// # Safety
+///
+/// `data` and `palette` are `GL_LoadTexture2`'s own arguments, which
+/// `GL_Upload8` is about to read over exactly these spans.
+unsafe fn upload_hash(data: *const u8, palette: *const u8, width: u32, height: u32) -> Option<u32> {
+    if data.is_null()
+        || palette.is_null()
+        || width == 0
+        || height == 0
+        || width > 4096
+        || height > 4096
+    {
+        return None;
+    }
+    let (indices, pal) = unsafe {
+        (
+            std::slice::from_raw_parts(data, (width * height) as usize),
+            std::slice::from_raw_parts(palette, 768),
+        )
+    };
+    Some(fnv1a32(&[indices, pal]))
+}
+
+/// Called by the swap stub with `GL_LoadTexture2`'s frame pointer and the
+/// cache record it's filling. Returns `PENDING`'s address to upload a
+/// replacement, or null to carry on unchanged.
 ///
 /// # Safety
 ///
 /// Only called from the installed stub, while `GL_LoadTexture2`'s frame is
-/// live: `[ebp+8]` .. `[ebp+0x28]` are its nine arguments.
-unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
+/// live: `[ebp+8]` .. `[ebp+0x28]` are its nine arguments, and `record` its
+/// `gltexture_t` (`esi`).
+unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const AtomicUsize {
     let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
     let name_ptr = arg(0x08) as *const std::ffi::c_char;
     let texture_type = arg(0x0c);
@@ -1715,6 +1755,17 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     let data = arg(0x18) as *const u8;
     let i_type = arg(0x20);
     let palette = arg(0x24) as *const u8;
+
+    // What this world texture's record holds, for `keep_cached` to compare
+    // the next map's same-named texture against. Every world upload, whether
+    // or not it's replaced.
+    if texture_type == GLT_WORLD
+        && !record.is_null()
+        && let Some(hash) = unsafe { upload_hash(data, palette, width, height) }
+        && let Ok(mut hashes) = RECORD_HASH.lock()
+    {
+        hashes.insert(record as usize, hash);
+    }
 
     ANY_SEEN.fetch_add(1, Ordering::Relaxed);
     let (seen, replaced, kind, index, build): (_, _, _, _, fn() -> Index) = match texture_type {
@@ -1905,9 +1956,10 @@ const JMP: u8 = 0x25;
 /// The swap stub, replacing `cmp [ebp+0xc], 5; jne upload8`.
 ///
 /// ```asm
+///     push esi                      ; the gltexture_t being filled
 ///     push ebp
-///     call [DECIDE_FN]              ; decide(ebp)
-///     add esp, 4
+///     call [DECIDE_FN]              ; decide(ebp, esi)
+///     add esp, 8
 ///     test eax, eax
 ///     jnz swap
 ///     cmp dword ptr [ebp+0xc], 5    ; the stolen bytes, verbatim in effect
@@ -1930,9 +1982,9 @@ const JMP: u8 = 0x25;
 /// reload what they use from the frame. `ebx`/`esi`/`edi`/`ebp` survive both
 /// calls (cdecl callee-saved), and the stack is balanced on every path.
 fn swap_stub() -> Vec<u8> {
-    let mut code = vec![0x55]; // push ebp
+    let mut code = vec![0x56, 0x55]; // push esi; push ebp
     indirect(&mut code, CALL, &DECIDE_FN);
-    code.extend_from_slice(&[0x83, 0xC4, 0x04]); // add esp, 4
+    code.extend_from_slice(&[0x83, 0xC4, 0x08]); // add esp, 8
     code.extend_from_slice(&[0x85, 0xC0]); // test eax, eax
     code.extend_from_slice(&[0x75, 0x12]); // jnz swap (+18)
     code.extend_from_slice(&[0x83, 0x7D, 0x0C, 0x05]); // cmp dword ptr [ebp+0xc], 5
@@ -2125,6 +2177,190 @@ fn install_detail_redirect(loader: usize) -> Result<detour::Detour, String> {
     unsafe { detour::install(at, DETAIL_PATH_STOLEN.len(), &detail_path_stub()) }
 }
 
+/// `GL_LoadTexture2` from its entry through its name-keyed cache lookup, up
+/// to the hit path's servercount refresh. Wildcards: call displacements and
+/// absolute addresses (the record array, its count, strings, servercount).
+const LOAD_TEXTURE2_HEAD: &str = "55 8B EC B8 0C 40 00 00 E8 ?? ?? ?? ?? 8B 45 08 53 33 DB 56 8A 08 57 84 C9 \
+    89 5D F4 74 61 33 F6 BF ?? ?? ?? ?? 3B 35 ?? ?? ?? ?? 7D 5F 66 83 7F 04 00 7D 0C 85 DB 75 1C 8B DF 46 \
+    83 C7 54 EB E5 8B 55 08 8D 4F 14 51 52 E8 ?? ?? ?? ?? 83 C4 08 85 C0 74 06 46 83 C7 54 EB CB 8B 45 10 \
+    8B 4F 08 3B C1 75 0A 8B 4D 14 8B 47 0C 3B C8 74 59 8B 45 08 8A 50 03 8A 08 FE C2 84 C9 88 50 03 75 9F \
+    68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 C4 04 85 DB 75 6D 8B 0D ?? ?? ?? ?? 8D 04 CD 00 00 00 00 2B C1 41 81 \
+    F9 C0 12 00 00 89 0D ?? ?? ?? ?? 8D 04 40 8D 34 85 ?? ?? ?? ?? 7C 47 68 ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 \
+    C4 04 EB 38 66 83 7F 04 00 7E 0B 66 8B 15 ?? ?? ?? ?? 66 89 57 04";
+
+/// Offsets into [`LOAD_TEXTURE2_HEAD`]. Inside the lookup loop `edi` is the
+/// `gltexture_t` being compared (84 bytes: `+4` servercount as a short, `+8`
+/// width, `+0xc` height, `+0x14` name).
+mod head {
+    /// `inc esi; add edi, 0x54; jmp loop` -- on to the next record.
+    pub const NEXT_RECORD: usize = 0x54;
+    /// `mov eax, [ebp+0x10]; mov ecx, [edi+8]` -- reached only when the
+    /// names matched; the detoured span.
+    pub const NAME_MATCHED: usize = 0x5a;
+    /// `cmp eax, ecx` -- the width compare, where the stub resumes.
+    pub const SIZE_COMPARE: usize = 0x60;
+    /// `mov dx, word ptr [servercount]` on the hit path.
+    pub const SERVERCOUNT: usize = 0xce;
+}
+const NAME_MATCHED_STOLEN: &[u8] = &[0x8B, 0x45, 0x10, 0x8B, 0x4F, 0x08];
+
+/// `keep_cached`'s address, the servercount global, and the stub's two exits.
+static KEEP_CACHED_FN: AtomicUsize = AtomicUsize::new(0);
+static SERVERCOUNT: AtomicUsize = AtomicUsize::new(0);
+static CACHE_NEXT: AtomicUsize = AtomicUsize::new(0);
+static CACHE_RESUME: AtomicUsize = AtomicUsize::new(0);
+/// Whether the leftover-texture fix is installed, and what it has done.
+static STALE_FIX: AtomicBool = AtomicBool::new(false);
+static STALE_RELOADED: AtomicU32 = AtomicU32::new(0);
+static STALE_REUSED: AtomicU32 = AtomicU32::new(0);
+/// The pixel hash of what each world texture's cache record (by address)
+/// holds, noted by [`decide`] at every world upload.
+static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+/// Whether a cached texture whose name matches may be used for this load.
+///
+/// The engine's cache matches on name and size only. The previous map's
+/// world textures are still cached while the next map loads, so a new map's
+/// texture with the same name and size but different pixels used to get the
+/// old map's texture instead (and one with a different size got renamed; see
+/// [`renamed_by_engine`]). Only world textures carry a servercount (every
+/// other type is stored with 0, "permanent"), and it's bumped at every map
+/// load, including every demo. So: a world texture left over from an earlier
+/// map is reused only if its pixels are identical -- otherwise the lookup
+/// moves on and the new map gets its own copy. The old one is freed, as
+/// before, when the new map finishes loading.
+///
+/// # Safety
+///
+/// `frame` is `GL_LoadTexture2`'s `ebp` and `record` the `gltexture_t` its
+/// lookup is comparing, both live for the call.
+unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
+    let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
+    if frame.is_null() || record.is_null() || arg(0x0c) != GLT_WORLD {
+        return 1;
+    }
+    let servercount_at = SERVERCOUNT.load(Ordering::Acquire);
+    if servercount_at == 0 {
+        return 1;
+    }
+    // Safety: the record's short at +4; the engine's int, of which the
+    // record keeps the low 16 bits.
+    let cached = unsafe { (record.add(4) as *const i16).read_unaligned() };
+    let current = unsafe { (servercount_at as *const i32).read_unaligned() } as i16;
+    if cached <= 0 || cached == current {
+        return 1;
+    }
+
+    // A leftover from an earlier map.
+    let (width, height) = (arg(0x10), arg(0x14));
+    let same_size = unsafe {
+        (record.add(8) as *const u32).read_unaligned() == width
+            && (record.add(0xc) as *const u32).read_unaligned() == height
+    };
+    let incoming = unsafe {
+        upload_hash(
+            arg(0x18) as *const u8,
+            arg(0x24) as *const u8,
+            width,
+            height,
+        )
+    };
+    let stored = RECORD_HASH
+        .lock()
+        .ok()
+        .and_then(|h| h.get(&(record as usize)).copied());
+    let keep = same_size && incoming.is_some() && incoming == stored;
+    if keep {
+        STALE_REUSED.fetch_add(1, Ordering::Relaxed);
+    } else {
+        STALE_RELOADED.fetch_add(1, Ordering::Relaxed);
+    }
+    if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
+        let name_ptr = arg(0x08) as *const std::ffi::c_char;
+        let name = if name_ptr.is_null() {
+            String::new()
+        } else {
+            unsafe { std::ffi::CStr::from_ptr(name_ptr) }
+                .to_string_lossy()
+                .into_owned()
+        };
+        let what = match (keep, same_size) {
+            (true, _) => "identical, reused",
+            (false, true) => "different pixels, loading this map's own",
+            (false, false) => "different size, loading this map's own",
+        };
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: world {name:?} is still cached from an earlier map: {what}"
+            ))
+        };
+    }
+    keep as u32
+}
+
+/// The cache stub, replacing `mov eax, [ebp+0x10]; mov ecx, [edi+8]` once a
+/// record's name has matched.
+///
+/// ```asm
+///     push edi                      ; the record
+///     push ebp
+///     call [KEEP_CACHED_FN]         ; keep_cached(ebp, edi)
+///     add esp, 8
+///     test eax, eax
+///     jnz keep
+///     jmp [CACHE_NEXT]              ; as if the name hadn't matched
+/// keep:
+///     mov eax, [ebp+0x10]           ; the stolen instructions
+///     mov ecx, [edi+8]
+///     jmp [CACHE_RESUME]
+/// ```
+///
+/// `eax`/`ecx`/`edx` are dead at the detour (just past a `strcmp` call) and
+/// on both exits: the next-record path reloads everything, and the kept path
+/// sets `eax`/`ecx` itself and loads `edx` before using it.
+fn cache_stub() -> Vec<u8> {
+    let mut code = vec![0x57, 0x55]; // push edi; push ebp
+    indirect(&mut code, CALL, &KEEP_CACHED_FN);
+    code.extend_from_slice(&[0x83, 0xC4, 0x08]); // add esp, 8
+    code.extend_from_slice(&[0x85, 0xC0]); // test eax, eax
+    code.extend_from_slice(&[0x75, 0x06]); // jnz keep (+6)
+    indirect(&mut code, JMP, &CACHE_NEXT);
+    code.extend_from_slice(NAME_MATCHED_STOLEN);
+    indirect(&mut code, JMP, &CACHE_RESUME);
+    code
+}
+
+/// Installs [`keep_cached`] in `GL_LoadTexture2`'s cache lookup. `tail` is
+/// the already-matched upload branch, which must sit in the same function.
+fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String> {
+    // Safety: `base` is hw.dll's module handle, mapped for the session.
+    let head = unsafe { scan::find_unique(base, LOAD_TEXTURE2_HEAD) }
+        .map_err(|why| format!("could not locate GL_LoadTexture2's cache lookup -- {why}"))?;
+    if !(head < tail && tail - head < 0x400) {
+        return Err(format!(
+            "cache lookup at {head:#x} isn't in the same function as the upload branch at {tail:#x}"
+        ));
+    }
+    check_span(head + head::NAME_MATCHED, NAME_MATCHED_STOLEN)?;
+    let servercount = unsafe { operand_after(head + head::SERVERCOUNT, &[0x66, 0x8B, 0x15]) }?;
+    SERVERCOUNT.store(servercount, Ordering::Release);
+    KEEP_CACHED_FN.store(keep_cached as *const () as usize, Ordering::Release);
+    CACHE_NEXT.store(head + head::NEXT_RECORD, Ordering::Release);
+    CACHE_RESUME.store(head + head::SIZE_COMPARE, Ordering::Release);
+    // Safety: span verified above; the only branch into it is the `je` after
+    // the name compare, which targets its first byte.
+    let detour = unsafe {
+        detour::install(
+            head + head::NAME_MATCHED,
+            NAME_MATCHED_STOLEN.len(),
+            &cache_stub(),
+        )
+    }?;
+    STALE_FIX.store(true, Ordering::Release);
+    Ok(detour)
+}
+
 /// Installs the world-texture swap, and raises the upload ceiling, once.
 ///
 /// Every signature and every byte about to be overwritten is checked first;
@@ -2234,6 +2470,15 @@ pub fn install() -> Result<(), String> {
         ))
     };
     detours.push(swap);
+    // After the swap: it's what notes each record's pixels (`decide`).
+    match install_stale_fix(base, tail) {
+        Ok(d) => detours.push(d),
+        Err(why) => unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: a later map may show an earlier map's same-named texture -- {why}"
+            ))
+        },
+    }
     *slot = Some(detours);
     HOOK_ACTIVE.store(true, Ordering::Release);
     Ok(())
@@ -2281,6 +2526,15 @@ pub fn status() -> String {
         0 => String::new(),
         n => format!(" ({n} of them renamed by the engine, matched anyway)"),
     };
+    let leftovers = if STALE_FIX.load(Ordering::Relaxed) {
+        format!(
+            "; earlier maps' same-named textures: {} reloaded, {} identical and reused",
+            STALE_RELOADED.load(Ordering::Relaxed),
+            STALE_REUSED.load(Ordering::Relaxed)
+        )
+    } else {
+        "; earlier maps' same-named textures NOT checked (fix not installed)".to_string()
+    };
     let misses = MISSES
         .lock()
         .map(|m| {
@@ -2297,7 +2551,7 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     format!(
-        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
+        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
         ACTIVE_STYLE
             .get()
             .map(String::as_str)
@@ -2489,15 +2743,17 @@ mod tests {
     #[test]
     fn swap_stub_branches_land_where_the_comments_say() {
         let code = swap_stub();
-        // jnz at [12]: target = 14 + 0x12 = the first push.
-        assert_eq!(&code[12..14], &[0x75, 0x12]);
-        assert_eq!(&code[14 + 0x12..14 + 0x12 + 3], &[0xFF, 0x75, 0x28]);
+        assert_eq!(&code[..2], &[0x56, 0x55]);
+        assert_eq!(&code[8..11], &[0x83, 0xC4, 0x08]);
+        // jnz at [13]: target = 15 + 0x12 = the first push.
+        assert_eq!(&code[13..15], &[0x75, 0x12]);
+        assert_eq!(&code[15 + 0x12..15 + 0x12 + 3], &[0xFF, 0x75, 0x28]);
         // The stolen compare, then a jne +6 that skips exactly the RESUME jump.
-        assert_eq!(&code[14..18], &BRANCH_STOLEN[..4]);
-        assert_eq!(&code[18..20], &[0x75, 0x06]);
-        assert_eq!(&code[20..22], &[0xFF, 0x25]);
-        assert_eq!(&code[26..28], &[0xFF, 0x25]);
-        assert_eq!(code.len(), 32 + 17 + 6 + 3 + 6);
+        assert_eq!(&code[15..19], &BRANCH_STOLEN[..4]);
+        assert_eq!(&code[19..21], &[0x75, 0x06]);
+        assert_eq!(&code[21..23], &[0xFF, 0x25]);
+        assert_eq!(&code[27..29], &[0xFF, 0x25]);
+        assert_eq!(code.len(), 33 + 17 + 6 + 3 + 6);
     }
 
     #[test]
@@ -2746,6 +3002,37 @@ mod tests {
         assert_eq!(names, ["{Fence", "WALL01"]);
         assert_eq!(sky.as_deref(), Some("kraftstoff"));
         assert_eq!(bsp_textures_and_sky(&[1, 2, 3]), (vec![], None));
+    }
+
+    #[test]
+    fn cache_lookup_offsets_land_on_what_they_name() {
+        scan::Pattern::parse(LOAD_TEXTURE2_HEAD).unwrap();
+        fixed(
+            LOAD_TEXTURE2_HEAD,
+            head::NEXT_RECORD,
+            &[0x46, 0x83, 0xC7, 0x54],
+        );
+        fixed(LOAD_TEXTURE2_HEAD, head::NAME_MATCHED, NAME_MATCHED_STOLEN);
+        fixed(LOAD_TEXTURE2_HEAD, head::SIZE_COMPARE, &[0x3B, 0xC1]);
+        fixed(LOAD_TEXTURE2_HEAD, head::SERVERCOUNT, &[0x66, 0x8B, 0x15]);
+        // The `je` after the name compare lands exactly on the detour: `74 06`
+        // right before NEXT_RECORD's 6 bytes.
+        fixed(LOAD_TEXTURE2_HEAD, head::NEXT_RECORD - 2, &[0x74, 0x06]);
+        assert_eq!(head::NEXT_RECORD + 6, head::NAME_MATCHED);
+        assert_eq!(tokens(LOAD_TEXTURE2_HEAD).len(), head::SERVERCOUNT + 11);
+    }
+
+    #[test]
+    fn cache_stub_branches_land_where_the_comments_say() {
+        let code = cache_stub();
+        assert_eq!(&code[..2], &[0x57, 0x55]);
+        assert_eq!(&code[8..11], &[0x83, 0xC4, 0x08]);
+        // jnz +6 at [13] skips exactly the 6-byte next-record jump.
+        assert_eq!(&code[13..15], &[0x75, 0x06]);
+        assert_eq!(&code[15..17], &[0xFF, 0x25]);
+        assert_eq!(&code[21..27], NAME_MATCHED_STOLEN);
+        assert_eq!(&code[27..29], &[0xFF, 0x25]);
+        assert_eq!(code.len(), 33);
     }
 
     #[test]
