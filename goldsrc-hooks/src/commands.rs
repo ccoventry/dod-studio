@@ -511,7 +511,7 @@ pub fn poll() {
     crate::msglog::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
-    poll_level();
+    log_level_changes();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -520,7 +520,7 @@ pub fn poll() {
 /// changes, so a crash further down the log can be tied to the map it
 /// happened on (`tools/crash_report.py` reads it). A frame where it hasn't
 /// changed costs a hash of the name.
-fn poll_level() {
+fn log_level_changes() {
     static LAST: AtomicU32 = AtomicU32::new(0);
     let Some(engfuncs) = engine::engfuncs() else {
         return;
