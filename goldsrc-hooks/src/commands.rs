@@ -511,8 +511,36 @@ pub fn poll() {
     crate::msglog::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
+    poll_level();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+}
+
+/// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
+/// changes, so a crash further down the log can be tied to the map it
+/// happened on (`tools/crash_report.py` reads it). A frame where it hasn't
+/// changed costs a hash of the name.
+fn poll_level() {
+    static LAST: AtomicU32 = AtomicU32::new(0);
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    // Safety: a pointer into the engine's client state, valid for the
+    // session; checked for null before reading.
+    let raw = unsafe { (engfuncs.pfn_get_level_name)() };
+    if raw.is_null() {
+        return;
+    }
+    let name = unsafe { CStr::from_ptr(raw) }.to_bytes();
+    if name.is_empty() {
+        return;
+    }
+    let hash = name.iter().fold(0x811c_9dc5_u32, |h, &b| {
+        (h ^ b as u32).wrapping_mul(0x0100_0193)
+    });
+    if LAST.swap(hash, Ordering::Relaxed) != hash {
+        unsafe { crate::debug::report(&format!("level: {}", String::from_utf8_lossy(name))) };
+    }
 }
 
 /// Everything in one place, for debugging -- not the settings surface a
