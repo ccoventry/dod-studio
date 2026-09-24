@@ -155,6 +155,11 @@ only its own 71-entry name/thunk table, not the hook itself. `tools/` holds
 a verifier per patched site, which checks the Rust constants against a real
 `client.dll`.
 
+`src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
+detail textures and skies as the game loads them (opt-in:
+`GOLDSRC_HOOKS_TEXTURE_HIRES=1`). `tools/hd/` holds the scripts that build
+those files; see its README.
+
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
 faulting address as `module+RVA` so a crash is diagnosable from the log alone.
