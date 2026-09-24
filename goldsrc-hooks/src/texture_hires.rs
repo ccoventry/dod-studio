@@ -71,6 +71,11 @@
 //! that stops them. `gl_max_size` (default 256) still clamps each side below
 //! that; set it to 512 or 1024 to see the extra resolution.
 //!
+//! Detail textures (`gfx/detail/*.tga`, drawn over walls when
+//! `r_detailtextures` is on) have a separate, smaller limit: their loader reads
+//! each TGA into a 1 MB buffer, so anything over 512x512 fails to load. With
+//! the ceiling raised, [`raise_detail_limit`] makes that 4 MB (1024x1024).
+//!
 //! ## Replacement files
 //!
 //! `<game>\dod\dodstudio_hd_textures\<name>_<hash>.tga` (override the folder
@@ -88,9 +93,11 @@
 //!
 //! ## Opt-in
 //!
-//! Installed only with `GOLDSRC_HOOKS_TEXTURE_HIRES=1`. The observation-only
-//! predecessor was live-tested (three sessions, no crash); this version writes
-//! into `hw.dll`'s code in three places and has not been yet.
+//! Installed only with `GOLDSRC_HOOKS_TEXTURE_HIRES=1`. Live-tested 2026-09-23
+//! across several wsod25 maps in one session (lennon2, railroad2_test,
+//! armory_b6, harrington, anzio) at `gl_max_size 1024`: no crash, about 97% of
+//! world texture loads replaced (the rest are sky/tool textures the replacement
+//! set skips). The detail-texture limit raise came after that test.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -174,6 +181,27 @@ mod upload8 {
     pub const EXPANSION_BUFFER: (usize, &[u8]) = (0x276, &[0x68]);
 }
 
+/// The detail-texture loader, from its entry through its `GL_LoadTexture2`
+/// call. Wildcards: the `malloc`, `snprintf`, `LoadTGA` and `GL_LoadTexture2`
+/// call displacements and the "gfx/%s.tga" format string's address.
+const DETAIL_LOADER: &str = "55 8B EC 81 EC 0C 01 00 00 53 56 57 68 00 00 10 00 E8 ?? ?? ?? ?? 8B 5D 08 \
+    8B F0 53 68 ?? ?? ?? ?? 8D 85 F4 FE FF FF 68 04 01 00 00 50 83 CF FF E8 ?? ?? ?? ?? 83 C4 14 85 F6 \
+    74 4D 8D 4D F8 6A 00 8D 55 FC 51 52 68 00 00 10 00 8D 85 F4 FE FF FF 56 50 E8 ?? ?? ?? ?? 83 C4 18 \
+    85 C0 74 21 8B 4D F8 8B 55 FC 68 03 27 00 00 6A 00 6A 04 6A 01 56 51 52 6A 05 53 E8 ?? ?? ?? ??";
+
+/// Offsets into [`DETAIL_LOADER`]: the two `push 0x100000`s.
+mod detail {
+    /// `malloc(0x100000)` -- the buffer the TGA is read into.
+    pub const ALLOC_SIZE: usize = 0x0c;
+    /// `LoadTGA(path, buffer, 0x100000, ...)` -- the size it's told it has.
+    pub const LOADTGA_SIZE: usize = 0x46;
+}
+
+/// `push 0x100000`.
+const DETAIL_STOCK_PUSH: &[u8] = &[0x68, 0x00, 0x00, 0x10, 0x00];
+/// 1024x1024 RGBA.
+const DETAIL_MAX_BYTES: usize = 1024 * 1024 * 4;
+
 /// The stock `GL_Upload32` pixel budget, and its buffer (4 bytes a pixel).
 const STOCK_MAX_PIXELS: usize = 0x80000;
 /// What [`install`] raises it to.
@@ -224,6 +252,8 @@ static DITHER_VALUE: AtomicUsize = AtomicUsize::new(0);
 /// Whether the 1024x1024 ceiling is in effect; replacements are capped to 512
 /// per side otherwise.
 static CEILING_RAISED: AtomicBool = AtomicBool::new(false);
+/// Whether detail textures may be up to 1024x1024 (512x512 otherwise).
+static DETAIL_RAISED: AtomicBool = AtomicBool::new(false);
 
 /// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
 /// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
@@ -772,6 +802,42 @@ fn raise_ceiling(upload32: usize, upload8: usize) -> Result<detour::Detour, Stri
     Ok(detour)
 }
 
+/// Lets detail textures (`gfx/detail/*.tga`) be up to 1024x1024: the detail
+/// loader `malloc`s a 1 MB buffer and tells `LoadTGA` it holds 1 MB, so any
+/// TGA over 512x512 pixels' worth fails with "LoadTGA: texture too large
+/// (WxH>256x256)" (the "256x256" is hardcoded text, not the real limit) and
+/// the detail layer silently goes missing. Both immediates become 4 MB -- the
+/// allocation first, so the limit never exceeds what was allocated. What it
+/// loads goes to `GL_Upload32` as RGBA, which [`raise_ceiling`] already opened
+/// to 1024x1024.
+fn raise_detail_limit(base: usize) -> Result<(), String> {
+    // Safety: `base` is hw.dll's module handle, mapped for the session.
+    let loader = unsafe { scan::find_unique(base, DETAIL_LOADER) }
+        .map_err(|why| format!("could not locate the detail texture loader -- {why}"))?;
+    for off in [detail::ALLOC_SIZE, detail::LOADTGA_SIZE] {
+        check_span(loader + off, DETAIL_STOCK_PUSH)?;
+    }
+    for off in [detail::ALLOC_SIZE, detail::LOADTGA_SIZE] {
+        // Safety: verified above to be `push 0x100000` in the detail loader.
+        if !unsafe {
+            crate::patch::write_code_bytes(
+                loader + off + 1,
+                &(DETAIL_MAX_BYTES as u32).to_le_bytes(),
+            )
+        } {
+            return Err(format!("could not rewrite the size at +{off:#x}"));
+        }
+    }
+    DETAIL_RAISED.store(true, Ordering::Release);
+    unsafe {
+        crate::debug::report(&format!(
+            "texture_hires: detail texture limit raised to 1024x1024 at +{:#x}",
+            loader - base
+        ))
+    };
+    Ok(())
+}
+
 /// Installs the world-texture swap, and raises the upload ceiling, once.
 ///
 /// Every signature and every byte about to be overwritten is checked first;
@@ -818,6 +884,17 @@ pub fn install() -> Result<(), String> {
                 "texture_hires: upload ceiling left at 512x1024, replacements capped at 512 -- {why}"
             ))
         },
+    }
+    // Only with the upload ceiling raised: a 1024x1024 detail texture would
+    // otherwise get past LoadTGA and hit GL_Upload32's stock Sys_Error.
+    if CEILING_RAISED.load(Ordering::Acquire)
+        && let Err(why) = raise_detail_limit(base)
+    {
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: detail textures left at 512x512 -- {why}"
+            ))
+        };
     }
 
     GAMMA_TABLE.store(gamma, Ordering::Release);
@@ -872,11 +949,16 @@ pub fn status() -> String {
         .map(|i| format!("{} file(s) in {}", i.files.len(), i.dir.display()))
         .unwrap_or_else(|| "folder not read yet".to_string());
     format!(
-        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; ceiling {} (logging {})",
+        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; ceiling {}, detail textures {} (logging {})",
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
         } else {
             "stock"
+        },
+        if DETAIL_RAISED.load(Ordering::Relaxed) {
+            "up to 1024x1024"
+        } else {
+            "up to 512x512"
         },
         if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
             "on"
@@ -927,6 +1009,15 @@ mod tests {
         fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD8_ARGS, &[0x8B, 0x45, 0x28]);
         fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD8, &[0xE8]);
         fixed(LOAD_TEXTURE2_TAIL, tail::AFTER - 3, &[0x83, 0xC4, 0x1C]);
+    }
+
+    #[test]
+    fn detail_offsets_land_on_the_size_pushes() {
+        scan::Pattern::parse(DETAIL_LOADER).unwrap();
+        fixed(DETAIL_LOADER, detail::ALLOC_SIZE, DETAIL_STOCK_PUSH);
+        fixed(DETAIL_LOADER, detail::LOADTGA_SIZE, DETAIL_STOCK_PUSH);
+        // The new size must hold exactly what GL_Upload32's raised ceiling allows.
+        assert_eq!(DETAIL_MAX_BYTES, RAISED_MAX_PIXELS * 4);
     }
 
     #[test]

@@ -10,6 +10,9 @@ Checks:
     (GL_Upload8's) starts exactly 2 MB later -- the proof of its size.
   - GL_Upload8's gamma-table and gl_dither operands sit where expected, and the
     gl_dither operand really is that cvar's value field.
+  - The detail-texture loader matches once, its two `push 0x100000`s (buffer
+    size and the size LoadTGA is told) sit where raise_detail_limit patches,
+    and it uploads through the same GL_LoadTexture2.
   - No branch anywhere in either function lands inside a detoured span (other
     than on its first byte).
 
@@ -51,6 +54,13 @@ UPLOAD32 = (
 SIZE_CHECK, TOO_BIG, SIZE_OK = 0xCA, 0xD4, 0xE1
 SIZE_CHECK_STOLEN = bytes([0x3D, 0x00, 0x00, 0x08, 0x00, 0x89, 0x45, 0xF4, 0x76, 0x0D])
 BUFFER_PUSHES = [0x1EB, 0x1FC, 0x22B, 0x26C, 0x29F]
+DETAIL_LOADER = (
+    "55 8B EC 81 EC 0C 01 00 00 53 56 57 68 00 00 10 00 E8 ?? ?? ?? ?? 8B 5D 08 "
+    "8B F0 53 68 ?? ?? ?? ?? 8D 85 F4 FE FF FF 68 04 01 00 00 50 83 CF FF E8 ?? ?? ?? ?? 83 C4 14 85 F6 "
+    "74 4D 8D 4D F8 6A 00 8D 55 FC 51 52 68 00 00 10 00 8D 85 F4 FE FF FF 56 50 E8 ?? ?? ?? ?? 83 C4 18 "
+    "85 C0 74 21 8B 4D F8 8B 55 FC 68 03 27 00 00 6A 00 6A 04 6A 01 56 51 52 6A 05 53 E8 ?? ?? ?? ??"
+)
+DETAIL_ALLOC, DETAIL_LOADTGA = 0x0C, 0x46
 U8_GAMMA, U8_DITHER, U8_EXPANSION = (0x53, b"\x8a\x91"), (0x94, b"\xd9\x05"), (0x276, b"\x68")
 
 
@@ -105,6 +115,17 @@ def main():
     name_ptr = u32(dither - 0xC - base)
     cvar_name = img[name_ptr - base: name_ptr - base + 16].split(b"\0")[0]
     check(cvar_name == b"gl_dither", f"dither operand is gl_dither.value ({cvar_name!r})")
+
+    details = find_all(img, parse(DETAIL_LOADER))
+    check(len(details) == 1, f"DETAIL_LOADER matches once ({[hex(base + d) for d in details]})")
+    if details:
+        dl = details[0]
+        for off in (DETAIL_ALLOC, DETAIL_LOADTGA):
+            check(img[dl + off: dl + off + 5] == bytes.fromhex("6800001000"), f"detail loader push 0x100000 at +{off:#x}")
+        # The loader's second call must be LoadTGA (whose error string names the limit)
+        # and its last GL_LoadTexture2 -- the same function the swap hooks.
+        lt2 = call(dl + 0x76)
+        check(lt2 == tail - 0x2BD, "detail loader uploads through GL_LoadTexture2")
 
     # Every direct branch in both functions: none may land inside a span
     # except on its first byte.
