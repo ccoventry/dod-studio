@@ -277,7 +277,7 @@ const SKY_MAX_BYTES: usize = (SKY_MAX_SIDE * SKY_MAX_SIDE * 4) as usize;
 const SKY_PATH_OFFSET: usize = 0x6c;
 const SKY_PATH_CAP: usize = 0x40;
 const SKY_PREFIX: &str = "gfx/env/";
-/// HD sky faces, beside the other HD folders: `dodstudio_hd\sky\<skyname><face>.tga`.
+/// HD sky faces, beside the other HD folders: `dodstudio_hd\sky\<style>\<skyname><face>.tga`.
 const SKY_DIR: &str = "dodstudio_hd/sky";
 
 /// The stock `GL_Upload32` pixel budget, and its buffer (4 bytes a pixel).
