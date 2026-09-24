@@ -48,7 +48,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
     anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
-    sound_fix, spectator_crosshair, spectator_target, voice,
+    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -70,6 +70,7 @@ const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
 const EX_INTERP_NAME: &str = ex_interp::NAME;
 const OVERVIEWMAP_NAME: &str = overview_map::NAME;
+const TEXTURE_HIRES_LOG_NAME: &str = texture_hires::NAME;
 
 /// `FCVAR_ARCHIVE` is 1. Deliberately not set — see the module docs.
 const CVAR_FLAGS: i32 = 0;
@@ -86,6 +87,7 @@ static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_m
 static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_TEXTURE_HIRES_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Set when registration succeeded, so `poll` does nothing at all on the
 /// command fallback path rather than reading null pointers every frame.
@@ -485,6 +487,11 @@ pub fn poll() {
         );
         poll_hand_signals();
         poll_ex_interp();
+        poll_flag(
+            TEXTURE_HIRES_LOG_NAME,
+            &CVAR_TEXTURE_HIRES_LOG,
+            &texture_hires::LOG_TEXTURE_LOADS,
+        );
     }
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
@@ -600,6 +607,12 @@ fn status_text() -> String {
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
+    }
+    // Only reported once it has actually seen something -- the hook itself is
+    // off by default (GOLDSRC_HOOKS_TEXTURE_HIRES), so "0 observed" would be
+    // the permanent, noisy default state for everyone who hasn't opted in.
+    if texture_hires::has_observed() {
+        lines.push(texture_hires::status());
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -990,6 +1003,20 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
+/// `dodstudio_log_texture_loads` -- verbose per-texture logging for the
+/// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) `Draw_MiptexTexture`
+/// observation hook. Registering the toggle unconditionally, whether or not
+/// the hook is actually installed this session, matches every other cvar
+/// here -- setting it when the hook is off just does nothing yet, rather than
+/// the command not existing at all.
+unsafe extern "C" fn cmd_texture_hires_log() {
+    handle_toggle(
+        TEXTURE_HIRES_LOG_NAME,
+        &texture_hires::LOG_TEXTURE_LOADS,
+        || texture_hires::status(),
+    );
+}
+
 /// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
@@ -1184,6 +1211,7 @@ fn install_fallback_commands() {
     add_command(CROSSHAIR_NAME, cmd_crosshair);
     add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
     add_command(HAND_SIGNALS_NAME, cmd_hand_signals);
+    add_command(TEXTURE_HIRES_LOG_NAME, cmd_texture_hires_log);
     // Without this, `poll`'s cvar-independent half (hudelement, deathmsg,
     // spectator_target, msglog) never ran on the fallback path either --
     // see issue #324. `poll` itself stays a no-op for the nine cvar-backed
@@ -1260,6 +1288,15 @@ pub fn install() {
     // Defaults to the engine's own ceiling, so registering it changes nothing
     // until someone asks for more.
     let ex_interp_cvar = register(EX_INTERP_NAME, &ex_interp::STOCK_MS.to_string());
+    // Independent of whether the hook itself installed this session (gated
+    // separately by GOLDSRC_HOOKS_TEXTURE_HIRES) -- registering the cvar
+    // either way means the type-ahead and .cfg/launch-line all work the same
+    // as every other setting here, even before the hook is proven enough to
+    // default on.
+    let texture_hires_log_cvar = register(
+        TEXTURE_HIRES_LOG_NAME,
+        bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
+    );
 
     let (
         Some(gunshots),
@@ -1273,6 +1310,7 @@ pub fn install() {
         Some(spectator_crosshair_cvar),
         Some(hand_signals_cvar),
         Some(ex_interp_cvar),
+        Some(texture_hires_log_cvar),
     ) = (
         gunshots,
         animation,
@@ -1285,6 +1323,7 @@ pub fn install() {
         spectator_crosshair_cvar,
         hand_signals_cvar,
         ex_interp_cvar,
+        texture_hires_log_cvar,
     )
     else {
         install_fallback_commands();
@@ -1302,12 +1341,13 @@ pub fn install() {
     CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
     CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
+    CVAR_TEXTURE_HIRES_LOG.store(texture_hires_log_cvar, Ordering::Relaxed);
     CVARS_LIVE.store(true, Ordering::Release);
     engine::set_per_frame_prologue(poll);
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
         ))
     };
 }

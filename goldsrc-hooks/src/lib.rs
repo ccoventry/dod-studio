@@ -94,9 +94,10 @@ mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod texture_hires;
 mod voice;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
 use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
@@ -136,6 +137,11 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// like a broken hook.
 const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
+/// Whether to install `texture_hires`'s `Draw_MiptexTexture` observation hook
+/// this session. See the module docs and the `GOLDSRC_HOOKS_TEXTURE_HIRES`
+/// env-flag above.
+static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
+
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
     // The sound fix stays default-off: what it currently does (extending how
     // far gunshots carry) is not the thing that turned out to be wanted, and
@@ -148,6 +154,13 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
+        Ordering::Relaxed,
+    );
+    // texture_hires is unproven -- the first hook in this crate that detours
+    // hw.dll's own internal code rather than an IAT/GetProcAddress seam. Off
+    // until it has been live-tested at least once; see the module docs.
+    TEXTURE_HIRES_ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_TEXTURE_HIRES", false),
         Ordering::Relaxed,
     );
 
@@ -223,6 +236,21 @@ fn install_fixes() {
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();
+
+    if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
+        match texture_hires::install() {
+            Ok(()) => unsafe {
+                debug::report(
+                    "goldsrc-hooks: texture_hires hook installed (GOLDSRC_HOOKS_TEXTURE_HIRES=1)",
+                )
+            },
+            Err(why) => unsafe {
+                debug::report(&format!(
+                    "goldsrc-hooks: texture_hires hook not installed -- {why}"
+                ))
+            },
+        }
+    }
 }
 
 /// # Safety
