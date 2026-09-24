@@ -4,17 +4,98 @@ These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`sr
 
 The hook only runs with `GOLDSRC_HOOKS_TEXTURE_HIRES=1` set; see the crate README.
 
+## Step by step (no coding needed)
+
+You'll type a few commands into a Command Prompt window. Copy each line, paste it in (right-click pastes), and press Enter.
+
+**1. Install Python (once).** Download it from [python.org/downloads](https://www.python.org/downloads/) and run the installer. On its first screen, tick **"Add python.exe to PATH"** before clicking Install.
+
+**2. Open a Command Prompt in this folder.** In File Explorer, open this folder (`goldsrc-hooks\tools\hd` inside the DoD Studio download). Click the address bar at the top, type `cmd` and press Enter. A black window opens, already in the right folder.
+
+**3. Install what the scripts use (once).** Paste these two lines, one at a time:
+
+```
+pip install -r requirements.txt
+python setup_tools.py
+```
+
+The first installs three Python packages. The second downloads the upscaler (about 45 MB) and the style models into a `realesrgan` folder here. If either prints an error, see "What you need" below.
+
+**4. Build the HD files.** For the default style:
+
+```
+python build_all.py ultrasharp
+```
+
+This finds your DoD install by itself (the one DoD Studio launches) and fills `dod\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
+
+**5. Turn it on in the game.** The HD textures are loaded by DoD Studio's hook DLL, which is off unless `GOLDSRC_HOOKS_TEXTURE_HIRES=1` is set. To set it once for good, paste this and then restart DoD Studio:
+
+```
+setx GOLDSRC_HOOKS_TEXTURE_HIRES 1
+```
+
+In game, `dodstudio_debug_status` in the console shows how many textures were replaced.
+
+### More examples
+
+**Build another style too** (then pick it with `dodstudio_hd_style remacri` in `movie.cfg`):
+
+```
+python build_all.py remacri
+```
+
+**Build all seven styles** (roughly 7x the time and disk space):
+
+```
+python build_all.py
+```
+
+**Only rebuild one kind of file**, e.g. after adding new sprites:
+
+```
+python build_all.py --types sprites ultrasharp
+```
+
+**Your DoD folder wasn't found**, or you have more than one Half-Life install. Say which one (the folder that contains `hl.exe`; keep the quotes):
+
+```
+python build_all.py --game "C:\Program Files (x86)\Steam\steamapps\common\Half-Life" ultrasharp
+```
+
+**You downloaded a new custom map** called `dod_mymap`:
+
+```
+python world_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\world\ultrasharp" dod_mymap
+python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sky\ultrasharp" dod_mymap
+```
+
+(`python build_all.py ultrasharp` does the same, for every map that's new.)
+
+**You have a custom weapon model or sprite** somewhere on your PC:
+
+```
+python models_hd.py  "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\models\ultrasharp" "C:\Users\me\Downloads\v_garand.mdl"
+python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sprites\ultrasharp" "C:\Users\me\Downloads\muzzleflash1.spr"
+```
+
+**See the styles side by side** before choosing one; this writes `compare.png` here, which you can open:
+
+```
+python compare.py compare.png
+```
+
+**Go back to stock:** delete the `dod\dodstudio_hd` folder, or run `setx GOLDSRC_HOOKS_TEXTURE_HIRES 0` and restart DoD Studio.
+
 ## What you need
 
-1. **Python 3.11 or newer**, plus three packages:
+1. **Python 3.11 or newer**, plus three packages: `pip install -r requirements.txt`.
 
-   ```
-   pip install -r requirements.txt
-   ```
+2. **Real-ESRGAN ncnn-vulkan** (the upscaler) and **the extra style models**. `python setup_tools.py` downloads both into a `realesrgan` folder here. To do it by hand instead:
+   - Unzip `realesrgan-ncnn-vulkan-20220424-windows.zip` from the [Real-ESRGAN releases page](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) into `realesrgan\`, so that `realesrgan\realesrgan-ncnn-vulkan.exe` exists. Or unzip it anywhere and set `REALESRGAN` to the `.exe`.
+   - Put each model's `.param` + `.bin` pair into `realesrgan\models\`.
 
-2. **Real-ESRGAN ncnn-vulkan** (the upscaler). Download `realesrgan-ncnn-vulkan-20220424-windows.zip` from the [Real-ESRGAN releases page](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) and unzip it into a `realesrgan` folder next to these scripts, so that `realesrgan\realesrgan-ncnn-vulkan.exe` exists. Or unzip it anywhere and set `REALESRGAN` to the `.exe`. It needs a GPU with Vulkan support, which any recent NVIDIA, AMD or Intel card has.
-
-3. **The extra upscaling models**, for every style except `x4plus` and `plain`: put each `.param` + `.bin` pair into `realesrgan\models\`.
+   It needs a GPU with Vulkan support, which any recent NVIDIA, AMD or Intel card has.
 
    | Style | Files | Where |
    |---|---|---|
@@ -97,6 +178,7 @@ In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read o
 | `detail_hd.py` | detail textures |
 | `sky_hd.py` | skybox faces |
 | `compare.py` | the style comparison sheet |
+| `setup_tools.py` | downloads the upscaler and the style models |
 | `styles.py` | the style list and the upscaler call |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
