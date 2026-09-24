@@ -1255,6 +1255,10 @@ pub fn install() {
         crate::hide_sprite::COMMAND_NAMES,
         crate::hide_sprite::command,
     );
+    add_commands(
+        texture_hires::MISSES_COMMAND_NAMES,
+        texture_hires::misses_command,
+    );
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);

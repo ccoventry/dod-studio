@@ -409,6 +409,193 @@ struct LastReplaced {
 }
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
+/// `dodstudio_hd_misses`: lists every texture that kept its original this
+/// session, and why. Registered in `commands.rs`.
+pub const MISSES_NAME: &str = console_name!("hd_misses");
+pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
+
+/// Why a texture kept its original. Declared in the order they're listed,
+/// most worth a look first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Miss {
+    /// An HD file has this name, but was made from different pixels -- a
+    /// swapped or updated original, or a different map's same-named texture.
+    WrongVersion,
+    /// No HD file has this name.
+    NoFile,
+    /// An HD file matched but couldn't be used.
+    Failed,
+    /// Left alone by design: tool textures, blank sprite frames, formats the
+    /// hook doesn't replace.
+    OnPurpose,
+}
+
+impl Miss {
+    fn heading(self) -> &'static str {
+        match self {
+            Miss::WrongVersion => "HD file is for a different version of the texture",
+            Miss::NoFile => "no HD file",
+            Miss::Failed => "HD file found but not usable",
+            Miss::OnPurpose => "left alone on purpose",
+        }
+    }
+}
+
+/// One line of the miss list: what to show after the name, and how many
+/// loads hit it (a sprite's frames count separately).
+struct MissEntry {
+    detail: String,
+    loads: u32,
+}
+
+/// Keyed by (why, asset type, name), so the list prints grouped and sorted,
+/// and a texture loaded again only bumps its count. Written at map load only.
+static MISSES: Mutex<std::collections::BTreeMap<(Miss, &'static str, String), MissEntry>> =
+    Mutex::new(std::collections::BTreeMap::new());
+/// Bounds the list; misses past it are only counted.
+const MAX_MISSES: usize = 2000;
+static MISSES_DROPPED: AtomicU32 = AtomicU32::new(0);
+
+fn record_miss(why: Miss, kind: &'static str, name: &str, detail: impl FnOnce() -> String) {
+    let Ok(mut misses) = MISSES.lock() else {
+        return;
+    };
+    let key = (why, kind, name.to_string());
+    if let Some(entry) = misses.get_mut(&key) {
+        entry.loads += 1;
+    } else if misses.len() < MAX_MISSES {
+        misses.insert(
+            key,
+            MissEntry {
+                detail: detail(),
+                loads: 1,
+            },
+        );
+    } else {
+        MISSES_DROPPED.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+/// World texture names the pipeline never builds: tool brushes the map
+/// compiler removes or the renderer never draws, and the sky, which is drawn
+/// from `gfx/env` instead. Lowercase; matches `SKIP` in `pipeline_hd.py`.
+const TOOL_TEXTURES: &[&str] = &[
+    "aaatrigger",
+    "clip",
+    "origin",
+    "null",
+    "skip",
+    "hint",
+    "bevel",
+    "sky",
+    "black",
+];
+
+/// How a load is shown in the miss list: a model skin as `<model> <skin>`,
+/// a sprite frame as its sprite (its frames are counted, not listed).
+fn miss_display_name(texture_type: u32, identifier: &str) -> String {
+    let lower = identifier.to_ascii_lowercase();
+    match texture_type {
+        GLT_STUDIO => match lower.rfind(".mdl") {
+            Some(at) if at + 4 < identifier.len() => {
+                format!("{} {}", &identifier[..at + 4], &identifier[at + 4..])
+            }
+            _ => identifier.to_string(),
+        },
+        GLT_SPRITE => match lower.rfind(".spr_") {
+            Some(at) => identifier[..at + 4].to_string(),
+            None => identifier.to_string(),
+        },
+        _ => identifier.to_string(),
+    }
+}
+
+/// The miss list, as console lines.
+fn misses_report() -> Vec<String> {
+    let Ok(misses) = MISSES.lock() else {
+        return vec![format!("{MISSES_NAME}: the list's lock is poisoned\n")];
+    };
+    let style = ACTIVE_STYLE
+        .get()
+        .map(String::as_str)
+        .unwrap_or("not chosen yet");
+    if misses.is_empty() {
+        return vec![format!(
+            "{MISSES_NAME}: every HD-eligible texture loaded so far was replaced (style {style:?})\n"
+        )];
+    }
+    let mut lines = vec![format!(
+        "{MISSES_NAME}: {} texture(s) kept their original this session (style {style:?})\n",
+        misses.len()
+    )];
+    let mut current = None;
+    for ((why, kind, name), entry) in misses.iter() {
+        if current != Some(*why) {
+            current = Some(*why);
+            let n = misses.keys().filter(|(w, _, _)| w == why).count();
+            lines.push(format!("-- {} ({n}):\n", why.heading()));
+        }
+        let loads = match (*kind, entry.loads) {
+            (_, 1) => String::new(),
+            ("sprite", n) => format!(" ({n} frame loads)"),
+            (_, n) => format!(" ({n} loads)"),
+        };
+        lines.push(format!("  {kind:<6} {name}  {}{loads}\n", entry.detail));
+    }
+    let dropped = MISSES_DROPPED.load(Ordering::Relaxed);
+    if dropped > 0 {
+        lines.push(format!("  ...and {dropped} more not listed\n"));
+    }
+    lines
+}
+
+/// `dodstudio_hd_misses` prints the list; `dodstudio_hd_misses clear` empties
+/// it, e.g. before loading the next map.
+pub unsafe extern "C" fn misses_command() {
+    let clear = misses_args()
+        .get(1)
+        .is_some_and(|a| a.eq_ignore_ascii_case("clear"));
+    if clear {
+        if let Ok(mut misses) = MISSES.lock() {
+            misses.clear();
+        }
+        MISSES_DROPPED.store(0, Ordering::Relaxed);
+        crate::commands::console_print(&format!("{MISSES_NAME}: list cleared\n"));
+        return;
+    }
+    let lines = misses_report();
+    // One call per line: the engine's console print has a fixed-size buffer.
+    for line in &lines {
+        crate::commands::console_print(line);
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "texture_hires: {MISSES_NAME} --\n{}",
+            lines.concat()
+        ))
+    };
+}
+
+fn misses_args() -> Vec<String> {
+    let Some(engfuncs) = crate::engine::engfuncs() else {
+        return Vec::new();
+    };
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+    (0..argc)
+        .filter_map(|i| {
+            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
+            if ptr.is_null() {
+                return None;
+            }
+            Some(
+                unsafe { std::ffi::CStr::from_ptr(ptr) }
+                    .to_string_lossy()
+                    .into_owned(),
+            )
+        })
+        .collect()
+}
+
 /// Whether to write a debug-log line for every load. Off by default -- a map
 /// loads well over a hundred textures.
 pub static LOG_TEXTURE_LOADS: AtomicBool = AtomicBool::new(false);
@@ -648,6 +835,7 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
         return stock();
     };
     let Some(engine_path) = SKY_INDEX.get_or_init(build_sky_index).get(rest) else {
+        record_miss(Miss::NoFile, "sky", &original, || "no HD face".to_string());
         return stock();
     };
     let file = game_dir().join(engine_path);
@@ -663,6 +851,9 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
                     file.display()
                 ))
             };
+            record_miss(Miss::Failed, "sky", &original, || {
+                format!("{}: {why}", file.display())
+            });
             return stock();
         }
     };
@@ -799,9 +990,15 @@ unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
         DETAIL_STOCK_BYTES
     };
     let Some(new) = detail_override(&original, index) else {
+        record_miss(Miss::NoFile, "detail", &original, || {
+            "no HD copy".to_string()
+        });
         return;
     };
     if !detail_fits(&game_dir().join(&new), max) {
+        record_miss(Miss::Failed, "detail", &original, || {
+            format!("{new} is over the loader's {max}-byte limit")
+        });
         if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
             unsafe {
                 crate::debug::report(&format!(
@@ -1133,7 +1330,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         _ => identifier.to_string(),
     };
     let log = LOG_TEXTURE_LOADS.load(Ordering::Relaxed);
-    let skip = |why: &str| {
+    let skip = |miss: Miss, why: &str| {
         if log {
             unsafe {
                 crate::debug::report(&format!(
@@ -1141,6 +1338,12 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
                 ))
             };
         }
+        record_miss(
+            miss,
+            kind,
+            &miss_display_name(texture_type, &identifier),
+            || format!("{width}x{height}, {why}"),
+        );
         std::ptr::null()
     };
 
@@ -1149,7 +1352,10 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     let known_type = matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA)
         || (texture_type == GLT_SPRITE && i_type == TEX_TYPE_ALPHA_GRADIENT);
     if !known_type {
-        return skip("unexpected iType, left alone");
+        return skip(
+            Miss::OnPurpose,
+            &format!("iType {i_type}, a format this hook doesn't replace"),
+        );
     }
     if data.is_null()
         || palette.is_null()
@@ -1158,15 +1364,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         || width > 4096
         || height > 4096
     {
-        return skip("no palette data, left alone");
-    }
-
-    let index = index.get_or_init(build);
-    let stem = file_stem_name(&name);
-    // The name check first: the hash is only worth computing for a texture
-    // that has any replacement at all.
-    if !index.files.keys().any(|(n, _)| *n == stem) {
-        return skip("no replacement");
+        return skip(Miss::OnPurpose, "no palette data");
     }
 
     // Safety: GL_Upload8 is about to read exactly these spans itself.
@@ -1176,11 +1374,38 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
             std::slice::from_raw_parts(palette, 768),
         )
     };
+    // Before the file lookup: a blanked-out copy of a sprite whose real
+    // frames have HD files would otherwise show up as the wrong version.
+    if texture_type == GLT_SPRITE && i_type == TEX_TYPE_ALPHA && indices.iter().all(|&i| i == 255) {
+        return skip(
+            Miss::OnPurpose,
+            "blank (fully transparent), nothing to upscale",
+        );
+    }
+
+    let index = index.get_or_init(build);
+    let stem = file_stem_name(&name);
+    // The name check first: the hash is only worth computing for a texture
+    // that has any replacement at all.
+    if !index.files.keys().any(|(n, _)| *n == stem) {
+        if texture_type == GLT_WORLD && TOOL_TEXTURES.contains(&stem.as_str()) {
+            return skip(Miss::OnPurpose, "tool texture, never built");
+        }
+        let hash = fnv1a32(&[indices, pal]);
+        return skip(
+            Miss::NoFile,
+            &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
+        );
+    }
+
     let hash = fnv1a32(&[indices, pal]);
     let Some(path) = index.files.get(&(stem.clone(), hash)) else {
-        return skip(&format!(
-            "replacement(s) named {stem:?} exist, none for this content ({hash:08x})"
-        ));
+        return skip(
+            Miss::WrongVersion,
+            &format!(
+                "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
+            ),
+        );
     };
 
     let tint = [pal[765], pal[766], pal[767]];
@@ -1193,6 +1418,12 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
                     path.display()
                 ))
             };
+            record_miss(
+                Miss::Failed,
+                kind,
+                &miss_display_name(texture_type, &identifier),
+                || format!("{width}x{height}, {}: {why}", path.display()),
+            );
             return std::ptr::null();
         }
     };
@@ -1609,8 +1840,19 @@ pub fn status() -> String {
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
+    let misses = MISSES
+        .lock()
+        .map(|m| {
+            let on_purpose = m.keys().filter(|(w, _, _)| *w == Miss::OnPurpose).count();
+            format!(
+                "; {} texture(s) kept their original ({} of them on purpose) -- {MISSES_NAME} lists them",
+                m.len(),
+                on_purpose
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
         ACTIVE_STYLE
             .get()
             .map(String::as_str)
@@ -1920,6 +2162,40 @@ mod tests {
         let mut px = vec![9, 9, 9, 0, 1, 2, 3, 77];
         match_engine_expansion(&mut px, &gamma, TEX_TYPE_ALPHA_GRADIENT, true, [0, 3, 255]);
         assert_eq!(px, vec![255, 252, 0, 0, 255, 252, 0, 77]);
+    }
+
+    #[test]
+    fn misses_show_readable_names() {
+        assert_eq!(
+            miss_display_name(GLT_STUDIO, "models/v_garand.mdlgarand.bmp"),
+            "models/v_garand.mdl garand.bmp"
+        );
+        assert_eq!(
+            miss_display_name(GLT_SPRITE, "sprites/shot_smoke1.spr_203"),
+            "sprites/shot_smoke1.spr"
+        );
+        assert_eq!(miss_display_name(GLT_WORLD, "{Fence7"), "{Fence7");
+    }
+
+    #[test]
+    fn misses_list_groups_worst_first_and_counts_repeats() {
+        // The list is process-wide; this test is the only one that writes it.
+        record_miss(Miss::OnPurpose, "world", "CLIP", || "tool".into());
+        record_miss(Miss::WrongVersion, "model", "m garand.bmp", || "x".into());
+        record_miss(Miss::NoFile, "sprite", "sprites/a.spr", || "y".into());
+        record_miss(Miss::NoFile, "sprite", "sprites/a.spr", || {
+            unreachable!("a repeat keeps the first detail")
+        });
+        let report = misses_report().concat();
+        let at = |s: &str| {
+            report
+                .find(s)
+                .unwrap_or_else(|| panic!("{s:?} in {report}"))
+        };
+        assert!(at(Miss::WrongVersion.heading()) < at(Miss::NoFile.heading()));
+        assert!(at(Miss::NoFile.heading()) < at(Miss::OnPurpose.heading()));
+        assert!(report.contains("sprites/a.spr  y (2 frame loads)"));
+        assert!(report.contains("3 texture(s) kept their original"));
     }
 
     #[test]
