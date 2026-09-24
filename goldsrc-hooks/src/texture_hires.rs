@@ -2706,10 +2706,23 @@ pub fn status() -> String {
             })
         })
         .unwrap_or_default();
+    // No index but loads already seen means the style changed since: the
+    // index is only rebuilt when something new of that type loads, and what
+    // loaded earlier stays in the style it loaded with.
+    let not_read = |seen: &AtomicU32, until: &str| {
+        if seen.load(Ordering::Relaxed) > 0 {
+            format!(
+                "still the style they loaded with; {until} for {:?}",
+                style_label()
+            )
+        } else {
+            "folder not read yet".to_string()
+        }
+    };
     let files = INDEX
         .peek()
         .map(|i| format!("{} file(s) in {}", i.files.len(), i.dir.display()))
-        .unwrap_or_else(|| "folder not read yet".to_string());
+        .unwrap_or_else(|| not_read(&WORLD_SEEN, "load another demo"));
     let models = format!(
         "{} of {} model skin load(s) replaced ({})",
         MODEL_REPLACED.load(Ordering::Relaxed),
@@ -2717,7 +2730,7 @@ pub fn status() -> String {
         MODEL_INDEX
             .peek()
             .map(|i| format!("{} file(s)", i.files.len()))
-            .unwrap_or_else(|| "folder not read yet".to_string())
+            .unwrap_or_else(|| not_read(&MODEL_SEEN, "restart the game"))
     );
     let sprites = format!(
         "{} of {} sprite frame load(s) replaced ({})",
@@ -2726,7 +2739,7 @@ pub fn status() -> String {
         SPRITE_INDEX
             .peek()
             .map(|i| format!("{} file(s)", i.files.len()))
-            .unwrap_or_else(|| "folder not read yet".to_string())
+            .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
     let renamed = match RENAMED.load(Ordering::Relaxed) {
         0 => String::new(),
