@@ -148,11 +148,11 @@
 //!
 //! ## On and off
 //!
-//! `dodstudio_hd_textures 1` / `0`, with the same timing as the style. It starts on
+//! `dodstudio_hd_enabled 1` / `0`, with the same timing as the style. It starts on
 //! when there's a `dod/dodstudio_hd` folder (nothing to load otherwise), and
 //! `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` overrides that; see [`starts_on`] for
 //! why the starting value is decided before any `.cfg` runs. Started off, the
-//! hook isn't installed at all until `dodstudio_hd_textures 1` asks for it, and is then
+//! hook isn't installed at all until `dodstudio_hd_enabled 1` asks for it, and is then
 //! installed between frames on the game's own thread. Turned off, it only
 //! stops replacing: the raised limits and the leftover-texture fix stay.
 //!
@@ -369,9 +369,9 @@ static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// where it hasn't changed costs a hash and nothing else.
 static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 
-/// `dodstudio_hd_textures`: HD replacements on (1) or off (0). Same timing as the
+/// `dodstudio_hd_enabled`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
-pub const HD_NAME: &str = console_name!("hd_textures");
+pub const HD_NAME: &str = console_name!("hd_enabled");
 static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 /// The switch's current value; what every replacement path checks.
@@ -385,7 +385,7 @@ pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
     STYLE_CVAR.store(cvar, Ordering::Release);
 }
 
-/// Called by `commands.rs` once `dodstudio_hd_textures` is registered.
+/// Called by `commands.rs` once `dodstudio_hd_enabled` is registered.
 pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
     HD_CVAR.store(cvar, Ordering::Release);
 }
@@ -396,7 +396,7 @@ pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
 ///
 /// Startup is when it has to be decided: the engine loads a few sprites
 /// (muzzle flashes, shell casings) while the game starts, before any `.cfg`
-/// runs, so a `dodstudio_hd_textures 1` in `movie.cfg` alone would come too late for
+/// runs, so a `dodstudio_hd_enabled 1` in `movie.cfg` alone would come too late for
 /// them.
 pub fn starts_on() -> bool {
     match std::env::var("GOLDSRC_HOOKS_TEXTURE_HIRES") {
@@ -510,7 +510,7 @@ impl<T> Cached<T> {
     }
 }
 
-/// Called every frame (`commands::poll`): follows `dodstudio_hd_textures` and
+/// Called every frame (`commands::poll`): follows `dodstudio_hd_enabled` and
 /// `dodstudio_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
@@ -2472,7 +2472,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         .and_then(|h| h.get(&(record as usize)).copied());
     let keep = same_size && incoming.is_some() && incoming == stored;
     // No hash noted for it: `settings_changed` forgot them all, because
-    // dodstudio_hd_textures or the style changed since it loaded.
+    // dodstudio_hd_enabled or the style changed since it loaded.
     let refreshed = !keep && same_size && stored.is_none();
     if keep {
         STALE_REUSED.fetch_add(1, Ordering::Relaxed);
@@ -2492,7 +2492,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         };
         let what = match (keep, refreshed, same_size) {
             (true, ..) => "identical, reused",
-            (_, true, _) => "reloading: dodstudio_hd_textures or the style changed since it loaded",
+            (_, true, _) => "reloading: dodstudio_hd_enabled or the style changed since it loaded",
             (_, _, true) => "different pixels, loading this map's own",
             _ => "different size, loading this map's own",
         };

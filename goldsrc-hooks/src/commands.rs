@@ -509,7 +509,7 @@ pub fn poll() {
     spectator_target::poll();
     // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
     crate::msglog::poll();
-    // Follows dodstudio_hd_textures / dodstudio_hd_style, then notes what each map
+    // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     texture_hires::poll_hd();
     texture_hires::poll_map();

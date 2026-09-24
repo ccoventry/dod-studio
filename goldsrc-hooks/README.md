@@ -157,7 +157,7 @@ a verifier per patched site, which checks the Rust constants against a real
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
 detail textures and skies as the game loads them: on when there's a
-`dod/dodstudio_hd` folder, `dodstudio_hd_textures 0/1` in game, and
+`dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
 those files; see its README.
