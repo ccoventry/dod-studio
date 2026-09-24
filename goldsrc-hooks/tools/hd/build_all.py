@@ -13,8 +13,9 @@ Progress goes to dodstudio_hd/build_all.log and the console.
   detail   every gfx/detail/*.tga
   sky      every sky in dod/gfx/env, plus the Half-Life ones maps name
 
-`blend` isn't upscaled at all: it's x4plus and plain mixed 50/50, file by
-file, so it needs both of those built first (the default order does that).
+Blend styles (`blend`, and any in my_styles.txt) aren't upscaled at all:
+they're two built styles mixed file by file, so they're built after every
+other style in the run, and need their two source styles built already.
 
 usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
                            [--types world,models,...] [style ...]
@@ -25,7 +26,8 @@ usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
                   HD copies too, ready if you ever copy them over
   --extra-models  any other folder of .mdl files to include
   --types         which asset types (default: all, quickest first)
-  style ...       which styles (default: all 7)
+  style ...       which styles (default: the 7 built-in ones and any in
+                  my_styles.txt)
 """
 import argparse, datetime, os, subprocess, sys, time
 from PIL import Image
@@ -61,10 +63,12 @@ def main():
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
-    styles = args.styles or STYLE_ORDER
+    styles = args.styles or STYLE_ORDER + [s for s in S.STYLES if s not in STYLE_ORDER]
     for s in styles:
-        if s not in S.STYLES:
+        if s not in S.DEFS:
             sys.exit(f"unknown style {s!r}; one of {S.STYLES}")
+    # Blends last: they mix files the other styles make.
+    styles = [s for s in styles if S.DEFS[s][0] != "blend"] + [s for s in styles if S.DEFS[s][0] == "blend"]
     types = [t for t in args.types.split(",") if t]
     for t in types:
         if t not in TYPES:
@@ -96,41 +100,43 @@ def main():
             log(f"  {(r.stderr or r.stdout)[-1500:]}")
             sys.exit(r.returncode)
 
-    def blend(kind):
-        """blend/<file> = 50/50 of x4plus/<file> and plain/<file>."""
-        a_dir, b_dir = os.path.join(hd, kind, "x4plus"), os.path.join(hd, kind, "plain")
+    def blend(style, kind):
+        """<style>/<file> = <a>/<file> and <b>/<file> mixed, pct% of a."""
+        _, a, b, pct = S.DEFS[style]
+        a_dir, b_dir = os.path.join(hd, kind, a), os.path.join(hd, kind, b)
         if not (os.path.isdir(a_dir) and os.path.isdir(b_dir)):
-            log(f"{'blend':10s} {kind:7s} skipped: build x4plus and plain first")
+            log(f"{style:10s} {kind:7s} skipped: build {a} and {b} first")
             return
-        out = os.path.join(hd, kind, "blend")
+        out = os.path.join(hd, kind, style)
         os.makedirs(out, exist_ok=True)
         t, made = time.time(), 0
         for name in sorted(os.listdir(a_dir)):
             dst, src_b = os.path.join(out, name), os.path.join(b_dir, name)
             if os.path.exists(dst) or not os.path.exists(src_b):
                 continue
-            a, b = Image.open(os.path.join(a_dir, name)), Image.open(src_b)
-            if a.size != b.size:
-                b = b.resize(a.size, Image.LANCZOS)
-            mixed = Image.blend(a.convert("RGB"), b.convert("RGB"), 0.5)
-            if a.mode == "RGBA":
+            ia, ib = Image.open(os.path.join(a_dir, name)), Image.open(src_b)
+            if ia.size != ib.size:
+                ib = ib.resize(ia.size, Image.LANCZOS)
+            weight = 1 - pct / 100  # Image.blend's weight is the second image's
+            mixed = Image.blend(ia.convert("RGB"), ib.convert("RGB"), weight)
+            if ia.mode == "RGBA":
                 # Masked textures have the same alpha in both; index-alpha
                 # sprites' alpha is the upscaled image itself, so it's mixed too.
-                alpha = a.getchannel("A")
-                if b.mode == "RGBA":
-                    alpha = Image.blend(alpha, b.getchannel("A"), 0.5)
+                alpha = ia.getchannel("A")
+                if ib.mode == "RGBA":
+                    alpha = Image.blend(alpha, ib.getchannel("A"), weight)
                 mixed = mixed.convert("RGBA")
                 mixed.putalpha(alpha)
             mixed.save(dst)
             made += 1
-        log(f"{'blend':10s} {kind:7s} {made} new, {len(os.listdir(out))} total, {time.time() - t:.0f}s")
+        log(f"{style:10s} {kind:7s} {made} new, {len(os.listdir(out))} total, {time.time() - t:.0f}s")
 
     keep_awake(log)
     log(f"=== build_all: {game}; styles {styles}; types {types}")
     for style in styles:
         for kind in types:
-            if style == "blend":
-                blend(kind)
+            if S.DEFS[style][0] == "blend":
+                blend(style, kind)
             else:
                 step(style, kind)
     log("=== build_all done")

@@ -1,0 +1,23 @@
+# Your own upscale styles. Copy this file to my_styles.txt (same folder),
+# uncomment or add lines, then build with:   python build_all.py <name>
+# and pick it in game with:                  dodstudio_hd_style <name>
+#
+# Style names: lowercase letters, digits, - and _ (they become folder names).
+# Three kinds of line:
+#
+#   name = <model>                  an AI upscaling model: put its .param and
+#                                   .bin files in realesrgan\models\ and give
+#                                   the file name without the extension
+#   name = plain <sharpening>       no AI: a plain enlargement, sharpened by
+#                                   0 (none) to 500 (very strong); plain is 60
+#   name = blend <a> <b> <percent>  two styles you've already built, mixed
+#                                   file by file, <percent> of <a> (the rest
+#                                   is <b>); blend is x4plus plain 50
+#
+# Examples:
+
+# anime   = realesrgan-x4plus-anime          # comes with Real-ESRGAN
+# soft    = plain 0                          # just a clean enlargement
+# crisp   = plain 150                        # a sharper plain
+# sharp70 = blend ultrasharp plain 70        # mostly UltraSharp, calmed down
+# gentle  = blend generalv3 remacri 50

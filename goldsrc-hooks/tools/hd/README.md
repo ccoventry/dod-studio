@@ -167,6 +167,33 @@ This makes one sheet with the original and every built style side by side, for a
 
 In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
 
+## Make your own style
+
+The game loads whatever style folder you name, so you can make as many as you like without touching any code:
+
+1. Copy `my_styles.example.txt` to `my_styles.txt` in this folder and open it in Notepad.
+2. Add one line per style. There are three kinds:
+
+   ```
+   anime   = realesrgan-x4plus-anime        an AI model (file name in realesrgan\models, no extension)
+   crisp   = plain 150                      no AI, sharpened 0 (none) to 500 (very strong); plain is 60
+   sharp70 = blend ultrasharp plain 70      two styles you've built, mixed: 70% ultrasharp, 30% plain
+   ```
+
+3. Build it and try it:
+
+   ```
+   python build_all.py crisp
+   ```
+
+   Then put `dodstudio_hd_style crisp` in `movie.cfg` and restart the game. `python compare.py compare.png` includes your styles too.
+
+**Other AI models.** Anything in ncnn format works (a `.param` + `.bin` pair): drop the two files into `realesrgan\models\` and name the file in a line. [Upscayl's custom models](https://github.com/upscayl/custom-models) has dozens ready to use. Models from [OpenModelDB](https://openmodeldb.info/) come as `.pth` or `.safetensors`, and [chaiNNer](https://chainner.app/) can convert them to ncnn. Use 4x models: the scripts expect 4x.
+
+**Blends** take no GPU time: they mix files that already exist, so build both of their styles first. `build_all.py` always builds blends last, so `python build_all.py ultrasharp plain sharp70` works in one go.
+
+Style names are lowercase letters, digits, `-` and `_`, because they become folder names. `my_styles.txt` stays out of git, so updating DoD Studio never touches it.
+
 ## Files
 
 | File | What it does |
@@ -180,6 +207,7 @@ In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read o
 | `compare.py` | the style comparison sheet |
 | `setup_tools.py` | downloads the upscaler and the style models |
 | `styles.py` | the style list and the upscaler call |
+| `my_styles.example.txt` | template for your own styles (copy it to `my_styles.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
