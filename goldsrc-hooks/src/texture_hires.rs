@@ -2411,6 +2411,8 @@ static CACHE_RESUME: AtomicUsize = AtomicUsize::new(0);
 static STALE_FIX: AtomicBool = AtomicBool::new(false);
 static STALE_RELOADED: AtomicU32 = AtomicU32::new(0);
 static STALE_REUSED: AtomicU32 = AtomicU32::new(0);
+/// Reloaded because the HD setting or style changed, not the pixels.
+static STALE_REFRESHED: AtomicU32 = AtomicU32::new(0);
 /// The pixel hash of what each world texture's cache record (by address)
 /// holds, noted by [`decide`] at every world upload.
 static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
@@ -2469,8 +2471,13 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         .ok()
         .and_then(|h| h.get(&(record as usize)).copied());
     let keep = same_size && incoming.is_some() && incoming == stored;
+    // No hash noted for it: `settings_changed` forgot them all, because
+    // dodstudio_hd or the style changed since it loaded.
+    let refreshed = !keep && same_size && stored.is_none();
     if keep {
         STALE_REUSED.fetch_add(1, Ordering::Relaxed);
+    } else if refreshed {
+        STALE_REFRESHED.fetch_add(1, Ordering::Relaxed);
     } else {
         STALE_RELOADED.fetch_add(1, Ordering::Relaxed);
     }
@@ -2483,10 +2490,11 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
                 .to_string_lossy()
                 .into_owned()
         };
-        let what = match (keep, same_size) {
-            (true, _) => "identical, reused",
-            (false, true) => "different pixels, loading this map's own",
-            (false, false) => "different size, loading this map's own",
+        let what = match (keep, refreshed, same_size) {
+            (true, ..) => "identical, reused",
+            (_, true, _) => "reloading: dodstudio_hd or the style changed since it loaded",
+            (_, _, true) => "different pixels, loading this map's own",
+            _ => "different size, loading this map's own",
         };
         unsafe {
             crate::debug::report(&format!(
@@ -2726,9 +2734,13 @@ pub fn status() -> String {
     };
     let leftovers = if STALE_FIX.load(Ordering::Relaxed) {
         format!(
-            "; earlier maps' same-named textures: {} reloaded, {} identical and reused",
+            "; earlier maps' same-named textures: {} reloaded (different pixels or size), {} identical and reused{}",
             STALE_RELOADED.load(Ordering::Relaxed),
-            STALE_REUSED.load(Ordering::Relaxed)
+            STALE_REUSED.load(Ordering::Relaxed),
+            match STALE_REFRESHED.load(Ordering::Relaxed) {
+                0 => String::new(),
+                n => format!(", {n} reloaded after a setting change"),
+            }
         )
     } else {
         "; earlier maps' same-named textures NOT checked (fix not installed)".to_string()
