@@ -1364,6 +1364,15 @@ fn detail_fits(file: &Path, max_bytes: usize) -> bool {
     w * h * 4 <= max_bytes
 }
 
+/// Whether `rel` (`gfx/detail/x.tga`) exists where the engine looks for it:
+/// `dod`, `dod_downloads`, then `valve`.
+fn in_game_dirs(rel: &str) -> bool {
+    let dod = game_dir();
+    ["dod", "dod_downloads", "valve"]
+        .iter()
+        .any(|g| dod.with_file_name(g).join(rel).is_file())
+}
+
 /// Called by the detail-path stub with the detail loader's path buffer, just
 /// before it is handed to `LoadTGA`. Rewrites it in place to the HD copy when
 /// there is one.
@@ -1387,9 +1396,15 @@ unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
         DETAIL_STOCK_BYTES
     };
     let Some(new) = detail_override(&original, index) else {
-        record_miss(Miss::NoFile, "detail", &original, || {
-            "no HD copy".to_string()
-        });
+        if in_game_dirs(&original) {
+            record_miss(Miss::NoFile, "detail", &original, || {
+                "no HD copy".to_string()
+            });
+        } else {
+            record_miss(Miss::OnPurpose, "detail", &original, || {
+                "the map names a detail texture the game doesn't have either".to_string()
+            });
+        }
         return;
     };
     if !detail_fits(&game_dir().join(&new), max) {
@@ -1845,10 +1860,19 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     };
     // Before the file lookup: a blanked-out copy of a sprite whose real
     // frames have HD files would otherwise show up as the wrong version.
-    if texture_type == GLT_SPRITE && i_type == TEX_TYPE_ALPHA && indices.iter().all(|&i| i == 255) {
+    // Fully transparent masked world textures (`{blue`) are the same case.
+    if i_type == TEX_TYPE_ALPHA && indices.iter().all(|&i| i == 255) {
         return skip(
             Miss::OnPurpose,
             "blank (fully transparent), nothing to upscale",
+        );
+    }
+    // A skin recoloured for one player (`DM_Base.bmp3`): uploaded under the
+    // texture name plus a number, with no model path, and not replaced.
+    if texture_type == GLT_STUDIO && !identifier.to_ascii_lowercase().contains(".mdl") {
+        return skip(
+            Miss::OnPurpose,
+            "a skin recoloured per player, which this hook doesn't replace",
         );
     }
 
