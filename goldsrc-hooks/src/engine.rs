@@ -90,6 +90,7 @@ pub struct EventApiPartial {
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
 pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char);
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
+pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
 pub type GetViewModelFn = unsafe extern "C" fn() -> *mut ClEntityS;
 pub type GetEntityByIndexFn = unsafe extern "C" fn(index: i32) -> *mut ClEntityS;
 pub type ConsoleCommandFn = unsafe extern "C" fn();
@@ -410,7 +411,8 @@ pub struct EngineStudioApiPartial {
 /// against it field-by-field. Every field up through `IsSpectateOnly` is
 /// present, in order, so the ones we actually use (`pfn_add_command`,
 /// `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
-/// `pfn_get_game_directory`, `p_event_api`, `is_spectate_only`) land at the
+/// `pfn_get_game_directory`, `pfn_get_level_name`, `p_event_api`,
+/// `is_spectate_only`) land at the
 /// correct byte offsets; everything else is kept as an opaque, untyped slot
 /// purely to hold the layout together.
 ///
@@ -441,7 +443,12 @@ pub struct ClEngineFuncsPartial {
     pub pfn_weapon_anim: WeaponAnimFn,
     _slots_between: [*mut c_void; 4], // pfnRandomFloat, pfnRandomLong, pfnHookEvent, Con_IsVisible
     pub pfn_get_game_directory: GetGameDirectoryFn,
-    _slots_after_gamedir: [*mut c_void; 12], // pfnGetCvarPointer .. pEfxAPI
+    _slots_after_gamedir: [*mut c_void; 2], // pfnGetCvarPointer, Key_LookupBinding
+    /// Slot 74: `"maps/<name>.bsp"`. Confirmed in DoD's `client.dll` (7 calls
+    /// through `gEngfuncs+0x128`): the one at RVA 0x26c00 prefixes the result
+    /// with `"dod/"` and cuts it at the last `'.'` -- a map path.
+    pub pfn_get_level_name: GetLevelNameFn,
+    _slots_after_level_name: [*mut c_void; 9], // pfnGetScreenFade .. pEfxAPI
     pub p_event_api: *mut EventApiPartial,
     _slots_after_event_api: [*mut c_void; 3], // pDemoAPI, pNetAPI, pVoiceTweak
     pub is_spectate_only: IsSpectateOnlyFn,
