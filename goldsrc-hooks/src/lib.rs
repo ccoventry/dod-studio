@@ -22,7 +22,7 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `msglog`: the `dodstudio_msglog` command -- dump chosen DoD user messages
+//! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
 //! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
@@ -138,7 +138,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
 /// Whether to install `texture_hires` at startup: see
-/// `texture_hires::starts_on`. Off, `dodstudio_hd 1` can still install it
+/// `texture_hires::starts_on`. Off, `dodstudio_hd_textures 1` can still install it
 /// later in the session.
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -158,7 +158,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
-    // texture_hires::starts_on for why startup decides). `dodstudio_hd` turns
+    // texture_hires::starts_on for why startup decides). `dodstudio_hd_textures` turns
     // it on and off in game.
     let hd = texture_hires::starts_on();
     TEXTURE_HIRES_ENABLED.store(hd, Ordering::Relaxed);

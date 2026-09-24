@@ -148,11 +148,11 @@
 //!
 //! ## On and off
 //!
-//! `dodstudio_hd 1` / `0`, with the same timing as the style. It starts on
+//! `dodstudio_hd_textures 1` / `0`, with the same timing as the style. It starts on
 //! when there's a `dod/dodstudio_hd` folder (nothing to load otherwise), and
 //! `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` overrides that; see [`starts_on`] for
 //! why the starting value is decided before any `.cfg` runs. Started off, the
-//! hook isn't installed at all until `dodstudio_hd 1` asks for it, and is then
+//! hook isn't installed at all until `dodstudio_hd_textures 1` asks for it, and is then
 //! installed between frames on the game's own thread. Turned off, it only
 //! stops replacing: the raised limits and the leftover-texture fix stay.
 //!
@@ -176,7 +176,7 @@ use crate::scan;
 
 /// The command name that toggles verbose per-load logging. Registered in
 /// `commands.rs`.
-pub const NAME: &str = console_name!("log_texture_loads");
+pub const NAME: &str = console_name!("debug_log_texture_loads");
 
 /// `GL_LoadTexture2`'s tail, from the optional upload callback through both
 /// upload calls. Wildcards: the callback pointer's address and the two call
@@ -369,9 +369,9 @@ static ACTIVE_STYLE: RwLock<String> = RwLock::new(String::new());
 /// where it hasn't changed costs a hash and nothing else.
 static STYLE_SEEN: AtomicU32 = AtomicU32::new(0);
 
-/// `dodstudio_hd`: HD replacements on (1) or off (0). Same timing as the
+/// `dodstudio_hd_textures`: HD replacements on (1) or off (0). Same timing as the
 /// style: a change applies to what loads next.
-pub const HD_NAME: &str = console_name!("hd");
+pub const HD_NAME: &str = console_name!("hd_textures");
 static HD_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 /// The switch's current value; what every replacement path checks.
@@ -385,7 +385,7 @@ pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
     STYLE_CVAR.store(cvar, Ordering::Release);
 }
 
-/// Called by `commands.rs` once `dodstudio_hd` is registered.
+/// Called by `commands.rs` once `dodstudio_hd_textures` is registered.
 pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
     HD_CVAR.store(cvar, Ordering::Release);
 }
@@ -396,7 +396,7 @@ pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
 ///
 /// Startup is when it has to be decided: the engine loads a few sprites
 /// (muzzle flashes, shell casings) while the game starts, before any `.cfg`
-/// runs, so a `dodstudio_hd 1` in `movie.cfg` alone would come too late for
+/// runs, so a `dodstudio_hd_textures 1` in `movie.cfg` alone would come too late for
 /// them.
 pub fn starts_on() -> bool {
     match std::env::var("GOLDSRC_HOOKS_TEXTURE_HIRES") {
@@ -510,7 +510,7 @@ impl<T> Cached<T> {
     }
 }
 
-/// Called every frame (`commands::poll`): follows `dodstudio_hd` and
+/// Called every frame (`commands::poll`): follows `dodstudio_hd_textures` and
 /// `dodstudio_hd_style`. A frame where neither changed costs a float read and
 /// a hash of the style text.
 pub fn poll_hd() {
@@ -591,9 +591,9 @@ struct LastReplaced {
 }
 static LAST_REPLACED: Mutex<Option<LastReplaced>> = Mutex::new(None);
 
-/// `dodstudio_hd_misses`: lists every texture that kept its original this
+/// `dodstudio_debug_hd_misses`: lists every texture that kept its original this
 /// session, and why. Registered in `commands.rs`.
-pub const MISSES_NAME: &str = console_name!("hd_misses");
+pub const MISSES_NAME: &str = console_name!("debug_hd_misses");
 pub const MISSES_COMMAND_NAMES: &[&str] = &[MISSES_NAME];
 
 /// Why a texture kept its original. Declared in the order they're listed,
@@ -901,9 +901,9 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
     lines
 }
 
-/// `dodstudio_hd_misses` prints the list, map by map;
-/// `dodstudio_hd_misses <map>` just that map's (e.g. `dod_anzio`);
-/// `dodstudio_hd_misses clear` forgets the misses recorded so far.
+/// `dodstudio_debug_hd_misses` prints the list, map by map;
+/// `dodstudio_debug_hd_misses <map>` just that map's (e.g. `dod_anzio`);
+/// `dodstudio_debug_hd_misses clear` forgets the misses recorded so far.
 pub unsafe extern "C" fn misses_command() {
     let args = misses_args();
     let arg = args.get(1).map(String::as_str);
@@ -1120,7 +1120,7 @@ fn bsp_textures_and_sky(bsp: &[u8]) -> (Vec<String>, Option<String>) {
 /// Called every frame (`commands::poll`). Costs a level-name hash and a walk
 /// of the precache list until one of them changes -- a new map, or more of
 /// the current one loaded -- and then records what the map uses, so
-/// `dodstudio_hd_misses` can list a texture under every map that shares it.
+/// `dodstudio_debug_hd_misses` can list a texture under every map that shares it.
 pub fn poll_map() {
     if !HOOK_ACTIVE.load(Ordering::Relaxed) {
         return;
@@ -2472,7 +2472,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         .and_then(|h| h.get(&(record as usize)).copied());
     let keep = same_size && incoming.is_some() && incoming == stored;
     // No hash noted for it: `settings_changed` forgot them all, because
-    // dodstudio_hd or the style changed since it loaded.
+    // dodstudio_hd_textures or the style changed since it loaded.
     let refreshed = !keep && same_size && stored.is_none();
     if keep {
         STALE_REUSED.fetch_add(1, Ordering::Relaxed);
@@ -2492,7 +2492,7 @@ unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
         };
         let what = match (keep, refreshed, same_size) {
             (true, ..) => "identical, reused",
-            (_, true, _) => "reloading: dodstudio_hd or the style changed since it loaded",
+            (_, true, _) => "reloading: dodstudio_hd_textures or the style changed since it loaded",
             (_, _, true) => "different pixels, loading this map's own",
             _ => "different size, loading this map's own",
         };

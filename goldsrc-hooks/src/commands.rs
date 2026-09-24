@@ -56,9 +56,9 @@ const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations")
 const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
-const HELD_MODELS_NAME: &str = console_name!("log_weapon_model");
+const HELD_MODELS_NAME: &str = console_name!("debug_log_weapon_model");
 /// See spectator_target.rs's module doc -- issue #206's diagnostic.
-const SPECTATOR_TARGET_LOG_NAME: &str = console_name!("log_spectator_target");
+const SPECTATOR_TARGET_LOG_NAME: &str = console_name!("debug_log_spectator_target");
 const STATUS_NAME: &str = console_name!("debug_status");
 /// Each module owns its own name, because its error text uses it too.
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
@@ -507,10 +507,10 @@ pub fn poll() {
     // callback slot), so its viewmodel-entity half reads apply()'s previous
     // frame's result, not this one's -- see spectator_target.rs's module doc.
     spectator_target::poll();
-    // Same reason, for whichever messages dodstudio_msglog currently wants.
+    // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
     crate::msglog::poll();
-    // Follows dodstudio_hd / dodstudio_hd_style, then notes what each map
-    // uses for dodstudio_hd_misses. Cheap unless one of them changed.
+    // Follows dodstudio_hd_textures / dodstudio_hd_style, then notes what each map
+    // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -1007,7 +1007,7 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
-/// `dodstudio_log_texture_loads` -- verbose per-texture logging for the
+/// `dodstudio_debug_log_texture_loads` -- verbose per-texture logging for the
 /// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) world-texture swap: one line
 /// per world texture uploaded, saying whether it was replaced and why not. Registering the toggle unconditionally, whether or not
 /// the hook is actually installed this session, matches every other cvar

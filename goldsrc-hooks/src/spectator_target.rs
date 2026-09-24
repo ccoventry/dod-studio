@@ -1,4 +1,4 @@
-//! `dodstudio_log_spectator_target` — logs `CHudSpectator`'s own idea of who
+//! `dodstudio_debug_log_spectator_target` — logs `CHudSpectator`'s own idea of who
 //! is being followed side by side with the entity the engine actually
 //! renders a first-person viewmodel for, whenever either one changes.
 //!

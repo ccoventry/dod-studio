@@ -2,7 +2,7 @@
 
 These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod\dodstudio_hd\`, which you can delete to go back to stock.
 
-The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd 0` in the game console (or `movie.cfg`) turns it off.
+The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_textures 0` in the game console (or `movie.cfg`) turns it off.
 
 ## Step by step (no coding needed)
 
@@ -34,8 +34,8 @@ This finds your DoD install by itself (the one DoD Studio launches) and fills `d
 To switch it off or on, use the console or a line in `movie.cfg`:
 
 ```
-dodstudio_hd 0
-dodstudio_hd 1
+dodstudio_hd_textures 0
+dodstudio_hd_textures 1
 ```
 
 A change applies to what loads next: walls, detail textures and skies from the next demo, models and sprites already loaded after a game restart. Put it in `movie.cfg` to have it from the start.
@@ -88,7 +88,7 @@ python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\do
 python compare.py compare.png
 ```
 
-**Go back to stock:** put `dodstudio_hd 0` in `movie.cfg`, or delete the `dod\dodstudio_hd` folder.
+**Go back to stock:** put `dodstudio_hd_textures 0` in `movie.cfg`, or delete the `dod\dodstudio_hd` folder.
 
 ## What you need
 
@@ -139,7 +139,7 @@ python build_all.py --types sprites,sky   only some types
 Each type's script takes an output folder and what to build. Put the output in the style you use, or in `overrides`, which wins over any style:
 
 ```
-set OUT=C:\...\Half-Life\dod\dodstudio_hd
+set OUT=C:\...\Half-Life\dod\dodstudio_hd_textures
 
 python world_hd.py   %OUT%\world\ultrasharp   dod_mymap dod_othermap
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\v_mycustomgun.mdl
@@ -158,7 +158,7 @@ Set `HD_STYLE` to build a style other than `ultrasharp` (for example `set HD_STY
 - **Sprites:** `<sprite>_<frame>_<hash>.tga`
 - **Detail textures and skies:** the same names as in `gfx\detail` and `gfx\env`
 
-The easiest way to get the right name is to build the texture once with any style and copy the file name. In game, `dodstudio_hd_misses` also names the file a texture would need.
+The easiest way to get the right name is to build the texture once with any style and copy the file name. In game, `dodstudio_debug_hd_misses` also names the file a texture would need.
 
 ## Picking a style
 

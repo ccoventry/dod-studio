@@ -22,7 +22,7 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
-- **Message log** (`dodstudio_msglog <name>... | all | clear`): dumps chosen
+- **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen
   DoD user messages and their payloads to the log file, forwarded to the game
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
@@ -145,11 +145,11 @@ return-value contract (0 = suppress) actually holds in this build and not
 only in Xash3D's open-source equivalent. The
 sound fix, `dodstudio_hide_scoreboard`, `dodstudio_mute_voice_commands`,
 `dodstudio_hide_crosshair`, `dodstudio_match_pov_crosshair` and
-`dodstudio_msglog` are confirmed by static analysis only -- see the module
+`dodstudio_debug_msglog` are confirmed by static analysis only -- see the module
 docs in `src/engine.rs`, `src/sound_fix.rs`, `src/scoreboard.rs`,
 `src/voice.rs`, `src/crosshair.rs`, `src/spectator_crosshair.rs` and
 `src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
-still needs a live check. `dodstudio_msglog` reuses `dodstudio_deathmsg`'s
+still needs a live check. `dodstudio_debug_msglog` reuses `dodstudio_deathmsg`'s
 already-proven prepend/forward mechanism unchanged, so the open question is
 only its own 71-entry name/thunk table, not the hook itself. `tools/` holds
 a verifier per patched site, which checks the Rust constants against a real
@@ -157,7 +157,7 @@ a verifier per patched site, which checks the Rust constants against a real
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
 detail textures and skies as the game loads them: on when there's a
-`dod/dodstudio_hd` folder, `dodstudio_hd 0/1` in game, and
+`dod/dodstudio_hd` folder, `dodstudio_hd_textures 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
 those files; see its README.

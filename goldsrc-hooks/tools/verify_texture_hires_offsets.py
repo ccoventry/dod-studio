@@ -221,7 +221,7 @@ def main():
                         check(False, f"{ins.address:#x} {ins.mnemonic} lands inside the span at {s:#x}")
     check(img[lt2_start: lt2_start + 3] == b"\x55\x8b\xec", "GL_LoadTexture2 prologue where expected")
 
-    # dodstudio_hd_misses' per-map list: find_precache_table follows the studio
+    # dodstudio_debug_hd_misses' per-map list: find_precache_table follows the studio
     # API's GetModelByIndex (slot 5) into CL_GetModelByIndex and reads
     # cl.model_precache from `mov esi, [edi*4 + table]`.
     bodies = find_all(img, parse(

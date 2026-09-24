@@ -9,6 +9,12 @@ everything below in one place (cvars unconditionally; the two fixes with
 preconditions only while enabled), and each item's own doc file has the full
 engine-level detail this table deliberately doesn't repeat.
 
+Diagnostics (status, logging, the HD miss list) all sit under
+`dodstudio_debug_`, so typing that prefix in the console lists every one of
+them; everything else is a setting you'd use for a capture. No name is the
+start of another, because the console's autocomplete would otherwise swap
+the shorter one for the longer when you press space.
+
 **Scope:** the surface actually on `dev` today. Several more entries are open
 PRs, listed separately at the bottom so this stays honest about what's
 *shipped* versus what's *proposed* -- update this table as part of merging
@@ -29,16 +35,16 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hltv_gunshots_fix` | `1` if `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME=1` at launch, else `0` | forces DoD weapon-fire sounds to full volume with no distance attenuation while spectating | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_hltv_show_viewmodel_animations` | `0` (off) unless `GOLDSRC_HOOKS_ANIM_FIX` sets a starting level | `0`=off, `1`=empty hand on throw, `2`=redraw immediately, `3`=never empty, `4`=redraw after a 1s lookahead (the recommended setting) -- corrects MG42/MG34/BAR/Bren viewmodel deploy animations while spectating in-eye | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_hltv_gunshot_attenuation` | `0.8` (`ATTN_NORM`, the game's own default) | how far gunshots carry while the gunshots fix is on, `0.05..0.79` (lower carries further); no effect while the fix is off | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
-| `dodstudio_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
+| `dodstudio_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_hide_scoreboard` | `0` | stops a POV demo's recorded TAB presses from putting the scoreboard over the shot | [`goldsrc_scoreboard.md`](goldsrc_scoreboard.md) |
 | `dodstudio_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
 | `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
 | `dodstudio_match_pov_crosshair` | `0` | draws the spectator crosshair from `sprites/customXHair.spr` using the same tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24 tile of `crosshairs.spr`. Loses to `dodstudio_hide_crosshair`. Doesn't cover `cl_xhair_style 0` -- see issue #308 | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) §6 |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven, no specific value settled on yet | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
-| `dodstudio_hd` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
-| `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd` | same |
-| `dodstudio_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `dodstudio_hd_textures` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
+| `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_textures` | same |
+| `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 
 ## Commands
 
@@ -96,9 +102,9 @@ lists both maps and what the engine currently has. See `src/overview_map.rs`'s
 module doc, including why it closes while a spectated player is scoped into a
 sniper (the engine's own FOV gate, not this command).
 
-### `dodstudio_msglog`
+### `dodstudio_debug_msglog`
 
-`dodstudio_msglog <name>... | all | clear` dumps chosen DoD user messages and
+`dodstudio_debug_msglog <name>... | all | clear` dumps chosen DoD user messages and
 their payloads to the log file, forwarded to the game untouched. See
 `src/msglog.rs`'s module doc.
 
@@ -115,14 +121,14 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 | `dodstudio_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
 | `dodstudio_objectives <any> default` | hand that one back to the game |
 
-### `dodstudio_hd_misses`
+### `dodstudio_debug_hd_misses`
 
 Lists every texture that kept its original this session, map by map, grouped
 by why: the HD file is for a different version of the texture, there's no HD
 file (naming the file that would match), the file couldn't be used, or it
 was left alone on purpose (tool textures, blank sprites, per-player skins). A
-texture several maps use is listed under each. `dodstudio_hd_misses <map>`
-shows one map; `dodstudio_hd_misses clear` forgets the list.
+texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
+shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
 ### `dodstudio_hide_sprite`
 
