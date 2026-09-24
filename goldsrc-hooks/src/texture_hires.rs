@@ -1498,6 +1498,39 @@ fn build_index_in(type_dir: &str) -> Index {
     }
 }
 
+/// World textures whose name the engine had changed, found anyway.
+static RENAMED: AtomicU32 = AtomicU32::new(0);
+
+/// The replacement for a texture the engine renamed before uploading it.
+///
+/// `GL_LoadTexture2`'s cache matches on name *and* size. When a texture with
+/// the same name but a different size is already loaded -- a world texture
+/// from the previous map, which stays loaded until the new one has finished
+/// loading -- it bumps the 4th character of the name, in place, and looks
+/// again, until the name is free (`wall01` -> `walm01`). So the name that
+/// reaches the hook is no longer the file's. The pixels are untouched,
+/// though: a file whose hash matches and whose name differs only at that
+/// character is the one. Returns its real name and path.
+fn renamed_by_engine<'a>(
+    index: &'a Index,
+    stem: &str,
+    hash: u32,
+) -> Option<(&'a String, &'a PathBuf)> {
+    let seen = stem.as_bytes();
+    if seen.len() < 4 {
+        return None;
+    }
+    index.files.iter().find_map(|((name, h), path)| {
+        let b = name.as_bytes();
+        (*h == hash
+            && b.len() == seen.len()
+            && b[3] != seen[3]
+            && b[..3] == seen[..3]
+            && b[4..] == seen[4..])
+            .then_some((name, path))
+    })
+}
+
 /// A decoded TGA: RGBA8, top row first.
 struct Rgba {
     width: u32,
@@ -1770,28 +1803,46 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
 
     let index = index.get_or_init(build);
     let stem = file_stem_name(&name);
-    // The name check first: the hash is only worth computing for a texture
-    // that has any replacement at all.
-    if !index.files.keys().any(|(n, _)| *n == stem) {
-        if texture_type == GLT_WORLD && TOOL_TEXTURES.contains(&stem.as_str()) {
-            return skip(Miss::OnPurpose, "tool texture, never built");
-        }
-        let hash = fnv1a32(&[indices, pal]);
-        return skip(
-            Miss::NoFile,
-            &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
-        );
+    let mut real_name = None;
+    let has_name = index.files.keys().any(|(n, _)| *n == stem);
+    if !has_name && texture_type == GLT_WORLD && TOOL_TEXTURES.contains(&stem.as_str()) {
+        return skip(Miss::OnPurpose, "tool texture, never built");
     }
 
     let hash = fnv1a32(&[indices, pal]);
-    let Some(path) = index.files.get(&(stem.clone(), hash)) else {
-        return skip(
-            Miss::WrongVersion,
-            &format!(
-                "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
-            ),
-        );
+    let path = match index.files.get(&(stem.clone(), hash)) {
+        Some(path) => path,
+        None => match renamed_by_engine(index, &stem, hash) {
+            Some((original, path)) => {
+                if log {
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "texture_hires: {kind} {identifier:?} is {original:?}, renamed by the \
+                             engine because a different-size {original:?} is already loaded"
+                        ))
+                    };
+                }
+                RENAMED.fetch_add(1, Ordering::Relaxed);
+                real_name = Some(original.clone());
+                path
+            }
+            None if has_name => {
+                return skip(
+                    Miss::WrongVersion,
+                    &format!(
+                        "replacement(s) named {stem:?} exist, none for this content (needs {stem}_{hash:08x}.tga)"
+                    ),
+                );
+            }
+            None => {
+                return skip(
+                    Miss::NoFile,
+                    &format!("no replacement (would be {stem}_{hash:08x}.tga)"),
+                );
+            }
+        },
     };
+    let name = real_name.unwrap_or(name);
 
     let tint = [pal[765], pal[766], pal[767]];
     let img = match load_replacement(path, i_type, tint) {
@@ -2226,6 +2277,10 @@ pub fn status() -> String {
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
+    let renamed = match RENAMED.load(Ordering::Relaxed) {
+        0 => String::new(),
+        n => format!(" ({n} of them renamed by the engine, matched anyway)"),
+    };
     let misses = MISSES
         .lock()
         .map(|m| {
@@ -2242,7 +2297,7 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     format!(
-        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
+        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
         ACTIVE_STYLE
             .get()
             .map(String::as_str)
@@ -2691,6 +2746,45 @@ mod tests {
         assert_eq!(names, ["{Fence", "WALL01"]);
         assert_eq!(sky.as_deref(), Some("kraftstoff"));
         assert_eq!(bsp_textures_and_sky(&[1, 2, 3]), (vec![], None));
+    }
+
+    #[test]
+    fn a_texture_the_engine_renamed_is_still_found() {
+        let files = [
+            (("wall01".to_string(), 0xaaaa_aaaa), PathBuf::from("a")),
+            (("wall01".to_string(), 0xbbbb_bbbb), PathBuf::from("b")),
+            (("wbll01".to_string(), 0xcccc_cccc), PathBuf::from("c")),
+            (("{fen".to_string(), 0xdddd_dddd), PathBuf::from("d")),
+        ]
+        .into_iter()
+        .collect();
+        let index = Index {
+            dir: PathBuf::new(),
+            files,
+        };
+        // `wall01` renamed once or several times: same pixels, 4th letter moved.
+        let found = |seen: &str, hash| {
+            renamed_by_engine(&index, seen, hash).map(|(n, p)| (n.clone(), p.clone()))
+        };
+        assert_eq!(
+            found("walm01", 0xbbbb_bbbb),
+            Some(("wall01".into(), "b".into()))
+        );
+        assert_eq!(
+            found("walp01", 0xaaaa_aaaa),
+            Some(("wall01".into(), "a".into()))
+        );
+        assert_eq!(
+            found("{feo", 0xdddd_dddd),
+            Some(("{fen".into(), "d".into()))
+        );
+        // The hash must match, only the 4th letter may differ, and the name
+        // itself isn't a rename.
+        assert_eq!(found("walm01", 0x1234_5678), None);
+        assert_eq!(found("xalm01", 0xbbbb_bbbb), None);
+        assert_eq!(found("walm011", 0xbbbb_bbbb), None);
+        assert_eq!(found("wall01", 0xbbbb_bbbb), None);
+        assert_eq!(found("wal", 0xbbbb_bbbb), None);
     }
 
     #[test]
