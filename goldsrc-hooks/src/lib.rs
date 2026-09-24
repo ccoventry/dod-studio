@@ -137,8 +137,8 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// like a broken hook.
 const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
-/// Whether to install `texture_hires`'s `Draw_MiptexTexture` observation hook
-/// this session. See the module docs and the `GOLDSRC_HOOKS_TEXTURE_HIRES`
+/// Whether to install `texture_hires`'s world-texture swap (and its raised
+/// upload ceiling) this session. See the module docs and the `GOLDSRC_HOOKS_TEXTURE_HIRES`
 /// env-flag above.
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
@@ -156,9 +156,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
         Ordering::Relaxed,
     );
-    // texture_hires is unproven -- the first hook in this crate that detours
-    // hw.dll's own internal code rather than an IAT/GetProcAddress seam. Off
-    // until it has been live-tested at least once; see the module docs.
+    // texture_hires detours hw.dll's own internal code rather than an
+    // IAT/GetProcAddress seam, and its swap has not been live-tested yet. Off
+    // unless asked for; see the module docs.
     TEXTURE_HIRES_ENABLED.store(
         env_flag("GOLDSRC_HOOKS_TEXTURE_HIRES", false),
         Ordering::Relaxed,

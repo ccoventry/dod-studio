@@ -1004,8 +1004,8 @@ unsafe extern "C" fn cmd_hand_signals() {
 }
 
 /// `dodstudio_log_texture_loads` -- verbose per-texture logging for the
-/// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) `Draw_MiptexTexture`
-/// observation hook. Registering the toggle unconditionally, whether or not
+/// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) world-texture swap: one line
+/// per world texture uploaded, saying whether it was replaced and why not. Registering the toggle unconditionally, whether or not
 /// the hook is actually installed this session, matches every other cvar
 /// here -- setting it when the hook is off just does nothing yet, rather than
 /// the command not existing at all.
@@ -1013,7 +1013,7 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     handle_toggle(
         TEXTURE_HIRES_LOG_NAME,
         &texture_hires::LOG_TEXTURE_LOADS,
-        || texture_hires::status(),
+        texture_hires::status,
     );
 }
 
