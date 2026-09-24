@@ -78,12 +78,24 @@
 //!
 //! ## Replacement files
 //!
-//! Everything lives under one folder, `<game>\dod\dodstudio_hd\`, one
-//! subfolder per asset type (`world`, `detail`, later `models`, `sky`, ...), so
-//! it can be backed up, copied or deleted as a unit.
+//! Everything lives under one folder, `<game>\dod\dodstudio_hd\`, so it can be
+//! backed up, copied or deleted as a unit:
 //!
-//! `<game>\dod\dodstudio_hd\world\<name>_<hash>.tga` (override the folder
-//! with `GOLDSRC_HOOKS_TEXTURE_HIRES_DIR`). `<name>` is the texture's name,
+//! ```text
+//! dodstudio_hd\
+//!     world\   models\   detail\   sky\      <- one per asset type
+//!         ultrasharp\  remacri\  siax\  generalv3\  x4plus\  plain\  blend\
+//!         overrides\                           <- single-file picks, win over any style
+//! ```
+//!
+//! `dodstudio_hd_style <name>` (default `ultrasharp`; `GOLDSRC_HOOKS_HD_STYLE`
+//! if the cvar can't be registered) picks the style subfolder, once, at the
+//! first map load: the engine keeps every texture it has uploaded, so a change
+//! mid-session would only reach textures not loaded yet. A style folder that
+//! doesn't exist simply means "originals" (plus overrides). Deleting the style
+//! folders you don't use is fine.
+//!
+//! Map textures are `world\<style>\<name>_<hash>.tga`. `<name>` is the texture's name,
 //! lowercased, with any character Windows forbids in a filename replaced by
 //! `_`. `<hash>` is 8 hex digits of FNV-1a-32 over the original's mip-0 palette
 //! indices followed by its 768-byte palette. The hash is what makes this safe
@@ -92,15 +104,15 @@
 //! It also means one file covers every map that carries the identical texture.
 //!
 //! Model skins (`GLT_STUDIO`, uploaded by `Mod_LoadStudioModel` through the
-//! same branch) go in `<game>\dod\dodstudio_hd\models\<texture>_<hash>.tga`.
+//! same branch) go in `models\<style>\<texture>_<hash>.tga`.
 //! The engine's identifier is the model path glued to the texture name
 //! (`models/v_garand.mdlgarand.bmp`); files use just the texture name, with the
 //! hash telling apart same-named skins from different models or installs.
 //! Player skins recoloured per player (`DM_Base.bmp` remaps) go through a
 //! different path with a per-player palette and are not replaced.
 //!
-//! HD **detail** textures go in `<game>\dod\dodstudio_hd\detail\`, named
-//! exactly as under `gfx\detail\` (e.g. `dodstudio_hd\detail\1.tga` replaces
+//! HD **detail** textures go in `detail\<style>\`, named
+//! exactly as under `gfx\detail\` (e.g. `detail\ultrasharp\1.tga` replaces
 //! `gfx\detail\1.tga`), so the game's own `gfx\detail` never has to change.
 //! The detail loader's path is rewritten just before `LoadTGA` reads it; a copy
 //! too big for the loader's buffer is skipped in favour of the original.
@@ -283,9 +295,74 @@ const GLT_WORLD: u32 = 4;
 const TEX_TYPE_NONE: u32 = 0;
 const TEX_TYPE_ALPHA: u32 = 1;
 
-/// Where replacements live, relative to `hl.exe`, unless overridden.
-const DEFAULT_DIR: &str = r"dod\dodstudio_hd\world";
-const DIR_ENV: &str = "GOLDSRC_HOOKS_TEXTURE_HIRES_DIR";
+/// The HD folders, relative to the game directory (`dod/`). Each holds one
+/// subfolder per upscale style (`ultrasharp`, `plain`, ...) plus
+/// [`OVERRIDES`]. Relative because the detail and sky paths are handed back to
+/// the engine's own file loader, which resolves them inside `dod/`.
+const WORLD_DIR: &str = "dodstudio_hd/world";
+const MODELS_DIR: &str = "dodstudio_hd/models";
+/// Per-texture picks, in each type's folder, that win over the active style --
+/// e.g. one texture a particular model got wrong, taken from another style.
+const OVERRIDES: &str = "overrides";
+
+/// `dodstudio_hd_style`: which style subfolder to use. Read once, when the
+/// first HD folder is indexed (the first map load), because the engine keeps
+/// every texture it has uploaded -- changing it later in a session would only
+/// affect textures not loaded yet. Set it in `movie.cfg` or on the launch line.
+pub const STYLE_NAME: &str = console_name!("hd_style");
+pub const DEFAULT_STYLE: &str = "ultrasharp";
+/// Fallback when the cvar could not be registered.
+const STYLE_ENV: &str = "GOLDSRC_HOOKS_HD_STYLE";
+static STYLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+static ACTIVE_STYLE: OnceLock<String> = OnceLock::new();
+
+/// Called by `commands.rs` once `dodstudio_hd_style` is registered.
+pub fn set_style_cvar(cvar: *mut crate::engine::CvarSPartial) {
+    STYLE_CVAR.store(cvar, Ordering::Release);
+}
+
+/// A style name as a folder name: lowercase letters, digits, `-` and `_` only,
+/// so a cvar value can never climb out of `dodstudio_hd` (`..`, `/`, `:`).
+fn clean_style(raw: &str) -> Option<String> {
+    let s = raw.trim().to_ascii_lowercase();
+    (!s.is_empty()
+        && s.len() <= 32
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+    .then_some(s)
+}
+
+/// The style in force this session, fixed the first time it's asked for.
+fn active_style() -> &'static str {
+    ACTIVE_STYLE.get_or_init(|| {
+        let cvar = STYLE_CVAR.load(Ordering::Acquire);
+        // Safety: a cvar_t the engine registered for us and keeps for the
+        // session; its `string` is always a valid C string.
+        let from_cvar = (!cvar.is_null())
+            .then(|| unsafe { (*cvar).string })
+            .filter(|p| !p.is_null())
+            .map(|p| {
+                unsafe { std::ffi::CStr::from_ptr(p) }
+                    .to_string_lossy()
+                    .into_owned()
+            });
+        let chosen = from_cvar
+            .or_else(|| std::env::var(STYLE_ENV).ok())
+            .and_then(|s| clean_style(&s))
+            .unwrap_or_else(|| DEFAULT_STYLE.to_string());
+        unsafe { crate::debug::report(&format!("texture_hires: HD style {chosen:?}")) };
+        chosen
+    })
+}
+
+/// `<type>/<active style>` and `<type>/overrides`, in that order -- later wins.
+fn style_dirs(type_dir: &str) -> [String; 2] {
+    [
+        format!("{type_dir}/{}", active_style()),
+        format!("{type_dir}/{OVERRIDES}"),
+    ]
+}
 
 /// World textures seen, and how many were replaced.
 static WORLD_SEEN: AtomicU32 = AtomicU32::new(0);
@@ -339,7 +416,7 @@ static SKY_HEIGHT_IMM: AtomicUsize = AtomicUsize::new(0);
 static SKY_CURRENT_DIMS: Mutex<(u32, u32)> = Mutex::new((SKY_STOCK_SIDE, SKY_STOCK_SIDE));
 /// Sky faces replaced this session, and the folder's index.
 static SKY_REPLACED: AtomicU32 = AtomicU32::new(0);
-static SKY_INDEX: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+static SKY_INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
 
 /// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
 /// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
@@ -400,22 +477,9 @@ fn parse_file_name(file: &str) -> Option<(String, u32)> {
     Some((name.to_ascii_lowercase(), hash))
 }
 
-fn replacement_dir() -> PathBuf {
-    if let Ok(dir) = std::env::var(DIR_ENV)
-        && !dir.trim().is_empty()
-    {
-        return PathBuf::from(dir.trim());
-    }
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .unwrap_or_default()
-        .join(DEFAULT_DIR)
-}
-
 /// Where HD detail textures live, relative to the game directory: the same
 /// relative paths as under `gfx/detail/`, so `gfx/detail/1.tga` is replaced by
-/// `dodstudio_hd/detail/1.tga`. Relative, not absolute, because the rewritten
+/// `dodstudio_hd/detail/<style>/1.tga`. Relative, not absolute, because the rewritten
 /// path goes back to the engine's own file loader, which resolves it inside
 /// `dod/` exactly as it resolves `gfx/...`.
 const DETAIL_DIR: &str = "dodstudio_hd/detail";
@@ -425,9 +489,10 @@ const DETAIL_PREFIX: &str = "gfx/detail/";
 /// The detail loader's path buffer (`char path[0x104]` at `ebp-0x10c`).
 const DETAIL_PATH_CAP: usize = 0x104;
 
-/// Lowercased relative paths of every file under [`DETAIL_DIR`], built on the
-/// first detail load of the session.
-static DETAIL_INDEX: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+/// Every HD detail texture for the active style (and overrides), by its
+/// lowercased path under `gfx/detail/`, to the path to hand the engine
+/// instead. Built on the first detail load of the session.
+static DETAIL_INDEX: OnceLock<HashMap<String, String>> = OnceLock::new();
 /// Detail textures loaded from [`DETAIL_DIR`] this session.
 static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
 
@@ -439,16 +504,18 @@ fn game_dir() -> PathBuf {
         .join("dod")
 }
 
-fn build_detail_index() -> std::collections::HashSet<String> {
+fn build_detail_index() -> HashMap<String, String> {
     build_folder_index(DETAIL_DIR, "HD detail texture(s)")
 }
 
-fn build_sky_index() -> std::collections::HashSet<String> {
+fn build_sky_index() -> HashMap<String, String> {
     build_folder_index(SKY_DIR, "HD sky face(s)")
 }
 
-/// Lowercased paths of every file under `game_dir()/rel`, relative to it.
-fn build_folder_index(rel_dir: &str, what: &str) -> std::collections::HashSet<String> {
+/// Every file in `<type_dir>/<style>` and `<type_dir>/overrides` (overrides
+/// winning), keyed by its lowercased path relative to that folder, mapped to
+/// its path relative to the game directory.
+fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
     fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -463,16 +530,21 @@ fn build_folder_index(rel_dir: &str, what: &str) -> std::collections::HashSet<St
             }
         }
     }
-    let root = game_dir().join(rel_dir);
-    let mut out = std::collections::HashSet::new();
-    walk(&root, "", &mut out);
-    unsafe {
-        crate::debug::report(&format!(
-            "texture_hires: indexed {} {what} in {}",
-            out.len(),
-            root.display()
-        ))
-    };
+    let mut out = HashMap::new();
+    for sub in style_dirs(type_dir) {
+        let mut found = std::collections::HashSet::new();
+        walk(&game_dir().join(&sub), "", &mut found);
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: indexed {} {what} in {sub}",
+                found.len()
+            ))
+        };
+        for rel in found {
+            let engine_path = format!("{sub}/{rel}");
+            out.insert(rel, engine_path);
+        }
+    }
     out
 }
 
@@ -546,10 +618,10 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
     let Some(rest) = original.strip_prefix(SKY_PREFIX) else {
         return stock();
     };
-    if !SKY_INDEX.get_or_init(build_sky_index).contains(rest) {
+    let Some(engine_path) = SKY_INDEX.get_or_init(build_sky_index).get(rest) else {
         return stock();
-    }
-    let file = game_dir().join(SKY_DIR).join(rest);
+    };
+    let file = game_dir().join(engine_path);
     let decoded = std::fs::read(&file)
         .map_err(|e| e.to_string())
         .and_then(|b| decode_tga(&b));
@@ -651,19 +723,13 @@ fn install_sky(base: usize) -> Result<detour::Detour, String> {
     unsafe { detour::install(hook_at, sky::HOOK_LEN, &sky_stub(&stolen)) }
 }
 
-/// `(path relative to DETAIL_DIR, path to hand the engine instead)`, if
-/// [`DETAIL_DIR`] has a replacement for `path`. `None` leaves it alone.
-fn detail_override(
-    path: &str,
-    index: &std::collections::HashSet<String>,
-) -> Option<(String, String)> {
+/// The path to hand the engine instead of `path`, if the active style (or
+/// overrides) has a replacement for it. `None` leaves it alone.
+fn detail_override(path: &str, index: &HashMap<String, String>) -> Option<String> {
     let norm = path.replace('\\', "/").to_ascii_lowercase();
     let rest = norm.strip_prefix(DETAIL_PREFIX)?;
-    if !index.contains(rest) {
-        return None;
-    }
-    let redirected = format!("{DETAIL_DIR}/{rest}");
-    (redirected.len() < DETAIL_PATH_CAP).then(|| (rest.to_string(), redirected))
+    let redirected = index.get(rest)?;
+    (redirected.len() < DETAIL_PATH_CAP).then(|| redirected.clone())
 }
 
 /// Whether the TGA at `file` fits in `max_bytes` of RGBA. A replacement too
@@ -703,10 +769,10 @@ unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
     } else {
         DETAIL_STOCK_BYTES
     };
-    let Some((rest, new)) = detail_override(&original, index) else {
+    let Some(new) = detail_override(&original, index) else {
         return;
     };
-    if !detail_fits(&game_dir().join(DETAIL_DIR).join(&rest), max) {
+    if !detail_fits(&game_dir().join(&new), max) {
         if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
             unsafe {
                 crate::debug::report(&format!(
@@ -748,11 +814,6 @@ fn detail_path_stub() -> Vec<u8> {
     code
 }
 
-/// Model skins sit beside the map textures: `dodstudio_hd\models`.
-fn model_dir() -> PathBuf {
-    replacement_dir().with_file_name("models")
-}
-
 /// The part of a model skin's identifier that names the texture itself.
 /// `Mod_LoadStudioModel` builds the identifier as `"%s%s"` of the model's path
 /// and the texture's name (`models/v_garand.mdlgarand.bmp`); keying files on
@@ -767,35 +828,44 @@ fn studio_texture_name(identifier: &str) -> &str {
 }
 
 fn build_index() -> Index {
-    build_index_in(replacement_dir())
+    build_index_in(WORLD_DIR)
 }
 
 fn build_model_index() -> Index {
-    build_index_in(model_dir())
+    build_index_in(MODELS_DIR)
 }
 
-fn build_index_in(dir: PathBuf) -> Index {
+/// Every `<name>_<hash>.tga` in `<type_dir>/<style>` and then
+/// `<type_dir>/overrides`, so an override replaces the style's file.
+fn build_index_in(type_dir: &str) -> Index {
     let mut files = HashMap::new();
-    if let Ok(entries) = std::fs::read_dir(&dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if let Some(key) = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .and_then(parse_file_name)
-            {
-                files.insert(key, path);
+    let dirs = style_dirs(type_dir);
+    for sub in &dirs {
+        let dir = game_dir().join(sub);
+        let mut found = 0;
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if let Some(key) = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .and_then(parse_file_name)
+                {
+                    files.insert(key, path);
+                    found += 1;
+                }
             }
         }
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: indexed {found} replacement(s) in {sub}"
+            ))
+        };
     }
-    unsafe {
-        crate::debug::report(&format!(
-            "texture_hires: indexed {} replacement(s) in {}",
-            files.len(),
-            dir.display()
-        ))
-    };
-    Index { dir, files }
+    Index {
+        dir: game_dir().join(&dirs[0]),
+        files,
+    }
 }
 
 /// A decoded TGA: RGBA8, top row first.
@@ -1421,7 +1491,7 @@ pub fn install() -> Result<(), String> {
             } else {
                 "stock"
             },
-            replacement_dir().display()
+            WORLD_DIR
         ))
     };
     detours.push(swap);
@@ -1459,7 +1529,11 @@ pub fn status() -> String {
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
     format!(
-        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        ACTIVE_STYLE
+            .get()
+            .map(String::as_str)
+            .unwrap_or("not chosen yet"),
         SKY_REPLACED.load(Ordering::Relaxed),
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
@@ -1576,18 +1650,37 @@ mod tests {
     }
 
     #[test]
+    fn style_names_cannot_leave_the_hd_folder() {
+        assert_eq!(clean_style(" UltraSharp "), Some("ultrasharp".to_string()));
+        assert_eq!(
+            clean_style("general-v3_2"),
+            Some("general-v3_2".to_string())
+        );
+        assert_eq!(clean_style(".."), None);
+        assert_eq!(clean_style("a/b"), None);
+        assert_eq!(clean_style("c:"), None);
+        assert_eq!(clean_style(""), None);
+    }
+
+    #[test]
     fn detail_paths_redirect_only_when_an_hd_copy_exists() {
-        let index: std::collections::HashSet<String> = ["1.tga", "sub/dt_grass1.tga"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
+        let index: HashMap<String, String> = [
+            ("1.tga", "dodstudio_hd/detail/ultrasharp/1.tga"),
+            (
+                "sub/dt_grass1.tga",
+                "dodstudio_hd/detail/overrides/sub/dt_grass1.tga",
+            ),
+        ]
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
         assert_eq!(
             detail_override("gfx/detail/1.tga", &index),
-            Some(("1.tga".to_string(), "dodstudio_hd/detail/1.tga".to_string()))
+            Some("dodstudio_hd/detail/ultrasharp/1.tga".to_string())
         );
         assert_eq!(
-            detail_override("GFX\\Detail\\Sub/DT_Grass1.TGA", &index).map(|r| r.1),
-            Some("dodstudio_hd/detail/sub/dt_grass1.tga".to_string())
+            detail_override("GFX\\Detail\\Sub/DT_Grass1.TGA", &index),
+            Some("dodstudio_hd/detail/overrides/sub/dt_grass1.tga".to_string())
         );
         assert_eq!(detail_override("gfx/detail/2.tga", &index), None);
         assert_eq!(detail_override("gfx/env/sky.tga", &index), None);

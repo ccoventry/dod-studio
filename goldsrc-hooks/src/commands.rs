@@ -1293,6 +1293,13 @@ pub fn install() {
     // either way means the type-ahead and .cfg/launch-line all work the same
     // as every other setting here, even before the hook is proven enough to
     // default on.
+    // A string, read once when the HD folders are first indexed (the first map
+    // load), so it sits outside the polled set below -- and outside the
+    // all-or-nothing tuple, since the HD textures fall back to their default
+    // style without it.
+    if let Some(style) = register(texture_hires::STYLE_NAME, texture_hires::DEFAULT_STYLE) {
+        texture_hires::set_style_cvar(style);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
