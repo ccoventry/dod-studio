@@ -83,7 +83,7 @@
 //!
 //! ```text
 //! dodstudio_hd\
-//!     world\   models\   detail\   sky\      <- one per asset type
+//!     world\   models\   sprites\   detail\   sky\      <- one per asset type
 //!         ultrasharp\  remacri\  siax\  generalv3\  x4plus\  plain\  blend\
 //!         overrides\                           <- single-file picks, win over any style
 //! ```
@@ -110,6 +110,18 @@
 //! hash telling apart same-named skins from different models or installs.
 //! Player skins recoloured per player (`DM_Base.bmp` remaps) go through a
 //! different path with a per-player palette and are not replaced.
+//!
+//! World sprite frames (`GLT_SPRITE`: muzzle flashes, smoke, explosions,
+//! uploaded one frame at a time by `Mod_LoadSpriteFrame`, again through the
+//! same branch) go in `sprites\<style>\<sprite>_<frame>_<hash>.tga`: the
+//! sprite's file name without its folder or `.spr`, the frame number as the
+//! engine counts it (frame `j` of group `i` is `i * 100 + j`), and the same
+//! hash over that frame's pixels and the sprite's palette. The sprite's
+//! render format picks the `iType`, and so what the replacement must look
+//! like: normal and additive sprites are opaque RGB, alpha-test sprites cut
+//! out like masked world textures, and index-alpha sprites (smoke) use only
+//! the file's alpha -- the colour is always palette entry 255's, as in the
+//! engine. HUD sprites are not replaced (see `GLT_SPRITE`).
 //!
 //! HD **detail** textures go in `detail\<style>\`, named
 //! exactly as under `gfx\detail\` (e.g. `detail\ultrasharp\1.tga` replaces
@@ -287,13 +299,21 @@ const RAISED_MAX_PIXELS: usize = 0x10_0000;
 /// The resample helpers' stack arrays: output width may never exceed this.
 const MAX_OUTPUT_WIDTH: u32 = 1024;
 
-/// `GLT_STUDIO` / `GLT_WORLD` in GoldSrc's `GL_TEXTURETYPE`: model skins and
-/// map textures, the two this module replaces.
+/// `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE` in GoldSrc's `GL_TEXTURETYPE`:
+/// model skins, map textures and world sprite frames, the three this module
+/// replaces. HUD sprites (`GLT_HUDSPRITE`, 2) are left alone: the HUD draws
+/// them pixel for pixel, without mipmaps, so a bigger copy would only be
+/// shrunk back down, badly.
 const GLT_STUDIO: u32 = 3;
 const GLT_WORLD: u32 = 4;
+const GLT_SPRITE: u32 = 5;
 /// `TEX_TYPE_NONE` / `TEX_TYPE_ALPHA`: the two `iType`s world textures use.
 const TEX_TYPE_NONE: u32 = 0;
 const TEX_TYPE_ALPHA: u32 = 1;
+/// `TEX_TYPE_ALPHA_GRADIENT`: index-alpha sprites (`SPR_INDEXALPHA`).
+/// `GL_Upload8` draws every pixel in palette entry 255's colour, with the
+/// pixel's palette index as its alpha.
+const TEX_TYPE_ALPHA_GRADIENT: u32 = 3;
 
 /// The HD folders, relative to the game directory (`dod/`). Each holds one
 /// subfolder per upscale style (`ultrasharp`, `plain`, ...) plus
@@ -301,6 +321,7 @@ const TEX_TYPE_ALPHA: u32 = 1;
 /// the engine's own file loader, which resolves them inside `dod/`.
 const WORLD_DIR: &str = "dodstudio_hd/world";
 const MODELS_DIR: &str = "dodstudio_hd/models";
+const SPRITES_DIR: &str = "dodstudio_hd/sprites";
 /// Per-texture picks, in each type's folder, that win over the active style --
 /// e.g. one texture a particular model got wrong, taken from another style.
 const OVERRIDES: &str = "overrides";
@@ -370,6 +391,9 @@ static REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Model skins seen, and how many were replaced.
 static MODEL_SEEN: AtomicU32 = AtomicU32::new(0);
 static MODEL_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// Sprite frames seen, and how many were replaced.
+static SPRITE_SEEN: AtomicU32 = AtomicU32::new(0);
+static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
 static ANY_SEEN: AtomicU32 = AtomicU32::new(0);
 
@@ -429,10 +453,11 @@ static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// Installed once per process; see [`detour::Detour`] on why never undone.
 static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
 
-/// The replacement folders' indexes, built on first use: map textures, and
-/// model skins (`models` beside `world`).
+/// The replacement folders' indexes, built on first use: map textures, model
+/// skins and sprite frames.
 static INDEX: OnceLock<Index> = OnceLock::new();
 static MODEL_INDEX: OnceLock<Index> = OnceLock::new();
+static SPRITE_INDEX: OnceLock<Index> = OnceLock::new();
 
 struct Index {
     dir: PathBuf,
@@ -827,12 +852,31 @@ fn studio_texture_name(identifier: &str) -> &str {
     }
 }
 
+/// A sprite frame's identifier as it appears in a replacement's filename.
+/// `Mod_LoadSpriteFrame` names each frame `"%s_%i"` of the sprite's model
+/// path and the frame number (`sprites/muzzleflash1.spr_0`; frame `j` of
+/// group `i` is `i * 100 + j`); files use the sprite's file name without the
+/// folder or `.spr` (`muzzleflash1_0`), the hash keeping same-named sprites
+/// from different folders apart.
+fn sprite_frame_name(identifier: &str) -> String {
+    let base = identifier.rsplit(['/', '\\']).next().unwrap_or(identifier);
+    let lower = base.to_ascii_lowercase();
+    match lower.rfind(".spr_") {
+        Some(at) => format!("{}_{}", &lower[..at], &lower[at + 5..]),
+        None => lower,
+    }
+}
+
 fn build_index() -> Index {
     build_index_in(WORLD_DIR)
 }
 
 fn build_model_index() -> Index {
     build_index_in(MODELS_DIR)
+}
+
+fn build_sprite_index() -> Index {
+    build_index_in(SPRITES_DIR)
 }
 
 /// Every `<name>_<hash>.tga` in `<type_dir>/<style>` and then
@@ -983,8 +1027,23 @@ fn halve(img: &Rgba) -> Rgba {
 
 /// Applies what `GL_Upload8` would have done to the original's palette:
 /// texture gamma, `gl_dither`'s `c | c >> 6` for opaque textures, and the
-/// all-zero transparent pixel for masked ones.
-fn match_engine_expansion(pixels: &mut [u8], gamma: &[u8; 256], i_type: u32, dither: bool) {
+/// all-zero transparent pixel for masked ones. For index-alpha sprites every
+/// pixel becomes `tint` (the original's palette entry 255) through the gamma
+/// table, keeping the replacement's alpha.
+fn match_engine_expansion(
+    pixels: &mut [u8],
+    gamma: &[u8; 256],
+    i_type: u32,
+    dither: bool,
+    tint: [u8; 3],
+) {
+    if i_type == TEX_TYPE_ALPHA_GRADIENT {
+        let rgb = tint.map(|c| gamma[c as usize]);
+        for px in pixels.chunks_exact_mut(4) {
+            px[..3].copy_from_slice(&rgb);
+        }
+        return;
+    }
     for px in pixels.chunks_exact_mut(4) {
         if i_type == TEX_TYPE_ALPHA && px[3] < 128 {
             px.copy_from_slice(&[0, 0, 0, 0]);
@@ -1002,7 +1061,7 @@ fn match_engine_expansion(pixels: &mut [u8], gamma: &[u8; 256], i_type: u32, dit
 }
 
 /// Loads, fits and prepares the replacement at `path`.
-fn load_replacement(path: &Path, i_type: u32) -> Result<Rgba, String> {
+fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let mut img = decode_tga(&bytes)?;
     let cap = if CEILING_RAISED.load(Ordering::Acquire) {
@@ -1018,7 +1077,7 @@ fn load_replacement(path: &Path, i_type: u32) -> Result<Rgba, String> {
     // and checked at install; the table is 256 bytes of hw.dll's .data.
     let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
     let dither = unsafe { *(DITHER_VALUE.load(Ordering::Acquire) as *const f32) } != 0.0;
-    match_engine_expansion(&mut img.pixels, gamma, i_type, dither);
+    match_engine_expansion(&mut img.pixels, gamma, i_type, dither, tint);
     Ok(img)
 }
 
@@ -1039,27 +1098,35 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     let palette = arg(0x24) as *const u8;
 
     ANY_SEEN.fetch_add(1, Ordering::Relaxed);
-    let is_model = match texture_type {
-        GLT_WORLD => false,
-        GLT_STUDIO => true,
+    let (seen, replaced, kind, index, build): (_, _, _, _, fn() -> Index) = match texture_type {
+        GLT_WORLD => (&WORLD_SEEN, &REPLACED, "world", &INDEX, build_index),
+        GLT_STUDIO => (
+            &MODEL_SEEN,
+            &MODEL_REPLACED,
+            "model",
+            &MODEL_INDEX,
+            build_model_index,
+        ),
+        GLT_SPRITE => (
+            &SPRITE_SEEN,
+            &SPRITE_REPLACED,
+            "sprite",
+            &SPRITE_INDEX,
+            build_sprite_index,
+        ),
         _ => return std::ptr::null(),
     };
     if name_ptr.is_null() {
         return std::ptr::null();
     }
-    let (seen, replaced, kind) = if is_model {
-        (&MODEL_SEEN, &MODEL_REPLACED, "model")
-    } else {
-        (&WORLD_SEEN, &REPLACED, "world")
-    };
     seen.fetch_add(1, Ordering::Relaxed);
 
     // Safety: the identifier every caller passes is a NUL-terminated name.
     let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
-    let name = if is_model {
-        studio_texture_name(&identifier)
-    } else {
-        &*identifier
+    let name = match texture_type {
+        GLT_STUDIO => studio_texture_name(&identifier).to_string(),
+        GLT_SPRITE => sprite_frame_name(&identifier),
+        _ => identifier.to_string(),
     };
     let log = LOG_TEXTURE_LOADS.load(Ordering::Relaxed);
     let skip = |why: &str| {
@@ -1073,7 +1140,11 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         std::ptr::null()
     };
 
-    if !matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA) {
+    // Sprites already in RGBA (iType 4) take GL_Upload32 directly and are
+    // never replaced; only sprites use the alpha gradient.
+    let known_type = matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA)
+        || (texture_type == GLT_SPRITE && i_type == TEX_TYPE_ALPHA_GRADIENT);
+    if !known_type {
         return skip("unexpected iType, left alone");
     }
     if data.is_null()
@@ -1086,12 +1157,8 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         return skip("no palette data, left alone");
     }
 
-    let index = if is_model {
-        MODEL_INDEX.get_or_init(build_model_index)
-    } else {
-        INDEX.get_or_init(build_index)
-    };
-    let stem = file_stem_name(name);
+    let index = index.get_or_init(build);
+    let stem = file_stem_name(&name);
     // The name check first: the hash is only worth computing for a texture
     // that has any replacement at all.
     if !index.files.keys().any(|(n, _)| *n == stem) {
@@ -1112,7 +1179,8 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         ));
     };
 
-    let img = match load_replacement(path, i_type) {
+    let tint = [pal[765], pal[766], pal[767]];
+    let img = match load_replacement(path, i_type, tint) {
         Ok(img) => img,
         Err(why) => {
             unsafe {
@@ -1137,7 +1205,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     replaced.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut last) = LAST_REPLACED.lock() {
         *last = Some(LastReplaced {
-            name: name.to_string(),
+            name,
             from: (width, height),
             to: (img.width, img.height),
         });
@@ -1528,8 +1596,17 @@ pub fn status() -> String {
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
+    let sprites = format!(
+        "{} of {} sprite frame load(s) replaced ({})",
+        SPRITE_REPLACED.load(Ordering::Relaxed),
+        SPRITE_SEEN.load(Ordering::Relaxed),
+        SPRITE_INDEX
+            .get()
+            .map(|i| format!("{} file(s)", i.files.len()))
+            .unwrap_or_else(|| "folder not read yet".to_string())
+    );
     format!(
-        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        "{NAME}: style {:?}; {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {sprites}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
         ACTIVE_STYLE
             .get()
             .map(String::as_str)
@@ -1828,12 +1905,36 @@ mod tests {
         }
         // Opaque with dither: gamma then c | c >> 6; alpha forced to 255.
         let mut px = vec![0, 3, 255, 7];
-        match_engine_expansion(&mut px, &gamma, TEX_TYPE_NONE, true);
+        match_engine_expansion(&mut px, &gamma, TEX_TYPE_NONE, true, [0; 3]);
         assert_eq!(px, vec![255, 252 | 3, 0, 255]);
         // Masked: below half alpha becomes all-zero, above becomes opaque.
         let mut px = vec![10, 10, 10, 100, 10, 10, 10, 200];
-        match_engine_expansion(&mut px, &gamma, TEX_TYPE_ALPHA, true);
+        match_engine_expansion(&mut px, &gamma, TEX_TYPE_ALPHA, true, [0; 3]);
         assert_eq!(px, vec![0, 0, 0, 0, 245, 245, 245, 255]);
+        // Index alpha: the palette-255 tint through gamma, alpha kept as is,
+        // whatever RGB the file had; no dither.
+        let mut px = vec![9, 9, 9, 0, 1, 2, 3, 77];
+        match_engine_expansion(&mut px, &gamma, TEX_TYPE_ALPHA_GRADIENT, true, [0, 3, 255]);
+        assert_eq!(px, vec![255, 252, 0, 0, 255, 252, 0, 77]);
+    }
+
+    #[test]
+    fn sprite_frames_are_keyed_by_file_name_and_frame() {
+        assert_eq!(
+            sprite_frame_name("sprites/muzzleflash1.spr_0"),
+            "muzzleflash1_0"
+        );
+        assert_eq!(
+            sprite_frame_name("sprites/effects/Debris_Dirt3.SPR_203"),
+            "debris_dirt3_203"
+        );
+        assert_eq!(sprite_frame_name("sprites\\x.spr_1"), "x_1");
+        assert_eq!(sprite_frame_name("odd_name"), "odd_name");
+        // What the Python pipeline writes for the same frame parses back to it.
+        assert_eq!(
+            parse_file_name("muzzleflash1_0_1a2b3c4d.tga"),
+            Some(("muzzleflash1_0".to_string(), 0x1a2b_3c4d))
+        );
     }
 
     #[test]
