@@ -78,7 +78,11 @@
 //!
 //! ## Replacement files
 //!
-//! `<game>\dod\dodstudio_hd_textures\<name>_<hash>.tga` (override the folder
+//! Everything lives under one folder, `<game>\dod\dodstudio_hd\`, one
+//! subfolder per asset type (`world`, `detail`, later `models`, `sky`, ...), so
+//! it can be backed up, copied or deleted as a unit.
+//!
+//! `<game>\dod\dodstudio_hd\world\<name>_<hash>.tga` (override the folder
 //! with `GOLDSRC_HOOKS_TEXTURE_HIRES_DIR`). `<name>` is the texture's name,
 //! lowercased, with any character Windows forbids in a filename replaced by
 //! `_`. `<hash>` is 8 hex digits of FNV-1a-32 over the original's mip-0 palette
@@ -86,6 +90,12 @@
 //! across maps: 25 names in the wsod25 set are reused by different maps with
 //! different pixels, and a name alone would put one map's texture on another.
 //! It also means one file covers every map that carries the identical texture.
+//!
+//! HD **detail** textures go in `<game>\dod\dodstudio_hd\detail\`, named
+//! exactly as under `gfx\detail\` (e.g. `dodstudio_hd\detail\1.tga` replaces
+//! `gfx\detail\1.tga`), so the game's own `gfx\detail` never has to change.
+//! The detail loader's path is rewritten just before `LoadTGA` reads it; a copy
+//! too big for the loader's buffer is skipped in favour of the original.
 //!
 //! 24- or 32-bit TGA, uncompressed or RLE, any dimensions (power-of-two is
 //! best: the engine rounds anything else, down as often as up). The folder is
@@ -199,6 +209,12 @@ mod detail {
 
 /// `push 0x100000`.
 const DETAIL_STOCK_PUSH: &[u8] = &[0x68, 0x00, 0x00, 0x10, 0x00];
+/// The stock detail buffer.
+const DETAIL_STOCK_BYTES: usize = 0x10_0000;
+/// Where in [`DETAIL_LOADER`] the path-redirect detour goes: `lea eax,
+/// [ebp-0x10c]`, loading the path buffer's address for `LoadTGA`.
+const DETAIL_PATH_AT: usize = 0x4b;
+const DETAIL_PATH_STOLEN: &[u8] = &[0x8D, 0x85, 0xF4, 0xFE, 0xFF, 0xFF];
 /// 1024x1024 RGBA.
 const DETAIL_MAX_BYTES: usize = 1024 * 1024 * 4;
 
@@ -216,7 +232,7 @@ const TEX_TYPE_NONE: u32 = 0;
 const TEX_TYPE_ALPHA: u32 = 1;
 
 /// Where replacements live, relative to `hl.exe`, unless overridden.
-const DEFAULT_DIR: &str = r"dod\dodstudio_hd_textures";
+const DEFAULT_DIR: &str = r"dod\dodstudio_hd\world";
 const DIR_ENV: &str = "GOLDSRC_HOOKS_TEXTURE_HIRES_DIR";
 
 /// World textures seen, and how many were replaced.
@@ -254,6 +270,9 @@ static DITHER_VALUE: AtomicUsize = AtomicUsize::new(0);
 static CEILING_RAISED: AtomicBool = AtomicBool::new(false);
 /// Whether detail textures may be up to 1024x1024 (512x512 otherwise).
 static DETAIL_RAISED: AtomicBool = AtomicBool::new(false);
+/// `redirect_detail_path`'s address, and where its stub returns to.
+static DETAIL_PATH_FN: AtomicUsize = AtomicUsize::new(0);
+static DETAIL_RESUME: AtomicUsize = AtomicUsize::new(0);
 
 /// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
 /// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
@@ -323,6 +342,157 @@ fn replacement_dir() -> PathBuf {
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
         .unwrap_or_default()
         .join(DEFAULT_DIR)
+}
+
+/// Where HD detail textures live, relative to the game directory: the same
+/// relative paths as under `gfx/detail/`, so `gfx/detail/1.tga` is replaced by
+/// `dodstudio_hd/detail/1.tga`. Relative, not absolute, because the rewritten
+/// path goes back to the engine's own file loader, which resolves it inside
+/// `dod/` exactly as it resolves `gfx/...`.
+const DETAIL_DIR: &str = "dodstudio_hd/detail";
+/// What the detail loader's path starts with once it has run `gfx/%s.tga`
+/// over a `_detail.txt` entry like `detail/1`.
+const DETAIL_PREFIX: &str = "gfx/detail/";
+/// The detail loader's path buffer (`char path[0x104]` at `ebp-0x10c`).
+const DETAIL_PATH_CAP: usize = 0x104;
+
+/// Lowercased relative paths of every file under [`DETAIL_DIR`], built on the
+/// first detail load of the session.
+static DETAIL_INDEX: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
+/// Detail textures loaded from [`DETAIL_DIR`] this session.
+static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
+
+fn game_dir() -> PathBuf {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf))
+        .unwrap_or_default()
+        .join("dod")
+}
+
+fn build_detail_index() -> std::collections::HashSet<String> {
+    fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            let rel = format!("{rel}{name}");
+            if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+                walk(&entry.path(), &format!("{rel}/"), out);
+            } else {
+                out.insert(rel);
+            }
+        }
+    }
+    let root = game_dir().join(DETAIL_DIR);
+    let mut out = std::collections::HashSet::new();
+    walk(&root, "", &mut out);
+    unsafe {
+        crate::debug::report(&format!(
+            "texture_hires: indexed {} HD detail texture(s) in {}",
+            out.len(),
+            root.display()
+        ))
+    };
+    out
+}
+
+/// `(path relative to DETAIL_DIR, path to hand the engine instead)`, if
+/// [`DETAIL_DIR`] has a replacement for `path`. `None` leaves it alone.
+fn detail_override(
+    path: &str,
+    index: &std::collections::HashSet<String>,
+) -> Option<(String, String)> {
+    let norm = path.replace('\\', "/").to_ascii_lowercase();
+    let rest = norm.strip_prefix(DETAIL_PREFIX)?;
+    if !index.contains(rest) {
+        return None;
+    }
+    let redirected = format!("{DETAIL_DIR}/{rest}");
+    (redirected.len() < DETAIL_PATH_CAP).then(|| (rest.to_string(), redirected))
+}
+
+/// Whether the TGA at `file` fits in `max_bytes` of RGBA. A replacement too
+/// big for the loader's buffer would fail to load and take the detail layer
+/// with it; the original is better than nothing.
+fn detail_fits(file: &Path, max_bytes: usize) -> bool {
+    use std::io::Read;
+    let mut header = [0u8; 18];
+    let read = std::fs::File::open(file).and_then(|mut f| f.read_exact(&mut header));
+    if read.is_err() {
+        return false;
+    }
+    let w = u16::from_le_bytes([header[12], header[13]]) as usize;
+    let h = u16::from_le_bytes([header[14], header[15]]) as usize;
+    w * h * 4 <= max_bytes
+}
+
+/// Called by the detail-path stub with the detail loader's path buffer, just
+/// before it is handed to `LoadTGA`. Rewrites it in place to the HD copy when
+/// there is one.
+///
+/// # Safety
+///
+/// `path` is the loader's own `char[0x104]`, NUL-terminated by its `snprintf`.
+unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
+    if path.is_null() {
+        return;
+    }
+    let buf = unsafe { std::slice::from_raw_parts_mut(path, DETAIL_PATH_CAP) };
+    let Some(len) = buf.iter().position(|&b| b == 0) else {
+        return;
+    };
+    let original = String::from_utf8_lossy(&buf[..len]).into_owned();
+    let index = DETAIL_INDEX.get_or_init(build_detail_index);
+    let max = if DETAIL_RAISED.load(Ordering::Acquire) {
+        DETAIL_MAX_BYTES
+    } else {
+        DETAIL_STOCK_BYTES
+    };
+    let Some((rest, new)) = detail_override(&original, index) else {
+        return;
+    };
+    if !detail_fits(&game_dir().join(DETAIL_DIR).join(&rest), max) {
+        if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: detail {original}: HD copy is over the {max}-byte limit, using the original"
+                ))
+            };
+        }
+        return;
+    }
+    buf[..new.len()].copy_from_slice(new.as_bytes());
+    buf[new.len()] = 0;
+    DETAIL_REDIRECTED.fetch_add(1, Ordering::Relaxed);
+    if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
+        unsafe { crate::debug::report(&format!("texture_hires: detail {original} -> {new}")) };
+    }
+}
+
+/// The detail-path stub, replacing `lea eax, [ebp-0x10c]` right before
+/// `LoadTGA`'s last two arguments are pushed.
+///
+/// ```asm
+///     lea eax, [ebp-0x10c]
+///     push eax
+///     call [DETAIL_PATH_FN]         ; redirect_detail_path(path)
+///     add esp, 4
+///     lea eax, [ebp-0x10c]          ; the stolen instruction
+///     jmp [DETAIL_RESUME]
+/// ```
+///
+/// `ecx`/`edx` are dead here (their values were already pushed), and `eax` is
+/// reloaded by the stolen `lea` last.
+fn detail_path_stub() -> Vec<u8> {
+    let mut code = DETAIL_PATH_STOLEN.to_vec();
+    code.push(0x50); // push eax
+    indirect(&mut code, CALL, &DETAIL_PATH_FN);
+    code.extend_from_slice(&[0x83, 0xC4, 0x04]); // add esp, 4
+    code.extend_from_slice(DETAIL_PATH_STOLEN);
+    indirect(&mut code, JMP, &DETAIL_RESUME);
+    code
 }
 
 fn build_index() -> Index {
@@ -810,10 +980,7 @@ fn raise_ceiling(upload32: usize, upload8: usize) -> Result<detour::Detour, Stri
 /// allocation first, so the limit never exceeds what was allocated. What it
 /// loads goes to `GL_Upload32` as RGBA, which [`raise_ceiling`] already opened
 /// to 1024x1024.
-fn raise_detail_limit(base: usize) -> Result<(), String> {
-    // Safety: `base` is hw.dll's module handle, mapped for the session.
-    let loader = unsafe { scan::find_unique(base, DETAIL_LOADER) }
-        .map_err(|why| format!("could not locate the detail texture loader -- {why}"))?;
+fn raise_detail_limit(base: usize, loader: usize) -> Result<(), String> {
     for off in [detail::ALLOC_SIZE, detail::LOADTGA_SIZE] {
         check_span(loader + off, DETAIL_STOCK_PUSH)?;
     }
@@ -836,6 +1003,20 @@ fn raise_detail_limit(base: usize) -> Result<(), String> {
         ))
     };
     Ok(())
+}
+
+/// Points the detail loader at [`DETAIL_DIR`] for any detail texture that has
+/// an HD copy there, so `gfx/detail/` itself never has to be edited.
+fn install_detail_redirect(loader: usize) -> Result<detour::Detour, String> {
+    let at = loader + DETAIL_PATH_AT;
+    check_span(at, DETAIL_PATH_STOLEN)?;
+    DETAIL_PATH_FN.store(
+        redirect_detail_path as *const () as usize,
+        Ordering::Release,
+    );
+    DETAIL_RESUME.store(at + DETAIL_PATH_STOLEN.len(), Ordering::Release);
+    // Safety: span verified above; nothing in the loader branches into it.
+    unsafe { detour::install(at, DETAIL_PATH_STOLEN.len(), &detail_path_stub()) }
 }
 
 /// Installs the world-texture swap, and raises the upload ceiling, once.
@@ -885,16 +1066,33 @@ pub fn install() -> Result<(), String> {
             ))
         },
     }
-    // Only with the upload ceiling raised: a 1024x1024 detail texture would
-    // otherwise get past LoadTGA and hit GL_Upload32's stock Sys_Error.
-    if CEILING_RAISED.load(Ordering::Acquire)
-        && let Err(why) = raise_detail_limit(base)
-    {
-        unsafe {
+    // Safety: `base` is hw.dll's module handle, mapped for the session.
+    match unsafe { scan::find_unique(base, DETAIL_LOADER) } {
+        Ok(loader) => {
+            // Only with the upload ceiling raised: a 1024x1024 detail texture
+            // would otherwise get past LoadTGA and hit GL_Upload32's stock
+            // Sys_Error.
+            if CEILING_RAISED.load(Ordering::Acquire)
+                && let Err(why) = raise_detail_limit(base, loader)
+            {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "texture_hires: detail textures left at 512x512 -- {why}"
+                    ))
+                };
+            }
+            match install_detail_redirect(loader) {
+                Ok(d) => detours.push(d),
+                Err(why) => unsafe {
+                    crate::debug::report(&format!("texture_hires: {DETAIL_DIR} not used -- {why}"))
+                },
+            }
+        }
+        Err(why) => unsafe {
             crate::debug::report(&format!(
-                "texture_hires: detail textures left at 512x512 -- {why}"
+                "texture_hires: could not locate the detail texture loader, detail textures left alone -- {why}"
             ))
-        };
+        },
     }
 
     GAMMA_TABLE.store(gamma, Ordering::Release);
@@ -949,7 +1147,7 @@ pub fn status() -> String {
         .map(|i| format!("{} file(s) in {}", i.files.len(), i.dir.display()))
         .unwrap_or_else(|| "folder not read yet".to_string());
     format!(
-        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; ceiling {}, detail textures {} (logging {})",
+        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
         } else {
@@ -960,6 +1158,7 @@ pub fn status() -> String {
         } else {
             "up to 512x512"
         },
+        DETAIL_REDIRECTED.load(Ordering::Relaxed),
         if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
             "on"
         } else {
@@ -1009,6 +1208,35 @@ mod tests {
         fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD8_ARGS, &[0x8B, 0x45, 0x28]);
         fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD8, &[0xE8]);
         fixed(LOAD_TEXTURE2_TAIL, tail::AFTER - 3, &[0x83, 0xC4, 0x1C]);
+    }
+
+    #[test]
+    fn detail_paths_redirect_only_when_an_hd_copy_exists() {
+        let index: std::collections::HashSet<String> = ["1.tga", "sub/dt_grass1.tga"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(
+            detail_override("gfx/detail/1.tga", &index),
+            Some(("1.tga".to_string(), "dodstudio_hd/detail/1.tga".to_string()))
+        );
+        assert_eq!(
+            detail_override("GFX\\Detail\\Sub/DT_Grass1.TGA", &index).map(|r| r.1),
+            Some("dodstudio_hd/detail/sub/dt_grass1.tga".to_string())
+        );
+        assert_eq!(detail_override("gfx/detail/2.tga", &index), None);
+        assert_eq!(detail_override("gfx/env/sky.tga", &index), None);
+    }
+
+    #[test]
+    fn detail_path_stub_reproduces_the_stolen_lea() {
+        fixed(DETAIL_LOADER, DETAIL_PATH_AT, DETAIL_PATH_STOLEN);
+        let code = detail_path_stub();
+        assert_eq!(&code[..6], DETAIL_PATH_STOLEN);
+        assert_eq!(code[6], 0x50);
+        assert_eq!(&code[16..22], DETAIL_PATH_STOLEN);
+        assert_eq!(&code[22..24], &[0xFF, 0x25]);
+        assert_eq!(code.len(), 28);
     }
 
     #[test]

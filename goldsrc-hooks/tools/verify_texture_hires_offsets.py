@@ -124,6 +124,11 @@ def main():
             check(img[dl + off: dl + off + 5] == bytes.fromhex("6800001000"), f"detail loader push 0x100000 at +{off:#x}")
         # The loader's second call must be LoadTGA (whose error string names the limit)
         # and its last GL_LoadTexture2 -- the same function the swap hooks.
+        check(img[dl + 0x4B: dl + 0x51] == bytes.fromhex('8D85F4FEFFFF'), 'detail path lea at +0x4b (redirect span)')
+        for ins in Cs(CS_ARCH_X86, CS_MODE_32).disasm(img[dl:dl + 0x92], base + dl):
+            if ins.mnemonic.startswith('j') and ins.op_str.startswith('0x'):
+                t = int(ins.op_str, 16) - base - dl
+                check(not (0x4B < t < 0x51), f'{ins.address:#x} does not branch into the detail redirect span')
         lt2 = call(dl + 0x76)
         check(lt2 == tail - 0x2BD, "detail loader uploads through GL_LoadTexture2")
 
