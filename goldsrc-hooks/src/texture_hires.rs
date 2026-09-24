@@ -314,6 +314,10 @@ const TEX_TYPE_ALPHA: u32 = 1;
 /// `GL_Upload8` draws every pixel in palette entry 255's colour, with the
 /// pixel's palette index as its alpha.
 const TEX_TYPE_ALPHA_GRADIENT: u32 = 3;
+/// `TEX_TYPE_RGBA`: already truecolour. As `GLT_SPRITE` this is the overview
+/// map's tiles and every detail texture, not sprite frames, and it takes
+/// `GL_Upload32` directly -- never replaced, and not counted as a sprite.
+const TEX_TYPE_RGBA: u32 = 4;
 
 /// The HD folders, relative to the game directory (`dod/`). Each holds one
 /// subfolder per upscale style (`ultrasharp`, `plain`, ...) plus
@@ -1107,7 +1111,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
             &MODEL_INDEX,
             build_model_index,
         ),
-        GLT_SPRITE => (
+        GLT_SPRITE if i_type != TEX_TYPE_RGBA => (
             &SPRITE_SEEN,
             &SPRITE_REPLACED,
             "sprite",
