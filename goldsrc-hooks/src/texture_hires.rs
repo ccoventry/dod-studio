@@ -91,6 +91,14 @@
 //! different pixels, and a name alone would put one map's texture on another.
 //! It also means one file covers every map that carries the identical texture.
 //!
+//! Model skins (`GLT_STUDIO`, uploaded by `Mod_LoadStudioModel` through the
+//! same branch) go in `<game>\dod\dodstudio_hd\models\<texture>_<hash>.tga`.
+//! The engine's identifier is the model path glued to the texture name
+//! (`models/v_garand.mdlgarand.bmp`); files use just the texture name, with the
+//! hash telling apart same-named skins from different models or installs.
+//! Player skins recoloured per player (`DM_Base.bmp` remaps) go through a
+//! different path with a per-player palette and are not replaced.
+//!
 //! HD **detail** textures go in `<game>\dod\dodstudio_hd\detail\`, named
 //! exactly as under `gfx\detail\` (e.g. `dodstudio_hd\detail\1.tga` replaces
 //! `gfx\detail\1.tga`), so the game's own `gfx\detail` never has to change.
@@ -225,7 +233,9 @@ const RAISED_MAX_PIXELS: usize = 0x10_0000;
 /// The resample helpers' stack arrays: output width may never exceed this.
 const MAX_OUTPUT_WIDTH: u32 = 1024;
 
-/// `GLT_WORLD` in GoldSrc's `GL_TEXTURETYPE`.
+/// `GLT_STUDIO` / `GLT_WORLD` in GoldSrc's `GL_TEXTURETYPE`: model skins and
+/// map textures, the two this module replaces.
+const GLT_STUDIO: u32 = 3;
 const GLT_WORLD: u32 = 4;
 /// `TEX_TYPE_NONE` / `TEX_TYPE_ALPHA`: the two `iType`s world textures use.
 const TEX_TYPE_NONE: u32 = 0;
@@ -238,6 +248,9 @@ const DIR_ENV: &str = "GOLDSRC_HOOKS_TEXTURE_HIRES_DIR";
 /// World textures seen, and how many were replaced.
 static WORLD_SEEN: AtomicU32 = AtomicU32::new(0);
 static REPLACED: AtomicU32 = AtomicU32::new(0);
+/// Model skins seen, and how many were replaced.
+static MODEL_SEEN: AtomicU32 = AtomicU32::new(0);
+static MODEL_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
 static ANY_SEEN: AtomicU32 = AtomicU32::new(0);
 
@@ -285,8 +298,10 @@ static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
 /// Installed once per process; see [`detour::Detour`] on why never undone.
 static INSTALLED: Mutex<Option<Vec<detour::Detour>>> = Mutex::new(None);
 
-/// The replacement folder's index, built on first use.
+/// The replacement folders' indexes, built on first use: map textures, and
+/// model skins (`models` beside `world`).
 static INDEX: OnceLock<Index> = OnceLock::new();
+static MODEL_INDEX: OnceLock<Index> = OnceLock::new();
 
 struct Index {
     dir: PathBuf,
@@ -495,8 +510,33 @@ fn detail_path_stub() -> Vec<u8> {
     code
 }
 
+/// Model skins sit beside the map textures: `dodstudio_hd\models`.
+fn model_dir() -> PathBuf {
+    replacement_dir().with_file_name("models")
+}
+
+/// The part of a model skin's identifier that names the texture itself.
+/// `Mod_LoadStudioModel` builds the identifier as `"%s%s"` of the model's path
+/// and the texture's name (`models/v_garand.mdlgarand.bmp`); keying files on
+/// the texture name alone keeps them readable, and the content hash already
+/// keeps same-named skins from different models apart.
+fn studio_texture_name(identifier: &str) -> &str {
+    let lower = identifier.to_ascii_lowercase();
+    match lower.rfind(".mdl") {
+        Some(at) if at + 4 < identifier.len() => &identifier[at + 4..],
+        _ => identifier,
+    }
+}
+
 fn build_index() -> Index {
-    let dir = replacement_dir();
+    build_index_in(replacement_dir())
+}
+
+fn build_model_index() -> Index {
+    build_index_in(model_dir())
+}
+
+fn build_index_in(dir: PathBuf) -> Index {
     let mut files = HashMap::new();
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
@@ -691,19 +731,34 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     let palette = arg(0x24) as *const u8;
 
     ANY_SEEN.fetch_add(1, Ordering::Relaxed);
-    if texture_type != GLT_WORLD || name_ptr.is_null() {
+    let is_model = match texture_type {
+        GLT_WORLD => false,
+        GLT_STUDIO => true,
+        _ => return std::ptr::null(),
+    };
+    if name_ptr.is_null() {
         return std::ptr::null();
     }
-    WORLD_SEEN.fetch_add(1, Ordering::Relaxed);
+    let (seen, replaced, kind) = if is_model {
+        (&MODEL_SEEN, &MODEL_REPLACED, "model")
+    } else {
+        (&WORLD_SEEN, &REPLACED, "world")
+    };
+    seen.fetch_add(1, Ordering::Relaxed);
 
     // Safety: the identifier every caller passes is a NUL-terminated name.
-    let name = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+    let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+    let name = if is_model {
+        studio_texture_name(&identifier)
+    } else {
+        &*identifier
+    };
     let log = LOG_TEXTURE_LOADS.load(Ordering::Relaxed);
     let skip = |why: &str| {
         if log {
             unsafe {
                 crate::debug::report(&format!(
-                    "texture_hires: world {name:?} {width}x{height} iType {i_type}: {why}"
+                    "texture_hires: {kind} {identifier:?} {width}x{height} iType {i_type}: {why}"
                 ))
             };
         }
@@ -723,8 +778,12 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
         return skip("no palette data, left alone");
     }
 
-    let index = INDEX.get_or_init(build_index);
-    let stem = file_stem_name(&name);
+    let index = if is_model {
+        MODEL_INDEX.get_or_init(build_model_index)
+    } else {
+        INDEX.get_or_init(build_index)
+    };
+    let stem = file_stem_name(name);
     // The name check first: the hash is only worth computing for a texture
     // that has any replacement at all.
     if !index.files.keys().any(|(n, _)| *n == stem) {
@@ -767,7 +826,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     PENDING[2].store(img.height as usize, Ordering::Release);
     drop(owned);
 
-    REPLACED.fetch_add(1, Ordering::Relaxed);
+    replaced.fetch_add(1, Ordering::Relaxed);
     if let Ok(mut last) = LAST_REPLACED.lock() {
         *last = Some(LastReplaced {
             name: name.to_string(),
@@ -778,7 +837,7 @@ unsafe extern "C" fn decide(frame: *const u8) -> *const AtomicUsize {
     if log {
         unsafe {
             crate::debug::report(&format!(
-                "texture_hires: world {name:?} {width}x{height} -> {}x{} from {}",
+                "texture_hires: {kind} {identifier:?} {width}x{height} -> {}x{} from {}",
                 img.width,
                 img.height,
                 path.display()
@@ -1146,8 +1205,17 @@ pub fn status() -> String {
         .get()
         .map(|i| format!("{} file(s) in {}", i.files.len(), i.dir.display()))
         .unwrap_or_else(|| "folder not read yet".to_string());
+    let models = format!(
+        "{} of {} model skin load(s) replaced ({})",
+        MODEL_REPLACED.load(Ordering::Relaxed),
+        MODEL_SEEN.load(Ordering::Relaxed),
+        MODEL_INDEX
+            .get()
+            .map(|i| format!("{} file(s)", i.files.len()))
+            .unwrap_or_else(|| "folder not read yet".to_string())
+    );
     format!(
-        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
         } else {
@@ -1208,6 +1276,20 @@ mod tests {
         fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD8_ARGS, &[0x8B, 0x45, 0x28]);
         fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD8, &[0xE8]);
         fixed(LOAD_TEXTURE2_TAIL, tail::AFTER - 3, &[0x83, 0xC4, 0x1C]);
+    }
+
+    #[test]
+    fn model_skins_are_keyed_by_texture_name() {
+        assert_eq!(
+            studio_texture_name("models/v_garand.mdlgarand.bmp"),
+            "garand.bmp"
+        );
+        assert_eq!(
+            studio_texture_name("models/player/us-inf/us-inf.MDLHead1.bmp"),
+            "Head1.bmp"
+        );
+        assert_eq!(studio_texture_name("no_model_here"), "no_model_here");
+        assert_eq!(studio_texture_name("models/x.mdl"), "models/x.mdl");
     }
 
     #[test]
