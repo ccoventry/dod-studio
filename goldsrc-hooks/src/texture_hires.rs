@@ -226,6 +226,48 @@ const DETAIL_PATH_STOLEN: &[u8] = &[0x8D, 0x85, 0xF4, 0xFE, 0xFF, 0xFF];
 /// 1024x1024 RGBA.
 const DETAIL_MAX_BYTES: usize = 1024 * 1024 * 4;
 
+/// `R_LoadSkys`'s entry through its `malloc` of the 256x256 RGBA face buffer.
+/// Wildcards: globals' addresses and call displacements.
+const SKY_LOADER: &str = "55 8B EC 83 EC 6C A1 ?? ?? ?? ?? 56 57 33 FF 3B C7 89 7D F4 75 25 BE ?? ?? ?? ?? \
+    39 3E 74 0B 56 6A 01 FF 15 ?? ?? ?? ?? 89 3E 83 C6 04 81 FE ?? ?? ?? ?? 7C E6 5F 5E 8B E5 5D C3 39 3D \
+    ?? ?? ?? ?? 74 1D D9 05 ?? ?? ?? ?? D8 1D ?? ?? ?? ?? DF E0 F6 C4 44 7B 0A 89 7D F8 E8 ?? ?? ?? ?? EB 07 \
+    C7 45 F8 01 00 00 00 68 00 00 04 00 E8 ?? ?? ?? ?? 83 C4 04";
+/// `push 0x40000` -- the face buffer's `malloc` size, in [`SKY_LOADER`].
+const SKY_MALLOC_AT: usize = 0x67;
+const SKY_STOCK_PUSH: &[u8] = &[0x68, 0x00, 0x00, 0x04, 0x00];
+
+/// `R_LoadSkys`'s per-face tail: the end of the TGA gamma loop, the texture
+/// bind and the `glTexImage2D` call, whose width and height are hardcoded
+/// `push 0x100`s. Wildcards: globals' addresses and call displacements.
+const SKY_UPLOAD: &str = "8D 0C 02 81 F9 00 00 04 00 0F 8C 7B FF FF FF 8B 04 9D ?? ?? ?? ?? 85 C0 75 0C \
+    E8 ?? ?? ?? ?? 89 04 9D ?? ?? ?? ?? 8B 14 9D ?? ?? ?? ?? 52 E8 ?? ?? ?? ?? 8D 45 E0 8D 4D D8 50 8D 55 D4 \
+    51 52 E8 ?? ?? ?? ?? 8B 45 E0 83 C4 10 83 F8 20 56 68 01 14 00 00 68 08 19 00 00 6A 00 68 00 01 00 00 \
+    68 00 01 00 00 75 07 68 58 80 00 00 EB 05 68 57 80 00 00 6A 00 68 E1 0D 00 00 FF 15 ?? ?? ?? ??";
+/// Offsets into [`SKY_UPLOAD`].
+mod sky {
+    /// `mov eax, [ebx*4 + skytexturenums]` -- the detoured span. Every path
+    /// that has a loaded, gamma-corrected face reaches it (the gamma loop's
+    /// end and its `gl_dither` == 0 skip both land here).
+    pub const HOOK_AT: usize = 0x0f;
+    pub const HOOK_LEN: usize = 7;
+    /// `push 0x100`: height, then width, for `glTexImage2D`.
+    pub const HEIGHT_PUSH: usize = 0x5a;
+    pub const WIDTH_PUSH: usize = 0x5f;
+}
+/// `push 0x100`.
+const SKY_DIM_PUSH: &[u8] = &[0x68, 0x00, 0x01, 0x00, 0x00];
+/// The stock face size, and the largest replacement face (1024x1024 RGBA).
+const SKY_STOCK_SIDE: u32 = 256;
+const SKY_MAX_SIDE: u32 = 1024;
+const SKY_MAX_BYTES: usize = (SKY_MAX_SIDE * SKY_MAX_SIDE * 4) as usize;
+/// `R_LoadSkys`'s path buffer: `char path[64]` at `ebp-0x6c`, filled with
+/// `gfx/env/<skyname><face>.tga` before the face loads.
+const SKY_PATH_OFFSET: usize = 0x6c;
+const SKY_PATH_CAP: usize = 0x40;
+const SKY_PREFIX: &str = "gfx/env/";
+/// HD sky faces, beside the other HD folders: `dodstudio_hd\sky\<skyname><face>.tga`.
+const SKY_DIR: &str = "dodstudio_hd/sky";
+
 /// The stock `GL_Upload32` pixel budget, and its buffer (4 bytes a pixel).
 const STOCK_MAX_PIXELS: usize = 0x80000;
 /// What [`install`] raises it to.
@@ -286,6 +328,18 @@ static DETAIL_RAISED: AtomicBool = AtomicBool::new(false);
 /// `redirect_detail_path`'s address, and where its stub returns to.
 static DETAIL_PATH_FN: AtomicUsize = AtomicUsize::new(0);
 static DETAIL_RESUME: AtomicUsize = AtomicUsize::new(0);
+/// `sky_face`'s address, where its stub returns to, and the two `push 0x100`
+/// immediates it rewrites per face.
+static SKY_FN: AtomicUsize = AtomicUsize::new(0);
+static SKY_RESUME: AtomicUsize = AtomicUsize::new(0);
+static SKY_WIDTH_IMM: AtomicUsize = AtomicUsize::new(0);
+static SKY_HEIGHT_IMM: AtomicUsize = AtomicUsize::new(0);
+/// What those immediates hold right now, so a stock face after an HD one
+/// puts them back.
+static SKY_CURRENT_DIMS: Mutex<(u32, u32)> = Mutex::new((SKY_STOCK_SIDE, SKY_STOCK_SIDE));
+/// Sky faces replaced this session, and the folder's index.
+static SKY_REPLACED: AtomicU32 = AtomicU32::new(0);
+static SKY_INDEX: OnceLock<std::collections::HashSet<String>> = OnceLock::new();
 
 /// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
 /// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
@@ -386,6 +440,15 @@ fn game_dir() -> PathBuf {
 }
 
 fn build_detail_index() -> std::collections::HashSet<String> {
+    build_folder_index(DETAIL_DIR, "HD detail texture(s)")
+}
+
+fn build_sky_index() -> std::collections::HashSet<String> {
+    build_folder_index(SKY_DIR, "HD sky face(s)")
+}
+
+/// Lowercased paths of every file under `game_dir()/rel`, relative to it.
+fn build_folder_index(rel_dir: &str, what: &str) -> std::collections::HashSet<String> {
     fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
@@ -400,17 +463,192 @@ fn build_detail_index() -> std::collections::HashSet<String> {
             }
         }
     }
-    let root = game_dir().join(DETAIL_DIR);
+    let root = game_dir().join(rel_dir);
     let mut out = std::collections::HashSet::new();
     walk(&root, "", &mut out);
     unsafe {
         crate::debug::report(&format!(
-            "texture_hires: indexed {} HD detail texture(s) in {}",
+            "texture_hires: indexed {} {what} in {}",
             out.len(),
             root.display()
         ))
     };
     out
+}
+
+/// What `R_LoadSkys` does to a face after `LoadTGA`, applied to a replacement:
+/// with `gl_dither` on, every channel below 0xfc becomes
+/// `texgamma[c | c >> 6]`; with it off, nothing. Alpha is forced opaque.
+fn match_sky_expansion(pixels: &mut [u8], gamma: &[u8; 256], dither: bool) {
+    for px in pixels.chunks_exact_mut(4) {
+        if dither {
+            for c in &mut px[..3] {
+                if *c < 0xfc {
+                    *c = gamma[(*c | (*c >> 6)) as usize];
+                }
+            }
+        }
+        px[3] = 255;
+    }
+}
+
+/// Points the `glTexImage2D` that follows at `w` x `h`, if it isn't already.
+fn set_sky_dims(w: u32, h: u32) -> bool {
+    let Ok(mut current) = SKY_CURRENT_DIMS.lock() else {
+        return false;
+    };
+    if *current == (w, h) {
+        return true;
+    }
+    let (wi, hi) = (
+        SKY_WIDTH_IMM.load(Ordering::Acquire),
+        SKY_HEIGHT_IMM.load(Ordering::Acquire),
+    );
+    // Safety: both are the operands of `push 0x100` in R_LoadSkys, verified
+    // at install; the function is only ever run on the game thread, which is
+    // the thread calling this, before it reaches either instruction.
+    let ok = unsafe {
+        crate::patch::write_code_bytes(wi, &w.to_le_bytes())
+            && crate::patch::write_code_bytes(hi, &h.to_le_bytes())
+    };
+    if ok {
+        *current = (w, h);
+    }
+    ok
+}
+
+/// Called by the sky stub once `R_LoadSkys` has a face loaded and
+/// gamma-corrected in `buffer`, just before it binds and uploads it. When
+/// `dodstudio_hd/sky` has the same face, overwrites `buffer` with it and
+/// points the upload at its size; otherwise makes sure the upload is back at
+/// the stock 256x256.
+///
+/// # Safety
+///
+/// `frame` is `R_LoadSkys`'s `ebp` and `buffer` its face buffer, which
+/// [`install_sky`] enlarged to [`SKY_MAX_BYTES`] before this could run.
+unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
+    let stock = || {
+        set_sky_dims(SKY_STOCK_SIDE, SKY_STOCK_SIDE);
+    };
+    let gamma_at = GAMMA_TABLE.load(Ordering::Acquire);
+    let dither_at = DITHER_VALUE.load(Ordering::Acquire);
+    if frame.is_null() || buffer.is_null() || gamma_at == 0 || dither_at == 0 {
+        return stock();
+    }
+    let path = unsafe { std::slice::from_raw_parts(frame.sub(SKY_PATH_OFFSET), SKY_PATH_CAP) };
+    let Some(len) = path.iter().position(|&b| b == 0) else {
+        return stock();
+    };
+    let original = String::from_utf8_lossy(&path[..len])
+        .replace('\\', "/")
+        .to_ascii_lowercase();
+    let Some(rest) = original.strip_prefix(SKY_PREFIX) else {
+        return stock();
+    };
+    if !SKY_INDEX.get_or_init(build_sky_index).contains(rest) {
+        return stock();
+    }
+    let file = game_dir().join(SKY_DIR).join(rest);
+    let decoded = std::fs::read(&file)
+        .map_err(|e| e.to_string())
+        .and_then(|b| decode_tga(&b));
+    let mut img = match decoded {
+        Ok(img) => img,
+        Err(why) => {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: could not use {}: {why}",
+                    file.display()
+                ))
+            };
+            return stock();
+        }
+    };
+    while img.width > SKY_MAX_SIDE || img.height > SKY_MAX_SIDE {
+        img = halve(&img);
+    }
+    // Safety: addresses read out of GL_Upload8 at install; R_LoadSkys uses
+    // the same texgamma table and gl_dither cvar for its own faces.
+    let gamma = unsafe { &*(gamma_at as *const [u8; 256]) };
+    let dither = unsafe { *(dither_at as *const f32) } != 0.0;
+    match_sky_expansion(&mut img.pixels, gamma, dither);
+    if !set_sky_dims(img.width, img.height) {
+        return stock();
+    }
+    // Safety: at most SKY_MAX_BYTES, the size install_sky made the buffer.
+    unsafe { std::ptr::copy_nonoverlapping(img.pixels.as_ptr(), buffer, img.pixels.len()) };
+    SKY_REPLACED.fetch_add(1, Ordering::Relaxed);
+    if LOG_TEXTURE_LOADS.load(Ordering::Relaxed) {
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: sky {original} -> {}x{} from {}",
+                img.width,
+                img.height,
+                file.display()
+            ))
+        };
+    }
+}
+
+/// The sky stub, replacing `mov eax, [ebx*4 + skytexturenums]`.
+///
+/// ```asm
+///     push esi                      ; the face buffer
+///     push ebp
+///     call [SKY_FN]                 ; sky_face(ebp, buffer)
+///     add esp, 8
+///     mov eax, [ebx*4 + ...]        ; the stolen instruction, copied verbatim
+///     jmp [SKY_RESUME]
+/// ```
+///
+/// The stolen instruction is position-independent (an absolute address), so
+/// it is copied from the game's own bytes rather than rebuilt. `ecx`/`edx`
+/// are reloaded by the code the stub returns to before any use.
+fn sky_stub(stolen: &[u8]) -> Vec<u8> {
+    let mut code = vec![0x56, 0x55]; // push esi; push ebp
+    indirect(&mut code, CALL, &SKY_FN);
+    code.extend_from_slice(&[0x83, 0xC4, 0x08]); // add esp, 8
+    code.extend_from_slice(stolen);
+    indirect(&mut code, JMP, &SKY_RESUME);
+    code
+}
+
+/// Lets `R_LoadSkys` use HD faces from [`SKY_DIR`]: enlarges its face buffer
+/// to 1024x1024, then hooks the moment each face is ready to upload. Faces
+/// without an HD copy upload exactly as before.
+fn install_sky(base: usize) -> Result<detour::Detour, String> {
+    // Safety: `base` is hw.dll's module handle, mapped for the session.
+    let loader = unsafe { scan::find_unique(base, SKY_LOADER) }
+        .map_err(|why| format!("could not locate R_LoadSkys -- {why}"))?;
+    let upload = unsafe { scan::find_unique(base, SKY_UPLOAD) }
+        .map_err(|why| format!("could not locate R_LoadSkys's upload -- {why}"))?;
+    check_span(loader + SKY_MALLOC_AT, SKY_STOCK_PUSH)?;
+    check_span(upload + sky::HEIGHT_PUSH, SKY_DIM_PUSH)?;
+    check_span(upload + sky::WIDTH_PUSH, SKY_DIM_PUSH)?;
+    let hook_at = upload + sky::HOOK_AT;
+    check_span(hook_at, &[0x8B, 0x04, 0x9D])?;
+    // Safety: inside the matched span.
+    let stolen =
+        unsafe { std::slice::from_raw_parts(hook_at as *const u8, sky::HOOK_LEN) }.to_vec();
+
+    // Buffer first: nothing may write a big face before the buffer is big.
+    // Safety: verified above to be `push 0x40000` before R_LoadSkys' malloc.
+    if !unsafe {
+        crate::patch::write_code_bytes(
+            loader + SKY_MALLOC_AT + 1,
+            &(SKY_MAX_BYTES as u32).to_le_bytes(),
+        )
+    } {
+        return Err("could not enlarge the sky face buffer".into());
+    }
+    SKY_WIDTH_IMM.store(upload + sky::WIDTH_PUSH + 1, Ordering::Release);
+    SKY_HEIGHT_IMM.store(upload + sky::HEIGHT_PUSH + 1, Ordering::Release);
+    SKY_FN.store(sky_face as *const () as usize, Ordering::Release);
+    SKY_RESUME.store(hook_at + sky::HOOK_LEN, Ordering::Release);
+    // Safety: span verified above; the only branch into it (the gl_dither
+    // skip) targets its first byte.
+    unsafe { detour::install(hook_at, sky::HOOK_LEN, &sky_stub(&stolen)) }
 }
 
 /// `(path relative to DETAIL_DIR, path to hand the engine instead)`, if
@@ -1156,6 +1394,12 @@ pub fn install() -> Result<(), String> {
 
     GAMMA_TABLE.store(gamma, Ordering::Release);
     DITHER_VALUE.store(dither, Ordering::Release);
+    match install_sky(base) {
+        Ok(d) => detours.push(d),
+        Err(why) => unsafe {
+            crate::debug::report(&format!("texture_hires: {SKY_DIR} not used -- {why}"))
+        },
+    }
     UPLOAD32_FN.store(upload32, Ordering::Release);
     RESUME.store(tail + tail::RESUME, Ordering::Release);
     UPLOAD8_ARGS.store(tail + tail::UPLOAD8_ARGS, Ordering::Release);
@@ -1215,7 +1459,8 @@ pub fn status() -> String {
             .unwrap_or_else(|| "folder not read yet".to_string())
     );
     format!(
-        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        "{NAME}: {replaced} of {world} world texture load(s) replaced{last}; {files}; {models}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {})",
+        SKY_REPLACED.load(Ordering::Relaxed),
         if CEILING_RAISED.load(Ordering::Relaxed) {
             "1024x1024"
         } else {
@@ -1276,6 +1521,44 @@ mod tests {
         fixed(LOAD_TEXTURE2_TAIL, tail::UPLOAD8_ARGS, &[0x8B, 0x45, 0x28]);
         fixed(LOAD_TEXTURE2_TAIL, tail::CALL_UPLOAD8, &[0xE8]);
         fixed(LOAD_TEXTURE2_TAIL, tail::AFTER - 3, &[0x83, 0xC4, 0x1C]);
+    }
+
+    #[test]
+    fn sky_offsets_land_on_what_they_name() {
+        scan::Pattern::parse(SKY_LOADER).unwrap();
+        scan::Pattern::parse(SKY_UPLOAD).unwrap();
+        fixed(SKY_LOADER, SKY_MALLOC_AT, SKY_STOCK_PUSH);
+        assert_eq!(tokens(SKY_LOADER).len(), SKY_MALLOC_AT + 5 + 8);
+        fixed(SKY_UPLOAD, sky::HOOK_AT, &[0x8B, 0x04, 0x9D]);
+        fixed(SKY_UPLOAD, sky::HEIGHT_PUSH, SKY_DIM_PUSH);
+        fixed(SKY_UPLOAD, sky::WIDTH_PUSH, SKY_DIM_PUSH);
+        assert_eq!(SKY_MAX_BYTES, 1024 * 1024 * 4);
+    }
+
+    #[test]
+    fn sky_stub_reproduces_the_stolen_instruction() {
+        let stolen = [0x8B, 0x04, 0x9D, 0x60, 0x34, 0x34, 0x02];
+        let code = sky_stub(&stolen);
+        assert_eq!(&code[..2], &[0x56, 0x55]);
+        assert_eq!(&code[8..11], &[0x83, 0xC4, 0x08]);
+        assert_eq!(&code[11..18], &stolen);
+        assert_eq!(&code[18..20], &[0xFF, 0x25]);
+        assert_eq!(code.len(), 24);
+    }
+
+    #[test]
+    fn sky_expansion_matches_the_engine() {
+        let mut gamma = [0u8; 256];
+        for (i, g) in gamma.iter_mut().enumerate() {
+            *g = (255 - i) as u8;
+        }
+        let mut px = vec![3, 0xfc, 0xff, 7];
+        match_sky_expansion(&mut px, &gamma, true);
+        // 3 -> gamma[3 | 0] = 252; 0xfc and up untouched; alpha opaque.
+        assert_eq!(px, vec![252, 0xfc, 0xff, 255]);
+        let mut px = vec![3, 4, 5, 7];
+        match_sky_expansion(&mut px, &gamma, false);
+        assert_eq!(px, vec![3, 4, 5, 255]);
     }
 
     #[test]

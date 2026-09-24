@@ -13,6 +13,9 @@ Checks:
   - The detail-texture loader matches once, its two `push 0x100000`s (buffer
     size and the size LoadTGA is told) sit where raise_detail_limit patches,
     and it uploads through the same GL_LoadTexture2.
+  - R_LoadSkys's face-buffer malloc, its hardcoded 256x256 glTexImage2D size
+    and the hooked instruction are where install_sky expects, nothing branches
+    into the hook span, and it shares GL_Upload8's texgamma table.
   - No branch anywhere in either function lands inside a detoured span (other
     than on its first byte).
 
@@ -61,6 +64,19 @@ DETAIL_LOADER = (
     "85 C0 74 21 8B 4D F8 8B 55 FC 68 03 27 00 00 6A 00 6A 04 6A 01 56 51 52 6A 05 53 E8 ?? ?? ?? ??"
 )
 DETAIL_ALLOC, DETAIL_LOADTGA = 0x0C, 0x46
+SKY_LOADER = (
+    "55 8B EC 83 EC 6C A1 ?? ?? ?? ?? 56 57 33 FF 3B C7 89 7D F4 75 25 BE ?? ?? ?? ?? "
+    "39 3E 74 0B 56 6A 01 FF 15 ?? ?? ?? ?? 89 3E 83 C6 04 81 FE ?? ?? ?? ?? 7C E6 5F 5E 8B E5 5D C3 39 3D "
+    "?? ?? ?? ?? 74 1D D9 05 ?? ?? ?? ?? D8 1D ?? ?? ?? ?? DF E0 F6 C4 44 7B 0A 89 7D F8 E8 ?? ?? ?? ?? EB 07 "
+    "C7 45 F8 01 00 00 00 68 00 00 04 00 E8 ?? ?? ?? ?? 83 C4 04"
+)
+SKY_UPLOAD = (
+    "8D 0C 02 81 F9 00 00 04 00 0F 8C 7B FF FF FF 8B 04 9D ?? ?? ?? ?? 85 C0 75 0C "
+    "E8 ?? ?? ?? ?? 89 04 9D ?? ?? ?? ?? 8B 14 9D ?? ?? ?? ?? 52 E8 ?? ?? ?? ?? 8D 45 E0 8D 4D D8 50 8D 55 D4 "
+    "51 52 E8 ?? ?? ?? ?? 8B 45 E0 83 C4 10 83 F8 20 56 68 01 14 00 00 68 08 19 00 00 6A 00 68 00 01 00 00 "
+    "68 00 01 00 00 75 07 68 58 80 00 00 EB 05 68 57 80 00 00 6A 00 68 E1 0D 00 00 FF 15 ?? ?? ?? ??"
+)
+SKY_MALLOC_AT, SKY_HOOK_AT, SKY_HEIGHT, SKY_WIDTH = 0x67, 0x0F, 0x5A, 0x5F
 U8_GAMMA, U8_DITHER, U8_EXPANSION = (0x53, b"\x8a\x91"), (0x94, b"\xd9\x05"), (0x276, b"\x68")
 
 
@@ -131,6 +147,29 @@ def main():
                 check(not (0x4B < t < 0x51), f'{ins.address:#x} does not branch into the detail redirect span')
         lt2 = call(dl + 0x76)
         check(lt2 == tail - 0x2BD, "detail loader uploads through GL_LoadTexture2")
+
+    skl = find_all(img, parse(SKY_LOADER))
+    sku = find_all(img, parse(SKY_UPLOAD))
+    check(len(skl) == 1, f"SKY_LOADER matches once ({[hex(base + x) for x in skl]})")
+    check(len(sku) == 1, f"SKY_UPLOAD matches once ({[hex(base + x) for x in sku]})")
+    if skl and sku:
+        sl, su = skl[0], sku[0]
+        check(img[sl + SKY_MALLOC_AT: sl + SKY_MALLOC_AT + 5] == bytes.fromhex("6800000400"), "sky malloc push 0x40000")
+        for off in (SKY_HEIGHT, SKY_WIDTH):
+            check(img[su + off: su + off + 5] == bytes.fromhex("6800010000"), f"sky push 0x100 at +{off:#x}")
+        check(img[su + SKY_HOOK_AT: su + SKY_HOOK_AT + 3] == bytes.fromhex("8B049D"), "sky hook span is mov eax,[ebx*4+...]")
+        # The upload block must be inside R_LoadSkys, and nothing in R_LoadSkys may
+        # branch into the 7-byte hook span except onto its first byte.
+        check(sl < su < sl + 0x400, "sky upload block is inside R_LoadSkys")
+        hook = base + su + SKY_HOOK_AT
+        for ins in Cs(CS_ARCH_X86, CS_MODE_32).disasm(img[sl:su + 0x100], base + sl):
+            if ins.mnemonic.startswith("j") and ins.op_str.startswith("0x"):
+                t = int(ins.op_str, 16)
+                if hook < t < hook + 7:
+                    check(False, f"{ins.address:#x} branches into the sky hook span")
+        # R_LoadSkys's face gamma uses the same texgamma table GL_Upload8 does.
+        check(img.find((u32(up8 + U8_GAMMA[0] + 2)).to_bytes(4, "little"), sl, su) != -1,
+              "R_LoadSkys uses the same texgamma table as GL_Upload8")
 
     # Every direct branch in both functions: none may land inside a span
     # except on its first byte.
