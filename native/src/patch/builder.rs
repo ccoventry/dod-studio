@@ -1520,8 +1520,9 @@ pub fn spawn_patch_batch(
 /// match-recorded demo names, e.g. "team1-vs-team2") silently truncates the
 /// `+viewdemo` target at the first one instead of failing loudly. Confirmed
 /// live: a source stem of "wsod25-po_r3_sf-..." loaded as bare "wsod25".
-/// Per docs/goldsrc_dod_quirks.md, playdemo/viewdemo targets must also stay
-/// under ~40 characters, which this stem was already over before appending
+/// Launch-line playdemo/viewdemo targets may also need to stay under ~40
+/// characters: the console takes longer names, but the launch line is
+/// untested (docs/goldsrc_dod_quirks.md, #376). This stem was already over that before appending
 /// "_preview" — both constraints are enforced here, once, at the point the
 /// output filename is chosen, so neither preview entry point (this one, or
 /// `generate_all_previews`'s later manual load) can hit it again.
