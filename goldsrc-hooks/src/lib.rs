@@ -47,6 +47,10 @@
 //!   `cl_xhair_style` picks, since the two are drawn by different code paths
 //!   and do not otherwise share a look.
 //!
+//! - `lightmap_gamma`: the first demo of a session no longer renders with its
+//!   lighting far too dark (issue #365): the gamma tables are refreshed from the
+//!   current cvars before a map's lightmaps are built. On by default;
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
 //! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
 //!   effect entity to give it (issue #374). On by default, since it only acts
 //!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
@@ -92,6 +96,7 @@ mod hand_signals;
 mod hide_sprite;
 mod hudelement;
 mod hull_trace_guard;
+mod lightmap_gamma;
 mod msglog;
 mod names;
 mod objicons;
@@ -164,6 +169,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
+        Ordering::Relaxed,
+    );
+    // Only makes the first map's lighting match every later map's, so on
+    // unless asked not to.
+    lightmap_gamma::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_LIGHTMAP_GAMMA", true),
         Ordering::Relaxed,
     );
     // A crash fix rather than a capture setting, so on unless asked not to.
@@ -256,6 +267,8 @@ fn install_fixes() {
     // set as the initial default, so either mechanism works.
     commands::install();
 
+    // hw.dll, once; before the first map loads, which is the one it's for.
+    lightmap_gamma::install();
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.
     tempent_fix::install();
