@@ -512,6 +512,7 @@ pub fn poll() {
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
+    crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
     texture_hires::poll_hd();
@@ -641,6 +642,9 @@ fn status_text() -> String {
     }
     // Always shown once installed: it is on by default, and "did it ever
     // catch anything?" is the question a crash-free session raises.
+    if let Some(lighting) = crate::lightmap_gamma::status_line() {
+        lines.push(lighting);
+    }
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
     }
