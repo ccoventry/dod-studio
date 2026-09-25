@@ -114,20 +114,22 @@ relative call the DLL resolves.
 
 ---
 
-## 5. Pre-Anniversary only
+## 5. The 25th Anniversary build (#370)
 
-`R_DecalInit`'s signature matches the 25th-Anniversary engine too, at a
-different address. The remove loop's does **not** — that build compiled the
-function differently, so `R_DecalUnlink` cannot be recovered from it this way.
+`R_DecalInit`'s signature matches the Anniversary engine too (`+0x2484d0`).
+The remove loop's does **not**: that build inlines `R_DecalUnlink` into its
+remove loops, so the loop leads nowhere. It still keeps a standalone
+`R_DecalUnlink` (`+0x2492a0`, called from `R_DecalCreate`), and that is what
+`decals.rs` finds there, by the function's own first instructions
+(`ANNI_UNLINK`). Those work out the decal's pool index for the decal cache
+(`sub ecx, <pool>`), so they also give the pool base, which must equal
+`R_DecalInit`'s. The pool's end is the base plus the length `R_DecalInit`
+clears.
 
-dod-tools only ever launches the pre-Anniversary movies install, so this
-refuses rather than guesses, and says which engine it wanted. Running the
-verifier against the Anniversary `hw.dll` shows exactly that:
-
-```
-  FAIL the remove loop matches exactly once (0 hit(s)) -- not the pre-Anniversary engine
-  ok   R_DecalInit matches exactly once (1 hit(s))
-```
+The two builds agree on everything the clear relies on: a 28-byte `decal_t`,
+`psurface` at +4, `msurface_t::pdecals` at +0x58, 4096 decals, and an unlink
+that invalidates the decal's cache entry as well as detaching it.
+`verify_decal_offsets.py --anniversary` checks all of that.
 
 ---
 
