@@ -88,6 +88,11 @@ pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
     )
 }
 
+// ── hd_manager.rs ───────────────────────────────────────────────────────────
+
+pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
+pub const HD_SETUP_ALREADY_RUNNING: &str = "The upscaler download is already running.";
+
 // ── capture_manager.rs ──────────────────────────────────────────────────────
 
 pub const CAPTURE_BATCH_ALREADY_RUNNING: &str = "Capture batch already in progress";

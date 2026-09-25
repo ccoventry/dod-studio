@@ -25,6 +25,7 @@ import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
+import { initHdPane } from './hd_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
@@ -56,6 +57,17 @@ const PATH_FIELDS = [
   ['#goldsrc-hooks-dll-path-input', '#goldsrc-hooks-path-warning'],
 ];
 
+/**
+ * Whether `hlPath` is the hl.exe in Steam's own `steamapps/common/Half-Life`
+ * folder -- normally the copy people play online with, which must never have
+ * HLAE or our hook DLL loaded into it (docs/vac_safety.md, #373). A warning,
+ * not a block: someone may keep only that one install and never play online.
+ */
+function isSteamPlayInstall(hlPath) {
+  const normalised = (hlPath || '').trim().replace(/\\/g, '/').toLowerCase();
+  return normalised.endsWith('/steamapps/common/half-life/hl.exe');
+}
+
 async function refreshPathWarnings() {
   const rows = PATH_FIELDS
     .map(([input, warning]) => ({
@@ -79,6 +91,9 @@ async function refreshPathWarnings() {
     let message = "";
     if (states[i] === 'not_found') message = STRINGS.CAPTURE_CONFIG.PATH_NOT_FOUND;
     else if (states[i] === 'not_a_file') message = STRINGS.CAPTURE_CONFIG.PATH_IS_A_FOLDER;
+    else if (row.input.id === 'hl-path-input' && isSteamPlayInstall(row.input.value)) {
+      message = STRINGS.CAPTURE_CONFIG.HL_PATH_PLAY_INSTALL;
+    }
     // 'empty' says nothing on purpose: these are legitimately blank before they
     // are filled in, and the FFmpeg override is optional entirely.
     row.warning.textContent = message;
@@ -358,6 +373,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initHdPane();
 
   async function pickTargetDrive() {
     try {
