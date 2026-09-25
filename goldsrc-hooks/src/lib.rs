@@ -54,6 +54,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_dialog_esc`: keep the demo player's VCR bar open when ESC is
+//!   pressed on the 25th Anniversary build (issue #369). Does nothing on the
+//!   pre-Anniversary build, which never closed it; `GOLDSRC_HOOKS_DEMO_DIALOG_ESC=0`
+//!   turns it off.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -85,6 +89,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_dialog_esc;
 mod detour;
 mod engine;
 mod ex_interp;
@@ -173,6 +178,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    demo_dialog_esc::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_DEMO_DIALOG_ESC", true),
         Ordering::Relaxed,
     );
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,

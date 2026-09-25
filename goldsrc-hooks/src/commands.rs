@@ -514,6 +514,8 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::demo_dialog_esc::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -646,6 +648,9 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(esc) = crate::demo_dialog_esc::status_line() {
+        lines.push(esc);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
