@@ -174,10 +174,7 @@ impl From<Demo> for DemoInfo {
                 {
                     for msg in msgs {
                         if let NetMessage::EngineMessage(eng_msg) = msg
-                            && matches!(
-                                **eng_msg,
-                                EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
-                            )
+                            && is_hltv_message(eng_msg)
                         {
                             is_hltv = true;
                             break 'outer;
@@ -202,6 +199,26 @@ impl From<Demo> for DemoInfo {
             demo_type,
             map_checksum: value.header.map_checksum,
         }
+    }
+}
+
+/// A message only an HLTV proxy's recording carries: `svc_hltv`, or a
+/// director command that drives the auto-director's camera.
+///
+/// Not *any* `svc_director` (#351): DoD Studio injects its own into every
+/// patched preview of a POV demo, and those read as HLTV. Its injections are
+/// only DRC_CMD_MESSAGE (0x06) and DRC_CMD_STUFFTEXT (0x0A) -- bookmarks and
+/// console commands -- and neither moves a camera, so they don't count. The
+/// same rule was worked out in `examples/hltv_shot_gap_probe.rs` (3f3663e).
+fn is_hltv_message(message: &EngineMessage) -> bool {
+    const DRC_CMD_MESSAGE: u8 = 0x06;
+    const DRC_CMD_STUFFTEXT: u8 = 0x0A;
+    match message {
+        EngineMessage::SvcHltv(_) => true,
+        EngineMessage::SvcDirector(d) => {
+            d.command != DRC_CMD_MESSAGE && d.command != DRC_CMD_STUFFTEXT
+        }
+        _ => false,
     }
 }
 
@@ -941,6 +958,32 @@ pub fn extract_match_fingerprint(bytes: &[u8]) -> Result<DemoFingerprint, String
 mod tests {
     use super::*;
     use std::fs;
+
+    /// #351: DoD Studio's own injections into a POV demo's preview --
+    /// bookmarks (DRC_CMD_MESSAGE) and console commands (DRC_CMD_STUFFTEXT) --
+    /// don't make it HLTV; svc_hltv and a camera-moving director command do.
+    #[test]
+    fn only_a_camera_director_command_or_svc_hltv_means_hltv() {
+        let director = |command: u8| {
+            EngineMessage::SvcDirector(dem::types::SvcDirector {
+                length: 2,
+                command,
+                message: vec![0],
+            })
+        };
+        // Injected by the patcher (builder.rs's build_director_message and
+        // build_director_stufftext).
+        assert!(!is_hltv_message(&director(0x06)));
+        assert!(!is_hltv_message(&director(0x0A)));
+        // DRC_CMD_START, _EVENT, _MODE, _CAMERA: a real auto-director stream.
+        for command in [0x01, 0x02, 0x03, 0x04] {
+            assert!(is_hltv_message(&director(command)), "{command:#x}");
+        }
+        assert!(is_hltv_message(&EngineMessage::SvcHltv(
+            dem::types::SvcHltv { mode: 0 }
+        )));
+        assert!(!is_hltv_message(&EngineMessage::SvcNop));
+    }
 
     #[test]
     fn is_relevant_message_admits_objective_messages() {
