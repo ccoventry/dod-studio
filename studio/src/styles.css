@@ -1820,6 +1820,26 @@ tr.keyboard-selected {
   font-size: 12px;
 }
 
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
+}
+
 /* Misses view: one collapsible block per map. */
 .hd-miss-map {
   border-top: 1px solid #282828;

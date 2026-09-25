@@ -669,3 +669,25 @@ export async function hdMisses() {
       throw err;
     });
 }
+
+/** Adds `name` to the install's my_styles.txt as `def` ({ kind: 'ai', model }
+ *  / { kind: 'plain', sharpening } / { kind: 'blend', a, b, percent }), or
+ *  changes it. */
+export async function hdSaveStyle(gamePath, name, def) {
+  return invoke("hd_save_style", { gamePath, name, def })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_save_style):", err);
+      showToast(STRINGS.IPC.hdStyleFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Takes `name` out of the install's my_styles.txt. */
+export async function hdRemoveStyle(gamePath, name) {
+  return invoke("hd_remove_style", { gamePath, name })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_remove_style):", err);
+      showToast(STRINGS.IPC.hdStyleFailed(err), 'error');
+      throw err;
+    });
+}
