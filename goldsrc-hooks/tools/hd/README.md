@@ -94,7 +94,7 @@ python compare.py compare.png
 
 1. **Python 3.11 or newer**, plus three packages: `pip install -r requirements.txt`.
 
-2. **Real-ESRGAN ncnn-vulkan** (the upscaler) and **the extra style models**. `python setup_tools.py` downloads both into a `realesrgan` folder here. To do it by hand instead:
+2. **Real-ESRGAN ncnn-vulkan** (the upscaler) and **the extra style models**. `python setup_tools.py` downloads both into a `realesrgan` folder here. DoD Studio's **HD Textures** page can download the same files into its own folder instead; the page shows the `set REALESRGAN=...` line that points these scripts at that copy. To do it by hand instead:
    - Unzip `realesrgan-ncnn-vulkan-20220424-windows.zip` from the [Real-ESRGAN releases page](https://github.com/xinntao/Real-ESRGAN/releases/tag/v0.2.5.0) into `realesrgan\`, so that `realesrgan\realesrgan-ncnn-vulkan.exe` exists. Or unzip it anywhere and set `REALESRGAN` to the `.exe`.
    - Put each model's `.param` + `.bin` pair into `realesrgan\models\`.
 
@@ -139,7 +139,7 @@ python build_all.py --types sprites,sky   only some types
 Each type's script takes an output folder and what to build. Put the output in the style you use, or in `overrides`, which wins over any style:
 
 ```
-set OUT=C:\...\Half-Life\dod\dodstudio_hd_enabled
+set OUT=C:\...\Half-Life\dod\dodstudio_hd
 
 python world_hd.py   %OUT%\world\ultrasharp   dod_mymap dod_othermap
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\v_mycustomgun.mdl

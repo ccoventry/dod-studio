@@ -591,3 +591,34 @@ export async function restartApp() {
       throw err;
     });
 }
+
+/** What is built under `<game>/dod/dodstudio_hd`, and whether the upscaler is
+ *  downloaded (#372). No toast: the HD page shows the error in place, and the
+ *  common one (no Half-Life path yet) is a state, not a failure. */
+export async function hdStatus(gamePath) {
+  return invoke("hd_status", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_status):", err);
+      throw err;
+    });
+}
+
+/** Downloads the upscaler and style models; progress arrives as
+ *  `hd_setup_progress` events. Rejects with "cancelled" after
+ *  `hdSetupCancel`, which the caller treats as an outcome, not an error. */
+export async function hdSetupTools() {
+  return invoke("hd_setup_tools")
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_setup_tools):", err);
+      if (err !== "cancelled") showToast(STRINGS.IPC.hdSetupFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function hdSetupCancel() {
+  return invoke("hd_setup_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_setup_cancel):", err);
+      throw err;
+    });
+}
