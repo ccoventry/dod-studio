@@ -162,7 +162,7 @@ fn dispatch(argv: &[String]) -> String {
     }
     // Anything else is a list of model paths, replacing whatever was hidden
     // before -- the same "each call restates the whole set" shape
-    // `dodstudio_deathmsg block <id>...` and `dodstudio_msglog <name>...` use.
+    // `dodstudio_deathmsg block <id>...` and `dodstudio_debug_msglog <name>...` use.
     if let Ok(mut list) = HIDDEN.write() {
         *list = rest.to_vec();
     }

@@ -22,7 +22,7 @@
 //!   the kill feed, move it, hide frags, or inject one. HLAE's own
 //!   `mirv_deathmsg` covers only `cstrike` and `tfc`, so none of it works for
 //!   DoD. Full design write-up in `docs/goldsrc_death_notices.md`.
-//! - `msglog`: the `dodstudio_msglog` command -- dump chosen DoD user messages
+//! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
 //! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
@@ -94,9 +94,10 @@ mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod texture_hires;
 mod voice;
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
 use windows_sys::Win32::System::SystemServices::DLL_PROCESS_ATTACH;
 use windows_sys::Win32::System::Threading::{CreateThread, Sleep};
@@ -136,6 +137,11 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// like a broken hook.
 const ANIM_FIX_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
+/// Whether to install `texture_hires` at startup: see
+/// `texture_hires::starts_on`. Off, `dodstudio_hd_enabled 1` can still install it
+/// later in the session.
+static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
+
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
     // The sound fix stays default-off: what it currently does (extending how
     // far gunshots carry) is not the thing that turned out to be wanted, and
@@ -150,6 +156,13 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
         Ordering::Relaxed,
     );
+    // HD textures: on when there's a dod/dodstudio_hd folder to load from,
+    // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
+    // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
+    // it on and off in game.
+    let hd = texture_hires::starts_on();
+    TEXTURE_HIRES_ENABLED.store(hd, Ordering::Relaxed);
+    texture_hires::set_enabled(hd);
 
     unsafe { debug::new_session_separator() };
     unsafe { debug::report("goldsrc-hooks worker thread started") };
@@ -223,6 +236,19 @@ fn install_fixes() {
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();
+
+    if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
+        match texture_hires::install() {
+            Ok(()) => unsafe {
+                debug::report("goldsrc-hooks: texture_hires hook installed (HD textures on)")
+            },
+            Err(why) => unsafe {
+                debug::report(&format!(
+                    "goldsrc-hooks: texture_hires hook not installed -- {why}"
+                ))
+            },
+        }
+    }
 }
 
 /// # Safety

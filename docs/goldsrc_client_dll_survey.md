@@ -248,7 +248,7 @@ want:
 *Technique:* message hook. *Effort:* low per message. *Risk:* low — nothing is
 patched, and an unhandled message is forwarded untouched.
 
-**Built** as `dodstudio_msglog <name>... | all | clear` (issue #267), covering
+**Built** as `dodstudio_debug_msglog <name>... | all | clear` (issue #267), covering
 all 71, not just the eight above — the full name/thunk table this section's
 own tool derives. See `src/msglog.rs`.
 

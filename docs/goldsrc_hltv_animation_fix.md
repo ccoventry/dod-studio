@@ -154,7 +154,7 @@ refinement on top, not the point.
 - `dodstudio_hltv_show_viewmodel_animations <0|1>` — a **cvar**, so it also takes
   `+dodstudio_hltv_show_viewmodel_animations 1` on the launch line or a line in any `.cfg`,
   and shows its value in the console type-ahead.
-- `dodstudio_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
+- `dodstudio_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
 - `dodstudio_debug_status` — what each fix is *doing*, not just what it is set to. A
   cvar can answer "what is this set to" on its own; whether the fix's
@@ -244,7 +244,7 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
-2. `dodstudio_hltv_show_viewmodel_animations 1`, `dodstudio_log_weapon_model 1`.
+2. `dodstudio_hltv_show_viewmodel_animations 1`, `dodstudio_debug_log_weapon_model 1`.
 3. Play an HLTV demo in-eye and let the director move between players.
 4. Read `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log`. The lines that matter, in order of value:
    - `now spectating … holding … viewmodel "…"` on every camera switch,

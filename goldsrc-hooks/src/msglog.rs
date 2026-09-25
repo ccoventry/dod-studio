@@ -1,4 +1,4 @@
-//! `dodstudio_msglog` — dump chosen DoD user messages and their payloads to
+//! `dodstudio_debug_msglog` — dump chosen DoD user messages and their payloads to
 //! the log, forwarded to the game untouched.
 //!
 //! Every investigation of "what does the client actually receive, and when"
@@ -48,7 +48,7 @@ use crate::engine;
 use crate::names::console_name;
 
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
-const COMMAND: &str = console_name!("msglog");
+const COMMAND: &str = console_name!("debug_msglog");
 
 /// Payload bytes kept per log line. DoD's user messages are all small,
 /// fixed-shape structs (the biggest named ones here are a few dozen bytes),
@@ -150,7 +150,7 @@ fn find_thunk(name: &str) -> Option<usize> {
         .map(|&(_, rva)| rva)
 }
 
-/// What `dodstudio_msglog` is currently set to watch.
+/// What `dodstudio_debug_msglog` is currently set to watch.
 enum Wanted {
     None,
     All,
@@ -279,7 +279,7 @@ pub fn poll() {
     }
 }
 
-/// The command's own reply to a bare `dodstudio_msglog` -- always something,
+/// The command's own reply to a bare `dodstudio_debug_msglog` -- always something,
 /// including "logging nothing", since a query should never come back empty.
 fn status() -> String {
     match WANTED.lock() {
