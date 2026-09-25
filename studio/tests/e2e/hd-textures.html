@@ -4,7 +4,7 @@
   general shape. Carries only the elements the pane reads and writes, plus the
   Configuration page's hl.exe field it takes the game path from. A test
   controls the backend by registering `hd_status` / `hd_setup_tools` /
-  `hd_build` / `hd_set_python` handlers on window.__mockInvokeHandlers; the
+  `hd_build` / `hd_set_python` / `hd_misses` handlers on window.__mockInvokeHandlers; the
   file picker is `plugin:dialog|open`, which goes through the same mock.
 -->
 <html lang="en">
@@ -38,6 +38,12 @@
   <p id="hd-build-progress"></p>
   <p id="hd-build-line"></p>
   <pre id="hd-realesrgan-line"></pre>
+  <button id="hd-misses-btn">Read the game's log</button>
+  <pre id="hd-misses-command"></pre>
+  <button id="hd-misses-copy-btn">Copy</button>
+  <p id="hd-misses-text"></p>
+  <input type="checkbox" id="hd-misses-on-purpose" />
+  <div id="hd-misses-maps"></div>
   <div id="footer-hd-summary"></div>
   <div id="toast-container"></div>
 

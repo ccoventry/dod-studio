@@ -1,5 +1,6 @@
 //! The HD Textures page's backend (#372): what is built, finding (or
-//! fetching) the upscaler and a Python, and running the build.
+//! fetching) the upscaler and a Python, running the build, and the misses
+//! the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
 use std::path::{Path, PathBuf};
@@ -7,7 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use native::hd::build::{BuildOutcome, BuildRequest};
-use native::hd::{self, HdStatus, python, setup::SetupOutcome, upscaler};
+use native::hd::{self, HdStatus, misses, python, setup::SetupOutcome, upscaler};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
@@ -192,6 +193,17 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
         let hd_tools = hd::setup::hd_tools_dir();
         let dir = path.as_deref().map(str::trim).filter(|p| !p.is_empty());
         upscaler::set_chosen(&hd_tools, dir.map(Path::new))
+    }))
+    .await
+}
+
+/// The newest list `dodstudio_debug_hd_misses` wrote to the hook log (none
+/// when no log has one yet), and the command itself.
+#[tauri::command]
+pub async fn hd_misses() -> Result<misses::MissesView, String> {
+    // A day's hook log can be tens of thousands of lines.
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(|| {
+        misses::view(&native::activity_log_dir())
     }))
     .await
 }

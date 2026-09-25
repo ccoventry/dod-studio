@@ -1,12 +1,13 @@
 // hd_pane.js — the HD Textures page (#372): what is built under
 // <game>/dod/dodstudio_hd, the movie.cfg lines to use it, downloading the
-// upscaler (and a Python when the PC has none), and running the build.
+// upscaler (and a Python when the PC has none), running the build, and the
+// textures the game last reported as kept original (the misses view).
 // The build is goldsrc-hooks/tools/hd's own scripts, so this page and the
 // command line always make the same files.
 
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler } from './ipc_bridge.js';
+import { hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -50,6 +51,12 @@ export function initHdPane() {
   const buildLine = document.querySelector('#hd-build-line');
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
+  const missesBtn = document.querySelector('#hd-misses-btn');
+  const missesCommand = document.querySelector('#hd-misses-command');
+  const missesCopyBtn = document.querySelector('#hd-misses-copy-btn');
+  const missesText = document.querySelector('#hd-misses-text');
+  const missesOnPurpose = document.querySelector('#hd-misses-on-purpose');
+  const missesMaps = document.querySelector('#hd-misses-maps');
   if (!statusBody || !statusHead) return;
 
   // The cvar names come from the backend (native::hd), not from here.
@@ -270,19 +277,101 @@ export function initHdPane() {
     }
   }
 
+  // The misses view: the newest list the game wrote to the hook log.
+  let missReport = null;
+
+  function renderMisses() {
+    missesMaps.innerHTML = '';
+    if (!missReport) {
+      missesText.textContent = STRINGS.HD.MISSES_NONE;
+      return;
+    }
+    const r = missReport;
+    missesText.textContent = STRINGS.HD.missesFrom(r.date, r.time, r.style, r.summary);
+    const showOnPurpose = missesOnPurpose.checked;
+    const el = (tag, className, text) => {
+      const e = document.createElement(tag);
+      if (className) e.className = className;
+      if (text !== undefined) e.textContent = text;
+      return e;
+    };
+    for (const map of r.maps) {
+      const details = el('details', 'hd-miss-map');
+      // Open when the list is short enough to take in at once.
+      details.open = r.maps.length <= 3;
+      details.append(el('summary', null, STRINGS.HD.missesMap(map.map, map.total, map.on_purpose)));
+      const groups = map.groups.filter((g) => showOnPurpose || g.reason !== 'on_purpose');
+      if (!groups.length) details.append(el('p', 'hd-hint', STRINGS.HD.MISSES_ONLY_ON_PURPOSE));
+      for (const group of groups) {
+        details.append(el('div', 'hd-miss-heading', `${group.heading} (${group.entries.length})`));
+        const advice = STRINGS.HD.MISSES_ADVICE[group.reason];
+        if (advice) details.append(el('p', 'hd-hint', advice));
+        const list = el('ul', 'hd-miss-list');
+        for (const entry of group.entries) {
+          const item = el('li');
+          const notes = [entry.detail];
+          if (entry.loads > 1) notes.push(STRINGS.HD.missesLoads(entry.loads, entry.asset_type));
+          item.append(
+            el('span', 'hd-miss-type', STRINGS.HD.MISS_TYPE_NAMES[entry.asset_type] || entry.asset_type),
+            el('span', 'hd-mono', entry.name),
+            el('span', 'hd-miss-detail', notes.join(', ')),
+          );
+          if (entry.also_on.length) {
+            const also = el('span', 'hd-miss-detail', STRINGS.HD.missesAlsoOn(entry.also_on.length));
+            also.title = entry.also_on.join(', ');
+            item.append(also);
+          }
+          list.append(item);
+        }
+        details.append(list);
+      }
+      missesMaps.append(details);
+    }
+  }
+
+  let readingMisses = null;
+  function readMisses() {
+    if (!missesBtn || !missesMaps) return null;
+    readingMisses ??= (async () => {
+      missesBtn.disabled = true;
+      missesBtn.textContent = STRINGS.HD.MISSES_READING;
+      try {
+        const view = await hdMisses();
+        missesCommand.textContent = view.command;
+        missReport = view.report;
+        renderMisses();
+      } catch (err) {
+        missesText.textContent = String(err);
+      } finally {
+        missesBtn.disabled = false;
+        missesBtn.textContent = STRINGS.HD.MISSES_BUTTON;
+        readingMisses = null;
+      }
+    })();
+    return readingMisses;
+  }
+
   refreshBtn?.addEventListener('click', refresh);
   styleSelect?.addEventListener('change', renderCfgLines);
-  // Refresh whenever the page is opened: builds can happen outside the app.
-  document.querySelector('.nav-tab-btn[data-nav="hd-textures"]')?.addEventListener('click', refresh);
+  // Refresh whenever the page is opened: builds can happen outside the app,
+  // and the game writes new misses to its log.
+  document.querySelector('.nav-tab-btn[data-nav="hd-textures"]')?.addEventListener('click', () => {
+    refresh();
+    readMisses();
+  });
+  missesBtn?.addEventListener('click', readMisses);
+  missesOnPurpose?.addEventListener('change', renderMisses);
 
-  copyBtn?.addEventListener('click', async () => {
+  async function copyText(text) {
     try {
-      await navigator.clipboard.writeText(cfgLines.textContent);
+      await navigator.clipboard.writeText(text);
       showToast(STRINGS.HD.COPIED, 'success');
     } catch (err) {
       console.error('Clipboard write failed:', err);
     }
-  });
+  }
+  copyBtn?.addEventListener('click', () => copyText(cfgLines.textContent));
+  missesCopyBtn?.addEventListener('click', () => copyText(missesCommand.textContent));
 
   listen('hd_setup_progress', (event) => {
     const p = event.payload;

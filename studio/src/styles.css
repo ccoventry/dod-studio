@@ -1805,3 +1805,57 @@ tr.keyboard-selected {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* One line of code beside its Copy button. */
+.hd-code-inline {
+  margin: 0;
+  min-width: 16em;
+}
+
+.hd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* Misses view: one collapsible block per map. */
+.hd-miss-map {
+  border-top: 1px solid #282828;
+  padding: 6px 0;
+}
+
+.hd-miss-map summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.hd-miss-heading {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.hd-miss-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-miss-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0;
+}
+
+.hd-miss-type {
+  min-width: 90px;
+  color: var(--text-muted);
+}
+
+.hd-miss-detail {
+  color: var(--text-muted);
+}
