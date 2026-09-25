@@ -84,13 +84,20 @@ pub fn dev_scripts_dir() -> PathBuf {
         .join("hd")
 }
 
-/// The scripts to run: the app's bundled copy, else the repo's in a dev
-/// build. `None` when neither has `build_all.py`.
+/// The scripts to run: the app's bundled copy (`hd-scripts` in its
+/// resources), else the repo's. A debug build tries the repo's first: `tauri
+/// dev` copies the resources too, but only when the app is rebuilt, so the
+/// repo's are the ones being edited. `None` when neither has `build_all.py`.
 pub fn scripts_dir(bundled: Option<&Path>) -> Option<PathBuf> {
-    bundled
-        .map(Path::to_path_buf)
+    let bundled = bundled.map(Path::to_path_buf);
+    let order = if cfg!(debug_assertions) {
+        [Some(dev_scripts_dir()), bundled]
+    } else {
+        [bundled, Some(dev_scripts_dir())]
+    };
+    order
         .into_iter()
-        .chain(std::iter::once(dev_scripts_dir()))
+        .flatten()
         .find(|dir| dir.join("build_all.py").is_file())
 }
 
@@ -366,10 +373,53 @@ mod tests {
     fn the_dev_build_finds_the_repo_scripts() {
         assert!(dev_scripts_dir().join("build_all.py").is_file());
         assert_eq!(scripts_dir(None), Some(dev_scripts_dir()));
-        let empty = Scratch::new("hd_build_no_scripts");
-        assert_eq!(scripts_dir(Some(&empty)), Some(dev_scripts_dir()));
-        std::fs::write(empty.join("build_all.py"), b"").unwrap();
-        assert_eq!(scripts_dir(Some(&empty)), Some(empty.to_path_buf()));
+        let bundled = Scratch::new("hd_build_bundled_scripts");
+        // A bundled folder without the scripts is passed over either way.
+        assert_eq!(scripts_dir(Some(&bundled)), Some(dev_scripts_dir()));
+        // With them, a release build uses it and a debug build the repo's.
+        std::fs::write(bundled.join("build_all.py"), b"").unwrap();
+        let expected = if cfg!(debug_assertions) {
+            dev_scripts_dir()
+        } else {
+            bundled.to_path_buf()
+        };
+        assert_eq!(scripts_dir(Some(&bundled)), Some(expected));
+    }
+
+    /// Everything the scripts read at run time is bundled into
+    /// `hd-scripts`, and nothing of the user's is (their own lists may
+    /// still sit in tools/hd from before #385).
+    #[test]
+    fn the_app_bundles_every_script_and_none_of_the_users_files() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../../../studio/src-tauri/tauri.conf.json"))
+                .unwrap();
+        let resources = conf["bundle"]["resources"].as_object().unwrap();
+        let bundled: Vec<&str> = resources
+            .iter()
+            .filter(|(_, to)| to.as_str().is_some_and(|t| t.starts_with("hd-scripts")))
+            .map(|(from, _)| from.as_str())
+            .collect();
+        let tools = "../../goldsrc-hooks/tools/hd/";
+        assert!(
+            bundled.contains(&format!("{tools}*.py").as_str()),
+            "{bundled:?}"
+        );
+        // The data file build_all.py passes to models_hd.py.
+        assert!(
+            bundled.contains(&format!("{tools}valve_models.txt").as_str()),
+            "{bundled:?}"
+        );
+        for user_file in ["hd_maps.txt", "my_styles.txt"] {
+            assert!(
+                !bundled
+                    .iter()
+                    .any(|b| b.ends_with(user_file) || b.ends_with("*.txt")),
+                "{user_file} could be bundled: {bundled:?}"
+            );
+        }
+        let script = include_str!("../../../goldsrc-hooks/tools/hd/build_all.py");
+        assert!(script.contains(r#"os.path.join(C.HERE, "valve_models.txt")"#));
     }
 
     #[test]
