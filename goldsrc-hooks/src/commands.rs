@@ -512,6 +512,7 @@ pub fn poll() {
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
+    crate::tempent_fix::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -636,6 +637,11 @@ fn status_text() -> String {
     // what was asked for, this says what the engine is actually clamping to.
     if ex_interp::active() != 0 && ex_interp::active() != ex_interp::STOCK_MS {
         lines.push(format!("interpolation: {}", ex_interp::status()));
+    }
+    // Always shown once installed: it is on by default, and "did it ever
+    // catch anything?" is the question a crash-free session raises.
+    if let Some(tempent) = crate::tempent_fix::status_line() {
+        lines.push(tempent);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));

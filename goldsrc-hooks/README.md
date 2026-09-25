@@ -169,6 +169,12 @@ detail textures and skies as the game loads them: on when there's a
 the scripts that build
 those files; see its README.
 
+`src/tempent_fix.rs` stops a years-old DoD crash (`client.dll+0x225cc`, issue
+#374): six places in DoD's client write into a temporary effect entity without
+checking the engine gave them one. It is on by default, because it only acts
+where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it
+off. `dodstudio_debug_status` shows how many effects it has skipped.
+
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
 faulting address as `module+RVA` so a crash is diagnosable from the log alone. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

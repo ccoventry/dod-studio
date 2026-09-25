@@ -19,8 +19,18 @@ session: check that nothing but the crash follows it in that day's log.
 import argparse, collections, glob, json, os, re
 
 # Crashes already understood: `module+offset` -> what it is.
+# #374: DoD writes into a temp entity the engine could not allocate (NULL).
+# One entry per unchecked call site, at the first write after each; every one
+# is guarded by src/tempent_fix.rs, so seeing one means the fix did not install
+# (the log's "tempent_fix:" lines say why).
+TEMPENT = "#374: DoD writes into a NULL temp entity ({}) -- tempent_fix guards this; check its log line"
 KNOWN = {
-    "client.dll+0x225cc": "#374: DoD writes into a NULL temp entity after a demo load (fix planned)",
+    "client.dll+0x225cc": TEMPENT.format("hit puff dust"),
+    "client.dll+0x226a4": TEMPENT.format("hit puff blood"),
+    "client.dll+0xb23e": TEMPENT.format("blood stream dust"),
+    "client.dll+0xb2e2": TEMPENT.format("blood stream blood"),
+    "client.dll+0x31574": TEMPENT.format("shell casing, player model"),
+    "client.dll+0x316ad": TEMPENT.format("shell casing, viewmodel"),
 }
 # Log lines that are only noise when reading what led up to a crash.
 NOISE = re.compile(r"texture_hires: (world|model|sprite) \"|texture_hires: detail gfx|still cached from|"
