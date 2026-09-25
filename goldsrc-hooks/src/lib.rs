@@ -51,6 +51,9 @@
 //!   effect entity to give it (issue #374). On by default, since it only acts
 //!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
 //!   it off.
+//! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
+//!   walks a previous map's collision data (issue #384). On by default for the
+//!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -88,6 +91,7 @@ mod ex_interp;
 mod hand_signals;
 mod hide_sprite;
 mod hudelement;
+mod hull_trace_guard;
 mod msglog;
 mod names;
 mod objicons;
@@ -165,6 +169,10 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // A crash fix rather than a capture setting, so on unless asked not to.
     tempent_fix::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
+        Ordering::Relaxed,
+    );
+    hull_trace_guard::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
@@ -251,6 +259,8 @@ fn install_fixes() {
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.
     tempent_fix::install();
+    // hw.dll is loaded for the whole session, so once is enough.
+    hull_trace_guard::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {
