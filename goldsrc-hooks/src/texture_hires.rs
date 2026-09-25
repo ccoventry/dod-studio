@@ -2567,6 +2567,275 @@ fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String>
     Ok(detour)
 }
 
+/// The 25th Anniversary `hw.dll`'s map-texture, model-skin and sprite swap
+/// and leftover-texture fix (#370). Same idea as the pre-Anniversary hooks,
+/// compiled differently:
+///
+/// - `GL_LoadTexture2` (+0x23c0d0) keeps the same nine arguments at the same
+///   `[ebp+...]` offsets and the same final branch, but its tail loads
+///   `iType` into `eax` between the `textureType` compare and the `jne`, and
+///   keeps the cache record in `ebx`, not `esi`. The detour takes the compare
+///   and that load (no relative branch among them) and resumes *at* the
+///   `jne`, so the flags it tests are the stub's own compare's.
+/// - `GL_Upload8` (+0x23cfa0) does exactly what the pre-Anniversary one does
+///   to a palette -- `texgamma` through a 256-byte table, `gl_dither`'s
+///   `c | c >> 6` for opaque textures, index 255 transparent for masked ones
+///   -- so the replacement is prepared the same way, with the table and the
+///   cvar read out of its instructions.
+/// - The cache lookup compares the record in `esi`; its hit path refreshes
+///   the servercount with `mov ax, word ptr [servercount]`.
+///
+/// Not ported yet: the 1024x1024 upload ceiling (`GL_Upload32` here still
+/// stops at 512x1024, so replacements are capped at 512 per side), and the
+/// detail-texture and sky loaders, which this build rewrote. Checked by
+/// `tools/verify_texture_hires_offsets.py --anniversary`.
+mod anniversary {
+    use super::*;
+
+    /// `GL_LoadTexture2`'s tail, from the optional upload callback through the
+    /// `GL_Upload32` call and the jump to the common exit. Wildcards: the
+    /// callback pointer's address, the two `jne upload8`s, the call and the
+    /// jump.
+    pub const TAIL: &str = "A1 ?? ?? ?? ?? 8B 75 10 85 C0 74 10 FF B5 EC BC FF FF FF 75 14 56 57 FF D0 \
+        83 C4 10 83 7D 0C 05 8B 45 20 0F 85 ?? ?? ?? ?? 83 F8 04 0F 85 ?? ?? ?? ?? FF 75 28 50 FF 75 1C \
+        FF 75 14 56 FF B5 EC BC FF FF E8 ?? ?? ?? ?? 83 C4 18 E9 ?? ?? ?? ??";
+
+    /// Offsets into [`TAIL`].
+    pub mod tail {
+        /// `cmp dword ptr [ebp+0xc], 5; mov eax, [ebp+0x20]` -- the detoured span.
+        pub const BRANCH: usize = 0x1c;
+        /// `jne upload8` (`0F 85 rel32`), right after the span: the stub resumes here.
+        pub const JNE_UPLOAD8: usize = 0x23;
+        /// `call GL_Upload32`.
+        pub const CALL_UPLOAD32: usize = 0x43;
+        /// `jmp exit` (`E9 rel32`), past the `GL_Upload32` path.
+        pub const JMP_AFTER: usize = 0x4b;
+    }
+
+    pub const BRANCH_STOLEN: &[u8] = &[0x83, 0x7D, 0x0C, 0x05, 0x8B, 0x45, 0x20];
+
+    /// The `GL_Upload8` argument setup the `jne` goes to, up to its call; the
+    /// call's `add esp, 0x1c` is followed directly by the common exit.
+    pub const UPLOAD8_ARGS: &[u8] = &[
+        0xFF, 0x75, 0x28, 0xFF, 0xB5, 0xD4, 0xBC, 0xFF, 0xFF, 0x50, 0xFF, 0x75, 0x1C, 0xFF, 0x75,
+        0x14, 0x56, 0xFF, 0xB5, 0xEC, 0xBC, 0xFF, 0xFF,
+    ];
+    /// `add esp, 0x1c`.
+    pub const UPLOAD8_POP: &[u8] = &[0x83, 0xC4, 0x1C];
+
+    /// `GL_Upload32`'s and `GL_Upload8`'s first instructions, to confirm the
+    /// two calls land where the disassembly says: `GL_Upload32`'s texture-stat
+    /// call, and `GL_Upload8`'s "it's > 640*480 bytes" check.
+    pub const UPLOAD32_ENTRY: &[u8] = &[
+        0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x34, 0x53, 0x56, 0x57, 0x8D, 0x45, 0xF8, 0x50, 0x8D, 0x45,
+        0xD0, 0x50, 0x8D, 0x45, 0xCC, 0x50, 0xE8,
+    ];
+    pub const UPLOAD8_ENTRY: &[u8] = &[
+        0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0x8B, 0x45, 0x0C, 0x8B, 0xC8, 0x8B, 0x55, 0x10, 0x0F,
+        0xAF, 0xCA, 0x89, 0x4D, 0xF8, 0x81, 0xF9, 0x00, 0xC0, 0x12, 0x00,
+    ];
+
+    /// `mov al, byte ptr [eax + <texgamma table>]`, in `GL_Upload8`'s palette loop.
+    pub const UPLOAD8_GAMMA: (usize, &[u8]) = (0x58, &[0x8A, 0x80]);
+    /// `movss xmm0, dword ptr [<gl_dither.value>]`.
+    pub const UPLOAD8_DITHER: (usize, &[u8]) = (0x16e, &[0xF3, 0x0F, 0x10, 0x05]);
+
+    /// `GL_LoadTexture2`'s cache lookup loop, from its top through the size
+    /// compares. Wildcards: the record count and array, the `strcmp` call and
+    /// the hit path's `je`.
+    pub const HEAD: &str = "8B 0D ?? ?? ?? ?? 33 FF BE ?? ?? ?? ?? 0F 1F 00 3B F9 7D 74 66 83 7E 04 00 \
+        7D 15 85 DB 8B C6 0F 45 C3 47 8B D8 83 C6 54 89 9D D8 BC FF FF EB E0 8D 46 14 50 52 E8 ?? ?? ?? ?? \
+        83 C4 08 85 C0 74 12 8B 0D ?? ?? ?? ?? 47 8B 95 F8 BC FF FF 83 C6 54 EB BD 8B 45 10 3B 46 08 75 0C \
+        8B 45 14 3B 46 0C 0F 84 ?? ?? ?? ??";
+
+    /// Offsets into [`HEAD`]. `esi` is the record being compared.
+    pub mod head {
+        /// `mov ecx, [count]; inc edi; ...; add esi, 0x54; jmp loop` -- on to
+        /// the next record.
+        pub const NEXT_RECORD: usize = 0x41;
+        /// `mov eax, [ebp+0x10]; cmp eax, [esi+8]` -- reached only when the
+        /// names matched; the detoured span.
+        pub const NAME_MATCHED: usize = 0x53;
+        /// `jne` -- the width compare's branch, where the stub resumes.
+        pub const SIZE_BRANCH: usize = 0x59;
+        /// `je hit` (`0F 84 rel32`).
+        pub const JE_HIT: usize = 0x61;
+    }
+    pub const NAME_MATCHED_STOLEN: &[u8] = &[0x8B, 0x45, 0x10, 0x3B, 0x46, 0x08];
+    /// The hit path: `cmp word ptr [esi+4], 0; jle +0xa`, then
+    /// `mov ax, word ptr [servercount]`.
+    pub const HIT: &[u8] = &[0x66, 0x83, 0x7E, 0x04, 0x00, 0x7E, 0x0A, 0x66, 0xA1];
+
+    /// Target of the `rel32` branch whose `opcode` is at `at`.
+    ///
+    /// Safety: `at .. at + opcode.len() + 4` must be mapped.
+    unsafe fn rel32_target(at: usize, opcode: &[u8]) -> Result<usize, String> {
+        let rel = unsafe { operand_after(at, opcode) }? as u32;
+        Ok((at as u32)
+            .wrapping_add(opcode.len() as u32 + 4)
+            .wrapping_add(rel) as usize)
+    }
+
+    /// The swap stub, replacing `cmp [ebp+0xc], 5; mov eax, [ebp+0x20]`.
+    ///
+    /// ```asm
+    ///     push ebx                      ; the gltexture_t being filled
+    ///     push ebp
+    ///     call [DECIDE_FN]              ; decide(ebp, ebx)
+    ///     add esp, 8
+    ///     test eax, eax
+    ///     jnz swap
+    ///     cmp dword ptr [ebp+0xc], 5    ; the stolen instructions
+    ///     mov eax, [ebp+0x20]
+    ///     jmp [RESUME]                  ; the engine's own jne, on these flags
+    /// swap:
+    ///     push [ebp+0x28]               ; filter
+    ///     push [ebp+0x20]               ; iType
+    ///     push [ebp+0x1c]               ; mipmap
+    ///     push [eax+8]                  ; replacement height
+    ///     push [eax+4]                  ; replacement width
+    ///     push [eax]                    ; replacement pixels
+    ///     call [UPLOAD32_FN]
+    ///     add esp, 0x18
+    ///     jmp [AFTER]
+    /// ```
+    ///
+    /// `eax`/`ecx`/`edx` and the flags are dead at the detour (the callback
+    /// call just before clobbered them, and both targets reload what they
+    /// use); `jmp [mem]` leaves the flags alone for the resumed `jne`. `ebx`,
+    /// `esi`, `edi` and `ebp` survive both calls (cdecl callee-saved), and the
+    /// stack is balanced on every path.
+    pub fn swap_stub() -> Vec<u8> {
+        let mut code = vec![0x53, 0x55]; // push ebx; push ebp
+        indirect(&mut code, CALL, &DECIDE_FN);
+        code.extend_from_slice(&[0x83, 0xC4, 0x08]); // add esp, 8
+        code.extend_from_slice(&[0x85, 0xC0]); // test eax, eax
+        code.extend_from_slice(&[0x75, (BRANCH_STOLEN.len() + 6) as u8]); // jnz swap
+        code.extend_from_slice(BRANCH_STOLEN);
+        indirect(&mut code, JMP, &RESUME);
+        // swap:
+        code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
+        code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
+        code.extend_from_slice(&[0xFF, 0x75, 0x1C]); // push [ebp+0x1c]
+        code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
+        code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
+        code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
+        indirect(&mut code, CALL, &UPLOAD32_FN);
+        code.extend_from_slice(&[0x83, 0xC4, 0x18]); // add esp, 0x18
+        indirect(&mut code, JMP, &AFTER);
+        code
+    }
+
+    /// The cache stub, replacing `mov eax, [ebp+0x10]; cmp eax, [esi+8]` once
+    /// a record's name has matched. As the pre-Anniversary one, with the
+    /// record in `esi` and the resumed branch being the engine's own `jne`.
+    ///
+    /// `eax`/`ecx`/`edx` are dead at the detour (just past a `strcmp` call):
+    /// the next-record path reloads `ecx` and `edx`, and every path after the
+    /// resumed `jne` reloads `edx` before using it.
+    pub fn cache_stub() -> Vec<u8> {
+        let mut code = vec![0x56, 0x55]; // push esi; push ebp
+        indirect(&mut code, CALL, &KEEP_CACHED_FN);
+        code.extend_from_slice(&[0x83, 0xC4, 0x08]); // add esp, 8
+        code.extend_from_slice(&[0x85, 0xC0]); // test eax, eax
+        code.extend_from_slice(&[0x75, 0x06]); // jnz keep (+6)
+        indirect(&mut code, JMP, &CACHE_NEXT);
+        code.extend_from_slice(NAME_MATCHED_STOLEN);
+        indirect(&mut code, JMP, &CACHE_RESUME);
+        code
+    }
+
+    /// Installs the swap (and, if it can, the leftover-texture fix) on the
+    /// Anniversary build. `tail` is the matched [`TAIL`].
+    pub fn install(base: usize, tail: usize) -> Result<Vec<detour::Detour>, String> {
+        let upload32 = unsafe { call_target(tail + tail::CALL_UPLOAD32) }?;
+        check_span(upload32, UPLOAD32_ENTRY)?;
+        let upload8_args = unsafe { rel32_target(tail + tail::JNE_UPLOAD8, &[0x0F, 0x85]) }?;
+        check_span(upload8_args, UPLOAD8_ARGS)?;
+        let upload8 = unsafe { call_target(upload8_args + UPLOAD8_ARGS.len()) }?;
+        check_span(upload8, UPLOAD8_ENTRY)?;
+        let after = unsafe { rel32_target(tail + tail::JMP_AFTER, &[0xE9]) }?;
+        // The GL_Upload8 path's `add esp, 0x1c` falls straight into the exit
+        // the GL_Upload32 path jumps to: the swap rejoins where both do.
+        let pop = upload8_args + UPLOAD8_ARGS.len() + 5;
+        check_span(pop, UPLOAD8_POP)?;
+        if pop + UPLOAD8_POP.len() != after {
+            return Err(format!(
+                "GL_Upload8's path ends at {:#x}, but GL_Upload32's jumps to {after:#x}",
+                pop + UPLOAD8_POP.len()
+            ));
+        }
+        let (off, op) = UPLOAD8_GAMMA;
+        let gamma = unsafe { operand_after(upload8 + off, op) }?;
+        let (off, op) = UPLOAD8_DITHER;
+        let dither = unsafe { operand_after(upload8 + off, op) }?;
+        check_span(tail + tail::BRANCH, BRANCH_STOLEN)?;
+
+        GAMMA_TABLE.store(gamma, Ordering::Release);
+        DITHER_VALUE.store(dither, Ordering::Release);
+        UPLOAD32_FN.store(upload32, Ordering::Release);
+        RESUME.store(tail + tail::JNE_UPLOAD8, Ordering::Release);
+        AFTER.store(after, Ordering::Release);
+        DECIDE_FN.store(decide as *const () as usize, Ordering::Release);
+
+        let branch = tail + tail::BRANCH;
+        // Safety: span verified above; nothing branches into it (the callback
+        // test's `je` targets its first byte).
+        let swap = unsafe { detour::install(branch, BRANCH_STOLEN.len(), &swap_stub()) }?;
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: 25th Anniversary hw.dll -- swap hook at +{:#x} (stub {:#x}), GL_Upload32 +{:#x}; \
+                 ceiling stock (replacements capped at 512); detail textures and skies are pre-Anniversary only for now; \
+                 replacements from {}",
+                branch - base,
+                swap.stub_address(),
+                upload32 - base,
+                WORLD_DIR
+            ))
+        };
+        let mut detours = vec![swap];
+        match install_stale_fix(base, tail) {
+            Ok(d) => detours.push(d),
+            Err(why) => unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: a later map may show an earlier map's same-named texture -- {why}"
+                ))
+            },
+        }
+        Ok(detours)
+    }
+
+    fn install_stale_fix(base: usize, tail: usize) -> Result<detour::Detour, String> {
+        // Safety: `base` is hw.dll's module handle, mapped for the session.
+        let head = unsafe { scan::find_unique(base, HEAD) }
+            .map_err(|why| format!("could not locate GL_LoadTexture2's cache lookup -- {why}"))?;
+        if !(head < tail && tail - head < 0x800) {
+            return Err(format!(
+                "cache lookup at {head:#x} isn't in the same function as the upload branch at {tail:#x}"
+            ));
+        }
+        check_span(head + head::NAME_MATCHED, NAME_MATCHED_STOLEN)?;
+        let hit = unsafe { rel32_target(head + head::JE_HIT, &[0x0F, 0x84]) }?;
+        check_span(hit, HIT)?;
+        let servercount = unsafe { operand_after(hit + HIT.len() - 2, &[0x66, 0xA1]) }?;
+        SERVERCOUNT.store(servercount, Ordering::Release);
+        KEEP_CACHED_FN.store(keep_cached as *const () as usize, Ordering::Release);
+        CACHE_NEXT.store(head + head::NEXT_RECORD, Ordering::Release);
+        CACHE_RESUME.store(head + head::SIZE_BRANCH, Ordering::Release);
+        // Safety: span verified above; the only branch into it is the `je`
+        // after the name compare, which targets its first byte.
+        let detour = unsafe {
+            detour::install(
+                head + head::NAME_MATCHED,
+                NAME_MATCHED_STOLEN.len(),
+                &cache_stub(),
+            )
+        }?;
+        STALE_FIX.store(true, Ordering::Release);
+        Ok(detour)
+    }
+}
+
 /// Installs the world-texture swap, and raises the upload ceiling, once.
 ///
 /// Every signature and every byte about to be overwritten is checked first;
@@ -2580,15 +2849,23 @@ pub fn install() -> Result<(), String> {
     }
 
     let base = engine::engine_module_base().ok_or("hw.dll is not loaded yet")?;
-    let wrong_build = |what: &str, why: String| {
-        format!(
-            "could not locate {what} -- {why}. These signatures are the pre-Anniversary hw.dll's; \
-             DoD Studio only launches that build"
-        )
-    };
+    let wrong_build = |what: &str, why: String| format!("could not locate {what} -- {why}");
     // Safety: `base` is a module handle the loader gave us, mapped for the session.
-    let tail = unsafe { scan::find_unique(base, LOAD_TEXTURE2_TAIL) }
-        .map_err(|why| wrong_build("GL_LoadTexture2's upload branch", why))?;
+    let tail = match unsafe { scan::find_unique(base, LOAD_TEXTURE2_TAIL) } {
+        Ok(tail) => tail,
+        // Not the pre-Anniversary build: try the 25th Anniversary one.
+        Err(pre_why) => {
+            let tail = unsafe { scan::find_unique(base, anniversary::TAIL) }.map_err(|anni_why| {
+                format!(
+                    "could not locate GL_LoadTexture2's upload branch -- pre-Anniversary: {pre_why}; \
+                     25th Anniversary: {anni_why}"
+                )
+            })?;
+            *slot = Some(anniversary::install(base, tail)?);
+            HOOK_ACTIVE.store(true, Ordering::Release);
+            return Ok(());
+        }
+    };
     let upload32 = unsafe { scan::find_unique(base, UPLOAD32) }
         .map_err(|why| wrong_build("GL_Upload32", why))?;
 
@@ -2964,6 +3241,70 @@ mod tests {
         let past = upload32::SIZE_CHECK + SIZE_CHECK_STOLEN.len();
         assert_eq!(past, upload32::TOO_BIG);
         assert_eq!(past + 0x0d, upload32::SIZE_OK);
+    }
+
+    #[test]
+    fn anniversary_swap_stub_resumes_on_its_own_compare() {
+        let code = anniversary::swap_stub();
+        assert_eq!(&code[..2], &[0x53, 0x55], "push ebx; push ebp");
+        assert_eq!(&code[8..11], &[0x83, 0xC4, 0x08]);
+        // jnz at [13] skips the stolen span and the RESUME jump exactly.
+        assert_eq!(code[13], 0x75);
+        let swap = 15 + code[14] as usize;
+        assert_eq!(&code[15..22], anniversary::BRANCH_STOLEN);
+        assert_eq!(&code[22..24], &[0xFF, 0x25], "jmp [RESUME]");
+        assert_eq!(swap, 28);
+        assert_eq!(&code[swap..swap + 3], &[0xFF, 0x75, 0x28]);
+        assert_eq!(
+            &code[code.len() - 6..code.len() - 4],
+            &[0xFF, 0x25],
+            "jmp [AFTER]"
+        );
+    }
+
+    #[test]
+    fn anniversary_offsets_land_on_the_bytes_they_name() {
+        scan::Pattern::parse(anniversary::TAIL).unwrap();
+        scan::Pattern::parse(anniversary::HEAD).unwrap();
+        fixed(
+            anniversary::TAIL,
+            anniversary::tail::BRANCH,
+            anniversary::BRANCH_STOLEN,
+        );
+        fixed(
+            anniversary::TAIL,
+            anniversary::tail::JNE_UPLOAD8,
+            &[0x0F, 0x85],
+        );
+        fixed(anniversary::TAIL, anniversary::tail::CALL_UPLOAD32, &[0xE8]);
+        fixed(anniversary::TAIL, anniversary::tail::JMP_AFTER, &[0xE9]);
+        fixed(
+            anniversary::HEAD,
+            anniversary::head::NAME_MATCHED,
+            anniversary::NAME_MATCHED_STOLEN,
+        );
+        fixed(anniversary::HEAD, anniversary::head::SIZE_BRANCH, &[0x75]);
+        fixed(anniversary::HEAD, anniversary::head::JE_HIT, &[0x0F, 0x84]);
+        // The stolen span runs straight into the jne the stub resumes at.
+        assert_eq!(
+            anniversary::tail::BRANCH + anniversary::BRANCH_STOLEN.len(),
+            anniversary::tail::JNE_UPLOAD8
+        );
+        assert_eq!(
+            anniversary::head::NAME_MATCHED + anniversary::NAME_MATCHED_STOLEN.len(),
+            anniversary::head::SIZE_BRANCH
+        );
+    }
+
+    #[test]
+    fn anniversary_cache_stub_pushes_esi() {
+        let code = anniversary::cache_stub();
+        assert_eq!(&code[..2], &[0x56, 0x55], "push esi; push ebp");
+        let stolen = code.len() - 6 - anniversary::NAME_MATCHED_STOLEN.len();
+        assert_eq!(
+            &code[stolen..stolen + anniversary::NAME_MATCHED_STOLEN.len()],
+            anniversary::NAME_MATCHED_STOLEN
+        );
     }
 
     #[test]

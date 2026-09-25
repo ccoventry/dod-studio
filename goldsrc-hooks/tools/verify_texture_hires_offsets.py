@@ -25,13 +25,40 @@ Checks:
     `mov esi, [edi*4 + model_precache]` is where find_precache_table reads
     the per-map model list from.
 
+With `--anniversary`, checks the 25th Anniversary port (`mod anniversary`)
+against the stock Anniversary hw.dll instead, reading its constants out of
+the Rust rather than restating them:
+  - TAIL and HEAD each match exactly once, in the same function.
+  - The swap's span is two whole instructions (`cmp [ebp+0xc], 5` and
+    `mov eax, [ebp+0x20]`), followed by the `jne` the stub resumes at.
+  - The tail's call lands on UPLOAD32_ENTRY; the `jne` lands on the
+    GL_Upload8 argument setup, whose call lands on UPLOAD8_ENTRY and whose
+    `add esp, 0x1c` falls into the exit the GL_Upload32 path jumps to.
+  - Every caller of GL_Upload32 pops six arguments, as the stub does, and
+    its ceiling is still the stock `cmp eax, 0x80000`.
+  - GL_Upload8's gamma-table and gl_dither operands are where the Rust says,
+    and the dither operand is that cvar's value field.
+  - `ebx` holds the cache record at the tail: the lookup saves it to a frame
+    slot, and the one loop that reuses `ebx` reloads it from that slot.
+  - The leftover-texture fix's span is two whole instructions ending at the
+    width compare's `jne`, the lookup's next-record path is where the stub
+    jumps, and the hit path reads the servercount the record is stamped with.
+  - No branch in GL_LoadTexture2 lands inside either span except on its
+    first byte.
+
 Run after touching the patterns or offsets in texture_hires.rs. Not part of
 `cargo test`: it needs the real DLL, which CI does not have. Requires pefile
 and capstone.
+
+Usage:
+    python goldsrc-hooks/tools/verify_texture_hires_offsets.py
+    python goldsrc-hooks/tools/verify_texture_hires_offsets.py --anniversary
 """
 
+import re
 import struct
 import sys
+from pathlib import Path
 
 import pefile
 from capstone import CS_ARCH_X86, CS_MODE_32, Cs
@@ -40,6 +67,8 @@ HW_DLL = (
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
+ANNIVERSARY_DLL = r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll"
+SRC = Path(__file__).resolve().parent.parent / "src" / "texture_hires.rs"
 
 # Kept in sync with texture_hires.rs by hand.
 LOAD_TEXTURE2_TAIL = (
@@ -243,5 +272,163 @@ def main():
     sys.exit(1 if failures else 0)
 
 
+def anniversary():
+    """The 25th Anniversary port's checks (see the module doc)."""
+    src = SRC.read_text(encoding="utf-8")
+    anni = src[src.index("mod anniversary {"):]
+
+    def pattern(name):
+        m = re.search(r"pub const " + name + r': &str = "(.*?)";', anni, re.S)
+        return parse(" ".join(m.group(1).replace("\\\n", " ").split()))
+
+    def offset(module, name):
+        m = re.search(r"pub mod " + module + r" \{.*?pub const " + name + r": usize = (0x[0-9a-f]+|\d+);", anni, re.S)
+        return int(m.group(1), 0)
+
+    def byte_list(text):
+        return bytes(int(b, 16) for b in re.findall(r"0x([0-9A-Fa-f]{2})", text))
+
+    def const_bytes(name):
+        return byte_list(re.search(r"pub const " + name + r": &\[u8\] = &?\[(.*?)\];", anni, re.S).group(1))
+
+    def const_operand(name):
+        m = re.search(r"pub const " + name + r": \(usize, &\[u8\]\) = \((0x[0-9a-f]+|\d+), &\[(.*?)\]\);", anni)
+        return int(m.group(1), 0), byte_list(m.group(2))
+
+    pe = pefile.PE(ANNIVERSARY_DLL)
+    base = pe.OPTIONAL_HEADER.ImageBase
+    img = pe.get_memory_mapped_image()
+    md = Cs(CS_ARCH_X86, CS_MODE_32)
+    u32 = lambda rva: struct.unpack_from("<I", img, rva)[0]
+    rel32 = lambda at, n: (at + n + 4 + struct.unpack_from("<i", img, at + n)[0]) & 0xFFFFFFFF
+    failures = []
+
+    def check(ok, what):
+        print(("ok   " if ok else "FAIL ") + what)
+        if not ok:
+            failures.append(what)
+
+    def instructions(start, end):
+        return [(i.address - base, f"{i.mnemonic} {i.op_str}") for i in md.disasm(bytes(img[start:end]), base + start)]
+
+    print(f"hw.dll at {ANNIVERSARY_DLL}\n")
+    tails, heads = find_all(img, pattern("TAIL")), find_all(img, pattern("HEAD"))
+    check(len(tails) == 1, f"TAIL matches once ({[hex(t) for t in tails]})")
+    check(len(heads) == 1, f"HEAD matches once ({[hex(h) for h in heads]})")
+    if failures:
+        sys.exit(1)
+    tail, head = tails[0], heads[0]
+    check(head < tail < head + 0x800, "the cache lookup and the upload branch are in the same function")
+    entry = img.rfind(b"\x55\x8b\xec", head - 0x100, head)
+    check(entry > 0, f"GL_LoadTexture2 begins at +{entry:#x}")
+
+    # The swap's span, and where the stub goes back to.
+    branch, jne = tail + offset("tail", "BRANCH"), tail + offset("tail", "JNE_UPLOAD8")
+    stolen = const_bytes("BRANCH_STOLEN")
+    check(img[branch:branch + len(stolen)] == stolen and branch + len(stolen) == jne, "swap span bytes, ending at the jne")
+    check(instructions(branch, jne) == [(branch, "cmp dword ptr [ebp + 0xc], 5"), (branch + 4, "mov eax, dword ptr [ebp + 0x20]")],
+          "the swap span is `cmp [ebp+0xc], 5; mov eax, [ebp+0x20]`")
+    check(img[jne:jne + 2] == b"\x0f\x85", "JNE_UPLOAD8 is a jne rel32")
+
+    call32, jmp_after = tail + offset("tail", "CALL_UPLOAD32"), tail + offset("tail", "JMP_AFTER")
+    check(img[call32] == 0xE8 and img[jmp_after] == 0xE9, "CALL_UPLOAD32 is a call, JMP_AFTER a jmp")
+    up32 = rel32(call32, 1)
+    check(img[up32:up32 + len(const_bytes("UPLOAD32_ENTRY"))] == const_bytes("UPLOAD32_ENTRY"), f"the tail calls GL_Upload32 (+{up32:#x})")
+    args8 = rel32(jne, 2)
+    upload8_args = const_bytes("UPLOAD8_ARGS")
+    check(img[args8:args8 + len(upload8_args)] == upload8_args, f"the jne goes to GL_Upload8's argument setup (+{args8:#x})")
+    call8 = args8 + len(upload8_args)
+    up8 = rel32(call8, 1) if img[call8] == 0xE8 else 0
+    check(up8 and img[up8:up8 + len(const_bytes("UPLOAD8_ENTRY"))] == const_bytes("UPLOAD8_ENTRY"), f"which calls GL_Upload8 (+{up8:#x})")
+    after = rel32(jmp_after, 1)
+    pop = call8 + 5
+    check(img[pop:pop + 3] == const_bytes("UPLOAD8_POP") and pop + 3 == after,
+          f"GL_Upload8's `add esp, 0x1c` falls into the exit GL_Upload32's path jumps to (+{after:#x})")
+
+    # GL_Upload32 takes the six arguments the stub pushes, and still stops at 512x1024.
+    # (One caller pushes another call's argument first and pops both at once.)
+    def popped_by(call):
+        pushed = 0
+        for _, t in instructions(call + 5, call + 0x40):
+            if t.startswith("push "):
+                pushed += 4
+            elif t.startswith("add esp, "):
+                return int(t.split(", ")[1], 16) - pushed
+            elif t.startswith(("call ", "ret", "jmp ")) and pushed == 0:
+                return None
+        return None
+
+    callers = [i for i in range(len(img) - 5) if img[i] == 0xE8 and rel32(i, 1) == up32]
+    pops = {popped_by(c) for c in callers}
+    check(callers and pops == {0x18}, f"all {len(callers)} caller(s) of GL_Upload32 pop its six arguments ({pops})")
+    check(any(t == "cmp eax, 0x80000" for _, t in instructions(up32, up32 + 0x300)),
+          "GL_Upload32's ceiling is the stock `cmp eax, 0x80000` (replacements capped at 512)")
+
+    # GL_Upload8's palette operands.
+    for name in ("UPLOAD8_GAMMA", "UPLOAD8_DITHER"):
+        off, op = const_operand(name)
+        check(img[up8 + off:up8 + off + len(op)] == op, f"{name} opcode at GL_Upload8+{off:#x}")
+    off, op = const_operand("UPLOAD8_DITHER")
+    dither = u32(up8 + off + len(op))
+    name_ptr = u32(dither - 0xC - base)
+    cvar_name = img[name_ptr - base:name_ptr - base + 16].split(b"\0")[0]
+    check(cvar_name == b"gl_dither", f"the dither operand is gl_dither.value ({cvar_name!r})")
+    off, op = const_operand("UPLOAD8_GAMMA")
+    gamma = u32(up8 + off + len(op))
+    check(any(f"{gamma:#x}" in t for _, t in instructions(up8, up8 + off + 8)[-2:]),
+          f"the gamma operand is the table the palette loop reads ({gamma:#x})")
+
+    # ebx is the cache record at the tail.
+    body = instructions(entry, tail)
+    saves = [a for a, t in body if t == "mov dword ptr [ebp - 0x4328], ebx"]
+    writes = [(a, t) for a, t in body
+              if re.match(r"(mov|xor|add|sub|lea|imul|movzx|pop|inc|dec|cmov\w+) ebx,", t)]
+    reloads = [a for a, t in writes if t == "mov ebx, dword ptr [ebp - 0x4328]"]
+    check(len(saves) >= 2 and any(head <= a < head + len(pattern("HEAD")) for a in saves),
+          f"the lookup saves the record in ebx to [ebp-0x4328], as does the new-record path ({[hex(a) for a in saves]})")
+    reuse = [a for a, _ in writes if a > saves[-1] and a not in reloads]
+    check(reuse and reloads and max(reuse) < reloads[-1],
+          f"the one loop that reuses ebx ({hex(min(reuse)) if reuse else '?'}..) reloads it from there after ({[hex(r) for r in reloads]})")
+    check(body[-1][1] == "mov word ptr [ebx + 6], ax", f"the instruction before the tail writes the record: `{body[-1][1]}`")
+
+    # The leftover-texture fix.
+    name_matched, size_branch = head + offset("head", "NAME_MATCHED"), head + offset("head", "SIZE_BRANCH")
+    stolen_cache = const_bytes("NAME_MATCHED_STOLEN")
+    check(img[name_matched:name_matched + len(stolen_cache)] == stolen_cache and name_matched + len(stolen_cache) == size_branch,
+          "name-matched span bytes, ending at the width compare's branch")
+    check([t for _, t in instructions(name_matched, size_branch + 2)] ==
+          ["mov eax, dword ptr [ebp + 0x10]", "cmp eax, dword ptr [esi + 8]", f"jne {base + size_branch + 2 + 0xC:#x}"],
+          "the span is `mov eax, [ebp+0x10]; cmp eax, [esi+8]`, then a jne")
+    into = [a for a, t in body if t == f"je {base + name_matched:#x}"]
+    check(len(into) == 1 and head < into[0] < name_matched,
+          f"the name compare's je is the one branch to the span, onto its first byte ({[hex(a) for a in into]})")
+    je_hit = head + offset("head", "JE_HIT")
+    check(img[je_hit:je_hit + 2] == b"\x0f\x84", "JE_HIT is a je rel32")
+    hit = rel32(je_hit, 2)
+    hit_bytes = const_bytes("HIT")
+    check(img[hit:hit + len(hit_bytes)] == hit_bytes, f"the hit path is `cmp word [esi+4], 0; jle; mov ax, [servercount]` (+{hit:#x})")
+    servercount = u32(hit + len(hit_bytes))
+    stamped = [a for a, t in body if t == f"movzx eax, word ptr [{servercount:#x}]"]
+    check(len(stamped) == 1 and hit < stamped[0] < tail,
+          f"the new-record path stamps records from the same servercount ({servercount:#x}, read at {[hex(a) for a in stamped]})")
+    next_record = head + offset("head", "NEXT_RECORD")
+    check([t for _, t in instructions(next_record, next_record + 6)][:1] == [f"mov ecx, dword ptr [{u32(head + 2):#x}]"],
+          "NEXT_RECORD reloads the record count, as the loop's top does")
+
+    # Nothing branches into either span except onto its first byte.
+    spans = [(branch, len(stolen)), (name_matched, len(stolen_cache))]
+    bad = []
+    for a, t in instructions(entry, after + 0x40):
+        m = re.match(r"(j\w+|loop\w*|call) 0x([0-9a-f]+)$", t)
+        if m:
+            target = int(m.group(2), 16) - base
+            bad += [(a, target) for s0, n in spans if s0 < target < s0 + n]
+    check(not bad, f"no branch lands inside a detoured span {[(hex(a), hex(t)) for a, t in bad]}")
+
+    print(f"\nGL_LoadTexture2 +{entry:#x} (tail +{tail:#x}), GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
+    print(f"{len(failures)} check(s) FAILED" if failures else "all checks passed")
+    sys.exit(1 if failures else 0)
+
+
 if __name__ == "__main__":
-    main()
+    anniversary() if "--anniversary" in sys.argv[1:] else main()
