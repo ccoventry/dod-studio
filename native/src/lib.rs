@@ -28,6 +28,10 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// The HD texture files: what is built, and fetching the upscaler (#372).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod hd;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;

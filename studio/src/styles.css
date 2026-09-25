@@ -1720,3 +1720,27 @@ tr.keyboard-selected {
   font-size: 0.85em;
   color: #ffa726;
 }
+
+/* HD Textures page (#372). */
+.hd-pane-column {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hd-hint {
+  margin: 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-code {
+  font-family: monospace;
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  padding: 6px 8px;
+  margin: 6px 0 0;
+  user-select: text;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
