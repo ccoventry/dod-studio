@@ -56,6 +56,21 @@
 //! the ceiling does not make a 20-tick recording smooth; it stops the engine
 //! from shortening a window that was already long enough.
 //!
+//! ## The 25th Anniversary build
+//!
+//! Its clamp (`hw+0x1a3cde`) has the same shape in SSE: ceiling
+//! `mov edx, 100`, and `mov eax, 200` / `cmovne edx, eax` on the same kind of
+//! flag. But there the flag is **live**: `CL_Parse_HLTV` sets it to 1 on
+//! `svc_hltv`'s mode 0, so an HLTV demo gets the 200 ms ceiling and a POV demo
+//! 100. [`BUILDS`] lists each build's ceiling immediates with what the engine
+//! ships in them.
+//!
+//! The setting means the same on both builds: at its default, 100
+//! ([`STOCK_MS`]), every immediate holds the engine's own value, so neither
+//! engine is touched. Any other value becomes the ceiling for every demo --
+//! on the Anniversary build that is both paths, so a value under 200 lowers an
+//! HLTV demo's ceiling there.
+//!
 //! ## Engine-wide, deliberately
 //!
 //! `docs/goldsrc_hw_dll_survey.md` sets the standing preference: do it in
@@ -72,12 +87,35 @@ use crate::scan;
 /// The cvar name. Registered in `commands.rs`.
 pub const NAME: &str = console_name!("ex_interp_max");
 
-/// The clamp's floor and ceiling, with the ceiling's immediate wildcarded so
-/// one pattern matches both the stock and a raised value. Unique in `hw.dll`.
-const PATTERN: &str = "BF 32 00 00 00 BB ?? ?? ?? ?? DF E0 F6 C4 05 7A";
+/// One engine build's clamp.
+struct Build {
+    name: &'static str,
+    /// The clamp, with each ceiling immediate wildcarded so the pattern still
+    /// matches after this has written one. Unique in that build's `hw.dll`,
+    /// matching nothing in the other's.
+    pattern: &'static str,
+    /// Each ceiling `imm32`: its offset in a match, and what the engine ships
+    /// there. The first is the one every demo gets on the pre-Anniversary
+    /// build and a POV demo gets on the Anniversary one.
+    ceilings: &'static [(usize, i32)],
+}
 
-/// Where the ceiling's `imm32` sits inside a match.
-const CEILING_AT: usize = 6;
+/// The builds this knows, tried in order.
+const BUILDS: [Build; 2] = [
+    // `mov edi, 50` (the floor), `mov ebx, <ceiling>`, then the flag test.
+    Build {
+        name: "pre-Anniversary",
+        pattern: "BF 32 00 00 00 BB ?? ?? ?? ?? DF E0 F6 C4 05 7A",
+        ceilings: &[(6, 100)],
+    },
+    // `cmp [flag], 0`, `mov eax, <200 path>`, `movss xmm4, [1000.0]`,
+    // `mov edx, <100 path>`, `cmovne edx, eax`.
+    Build {
+        name: "25th Anniversary",
+        pattern: "83 3D ?? ?? ?? ?? 00 B8 ?? ?? ?? ?? F3 0F 10 25 ?? ?? ?? ?? BA ?? ?? ?? ?? 0F 45 D0",
+        ceilings: &[(21, 100), (8, 200)],
+    },
+];
 
 /// `mov edi, 0x32` -- the engine's own floor, in milliseconds. Not patched:
 /// `cl_updaterate` overrides it a few instructions later anyway.
@@ -93,34 +131,48 @@ pub const MAX_MS: i32 = 1000;
 
 static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
+/// Which of [`BUILDS`] matched.
+static BUILD: AtomicUsize = AtomicUsize::new(0);
 
 /// The ceiling currently written into the engine, or 0 before the first apply.
 static ACTIVE_MS: AtomicI32 = AtomicI32::new(0);
 
-fn span_address() -> Result<usize, String> {
+/// The clamp's address and which build it is, scanning once per module base.
+fn span() -> Result<(usize, &'static Build), String> {
     let Some(base) = engine::engine_module_base() else {
         return Err("hw.dll is not loaded yet".to_string());
     };
     if SCANNED_BASE.load(Ordering::Acquire) == base {
         let cached = SPAN_ADDRESS.load(Ordering::Acquire);
         if cached != 0 {
-            return Ok(cached);
+            return Ok((cached, &BUILDS[BUILD.load(Ordering::Acquire)]));
         }
     }
-    // Safety: `engine_module_base` only returns a base for a mapped module, and
-    // hw.dll stays mapped for the session.
-    let address = unsafe { scan::find_unique(base, PATTERN) }
-        .map_err(|why| format!("could not find the ex_interp clamp -- {why}"))?;
-    SPAN_ADDRESS.store(address, Ordering::Release);
-    SCANNED_BASE.store(base, Ordering::Release);
-    Ok(address)
+    let mut misses = Vec::new();
+    for (index, build) in BUILDS.iter().enumerate() {
+        // Safety: `engine_module_base` only returns a base for a mapped
+        // module, and hw.dll stays mapped for the session.
+        match unsafe { scan::find_unique(base, build.pattern) } {
+            Ok(address) => {
+                SPAN_ADDRESS.store(address, Ordering::Release);
+                BUILD.store(index, Ordering::Release);
+                SCANNED_BASE.store(base, Ordering::Release);
+                return Ok((address, build));
+            }
+            Err(why) => misses.push(format!("{}: {why}", build.name)),
+        }
+    }
+    Err(format!(
+        "could not find the ex_interp clamp -- {}",
+        misses.join("; ")
+    ))
 }
 
-/// The ceiling the engine is using right now, read back from its own code.
-pub fn current() -> Result<i32, String> {
-    let address = span_address()?;
-    // Safety: the scan proved these bytes are mapped code.
-    Ok(unsafe { ((address + CEILING_AT) as *const i32).read_unaligned() })
+/// Reads one ceiling immediate.
+///
+/// Safety: `address + at` must be inside the span the scan matched.
+unsafe fn read_ceiling(address: usize, at: usize) -> i32 {
+    unsafe { ((address + at) as *const i32).read_unaligned() }
 }
 
 /// Rejects a ceiling the clamp could not honour, or that would not be a
@@ -148,23 +200,39 @@ pub fn validate(ms: i32) -> Result<(), String> {
 /// the cvar takes effect without a restart.
 pub fn set_max(ms: i32) -> Result<bool, String> {
     validate(ms)?;
-    let address = span_address()?;
-    let present = current()?;
-    if present == ms {
+    let (address, build) = span()?;
+    // The default leaves every immediate at the engine's own value; anything
+    // else is the ceiling on every path.
+    let wanted = |stock: i32| if ms == STOCK_MS { stock } else { ms };
+    // Safety (every read and write below): immediates inside the matched span.
+    let present: Vec<i32> = build
+        .ceilings
+        .iter()
+        .map(|&(at, _)| unsafe { read_ceiling(address, at) })
+        .collect();
+    if build
+        .ceilings
+        .iter()
+        .zip(&present)
+        .all(|(&(_, stock), &now)| now == wanted(stock))
+    {
         ACTIVE_MS.store(ms, Ordering::Release);
         return Ok(false);
     }
-    // Anything that is neither the shipped ceiling nor a value this module
+    // Anything that is neither the shipped value nor a value this module
     // would write is someone else's patch, and overwriting it would hide that.
-    if present != STOCK_MS && validate(present).is_err() {
-        return Err(format!(
-            "the clamp's ceiling is {present} ms, which is neither the engine's {STOCK_MS} nor a value this could have written -- something else has patched it"
-        ));
+    for (&(at, stock), &now) in build.ceilings.iter().zip(&present) {
+        if now != stock && validate(now).is_err() {
+            return Err(format!(
+                "the clamp's ceiling at +{at} is {now} ms, which is neither the engine's {stock} nor a value this could have written -- something else has patched it"
+            ));
+        }
     }
-    // Safety: four bytes of an immediate inside the span the scan matched,
-    // written through the same protect/write/restore used everywhere here.
-    if !unsafe { crate::patch::write_code_bytes(address + CEILING_AT, &ms.to_le_bytes()) } {
-        return Err("could not make the ex_interp clamp writable".to_string());
+    for &(at, stock) in build.ceilings {
+        // Written through the same protect/write/restore used everywhere here.
+        if !unsafe { crate::patch::write_code_bytes(address + at, &wanted(stock).to_le_bytes()) } {
+            return Err("could not make the ex_interp clamp writable".to_string());
+        }
     }
     ACTIVE_MS.store(ms, Ordering::Release);
     Ok(true)
@@ -177,7 +245,12 @@ pub fn active() -> i32 {
 
 /// One line for `dodstudio_status`.
 pub fn status() -> String {
+    let anniversary =
+        SCANNED_BASE.load(Ordering::Relaxed) != 0 && BUILD.load(Ordering::Relaxed) == 1;
     match ACTIVE_MS.load(Ordering::Relaxed) {
+        0 if anniversary => format!(
+            "the engine's interpolation ceiling is untouched ({STOCK_MS} ms for a POV demo, 200 ms for an HLTV demo on this build)"
+        ),
         0 => format!(
             "the engine's interpolation ceiling is untouched ({STOCK_MS} ms; its own 200 ms path is unreachable in this build)"
         ),
@@ -193,32 +266,64 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_pattern_is_well_formed_and_the_ceiling_is_its_only_wildcard() {
-        let tokens: Vec<&str> = PATTERN.split_whitespace().collect();
-        assert_ne!(
-            tokens[0], "??",
-            "a leading wildcard is rejected by the scanner"
-        );
-        for (i, token) in tokens.iter().enumerate() {
-            let wildcard = (CEILING_AT..CEILING_AT + 4).contains(&i);
-            if wildcard {
-                assert_eq!(*token, "??", "byte {i} is the ceiling immediate");
-            } else {
+    fn each_pattern_is_well_formed_and_every_ceiling_is_a_wildcard() {
+        for build in &BUILDS {
+            assert!(
+                scan::Pattern::parse(build.pattern).is_ok(),
+                "{}",
+                build.name
+            );
+            let tokens: Vec<&str> = build.pattern.split_whitespace().collect();
+            for &(at, stock) in build.ceilings {
+                for (i, token) in tokens.iter().enumerate().skip(at).take(4) {
+                    assert_eq!(
+                        *token, "??",
+                        "{}: byte {i} is a ceiling immediate",
+                        build.name
+                    );
+                }
+                // `mov r32, imm32` is B8+r: the byte before each ceiling.
+                let opcode = u8::from_str_radix(tokens[at - 1], 16).unwrap();
+                assert_eq!(
+                    opcode & 0xf8,
+                    0xb8,
+                    "{}: +{at} follows a mov r32, imm32",
+                    build.name
+                );
                 assert!(
-                    u8::from_str_radix(token, 16).is_ok(),
-                    "byte {i} is {token:?}; only the ceiling may be a wildcard"
+                    validate(stock).is_ok(),
+                    "{}: stock {stock} is writable",
+                    build.name
                 );
             }
         }
     }
 
-    /// The two `mov r32, imm32` opcodes the span starts with. `BF` is
-    /// `mov edi, imm32` (the floor) and `BB` is `mov ebx, imm32` (the ceiling);
-    /// patching the wrong one would raise the floor instead, which the engine
-    /// would then force every value up to.
+    /// The Anniversary clamp's two ceilings: `mov edx` (the 100 ms path, the
+    /// one kept) and `mov eax` (200 ms, moved into edx by `cmovne edx, eax`).
+    #[test]
+    fn the_anniversary_ceilings_are_the_right_registers() {
+        let build = &BUILDS[1];
+        let tokens: Vec<&str> = build.pattern.split_whitespace().collect();
+        let (pov, hltv) = (build.ceilings[0], build.ceilings[1]);
+        assert_eq!((tokens[pov.0 - 1], pov.1), ("BA", STOCK_MS), "mov edx, 100");
+        assert_eq!((tokens[hltv.0 - 1], hltv.1), ("B8", 200), "mov eax, 200");
+        assert_eq!(
+            &tokens[tokens.len() - 3..],
+            ["0F", "45", "D0"],
+            "cmovne edx, eax"
+        );
+    }
+
+    /// The two `mov r32, imm32` opcodes the pre-Anniversary span starts with.
+    /// `BF` is `mov edi, imm32` (the floor) and `BB` is `mov ebx, imm32` (the
+    /// ceiling); patching the wrong one would raise the floor instead, which
+    /// the engine would then force every value up to.
     #[test]
     fn the_ceiling_offset_lands_on_the_right_instruction() {
-        let tokens: Vec<&str> = PATTERN.split_whitespace().collect();
+        const CEILING_AT: usize = 6;
+        assert_eq!(BUILDS[0].ceilings, &[(CEILING_AT, STOCK_MS)]);
+        let tokens: Vec<&str> = BUILDS[0].pattern.split_whitespace().collect();
         assert_eq!(
             u8::from_str_radix(tokens[0], 16).unwrap(),
             0xbf,
