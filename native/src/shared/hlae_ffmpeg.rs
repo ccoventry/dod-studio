@@ -50,6 +50,11 @@ const HOOK_DLL: &str = "AfxHookGoldSrc.dll";
 /// The header `link` writes, and the marker `authored_by_us` looks for.
 const AUTHORED_MARKER: &str = "Written by dod-studio";
 
+/// The header's older spellings, still ours: every `ffmpeg.ini` linked before
+/// the rename to DoD Studio (#260) says "dod-tools", and treating those as
+/// somebody else's hid the button that re-points HLAE (#357).
+const EARLIER_MARKERS: [&str; 1] = ["Written by dod-tools"];
+
 /// What HLAE would find if it looked right now.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
@@ -255,7 +260,9 @@ pub fn detect(hlae_exe: &Path) -> HlaeFfmpeg {
 /// untouchable, makes the first link permanent and leaves no way to re-point
 /// HLAE after changing the app's FFmpeg.
 fn authored_by_us(body: &str) -> bool {
-    body.contains(AUTHORED_MARKER)
+    std::iter::once(AUTHORED_MARKER)
+        .chain(EARLIER_MARKERS)
+        .any(|marker| body.contains(marker))
 }
 
 /// Points HLAE at `ffmpeg_exe` by writing `ffmpeg.ini`.
@@ -956,6 +963,28 @@ mod tests {
             }
             other => panic!("{:?}", other),
         }
+    }
+
+    #[test]
+    fn an_ini_linked_before_the_rename_is_still_ours() {
+        // #357: the header said "dod-tools" until #260.
+        let hlae = install("pre_rename");
+        let folder = hlae.parent().unwrap().join(FFMPEG_DIR);
+        std::fs::write(
+            folder.join(INI_NAME),
+            "; Written by dod-tools so HLAE's mirv_movie_ffmpeg can find FFmpeg.\n\
+             [Ffmpeg]\nPath=D:\\old\\ffmpeg.exe\n",
+        )
+        .expect("ini");
+        match detect(&hlae) {
+            HlaeFfmpeg::Linked { ours, .. } => assert!(ours),
+            other => panic!("{:?}", other),
+        }
+        assert!(detect(&hlae).can_link());
+
+        let ffmpeg = a_real_ffmpeg(hlae.parent().unwrap());
+        write_link(&hlae, &ffmpeg).expect("relink over our own old file");
+        assert_eq!(read_target(&hlae), Some(ffmpeg));
     }
 
     #[test]
