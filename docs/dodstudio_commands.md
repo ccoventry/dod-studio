@@ -46,6 +46,9 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 
+The HD rows work the same on the pre-Anniversary and the 25th Anniversary
+`hw.dll` (#370).
+
 ## Commands
 
 Always a command rather than a cvar when it has subcommands or a variable
