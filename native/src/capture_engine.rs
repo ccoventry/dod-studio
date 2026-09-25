@@ -976,13 +976,15 @@ pub fn spawn_capture_engine(
 
             let _ = tx.send(EngineEvent::Finished("Batch Queue".into()));
 
+            // Nothing writes .autosave.json at present (restoring that is #20),
+            // so this only clears a copy an older build left behind -- and says
+            // nothing when it succeeds, since there was no recovery state to
+            // clean up (#352). Only an unexpected failure is worth a line.
             let autosave_path = crate::shared::paths::get_appdata_dir().join(".autosave.json");
-            if let Err(e) = std::fs::remove_file(&autosave_path) {
-                if e.kind() != std::io::ErrorKind::NotFound {
-                    log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
-                }
-            } else {
-                log::info!("[autosave] Lockfile removed after clean completion");
+            if let Err(e) = std::fs::remove_file(&autosave_path)
+                && e.kind() != std::io::ErrorKind::NotFound
+            {
+                log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);
