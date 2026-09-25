@@ -7,9 +7,13 @@ The game folder is the Half-Life folder that holds dod/. In order: HD_GAME
 (its settings.json), else the one Steam install with a dod/ folder -- several
 are an error that lists them.
 """
-import glob, os, re, sys, tempfile
+import fnmatch, glob, os, re, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Which maps get HD map textures and skies (see hd_maps.example.txt). No file
+# means every map.
+MAP_LIST = os.environ.get("HD_MAPS") or os.path.join(HERE, "hd_maps.txt")
 
 # Largest replacement side: texture_hires raises the engine's upload ceiling
 # to 1024x1024 (see its module doc).
@@ -95,6 +99,44 @@ def game_root():
     listing = "\n  ".join(found) or "(none found)"
     sys.exit("Which game folder? Set HD_GAME (or build_all.py --game) to the Half-Life folder "
              f"DoD Studio launches. Found:\n  {listing}")
+
+
+def map_patterns(path=None):
+    """The patterns in hd_maps.txt, lowercased, or None when there's no such
+    file (build every map). `*` matches any run of characters and `?` one, as
+    in a Windows folder search; a name without either matches only itself."""
+    path = path or MAP_LIST
+    if not os.path.exists(path):
+        return None
+    patterns = []
+    for raw in open(path, encoding="utf-8"):
+        line = raw.split("#", 1)[0].strip().lower()
+        if line.endswith(".bsp"):
+            line = line[:-4]
+        if line:
+            patterns.append(line)
+    return patterns
+
+
+def select_maps(names, patterns):
+    """(the names `patterns` allows, the patterns that matched nothing).
+    `patterns` None allows everything."""
+    if patterns is None:
+        return list(names), []
+    chosen = [n for n in names if any(fnmatch.fnmatchcase(n.lower(), p) for p in patterns)]
+    unused = [p for p in patterns if not any(fnmatch.fnmatchcase(n.lower(), p) for n in names)]
+    return chosen, unused
+
+
+def all_maps(game):
+    """Every map in dod/maps, as hd_maps.txt narrows it (all of them without
+    the file). Patterns that match no map are reported, since a typo there
+    would otherwise quietly build nothing."""
+    names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+    chosen, unused = select_maps(names, map_patterns())
+    for p in unused:
+        print(f"  {os.path.basename(MAP_LIST)}: {p!r} matches no map in dod/maps", flush=True)
+    return chosen
 
 
 def dod_dir():

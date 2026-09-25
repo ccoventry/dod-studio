@@ -1,0 +1,18 @@
+# Which maps get HD map textures and skies. Copy this file to hd_maps.txt
+# (same folder) and list the maps you make movies on; build_all.py then skips
+# every other map. Without hd_maps.txt, every map in dod\maps is built.
+#
+# One map per line, with or without .bsp. Case doesn't matter.
+#   *   matches any run of characters, as in a Windows folder search
+#   ?   matches exactly one character
+# A name without either matches only that map.
+#
+# Only map textures and skies follow this list. Model skins, sprites and
+# detail textures aren't tied to one map, so they're always built in full.
+#
+# Examples:
+
+# dod_anzio
+# dod_railroad2*          # dod_railroad2_s9a, dod_railroad2_test, ... (every railroad2)
+# dod_saints2_b?          # dod_saints2_b1 .. dod_saints2_b9, not dod_saints2_b3e
+# dod_thunder2*
