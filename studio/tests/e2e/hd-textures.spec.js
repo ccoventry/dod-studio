@@ -287,3 +287,17 @@ test('an upscaler found elsewhere is named and its styles can build; a chosen fo
   await page.click('#hd-refresh-btn');
   await expect(text).toContainText("isn't used: another one has more of the style models");
 });
+
+test('refresh shows it is working, and the status line says when it last finished', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => new Promise((resolve) => { window.__finishStatus = () => resolve(s); });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-refresh-btn')).toBeDisabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Checking...');
+  await page.evaluate(() => window.__finishStatus());
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Refresh');
+  await expect(page.locator('#hd-status-text')).toContainText(/Checked at .+\./);
+});

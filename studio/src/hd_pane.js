@@ -208,7 +208,26 @@ export function initHdPane() {
     setBusy(busy);
   }
 
-  async function refresh() {
+  // A refresh walks the whole HD folder and asks each Python it finds for
+  // its version, which can take a few seconds: the button says so while it
+  // runs, and the status line ends with when it last finished.
+  let refreshing = null;
+  function refresh() {
+    refreshing ??= (async () => {
+      refreshBtn.disabled = true;
+      refreshBtn.textContent = STRINGS.HD.REFRESHING;
+      try {
+        await refreshNow();
+      } finally {
+        refreshBtn.disabled = false;
+        refreshBtn.textContent = STRINGS.HD.REFRESH_BUTTON;
+        refreshing = null;
+      }
+    })();
+    return refreshing;
+  }
+
+  async function refreshNow() {
     let status;
     try {
       status = await hdStatus(gamePath());
@@ -222,6 +241,7 @@ export function initHdPane() {
     statusText.textContent = [
       status.hd_root_exists ? STRINGS.HD.hdRootFound(status.hd_root) : STRINGS.HD.hdRootMissing(status.hd_root),
       status.built_styles.length ? STRINGS.HD.stylesBuilt(status.built_styles) : STRINGS.HD.NO_STYLES_BUILT,
+      STRINGS.HD.checkedAt(new Date().toLocaleTimeString()),
     ].join(' ');
     renderTable(status);
     renderStyles(status);

@@ -1076,6 +1076,8 @@ export const STRINGS = {
   HD: {
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
+    REFRESHING: 'Checking...',
+    checkedAt: (time) => `Checked at ${time}.`,
     TABLE_STYLE: 'Style',
     USE_TITLE: 'Use it in the game',
     USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
