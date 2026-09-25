@@ -1,7 +1,7 @@
 # The upscaler and its models: downloaded per README.md, never committed.
 realesrgan/
 __pycache__/
-# Your own styles (see my_styles.example.txt).
+# Your own styles and map list. They belong in the game's dod\dodstudio_hd
+# now (see README.md), but a copy left here from before still works.
 my_styles.txt
-# Your own map list (see hd_maps.example.txt).
 hd_maps.txt

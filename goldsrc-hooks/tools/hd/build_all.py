@@ -63,11 +63,18 @@ def main():
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    # A list still in this folder from before #385: said once, in the log.
+    for name, env in ((C.MAP_LIST, "HD_MAPS"), (C.MY_STYLES, "HD_MY_STYLES")):
+        C.old_place_noted.add(name)
+        path = C.user_file(name, env)
+        if os.path.dirname(os.path.abspath(path)) == C.HERE and not os.environ.get(env):
+            log(f"=== note: {name} is still in {C.HERE}; move it to {hd}, where it belongs now")
+
     patterns = C.map_patterns()
     if patterns is not None and ({"world", "sky"} & set(args.types.split(","))):
         names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
         chosen, unused = C.select_maps(names, patterns)
-        log(f"=== {os.path.basename(C.MAP_LIST)}: map textures and skies for {len(chosen)} of {len(names)} map(s)"
+        log(f"=== {C.map_list()}: map textures and skies for {len(chosen)} of {len(names)} map(s)"
             + (f"; matching nothing: {', '.join(unused)}" if unused else ""))
 
     styles = args.styles or STYLE_ORDER + [s for s in S.STYLES if s not in STYLE_ORDER]
