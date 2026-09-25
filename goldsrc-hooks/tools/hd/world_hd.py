@@ -39,16 +39,22 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     work = C.work_dir("world_" + style)
 
-    jobs = {}
+    jobs, blank = {}, set()
     for m in maps:
         for name, w, h, idx, pal in map_textures(game, m):
             base = name.lower()
             if base in C.SKIP or base.startswith("sky") or len(idx) != w * h or len(pal) != 768:
                 continue
             key = f"{C.file_stem_name(name)}_{C.fnv1a32(idx, pal):08x}"
+            # A masked texture that is all cut-out: nothing to upscale, and
+            # the hook labels it "blank" rather than looking for a file.
+            if name.startswith("{") and idx.count(255) == len(idx):
+                blank.add(key)
+                continue
             jobs.setdefault(key, (name, w, h, idx, pal))
     todo = {k: v for k, v in jobs.items() if not os.path.exists(os.path.join(out_dir, k + ".tga"))}
-    print(f"{len(jobs)} unique textures across {len(maps)} map(s), {len(todo)} still to build")
+    print(f"{len(jobs)} unique textures across {len(maps)} map(s), {len(todo)} still to build"
+          + (f" ({len(blank)} blank placeholder(s) skipped)" if blank else ""))
 
     masks = {}
     for key, (name, w, h, idx, pal) in todo.items():
@@ -56,8 +62,6 @@ def main():
         rgb = np.frombuffer(pal, np.uint8).reshape(256, 3)[ind].copy()
         if name.startswith("{"):
             mask = ind == 255
-            if mask.all():
-                continue  # a blank placeholder: nothing to upscale
             if mask.any():
                 _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
                 rgb = rgb[iy, ix]

@@ -7,7 +7,7 @@ The game folder is the Half-Life folder that holds dod/. In order: HD_GAME
 (its settings.json), else the one Steam install with a dod/ folder -- several
 are an error that lists them.
 """
-import fnmatch, glob, os, re, sys, tempfile
+import atexit, fnmatch, glob, hashlib, os, re, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -24,13 +24,68 @@ CAP = 1024
 SKIP = {"aaatrigger", "clip", "origin", "null", "skip", "hint", "bevel", "sky", "black"}
 
 
+# fnv1a32's results, keyed by a BLAKE2b digest of the same bytes, kept on
+# disk between runs: 16-byte digest + 4-byte hash per record, append-only.
+FNV_CACHE = os.path.join(tempfile.gettempdir(), "dodstudio_hd_work", "fnv1a32.cache")
+_fnv_known = None
+_fnv_new = []
+
+
 def fnv1a32(*parts):
-    """FNV-1a, 32-bit -- texture_hires.rs's `fnv1a32`."""
+    """FNV-1a, 32-bit -- texture_hires.rs's `fnv1a32` -- of `parts` joined.
+
+    The byte loop is pure Python: hashing every texture of 133 maps took
+    about 50 s, once per style (#383). So each result is remembered under a
+    BLAKE2b digest of the same bytes (C, and fast), in memory and in
+    FNV_CACHE, and only bytes never seen before pay for the loop. The key is
+    the content itself, so the cache can't go stale: a changed texture is a
+    different key."""
+    global _fnv_known
+    if _fnv_known is None:
+        _fnv_known = _load_fnv_cache()
+        atexit.register(_save_fnv_cache)
+    digest = hashlib.blake2b(digest_size=16)
+    for p in parts:
+        digest.update(p)
+    key = digest.digest()
+    h = _fnv_known.get(key)
+    if h is None:
+        h = fnv1a32_uncached(*parts)
+        _fnv_known[key] = h
+        _fnv_new.append(key + h.to_bytes(4, "little"))
+    return h
+
+
+def fnv1a32_uncached(*parts):
+    """The FNV-1a byte loop itself."""
     h = 0x811C9DC5
     for p in parts:
         for b in p:
             h = ((h ^ b) * 0x01000193) & 0xFFFFFFFF
     return h
+
+
+def _load_fnv_cache():
+    try:
+        with open(FNV_CACHE, "rb") as f:
+            data = f.read()
+    except OSError:
+        return {}
+    # A record cut short by a killed run is dropped, not misread.
+    data = data[: len(data) - len(data) % 20]
+    return {data[i : i + 16]: int.from_bytes(data[i + 16 : i + 20], "little") for i in range(0, len(data), 20)}
+
+
+def _save_fnv_cache():
+    if not _fnv_new:
+        return
+    try:
+        os.makedirs(os.path.dirname(FNV_CACHE), exist_ok=True)
+        with open(FNV_CACHE, "ab") as f:
+            f.write(b"".join(_fnv_new))
+        _fnv_new.clear()
+    except OSError:
+        pass  # only a cache: the next run recomputes
 
 
 def file_stem_name(name):
