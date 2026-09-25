@@ -5,8 +5,8 @@
 // missing game path reads as a message rather than a broken page, that the
 // download's progress and cancel land in the progress line, which Python the
 // page says it will use, the build's choices, progress and cancel, and the
-// custom-style form (my_styles.txt), and the misses view read from the hook
-// log.
+// style comparison, the custom-style form (my_styles.txt), and the misses
+// view read from the hook log.
 import { test, expect } from '@playwright/test';
 
 /** native::hd::HdStatus, as serde sends it (snake_case). */
@@ -61,6 +61,7 @@ const STATUS = {
     styles: [],
     error: null,
   },
+  maps: ['dod_anzio', 'dod_caen'],
 };
 
 async function loadHarness(page, handlers) {
@@ -76,6 +77,8 @@ async function loadHarness(page, handlers) {
     if (h.picked !== undefined) window.__mockInvokeHandlers['plugin:dialog|open'] = () => h.picked;
     if (h.misses !== undefined) window.__mockInvokeHandlers.hd_misses = () => h.misses;
     if (h.saveError) window.__mockInvokeHandlers.hd_save_style = () => Promise.reject(h.saveError);
+    window.__mockInvokeHandlers.hd_preview = () =>
+      new Promise((resolve, reject) => { window.__finishPreview = { resolve, reject }; });
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -562,4 +565,54 @@ test('my styles: a file the scripts would refuse is reported, and Build waits fo
   await page.click('#hd-refresh-btn');
   await expect(page.locator('#hd-my-styles-text')).toContainText("can't be read, so builds won't start");
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('preview: picks maps and built styles, shows the sheet, and fits it on a click', async ({ page }) => {
+  const built = { ...STATUS, built_styles: ['plain', 'ultrasharp'] };
+  await loadHarness(page, { status: built });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-preview-map option')).toHaveText(
+    ['A few of your maps, picked for you', 'dod_anzio', 'dod_caen']);
+  // Only built styles can be compared; all are ticked to start with.
+  await expect(page.locator('#hd-preview-styles input:checked')).toHaveCount(2);
+
+  await page.selectOption('#hd-preview-map', 'dod_caen');
+  await page.uncheck('#hd-preview-styles input[value="ultrasharp"]');
+  await page.click('#hd-preview-btn');
+  await expect(page.locator('#hd-preview-btn')).toBeDisabled();
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_preview'));
+  expect(call.args).toEqual({
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    request: { maps: ['dod_caen'], styles: ['plain'] },
+  });
+
+  // A 1x1 PNG stands in for the sheet.
+  const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  await page.evaluate((image) => window.__finishPreview.resolve({
+    image, samples: 3, maps: [], skipped: ['model:v_bar.mdl: not found'],
+  }), png);
+  await expect(page.locator('#hd-preview-wrap')).toBeVisible();
+  await expect(page.locator('#hd-preview-img')).toHaveAttribute('src', png);
+  await expect(page.locator('#hd-preview-text')).toHaveText('3 samples. Left out: model:v_bar.mdl: not found.');
+  await expect(page.locator('#hd-preview-btn')).toBeEnabled();
+
+  await page.click('#hd-preview-img');
+  await expect(page.locator('#hd-preview-wrap')).toHaveClass(/hd-preview-fit/);
+});
+
+test('preview: auto-picked maps are named; nothing built means nothing to compare', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-preview-btn');
+  const call = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_preview'));
+  expect(call.args.request).toEqual({ maps: [], styles: ['plain'] });
+  await page.evaluate(() => window.__finishPreview.resolve({
+    image: 'data:image/png;base64,', samples: 9, maps: ['dod_anzio', 'dod_caen'], skipped: [],
+  }));
+  await expect(page.locator('#hd-preview-text')).toHaveText('9 samples, from dod_anzio, dod_caen.');
+
+  await loadHarness(page, { status: { ...STATUS, built_styles: [] } });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-preview-btn')).toBeDisabled();
+  await expect(page.locator('#hd-preview-text')).toContainText('Build a style first');
 });

@@ -358,7 +358,7 @@ pub fn run(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::hd) mod tests {
     use super::*;
     use crate::test_support::Scratch;
 
@@ -543,7 +543,7 @@ anime = realesrgan-x4plus-anime
 
     /// A BSP v30 with one lump that matters: the textures, holding one 16x16
     /// embedded texture named `wall`. `world_hd.py` reads nothing else.
-    pub(super) fn tiny_bsp() -> Vec<u8> {
+    pub(in crate::hd) fn tiny_bsp() -> Vec<u8> {
         const LUMPS: usize = 15;
         let header = 4 + LUMPS * 8;
         let (w, h) = (16u32, 16u32);

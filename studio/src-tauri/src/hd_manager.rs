@@ -1,6 +1,6 @@
 //! The HD Textures page's backend (#372): what is built, finding (or
 //! fetching) the upscaler and a Python, running the build, the user's own
-//! styles, and the misses the game logged.
+//! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
 use std::path::{Path, PathBuf};
@@ -14,10 +14,12 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
 /// flag: a build must not start while its Python is still being fetched.
+/// The style preview only reads, so it has its own.
 #[derive(Default)]
 pub struct HdManager {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
+    previewing: Arc<AtomicBool>,
 }
 
 /// The `hl.exe` path from the Configuration page, or the "set it first"
@@ -46,8 +48,8 @@ fn scripts_dir(app: &AppHandle) -> Option<PathBuf> {
 /// `hl.exe` the Configuration page holds.
 #[tauri::command]
 pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, String> {
-    let root = hd::hd_root(&game_exe(&game_path)?)
-        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let exe = game_exe(&game_path)?;
+    let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
     // A big HD folder is tens of thousands of files, and finding Python runs
     // a few processes: neither belongs on the async runtime's own threads.
@@ -60,6 +62,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
             upscaler::chosen(&hd_tools).map(|dir| dir.to_string_lossy().to_string());
         status.python = Some(python::resolve(&hd_tools));
         status.my_styles = Some(my_styles::read(&root, scripts.as_deref()));
+        status.maps = hd::preview::map_choices(&exe, &root, scripts.as_deref());
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
         status
     }))
@@ -242,4 +245,39 @@ pub async fn hd_remove_style(
         my_styles::remove(&root, scripts.as_deref(), &name)
     }))
     .await
+}
+
+/// Makes the style comparison sheet with `compare.py`: the chosen maps (or a
+/// few picked for you) in the chosen styles (or all of them).
+#[tauri::command]
+pub async fn hd_preview(
+    app: AppHandle,
+    state: State<'_, HdManager>,
+    game_path: String,
+    request: hd::preview::PreviewRequest,
+) -> Result<hd::preview::Preview, String> {
+    let game = game_exe(&game_path)?;
+    let scripts = scripts_dir(&app).ok_or_else(|| crate::messages::HD_NO_SCRIPTS.to_string())?;
+    if state.previewing.swap(true, Ordering::SeqCst) {
+        return Err(crate::messages::HD_ALREADY_RUNNING.to_string());
+    }
+    let previewing = Arc::clone(&state.previewing);
+    let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let hd_tools = hd::setup::hd_tools_dir();
+        let using = python::resolve(&hd_tools)
+            .using
+            .ok_or_else(|| crate::messages::HD_NO_PYTHON.to_string())?;
+        // Nothing stops a preview but its own timeout: it takes seconds.
+        hd::preview::run(
+            &request,
+            &using,
+            &hd_tools,
+            &scripts,
+            &game,
+            &AtomicBool::new(false),
+        )
+    }))
+    .await;
+    previewing.store(false, Ordering::SeqCst);
+    result
 }
