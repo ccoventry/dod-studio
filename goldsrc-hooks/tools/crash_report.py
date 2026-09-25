@@ -31,6 +31,25 @@ KNOWN = {
     "client.dll+0xb2e2": TEMPENT.format("blood stream blood"),
     "client.dll+0x31574": TEMPENT.format("shell casing, player model"),
     "client.dll+0x316ad": TEMPENT.format("shell casing, viewmodel"),
+    # #375 triage: Server::ParseDeltaPacketEntities (core.dll+0x13320) clears
+    # entnum * 340 bytes of a 256-entity array without stopping after its own
+    # "entnum>MAX_PACKET_ENTITIES" error, so 257+ entities also zero the
+    # m_Instream pointer stored just past the array, and the next ReadByte
+    # reads through NULL.
+    # The crash record names no demo; only an entity count over 256 reaches
+    # this, and every HLTV demo in the movie install that has one is on
+    # dod_lennon2 and has it from the first frame (packet_entity_probe).
+    "core.dll+0x16d6": "#207: an HLTV demo with more than 256 entities in one packet (so far always dod_lennon2); "
+                       "the pre-Anniversary HLTV demo player can't hold them. The Anniversary build's limit is 1024",
+}
+# Engine fatal errors already understood: a substring of the message -> what it is.
+KNOWN_ERRORS = {
+    "entnum>MAX_PACKET_ENTITIES": "#207: an HLTV demo with more than 256 entities (so far always dod_lennon2); "
+                                  "the demo is fine, the pre-Anniversary engine can't play it",
+    "Cannot continue without model": "a demo needs a file that is missing from the game folder; "
+                                     "check whether it is there now",
+    "Illegible server message - svc_bad": "expected for recovered/spliced demos from the demo-salvage R&D; "
+                                          "anywhere else it is a damaged demo",
 }
 # Log lines that are only noise when reading what led up to a crash.
 NOISE = re.compile(r"texture_hires: (world|model|sprite) \"|texture_hires: detail gfx|still cached from|"
@@ -135,7 +154,7 @@ def main():
         modules = list(dict.fromkeys(f.split("+")[0] for f in first[6]))
         print(f"  call stack runs through: {' <- '.join(modules) or '(none recorded)'}")
         for date, time, demo, _, _, _, frames, before, level, session in (occ if args.all else occ[:1]):
-            when = f"{date} {time}" + (f", {float(demo):.0f} s into the demo" if demo else "")
+            when = f"{date} {time}" + (f", {float(demo):.0f} s of playback into the session" if demo else "")
             print(f"  -- {when}" + (f", on {level}" if level else "") + (f" (session started {session})" if session else ""))
             for line in before:
                 m = HEADER.match(line)
@@ -151,6 +170,9 @@ def main():
     for msg, demos in sorted(errors.items(), key=lambda kv: -len(kv[1])):
         named = collections.Counter(d or "(demo unknown)" for d in demos)
         print(f"\n{msg}  x{len(demos)}")
+        known = [note for key, note in KNOWN_ERRORS.items() if key in msg]
+        if known:
+            print(f"  ({known[0]})")
         for d, n in named.most_common(5):
             print(f"  {d}" + (f" x{n}" if n > 1 else ""))
 
