@@ -15,6 +15,8 @@ usage: python sky_hd.py <out_dir> <map> [<map> ...]   the skies those maps use
                                                        dod/gfx/env, plus the
                                                        Half-Life skies any map
                                                        in dod/maps names
+                                                       (with hd_maps.txt: only
+                                                       the skies its maps use)
 env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
 """
 import os, sys
@@ -38,7 +40,10 @@ def main():
     def face_path(name):
         return next((p for p in (os.path.join(d, name) for d in env_dirs) if os.path.exists(p)), None)
 
-    if maps == ["--all"]:
+    if maps == ["--all"] and C.map_patterns() is not None:
+        # hd_maps.txt: only the listed maps' skies, not every sky on disk.
+        names = {skyname(game, m) for m in C.all_maps(game)}
+    elif maps == ["--all"]:
         names = {f[:-6].lower() for f in os.listdir(env_dirs[0]) if f.lower().endswith(".tga")}
         names |= {skyname(game, b[:-4]) for b in os.listdir(os.path.join(game, "dod", "maps"))
                   if b.lower().endswith(".bsp")}

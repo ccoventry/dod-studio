@@ -29,7 +29,7 @@ usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
   style ...       which styles (default: the 7 built-in ones and any in
                   my_styles.txt)
 """
-import argparse, datetime, os, subprocess, sys, time
+import argparse, datetime, glob, os, subprocess, sys, time
 from PIL import Image
 
 import hdcommon as C
@@ -62,6 +62,13 @@ def main():
         print(line, flush=True)
         with open(log_path, "a", encoding="utf-8") as f:
             f.write(line + "\n")
+
+    patterns = C.map_patterns()
+    if patterns is not None and ({"world", "sky"} & set(args.types.split(","))):
+        names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+        chosen, unused = C.select_maps(names, patterns)
+        log(f"=== {os.path.basename(C.MAP_LIST)}: map textures and skies for {len(chosen)} of {len(names)} map(s)"
+            + (f"; matching nothing: {', '.join(unused)}" if unused else ""))
 
     styles = args.styles or STYLE_ORDER + [s for s in S.STYLES if s not in STYLE_ORDER]
     for s in styles:
