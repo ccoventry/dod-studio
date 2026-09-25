@@ -5,6 +5,8 @@
 //! scripts build them. This module is the app's side of that: what is built
 //! ([`scan`]), and fetching the upscaler the build needs ([`setup`]). Building
 //! itself is still the scripts' job; the Rust port is #372's second step.
+//! The user's own styles are [`my_styles`], and the misses the game logged
+//! [`misses`].
 //!
 //! The layout and names here mirror the hook's and the scripts', and must stay
 //! in step with both:
@@ -15,6 +17,7 @@
 
 pub mod build;
 pub mod misses;
+pub mod my_styles;
 pub mod python;
 pub mod setup;
 pub mod upscaler;
@@ -108,6 +111,9 @@ pub struct ToolsStatus {
     pub upscaler: String,
     pub upscaler_present: bool,
     pub models: Vec<ModelStatus>,
+    /// Every model in the folder (both halves present), by file stem, sorted:
+    /// what a custom AI style can use.
+    pub available_models: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -138,6 +144,9 @@ pub struct HdStatus {
     pub python: Option<python::PythonStatus>,
     /// The build scripts' folder, `None` when this copy of the app has none.
     pub scripts: Option<String>,
+    /// The install's `my_styles.txt`. Filled in by the caller, which knows
+    /// the scripts' folder: [`my_styles::read`].
+    pub my_styles: Option<my_styles::MyStyles>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -179,6 +188,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         tools: tools_status(tools_dir),
         python: None,
         scripts: None,
+        my_styles: None,
     }
 }
 
@@ -235,7 +245,25 @@ fn tools_status(tools_dir: &Path) -> ToolsStatus {
         upscaler: upscaler.to_string_lossy().to_string(),
         upscaler_present: upscaler.is_file(),
         models,
+        available_models: available_models(tools_dir),
     }
+}
+
+/// The models in `tools_dir\models` with both a `.param` and a `.bin`.
+fn available_models(tools_dir: &Path) -> Vec<String> {
+    let Ok(entries) = std::fs::read_dir(tools_dir.join("models")) else {
+        return Vec::new();
+    };
+    let mut models: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().to_string();
+            name.strip_suffix(".param").map(str::to_string)
+        })
+        .filter(|model| setup::model_present(tools_dir, model))
+        .collect();
+    models.sort();
+    models
 }
 
 #[cfg(test)]
@@ -259,6 +287,29 @@ mod tests {
         assert!(status.built_styles.is_empty());
         assert!(!status.tools.upscaler_present);
         assert!(status.tools.models.iter().all(|m| !m.present));
+        assert!(status.tools.available_models.is_empty());
+    }
+
+    #[test]
+    fn every_whole_model_in_the_folder_is_available() {
+        let dir = Scratch::new("hd_available_models");
+        let models = dir.join("tools").join("models");
+        std::fs::create_dir_all(&models).unwrap();
+        for file in [
+            "realesrgan-x4plus-anime.param",
+            "realesrgan-x4plus-anime.bin",
+            "ultrasharp-4x.bin",
+            "ultrasharp-4x.param",
+            "half.param",
+            "notes.txt",
+        ] {
+            std::fs::write(models.join(file), b"").unwrap();
+        }
+        let status = scan(&dir.join("dodstudio_hd"), &dir.join("tools"));
+        assert_eq!(
+            status.tools.available_models,
+            ["realesrgan-x4plus-anime", "ultrasharp-4x"]
+        );
     }
 
     #[test]

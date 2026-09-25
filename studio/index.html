@@ -795,6 +795,50 @@
               </div>
             </div>
 
+            <!-- The custom-style form: lines in the install's my_styles.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MY_STYLES_TITLE">Your own styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MY_STYLES_HINT">Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.</p>
+                <p id="hd-my-styles-text" class="hd-hint"></p>
+                <ul id="hd-my-styles-list" class="hd-my-styles"></ul>
+                <div class="input-row">
+                  <label for="hd-style-name" data-str="HD.STYLE_NAME_LABEL">Name:</label>
+                  <input id="hd-style-name" type="text" maxlength="32" spellcheck="false" data-str-placeholder="HD.STYLE_NAME_PLACEHOLDER">
+                  <label for="hd-style-kind" data-str="HD.STYLE_KIND_LABEL">Made by:</label>
+                  <select id="hd-style-kind">
+                    <option value="plain" data-str="HD.STYLE_KINDS.plain">A plain enlargement, sharpened</option>
+                    <option value="ai" data-str="HD.STYLE_KINDS.ai">An AI model</option>
+                    <option value="blend" data-str="HD.STYLE_KINDS.blend">Mixing two styles</option>
+                  </select>
+                </div>
+                <div class="input-row" data-style-kind="plain">
+                  <label for="hd-style-sharpening" data-str="HD.STYLE_SHARPENING_LABEL">Sharpening (0 to 500; plain is 60):</label>
+                  <input id="hd-style-sharpening" type="number" min="0" max="500" step="10" value="60">
+                </div>
+                <div class="input-row" data-style-kind="ai" hidden>
+                  <label for="hd-style-model" data-str="HD.STYLE_MODEL_LABEL">Model:</label>
+                  <select id="hd-style-model"></select>
+                </div>
+                <p id="hd-style-model-hint" class="hd-hint" data-style-kind="ai" hidden></p>
+                <div class="input-row" data-style-kind="blend" hidden>
+                  <label for="hd-style-percent" data-str="HD.STYLE_MIX_LABEL">Mix:</label>
+                  <input id="hd-style-percent" type="number" min="0" max="100" step="5" value="50">
+                  <span data-str="HD.STYLE_MIX_OF">% of</span>
+                  <select id="hd-style-a"></select>
+                  <span data-str="HD.STYLE_MIX_REST">and the rest</span>
+                  <select id="hd-style-b"></select>
+                </div>
+                <pre id="hd-style-line" class="hd-code"></pre>
+                <div class="row-inputs">
+                  <button id="hd-style-save-btn" class="primary-btn" data-str="HD.STYLE_SAVE_BUTTON">Save style</button>
+                </div>
+                <p id="hd-style-message" class="hd-hint"></p>
+              </div>
+            </div>
+
             <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
             <div class="egui-panel">
               <div class="panel-header flex-between">

@@ -123,6 +123,10 @@ pub fn hd_build_bad_type(kind: &str) -> String {
     format!("{kind:?} is not something the build makes")
 }
 
+pub fn hd_build_unknown_style(style: &str) -> String {
+    format!("{style:?} is neither a built-in style nor one in my_styles.txt")
+}
+
 pub fn hd_build_needs_upscaler(style: &str) -> String {
     format!("The {style} style needs the upscaler and its model: use Download first")
 }
@@ -136,6 +140,45 @@ pub fn hd_build_failed(status: impl Display, detail: &str) -> String {
 {detail}"
         )
     }
+}
+
+// ── hd/my_styles.rs ──────────────────────────────────────────────────────
+// The scripts' own wording (styles.py's load_my_styles), so a file refused
+// on the HD page reads the same as one refused on the command line.
+
+/// Where a problem in the custom-style form is, in place of a line number.
+pub const HD_STYLE_FORM: &str = "New style";
+
+pub fn hd_style_expected_eq(where_: &str, line: &str) -> String {
+    format!("{where_}: expected `name = ...`, got {line:?}")
+}
+
+pub fn hd_style_bad_name(where_: &str, name: &str) -> String {
+    format!("{where_}: {name:?} -- style names are lowercase letters, digits, - and _ only")
+}
+
+pub fn hd_style_built_in(where_: &str, name: &str) -> String {
+    format!("{where_}: {name:?} is a built-in style; pick another name")
+}
+
+pub fn hd_style_bad_value(where_: &str, value: &str) -> String {
+    format!("{where_}: can't read {value:?}; see my_styles.example.txt")
+}
+
+pub fn hd_style_blends_unknown(name: &str, source: &str) -> String {
+    format!("my_styles.txt: {name} blends {source:?}, which isn't a style")
+}
+
+pub fn hd_style_blends_itself(name: &str) -> String {
+    format!("{name} can't blend itself")
+}
+
+pub fn hd_build_bad_my_styles(error: &str) -> String {
+    format!("my_styles.txt needs fixing before a build: {error}")
+}
+
+pub fn hd_build_needs_model(style: &str, model: &str) -> String {
+    format!("The {style} style needs the model {model} in the upscaler's models folder")
 }
 
 pub fn hd_not_an_upscaler_folder(dir: impl Display) -> String {
