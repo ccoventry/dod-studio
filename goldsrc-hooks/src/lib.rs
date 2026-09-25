@@ -47,6 +47,11 @@
 //!   `cl_xhair_style` picks, since the two are drawn by different code paths
 //!   and do not otherwise share a look.
 //!
+//! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
+//!   effect entity to give it (issue #374). On by default, since it only acts
+//!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
+//!   it off.
+//!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
 //!
@@ -94,6 +99,7 @@ mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod tempent_fix;
 mod texture_hires;
 mod voice;
 
@@ -154,6 +160,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_ANIM_FIX", ANIM_FIX_DEFAULT),
+        Ordering::Relaxed,
+    );
+    // A crash fix rather than a capture setting, so on unless asked not to.
+    tempent_fix::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_TEMPENT_FIX", true),
         Ordering::Relaxed,
     );
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
@@ -236,6 +247,10 @@ fn install_fixes() {
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();
+
+    // Also re-runs if client.dll is ever loaded again: install() compares the
+    // module base and patches the new copy.
+    tempent_fix::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {
