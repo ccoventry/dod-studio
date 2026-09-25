@@ -13,7 +13,10 @@
 //!   style;
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
+pub mod build;
+pub mod python;
 pub mod setup;
+pub mod upscaler;
 
 use std::path::{Path, PathBuf};
 
@@ -91,11 +94,16 @@ pub struct TypeStatus {
     pub folders: Vec<FolderStatus>,
 }
 
-/// Whether the upscaler and each AI style's model are where [`setup`] puts
-/// them.
+/// Whether the upscaler and each AI style's model are in the folder a build
+/// would use ([`upscaler::resolve`]).
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolsStatus {
     pub dir: String,
+    /// Where that folder came from; `None` when no folder has the upscaler
+    /// yet, and `dir` is DoD Studio's own, which Download fills.
+    pub source: Option<upscaler::UpscalerSource>,
+    /// The folder the user chose, whether or not it is the one used.
+    pub chosen: Option<String>,
     pub upscaler: String,
     pub upscaler_present: bool,
     pub models: Vec<ModelStatus>,
@@ -124,6 +132,11 @@ pub struct HdStatus {
     pub enabled_cvar: &'static str,
     pub style_cvar: &'static str,
     pub tools: ToolsStatus,
+    /// Which Python a build would use. Filled in by the caller, since
+    /// finding out runs a few processes: [`python::resolve`].
+    pub python: Option<python::PythonStatus>,
+    /// The build scripts' folder, `None` when this copy of the app has none.
+    pub scripts: Option<String>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -163,6 +176,8 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         enabled_cvar: ENABLED_CVAR,
         style_cvar: STYLE_CVAR,
         tools: tools_status(tools_dir),
+        python: None,
+        scripts: None,
     }
 }
 
@@ -214,6 +229,8 @@ fn tools_status(tools_dir: &Path) -> ToolsStatus {
         .collect();
     ToolsStatus {
         dir: tools_dir.to_string_lossy().to_string(),
+        source: None,
+        chosen: None,
         upscaler: upscaler.to_string_lossy().to_string(),
         upscaler_present: upscaler.is_file(),
         models,

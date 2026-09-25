@@ -78,7 +78,7 @@ def main():
         # The upscaled image is 1.5 faces wide (a quarter face of padding each
         # side): scale it to 1.5x the target, keep the middle.
         big = Image.open(src).convert("RGB").resize((tw * 3 // 2, th * 3 // 2), Image.LANCZOS)
-        big.crop((tw // 4, th // 4, tw // 4 + tw, th // 4 + th)).save(os.path.join(out_dir, name))
+        C.save_output(big.crop((tw // 4, th // 4, tw // 4 + tw, th // 4 + th)), os.path.join(out_dir, name))
         done += 1
     print(f"wrote {done} HD sky face(s) to {out_dir}")
 

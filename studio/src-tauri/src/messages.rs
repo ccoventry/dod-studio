@@ -91,7 +91,16 @@ pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
 // ── hd_manager.rs ───────────────────────────────────────────────────────────
 
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
-pub const HD_SETUP_ALREADY_RUNNING: &str = "The upscaler download is already running.";
+pub const HD_ALREADY_RUNNING: &str =
+    "A download or build is already running. Wait for it, or Cancel it.";
+pub const HD_NO_SCRIPTS: &str =
+    "This copy of DoD Studio has no HD build scripts (goldsrc-hooks/tools/hd).";
+pub const HD_NO_PYTHON: &str =
+    "No Python to run the build with: use Download, or choose a python.exe.";
+
+pub fn hd_not_python(path: &str) -> String {
+    format!("{path} didn't run as Python 3")
+}
 
 // ── capture_manager.rs ──────────────────────────────────────────────────────
 

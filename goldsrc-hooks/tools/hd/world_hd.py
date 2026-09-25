@@ -86,7 +86,7 @@ def main():
             alpha = Image.fromarray(m.astype(np.uint8) * 255, "L").resize((tw * 2, th * 2), Image.BILINEAR).crop(centre)
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
-        img.save(os.path.join(out_dir, key + ".tga"))
+        C.save_output(img, os.path.join(out_dir, key + ".tga"))
         done += 1
     print(f"wrote {done} replacement(s) to {out_dir}")
 

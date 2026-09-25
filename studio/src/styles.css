@@ -1734,6 +1734,67 @@ tr.keyboard-selected {
   color: var(--text-muted);
 }
 
+/* Style rows × type columns; each cell is "N files, size". */
+#hd-status-table {
+  border-collapse: collapse;
+}
+
+#hd-status-table th,
+#hd-status-table td {
+  padding: 5px 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid #282828;
+}
+
+#hd-status-table th {
+  color: #aaaaaa;
+  font-weight: 600;
+  border-bottom-color: var(--border-color);
+}
+
+.hd-mono {
+  font-family: monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.hd-choice-group {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.hd-choice-label {
+  min-width: 52px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+}
+
+.hd-choices label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.hd-details {
+  margin-top: 8px;
+}
+
+.hd-details summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
 .hd-code {
   font-family: monospace;
   background: var(--bg-input);

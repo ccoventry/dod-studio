@@ -3,8 +3,9 @@
   Minimal harness for hd_pane.js (#372) -- see tests/e2e/README.md for the
   general shape. Carries only the elements the pane reads and writes, plus the
   Configuration page's hl.exe field it takes the game path from. A test
-  controls the backend by registering `hd_status` / `hd_setup_tools`
-  handlers on window.__mockInvokeHandlers.
+  controls the backend by registering `hd_status` / `hd_setup_tools` /
+  `hd_build` / `hd_set_python` handlers on window.__mockInvokeHandlers; the
+  file picker is `plugin:dialog|open`, which goes through the same mock.
 -->
 <html lang="en">
 <head>
@@ -17,14 +18,25 @@
 
   <p id="hd-status-text"></p>
   <button id="hd-refresh-btn">Refresh</button>
-  <table><tbody id="hd-status-body"></tbody></table>
+  <table><thead id="hd-status-head"></thead><tbody id="hd-status-body"></tbody></table>
   <select id="hd-style-select"></select>
   <button id="hd-copy-cfg-btn">Copy</button>
   <pre id="hd-cfg-lines"></pre>
   <p id="hd-tools-text"></p>
   <button id="hd-setup-btn">Download</button>
   <button id="hd-setup-cancel-btn" disabled>Cancel</button>
+  <button id="hd-upscaler-pick-btn">Choose upscaler folder...</button>
+  <button id="hd-upscaler-reset-btn">Find it automatically</button>
+  <p id="hd-python-text"></p>
+  <button id="hd-python-pick-btn">Choose python.exe...</button>
+  <button id="hd-python-reset-btn">Find it automatically</button>
   <p id="hd-setup-progress"></p>
+  <div id="hd-build-styles"></div>
+  <div id="hd-build-types"></div>
+  <button id="hd-build-btn">Build</button>
+  <button id="hd-build-cancel-btn" disabled>Cancel</button>
+  <p id="hd-build-progress"></p>
+  <p id="hd-build-line"></p>
   <pre id="hd-realesrgan-line"></pre>
   <div id="footer-hd-summary"></div>
   <div id="toast-container"></div>

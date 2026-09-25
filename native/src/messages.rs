@@ -108,6 +108,44 @@ pub fn hd_download_incomplete(url: &str, got: u64, want: u64) -> String {
     format!("{url} stopped after {got} of {want} bytes")
 }
 
+// ── hd/build.rs ──────────────────────────────────────────────────────────
+
+pub const HD_BUILD_NO_GAME_FOLDER: &str =
+    "The Half-Life Executable path has no folder to build into.";
+
+pub const HD_BUILD_NOTHING_CHOSEN: &str = "Pick at least one style and one kind of file to build.";
+
+pub fn hd_build_bad_style(style: &str) -> String {
+    format!("{style:?} is not a style name: lowercase letters, digits, - and _ only")
+}
+
+pub fn hd_build_bad_type(kind: &str) -> String {
+    format!("{kind:?} is not something the build makes")
+}
+
+pub fn hd_build_needs_upscaler(style: &str) -> String {
+    format!("The {style} style needs the upscaler and its model: use Download first")
+}
+
+pub fn hd_build_failed(status: impl Display, detail: &str) -> String {
+    if detail.is_empty() {
+        format!("the build stopped ({status})")
+    } else {
+        format!(
+            "the build stopped ({status}):
+{detail}"
+        )
+    }
+}
+
+pub fn hd_not_an_upscaler_folder(dir: impl Display) -> String {
+    format!("{dir} has no realesrgan-ncnn-vulkan.exe; choose the folder it is in")
+}
+
+pub fn hd_download_checksum(url: &str, got: &str, want: &str) -> String {
+    format!("{url} is not the expected file (SHA-256 {got}, expected {want}); nothing was kept")
+}
+
 pub fn hd_unzip_failed(zip: impl Display, status: impl Display) -> String {
     format!("could not unpack {zip} ({status})")
 }

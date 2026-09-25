@@ -64,7 +64,7 @@ def main():
             um, us = up[..., c].mean(), up[..., c].std()
             om, os_ = o[..., c].mean(), o[..., c].std()
             up[..., c] = (up[..., c] - um) * (os_ / us if us > 1e-3 else 1.0) + om
-        Image.fromarray(np.clip(up + 0.5, 0, 255).astype(np.uint8), "RGB").save(os.path.join(out_dir, name))
+        C.save_output(Image.fromarray(np.clip(up + 0.5, 0, 255).astype(np.uint8), "RGB"), os.path.join(out_dir, name))
         done += 1
     print(f"wrote {done} HD detail texture(s) to {out_dir}")
 

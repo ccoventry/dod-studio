@@ -224,6 +224,28 @@ def all_maps(game):
     return chosen
 
 
+def save_output(img, path):
+    """Saves a finished HD file so it only ever appears whole.
+
+    Every build step skips a file that already exists, so a build stopped
+    mid-save (Cancel in DoD Studio, a closed window) must not leave half a
+    file under the real name: it would count as built forever. The image goes
+    to `<path>.part` first and is renamed into place."""
+    part = path + ".part"
+    img.save(part, format=os.path.splitext(path)[1][1:].upper() or None)
+    os.replace(part, path)
+
+
+def clear_partial(out_dir):
+    """Removes `.part` files a stopped build left in `out_dir`."""
+    for name in os.listdir(out_dir) if os.path.isdir(out_dir) else ():
+        if name.endswith(".part"):
+            try:
+                os.remove(os.path.join(out_dir, name))
+            except OSError:
+                pass
+
+
 def dod_dir():
     return os.path.join(game_root(), "dod")
 

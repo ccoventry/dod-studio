@@ -37,7 +37,12 @@
     ],
     "resources": {
       "../../localizations": "localizations",
-      "../../target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll": "goldsrc-hooks/dodstudio_goldsrc_hooks.dll"
+      "../../target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll": "goldsrc-hooks/dodstudio_goldsrc_hooks.dll",
+      "../../goldsrc-hooks/tools/hd/*.py": "hd-scripts/",
+      "../../goldsrc-hooks/tools/hd/valve_models.txt": "hd-scripts/valve_models.txt",
+      "../../goldsrc-hooks/tools/hd/hd_maps.example.txt": "hd-scripts/hd_maps.example.txt",
+      "../../goldsrc-hooks/tools/hd/my_styles.example.txt": "hd-scripts/my_styles.example.txt",
+      "../../goldsrc-hooks/tools/hd/README.md": "hd-scripts/README.md"
     }
   },
   "plugins": {

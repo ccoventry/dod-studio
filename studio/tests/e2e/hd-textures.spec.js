@@ -1,9 +1,10 @@
 // hd_pane.js — the HD Textures page (#372).
 //
-// Pins what the page shows for a status report (the per-type table, the style
+// Pins what the page shows for a status report (the style-by-type table, the style
 // picker and the movie.cfg lines built from the backend's cvar names), that a
-// missing game path reads as a message rather than a broken page, and that the
-// download's progress and cancel land in the progress line.
+// missing game path reads as a message rather than a broken page, that the
+// download's progress and cancel land in the progress line, which Python the
+// page says it will use, and the build's choices, progress and cancel.
 import { test, expect } from '@playwright/test';
 
 /** native::hd::HdStatus, as serde sends it (snake_case). */
@@ -32,8 +33,24 @@ const STATUS = {
     dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan',
     upscaler: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan/realesrgan-ncnn-vulkan.exe',
     upscaler_present: false,
-    models: [{ style: 'ultrasharp', model: 'ultrasharp-4x', present: false }],
+    source: null,
+    chosen: null,
+    models: [
+      { style: 'ultrasharp', model: 'ultrasharp-4x', present: false },
+      { style: 'remacri', model: 'remacri-4x', present: false },
+      { style: 'siax', model: '4x_NMKD-Siax_200k', present: false },
+      { style: 'generalv3', model: 'RealESRGAN_General_x4_v3', present: false },
+      { style: 'x4plus', model: 'realesrgan-x4plus', present: false },
+    ],
   },
+  python: {
+    using: { source: 'found', exe: 'C:/Python314/python.exe', version: '3.14.7', missing: [] },
+    chosen: null,
+    chosen_problem: null,
+    found_unusable: null,
+    app_copy_present: false,
+  },
+  scripts: 'C:/dod-studio/goldsrc-hooks/tools/hd',
 };
 
 async function loadHarness(page, handlers) {
@@ -44,6 +61,9 @@ async function loadHarness(page, handlers) {
     if (h.statusError) window.__mockInvokeHandlers.hd_status = () => Promise.reject(h.statusError);
     window.__mockInvokeHandlers.hd_setup_tools = () =>
       new Promise((resolve, reject) => { window.__finishSetup = { resolve, reject }; });
+    window.__mockInvokeHandlers.hd_build = () =>
+      new Promise((resolve, reject) => { window.__finishBuild = { resolve, reject }; });
+    if (h.picked !== undefined) window.__mockInvokeHandlers['plugin:dialog|open'] = () => h.picked;
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -53,13 +73,14 @@ test('a status report fills the table, picks the built style and writes the cfg 
   await loadHarness(page, { status: STATUS });
   await page.click('#hd-refresh-btn');
 
+  // Styles are rows, asset types are columns.
+  await expect(page.locator('#hd-status-head th')).toHaveText(
+    ['Style', 'Map textures', 'Model skins', 'Sprites', 'Detail textures', 'Skies']);
   const rows = page.locator('#hd-status-body tr');
-  await expect(rows).toHaveCount(5);
-  await expect(rows.nth(0)).toContainText('Map textures');
-  await expect(rows.nth(0)).toContainText('plain: 4,708 files, 3.0 GB');
-  // An empty overrides folder is not listed.
-  await expect(rows.nth(0)).not.toContainText('overrides');
-  await expect(rows.nth(1)).toContainText('Nothing yet');
+  // Only plain has files; an empty overrides folder is not a row.
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0).locator('td')).toHaveText(
+    ['plain', '4,708 files, 3.0 GB', '–', '–', '493 files, 50.0 MB', '–']);
 
   // The default isn't built, so the built one is picked.
   await expect(page.locator('#hd-style-select')).toHaveValue('plain');
@@ -69,14 +90,14 @@ test('a status report fills the table, picks the built style and writes the cfg 
   await page.selectOption('#hd-style-select', 'remacri');
   await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri');
 
-  await expect(page.locator('#hd-tools-text')).toContainText('not downloaded yet');
+  await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
   await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
 });
 
 test('opening the page refreshes it', async ({ page }) => {
   await loadHarness(page, { status: STATUS });
   await page.click('.nav-tab-btn[data-nav="hd-textures"]');
-  await expect(page.locator('#hd-status-body tr')).toHaveCount(5);
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
 });
 
 test('no game path shows the backend message instead of a table', async ({ page }) => {
@@ -100,9 +121,240 @@ test('download progress, then cancel', async ({ page }) => {
   await expect(page.locator('#hd-setup-progress')).toHaveText('1 of 9: realesrgan-ncnn-vulkan.zip (10.0 MB of 45.0 MB)');
 
   await page.click('#hd-setup-cancel-btn');
-  const cancelled = await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_setup_cancel'));
+  const cancelled = await page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_cancel'));
   expect(cancelled).toBe(true);
   await page.evaluate(() => window.__finishSetup.reject('cancelled'));
   await expect(page.locator('#hd-setup-progress')).toContainText('Cancelled');
   await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+});
+
+test('the Python line says which Python the build uses, and why another is not', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-python-text')).toHaveText('Python: 3.14.7, found on this PC (C:/Python314/python.exe).');
+  // Nothing chosen: nothing to reset.
+  await expect(page.locator('#hd-python-reset-btn')).toBeHidden();
+
+  const noneUsable = {
+    ...STATUS,
+    python: {
+      using: null,
+      chosen: 'D:/py/python.exe',
+      chosen_problem: { exe: 'D:/py/python.exe', version: '3.13.1', missing: ['scipy'] },
+      // PIL is reported as Pillow, the name pip knows.
+      found_unusable: { exe: 'C:/Python39/python.exe', version: '3.9.18', missing: [] },
+      app_copy_present: false,
+    },
+  };
+  await page.evaluate((s) => { window.__mockInvokeHandlers.hd_status = () => s; }, noneUsable);
+  await page.click('#hd-refresh-btn');
+  const text = page.locator('#hd-python-text');
+  await expect(text).toContainText('The Python you chose (D:/py/python.exe, 3.13.1) has no SciPy');
+  await expect(text).toContainText('Python 3.9.18 is installed (C:/Python39/python.exe) but is older than 3.10');
+  await expect(page.locator('#hd-python-reset-btn')).toBeVisible();
+  // No Python: no building.
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('choosing a python.exe sends it to the backend, and reset forgets it', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, picked: 'D:/py/python.exe' });
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-python-pick-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.find((c) => c.cmd === 'hd_set_python')?.args)).toEqual({ path: 'D:/py/python.exe' });
+
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, python: { ...s.python, chosen: 'D:/py/python.exe' } });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await page.click('#hd-python-reset-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.filter((c) => c.cmd === 'hd_set_python').at(-1)?.args)).toEqual({ path: null });
+});
+
+test('build choices: AI styles wait for the upscaler, and the request carries what is ticked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+
+  const styles = page.locator('#hd-build-styles input');
+  await expect(styles).toHaveCount(7);
+  // No upscaler yet: every AI style is off and says why; plain and blend are free.
+  await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeDisabled();
+  await expect(page.locator('#hd-build-styles label', { hasText: 'x4plus' })).toContainText('(needs Download)');
+  await expect(page.locator('#hd-build-styles input[value="plain"]')).toBeEnabled();
+  // Every file type starts ticked.
+  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(5);
+
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.uncheck('#hd-build-types input[value="world"]');
+  await page.click('#hd-build-btn');
+  const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args);
+  expect(request).toEqual({
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    request: { styles: ['plain'], types: ['sky', 'sprites', 'models', 'detail'] },
+  });
+});
+
+test('build progress, the finished line, and cancel', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 5, steps: 10, style: 'plain', asset_type: 'world', line: null, elapsed_secs: 75,
+  }));
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 5 of 10: plain, Map textures (1m 15s so far)');
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 5, steps: 10, style: 'plain', asset_type: 'world', line: 'plain      world   exit 0, 12 new', elapsed_secs: 80,
+  }));
+  await expect(page.locator('#hd-build-line')).toHaveText('plain      world   exit 0, 12 new');
+
+  await page.click('#hd-build-cancel-btn');
+  await expect.poll(() => page.evaluate(() => window.__mockInvocations.some((c) => c.cmd === 'hd_cancel'))).toBe(true);
+  await page.evaluate(() => window.__finishBuild.reject('cancelled'));
+  await expect(page.locator('#hd-build-progress')).toContainText('Stopped. Files already built are kept');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  await page.click('#hd-build-btn');
+  await page.evaluate(() => window.__finishBuild.resolve({ steps: 10, elapsed_secs: 200, log_path: 'C:/x/build_all.log' }));
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3m 20s. Every step's counts are in C:/x/build_all.log.");
+});
+
+test('rows follow the style order, custom styles after, overrides last; nothing built is one row', async ({ page }) => {
+  const types = ['world', 'models', 'sprites', 'detail', 'sky'];
+  const withFolders = {
+    ...STATUS,
+    built_styles: ['crisp', 'plain', 'ultrasharp'],
+    types: types.map((asset_type) => ({
+      asset_type,
+      folders: asset_type === 'world'
+        ? ['crisp', 'overrides', 'plain', 'ultrasharp'].map((name) => ({ name, files: 1, bytes: 1024 }))
+        : [],
+    })),
+  };
+  await loadHarness(page, { status: withFolders });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr td:first-child')).toHaveText(['ultrasharp', 'plain', 'crisp', 'overrides']);
+
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, built_styles: [], types: s.types.map((t) => ({ ...t, folders: [] })) });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
+  await expect(page.locator('#hd-status-body td')).toHaveText('Nothing yet');
+  await expect(page.locator('#hd-status-body td')).toHaveAttribute('colspan', '6');
+});
+
+test('an upscaler found elsewhere is named and its styles can build; a chosen folder can be reset', async ({ page }) => {
+  const dir = 'C:/dod-studio/local/texture-upscale-rnd/tools/realesrgan';
+  const found = {
+    ...STATUS,
+    tools: {
+      ...STATUS.tools,
+      dir,
+      upscaler: `${dir}/realesrgan-ncnn-vulkan.exe`,
+      upscaler_present: true,
+      source: 'chosen',
+      chosen: dir,
+      models: STATUS.tools.models.map((m) => ({ ...m, present: m.style !== 'siax' })),
+    },
+  };
+  await loadHarness(page, { status: found, picked: dir });
+  await page.click('#hd-refresh-btn');
+  const text = page.locator('#hd-tools-text');
+  await expect(text).toContainText(`Upscaler: the folder you chose (${dir}).`);
+  await expect(text).toContainText('Missing models for: siax.');
+  await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeEnabled();
+  await expect(page.locator('#hd-build-styles input[value="siax"]')).toBeDisabled();
+  await expect(page.locator('#hd-upscaler-reset-btn')).toBeVisible();
+
+  await page.click('#hd-upscaler-pick-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.find((c) => c.cmd === 'hd_set_upscaler')?.args)).toEqual({ path: dir });
+  const picker = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'plugin:dialog|open')?.args);
+  expect(picker.options.directory).toBe(true);
+
+  await page.click('#hd-upscaler-reset-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.filter((c) => c.cmd === 'hd_set_upscaler').at(-1)?.args)).toEqual({ path: null });
+
+  // A chosen folder another one beats is said so.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, tools: { ...s.tools, source: 'app' } });
+  }, found);
+  await page.click('#hd-refresh-btn');
+  await expect(text).toContainText("isn't used: another one has more of the style models");
+});
+
+test('refresh shows it is working, and the status line says when it last finished', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => new Promise((resolve) => { window.__finishStatus = () => resolve(s); });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-refresh-btn')).toBeDisabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Checking...');
+  await page.evaluate(() => window.__finishStatus());
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await expect(page.locator('#hd-refresh-btn')).toHaveText('Refresh');
+  await expect(page.locator('#hd-status-text')).toContainText(/Checked at .+\./);
+});
+
+test('missing packages are named as pip knows them', async ({ page }) => {
+  const status = {
+    ...STATUS,
+    python: {
+      using: null, chosen: null, chosen_problem: null, app_copy_present: false,
+      found_unusable: { exe: 'C:/Py/python.exe', version: '3.12.1', missing: ['numpy', 'PIL'] },
+    },
+  };
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-python-text')).toContainText('has no NumPy, Pillow.');
+});
+
+test('Download is off, and says so, when there is nothing to download', async ({ page }) => {
+  const complete = {
+    ...STATUS,
+    tools: { ...STATUS.tools, upscaler_present: true, source: 'app',
+      models: STATUS.tools.models.map((m) => ({ ...m, present: true })) },
+  };
+  await loadHarness(page, { status: complete });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText('Nothing to download');
+
+  // One model short: back on.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({
+      ...s, tools: { ...s.tools, models: s.tools.models.map((m, i) => ({ ...m, present: i > 0 })) },
+    });
+  }, complete);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText("Download what's missing");
+});
+
+test('Build is off until at least one style and one kind of file are ticked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  // The default style (ultrasharp) needs the upscaler, so no style starts ticked.
+  await expect(page.locator('#hd-build-styles input:checked')).toHaveCount(0);
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+
+  await page.check('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  for (const type of ['sky', 'sprites', 'models', 'detail', 'world']) {
+    await page.uncheck(`#hd-build-types input[value="${type}"]`);
+  }
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+  await page.check('#hd-build-types input[value="sky"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  await page.uncheck('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
 });
