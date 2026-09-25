@@ -719,12 +719,9 @@
                 <p id="hd-status-text" class="hd-hint"></p>
                 <div class="table-wrapper">
                   <table id="hd-status-table">
-                    <thead>
-                      <tr>
-                        <th data-str="HD.TABLE_TYPE">Type</th>
-                        <th data-str="HD.TABLE_FOLDERS">Styles built</th>
-                      </tr>
-                    </thead>
+                    <!-- One row per style, one column per asset type: hd_pane.js
+                         writes both, since the types come from the backend. -->
+                    <thead id="hd-status-head"></thead>
                     <tbody id="hd-status-body"></tbody>
                   </table>
                 </div>

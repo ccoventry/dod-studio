@@ -27,6 +27,7 @@ const BUILD_TYPES = ['sky', 'sprites', 'models', 'detail', 'world'];
 
 export function initHdPane() {
   const statusText = document.querySelector('#hd-status-text');
+  const statusHead = document.querySelector('#hd-status-head');
   const statusBody = document.querySelector('#hd-status-body');
   const refreshBtn = document.querySelector('#hd-refresh-btn');
   const styleSelect = document.querySelector('#hd-style-select');
@@ -47,7 +48,7 @@ export function initHdPane() {
   const buildLine = document.querySelector('#hd-build-line');
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
-  if (!statusBody) return;
+  if (!statusBody || !statusHead) return;
 
   // The cvar names come from the backend (native::hd), not from here.
   let cvars = null;
@@ -95,18 +96,40 @@ export function initHdPane() {
     styleSelect.value = pick;
   }
 
+  // One row per style (and `overrides`, last), one column per asset type.
   function renderTable(status) {
+    const cell = (tag, text) => {
+      const el = document.createElement(tag);
+      el.textContent = text;
+      return el;
+    };
+    const head = document.createElement('tr');
+    head.append(cell('th', STRINGS.HD.TABLE_STYLE),
+      ...status.types.map((t) => cell('th', STRINGS.HD.TYPE_NAMES[t.asset_type] || t.asset_type)));
+    statusHead.replaceChildren(head);
+
+    const names = status.types.flatMap((t) => t.folders.filter((f) => f.files > 0).map((f) => f.name));
+    const known = allStyles(status);
+    const rows = [...new Set(names)].sort((a, b) => {
+      const rank = (n) => (n === 'overrides' ? Infinity : known.includes(n) ? known.indexOf(n) : known.length);
+      return rank(a) - rank(b) || a.localeCompare(b);
+    });
+
     statusBody.innerHTML = '';
-    for (const type of status.types) {
+    if (!rows.length) {
+      const empty = cell('td', STRINGS.HD.NOTHING_BUILT);
+      empty.colSpan = status.types.length + 1;
       const row = document.createElement('tr');
-      const name = document.createElement('td');
-      name.textContent = STRINGS.HD.TYPE_NAMES[type.asset_type] || type.asset_type;
-      const folders = document.createElement('td');
-      const filled = type.folders.filter((f) => f.files > 0);
-      folders.textContent = filled.length
-        ? filled.map((f) => STRINGS.HD.folderSummary(f.name, f.files, formatSize(f.bytes))).join('; ')
-        : STRINGS.HD.NOTHING_BUILT;
-      row.append(name, folders);
+      row.append(empty);
+      statusBody.appendChild(row);
+      return;
+    }
+    for (const name of rows) {
+      const row = document.createElement('tr');
+      row.append(cell('td', name), ...status.types.map((t) => {
+        const folder = t.folders.find((f) => f.name === name && f.files > 0);
+        return cell('td', folder ? STRINGS.HD.cellSummary(folder.files, formatSize(folder.bytes)) : '–');
+      }));
       statusBody.appendChild(row);
     }
   }
@@ -183,6 +206,7 @@ export function initHdPane() {
       status = await hdStatus(gamePath());
     } catch (err) {
       statusText.textContent = String(err);
+      statusHead.replaceChildren();
       statusBody.innerHTML = '';
       return;
     }

@@ -1076,8 +1076,7 @@ export const STRINGS = {
   HD: {
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
-    TABLE_TYPE: 'Type',
-    TABLE_FOLDERS: 'Styles built',
+    TABLE_STYLE: 'Style',
     USE_TITLE: 'Use it in the game',
     USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
     STYLE_LABEL: 'Style:',
@@ -1116,7 +1115,7 @@ export const STRINGS = {
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
-    folderSummary: (name, files, size) => `${name}: ${files.toLocaleString()} files, ${size}`,
+    cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,

@@ -1,6 +1,6 @@
 // hd_pane.js — the HD Textures page (#372).
 //
-// Pins what the page shows for a status report (the per-type table, the style
+// Pins what the page shows for a status report (the style-by-type table, the style
 // picker and the movie.cfg lines built from the backend's cvar names), that a
 // missing game path reads as a message rather than a broken page, that the
 // download's progress and cancel land in the progress line, which Python the
@@ -65,13 +65,14 @@ test('a status report fills the table, picks the built style and writes the cfg 
   await loadHarness(page, { status: STATUS });
   await page.click('#hd-refresh-btn');
 
+  // Styles are rows, asset types are columns.
+  await expect(page.locator('#hd-status-head th')).toHaveText(
+    ['Style', 'Map textures', 'Model skins', 'Sprites', 'Detail textures', 'Skies']);
   const rows = page.locator('#hd-status-body tr');
-  await expect(rows).toHaveCount(5);
-  await expect(rows.nth(0)).toContainText('Map textures');
-  await expect(rows.nth(0)).toContainText('plain: 4,708 files, 3.0 GB');
-  // An empty overrides folder is not listed.
-  await expect(rows.nth(0)).not.toContainText('overrides');
-  await expect(rows.nth(1)).toContainText('Nothing yet');
+  // Only plain has files; an empty overrides folder is not a row.
+  await expect(rows).toHaveCount(1);
+  await expect(rows.nth(0).locator('td')).toHaveText(
+    ['plain', '4,708 files, 3.0 GB', '–', '–', '493 files, 50.0 MB', '–']);
 
   // The default isn't built, so the built one is picked.
   await expect(page.locator('#hd-style-select')).toHaveValue('plain');
@@ -88,7 +89,7 @@ test('a status report fills the table, picks the built style and writes the cfg 
 test('opening the page refreshes it', async ({ page }) => {
   await loadHarness(page, { status: STATUS });
   await page.click('.nav-tab-btn[data-nav="hd-textures"]');
-  await expect(page.locator('#hd-status-body tr')).toHaveCount(5);
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
 });
 
 test('no game path shows the backend message instead of a table', async ({ page }) => {
@@ -211,4 +212,29 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
   await page.click('#hd-build-btn');
   await page.evaluate(() => window.__finishBuild.resolve({ steps: 10, elapsed_secs: 200, log_path: 'C:/x/build_all.log' }));
   await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3m 20s. Every step's counts are in C:/x/build_all.log.");
+});
+
+test('rows follow the style order, custom styles after, overrides last; nothing built is one row', async ({ page }) => {
+  const types = ['world', 'models', 'sprites', 'detail', 'sky'];
+  const withFolders = {
+    ...STATUS,
+    built_styles: ['crisp', 'plain', 'ultrasharp'],
+    types: types.map((asset_type) => ({
+      asset_type,
+      folders: asset_type === 'world'
+        ? ['crisp', 'overrides', 'plain', 'ultrasharp'].map((name) => ({ name, files: 1, bytes: 1024 }))
+        : [],
+    })),
+  };
+  await loadHarness(page, { status: withFolders });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr td:first-child')).toHaveText(['ultrasharp', 'plain', 'crisp', 'overrides']);
+
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, built_styles: [], types: s.types.map((t) => ({ ...t, folders: [] })) });
+  }, STATUS);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
+  await expect(page.locator('#hd-status-body td')).toHaveText('Nothing yet');
+  await expect(page.locator('#hd-status-body td')).toHaveAttribute('colspan', '6');
 });
