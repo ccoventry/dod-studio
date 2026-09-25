@@ -425,6 +425,21 @@ def anniversary():
             bad += [(a, target) for s0, n in spans if s0 < target < s0 + n]
     check(not bad, f"no branch lands inside a detoured span {[(hex(a), hex(t)) for a, t in bad]}")
 
+    # dodstudio_debug_hd_misses' per-map list: the studio API's GetModelByIndex
+    # (slot 5 of the table HUD_GetStudioModelInterface is handed) is a tail
+    # call here, and CL_GetModelByIndex reads the table at +0x17, not +0x1b.
+    studio_push = img.find(b"\x68" + struct.pack("<I", base + img.find(b"HUD_GetStudioModelInterface\0")))
+    pushes = [t for _, t in instructions(studio_push, studio_push + 0x30)]
+    # push "HUD_GetStudioModelInterface" ... push pstudio; push ppinterface; push 1
+    later = [t for t in pushes if t.startswith("push 0x")]
+    studio_api = int(later[1].split()[1], 16) - base if len(later) > 2 else 0
+    wrapper = u32(studio_api + 5 * 4) - base if studio_api else 0
+    check(img[wrapper:wrapper + 5] == b"\x55\x8b\xec\x5d\xe9",
+          f"studio API slot 5 (table +{studio_api:#x}) is `push ebp; mov ebp, esp; pop ebp; jmp` (+{wrapper:#x})")
+    body = rel32(wrapper + 4, 1)
+    check(img[body + 0xB:body + 0x11] == bytes.fromhex("81ff00020000") and img[body + 0x17:body + 0x1a] == b"\x8b\x34\xbd",
+          f"CL_GetModelByIndex (+{body:#x}) bounds the index at 0x200 and reads the table at +0x17")
+
     print(f"\nGL_LoadTexture2 +{entry:#x} (tail +{tail:#x}), GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
     print(f"{len(failures)} check(s) FAILED" if failures else "all checks passed")
     sys.exit(1 if failures else 0)

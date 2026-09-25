@@ -964,20 +964,28 @@ static LAST_LEVEL: AtomicU32 = AtomicU32::new(0);
 static LAST_MODEL_COUNT: AtomicU32 = AtomicU32::new(0);
 
 /// Finds `cl.model_precache` through the studio API's `GetModelByIndex`,
-/// which in this build is `push index; call CL_GetModelByIndex`, whose body
-/// bounds-checks the index against 0x200 and then reads
-/// `mov esi, [edi*4 + model_precache]`. Every byte relied on is checked;
-/// anything else means "not found", and misses are then filed only under
-/// the map loading when they were recorded.
+/// which calls `CL_GetModelByIndex`, whose body bounds-checks the index
+/// against 0x200 and then reads `mov esi, [edi*4 + model_precache]`. The
+/// pre-Anniversary wrapper is `push index; call`, the 25th Anniversary one a
+/// tail call (`pop ebp; jmp`), and the Anniversary body reads the table four
+/// bytes sooner. Every byte relied on is checked; anything else means "not
+/// found", and misses are then filed only under the map loading when they
+/// were recorded.
 fn find_precache_table() -> Option<usize> {
     let studio = engine::engine_studio()?;
     let wrapper = studio.get_model_by_index as *const () as usize;
     // push ebp; mov ebp, esp; mov eax, [ebp+8]; push eax; call rel32
-    check_span(wrapper, &[0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x50]).ok()?;
-    let body = unsafe { call_target(wrapper + 7) }.ok()?;
-    // cmp edi, 0x200 at +0x0b; mov esi, [edi*4 + table] at +0x1b.
+    let (body, load_at) =
+        if check_span(wrapper, &[0x55, 0x8B, 0xEC, 0x8B, 0x45, 0x08, 0x50]).is_ok() {
+            (unsafe { call_target(wrapper + 7) }.ok()?, 0x1b)
+        } else {
+            // push ebp; mov ebp, esp; pop ebp; jmp rel32
+            check_span(wrapper, &[0x55, 0x8B, 0xEC, 0x5D]).ok()?;
+            (unsafe { rel32_target(wrapper + 4, &[0xE9]) }.ok()?, 0x17)
+        };
+    // cmp edi, 0x200 at +0x0b; mov esi, [edi*4 + table] at +0x1b (Anniversary: +0x17).
     check_span(body + 0x0b, &[0x81, 0xFF, 0x00, 0x02, 0x00, 0x00]).ok()?;
-    let table = unsafe { operand_after(body + 0x1b, &[0x8B, 0x34, 0xBD]) }.ok()?;
+    let table = unsafe { operand_after(body + load_at, &[0x8B, 0x34, 0xBD]) }.ok()?;
     (table != 0).then_some(table)
 }
 
@@ -2242,6 +2250,16 @@ unsafe fn operand_after(at: usize, opcode: &[u8]) -> Result<usize, String> {
     Ok(unsafe { ((at + opcode.len()) as *const u32).read_unaligned() } as usize)
 }
 
+/// Target of the `rel32` branch whose `opcode` is at `at`.
+///
+/// Safety: `at .. at + opcode.len() + 4` must be mapped.
+unsafe fn rel32_target(at: usize, opcode: &[u8]) -> Result<usize, String> {
+    let rel = unsafe { operand_after(at, opcode) }? as u32;
+    Ok((at as u32)
+        .wrapping_add(opcode.len() as u32 + 4)
+        .wrapping_add(rel) as usize)
+}
+
 /// Target of the `E8 rel32` at `at`.
 ///
 /// Safety: as [`operand_after`].
@@ -2665,16 +2683,6 @@ mod anniversary {
     /// The hit path: `cmp word ptr [esi+4], 0; jle +0xa`, then
     /// `mov ax, word ptr [servercount]`.
     pub const HIT: &[u8] = &[0x66, 0x83, 0x7E, 0x04, 0x00, 0x7E, 0x0A, 0x66, 0xA1];
-
-    /// Target of the `rel32` branch whose `opcode` is at `at`.
-    ///
-    /// Safety: `at .. at + opcode.len() + 4` must be mapped.
-    unsafe fn rel32_target(at: usize, opcode: &[u8]) -> Result<usize, String> {
-        let rel = unsafe { operand_after(at, opcode) }? as u32;
-        Ok((at as u32)
-            .wrapping_add(opcode.len() as u32 + 4)
-            .wrapping_add(rel) as usize)
-    }
 
     /// The swap stub, replacing `cmp [ebp+0xc], 5; mov eax, [ebp+0x20]`.
     ///
