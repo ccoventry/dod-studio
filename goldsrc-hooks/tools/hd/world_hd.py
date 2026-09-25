@@ -14,10 +14,11 @@ border, and every place the texture repeats on a wall shows a seam.
 Identical textures shared between maps are built once.
 
 usage: python world_hd.py <out_dir> <map> [<map> ...]     e.g. dod_anzio
-       python world_hd.py <out_dir> --all                  every map in dod/maps
+       python world_hd.py <out_dir> --all                  every map in dod/maps, or
+                                                           the ones hd_maps.txt lists
 env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
 """
-import glob, os, sys
+import os, sys
 import numpy as np
 from PIL import Image
 from scipy.ndimage import distance_transform_edt
@@ -33,7 +34,7 @@ def main():
     out_dir, maps = sys.argv[1], sys.argv[2:]
     game = C.game_root()
     if maps == ["--all"]:
-        maps = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+        maps = C.all_maps(game)
     style = S.style_from_env()
     os.makedirs(out_dir, exist_ok=True)
     work = C.work_dir("world_" + style)

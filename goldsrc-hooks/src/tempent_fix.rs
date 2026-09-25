@@ -172,8 +172,10 @@ static SKIPPED: [AtomicU32; SITE_COUNT] = [const { AtomicU32::new(0) }; SITE_COU
 /// change.
 static LOGGED: [AtomicU32; SITE_COUNT] = [const { AtomicU32::new(0) }; SITE_COUNT];
 
-/// The `client.dll` base the detours were written into, or 0. Compared on each
-/// install so a reloaded `client.dll` is patched again rather than skipped.
+/// The `client.dll` base the detours were written into, or 0. On a later
+/// install at the same base, each site's own bytes say whether the loaded copy
+/// still has its jump (see [`already_guarded`]), so a reloaded `client.dll` is
+/// patched again rather than skipped.
 static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// How many of the six are in place, for the status line.
@@ -226,9 +228,10 @@ pub fn install() {
         unsafe { crate::debug::report("tempent_fix: client.dll is not loaded yet; not installed") };
         return;
     };
-    if INSTALLED_BASE.load(Ordering::Acquire) == base {
-        return;
-    }
+    // client.dll opts out of ASLR, so a reloaded copy usually lands at the
+    // same base: the base alone can't say whether this copy is patched. Only
+    // at the same base is RESUME known to point into mapped code.
+    let same_base = INSTALLED_BASE.load(Ordering::Acquire) == base;
     let Ok(mut detours) = DETOURS.lock() else {
         unsafe { crate::debug::report("tempent_fix: the detour lock is poisoned; not installed") };
         return;
@@ -245,7 +248,12 @@ pub fn install() {
     };
 
     let mut installed = 0;
+    let mut already = 0;
     for (index, site) in SITES.iter().enumerate() {
+        if same_base && already_guarded(index, site) {
+            already += 1;
+            continue;
+        }
         match install_site(index, site, base, scratch) {
             Ok(detour) => {
                 detours.push(detour);
@@ -256,13 +264,26 @@ pub fn install() {
             },
         }
     }
-    INSTALLED_COUNT.store(installed, Ordering::Relaxed);
+    INSTALLED_COUNT.store(installed + already, Ordering::Relaxed);
     INSTALLED_BASE.store(base, Ordering::Release);
+    if installed == 0 && already > 0 {
+        return;
+    }
+    let installed = installed + already;
     unsafe {
         crate::debug::report(&format!(
             "tempent_fix: {installed} of {SITE_COUNT} unchecked temp-entity calls guarded (scratch at {scratch:#x})"
         ))
     };
+}
+
+/// Whether site `index`'s jump is still in the loaded code: `E9` where the
+/// stolen bytes began. Only called at the base the jump was written at.
+fn already_guarded(index: usize, site: &Site) -> bool {
+    let resume = RESUME[index].load(Ordering::Acquire);
+    // Safety: the caller checked this is the base RESUME was computed
+    // against, so the address is inside client.dll's mapped code.
+    resume != 0 && unsafe { *((resume - site.stolen.len()) as *const u8) } == 0xe9
 }
 
 /// Scans for one site, checks its stolen bytes, and writes the jump.

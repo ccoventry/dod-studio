@@ -100,6 +100,24 @@ pub fn could_not_move_after_retries(
     )
 }
 
+// ── hd/setup.rs ──────────────────────────────────────────────────────────
+
+pub const HD_SETUP_CANCELLED: &str = "cancelled";
+
+pub fn hd_download_incomplete(url: &str, got: u64, want: u64) -> String {
+    format!("{url} stopped after {got} of {want} bytes")
+}
+
+pub fn hd_unzip_failed(zip: impl Display, status: impl Display) -> String {
+    format!("could not unpack {zip} ({status})")
+}
+
+pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
+    format!(
+        "the Real-ESRGAN zip didn't contain realesrgan-ncnn-vulkan.exe; unzip it into {dir} by hand"
+    )
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

@@ -34,6 +34,7 @@ export const STRINGS = {
     STUDIO_TAB: 'Studio',
     DEMO_AUDITOR_TAB: 'Demo Auditor',
     DEMO_ANALYZER_TAB: 'Demo Analyzer',
+    HD_TEXTURES_TAB: 'HD Textures',
     NO_SESSION_LOADED: 'No session loaded',
     FILE_MENU: 'File',
     NEW_SESSION_BUTTON: 'New Session',
@@ -274,6 +275,9 @@ export const STRINGS = {
         "Capture to video is on, but HLAE has no FFmpeg — the capture would run and produce no video. Sort the HLAE FFmpeg row above first.",
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
+    // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
+    HL_PATH_PLAY_INSTALL:
+        "This is Steam's own Half-Life folder, usually the one you play online with. DoD Studio loads HLAE and its hook DLL into the game, which VAC detects. Use a separate copy of Half-Life for movies and never join a server with it.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -1068,8 +1072,48 @@ export const STRINGS = {
     REMOVE_ARIA_LABEL: 'Remove',
   },
 
+  // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
+  HD: {
+    STATUS_TITLE: "What's built",
+    REFRESH_BUTTON: 'Refresh',
+    TABLE_TYPE: 'Type',
+    TABLE_FOLDERS: 'Styles built',
+    USE_TITLE: 'Use it in the game',
+    USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
+    STYLE_LABEL: 'Style:',
+    COPY_BUTTON: 'Copy',
+    SETUP_TITLE: 'Upscaler',
+    LICENCE_NOTE: "This downloads Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.",
+    SETUP_BUTTON: 'Download upscaler and models',
+    CANCEL_BUTTON: 'Cancel',
+    BUILD_TITLE: 'Build',
+    BUILD_HINT: 'Building the HD files from here comes next. Until then, use the scripts in goldsrc-hooks\\tools\\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:',
+    // Asset types, as the hook's folder names.
+    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
+    NOTHING_BUILT: 'Nothing yet',
+    folderSummary: (name, files, size) => `${name}: ${files.toLocaleString()} files, ${size}`,
+    hdRootFound: (path) => `HD folder: ${path}`,
+    hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
+    stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
+    NO_STYLES_BUILT: 'No style is built yet.',
+    NOT_BUILT_SUFFIX: ' (not built yet)',
+    DEFAULT_SUFFIX: ' (default)',
+    upscalerPresent: (path) => `Upscaler installed: ${path}`,
+    UPSCALER_MISSING: 'The upscaler is not downloaded yet. The plain style needs no upscaler.',
+    modelsMissing: (styles) => `Missing models for: ${styles.join(', ')}.`,
+    ALL_MODELS_PRESENT: 'All style models are present.',
+    bytesOf: (done, total) => `${done} of ${total}`,
+    progressLine: (item, step, steps, done) => `${step} of ${steps}: ${item} (${done})`,
+    unpackingLine: (item, step, steps) => `${step} of ${steps}: unpacking ${item}...`,
+    setupDone: (count) => count ? `Done: downloaded ${count} file${count === 1 ? '' : 's'}.` : 'Everything was already there.',
+    SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
+    COPIED: 'Copied to the clipboard.',
+    footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+  },
+
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
   IPC: {
+    hdSetupFailed: (err) => `Upscaler download failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
