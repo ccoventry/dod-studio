@@ -1,8 +1,8 @@
 // hd_pane.js — the HD Textures page (#372): what is built under
 // <game>/dod/dodstudio_hd, the movie.cfg lines to use it, downloading the
 // upscaler (and a Python when the PC has none), running the build, the
-// user's own styles (my_styles.txt), and the textures the game last reported
-// as kept original (the misses view).
+// style comparison sheet, the user's own styles (my_styles.txt), and the
+// textures the game last reported as kept original (the misses view).
 // The build is goldsrc-hooks/tools/hd's own scripts, so this page and the
 // command line always make the same files.
 
@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses, hdSaveStyle, hdRemoveStyle,
+  hdPreview,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -54,6 +55,12 @@ export function initHdPane() {
   const buildLine = document.querySelector('#hd-build-line');
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
+  const previewMap = document.querySelector('#hd-preview-map');
+  const previewStyles = document.querySelector('#hd-preview-styles');
+  const previewBtn = document.querySelector('#hd-preview-btn');
+  const previewText = document.querySelector('#hd-preview-text');
+  const previewWrap = document.querySelector('#hd-preview-wrap');
+  const previewImg = document.querySelector('#hd-preview-img');
   const myStylesText = document.querySelector('#hd-my-styles-text');
   const myStylesList = document.querySelector('#hd-my-styles-list');
   const styleName = document.querySelector('#hd-style-name');
@@ -298,12 +305,66 @@ export function initHdPane() {
     renderPython(status.python);
     renderBuild(status);
     renderMyStyles(status);
+    renderPreviewChoices(status);
 
     const total = status.types.flatMap((t) => t.folders).reduce((sum, f) => sum + f.bytes, 0);
     if (footerSummary) {
       footerSummary.textContent = STRINGS.HD.footerSummary(status.built_styles.join(', '), formatSize(total));
     }
   }
+
+  // The style comparison: which maps and built styles to put in the sheet.
+  let canPreview = false;
+  let previewing = false;
+
+  function renderPreviewChoices(status) {
+    if (!previewMap) return;
+    const previous = previewMap.value;
+    previewMap.innerHTML = '';
+    for (const [value, label] of [['', STRINGS.HD.PREVIEW_AUTO_MAP], ...status.maps.map((m) => [m, m])]) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = label;
+      previewMap.appendChild(option);
+    }
+    if (status.maps.includes(previous)) previewMap.value = previous;
+    renderChoices(previewStyles, status.built_styles.map((name) => ({ value: name, label: name })), () => true);
+    canPreview = !!status.scripts && !!status.python?.using && status.built_styles.length > 0;
+    if (!status.built_styles.length) previewText.textContent = STRINGS.HD.PREVIEW_NOTHING_BUILT;
+    renderPreviewButton();
+  }
+
+  function renderPreviewButton() {
+    if (previewBtn) previewBtn.disabled = previewing || !canPreview || !ticked(previewStyles).length;
+  }
+
+  async function showPreview() {
+    const request = { maps: previewMap.value ? [previewMap.value] : [], styles: ticked(previewStyles) };
+    previewing = true;
+    renderPreviewButton();
+    previewBtn.textContent = STRINGS.HD.PREVIEW_WORKING;
+    previewText.textContent = '';
+    try {
+      const preview = await hdPreview(gamePath(), request);
+      previewImg.src = preview.image;
+      previewWrap.hidden = false;
+      previewText.textContent = [
+        STRINGS.HD.previewDone(preview.samples, preview.maps),
+        preview.skipped.length ? STRINGS.HD.previewSkipped(preview.skipped) : '',
+      ].filter(Boolean).join(' ');
+    } catch (err) {
+      previewText.textContent = STRINGS.IPC.hdPreviewFailed(err);
+    } finally {
+      previewing = false;
+      previewBtn.textContent = STRINGS.HD.PREVIEW_BUTTON;
+      renderPreviewButton();
+    }
+  }
+
+  previewBtn?.addEventListener('click', showPreview);
+  previewStyles?.addEventListener('change', renderPreviewButton);
+  // 1:1 by default (the point of the sheet); a click fits it to the page.
+  previewImg?.addEventListener('click', () => previewWrap.classList.toggle('hd-preview-fit'));
 
   // The custom-style form. `lastStatus` is the newest status report: the
   // form's model and blend lists come from it.

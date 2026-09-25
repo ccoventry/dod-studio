@@ -743,6 +743,31 @@
               </div>
             </div>
 
+            <!-- The style comparison: compare.py's sheet, from the user's own maps. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.PREVIEW_TITLE">Compare styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.PREVIEW_HINT">The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.</p>
+                <div class="input-row">
+                  <label for="hd-preview-map" data-str="HD.PREVIEW_MAP_LABEL">Map:</label>
+                  <select id="hd-preview-map"></select>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-preview-styles" class="hd-choices"></div>
+                </div>
+                <div class="row-inputs">
+                  <button id="hd-preview-btn" class="primary-btn" data-str="HD.PREVIEW_BUTTON">Show comparison</button>
+                </div>
+                <p id="hd-preview-text" class="hd-hint"></p>
+                <div id="hd-preview-wrap" class="hd-preview-wrap" hidden>
+                  <img id="hd-preview-img" alt="">
+                </div>
+              </div>
+            </div>
+
             <div class="egui-panel">
               <div class="panel-header">
                 <h3 data-str="HD.SETUP_TITLE">Upscaler</h3>

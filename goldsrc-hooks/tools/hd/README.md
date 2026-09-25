@@ -183,6 +183,8 @@ python compare.py compare.png
 
 This makes one sheet with the original and every built style side by side, for a few sample textures, model skins, sprites, detail textures and a sky. Pass your own samples to compare something specific; run it with no arguments for the format.
 
+To see your own maps instead of the fixed samples, `--map dod_anzio` takes that map's most detailed textures that have an HD file, plus its sky, and `--auto` picks a few of your maps for you. `--styles ultrasharp,plain` keeps the sheet to the styles you're choosing between. DoD Studio's HD Textures page makes the same sheet under **Compare styles**.
+
 In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
 
 ## Make your own style

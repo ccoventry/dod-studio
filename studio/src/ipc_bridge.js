@@ -691,3 +691,15 @@ export async function hdRemoveStyle(gamePath, name) {
       throw err;
     });
 }
+
+/** Makes the style comparison sheet for `request` ({ maps, styles }; empty
+ *  means picked for you / every style). Resolves { image (a data: URL),
+ *  samples, maps, skipped }. */
+export async function hdPreview(gamePath, request) {
+  return invoke("hd_preview", { gamePath, request })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_preview):", err);
+      showToast(STRINGS.IPC.hdPreviewFailed(err), 'error');
+      throw err;
+    });
+}
