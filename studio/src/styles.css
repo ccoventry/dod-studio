@@ -1734,6 +1734,25 @@ tr.keyboard-selected {
   color: var(--text-muted);
 }
 
+/* Style rows × type columns; each cell is "N files, size". */
+#hd-status-table {
+  border-collapse: collapse;
+}
+
+#hd-status-table th,
+#hd-status-table td {
+  padding: 5px 12px;
+  text-align: left;
+  white-space: nowrap;
+  border-bottom: 1px solid #282828;
+}
+
+#hd-status-table th {
+  color: #aaaaaa;
+  font-weight: 600;
+  border-bottom-color: var(--border-color);
+}
+
 .hd-mono {
   font-family: monospace;
   white-space: pre-wrap;
