@@ -6,7 +6,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
-import { hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython } from './ipc_bridge.js';
+import { hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -34,6 +34,8 @@ export function initHdPane() {
   const cfgLines = document.querySelector('#hd-cfg-lines');
   const copyBtn = document.querySelector('#hd-copy-cfg-btn');
   const toolsText = document.querySelector('#hd-tools-text');
+  const upscalerPickBtn = document.querySelector('#hd-upscaler-pick-btn');
+  const upscalerResetBtn = document.querySelector('#hd-upscaler-reset-btn');
   const pythonText = document.querySelector('#hd-python-text');
   const pythonPickBtn = document.querySelector('#hd-python-pick-btn');
   const pythonResetBtn = document.querySelector('#hd-python-reset-btn');
@@ -67,6 +69,8 @@ export function initHdPane() {
     buildBtn.disabled = busy || !canBuild;
     pythonPickBtn.disabled = busy;
     pythonResetBtn.disabled = busy;
+    upscalerPickBtn.disabled = busy;
+    upscalerResetBtn.disabled = busy;
   }
 
   function renderCfgLines() {
@@ -155,11 +159,16 @@ export function initHdPane() {
 
   function renderTools(tools) {
     const missing = tools.models.filter((m) => !m.present).map((m) => m.style);
-    const lines = [
-      tools.upscaler_present ? STRINGS.HD.upscalerPresent(tools.upscaler) : STRINGS.HD.UPSCALER_MISSING,
-      missing.length ? STRINGS.HD.modelsMissing(missing) : STRINGS.HD.ALL_MODELS_PRESENT,
-    ];
+    const lines = [];
+    if (tools.chosen && tools.source !== 'chosen') lines.push(STRINGS.HD.upscalerChosenUnused(tools.chosen));
+    if (tools.upscaler_present) {
+      lines.push(STRINGS.HD.upscalerUsing(tools.source, tools.dir),
+        missing.length ? STRINGS.HD.modelsMissing(missing) : STRINGS.HD.ALL_MODELS_PRESENT);
+    } else {
+      lines.push(STRINGS.HD.UPSCALER_MISSING);
+    }
     toolsText.textContent = lines.join(' ');
+    upscalerResetBtn.hidden = !tools.chosen;
     realesrganLine.textContent = `set REALESRGAN=${tools.upscaler}`;
   }
 
@@ -181,12 +190,11 @@ export function initHdPane() {
   }
 
   function renderBuild(status) {
-    // An AI style can't build until its upscaler and model are downloaded.
+    // An AI style can't build until the upscaler and its own model are there.
     const ready = new Set(status.tools.upscaler_present
       ? status.tools.models.filter((m) => m.present).map((m) => m.style)
       : []);
-    if (status.tools.upscaler_present) ready.add('x4plus'); // its model ships in the zip
-    const aiStyles = new Set(status.tools.models.map((m) => m.style).concat('x4plus'));
+    const aiStyles = new Set(status.tools.models.map((m) => m.style));
     renderChoices(buildStyles, allStyles(status).map((name) => {
       const needs = aiStyles.has(name) && !ready.has(name);
       return { value: name, label: name + (needs ? STRINGS.HD.STYLE_NEEDS_UPSCALER : ''), disabled: needs };
@@ -328,6 +336,32 @@ export function initHdPane() {
       await hdSetPython(picked);
     } catch {
       return; // hdSetPython already showed why
+    }
+    refresh();
+  });
+
+  upscalerPickBtn?.addEventListener('click', async () => {
+    let picked;
+    try {
+      picked = await open({ title: STRINGS.HD.UPSCALER_PICK_TITLE, directory: true, multiple: false });
+    } catch (err) {
+      console.error('Upscaler folder picker failed:', err);
+      return;
+    }
+    if (!picked) return;
+    try {
+      await hdSetUpscaler(picked);
+    } catch {
+      return; // hdSetUpscaler already showed why
+    }
+    refresh();
+  });
+
+  upscalerResetBtn?.addEventListener('click', async () => {
+    try {
+      await hdSetUpscaler(null);
+    } catch {
+      return;
     }
     refresh();
   });

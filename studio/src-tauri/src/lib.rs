@@ -613,6 +613,7 @@ pub fn run() {
             hd_manager::hd_cancel,
             hd_manager::hd_build,
             hd_manager::hd_set_python,
+            hd_manager::hd_set_upscaler,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

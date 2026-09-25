@@ -183,19 +183,21 @@ impl Drop for TreeGuard {
 }
 
 /// Runs the build and waits for it. `game_exe` is the `hl.exe` the app
-/// launches; `progress` is called at each step and log line (a few times a
-/// minute, so no throttling is needed).
+/// launches, and `realesrgan` the upscaler folder
+/// ([`super::upscaler::resolve`]); `progress` is called at each step and log
+/// line (a few times a minute, so no throttling is needed).
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     request: &BuildRequest,
     python: &Using,
     hd_tools: &Path,
+    realesrgan: &Path,
     scripts: &Path,
     game_exe: &Path,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&BuildProgress),
 ) -> Result<BuildOutcome, String> {
-    let realesrgan = setup::realesrgan_dir(hd_tools);
-    check(request, &realesrgan)?;
+    check(request, realesrgan)?;
     let game_dir = game_exe
         .parent()
         .ok_or_else(|| crate::messages::HD_BUILD_NO_GAME_FOLDER.to_string())?;
@@ -212,7 +214,7 @@ pub fn run(
         .arg(request.types.join(","))
         .args(&request.styles)
         .current_dir(scripts)
-        .env("REALESRGAN", setup::upscaler_exe(&realesrgan))
+        .env("REALESRGAN", setup::upscaler_exe(realesrgan))
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -489,6 +491,7 @@ mod tests {
             &request,
             &using,
             &tools,
+            &setup::realesrgan_dir(&tools),
             &dev_scripts_dir(),
             &game.join("hl.exe"),
             &AtomicBool::new(false),

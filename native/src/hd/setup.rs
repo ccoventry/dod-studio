@@ -105,12 +105,14 @@ struct Job {
     staged: bool,
 }
 
-/// What still needs fetching under `hd_tools`, in order. `need_python` adds
-/// the app's own Python, for a PC with none the build can use.
-fn jobs(hd_tools: &Path, need_python: bool) -> Vec<Job> {
+/// What still needs fetching under `hd_tools`, in order. `need_upscaler`
+/// fills DoD Studio's own upscaler folder, for a PC with no complete one
+/// elsewhere ([`super::upscaler`]); `need_python` adds the app's own Python,
+/// for a PC with none the build can use.
+fn jobs(hd_tools: &Path, need_upscaler: bool, need_python: bool) -> Vec<Job> {
     let dir = &realesrgan_dir(hd_tools);
     let mut jobs = Vec::new();
-    if !upscaler_exe(dir).is_file() {
+    if need_upscaler && !upscaler_exe(dir).is_file() {
         jobs.push(Job {
             url: REALESRGAN_ZIP_URL.to_string(),
             target: dir.join("realesrgan-ncnn-vulkan.zip"),
@@ -122,7 +124,7 @@ fn jobs(hd_tools: &Path, need_python: bool) -> Vec<Job> {
     for (base, model) in MODELS {
         for ext in ["param", "bin"] {
             let target = dir.join("models").join(format!("{model}.{ext}"));
-            if !target.is_file() {
+            if need_upscaler && !target.is_file() {
                 jobs.push(Job {
                     url: format!("{base}{model}.{ext}"),
                     target,
@@ -166,6 +168,7 @@ fn file_name(url: &str) -> &str {
 /// (every chunk); throttling it is the caller's job.
 pub fn run(
     hd_tools: &Path,
+    need_upscaler: bool,
     need_python: bool,
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&SetupProgress),
@@ -174,7 +177,7 @@ pub fn run(
     std::fs::create_dir_all(dir.join("models"))
         .map_err(|e| crate::messages::labeled(dir.display(), e))?;
 
-    let jobs = jobs(hd_tools, need_python);
+    let jobs = jobs(hd_tools, need_upscaler, need_python);
     let steps = jobs.len();
     let mut fetched = Vec::new();
     for (index, job) in jobs.iter().enumerate() {
@@ -388,7 +391,9 @@ mod tests {
     #[test]
     fn an_empty_folder_needs_the_zip_and_both_halves_of_every_model() {
         let tools = Scratch::new("hd_setup_jobs");
-        let jobs = jobs(&tools, false);
+        // A complete upscaler elsewhere: nothing to fetch here.
+        assert!(jobs(&tools, false, false).is_empty());
+        let jobs = jobs(&tools, true, false);
         assert_eq!(jobs.len(), 1 + MODELS.len() * 2);
         assert!(jobs[0].unpack_to.is_some() && jobs[0].url == REALESRGAN_ZIP_URL);
         assert!(jobs.iter().all(|j| j.url.starts_with("https://")));
@@ -406,7 +411,7 @@ mod tests {
         // Half a model is not a model.
         std::fs::write(dir.join("models/remacri-4x.param"), b"").unwrap();
 
-        let jobs = jobs(&tools, false);
+        let jobs = jobs(&tools, true, false);
         assert!(jobs.iter().all(|j| j.unpack_to.is_none()));
         assert_eq!(jobs.len(), (MODELS.len() - 1) * 2 - 1);
         assert!(model_present(&dir, "ultrasharp-4x"));
@@ -478,7 +483,7 @@ mod tests {
         let tools = Scratch::new("hd_setup_real");
         let dir = realesrgan_dir(&tools);
         let mut steps_seen = std::collections::BTreeSet::new();
-        let outcome = run(&tools, false, &AtomicBool::new(false), &mut |p| {
+        let outcome = run(&tools, true, false, &AtomicBool::new(false), &mut |p| {
             steps_seen.insert(p.step);
         })
         .unwrap();
@@ -500,7 +505,7 @@ mod tests {
             .collect();
         assert!(leftovers.is_empty(), "{leftovers:?}");
         // A second run finds everything in place.
-        let again = run(&tools, false, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let again = run(&tools, true, false, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert!(again.already_there);
     }
 
@@ -516,7 +521,10 @@ mod tests {
             }
         }
         let mut calls = 0;
-        let outcome = run(&tools, false, &AtomicBool::new(false), &mut |_| calls += 1).unwrap();
+        let outcome = run(&tools, true, false, &AtomicBool::new(false), &mut |_| {
+            calls += 1
+        })
+        .unwrap();
         assert!(outcome.already_there);
         assert!(outcome.fetched.is_empty());
         assert_eq!(calls, 0);
@@ -525,8 +533,8 @@ mod tests {
     #[test]
     fn python_is_fetched_only_when_asked_and_only_what_is_missing() {
         let tools = Scratch::new("hd_setup_python_jobs");
-        let without = jobs(&tools, false).len();
-        let with = jobs(&tools, true);
+        let without = jobs(&tools, true, false).len();
+        let with = jobs(&tools, true, true);
         assert_eq!(with.len(), without + 1 + python::WHEELS.len());
         let python_jobs = &with[without..];
         assert!(python_jobs.iter().all(|j| j.staged && j.sha256.is_some()));
@@ -539,7 +547,7 @@ mod tests {
         // Python itself and numpy already there: only Pillow and SciPy left.
         std::fs::create_dir_all(python::site_packages(&tools).join("numpy")).unwrap();
         std::fs::write(python::app_python_exe(&tools), b"").unwrap();
-        let left: Vec<String> = jobs(&tools, true)[without..]
+        let left: Vec<String> = jobs(&tools, true, true)[without..]
             .iter()
             .map(|j| file_name(&j.url).to_string())
             .collect();
@@ -600,7 +608,7 @@ mod tests {
                 std::fs::write(dir.join(format!("models/{model}.{ext}")), b"").unwrap();
             }
         }
-        let outcome = run(&tools, true, &AtomicBool::new(false), &mut |_| {}).unwrap();
+        let outcome = run(&tools, true, true, &AtomicBool::new(false), &mut |_| {}).unwrap();
         assert_eq!(outcome.fetched.len(), 1 + python::WHEELS.len());
         assert!(python::app_python_complete(&tools));
 

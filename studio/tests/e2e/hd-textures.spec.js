@@ -33,7 +33,15 @@ const STATUS = {
     dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan',
     upscaler: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan/realesrgan-ncnn-vulkan.exe',
     upscaler_present: false,
-    models: [{ style: 'ultrasharp', model: 'ultrasharp-4x', present: false }],
+    source: null,
+    chosen: null,
+    models: [
+      { style: 'ultrasharp', model: 'ultrasharp-4x', present: false },
+      { style: 'remacri', model: 'remacri-4x', present: false },
+      { style: 'siax', model: '4x_NMKD-Siax_200k', present: false },
+      { style: 'generalv3', model: 'RealESRGAN_General_x4_v3', present: false },
+      { style: 'x4plus', model: 'realesrgan-x4plus', present: false },
+    ],
   },
   python: {
     using: { source: 'found', exe: 'C:/Python314/python.exe', version: '3.14.7', missing: [] },
@@ -82,7 +90,7 @@ test('a status report fills the table, picks the built style and writes the cfg 
   await page.selectOption('#hd-style-select', 'remacri');
   await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri');
 
-  await expect(page.locator('#hd-tools-text')).toContainText('not downloaded yet');
+  await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
   await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
 });
 
@@ -237,4 +245,45 @@ test('rows follow the style order, custom styles after, overrides last; nothing 
   await expect(page.locator('#hd-status-body tr')).toHaveCount(1);
   await expect(page.locator('#hd-status-body td')).toHaveText('Nothing yet');
   await expect(page.locator('#hd-status-body td')).toHaveAttribute('colspan', '6');
+});
+
+test('an upscaler found elsewhere is named and its styles can build; a chosen folder can be reset', async ({ page }) => {
+  const dir = 'C:/dod-studio/local/texture-upscale-rnd/tools/realesrgan';
+  const found = {
+    ...STATUS,
+    tools: {
+      ...STATUS.tools,
+      dir,
+      upscaler: `${dir}/realesrgan-ncnn-vulkan.exe`,
+      upscaler_present: true,
+      source: 'chosen',
+      chosen: dir,
+      models: STATUS.tools.models.map((m) => ({ ...m, present: m.style !== 'siax' })),
+    },
+  };
+  await loadHarness(page, { status: found, picked: dir });
+  await page.click('#hd-refresh-btn');
+  const text = page.locator('#hd-tools-text');
+  await expect(text).toContainText(`Upscaler: the folder you chose (${dir}).`);
+  await expect(text).toContainText('Missing models for: siax.');
+  await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeEnabled();
+  await expect(page.locator('#hd-build-styles input[value="siax"]')).toBeDisabled();
+  await expect(page.locator('#hd-upscaler-reset-btn')).toBeVisible();
+
+  await page.click('#hd-upscaler-pick-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.find((c) => c.cmd === 'hd_set_upscaler')?.args)).toEqual({ path: dir });
+  const picker = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'plugin:dialog|open')?.args);
+  expect(picker.options.directory).toBe(true);
+
+  await page.click('#hd-upscaler-reset-btn');
+  await expect.poll(() => page.evaluate(() =>
+    window.__mockInvocations.filter((c) => c.cmd === 'hd_set_upscaler').at(-1)?.args)).toEqual({ path: null });
+
+  // A chosen folder another one beats is said so.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({ ...s, tools: { ...s.tools, source: 'app' } });
+  }, found);
+  await page.click('#hd-refresh-btn');
+  await expect(text).toContainText("isn't used: another one has more of the style models");
 });

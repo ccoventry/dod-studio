@@ -16,6 +16,7 @@
 pub mod build;
 pub mod python;
 pub mod setup;
+pub mod upscaler;
 
 use std::path::{Path, PathBuf};
 
@@ -93,11 +94,16 @@ pub struct TypeStatus {
     pub folders: Vec<FolderStatus>,
 }
 
-/// Whether the upscaler and each AI style's model are where [`setup`] puts
-/// them.
+/// Whether the upscaler and each AI style's model are in the folder a build
+/// would use ([`upscaler::resolve`]).
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolsStatus {
     pub dir: String,
+    /// Where that folder came from; `None` when no folder has the upscaler
+    /// yet, and `dir` is DoD Studio's own, which Download fills.
+    pub source: Option<upscaler::UpscalerSource>,
+    /// The folder the user chose, whether or not it is the one used.
+    pub chosen: Option<String>,
     pub upscaler: String,
     pub upscaler_present: bool,
     pub models: Vec<ModelStatus>,
@@ -223,6 +229,8 @@ fn tools_status(tools_dir: &Path) -> ToolsStatus {
         .collect();
     ToolsStatus {
         dir: tools_dir.to_string_lossy().to_string(),
+        source: None,
+        chosen: None,
         upscaler: upscaler.to_string_lossy().to_string(),
         upscaler_present: upscaler.is_file(),
         models,

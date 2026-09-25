@@ -637,6 +637,17 @@ export async function hdCancel() {
     });
 }
 
+/** Uses `path` (a folder with realesrgan-ncnn-vulkan.exe) for builds from
+ *  now on, or goes back to finding one with `null`. */
+export async function hdSetUpscaler(path) {
+  return invoke("hd_set_upscaler", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_set_upscaler):", err);
+      showToast(STRINGS.IPC.hdUpscalerFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** Uses `path` (a python.exe) for builds from now on, or goes back to
  *  finding one with `null`. */
 export async function hdSetPython(path) {

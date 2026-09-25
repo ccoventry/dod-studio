@@ -138,6 +138,10 @@ pub fn hd_build_failed(status: impl Display, detail: &str) -> String {
     }
 }
 
+pub fn hd_not_an_upscaler_folder(dir: impl Display) -> String {
+    format!("{dir} has no realesrgan-ncnn-vulkan.exe; choose the folder it is in")
+}
+
 pub fn hd_download_checksum(url: &str, got: &str, want: &str) -> String {
     format!("{url} is not the expected file (SHA-256 {got}, expected {want}); nothing was kept")
 }
