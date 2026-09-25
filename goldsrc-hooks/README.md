@@ -117,7 +117,14 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 
 ## Testing manually
 
-1. Launch DoD 1.3 (with or without HLAE) and load an HLTV/POV demo.
+> [!WARNING]
+> **Only ever inject into a separate movie copy of Half-Life, never the one
+> you play online with, and never join a server afterwards.** This DLL patches
+> the game in memory, which is what VAC detects. Injecting by hand skips the
+> connect warning HLAE shows in every DoD Studio launch, so nothing will stop
+> you. See [`docs/vac_safety.md`](../docs/vac_safety.md).
+
+1. Launch DoD 1.3 (with or without HLAE) from your movie copy and load an HLTV/POV demo.
 2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
 3. Set whichever env var(s) you want *before* launching `hl.exe` --
    `inject.exe` only delivers the DLL, it doesn't set environment variables
