@@ -65,4 +65,22 @@ test.describe('themed_confirm', () => {
     await page.locator('#themed-confirm-ok-btn').click();
     await expect(page.locator('#result')).toHaveText('true');
   });
+
+  // #356: opened from a modal that comes later in index.html (Clear
+  // Previews), it must still be on top and take the click.
+  test('sits above another open modal, whatever the DOM order', async ({ page }) => {
+    await gotoHarness(page);
+    await page.addStyleTag({ url: '/src/styles.css' });
+    await page.evaluate(() => {
+      const outer = document.createElement('div');
+      outer.id = 'clear-previews-modal';
+      outer.className = 'modal';
+      outer.innerHTML = '<div class="modal-content"><p>Clear Previews</p></div>';
+      document.body.appendChild(outer);
+    });
+    await page.evaluate(() => document.querySelector('#trigger-default-btn').click());
+    // A click Playwright can't deliver (something on top) fails the test.
+    await page.locator('#themed-confirm-ok-btn').click({ timeout: 2000 });
+    await expect(page.locator('#result')).toHaveText('true');
+  });
 });

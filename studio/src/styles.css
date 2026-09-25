@@ -987,6 +987,14 @@ button.primary-btn:hover:not(:disabled) {
   justify-content: center;
 }
 
+/* The themed confirm is always asked on top of something, often another
+   modal (Clear Previews' Delete, #356). Every .modal shares one z-index, so
+   without this the later one in index.html would paint over it and take its
+   clicks. */
+#themed-confirm-modal {
+  z-index: 1001;
+}
+
 .modal-content {
   width: 80%;
   max-width: 900px;
