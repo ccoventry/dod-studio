@@ -58,6 +58,9 @@ export function initHdPane() {
   let busy = false;
   // Whether the build can run at all: scripts shipped, and a Python found.
   let canBuild = false;
+  // Whether Download has anything to fetch: no complete upscaler folder, or
+  // no Python the build can use.
+  let nothingMissing = false;
 
   function gamePath() {
     return document.querySelector('#hl-path-input')?.value?.trim() || '';
@@ -65,13 +68,16 @@ export function initHdPane() {
 
   function setBusy(value) {
     busy = value;
-    setupBtn.disabled = busy;
-    buildBtn.disabled = busy || !canBuild;
+    setupBtn.disabled = busy || nothingMissing;
+    setupBtn.textContent = nothingMissing ? STRINGS.HD.NOTHING_MISSING_BUTTON : STRINGS.HD.SETUP_BUTTON;
+    buildBtn.disabled = busy || !canBuild || !ticked(buildStyles).length || !ticked(buildTypes).length;
     pythonPickBtn.disabled = busy;
     pythonResetBtn.disabled = busy;
     upscalerPickBtn.disabled = busy;
     upscalerResetBtn.disabled = busy;
   }
+
+  const ticked = (container) => [...container.querySelectorAll('input:checked')].map((i) => i.value);
 
   function renderCfgLines() {
     if (!cvars || !cfgLines) return;
@@ -138,18 +144,23 @@ export function initHdPane() {
     }
   }
 
+  // The probe reports modules as imported (`PIL`); people know the packages
+  // by the names pip installs them under.
+  const PACKAGE_NAMES = { numpy: 'NumPy', PIL: 'Pillow', scipy: 'SciPy' };
+  const packages = (missing) => missing.map((m) => PACKAGE_NAMES[m] || m);
+
   function renderPython(python) {
     const lines = [];
     if (python?.chosen_problem) {
       const p = python.chosen_problem;
-      lines.push(STRINGS.HD.pythonChosenProblem(p.exe, p.version, p.missing));
+      lines.push(STRINGS.HD.pythonChosenProblem(p.exe, p.version, packages(p.missing)));
     }
     if (python?.using) {
       const u = python.using;
       lines.push(STRINGS.HD.pythonUsing(u.source, u.exe, u.version));
     } else if (python?.found_unusable) {
       const p = python.found_unusable;
-      lines.push(STRINGS.HD.pythonFoundUnusable(p.exe, p.version, p.missing));
+      lines.push(STRINGS.HD.pythonFoundUnusable(p.exe, p.version, packages(p.missing)));
     } else {
       lines.push(STRINGS.HD.PYTHON_NONE);
     }
@@ -204,6 +215,9 @@ export function initHdPane() {
     })), () => true);
 
     canBuild = !!status.scripts && !!status.python?.using;
+    nothingMissing = status.tools.upscaler_present
+      && status.tools.models.every((m) => m.present)
+      && !!status.python?.using;
     if (!status.scripts) buildProgress.textContent = STRINGS.HD.NO_SCRIPTS;
     setBusy(busy);
   }
@@ -311,12 +325,7 @@ export function initHdPane() {
   });
 
   buildBtn?.addEventListener('click', async () => {
-    const ticked = (container) => [...container.querySelectorAll('input:checked')].map((i) => i.value);
     const request = { styles: ticked(buildStyles), types: ticked(buildTypes) };
-    if (!request.styles.length || !request.types.length) {
-      buildProgress.textContent = STRINGS.HD.BUILD_NEEDS_CHOICE;
-      return;
-    }
     setBusy(true);
     buildCancelBtn.disabled = false;
     buildProgress.textContent = '';
@@ -332,6 +341,10 @@ export function initHdPane() {
       refresh();
     }
   });
+
+  // Build needs at least one style and one kind of file ticked.
+  buildStyles?.addEventListener('change', () => setBusy(busy));
+  buildTypes?.addEventListener('change', () => setBusy(busy));
 
   buildCancelBtn?.addEventListener('click', () => {
     buildCancelBtn.disabled = true;

@@ -141,6 +141,7 @@ test('the Python line says which Python the build uses, and why another is not',
       using: null,
       chosen: 'D:/py/python.exe',
       chosen_problem: { exe: 'D:/py/python.exe', version: '3.13.1', missing: ['scipy'] },
+      // PIL is reported as Pillow, the name pip knows.
       found_unusable: { exe: 'C:/Python39/python.exe', version: '3.9.18', missing: [] },
       app_copy_present: false,
     },
@@ -148,7 +149,7 @@ test('the Python line says which Python the build uses, and why another is not',
   await page.evaluate((s) => { window.__mockInvokeHandlers.hd_status = () => s; }, noneUsable);
   await page.click('#hd-refresh-btn');
   const text = page.locator('#hd-python-text');
-  await expect(text).toContainText('The Python you chose (D:/py/python.exe, 3.13.1) has no scipy');
+  await expect(text).toContainText('The Python you chose (D:/py/python.exe, 3.13.1) has no SciPy');
   await expect(text).toContainText('Python 3.9.18 is installed (C:/Python39/python.exe) but is older than 3.10');
   await expect(page.locator('#hd-python-reset-btn')).toBeVisible();
   // No Python: no building.
@@ -300,4 +301,60 @@ test('refresh shows it is working, and the status line says when it last finishe
   await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
   await expect(page.locator('#hd-refresh-btn')).toHaveText('Refresh');
   await expect(page.locator('#hd-status-text')).toContainText(/Checked at .+\./);
+});
+
+test('missing packages are named as pip knows them', async ({ page }) => {
+  const status = {
+    ...STATUS,
+    python: {
+      using: null, chosen: null, chosen_problem: null, app_copy_present: false,
+      found_unusable: { exe: 'C:/Py/python.exe', version: '3.12.1', missing: ['numpy', 'PIL'] },
+    },
+  };
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-python-text')).toContainText('has no NumPy, Pillow.');
+});
+
+test('Download is off, and says so, when there is nothing to download', async ({ page }) => {
+  const complete = {
+    ...STATUS,
+    tools: { ...STATUS.tools, upscaler_present: true, source: 'app',
+      models: STATUS.tools.models.map((m) => ({ ...m, present: true })) },
+  };
+  await loadHarness(page, { status: complete });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeDisabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText('Nothing to download');
+
+  // One model short: back on.
+  await page.evaluate((s) => {
+    window.__mockInvokeHandlers.hd_status = () => ({
+      ...s, tools: { ...s.tools, models: s.tools.models.map((m, i) => ({ ...m, present: i > 0 })) },
+    });
+  }, complete);
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-setup-btn')).toBeEnabled();
+  await expect(page.locator('#hd-setup-btn')).toHaveText("Download what's missing");
+});
+
+test('Build is off until at least one style and one kind of file are ticked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  // The default style (ultrasharp) needs the upscaler, so no style starts ticked.
+  await expect(page.locator('#hd-build-styles input:checked')).toHaveCount(0);
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+
+  await page.check('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  for (const type of ['sky', 'sprites', 'models', 'detail', 'world']) {
+    await page.uncheck(`#hd-build-types input[value="${type}"]`);
+  }
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
+  await page.check('#hd-build-types input[value="sky"]');
+  await expect(page.locator('#hd-build-btn')).toBeEnabled();
+
+  await page.uncheck('#hd-build-styles input[value="plain"]');
+  await expect(page.locator('#hd-build-btn')).toBeDisabled();
 });

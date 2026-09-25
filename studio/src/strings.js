@@ -1086,6 +1086,7 @@ export const STRINGS = {
     SETUP_TITLE: 'Tools',
     LICENCE_NOTE: "Download fetches Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. When this PC has no Python the build can use, it also fetches one for DoD Studio's own use (Python 3.12 with NumPy, Pillow and SciPy, about 70 MB), without installing anything system-wide. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.",
     SETUP_BUTTON: "Download what's missing",
+    NOTHING_MISSING_BUTTON: 'Nothing to download',
     CANCEL_BUTTON: 'Cancel',
     BUILD_TITLE: 'Build',
     BUILD_HINT: 'Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.',
@@ -1112,7 +1113,6 @@ export const STRINGS = {
     buildStep: (step, steps, style, type, elapsed) => `Step ${step} of ${steps}: ${style}, ${type} (${elapsed} so far)`,
     buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
-    BUILD_NEEDS_CHOICE: 'Pick at least one style and one kind of file.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
