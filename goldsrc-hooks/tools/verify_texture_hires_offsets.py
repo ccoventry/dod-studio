@@ -45,6 +45,22 @@ the Rust rather than restating them:
     jumps, and the hit path reads the servercount the record is stamped with.
   - No branch in GL_LoadTexture2 lands inside either span except on its
     first byte.
+  - The ceiling (CEILING): the size check is `cmp eax, 0x80000; jbe` onto
+    SIZE_OK past the "too big" Sys_Error push; every relocated reference into
+    GL_Upload32's 2 MB scratch buffer is one of the listed five; GL_Upload8's
+    buffer starts exactly 2 MB later; both resample helpers have the same
+    stack frames as the pre-Anniversary ones (so the same 1024 width bound);
+    esi is the scaled width at the check; nothing branches into the span.
+  - Detail textures (DETAIL): the loader matches once, its two pushes are
+    `push 0x100000`, the redirect span is `lea eax, [ebp-0x108]` (the buffer
+    the `snprintf` of "gfx/%s.tga" fills, 0x104 bytes), LoadTGA compares the
+    TGA against the size it's told, the load goes to GL_LoadTexture2, and
+    nothing branches into the span.
+  - Skies (SKY): both patterns match once, inside one function; the malloc
+    is `push 0x40000`; the dims are `push 0x100`s; the hooked instruction is
+    `mov eax, [esi*4 + ...]`, reached by the gl_dither skip on its first byte
+    and nothing else; the path buffer is `[ebp-0x44]` (64 bytes); the gamma
+    loop uses GL_Upload8's texgamma table and gl_dither.
 
 Run after touching the patterns or offsets in texture_hires.rs. Not part of
 `cargo test`: it needs the real DLL, which CI does not have. Requires pefile
@@ -439,6 +455,111 @@ def anniversary():
     body = rel32(wrapper + 4, 1)
     check(img[body + 0xB:body + 0x11] == bytes.fromhex("81ff00020000") and img[body + 0x17:body + 0x1a] == b"\x8b\x34\xbd",
           f"CL_GetModelByIndex (+{body:#x}) bounds the index at 0x200 and reads the table at +0x17")
+
+    def site(name):
+        return re.search(r"const " + name + r": \w+ = \w+ \{(.*?\n)    \};", anni, re.S).group(1)
+
+    def field(body, name):
+        m = (re.search(r"\b" + name + r": (&\[.*?\]),\n", body, re.S)
+             or re.search(r"\b" + name + r": ([^\n]*?),\s*(?://[^\n]*)?\n", body))
+        return m.group(1).strip()
+
+    def num(text):
+        return int(text, 0)
+
+    def branches_into(lo, hi, start, length):
+        bad = []
+        for a, t in instructions(lo, hi):
+            m = re.match(r"(j\w+|loop\w*|call) 0x([0-9a-f]+)$", t)
+            if m and start < int(m.group(2), 16) - base < start + length:
+                bad.append(hex(a))
+        return bad
+
+    # The ceiling.
+    c = site("CEILING")
+    size_check, too_big, size_ok = (num(field(c, k)) for k in ("size_check", "too_big", "size_ok"))
+    stolen_c = byte_list(field(c, "stolen"))
+    refs = [(int(a, 0), int(b, 0)) for a, b in re.findall(r"\((0x[0-9a-f]+), (0x[0-9A-F]+)\)", field(c, "buffer_refs"))]
+    exp_off, exp_op = re.match(r"\((0x[0-9a-f]+), &\[(.*?)\]\)", field(c, "expansion")).groups()
+    check(img[up32 + size_check:up32 + size_check + len(stolen_c)] == stolen_c, "ceiling: size-check span bytes")
+    jbe_to = up32 + size_check + len(stolen_c) + stolen_c[-1]
+    check(jbe_to == up32 + size_ok and up32 + size_check + len(stolen_c) == up32 + too_big,
+          "ceiling: the jbe goes to SIZE_OK, the fallthrough is TOO_BIG")
+    too_big_str = u32(up32 + too_big + 1) - base
+    check(img[up32 + too_big] == 0x68 and img[too_big_str:too_big_str + 23] == b"GL_LoadTexture: too big",
+          'ceiling: TOO_BIG pushes "GL_LoadTexture: too big"')
+    pre_check = [t for a, t in instructions(up32 + size_check - 8, up32 + size_check)]
+    check("imul eax, ebx" in pre_check and "mov eax, esi" in pre_check,
+          f"ceiling: eax = esi (the scaled width) * ebx at the check ({pre_check})")
+    buf = {u32(up32 + off + 1) for off, op in refs if img[up32 + off] == op}
+    check(len(buf) == 1 and len(refs) == 5, f"ceiling: the five buffer references agree ({[hex(b) for b in buf]})")
+    buf = buf.pop() if len(buf) == 1 else 0
+    exp = u32(up8 + int(exp_off, 0) + 1) if img[up8 + int(exp_off, 0)] == byte_list(exp_op)[0] else 0
+    check(exp == buf + 0x200000, f"ceiling: GL_Upload8's buffer starts 2 MB after it ({buf:#x} -> {exp:#x})")
+    rpe = pefile.PE(ANNIVERSARY_DLL, fast_load=True)
+    rpe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_BASERELOC"]])
+    into = sorted(e.rva for b in rpe.DIRECTORY_ENTRY_BASERELOC for e in b.entries
+                  if e.type == 3 and buf <= struct.unpack_from("<I", img, e.rva)[0] < buf + 0x200000)
+    check(into == sorted(up32 + off + 1 for off, _ in refs),
+          f"ceiling: nothing else refers into the scratch buffer ({[hex(r) for r in into]})")
+    resamplers = [int(t.split()[1], 16) - base for a, t in instructions(up32, up32 + 0x300) if t.startswith("call 0x")]
+    frames = []
+    for r in resamplers:
+        body_r = [t for _, t in instructions(r, r + 0x10)]
+        if body_r[2:3] == ["sub esp, 0x81c"]:
+            frames.append(0x81c)
+        elif body_r[2:3] == ["mov eax, 0x2018"]:
+            frames.append(0x2018)
+    check(sorted(frames) == [0x81c, 0x2018],
+          f"ceiling: the two resample helpers have the pre-Anniversary frames plus a stack cookie ({[hex(f) for f in frames]})")
+    check(not branches_into(up32, up32 + 0x4c0, up32 + size_check, len(stolen_c)), "ceiling: nothing branches into the span")
+
+    # Detail textures.
+    d = site("DETAIL")
+    dpat = pattern("DETAIL_LOADER")
+    dl = find_all(img, dpat)
+    check(len(dl) == 1, f"detail: DETAIL_LOADER matches once ({[hex(x) for x in dl]})")
+    if dl:
+        dl = dl[0]
+        for off in re.findall(r"0x[0-9a-f]+", field(d, "sizes")):
+            check(img[dl + int(off, 0):dl + int(off, 0) + 5] == bytes.fromhex("6800001000"), f"detail: push 0x100000 at +{off}")
+        path_at = num(field(d, "path_at"))
+        check(instructions(dl + path_at, dl + path_at + 6)[0][1] == "lea eax, [ebp - 0x108]", "detail: the redirect span is `lea eax, [ebp-0x108]`")
+        fmt = [t for _, t in instructions(dl, dl + path_at)]
+        gfx = img.find(b"gfx/%s.tga\0")
+        check(f"push {base + gfx:#x}" in fmt and "lea eax, [ebp - 0x108]" in fmt and "push 0x104" in fmt,
+              "detail: that is the 0x104-byte buffer the snprintf of \"gfx/%s.tga\" fills")
+        load_tga = rel32(dl + path_at + 8, 1)
+        lt = [t for _, t in instructions(load_tga, load_tga + 0x220)]
+        check("cmp ecx, dword ptr [ebp + 0x10]" in lt, "detail: LoadTGA compares the image against the size it is told ([ebp+0x10])")
+        lt2 = rel32(dl + len(dpat) - 5, 1)
+        check(lt2 == entry, "detail: the loader uploads through GL_LoadTexture2")
+        fn = img.rfind(b"\xcc\x55\x8b\xec", 0, dl) + 1
+        check(not branches_into(fn, dl + 0x200, dl + path_at, 6), f"detail: nothing in the loader (+{fn:#x}) branches into the span")
+
+    # Skies.
+    sk = site("SKY")
+    sl, su = find_all(img, pattern("SKY_LOADER")), find_all(img, pattern("SKY_UPLOAD"))
+    check(len(sl) == 1 and len(su) == 1, f"sky: both patterns match once ({[hex(x) for x in sl]}, {[hex(x) for x in su]})")
+    if len(sl) == 1 and len(su) == 1:
+        sl, su = sl[0], su[0]
+        check(sl < su < sl + 0x400, "sky: the upload is inside R_LoadSkys")
+        check(img[sl + num(field(sk, "malloc_at")):][:5] == bytes.fromhex("6800000400"), "sky: malloc push 0x40000")
+        for k in ("height_push", "width_push"):
+            check(img[su + num(field(sk, k)):][:5] == bytes.fromhex("6800010000"), f"sky: {k} is push 0x100")
+        hook = su + num(field(sk, "hook_at"))
+        check(instructions(hook, hook + 7)[0][1].startswith("mov eax, dword ptr [esi*4 + 0x"), "sky: the hook span is `mov eax, [esi*4 + ...]`")
+        body_s = instructions(sl, su + 0x80)
+        to_hook = [a for a, t in body_s if re.match(r"j\w+ 0x", t) and int(t.split()[1], 16) - base == hook]
+        check(len(to_hook) == 1, f"sky: the gl_dither skip jumps onto its first byte ({[hex(a) for a in to_hook]})")
+        check(not branches_into(sl, su + 0x80, hook, 7), "sky: nothing branches inside the span")
+        texts = [t for _, t in body_s]
+        tga = img.find(b"gfx/env/%s%s.tga\0")
+        k = texts.index(f"push {base + tga:#x}") if f"push {base + tga:#x}" in texts else -1
+        check(k > 0 and "push 0x40" in texts[k:k + 3] and "lea eax, [ebp - 0x44]" in texts[k - 3:k + 3]
+              and num(field(sk, "path_offset")) == 0x44, "sky: the path is the 64-byte buffer at [ebp-0x44]")
+        check(any(f"{gamma:#x}]" in t for t in texts), f"sky: the gamma loop uses GL_Upload8's texgamma table ({gamma:#x})")
+        check(any(f"[{dither:#x}]" in t for t in texts), "sky: and gl_dither")
 
     print(f"\nGL_LoadTexture2 +{entry:#x} (tail +{tail:#x}), GL_Upload32 +{up32:#x}, GL_Upload8 +{up8:#x}")
     print(f"{len(failures)} check(s) FAILED" if failures else "all checks passed")
