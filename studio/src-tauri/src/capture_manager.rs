@@ -1581,14 +1581,27 @@ fn patch_bookmark_previews(
 /// `+viewdemo <stem>_preview`.
 #[tauri::command]
 pub async fn launch_demo_preview(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
+    // The saved resolution, as Launch Game uses it (#358); without it the
+    // preview opened at PatcherConfig's default 1280x720.
+    let (width, height) = {
+        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings_state
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (guard.resolution_width, guard.resolution_height)
+    };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) =
+        let (mut patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        patcher_config.resolution_width = width;
+        patcher_config.resolution_height = height;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()

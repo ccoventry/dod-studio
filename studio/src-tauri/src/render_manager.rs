@@ -262,15 +262,23 @@ fn write_autosave(
                 output_path: j.output_path.clone(),
                 status: AutosaveJobStatus::Pending,
                 name: j.clip.base_name.clone(),
+                codec: Some(j.codec.to_str_id().to_string()),
+                custom_codec_args: Some(j.custom_codec_args.clone()),
+                fps: Some(j.fps),
             })
             .collect(),
     };
-    if let Ok(json) = serde_json::to_string_pretty(&session)
+    save_autosave(&session);
+    *render_session.lock().unwrap() = Some(session);
+}
+
+/// Writes `session` to `.render_autosave.json`.
+fn save_autosave(session: &RenderSessionData) {
+    if let Ok(json) = serde_json::to_string_pretty(session)
         && let Err(e) = std::fs::write(autosave_path(), json)
     {
         log::warn!("[render_autosave] Failed to write lockfile: {}", e);
     }
-    *render_session.lock().unwrap() = Some(session);
 }
 
 fn emit_jobs_snapshot(app: &AppHandle, jobs: &Arc<Mutex<Vec<RenderJobRuntime>>>) {
@@ -742,6 +750,16 @@ pub async fn set_render_job_codec(
         job_id,
         requested.to_str_id()
     ));
+    // Into the autosave too, so a crash before this job renders recovers it
+    // with the codec it was given, not the batch's (#85).
+    if let Some(session) = state.render_session.lock().unwrap().as_mut()
+        && let Ok(idx) = job_id.parse::<usize>()
+        && let Some(rj) = session.jobs.get_mut(idx)
+    {
+        rj.codec = Some(job.codec.to_str_id().to_string());
+        rj.custom_codec_args = Some(job.custom_codec_args.clone());
+        save_autosave(session);
+    }
     drop(jobs);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
@@ -1042,8 +1060,8 @@ pub fn discard_render_autosave() -> Result<(), String> {
 
 /// Repopulates the job table from `.render_autosave.json` — Completed jobs
 /// show as "Finished"/100%, Pending ones as "Queued"/0%, both via stub
-/// `ClipData` (the snapshot only stores take_folder/name/status, not the
-/// full scanner output). Matches dev's own recovery flow exactly
+/// `ClipData` (the snapshot stores take_folder/name/status and the job's
+/// codec/fps, not the full scanner output). Matches dev's own recovery flow exactly
 /// (`main.rs`'s render-recovery modal rebuilds the same kind of stub with
 /// blank stream/frames/date — dev never had richer data to recover either).
 /// Does not auto-start rendering; the user still clicks Start Render.
@@ -1053,24 +1071,16 @@ pub fn recover_render_batch(
 ) -> Result<Vec<RenderJobView>, String> {
     let json = std::fs::read_to_string(autosave_path()).map_err(|e| e.to_string())?;
     let session: RenderSessionData = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    // The autosave snapshot only ever recorded one session-wide codec/fps
-    // (written once at batch start, before per-job settings existed) — every
-    // recovered job gets that same pair. A job individually changed before a
-    // crash — via `reset_render_job`'s codec/fps carry-over, or via
-    // `set_render_job_codec`'s "Skip" toggle — won't recover with that
-    // override; a known, pre-existing recovery-fidelity gap (see the doc
-    // comment below), not a regression from per-job settings. A recovered
-    // "Skip" job simply comes back as whatever `session.target_codec` was
-    // for the batch, and needs re-toggling by hand if that was Skip.
-    let recovered_codec = RenderCodec::from_str_id(&session.target_codec);
-    let recovered_fps = session.fps;
-    let recovered_custom_codec_args = session.target_custom_codec_args.clone();
+    // Each job recovers with its own codec/fps (#85): the snapshot records
+    // them per job, and `set_render_job_codec` updates it when a job's Skip
+    // toggle changes. A snapshot from before that falls back to the batch's.
 
     let jobs: Vec<RenderJobRuntime> = session
         .jobs
         .iter()
         .enumerate()
         .map(|(i, rj)| {
+            let settings = session.job_settings(rj);
             let (status, progress) = if rj.status == AutosaveJobStatus::Completed {
                 ("Finished".to_string(), 100u32)
             } else {
@@ -1114,9 +1124,9 @@ pub fn recover_render_batch(
                 output_path: rj.output_path.clone(),
                 output_size_bytes,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
-                codec: recovered_codec,
-                custom_codec_args: recovered_custom_codec_args.clone(),
-                fps: recovered_fps,
+                codec: RenderCodec::from_str_id(&settings.codec),
+                custom_codec_args: settings.custom_codec_args,
+                fps: settings.fps,
             }
         })
         .collect();

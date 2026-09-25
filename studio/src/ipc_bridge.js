@@ -27,6 +27,17 @@ export async function openActivityLog() {
     });
 }
 
+/** `Documents\dod-studio\projects` (made if missing), where Save and Load
+ *  Project start (#354), or null when it can't be had: the dialogs then open
+ *  wherever they would anyway, so this is logged, not toasted. */
+export async function defaultProjectsDir() {
+  return invoke("default_projects_dir")
+    .catch((err) => {
+      console.error("IPC Execution Error (default_projects_dir):", err);
+      return null;
+    });
+}
+
 export async function scanDirectory(scanPaths) {
   return invoke("scan_directory", { paths: scanPaths })
     .catch((err) => {

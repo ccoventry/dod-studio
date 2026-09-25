@@ -13,7 +13,8 @@ import {
   checkHlaeFfmpeg,
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
-  launchObs
+  launchObs,
+  defaultProjectsDir
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
@@ -744,9 +745,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
+      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
       const filePath = currentSessionPath || await save({
         title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: 'dod_project.json',
+        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
       if (!filePath) return false;
@@ -805,8 +807,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         // handler; 'discard' falls through to load over it either way.
       }
       try {
+        const projectsDir = await defaultProjectsDir();
         const selected = await open({
           multiple: false,
+          ...(projectsDir ? { defaultPath: projectsDir } : {}),
           filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
         });
         if (selected) {
