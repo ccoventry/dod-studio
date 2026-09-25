@@ -22,10 +22,10 @@ realesrgan/realesrgan-ncnn-vulkan.exe next to this file.
 import os, re, subprocess, sys, time
 from PIL import Image, ImageFilter
 
+import hdcommon as C
 from hdcommon import HERE
 
 ESRGAN = os.environ.get("REALESRGAN") or os.path.join(HERE, "realesrgan", "realesrgan-ncnn-vulkan.exe")
-MY_STYLES = os.environ.get("HD_MY_STYLES") or os.path.join(HERE, "my_styles.txt")
 
 # Each style is ("ai", model file name), ("plain", sharpening percent), or
 # ("blend", style A, style B, percent of A).
@@ -43,8 +43,9 @@ DEFAULT = "ultrasharp"
 NAME = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
-def load_my_styles(path=MY_STYLES):
-    """Styles from my_styles.txt, one per line:
+def load_my_styles(path=None):
+    """Styles from my_styles.txt (in the install's dodstudio_hd folder, see
+    hdcommon.user_file), one per line:
 
         name = <model file name>             an AI style (the model's .param and
                                              .bin in realesrgan/models)
@@ -52,6 +53,7 @@ def load_my_styles(path=MY_STYLES):
         name = blend <style> <style> <0-100> two built styles mixed, the first
                                              one at that percent
     """
+    path = path or C.user_file(C.MY_STYLES, "HD_MY_STYLES")
     styles = {}
     if not os.path.exists(path):
         return styles
@@ -94,14 +96,32 @@ def load_my_styles(path=MY_STYLES):
     return styles
 
 
-DEFS = {**BUILT_IN, **load_my_styles()}
-STYLES = list(DEFS)
+_defs = None
+
+
+def defs():
+    """Every style, built-in and my_styles.txt's. Read on first use rather
+    than at import: my_styles.txt lives in the game folder, which
+    build_all.py's --game only sets after importing this."""
+    global _defs
+    if _defs is None:
+        _defs = {**BUILT_IN, **load_my_styles()}
+    return _defs
+
+
+def __getattr__(name):
+    """`styles.DEFS` and `styles.STYLES` (the names), through defs()."""
+    if name == "DEFS":
+        return defs()
+    if name == "STYLES":
+        return list(defs())
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
 def style_from_env():
     s = (os.environ.get("HD_STYLE") or DEFAULT).lower()
-    if s not in DEFS:
-        sys.exit(f"unknown HD_STYLE {s!r}; one of {STYLES}")
+    if s not in defs():
+        sys.exit(f"unknown HD_STYLE {s!r}; one of {list(defs())}")
     return s
 
 
@@ -131,7 +151,7 @@ def upscale(in_dir, out_dir, style):
     names = [n for n in os.listdir(in_dir) if n.lower().endswith(".png")]
     if not names:
         return
-    kind, *args = DEFS[style]
+    kind, *args = defs()[style]
     if kind == "ai":
         _ai(in_dir, out_dir, args[0])
     elif kind == "plain":

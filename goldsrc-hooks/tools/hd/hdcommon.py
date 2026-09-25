@@ -11,9 +11,11 @@ import atexit, fnmatch, glob, hashlib, os, re, sys, tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Which maps get HD map textures and skies (see hd_maps.example.txt). No file
-# means every map.
-MAP_LIST = os.environ.get("HD_MAPS") or os.path.join(HERE, "hd_maps.txt")
+# The user's own lists, read from the install they describe (see user_file):
+# which maps get HD map textures and skies (hd_maps.example.txt; no file means
+# every map), and extra styles (my_styles.example.txt, read by styles.py).
+MAP_LIST = "hd_maps.txt"
+MY_STYLES = "my_styles.txt"
 
 # Largest replacement side: texture_hires raises the engine's upload ceiling
 # to 1024x1024 (see its module doc).
@@ -156,11 +158,39 @@ def game_root():
              f"DoD Studio launches. Found:\n  {listing}")
 
 
+# Lists whose old-place note has been given, so it's given once per run.
+old_place_noted = set()
+
+
+def user_file(name, env):
+    """Where one of the user's own lists is read from: the path in `env` if
+    set, else <game>/dod/dodstudio_hd/<name>, beside the files it shapes.
+
+    That folder belongs to one install and survives a re-clone of the repo;
+    this folder does neither (#385). A copy left here from before still works
+    while the install has none, with a note saying where to move it."""
+    if os.environ.get(env):
+        return os.environ[env]
+    path = os.path.join(hd_dir(), name)
+    old = os.path.join(HERE, name)
+    if os.path.exists(path) or not os.path.exists(old):
+        return path
+    if name not in old_place_noted:
+        old_place_noted.add(name)
+        print(f"note: reading {old}; move it to {path}, where it belongs now", file=sys.stderr, flush=True)
+    return old
+
+
+def map_list():
+    """The hd_maps.txt this run reads (which may not exist)."""
+    return user_file(MAP_LIST, "HD_MAPS")
+
+
 def map_patterns(path=None):
     """The patterns in hd_maps.txt, lowercased, or None when there's no such
     file (build every map). `*` matches any run of characters and `?` one, as
     in a Windows folder search; a name without either matches only itself."""
-    path = path or MAP_LIST
+    path = path or map_list()
     if not os.path.exists(path):
         return None
     patterns = []
@@ -190,7 +220,7 @@ def all_maps(game):
     names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
     chosen, unused = select_maps(names, map_patterns())
     for p in unused:
-        print(f"  {os.path.basename(MAP_LIST)}: {p!r} matches no map in dod/maps", flush=True)
+        print(f"  {MAP_LIST}: {p!r} matches no map in dod/maps", flush=True)
     return chosen
 
 

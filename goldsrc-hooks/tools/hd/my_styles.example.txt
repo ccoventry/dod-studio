@@ -1,4 +1,5 @@
-# Your own upscale styles. Copy this file to my_styles.txt (same folder),
+# Your own upscale styles. Copy this file to my_styles.txt in the game's
+# dod\dodstudio_hd folder (next to the style folders),
 # uncomment or add lines, then build with:   python build_all.py <name>
 # and pick it in game with:                  dodstudio_hd_style <name>
 #

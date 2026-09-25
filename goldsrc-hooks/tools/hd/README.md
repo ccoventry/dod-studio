@@ -140,10 +140,10 @@ python build_all.py --types sprites,sky   only some types
 
 Map textures and skies are the bulk of the build, and a public-server map you never film is wasted time and disk. To build only some maps:
 
-1. Copy `hd_maps.example.txt` to `hd_maps.txt` in this folder.
+1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod\dodstudio_hd` folder (e.g. `...\Half-Life\dod\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
 2. List the maps, one per line. `*` matches anything and `?` one character, like a Windows folder search: `dod_railroad2*` covers every railroad2 build. A name without them matches only that map.
 
-`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again. Like `my_styles.txt`, it stays out of git.
+`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
 
 A map left out simply shows its original textures in game, and `dodstudio_debug_hd_misses` lists it.
 
@@ -187,7 +187,7 @@ In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read o
 
 The game loads whatever style folder you name, so you can make as many as you like without touching any code:
 
-1. Copy `my_styles.example.txt` to `my_styles.txt` in this folder and open it in Notepad.
+1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:
 
    ```
@@ -208,7 +208,13 @@ The game loads whatever style folder you name, so you can make as many as you li
 
 **Blends** take no GPU time: they mix files that already exist, so build both of their styles first. `build_all.py` always builds blends last, so `python build_all.py ultrasharp plain sharp70` works in one go.
 
-Style names are lowercase letters, digits, `-` and `_`, because they become folder names. `my_styles.txt` stays out of git, so updating DoD Studio never touches it.
+Style names are lowercase letters, digits, `-` and `_`, because they become folder names.
+
+## Where your lists live
+
+`hd_maps.txt` and `my_styles.txt` belong to one game install, so they live in its `dod\dodstudio_hd` folder rather than here. A second install (a stock one next to a movie one) keeps its own, and updating or re-downloading DoD Studio never touches them. Deleting `dodstudio_hd` deletes them too. `HD_MAPS` and `HD_MY_STYLES` point at a file anywhere else.
+
+Lists saved in this folder by an older version still work while the install has none of its own: the build says so at the top of `build_all.log`, with the path to move each one to.
 
 ## Files
 
@@ -223,8 +229,8 @@ Style names are lowercase letters, digits, `-` and `_`, because they become fold
 | `compare.py` | the style comparison sheet |
 | `setup_tools.py` | downloads the upscaler and the style models |
 | `styles.py` | the style list and the upscaler call |
-| `my_styles.example.txt` | template for your own styles (copy it to `my_styles.txt`) |
-| `hd_maps.example.txt` | template for building only some maps (copy it to `hd_maps.txt`) |
+| `my_styles.example.txt` | template for your own styles (copy it to `dodstudio_hd\my_styles.txt`) |
+| `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
