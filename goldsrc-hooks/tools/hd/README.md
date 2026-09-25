@@ -4,6 +4,8 @@ These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`sr
 
 The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
+**DoD Studio can run these scripts for you:** its HD Textures page downloads the upscaler, uses your own Python if it has NumPy, Pillow and SciPy (or fetches a private copy for DoD Studio's own use), and has a Build button with progress and Cancel. It runs exactly these scripts, so both routes make the same files, and a build started in one carries on in the other. The steps below are for the command line.
+
 ## Step by step (no coding needed)
 
 You'll type a few commands into a Command Prompt window. Copy each line, paste it in (right-click pastes), and press Enter.

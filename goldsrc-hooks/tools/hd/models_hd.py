@@ -94,7 +94,7 @@ def main():
             alpha = Image.fromarray(masks[key].astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
-        img.save(os.path.join(out_dir, key + ".tga"))
+        C.save_output(img, os.path.join(out_dir, key + ".tga"))
         done += 1
     print(f"wrote {done} model skin replacement(s) to {out_dir}")
 

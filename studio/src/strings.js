@@ -1082,12 +1082,37 @@ export const STRINGS = {
     USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
     STYLE_LABEL: 'Style:',
     COPY_BUTTON: 'Copy',
-    SETUP_TITLE: 'Upscaler',
-    LICENCE_NOTE: "This downloads Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.",
-    SETUP_BUTTON: 'Download upscaler and models',
+    SETUP_TITLE: 'Tools',
+    LICENCE_NOTE: "Download fetches Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. When this PC has no Python the build can use, it also fetches one for DoD Studio's own use (Python 3.12 with NumPy, Pillow and SciPy, about 70 MB), without installing anything system-wide. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.",
+    SETUP_BUTTON: "Download what's missing",
     CANCEL_BUTTON: 'Cancel',
     BUILD_TITLE: 'Build',
-    BUILD_HINT: 'Building the HD files from here comes next. Until then, use the scripts in goldsrc-hooks\\tools\\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:',
+    BUILD_HINT: 'Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.',
+    BUILD_STYLES_LABEL: 'Styles:',
+    BUILD_TYPES_LABEL: 'Files:',
+    BUILD_BUTTON: 'Build',
+    SCRIPTS_SUMMARY: 'Build from a Command Prompt instead',
+    SCRIPTS_HINT: 'The same scripts run from goldsrc-hooks\\tools\\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:',
+    PYTHON_PICK_BUTTON: 'Choose python.exe...',
+    PYTHON_RESET_BUTTON: 'Find it automatically',
+    PYTHON_PICK_TITLE: 'Choose python.exe',
+    // Where the Python the build would use came from.
+    pythonUsing: (source, exe, version) => ({
+      chosen: `Python: ${version}, the one you chose (${exe}).`,
+      app: `Python: ${version}, DoD Studio's own copy.`,
+      found: `Python: ${version}, found on this PC (${exe}).`,
+    })[source],
+    pythonChosenProblem: (exe, version, missing) => version
+      ? `The Python you chose (${exe}, ${version}) ${missing.length ? `has no ${missing.join(', ')}` : 'is older than 3.10'}, so it isn't used.`
+      : `The Python you chose (${exe}) didn't run, so it isn't used.`,
+    pythonFoundUnusable: (exe, version, missing) => `Python ${version} is installed (${exe}) but ${missing.length ? `has no ${missing.join(', ')}` : 'is older than 3.10'}. Install ${missing.length ? 'them' : 'Python 3.10 or newer'} there (pip install numpy pillow scipy), choose another python.exe, or let Download fetch DoD Studio's own copy.`,
+    PYTHON_NONE: "Python: none found. Download fetches DoD Studio's own copy, or choose a python.exe with NumPy, Pillow and SciPy.",
+    NO_SCRIPTS: 'This copy of DoD Studio has no build scripts, so it can only show what is built.',
+    buildStep: (step, steps, style, type, elapsed) => `Step ${step} of ${steps}: ${style}, ${type} (${elapsed} so far)`,
+    buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
+    BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
+    BUILD_NEEDS_CHOICE: 'Pick at least one style and one kind of file.',
+    STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
@@ -1113,7 +1138,9 @@ export const STRINGS = {
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
   IPC: {
-    hdSetupFailed: (err) => `Upscaler download failed: ${err}`,
+    hdSetupFailed: (err) => `Download failed: ${err}`,
+    hdBuildFailed: (err) => `Build failed: ${err}`,
+    hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,

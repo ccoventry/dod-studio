@@ -603,9 +603,10 @@ export async function hdStatus(gamePath) {
     });
 }
 
-/** Downloads the upscaler and style models; progress arrives as
- *  `hd_setup_progress` events. Rejects with "cancelled" after
- *  `hdSetupCancel`, which the caller treats as an outcome, not an error. */
+/** Downloads the upscaler and style models, plus DoD Studio's own Python
+ *  when the PC has none the build can use; progress arrives as
+ *  `hd_setup_progress` events. Rejects with "cancelled" after `hdCancel`,
+ *  which the caller treats as an outcome, not an error. */
 export async function hdSetupTools() {
   return invoke("hd_setup_tools")
     .catch((err) => {
@@ -615,10 +616,34 @@ export async function hdSetupTools() {
     });
 }
 
-export async function hdSetupCancel() {
-  return invoke("hd_setup_cancel")
+/** Runs the HD build scripts for `request` ({ styles, types }); progress
+ *  arrives as `hd_build_progress` events. Rejects with "cancelled" after
+ *  `hdCancel`. */
+export async function hdBuild(gamePath, request) {
+  return invoke("hd_build", { gamePath, request })
     .catch((err) => {
-      console.error("IPC Execution Error (hd_setup_cancel):", err);
+      console.error("IPC Execution Error (hd_build):", err);
+      if (err !== "cancelled") showToast(STRINGS.IPC.hdBuildFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Stops a running download or build. */
+export async function hdCancel() {
+  return invoke("hd_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_cancel):", err);
+      throw err;
+    });
+}
+
+/** Uses `path` (a python.exe) for builds from now on, or goes back to
+ *  finding one with `null`. */
+export async function hdSetPython(path) {
+  return invoke("hd_set_python", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_set_python):", err);
+      showToast(STRINGS.IPC.hdPythonFailed(err), 'error');
       throw err;
     });
 }

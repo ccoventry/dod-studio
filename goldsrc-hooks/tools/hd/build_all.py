@@ -91,6 +91,7 @@ def main():
     def step(style, kind):
         out = os.path.join(hd, kind, style)
         os.makedirs(out, exist_ok=True)
+        C.clear_partial(out)
         env = dict(os.environ, HD_STYLE=style)
         if kind == "world":
             cmd = ["world_hd.py", out, "--all"]
@@ -123,6 +124,7 @@ def main():
             return
         out = os.path.join(hd, kind, style)
         os.makedirs(out, exist_ok=True)
+        C.clear_partial(out)
         t, made = time.time(), 0
         for name in sorted(os.listdir(a_dir)):
             dst, src_b = os.path.join(out, name), os.path.join(b_dir, name)
@@ -141,18 +143,20 @@ def main():
                     alpha = Image.blend(alpha, ib.getchannel("A"), weight)
                 mixed = mixed.convert("RGBA")
                 mixed.putalpha(alpha)
-            mixed.save(dst)
+            C.save_output(mixed, dst)
             made += 1
         log(f"{style:10s} {kind:7s} {made} new, {len(os.listdir(out))} total, {time.time() - t:.0f}s")
 
     keep_awake(log)
     log(f"=== build_all: {game}; styles {styles}; types {types}")
-    for style in styles:
-        for kind in types:
-            if S.DEFS[style][0] == "blend":
-                blend(style, kind)
-            else:
-                step(style, kind)
+    steps = [(style, kind) for style in styles for kind in types]
+    for number, (style, kind) in enumerate(steps, 1):
+        # For DoD Studio's progress line; not written to build_all.log.
+        print(f"@@step {number} {len(steps)} {style} {kind}", flush=True)
+        if S.DEFS[style][0] == "blend":
+            blend(style, kind)
+        else:
+            step(style, kind)
     log("=== build_all done")
 
 

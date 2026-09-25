@@ -705,9 +705,9 @@
           </div>
         </section>
 
-        <!-- HD Textures (#372): what is built, fetching the upscaler, and the
-             movie.cfg lines to use it. Building itself is still the
-             goldsrc-hooks/tools/hd scripts' job until the Rust port. -->
+        <!-- HD Textures (#372): what is built, the movie.cfg lines to use it,
+             fetching the upscaler (and a Python when the PC has none), and
+             running the goldsrc-hooks/tools/hd build scripts. -->
         <section id="pane-hd-textures" class="content-pane" style="display: none;">
           <div class="hd-pane-column">
             <div class="egui-panel">
@@ -752,6 +752,11 @@
               </div>
               <div class="panel-body">
                 <p id="hd-tools-text" class="hd-hint"></p>
+                <p id="hd-python-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-python-pick-btn" data-str="HD.PYTHON_PICK_BUTTON">Choose python.exe...</button>
+                  <button id="hd-python-reset-btn" data-str="HD.PYTHON_RESET_BUTTON">Find it automatically</button>
+                </div>
                 <p class="hd-hint" data-str="HD.LICENCE_NOTE">This downloads Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.</p>
                 <div class="row-inputs">
                   <button id="hd-setup-btn" class="primary-btn" data-str="HD.SETUP_BUTTON">Download upscaler and models</button>
@@ -766,8 +771,26 @@
                 <h3 data-str="HD.BUILD_TITLE">Build</h3>
               </div>
               <div class="panel-body">
-                <p class="hd-hint" data-str="HD.BUILD_HINT">Building the HD files from here comes next. Until then, use the scripts in goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
-                <pre id="hd-realesrgan-line" class="hd-code"></pre>
+                <p class="hd-hint" data-str="HD.BUILD_HINT">Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.</p>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-build-styles" class="hd-choices"></div>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_TYPES_LABEL">Files:</span>
+                  <div id="hd-build-types" class="hd-choices"></div>
+                </div>
+                <div class="row-inputs">
+                  <button id="hd-build-btn" class="primary-btn" data-str="HD.BUILD_BUTTON">Build</button>
+                  <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="hd-build-progress" class="hd-hint"></p>
+                <p id="hd-build-line" class="hd-hint hd-mono"></p>
+                <details class="hd-details">
+                  <summary data-str="HD.SCRIPTS_SUMMARY">Build from a Command Prompt instead</summary>
+                  <p class="hd-hint" data-str="HD.SCRIPTS_HINT">The same scripts run from goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
+                  <pre id="hd-realesrgan-line" class="hd-code"></pre>
+                </details>
               </div>
             </div>
           </div>
