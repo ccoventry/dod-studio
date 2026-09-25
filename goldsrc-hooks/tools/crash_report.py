@@ -41,6 +41,15 @@ KNOWN = {
     # dod_lennon2 and has it from the first frame (packet_entity_probe).
     "core.dll+0x16d6": "#207: an HLTV demo with more than 256 entities in one packet (so far always dod_lennon2); "
                        "the pre-Anniversary HLTV demo player can't hold them. The Anniversary build's limit is 1024",
+    # #384: PM_RecursiveHullCheck (hw.dll+0x6c830) walking a previous map's
+    # clip hull after `playdemo` of an HLTV demo on some maps (anzio,
+    # harrington): a loop until the stack runs out, or a garbage plane read.
+    # Guarded by src/hull_trace_guard.rs, so seeing one means the guard did
+    # not install (the log's "hull_trace_guard:" line says why).
+    "hw.dll+0x6c839": "#384: the engine's hull trace walked a previous map's collision data and ran out of stack "
+                      "-- hull_trace_guard guards this; check its log line",
+    "hw.dll+0x6c8d1": "#384: the engine's hull trace read a garbage plane from a previous map's collision data "
+                      "-- hull_trace_guard guards this; check its log line",
 }
 # Engine fatal errors already understood: a substring of the message -> what it is.
 KNOWN_ERRORS = {
@@ -155,7 +164,7 @@ def main():
         print(f"  call stack runs through: {' <- '.join(modules) or '(none recorded)'}")
         for date, time, demo, _, _, _, frames, before, level, session in (occ if args.all else occ[:1]):
             when = f"{date} {time}" + (f", {float(demo):.0f} s of playback into the session" if demo else "")
-            print(f"  -- {when}" + (f", on {level}" if level else "") + (f" (session started {session})" if session else ""))
+            print(f"  -- {when}" + (f", last level loaded: {level}" if level else "") + (f" (session started {session})" if session else ""))
             for line in before:
                 m = HEADER.match(line)
                 print(f"       {m.group('msg') if m else line}"[:200])

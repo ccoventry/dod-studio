@@ -513,6 +513,7 @@ pub fn poll() {
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::tempent_fix::poll();
+    crate::hull_trace_guard::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -642,6 +643,9 @@ fn status_text() -> String {
     // catch anything?" is the question a crash-free session raises.
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
+    }
+    if let Some(hull) = crate::hull_trace_guard::status_line() {
+        lines.push(hull);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));

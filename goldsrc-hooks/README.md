@@ -175,6 +175,13 @@ checking the engine gave them one. It is on by default, because it only acts
 where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it
 off. `dodstudio_debug_status` shows how many effects it has skipped.
 
+`src/hull_trace_guard.rs` stops an engine crash (`hw.dll+0x6c839`, issue #384):
+`playdemo` of an HLTV demo on some maps right after another map can hand the
+player-movement trace a previous map's collision data, and it recurses until
+the stack runs out. The guard refuses any clip node the hull can't have, and
+stops a trace that is about to run out of stack. On by default for the same
+reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
 faulting address as `module+RVA` so a crash is diagnosable from the log alone. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

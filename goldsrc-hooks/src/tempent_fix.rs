@@ -340,7 +340,7 @@ pub fn poll() {
 }
 
 /// True when the count has reached the next of 1, 10, 100, ... past `logged`.
-fn worth_logging(logged: u32, now: u32) -> bool {
+pub(crate) fn worth_logging(logged: u32, now: u32) -> bool {
     let mut step = 1u32;
     while step <= logged {
         match step.checked_mul(10) {
