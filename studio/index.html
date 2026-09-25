@@ -794,6 +794,27 @@
                 </details>
               </div>
             </div>
+
+            <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
+                <button id="hd-misses-btn" data-str="HD.MISSES_BUTTON">Read the game's log</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MISSES_HINT">After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.</p>
+                <div class="input-row">
+                  <pre id="hd-misses-command" class="hd-code hd-code-inline"></pre>
+                  <button id="hd-misses-copy-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <p id="hd-misses-text" class="hd-hint"></p>
+                <label class="hd-check">
+                  <input type="checkbox" id="hd-misses-on-purpose">
+                  <span data-str="HD.MISSES_SHOW_ON_PURPOSE">Show textures left alone on purpose</span>
+                </label>
+                <div id="hd-misses-maps"></div>
+              </div>
+            </div>
           </div>
         </section>
 
