@@ -136,6 +136,17 @@ python build_all.py --types sprites,sky   only some types
 - **`--also <another Half-Life folder>`** also builds that install's models and sprites. Use it if you keep a stock install next to a modded one: its versions get HD copies too, so they're ready if you ever copy them over. Files are matched by their pixels, so both versions can share one folder.
 - **`--extra-models <folder>`** adds any other folder of `.mdl` files.
 
+## Only the maps you use
+
+Map textures and skies are the bulk of the build, and a public-server map you never film is wasted time and disk. To build only some maps:
+
+1. Copy `hd_maps.example.txt` to `hd_maps.txt` in this folder.
+2. List the maps, one per line. `*` matches anything and `?` one character, like a Windows folder search: `dod_railroad2*` covers every railroad2 build. A name without them matches only that map.
+
+`build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again. Like `my_styles.txt`, it stays out of git.
+
+A map left out simply shows its original textures in game, and `dodstudio_debug_hd_misses` lists it.
+
 ## Upscale your own files
 
 Each type's script takes an output folder and what to build. Put the output in the style you use, or in `overrides`, which wins over any style:
@@ -213,6 +224,7 @@ Style names are lowercase letters, digits, `-` and `_`, because they become fold
 | `setup_tools.py` | downloads the upscaler and the style models |
 | `styles.py` | the style list and the upscaler call |
 | `my_styles.example.txt` | template for your own styles (copy it to `my_styles.txt`) |
+| `hd_maps.example.txt` | template for building only some maps (copy it to `hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |

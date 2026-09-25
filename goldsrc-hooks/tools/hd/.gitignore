@@ -3,3 +3,5 @@ realesrgan/
 __pycache__/
 # Your own styles (see my_styles.example.txt).
 my_styles.txt
+# Your own map list (see hd_maps.example.txt).
+hd_maps.txt
