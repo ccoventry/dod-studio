@@ -6,7 +6,10 @@
 game's code reads it (issue #384). The unit test proves the stub assembles as
 documented; only the binary can prove the facts the stub relies on:
 
-  1. The signature matches exactly once, and starts with the stolen bytes.
+  0. Exactly one of the builds in `BUILDS` (pre-Anniversary, 25th
+     Anniversary) matches this `hw.dll`, and the others match nothing.
+  1. That build's signature matches exactly once, and starts with its
+     stolen bytes.
   2. Nothing branches into the interior of the span, and no relocated dword
      points into it. The stolen instructions are not relative and read no
      flags.
@@ -17,8 +20,9 @@ documented; only the binary can prove the facts the stub relies on:
   4. The stub's reads match the function's: the hull is `[ebp+8]` and the
      node number `[ebp+0xc]`; the early-out compares `hull+8` (first
      clipnode) with `hull+0xc` (last); a node is `[hull+0] + num*8` with its
-     plane number at `+0`; and the plane read that crashed (`+0x6c8d1`) is
-     `[hull+4] + planenum*20`.
+     plane number at `+0`; and the plane read that crashed (`+0x6c8d1` in
+     the pre-Anniversary build) is `[hull+4] + planenum*20`. The two builds'
+     compilers spell these differently, so each has its own list.
   5. `PM_HullPointContents`, which walks the same hulls, refuses a node
      outside `hull+8 ..= hull+0xc` (with a `Sys_Error`), so real map data
      always passes the stub's range check.
@@ -30,9 +34,10 @@ here, for the reason in `verify_deathmsg_offsets.py`.
 
 Usage:
     python goldsrc-hooks/tools/verify_hull_trace_offsets.py [path-to-hw.dll]
+    python goldsrc-hooks/tools/verify_hull_trace_offsets.py --anniversary
 
-Defaults to the pre-Anniversary movies install. Needs `pip install pefile
-capstone`.
+Defaults to the pre-Anniversary movies install; `--anniversary` is the stock
+25th Anniversary one. Needs `pip install pefile capstone`.
 """
 
 import re
@@ -50,12 +55,14 @@ DEFAULT_DLL = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
+ANNIVERSARY_DLL = Path(r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life\hw.dll")
 RUST = Path(__file__).resolve().parent.parent / "src" / "hull_trace_guard.rs"
 
 # Instructions the stub relies on, in the order the function runs them, as
 # capstone prints them. Registers are the compiler's choice and are read from
-# each match rather than assumed; `{hull}` and friends name them.
-READS = [
+# each match rather than assumed; `{hull}` and friends name them. One list per
+# build in `BUILDS`, by its name.
+PRE_READS = [
     ("num is [ebp+0xc]", r"mov (?P<num>e\w\w), dword ptr \[ebp \+ 0xc\]"),
     ("hull is [ebp+8]", r"mov (?P<hull>e\w\w), dword ptr \[ebp \+ 8\]"),
     ("first clipnode is hull+8", r"mov (?P<first>e\w\w), dword ptr \[{hull} \+ 8\]"),
@@ -69,6 +76,46 @@ READS = [
     ("plane stride 20, part 2", r"lea (?P<plane>e\w\w), \[{planes} \+ {pn}\*4\]"),
     ("the plane read that crashed", r"mov al, byte ptr \[{plane} \+ 0x10\]"),
 ]
+# The Anniversary compiler keeps the node number in a local, compares the
+# first clipnode against the last in memory, and folds the plane address into
+# the read.
+ANNIVERSARY_READS = [
+    ("num is [ebp+0xc]", r"mov (?P<num>e\w\w), dword ptr \[ebp \+ 0xc\]"),
+    ("num kept in a local", r"mov dword ptr \[ebp - (?P<slot>0x\w+)\], {num}"),
+    ("hull is [ebp+8]", r"mov (?P<hull>e\w\w), dword ptr \[ebp \+ 8\]"),
+    ("first clipnode is hull+8", r"mov (?P<first>e\w\w), dword ptr \[{hull} \+ 8\]"),
+    ("no clipnodes: the early-out, against hull+0xc", r"cmp {first}, dword ptr \[{hull} \+ 0xc\]"),
+    ("num back from the local", r"mov (?P<num2>e\w\w), dword ptr \[ebp - {slot}\]"),
+    ("clipnodes is [hull]", r"mov (?P<clip>e\w\w), dword ptr \[{hull}\]"),
+    ("a node is clipnodes + num*8", r"lea (?P<node>e\w\w), \[{clip} \+ {num2}\*8\]"),
+    ("planes is hull+4", r"mov (?P<planes>e\w\w), dword ptr \[{hull} \+ 4\]"),
+    ("planenum is the node's first dword", r"mov (?P<pn>e\w\w), dword ptr \[{node}\]"),
+    ("plane stride 20, part 1", r"lea {pn}, \[{pn} \+ {pn}\*4\]"),
+    ("the plane type read (planes + planenum*20 + 0x10)", r"mov \w\w, byte ptr \[{planes} \+ {pn}\*4 \+ 0x10\]"),
+]
+READS = {"pre-Anniversary": PRE_READS, "25th Anniversary": ANNIVERSARY_READS}
+
+
+def rust_builds(src: str):
+    """[(name, pattern, stolen bytes)] from `BUILDS` in hull_trace_guard.rs."""
+    table = re.search(r"const BUILDS: \[Build; \d+\] = \[(.*?)\n\];", src, re.S)
+    if not table:
+        raise SystemExit("could not find `const BUILDS` in hull_trace_guard.rs")
+    builds = []
+    for name, pattern, stolen in re.findall(
+        r'name: "([^"]+)",\s*pattern: "(.*?)",\s*stolen: \[([^\]]*)\]', table.group(1), re.S
+    ):
+        pattern = " ".join(pattern.replace("\\", " ").split())
+        builds.append((name, pattern, bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", stolen))))
+    if not builds:
+        raise SystemExit("`BUILDS` in hull_trace_guard.rs has no entries this script can read")
+    return builds
+
+
+def signature_matches(image, pattern):
+    """Every offset `pattern` (hex bytes and ?? wildcards) matches in `image`."""
+    rx = re.compile(b"".join(b"." if t == "??" else re.escape(bytes([int(t, 16)])) for t in pattern.split()), re.S)
+    return [m.start() for m in rx.finditer(image)]
 
 
 def rust_const(src: str, name: str) -> str:
@@ -120,13 +167,13 @@ def function_body(image, base, md, start, limit=0x600):
 
 
 def main() -> int:
-    dll = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_DLL
+    arg = sys.argv[1] if len(sys.argv) > 1 else None
+    dll = ANNIVERSARY_DLL if arg == "--anniversary" else Path(arg) if arg else DEFAULT_DLL
     if not dll.is_file():
         return print(f"no hw.dll at {dll}") or 2
 
     src = RUST.read_text(encoding="utf-8")
-    pattern = " ".join(rust_const(src, "PATTERN").replace('"', " ").replace("\\", " ").split())
-    stolen = bytes(int(b, 16) for b in re.findall(r"0x([0-9a-f]{2})", rust_const(src, "STOLEN")))
+    builds = rust_builds(src)
     margin = int(rust_const(src, "STACK_MARGIN").replace("_", ""), 0)
     max_plane = int(rust_const(src, "MAX_PLANE").replace("_", ""), 0)
 
@@ -143,10 +190,22 @@ def main() -> int:
         ok &= bool(passed)
         print(("OK   " if passed else "FAIL ") + message)
 
+    # -- 0. which build ------------------------------------------------------
+    print(f"== {dll} ==")
+    hits = {name: signature_matches(image, pattern) for name, pattern, _ in builds}
+    for name, found in hits.items():
+        print(f"     {name} signature: {len(found)} match(es) {[hex(m) for m in found]}")
+    matching = [b for b in builds if hits[b[0]]]
+    if len(matching) != 1:
+        print(f"FAIL {len(matching)} builds' signatures match; exactly one should")
+        print("\nMISMATCH -- do not ship")
+        return 1
+    name, pattern, stolen = matching[0]
+    print(f"     this is the {name} hw.dll")
+
     # -- 1. the signature --------------------------------------------------
-    print("== the entry ==")
-    rx = re.compile(b"".join(re.escape(bytes([int(t, 16)])) for t in pattern.split()), re.S)
-    matches = [m.start() for m in rx.finditer(image)]
+    print("\n== the entry ==")
+    matches = hits[name]
     if len(matches) != 1:
         print(f"FAIL the signature matches {len(matches)} times: {[hex(m) for m in matches]}")
         print("\nMISMATCH -- do not ship")
@@ -193,7 +252,7 @@ def main() -> int:
     # -- 4. the reads the stub mirrors ----------------------------------------
     print("\n== what the stub mirrors ==")
     regs, at = {}, 0
-    for what, template in READS:
+    for what, template in READS[name]:
         rx = re.compile(template.format(**regs) + "$")
         for index in range(at, len(body)):
             m = rx.match(f"{body[index].mnemonic} {body[index].op_str}")
@@ -212,21 +271,27 @@ def main() -> int:
     check(message >= 0, "the engine has the `PM_HullPointContents: bad node number` error")
     pushers = [i for i in range(len(image) - 5) if image[i] == 0x68
                and int.from_bytes(image[i + 1 : i + 5], "little") == base + message]
-    check(len(pushers) == 1, f"one `push` of it, at {[hex(p) for p in pushers]}")
+    # The Anniversary build also inlines the check into PM_PointContents, so
+    # it is pushed twice; the first push is PM_HullPointContents itself.
+    check(pushers, f"`push`ed at {[hex(p) for p in pushers]}")
     if pushers:
         start = image.rfind(b"\x55\x8b\xec", 0, pushers[0])
         text = [f"{i.mnemonic} {i.op_str}" for i in md.disasm(image[start : pushers[0]], base + start)]
         hull = next((re.match(r"mov (e\w\w), dword ptr \[ebp \+ 8\]", t).group(1)
                      for t in text if re.match(r"mov (e\w\w), dword ptr \[ebp \+ 8\]", t)), None)
         compares = [t for t in text if hull and re.match(rf"cmp e\w\w, dword ptr \[{hull} \+ (8|0xc)\]$", t)]
-        check(len(compares) == 2, f"+{start:#x} compares the node with hull+8 and hull+0xc before the error: {compares}")
+        # The Anniversary build also makes the early-out's compare here.
+        bounds = {re.search(r"\+ (8|0xc)\]$", t).group(1) for t in compares}
+        check(bounds == {"8", "0xc"}, f"+{start:#x} compares the node with hull+8 and hull+0xc before the error: {compares}")
 
     # -- 6. the constants -----------------------------------------------------
     print("\n== constants ==")
     exe = pefile.PE(str(dll.with_name("hl.exe")), fast_load=True)
     stack = exe.OPTIONAL_HEADER.SizeOfStackReserve
     check(margin <= stack // 8, f"STACK_MARGIN {margin:#x} is at most an eighth of hl.exe's {stack:#x} stack")
-    frame = 0x20 + 3 * 4 + 4 + 4 + 7 * 4  # locals, saved regs, ebp, return address, arguments
+    first_branch = next(i for i, ins in enumerate(body) if ins.mnemonic.startswith("j"))
+    saved = sum(1 for ins in body[:first_branch] if ins.mnemonic == "push") - 1  # not ebp
+    frame = stolen[5] + saved * 4 + 4 + 4 + 7 * 4  # locals, saved regs, ebp, return address, arguments
     print(f"     one level of recursion is {frame} bytes: a 44-deep trace uses {44 * frame} of the "
           f"{stack - margin} the guard allows ({(stack - margin) // frame} levels)")
     check(max_plane > 32767, f"MAX_PLANE {max_plane:#x} is above MAX_MAP_PLANES (32767)")
