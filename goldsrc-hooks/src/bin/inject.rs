@@ -21,7 +21,14 @@ use windows_sys::Win32::System::Threading::{
     PROCESS_VM_OPERATION, PROCESS_VM_READ, PROCESS_VM_WRITE, WaitForSingleObject,
 };
 
+/// Printed on every run, before anything else: this route skips the connect
+/// warning HLAE shows in every DoD Studio launch (docs/vac_safety.md).
+const VAC_WARNING: &str = "WARNING: only inject into a separate movie copy of Half-Life, never the one \
+                           you play online with, and never join a server afterwards -- this DLL patches \
+                           the game in memory, which is what VAC detects. See docs/vac_safety.md.";
+
 fn main() -> ExitCode {
+    eprintln!("{VAC_WARNING}\n");
     let args: Vec<String> = env::args().collect();
     let [_, pid_arg, dll_path] = args.as_slice() else {
         eprintln!("usage: inject <pid> <path-to-dll>");

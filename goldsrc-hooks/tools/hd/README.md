@@ -120,6 +120,8 @@ The scripts write into the Half-Life folder that DoD Studio launches. They look 
 2. the `hl.exe` DoD Studio is set to launch
 3. the only Steam install with a `dod` folder (if you have several, you'll be asked to pick one)
 
+Build into your **movie copy** of Half-Life, the one DoD Studio launches. The HD files are plain images and harmless on their own, but they only show up when DoD Studio's hook DLL is loaded into the game, and that DLL must never be loaded into the copy you play online with. See [`docs/vac_safety.md`](../../../docs/vac_safety.md).
+
 ## Build everything
 
 ```
