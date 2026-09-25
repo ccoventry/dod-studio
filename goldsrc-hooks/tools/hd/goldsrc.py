@@ -51,7 +51,15 @@ def bsp_path(game, m):
 def map_textures(game, m, warn=print):
     """[(name, w, h, indices, palette)] for every texture map `m` uses:
     embedded in the BSP, or from the wads its worldspawn lists (searched in
-    dod/, then valve/)."""
+    dod/, then valve/).
+
+    A name found in more than one of the map's wads is returned once per
+    wad. The engine doesn't take the first listed wad's copy: dod_chemille
+    lists dod_chemille.wad before dod_narby.wad, both have an IR_Nredish2
+    with different pixels, and the game loaded dod_narby's (seen live,
+    2026-09-24). Returning every copy means whichever one the engine picks
+    has an HD file, whatever its lookup order is; the file names carry the
+    pixel hash, so the extra copies never collide."""
     d = open(bsp_path(game, m), "rb").read()
     lumps = [struct.unpack_from("<ii", d, 4 + 8 * i) for i in range(15)]
     ents = d[lumps[0][0]: sum(lumps[0])].decode("latin1")
@@ -69,6 +77,7 @@ def map_textures(game, m, warn=print):
         if struct.unpack_from("<I", d, at + 24)[0]:
             out.append(read_miptex(d, at))
             continue
+        found = False
         for w in wads:
             p = next((os.path.join(game, g, w) for g in ("dod", "valve")
                       if os.path.exists(os.path.join(game, g, w))), None)
@@ -77,8 +86,8 @@ def map_textures(game, m, warn=print):
                 with open(p, "rb") as f:
                     f.seek(o)
                     out.append(read_miptex(f.read(disk), 0))
-                break
-        else:
+                found = True
+        if not found:
             warn(f"  {m}: {name} not found in any wad, skipped")
     return out
 

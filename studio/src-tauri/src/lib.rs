@@ -1,6 +1,7 @@
 mod audit_manager;
 mod capture_manager;
 mod dir_browser;
+mod hd_manager;
 mod map_manager;
 mod messages;
 mod render_manager;
@@ -535,6 +536,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -606,6 +608,9 @@ pub fn run() {
             map_manager::download_map,
             map_manager::scan_game_configs,
             map_manager::roll_floors,
+            hd_manager::hd_status,
+            hd_manager::hd_setup_tools,
+            hd_manager::hd_setup_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

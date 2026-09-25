@@ -52,6 +52,7 @@
           <button class="nav-tab-btn active" data-nav="workspace" data-str="NAV.STUDIO_TAB">Studio</button>
           <button class="nav-tab-btn" data-nav="demo-auditor" data-str="NAV.DEMO_AUDITOR_TAB">Demo Auditor</button>
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
+          <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -704,6 +705,74 @@
           </div>
         </section>
 
+        <!-- HD Textures (#372): what is built, fetching the upscaler, and the
+             movie.cfg lines to use it. Building itself is still the
+             goldsrc-hooks/tools/hd scripts' job until the Rust port. -->
+        <section id="pane-hd-textures" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.STATUS_TITLE">What's built</h3>
+                <button id="hd-refresh-btn" data-str="HD.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p id="hd-status-text" class="hd-hint"></p>
+                <div class="table-wrapper">
+                  <table id="hd-status-table">
+                    <thead>
+                      <tr>
+                        <th data-str="HD.TABLE_TYPE">Type</th>
+                        <th data-str="HD.TABLE_FOLDERS">Styles built</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hd-status-body"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.USE_TITLE">Use it in the game</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.</p>
+                <div class="input-row">
+                  <label for="hd-style-select" data-str="HD.STYLE_LABEL">Style:</label>
+                  <select id="hd-style-select"></select>
+                  <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <pre id="hd-cfg-lines" class="hd-code"></pre>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.SETUP_TITLE">Upscaler</h3>
+              </div>
+              <div class="panel-body">
+                <p id="hd-tools-text" class="hd-hint"></p>
+                <p class="hd-hint" data-str="HD.LICENCE_NOTE">This downloads Real-ESRGAN ncnn-vulkan from its GitHub releases and four style models from the Upscayl project, about 180 MB in all, into DoD Studio's own folder. The models have their own licences, which differ from DoD Studio's: 4x-UltraSharp, for one, is non-commercial. Check each one's licence before you share what you make with it.</p>
+                <div class="row-inputs">
+                  <button id="hd-setup-btn" class="primary-btn" data-str="HD.SETUP_BUTTON">Download upscaler and models</button>
+                  <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="hd-setup-progress" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.BUILD_TITLE">Build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.BUILD_HINT">Building the HD files from here comes next. Until then, use the scripts in goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
+                <pre id="hd-realesrgan-line" class="hd-code"></pre>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Demo Analyzer: standalone per-demo report (Summary/Scoreboard/Player/Team/Timeline/Rounds/Chat) -->
         <section id="pane-demo-analyzer" class="content-pane" style="display: none;">
           <!-- Left: Explorer sidebar — 3-tier Quick Links (Pinned/Recent/Local) + a
@@ -852,6 +921,9 @@
         </div>
         <div id="footer-demo-analyzer" class="pinned-footer-content" style="display: none;">
           <div id="footer-analyzer-current-file" data-str="ANALYZER.NO_DEMO_LOADED">No demo loaded</div>
+        </div>
+        <div id="footer-hd-textures" class="pinned-footer-content" style="display: none;">
+          <div id="footer-hd-summary"></div>
         </div>
       </footer>
 

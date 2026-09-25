@@ -1,0 +1,38 @@
+<!doctype html>
+<!--
+  Minimal harness for hd_pane.js (#372) -- see tests/e2e/README.md for the
+  general shape. Carries only the elements the pane reads and writes, plus the
+  Configuration page's hl.exe field it takes the game path from. A test
+  controls the backend by registering `hd_status` / `hd_setup_tools`
+  handlers on window.__mockInvokeHandlers.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>hd_pane.js test harness</title>
+</head>
+<body>
+  <input id="hl-path-input" value="C:/games/Half-Life/hl.exe" />
+  <button class="nav-tab-btn" data-nav="hd-textures">HD Textures</button>
+
+  <p id="hd-status-text"></p>
+  <button id="hd-refresh-btn">Refresh</button>
+  <table><tbody id="hd-status-body"></tbody></table>
+  <select id="hd-style-select"></select>
+  <button id="hd-copy-cfg-btn">Copy</button>
+  <pre id="hd-cfg-lines"></pre>
+  <p id="hd-tools-text"></p>
+  <button id="hd-setup-btn">Download</button>
+  <button id="hd-setup-cancel-btn" disabled>Cancel</button>
+  <p id="hd-setup-progress"></p>
+  <pre id="hd-realesrgan-line"></pre>
+  <div id="footer-hd-summary"></div>
+  <div id="toast-container"></div>
+
+  <script type="module">
+    import { initHdPane } from '/src/hd_pane.js';
+    initHdPane();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

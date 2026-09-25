@@ -65,6 +65,20 @@ Tests:
 
     cargo test --workspace
 
+## Staying VAC-safe
+
+DoD Studio loads HLAE and its own hook DLL into the game and patches it in
+memory, which is exactly what VAC looks for. So:
+
+- **Use a separate copy of Half-Life for movies**, and point DoD Studio at that
+  copy's `hl.exe`, never at the Steam install you play online with.
+- **Only play demos in it.** Never join a server from a game DoD Studio started.
+  If HLAE asks "You are about to connect to a server", answer No.
+- **Never inject the hook DLL by hand** (`inject.exe`) into a game you play
+  online with.
+
+Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
+
 ## Localization keys
 
 Tokens are stored **bare** — lowercase, no `#`. The `#` is a lookup-time sigil
