@@ -1,7 +1,8 @@
 // hd_pane.js — the HD Textures page (#372): what is built under
 // <game>/dod/dodstudio_hd, the movie.cfg lines to use it, downloading the
 // upscaler (and a Python when the PC has none), running the build, the
-// style comparison sheet, the user's own styles (my_styles.txt), and the
+// style comparison sheet, which maps to build (hd_maps.txt), the user's own
+// styles (my_styles.txt), and the
 // textures the game last reported as kept original (the misses view).
 // The build is goldsrc-hooks/tools/hd's own scripts, so this page and the
 // command line always make the same files.
@@ -10,7 +11,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses, hdSaveStyle, hdRemoveStyle,
-  hdPreview,
+  hdPreview, hdSaveMapList,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -74,6 +75,22 @@ export function initHdPane() {
   const styleLine = document.querySelector('#hd-style-line');
   const styleSaveBtn = document.querySelector('#hd-style-save-btn');
   const styleMessage = document.querySelector('#hd-style-message');
+  const mapsFile = document.querySelector('#hd-maps-file');
+  const mapsEvery = document.querySelector('#hd-maps-every');
+  const mapsEveryLabel = document.querySelector('#hd-maps-every-label');
+  const mapsSome = document.querySelector('#hd-maps-some');
+  const mapsEditor = document.querySelector('#hd-maps-editor');
+  const mapsPatterns = document.querySelector('#hd-maps-patterns');
+  const mapsPattern = document.querySelector('#hd-maps-pattern');
+  const mapsAddBtn = document.querySelector('#hd-maps-add-btn');
+  const mapsPatternHint = document.querySelector('#hd-maps-pattern-hint');
+  const mapsSearch = document.querySelector('#hd-maps-search');
+  const mapsPickedOnly = document.querySelector('#hd-maps-picked-only');
+  const mapsAvailable = document.querySelector('#hd-maps-available');
+  const mapsSummary = document.querySelector('#hd-maps-summary');
+  const mapsSaveBtn = document.querySelector('#hd-maps-save-btn');
+  const mapsUndoBtn = document.querySelector('#hd-maps-undo-btn');
+  const mapsMessage = document.querySelector('#hd-maps-message');
   const missesBtn = document.querySelector('#hd-misses-btn');
   const missesCommand = document.querySelector('#hd-misses-command');
   const missesCopyBtn = document.querySelector('#hd-misses-copy-btn');
@@ -306,6 +323,7 @@ export function initHdPane() {
     renderBuild(status);
     renderMyStyles(status);
     renderPreviewChoices(status);
+    renderMapList(status);
 
     const total = status.types.flatMap((t) => t.folders).reduce((sum, f) => sum + f.bytes, 0);
     if (footerSummary) {
@@ -527,6 +545,243 @@ export function initHdPane() {
   }
   styleSaveBtn?.addEventListener('click', saveStyle);
   renderForm();
+
+  // The map list: the install's hd_maps.txt, as native::hd::map_list reads
+  // it. The list's text is what gets saved, so comments and the user's own
+  // layout survive; ticking a map adds or removes one line of it. Every map
+  // is the file's absence (the backend sets the list aside rather than
+  // deleting it).
+  let mapFile = null; // the backend's MapList, as last saved
+  let mapText = ''; // the list being edited
+  let mapMode = 'every'; // 'every' | 'some'
+
+  // hdcommon.map_patterns: one per line, # starts a comment, .bsp optional,
+  // case doesn't matter.
+  function mapPatterns(text) {
+    return text.split(/\r?\n/)
+      .map((raw) => raw.split('#')[0].trim().toLowerCase())
+      .map((line) => (line.endsWith('.bsp') ? line.slice(0, -4) : line))
+      .filter(Boolean);
+  }
+
+  // fnmatch.fnmatchcase for * and ?, on the lowercased name.
+  function patternTest(pattern) {
+    const source = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    const re = new RegExp(`^${source}$`, 's');
+    return (name) => re.test(name.toLowerCase());
+  }
+
+  const mapNames = () => (mapFile?.maps || []).map((m) => m.name);
+
+  // Every map name -> the first pattern that picks it.
+  function pickedBy() {
+    const tests = mapPatterns(mapText).map((p) => [p, patternTest(p)]);
+    const picked = new Map();
+    for (const name of mapNames()) {
+      const hit = tests.find(([, test]) => test(name));
+      if (hit) picked.set(name, hit[0]);
+    }
+    return picked;
+  }
+
+  const isWildcard = (pattern) => /[*?]/.test(pattern);
+
+  function addPattern(pattern) {
+    const lines = mapText.replace(/\s*$/, '');
+    mapText = `${lines}${lines ? '\n' : ''}${pattern}\n`;
+  }
+
+  // Takes out every line whose pattern is `pattern`, comments with it.
+  function removePattern(pattern) {
+    mapText = mapText.split(/\r?\n/)
+      .filter((raw) => mapPatterns(raw)[0] !== pattern)
+      .join('\n');
+  }
+
+  const mapsDirty = () => !!mapFile
+    && ((mapMode === 'some') !== mapFile.active || (mapMode === 'some' && mapText !== mapFile.text));
+
+  function renderMapList(status) {
+    const fresh = status?.map_list;
+    if (fresh) {
+      // A refresh keeps edits that aren't saved yet.
+      const keep = mapsDirty();
+      mapFile = fresh;
+      if (!keep) {
+        mapText = fresh.text;
+        mapMode = fresh.active ? 'some' : 'every';
+      }
+    }
+    if (!mapsAvailable || !mapFile) return;
+
+    mapsFile.textContent = mapFile.old_place
+      ? STRINGS.HD.mapsOldPlace(mapFile.old_place, mapFile.path)
+      : STRINGS.HD.mapsFile(mapFile.path, mapFile.active);
+    mapsEveryLabel.textContent = STRINGS.HD.mapsEvery(mapFile.maps.length);
+    mapsEvery.checked = mapMode === 'every';
+    mapsSome.checked = mapMode === 'some';
+    mapsEditor.hidden = mapMode !== 'some';
+
+    const picked = mapMode === 'some' ? pickedBy() : null;
+
+    // The patterns, each with the maps it picks.
+    mapsPatterns.innerHTML = '';
+    const patterns = [...new Set(mapPatterns(mapText))];
+    if (!patterns.length) {
+      const none = document.createElement('li');
+      none.textContent = STRINGS.HD.MAPS_LIST_EMPTY;
+      mapsPatterns.appendChild(none);
+    }
+    for (const pattern of patterns) {
+      const test = patternTest(pattern);
+      const hits = mapNames().filter(test);
+      const item = document.createElement('li');
+      const name = document.createElement('span');
+      name.className = 'hd-my-style-name';
+      name.textContent = pattern;
+      const what = document.createElement('span');
+      what.className = 'hd-miss-detail';
+      what.textContent = STRINGS.HD.patternCount(hits.length);
+      if (hits.length) what.title = hits.join('\n');
+      else item.classList.add('hd-pattern-unused');
+      const remove = document.createElement('button');
+      remove.textContent = STRINGS.HD.MAPS_REMOVE_BUTTON;
+      remove.addEventListener('click', () => {
+        removePattern(pattern);
+        renderMapList();
+      });
+      item.append(name, what, remove);
+      mapsPatterns.appendChild(item);
+    }
+
+    // Every map, ticked when the list picks it.
+    const query = mapsSearch.value.trim().toLowerCase();
+    const shown = mapFile.maps.filter((m) => (!query || m.name.toLowerCase().includes(query))
+      && (!mapsPickedOnly.checked || !picked || picked.has(m.name)));
+    mapsAvailable.innerHTML = '';
+    mapsAvailable.classList.toggle('hd-map-list-off', mapMode === 'every');
+    if (!shown.length) {
+      const none = document.createElement('li');
+      none.textContent = mapFile.maps.length ? STRINGS.HD.MAPS_NO_MATCH : STRINGS.HD.MAPS_NONE_FOUND;
+      mapsAvailable.appendChild(none);
+    }
+    for (const map of shown) {
+      const by = picked?.get(map.name);
+      const item = document.createElement('li');
+      const label = document.createElement('label');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.value = map.name;
+      box.checked = mapMode === 'every' || !!by;
+      // A pattern with a wildcard can't leave one map out; its line has to change.
+      box.disabled = mapMode === 'every' || (!!by && isWildcard(by));
+      if (by && isWildcard(by)) label.title = STRINGS.HD.mapPickedByTitle(by);
+      box.addEventListener('change', () => {
+        if (box.checked) addPattern(map.name.toLowerCase());
+        else removePattern(by);
+        renderMapList();
+      });
+      const name = document.createElement('span');
+      name.className = 'hd-map-name';
+      name.textContent = map.name;
+      const detail = document.createElement('span');
+      detail.className = 'hd-miss-detail';
+      detail.textContent = by && isWildcard(by)
+        ? `${STRINGS.HD.mapPickedBy(by)} · ${formatSize(map.bytes)}`
+        : formatSize(map.bytes);
+      label.append(box, name, detail);
+      item.appendChild(label);
+      mapsAvailable.appendChild(item);
+    }
+
+    const count = mapFile.maps.length;
+    const summary = [mapMode === 'every'
+      ? STRINGS.HD.mapsSummaryEvery(count)
+      : STRINGS.HD.mapsSummary(picked.size, count)];
+    if (mapsDirty()) summary.push(STRINGS.HD.MAPS_UNSAVED);
+    mapsSummary.textContent = summary.join(' ');
+    mapsSaveBtn.disabled = !mapsDirty() || (mapMode === 'some' && !mapPatterns(mapText).length);
+    mapsUndoBtn.disabled = !mapsDirty();
+    renderPatternHint();
+  }
+
+  // What the pattern being typed would pick.
+  function renderPatternHint() {
+    const raw = mapsPattern.value.trim().toLowerCase().replace(/\.bsp$/, '');
+    mapsAddBtn.disabled = !raw;
+    if (!raw) {
+      mapsPatternHint.textContent = STRINGS.HD.MAPS_PATTERN_HELP;
+      return;
+    }
+    if (/[#\s]/.test(raw)) {
+      mapsAddBtn.disabled = true;
+      mapsPatternHint.textContent = STRINGS.HD.PATTERN_BAD;
+      return;
+    }
+    const hits = mapNames().filter(patternTest(raw));
+    mapsPatternHint.textContent = mapPatterns(mapText).includes(raw)
+      ? STRINGS.HD.PATTERN_ALREADY
+      : STRINGS.HD.patternMatches(hits.length, hits);
+  }
+
+  function addTypedPattern() {
+    const raw = mapsPattern.value.trim().toLowerCase().replace(/\.bsp$/, '');
+    if (!raw || /[#\s]/.test(raw) || mapPatterns(mapText).includes(raw)) {
+      renderPatternHint();
+      return;
+    }
+    addPattern(raw);
+    mapsPattern.value = '';
+    mapsMessage.textContent = '';
+    renderMapList();
+  }
+
+  async function saveMapList() {
+    if (mapMode === 'some' && !mapPatterns(mapText).length) {
+      mapsMessage.textContent = STRINGS.HD.MAPS_EMPTY;
+      return;
+    }
+    mapsSaveBtn.disabled = true;
+    const every = mapMode === 'every';
+    const picked = every ? 0 : pickedBy().size;
+    try {
+      await hdSaveMapList(gamePath(), every ? null : mapText);
+    } catch (err) {
+      mapsMessage.textContent = String(err);
+      renderMapList();
+      return;
+    }
+    // Saved: what's on disk is now what's on screen, so the refresh below
+    // takes the backend's copy.
+    mapFile = { ...mapFile, active: !every, text: mapText };
+    mapsMessage.textContent = every ? STRINGS.HD.MAPS_SAVED_EVERY : STRINGS.HD.mapsSaved(picked);
+    await refresh();
+  }
+
+  mapsEvery?.addEventListener('change', () => {
+    mapMode = 'every';
+    mapsMessage.textContent = '';
+    renderMapList();
+  });
+  mapsSome?.addEventListener('change', () => {
+    mapMode = 'some';
+    mapsMessage.textContent = '';
+    renderMapList();
+  });
+  mapsPattern?.addEventListener('input', renderPatternHint);
+  mapsPattern?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addTypedPattern();
+  });
+  mapsAddBtn?.addEventListener('click', addTypedPattern);
+  mapsSearch?.addEventListener('input', () => renderMapList());
+  mapsPickedOnly?.addEventListener('change', () => renderMapList());
+  mapsSaveBtn?.addEventListener('click', saveMapList);
+  mapsUndoBtn?.addEventListener('click', () => {
+    mapText = mapFile.text;
+    mapMode = mapFile.active ? 'some' : 'every';
+    mapsMessage.textContent = '';
+    renderMapList();
+  });
 
   // The misses view: the newest list the game wrote to the hook log.
   let missReport = null;

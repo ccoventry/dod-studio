@@ -4,7 +4,8 @@
   general shape. Carries only the elements the pane reads and writes, plus the
   Configuration page's hl.exe field it takes the game path from. A test
   controls the backend by registering `hd_status` / `hd_setup_tools` /
-  `hd_build` / `hd_set_python` / `hd_misses` / `hd_save_style` / `hd_preview` handlers on window.__mockInvokeHandlers; the
+  `hd_build` / `hd_set_python` / `hd_misses` / `hd_save_style` / `hd_preview` /
+  `hd_save_map_list` handlers on window.__mockInvokeHandlers; the
   file picker is `plugin:dialog|open`, which goes through the same mock.
 -->
 <html lang="en">
@@ -43,6 +44,23 @@
   <button id="hd-preview-btn">Show comparison</button>
   <p id="hd-preview-text"></p>
   <div id="hd-preview-wrap" hidden><img id="hd-preview-img" alt="" /></div>
+  <p id="hd-maps-file"></p>
+  <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every" />
+  <span id="hd-maps-every-label"></span>
+  <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some" />
+  <div id="hd-maps-editor">
+    <ul id="hd-maps-patterns"></ul>
+    <input id="hd-maps-pattern" />
+    <button id="hd-maps-add-btn">Add</button>
+    <p id="hd-maps-pattern-hint"></p>
+  </div>
+  <input id="hd-maps-search" type="search" />
+  <input type="checkbox" id="hd-maps-picked-only" />
+  <ul id="hd-maps-available"></ul>
+  <p id="hd-maps-summary"></p>
+  <button id="hd-maps-save-btn">Save</button>
+  <button id="hd-maps-undo-btn">Undo changes</button>
+  <p id="hd-maps-message"></p>
   <p id="hd-my-styles-text"></p>
   <ul id="hd-my-styles-list"></ul>
   <input id="hd-style-name" />
