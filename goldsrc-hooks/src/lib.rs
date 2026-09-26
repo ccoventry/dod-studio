@@ -54,6 +54,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `frame_esc`: keep GameUI's windows -- the VCR bar, the events list, the
+//!   Load Demo window, the console -- open when ESC is pressed on the 25th
+//!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
+//!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -88,6 +92,7 @@ mod decals;
 mod detour;
 mod engine;
 mod ex_interp;
+mod frame_esc;
 mod hand_signals;
 mod hide_sprite;
 mod hudelement;
@@ -175,6 +180,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
