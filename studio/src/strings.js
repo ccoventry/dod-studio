@@ -1185,7 +1185,7 @@ export const STRINGS = {
     mapsSummaryEvery: (count) => `All ${count} maps get map textures and skies.`,
     mapsSummary: (picked, count) => `${picked} of ${count} maps get map textures and skies.`,
     MAPS_UNSAVED: 'Not saved yet: builds still use the saved list.',
-    MAPS_TICK_LEGEND: 'A blue tick is the map's own line; a green tick is a pattern.',
+    MAPS_TICK_LEGEND: "A blue tick is the map's own line; a green tick is a pattern.",
     MAPS_SAVE_BUTTON: 'Save',
     MAPS_UNDO_BUTTON: 'Undo changes',
     MAPS_SAVED_EVERY: 'Saved: every map is built. Your list is kept, and comes back when you pick maps again.',
