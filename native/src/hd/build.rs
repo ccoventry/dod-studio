@@ -6,7 +6,9 @@
 //! progress, and stops it on Cancel.
 //!
 //! - **Progress:** `build_all.py` prints `@@step <n> <of> <style> <type>`
-//!   before each step and a log line after it; see [`parse_line`].
+//!   before each step and a log line after it; see [`parse_line`]. The map
+//!   texture step, the long one, also prints a log-shaped "N of M written"
+//!   line after each batch it finishes.
 //! - **Resume:** every step skips files that already exist, so running again
 //!   after a Cancel carries on. The scripts write each file under a `.part`
 //!   name and rename it when whole, so a stopped step never leaves a broken
