@@ -178,6 +178,33 @@ pub fn failed_to_read_dod_directory(err: impl Display) -> String {
     format!("Failed to read dod directory: {}", err)
 }
 
+/// The batch status line while demos patch (#75). `writing` holds each
+/// in-flight job's percent written; `clearing` counts those still in the
+/// decal pass, which reports no percentage.
+pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8]) -> String {
+    let head = format!("Patching {} / {}", done, total);
+    match (clearing, writing) {
+        (0, []) => head,
+        (1, []) => format!("{}: clearing decals", head),
+        (0, [percent]) => format!("{}: writing, {}%", head, percent),
+        _ => {
+            let mut parts = Vec::new();
+            if clearing > 0 {
+                parts.push(format!("{} clearing decals", clearing));
+            }
+            if !writing.is_empty() {
+                let average = writing.iter().map(|&p| p as usize).sum::<usize>() / writing.len();
+                parts.push(format!(
+                    "{} writing ({}% on average)",
+                    writing.len(),
+                    average
+                ));
+            }
+            format!("{}: {}", head, parts.join(", "))
+        }
+    }
+}
+
 // ── render_manager.rs ────────────────────────────────────────────────────
 
 pub const RENDER_BATCH_ALREADY_RUNNING_LONG: &str = "A render batch is already running.";
