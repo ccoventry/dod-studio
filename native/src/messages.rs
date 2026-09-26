@@ -159,6 +159,10 @@ pub fn hd_preview_failed(status: impl Display, detail: &str) -> String {
     }
 }
 
+// ── hd/map_list.rs ───────────────────────────────────────────────────────
+
+pub const HD_MAP_LIST_EMPTY: &str = "The map list picks no maps, so a build would make no map textures. Add a map, or choose Every map.";
+
 // ── hd/my_styles.rs ──────────────────────────────────────────────────────
 // The scripts' own wording (styles.py's load_my_styles), so a file refused
 // on the HD page reads the same as one refused on the command line.

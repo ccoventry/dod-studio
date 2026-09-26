@@ -682,6 +682,17 @@ export async function hdSaveStyle(gamePath, name, def) {
     });
 }
 
+/** Puts `text` in effect as the install's hd_maps.txt, or with `null`
+ *  builds every map again (the list is set aside, not deleted). */
+export async function hdSaveMapList(gamePath, text) {
+  return invoke("hd_save_map_list", { gamePath, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_save_map_list):", err);
+      showToast(STRINGS.IPC.hdMapListFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** Takes `name` out of the install's my_styles.txt. */
 export async function hdRemoveStyle(gamePath, name) {
   return invoke("hd_remove_style", { gamePath, name })

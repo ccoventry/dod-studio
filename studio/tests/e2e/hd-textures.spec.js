@@ -5,8 +5,8 @@
 // missing game path reads as a message rather than a broken page, that the
 // download's progress and cancel land in the progress line, which Python the
 // page says it will use, the build's choices, progress and cancel, and the
-// style comparison, the custom-style form (my_styles.txt), and the misses
-// view read from the hook log.
+// style comparison, the map list (hd_maps.txt), the custom-style form
+// (my_styles.txt), and the misses view read from the hook log.
 import { test, expect } from '@playwright/test';
 
 /** native::hd::HdStatus, as serde sends it (snake_case). */
@@ -79,6 +79,7 @@ async function loadHarness(page, handlers) {
     if (h.saveError) window.__mockInvokeHandlers.hd_save_style = () => Promise.reject(h.saveError);
     window.__mockInvokeHandlers.hd_preview = () =>
       new Promise((resolve, reject) => { window.__finishPreview = { resolve, reject }; });
+    if (h.mapSaveError) window.__mockInvokeHandlers.hd_save_map_list = () => Promise.reject(h.mapSaveError);
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -615,4 +616,113 @@ test('preview: auto-picked maps are named; nothing built means nothing to compar
   await page.click('#hd-refresh-btn');
   await expect(page.locator('#hd-preview-btn')).toBeDisabled();
   await expect(page.locator('#hd-preview-text')).toContainText('Build a style first');
+});
+
+/** native::hd::map_list::MapList: a list in effect that picks every railroad map. */
+const MAP_LIST = {
+  path: 'C:/games/Half-Life/dod/dodstudio_hd/hd_maps.txt',
+  active: true,
+  old_place: null,
+  text: '# my maps\ndod_railroad*   # every railroad\ndod_anzio\ndod_nowhere\n',
+  maps: [
+    { name: 'dod_anzio', bytes: 4 * 1024 ** 2 },
+    { name: 'dod_caen', bytes: 3 * 1024 ** 2 },
+    { name: 'dod_railroad', bytes: 5 * 1024 ** 2 },
+    { name: 'dod_railroad2_s9a', bytes: 6 * 1024 ** 2 },
+  ],
+};
+
+const mapSaves = (page) => page.evaluate(() =>
+  window.__mockInvocations.filter((c) => c.cmd === 'hd_save_map_list').map((c) => c.args));
+
+const mapRow = (page, name) => page.locator('#hd-maps-available li', { hasText: name });
+
+test('map list: shows every map, what picks it, and what each line matches', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await expect(page.locator('#hd-maps-every-label')).toHaveText('Every map (4)');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-summary')).toHaveText('3 of 4 maps get map textures and skies.');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
+  await expect(page.locator('#hd-maps-patterns li').nth(0)).toContainText('dod_railroad*2 maps');
+  await expect(page.locator('#hd-maps-patterns li').nth(2)).toContainText('dod_nowherematches no map');
+
+  // Picked by a wildcard: ticked, and only that line can drop it.
+  const railroad = mapRow(page, 'dod_railroad2_s9a').locator('input');
+  await expect(railroad).toBeChecked();
+  await expect(railroad).toBeDisabled();
+  await expect(mapRow(page, 'dod_railroad2_s9a')).toContainText('picked by dod_railroad*');
+  await expect(mapRow(page, 'dod_anzio').locator('input')).toBeEnabled();
+  await expect(mapRow(page, 'dod_caen').locator('input')).not.toBeChecked();
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  await page.fill('#hd-maps-search', 'rail');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
+  await page.fill('#hd-maps-search', '');
+  await page.check('#hd-maps-picked-only');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(3);
+});
+
+test('map list: ticking and adding change the text, and Save sends it whole', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await mapRow(page, 'dod_caen').locator('input').check();
+  await mapRow(page, 'dod_anzio').locator('input').uncheck();
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps');
+  await expect(page.locator('#hd-maps-summary')).toContainText('Not saved yet');
+
+  await page.fill('#hd-maps-pattern', 'DOD_C*.bsp');
+  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Matches 1 map: dod_caen.');
+  await page.fill('#hd-maps-pattern', 'dod_saints*');
+  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Matches none of your maps.');
+  await page.fill('#hd-maps-pattern', 'dod_railroad*');
+  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Already in the list.');
+  await page.fill('#hd-maps-pattern', 'dod_rail?oad');
+  await page.press('#hd-maps-pattern', 'Enter');
+  await expect(page.locator('#hd-maps-pattern')).toHaveValue('');
+
+  await page.click('#hd-maps-save-btn');
+  // Comments and the user's own lines stay; only the changed lines move.
+  expect(await mapSaves(page)).toEqual([{
+    gamePath: 'C:/games/Half-Life/hl.exe',
+    text: '# my maps\ndod_railroad*   # every railroad\ndod_nowhere\ndod_caen\ndod_rail?oad\n',
+  }]);
+  await expect(page.locator('#hd-maps-message')).toHaveText('Saved: 3 maps picked.');
+});
+
+test('map list: Every map sends no list, and Undo puts the saved one back', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST } });
+  await page.click('#hd-refresh-btn');
+
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-maps-editor')).toBeHidden();
+  await expect(mapRow(page, 'dod_caen').locator('input')).toBeChecked();
+  await expect(page.locator('#hd-maps-summary')).toContainText('All 4 maps get map textures and skies.');
+
+  await page.click('#hd-maps-undo-btn');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  await page.check('#hd-maps-every');
+  await page.click('#hd-maps-save-btn');
+  expect((await mapSaves(page))[0].text).toBeNull();
+  await expect(page.locator('#hd-maps-message')).toContainText('every map is built');
+});
+
+test('map list: a list that picks nothing is not saved, and a refusal is shown', async ({ page }) => {
+  const none = { ...MAP_LIST, active: false, text: '# Which maps\n' };
+  await loadHarness(page, { status: { ...STATUS, map_list: none }, mapSaveError: 'disk full' });
+  await page.click('#hd-refresh-btn');
+
+  await expect(page.locator('#hd-maps-every')).toBeChecked();
+  await page.check('#hd-maps-some');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveText(['Nothing yet: tick maps below, or add a pattern.']);
+  await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
+
+  await mapRow(page, 'dod_anzio').locator('input').check();
+  await page.click('#hd-maps-save-btn');
+  await expect(page.locator('#hd-maps-message')).toHaveText('disk full');
+  expect((await mapSaves(page))[0].text).toBe('# Which maps\ndod_anzio\n');
 });

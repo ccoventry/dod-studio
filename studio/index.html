@@ -792,6 +792,54 @@
               </div>
             </div>
 
+            <!-- Which maps get HD map textures and skies: the install's hd_maps.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MAPS_TITLE">Maps to build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MAPS_HINT">Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.</p>
+                <p id="hd-maps-file" class="hd-hint"></p>
+                <div class="hd-maps-mode">
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every">
+                    <span id="hd-maps-every-label" data-str="HD.MAPS_EVERY">Every map</span>
+                  </label>
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some">
+                    <span data-str="HD.MAPS_SOME">Only the maps I pick</span>
+                  </label>
+                </div>
+                <div id="hd-maps-editor">
+                  <div class="hd-choice-group">
+                    <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
+                    <ul id="hd-maps-patterns" class="hd-my-styles hd-map-patterns"></ul>
+                  </div>
+                  <div class="input-row">
+                    <label for="hd-maps-pattern" data-str="HD.MAPS_ADD_LABEL">Add a map or a pattern:</label>
+                    <input id="hd-maps-pattern" type="text" spellcheck="false" data-str-placeholder="HD.MAPS_ADD_PLACEHOLDER" placeholder="dod_railroad* or dod_anzio">
+                    <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add</button>
+                  </div>
+                  <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">* matches any run of characters, so dod_railroad* is every railroad map; ? matches one character.</p>
+                </div>
+                <div class="input-row">
+                  <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
+                  <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search">
+                  <label class="hd-check">
+                    <input type="checkbox" id="hd-maps-picked-only">
+                    <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
+                  </label>
+                </div>
+                <ul id="hd-maps-available" class="hd-map-list"></ul>
+                <p id="hd-maps-summary" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-maps-save-btn" class="primary-btn" data-str="HD.MAPS_SAVE_BUTTON">Save</button>
+                  <button id="hd-maps-undo-btn" data-str="HD.MAPS_UNDO_BUTTON">Undo changes</button>
+                </div>
+                <p id="hd-maps-message" class="hd-hint"></p>
+              </div>
+            </div>
+
             <div class="egui-panel">
               <div class="panel-header">
                 <h3 data-str="HD.BUILD_TITLE">Build</h3>

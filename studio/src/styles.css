@@ -1861,6 +1861,58 @@ tr.keyboard-selected {
   font-family: monospace;
 }
 
+/* The map list: every map in dod\maps, ticked when the list picks it. */
+.hd-maps-mode {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 6px;
+}
+
+.hd-map-patterns li .hd-miss-detail {
+  max-width: 50em;
+}
+
+.hd-pattern-unused .hd-miss-detail {
+  color: #d9a441;
+}
+
+.hd-map-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  max-height: 320px;
+  overflow: auto;
+  columns: 3 16em;
+  column-gap: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.hd-map-list li {
+  break-inside: avoid;
+}
+
+.hd-map-list label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.hd-map-name {
+  font-family: monospace;
+}
+
+.hd-map-list .hd-miss-detail {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.hd-map-list.hd-map-list-off label {
+  opacity: 0.75;
+}
+
 /* Misses view: one collapsible block per map. */
 .hd-miss-map {
   border-top: 1px solid #282828;
