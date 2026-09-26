@@ -1,4 +1,5 @@
 mod audit_manager;
+mod blender_manager;
 mod capture_manager;
 mod dir_browser;
 mod hd_manager;
@@ -537,6 +538,7 @@ pub fn run() {
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
         .manage(hd_manager::HdManager::default())
+        .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -614,6 +616,10 @@ pub fn run() {
             hd_manager::hd_build,
             hd_manager::hd_set_python,
             hd_manager::hd_set_upscaler,
+            blender_manager::blender_status,
+            blender_manager::blender_set_exe,
+            blender_manager::blender_run,
+            blender_manager::blender_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

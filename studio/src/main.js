@@ -26,6 +26,7 @@ import { initAuditorPane } from './auditor_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initBlenderPane } from './blender_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
@@ -374,6 +375,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initThemedConfirm();
   initAuditorPane();
   initHdPane();
+  initBlenderPane();
 
   async function pickTargetDrive() {
     try {

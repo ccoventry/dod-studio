@@ -88,6 +88,19 @@ pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
     )
 }
 
+// ── blender_manager.rs ──────────────────────────────────────────────────────
+
+pub const BLENDER_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the maps and HD textures come from its dod folder.";
+pub const BLENDER_ALREADY_RUNNING: &str =
+    "A Blender step is already running. Wait for it, or Cancel it.";
+pub const BLENDER_NO_SCRIPTS: &str =
+    "This copy of DoD Studio has no Blender scripts (the blender folder in the DoD Studio repo).";
+pub const BLENDER_NOT_FOUND: &str = "No Blender found: choose blender.exe (Blender 4.4).";
+
+pub fn blender_not_blender(path: &str) -> String {
+    format!("{path} is not blender.exe")
+}
+
 // ── hd_manager.rs ───────────────────────────────────────────────────────────
 
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";

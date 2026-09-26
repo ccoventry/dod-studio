@@ -53,6 +53,7 @@
           <button class="nav-tab-btn" data-nav="demo-auditor" data-str="NAV.DEMO_AUDITOR_TAB">Demo Auditor</button>
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
           <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
+          <button class="nav-tab-btn" data-nav="blender" data-str="NAV.BLENDER_TAB">Blender</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -792,6 +793,87 @@
                   <p class="hd-hint" data-str="HD.SCRIPTS_HINT">The same scripts run from goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
                   <pre id="hd-realesrgan-line" class="hd-code"></pre>
                 </details>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Blender (#403): rebuild a highlight recorded with mirv_agr in Blender -->
+        <section id="pane-blender" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="BLENDER.BLENDER_TITLE">Blender</h3>
+                <button id="blender-refresh-btn" data-str="BLENDER.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.INTRO">Rebuild a highlight you recorded with HLAE's mirv_agr in Blender, with the real map, HD textures, lighting and the recorded camera, and render it. Needs Blender 4.4 with Blender Source Tools 3.4.3 and afx-blender-scripts 1.14.6 installed, and the game's models decompiled with Crowbar (blender\README.md in the DoD Studio repo has the steps).</p>
+                <p id="blender-status-text" class="hd-hint"></p>
+                <p id="blender-addons-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="blender-pick-exe-btn" data-str="BLENDER.PICK_EXE_BUTTON">Choose blender.exe...</button>
+                  <button id="blender-reset-exe-btn" data-str="BLENDER.RESET_EXE_BUTTON">Find it automatically</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.TAKE_TITLE">Take</h3>
+              </div>
+              <div class="panel-body">
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.AGR_LABEL">Recording (.agr):</span>
+                  <span id="blender-agr-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-agr-btn" data-str="BLENDER.PICK_AGR_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.ASSETS_LABEL">Crowbar models folder:</span>
+                  <span id="blender-assets-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-assets-btn" data-str="BLENDER.PICK_ASSETS_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <label for="blender-map-select" data-str="BLENDER.MAP_LABEL">Map:</label>
+                  <select id="blender-map-select"></select>
+                  <label for="blender-style-select" data-str="BLENDER.STYLE_LABEL">Textures:</label>
+                  <select id="blender-style-select"></select>
+                </div>
+                <div class="input-row">
+                  <span id="blender-work-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-open-work-btn" data-str="BLENDER.OPEN_WORK_BUTTON">Open folder</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.STEPS_TITLE">Steps</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.STEPS_HINT">Run them in order; each one picks up the last one's files. Import opens a Blender window while it works.</p>
+                <div class="row-inputs">
+                  <button id="blender-import-btn" class="primary-btn" data-str="BLENDER.IMPORT_BUTTON">1. Import</button>
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-scene-btn" class="primary-btn" data-str="BLENDER.SCENE_BUTTON">2. Build scene</button>
+                  <select id="blender-engine-select">
+                    <option value="eevee" data-str="BLENDER.ENGINE_EEVEE">EEVEE previews</option>
+                    <option value="cycles" data-str="BLENDER.ENGINE_CYCLES">One Cycles frame</option>
+                  </select>
+                  <input id="blender-frames-input" type="text" data-str-placeholder="BLENDER.FRAMES_PLACEHOLDER" placeholder="frames, e.g. 180 510 (optional)" />
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-render-btn" class="primary-btn" data-str="BLENDER.RENDER_BUTTON">3. Render</button>
+                  <button id="blender-encode-btn" class="primary-btn" data-str="BLENDER.ENCODE_BUTTON">4. Encode MP4</button>
+                  <select id="blender-quality-select">
+                    <option value="quick" data-str="BLENDER.QUALITY_QUICK">Quick: 720p, 32 samples</option>
+                    <option value="final" data-str="BLENDER.QUALITY_FINAL">Final: 1080p, 64 samples</option>
+                  </select>
+                  <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="blender-progress" class="hd-hint"></p>
+                <p id="blender-line" class="hd-hint hd-mono"></p>
+                <ul id="blender-results" class="hd-hint hd-mono"></ul>
               </div>
             </div>
           </div>
