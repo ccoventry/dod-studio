@@ -733,7 +733,7 @@
                 <h3 data-str="HD.USE_TITLE">Use it in the game</h3>
               </div>
               <div class="panel-body">
-                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.</p>
+                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.</p>
                 <div class="input-row">
                   <label for="hd-style-select" data-str="HD.STYLE_LABEL">Style:</label>
                   <select id="hd-style-select"></select>
@@ -781,6 +781,15 @@
                   <span class="hd-choice-label" data-str="HD.BUILD_TYPES_LABEL">Files:</span>
                   <div id="hd-build-types" class="hd-choices"></div>
                 </div>
+                <div class="input-row">
+                  <label for="hd-build-cap" data-str="HD.BUILD_CAP_LABEL">Largest size:</label>
+                  <select id="hd-build-cap">
+                    <option value="1024" data-str="HD.CAP_NAMES.1024">1024 (the usual)</option>
+                    <option value="2048" data-str="HD.CAP_NAMES.2048">2048</option>
+                    <option value="4096" data-str="HD.CAP_NAMES.4096">4096</option>
+                  </select>
+                </div>
+                <p id="hd-build-cap-hint" class="hd-hint"></p>
                 <div class="row-inputs">
                   <button id="hd-build-btn" class="primary-btn" data-str="HD.BUILD_BUTTON">Build</button>
                   <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>

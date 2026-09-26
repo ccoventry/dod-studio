@@ -17,9 +17,24 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 MAP_LIST = "hd_maps.txt"
 MY_STYLES = "my_styles.txt"
 
-# Largest replacement side: texture_hires raises the engine's upload ceiling
-# to 1024x1024 (see its module doc).
-CAP = 1024
+# Largest replacement side, a power of two from 1024 to 4096 (build_all.py
+# --cap, HD_CAP). The hook lets the engine take up to 4096x4096 (see
+# texture_hires.rs's module doc), and gl_max_size in the game decides what
+# is shown; 1024 is the size everything was built at before there was a
+# choice. The scripts upscale 4x whatever the cap, so it only matters for
+# originals over 256 a side: detail textures (mostly 512), a few large map
+# textures and model skins.
+CAPS = (1024, 2048, 4096)
+
+
+def _cap():
+    raw = os.environ.get("HD_CAP", "1024")
+    if not raw.isdigit() or int(raw) not in CAPS:
+        sys.exit(f"HD_CAP={raw!r}: one of {', '.join(map(str, CAPS))}")
+    return int(raw)
+
+
+CAP = _cap()
 
 # World textures never drawn, or drawn by a different path (sky): not built.
 # The hook's TOOL_TEXTURES list must match this one.
@@ -102,6 +117,26 @@ def pot(n):
     while p < n:
         p *= 2
     return min(p, CAP)
+
+
+def tga_size(path):
+    """(width, height) from a TGA's header, or None when there's no file."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(18)
+    except OSError:
+        return None
+    if len(head) < 18:
+        return None
+    return int.from_bytes(head[12:14], "little"), int.from_bytes(head[14:16], "little")
+
+
+def built(path, w, h):
+    """Whether `path` is already built at least `w` x `h`: what every build
+    step skips. A file from a smaller cap is rebuilt, so raising the cap
+    replaces only the files it enlarges."""
+    size = tga_size(path)
+    return size is not None and size[0] >= w and size[1] >= h
 
 
 def _steam_libraries():
