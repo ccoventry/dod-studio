@@ -24,7 +24,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::python::{self, PythonSource, Using};
-use super::{ASSET_TYPES, BUILT_IN_STYLES, setup};
+use super::{ASSET_TYPES, BUILT_IN_STYLES, Backend, setup};
 
 /// How often the running build is polled, per CLAUDE.md's process rules.
 const POLL: Duration = Duration::from_millis(16);
@@ -125,16 +125,25 @@ pub fn check(request: &BuildRequest, realesrgan: &Path) -> Result<(), String> {
     {
         return Err(crate::messages::hd_build_bad_type(bad));
     }
+    let spandrel = setup::spandrel_dir(realesrgan);
     for style in &request.styles {
-        let model = BUILT_IN_STYLES
-            .iter()
-            .find(|s| s.name == style)
-            .and_then(|s| s.model);
-        if let Some(model) = model
-            && !(setup::upscaler_exe(realesrgan).is_file()
-                && setup::model_present(realesrgan, model))
-        {
-            return Err(crate::messages::hd_build_needs_upscaler(style));
+        let Some(built_in) = BUILT_IN_STYLES.iter().find(|s| s.name == style) else {
+            continue; // a my_styles.txt style: the scripts check it
+        };
+        match (built_in.backend, built_in.model) {
+            (Backend::Ncnn, Some(model))
+                if !(setup::upscaler_exe(realesrgan).is_file()
+                    && setup::model_present(realesrgan, model)) =>
+            {
+                return Err(crate::messages::hd_build_needs_upscaler(style));
+            }
+            (Backend::Spandrel, Some(model))
+                if !(setup::spandrel_python(&spandrel).is_file()
+                    && setup::spandrel_model_present(&spandrel, model)) =>
+            {
+                return Err(crate::messages::hd_build_needs_spandrel(style));
+            }
+            _ => {}
         }
     }
     Ok(())
@@ -215,6 +224,7 @@ pub fn run(
         .args(&request.styles)
         .current_dir(scripts)
         .env("REALESRGAN", setup::upscaler_exe(realesrgan))
+        .env("HD_SPANDREL", setup::spandrel_dir(realesrgan))
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -445,6 +455,20 @@ mod tests {
             )
             .is_ok()
         );
+        // A spandrel style needs the venv and its own model, not the upscaler.
+        assert!(check(&request(&["pbrify"], &["world"]), &realesrgan).is_err());
+        let spandrel = setup::spandrel_dir(&realesrgan);
+        std::fs::create_dir_all(spandrel.join("venv").join("Scripts")).unwrap();
+        std::fs::write(setup::spandrel_python(&spandrel), b"").unwrap();
+        assert!(check(&request(&["pbrify"], &["world"]), &realesrgan).is_err());
+        std::fs::create_dir_all(spandrel.join("models")).unwrap();
+        std::fs::write(
+            spandrel.join("models").join("4x-PBRify_UpscalerV4.pth"),
+            b"",
+        )
+        .unwrap();
+        assert!(check(&request(&["pbrify"], &["world"]), &realesrgan).is_ok());
+        assert!(check(&request(&["webphoto"], &["world"]), &realesrgan).is_err());
         // An AI style needs the upscaler and its own model.
         assert!(check(&request(&["ultrasharp"], &["world"]), &realesrgan).is_err());
         std::fs::create_dir_all(realesrgan.join("models")).unwrap();

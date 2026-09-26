@@ -25,7 +25,7 @@ const STATUS = {
     { asset_type: 'sky', folders: [] },
   ],
   built_styles: ['plain'],
-  known_styles: ['ultrasharp', 'remacri', 'siax', 'generalv3', 'x4plus', 'plain', 'blend'],
+  known_styles: ['ultrasharp', 'remacri', 'siax', 'generalv3', 'x4plus', 'plain', 'blend', 'ultrasharpv2', 'pbrify', 'webphoto'],
   default_style: 'ultrasharp',
   enabled_cvar: 'dodstudio_hd_enabled',
   style_cvar: 'dodstudio_hd_style',
@@ -42,6 +42,15 @@ const STATUS = {
       { style: 'generalv3', model: 'RealESRGAN_General_x4_v3', present: false },
       { style: 'x4plus', model: 'realesrgan-x4plus', present: false },
     ],
+    spandrel: {
+      dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/spandrel',
+      python_present: false,
+      models: [
+        { style: 'ultrasharpv2', model: '4x-UltraSharpV2.safetensors', present: false },
+        { style: 'pbrify', model: '4x-PBRify_UpscalerV4.pth', present: false },
+        { style: 'webphoto', model: '4xNomosWebPhoto_RealPLKSR.pth', present: false },
+      ],
+    },
   },
   python: {
     using: { source: 'found', exe: 'C:/Python314/python.exe', version: '3.14.7', missing: [] },
@@ -177,11 +186,16 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   await page.click('#hd-refresh-btn');
 
   const styles = page.locator('#hd-build-styles input');
-  await expect(styles).toHaveCount(7);
+  await expect(styles).toHaveCount(10);
   // No upscaler yet: every AI style is off and says why; plain and blend are free.
   await expect(page.locator('#hd-build-styles input[value="ultrasharp"]')).toBeDisabled();
   await expect(page.locator('#hd-build-styles label', { hasText: 'x4plus' })).toContainText('(needs Download)');
   await expect(page.locator('#hd-build-styles input[value="plain"]')).toBeEnabled();
+  // The second backend's styles wait for it, and say so differently: it is
+  // set up from the command line, not by Download.
+  await expect(page.locator('#hd-build-styles input[value="pbrify"]')).toBeDisabled();
+  await expect(page.locator('#hd-build-styles label', { hasText: 'pbrify' })).toContainText('(needs setup_tools.py --spandrel)');
+  await expect(page.locator('#hd-tools-text')).toContainText('Second upscaler (spandrel, for ultrasharpv2, pbrify, webphoto): not set up.');
   // Every file type starts ticked.
   await expect(page.locator('#hd-build-types input:checked')).toHaveCount(5);
 
@@ -357,4 +371,21 @@ test('Build is off until at least one style and one kind of file are ticked', as
 
   await page.uncheck('#hd-build-styles input[value="plain"]');
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+test('spandrel styles build once the backend and their model are there', async ({ page }) => {
+  const spandrel = {
+    ...STATUS.tools.spandrel,
+    python_present: true,
+    models: STATUS.tools.spandrel.models.map((m) => ({ ...m, present: m.style === 'pbrify' })),
+  };
+  await loadHarness(page, { status: { ...STATUS, tools: { ...STATUS.tools, spandrel } } });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-build-styles input[value="pbrify"]')).toBeEnabled();
+  await expect(page.locator('#hd-build-styles input[value="webphoto"]')).toBeDisabled();
+  await expect(page.locator('#hd-tools-text')).toContainText('set up, with pbrify of ultrasharpv2, pbrify, webphoto');
+  await page.check('#hd-build-styles input[value="pbrify"]');
+  await page.click('#hd-build-btn');
+  const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args.request);
+  expect(request.styles).toEqual(['pbrify']);
 });

@@ -171,6 +171,14 @@ export function initHdPane() {
   function renderTools(tools) {
     const missing = tools.models.filter((m) => !m.present).map((m) => m.style);
     const lines = [];
+    // The second backend is set up from the command line, not from here.
+    const spandrel = tools.spandrel;
+    if (spandrel) {
+      const have = spandrel.models.filter((m) => m.present).map((m) => m.style);
+      lines.push(spandrel.python_present
+        ? STRINGS.HD.spandrelReady(have, spandrel.models.map((m) => m.style))
+        : STRINGS.HD.spandrelMissing(spandrel.models.map((m) => m.style)));
+    }
     if (tools.chosen && tools.source !== 'chosen') lines.push(STRINGS.HD.upscalerChosenUnused(tools.chosen));
     if (tools.upscaler_present) {
       lines.push(STRINGS.HD.upscalerUsing(tools.source, tools.dir),
@@ -201,14 +209,22 @@ export function initHdPane() {
   }
 
   function renderBuild(status) {
-    // An AI style can't build until the upscaler and its own model are there.
+    // An AI style can't build until its backend and its own model are there:
+    // the upscaler for the Real-ESRGAN styles, the spandrel venv for the rest.
     const ready = new Set(status.tools.upscaler_present
       ? status.tools.models.filter((m) => m.present).map((m) => m.style)
       : []);
     const aiStyles = new Set(status.tools.models.map((m) => m.style));
+    const spandrel = status.tools.spandrel || { python_present: false, models: [] };
+    const spandrelStyles = new Set(spandrel.models.map((m) => m.style));
+    const spandrelReady = new Set(spandrel.python_present
+      ? spandrel.models.filter((m) => m.present).map((m) => m.style)
+      : []);
     renderChoices(buildStyles, allStyles(status).map((name) => {
-      const needs = aiStyles.has(name) && !ready.has(name);
-      return { value: name, label: name + (needs ? STRINGS.HD.STYLE_NEEDS_UPSCALER : ''), disabled: needs };
+      let needs = '';
+      if (aiStyles.has(name) && !ready.has(name)) needs = STRINGS.HD.STYLE_NEEDS_UPSCALER;
+      else if (spandrelStyles.has(name) && !spandrelReady.has(name)) needs = STRINGS.HD.STYLE_NEEDS_SPANDREL;
+      return { value: name, label: name + needs, disabled: !!needs };
     }), (name) => name === status.default_style);
     renderChoices(buildTypes, BUILD_TYPES.map((t) => ({
       value: t, label: STRINGS.HD.TYPE_NAMES[t] || t,

@@ -123,6 +123,12 @@ pub fn hd_build_bad_type(kind: &str) -> String {
     format!("{kind:?} is not something the build makes")
 }
 
+pub fn hd_build_needs_spandrel(style: &str) -> String {
+    format!(
+        "{style} runs through the second upscaler backend, which isn't set up: run `python setup_tools.py --spandrel` in the scripts folder (it fetches PyTorch, spandrel and the model, about 3 GB)"
+    )
+}
+
 pub fn hd_build_needs_upscaler(style: &str) -> String {
     format!("The {style} style needs the upscaler and its model: use Download first")
 }

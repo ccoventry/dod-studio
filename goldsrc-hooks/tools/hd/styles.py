@@ -13,11 +13,25 @@ under the same name. The script then does its own crop/resize/alpha work.
   blend       x4plus and plain mixed 50/50 (build_all.py makes it from those
               two; it is never upscaled on its own)
 
+Three more run through the second backend (below):
+
+  ultrasharpv2  4x-UltraSharpV2          -- UltraSharp's successor (DAT2)
+  pbrify        4x-PBRify_UpscalerV4     -- made for old game textures (DAT2)
+  webphoto      4xNomosWebPhoto_RealPLKSR -- photo surfaces, lighter and faster
+
 More can be added without touching this file: see my_styles.example.txt.
 
-The AI styles run Real-ESRGAN ncnn-vulkan (see README.md for where to get it
-and the extra models): REALESRGAN points at the .exe, default
-realesrgan/realesrgan-ncnn-vulkan.exe next to this file.
+The `ai` styles run Real-ESRGAN ncnn-vulkan (see README.md for where to get
+it and the extra models): REALESRGAN points at the .exe, default
+realesrgan/realesrgan-ncnn-vulkan.exe next to this file. It runs only
+ESRGAN-shaped networks.
+
+The `spandrel` styles run spandrel_run.py under a Python that has torch and
+spandrel, which loads the newer architectures (DAT, SPAN, RealPLKSR, HAT,
+ATD...) from the .pth/.safetensors files OpenModelDB links to. HD_SPANDREL
+points at a folder with venv/ (setup_tools.py --spandrel makes it) and
+models/; default spandrel/ next to this file. Without that, the ncnn
+styles still work and a spandrel style says what it needs.
 """
 import os, re, subprocess, sys, time
 from PIL import Image, ImageFilter
@@ -26,9 +40,11 @@ import hdcommon as C
 from hdcommon import HERE
 
 ESRGAN = os.environ.get("REALESRGAN") or os.path.join(HERE, "realesrgan", "realesrgan-ncnn-vulkan.exe")
+SPANDREL = os.environ.get("HD_SPANDREL") or os.path.join(HERE, "spandrel")
 
-# Each style is ("ai", model file name), ("plain", sharpening percent), or
-# ("blend", style A, style B, percent of A).
+# Each style is ("ai", ncnn model file name), ("spandrel", model file name
+# with its extension), ("plain", sharpening percent), or ("blend", style A,
+# style B, percent of A).
 BUILT_IN = {
     "ultrasharp": ("ai", "ultrasharp-4x"),
     "remacri": ("ai", "remacri-4x"),
@@ -37,6 +53,9 @@ BUILT_IN = {
     "x4plus": ("ai", "realesrgan-x4plus"),
     "plain": ("plain", 60),
     "blend": ("blend", "x4plus", "plain", 50),
+    "ultrasharpv2": ("spandrel", "4x-UltraSharpV2.safetensors"),
+    "pbrify": ("spandrel", "4x-PBRify_UpscalerV4.pth"),
+    "webphoto": ("spandrel", "4xNomosWebPhoto_RealPLKSR.pth"),
 }
 DEFAULT = "ultrasharp"
 # What the hook accepts as a style name (texture_hires.rs's `clean_style`).
@@ -49,6 +68,8 @@ def load_my_styles(path=None):
 
         name = <model file name>             an AI style (the model's .param and
                                              .bin in realesrgan/models)
+        name = spandrel <model file>         an AI style through spandrel (the
+                                             .pth/.safetensors in spandrel/models)
         name = plain <sharpening 0-500>      no AI, more or less sharpened
         name = blend <style> <style> <0-100> two built styles mixed, the first
                                              one at that percent
@@ -82,6 +103,10 @@ def load_my_styles(path=None):
                 if not 0 <= pct <= 100:
                     raise ValueError
                 styles[name] = ("blend", a, b, pct)
+            elif words[0].lower() == "spandrel":
+                if len(words) != 2 or os.path.basename(words[1]) != words[1]:
+                    raise ValueError
+                styles[name] = ("spandrel", words[1])
             elif len(words) == 1:
                 styles[name] = ("ai", words[0])
             else:
@@ -145,6 +170,48 @@ def _ai(in_dir, out_dir, model):
         print(r.stderr[-2000:], flush=True)
 
 
+def spandrel_python():
+    """The Python that runs spandrel styles: the venv setup_tools.py
+    --spandrel made, else this interpreter if it has spandrel, else None."""
+    venv = os.path.join(SPANDREL, "venv", "Scripts", "python.exe")
+    if os.path.exists(venv):
+        return venv
+    try:
+        import spandrel  # noqa: F401
+        import torch  # noqa: F401
+        return sys.executable
+    except ImportError:
+        return None
+
+
+def spandrel_model(model):
+    """Where a spandrel style's model file is (which may not exist)."""
+    return os.path.join(SPANDREL, "models", model)
+
+
+def spandrel_ready(style):
+    """Why `style` (a spandrel one) can't build, or None if it can."""
+    model = defs()[style][1]
+    if spandrel_python() is None:
+        return f"{style} needs the spandrel backend: run `python setup_tools.py --spandrel` (see README.md)"
+    if not os.path.exists(spandrel_model(model)):
+        return f"{style} needs {spandrel_model(model)}: run `python setup_tools.py --spandrel`, or download it there (see README.md)"
+    return None
+
+
+def _spandrel(in_dir, out_dir, model, style):
+    why = spandrel_ready(style)
+    if why:
+        sys.exit(why)
+    t = time.time()
+    r = subprocess.run([spandrel_python(), "-u", os.path.join(HERE, "spandrel_run.py"), spandrel_model(model), in_dir, out_dir],
+                       capture_output=True, text=True)
+    print(f"{model}: {time.time() - t:.0f}s, exit {r.returncode}", flush=True)
+    if r.returncode != 0:
+        print((r.stderr or r.stdout)[-2000:], flush=True)
+        sys.exit(r.returncode)
+
+
 def upscale(in_dir, out_dir, style):
     """4x every PNG in in_dir into out_dir (same file names) in `style`."""
     os.makedirs(out_dir, exist_ok=True)
@@ -154,6 +221,8 @@ def upscale(in_dir, out_dir, style):
     kind, *args = defs()[style]
     if kind == "ai":
         _ai(in_dir, out_dir, args[0])
+    elif kind == "spandrel":
+        _spandrel(in_dir, out_dir, args[0], style)
     elif kind == "plain":
         for n in names:
             plain_x4(Image.open(os.path.join(in_dir, n)), args[0]).save(os.path.join(out_dir, n))
