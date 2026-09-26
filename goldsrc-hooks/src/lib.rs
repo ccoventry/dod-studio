@@ -85,6 +85,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_reload;
 mod detour;
 mod engine;
 mod ex_interp;

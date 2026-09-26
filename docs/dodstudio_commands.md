@@ -94,6 +94,12 @@ unlinking each decal from its surface first the way the engine's own remove
 functions do. Nothing to do with `r_decals`. Pre-Anniversary `hw.dll` only.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
 
+### `dodstudio_reload_demo`
+
+No arguments. Plays the last demo started with `playdemo` or `viewdemo`
+again, from the start, by running the same command with the same name. Says
+so when no demo has been played this session. See `src/demo_reload.rs`.
+
 ### `dodstudio_overviewmap`
 
 `dodstudio_overviewmap <full|mini> <x> <y> <w> <h>` places and sizes DoD's
