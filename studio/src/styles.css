@@ -1933,11 +1933,12 @@ tr.keyboard-selected {
    against the browser's blue for a map with its own line. The legend beside
    "Picked only" is two drawn ticks in the same two colours. */
 :root {
-  --hd-tick-own: #2b6fd6;
+  --hd-tick-own: var(--primary-accent);
   --hd-tick-pattern: #3ea86b;
 }
 
-.hd-box-pattern {
+/* Outranks the global input[type="checkbox"] accent rule at the top. */
+input[type="checkbox"].hd-box-pattern {
   accent-color: var(--hd-tick-pattern);
 }
 
