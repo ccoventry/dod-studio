@@ -54,6 +54,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `engine_buttons`: a button inside a GameUI window whose command is
+//!   `engine <console command>` runs it, as the ESC menu's entries do
+//!   (issue #408). On by default, since it only acts on commands the window
+//!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -87,6 +91,7 @@ mod debug;
 mod decals;
 mod detour;
 mod engine;
+mod engine_buttons;
 mod ex_interp;
 mod hand_signals;
 mod hide_sprite;
@@ -173,6 +178,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Only acts on commands a window would otherwise drop, so on unless asked
+    // not to.
+    engine_buttons::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
         Ordering::Relaxed,
     );
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
