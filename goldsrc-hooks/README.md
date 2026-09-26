@@ -73,6 +73,12 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Seek** (`dodstudio_seek_to <seconds>`, `dodstudio_seek_by <seconds>`):
+  jumps `viewdemo` playback to a time, the way the demo editor's Goto does,
+  through `DemoPlayer.dll`'s own `IDemoPlayer`. A forward jump normally runs
+  every director event and console command it skips, all at once;
+  `dodstudio_seek_skip_between 1` lands clean instead. Refuses while the demo
+  is still loading. Both builds; see `docs/goldsrc_viewdemo.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area

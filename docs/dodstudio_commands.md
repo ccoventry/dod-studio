@@ -45,6 +45,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hd_enabled` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 
 ## Commands
 
@@ -93,6 +94,15 @@ No arguments. Empties the engine's 4096-slot decal pool on command,
 unlinking each decal from its surface first the way the engine's own remove
 functions do. Nothing to do with `r_decals`. Pre-Anniversary `hw.dll` only.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
+
+### `dodstudio_seek_to` / `dodstudio_seek_by`
+
+`dodstudio_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `dodstudio_seek_by <seconds>` jumps
+from where playback is, back when negative. Neither pauses, and both refuse
+while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
+Anniversary `DemoPlayer.dll`. Nothing in the pipeline calls them yet. See
+[`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 
 ### `dodstudio_overviewmap`
 
