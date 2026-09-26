@@ -659,6 +659,13 @@ test('map list: shows every map, what picks it, and what each line matches', asy
 
   await page.fill('#hd-maps-search', 'rail');
   await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
+  // The search takes wildcards too: a whole-name match then, as in the list.
+  await page.fill('#hd-maps-search', 'dod_r*');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
+  await page.fill('#hd-maps-search', 'dod_ca?n');
+  await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
+  await page.fill('#hd-maps-search', 'rail*');
+  await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
   await page.fill('#hd-maps-search', '');
   await page.check('#hd-maps-picked-only');
   await expect(page.locator('#hd-maps-available li')).toHaveCount(3);
@@ -725,4 +732,24 @@ test('map list: a list that picks nothing is not saved, and a refusal is shown',
   await page.click('#hd-maps-save-btn');
   await expect(page.locator('#hd-maps-message')).toHaveText('disk full');
   expect((await mapSaves(page))[0].text).toBe('# Which maps\ndod_anzio\n');
+});
+
+test('map list: switching to another install drops unsaved edits, the same install keeps them', async ({ page }) => {
+  const none = { ...MAP_LIST, active: false, text: '# Which maps\n', path: 'C:/games/POST/dod/dodstudio_hd/hd_maps.txt' };
+  await loadHarness(page, { status: { ...STATUS, map_list: none } });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-maps-some');
+  await mapRow(page, 'dod_caen').locator('input').check();
+  await expect(page.locator('#hd-maps-summary')).toContainText('Not saved yet');
+
+  // The same file again: the edit survives the refresh.
+  await page.click('#hd-refresh-btn');
+  await expect(mapRow(page, 'dod_caen').locator('input')).toBeChecked();
+
+  // Another install's file: what it says is shown, not the old edit.
+  await page.evaluate((s) => { window.__mockInvokeHandlers.hd_status = () => s; }, { ...STATUS, map_list: MAP_LIST });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-maps-some')).toBeChecked();
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
+  await expect(page.locator('#hd-maps-summary')).toHaveText('3 of 4 maps get map textures and skies.');
 });

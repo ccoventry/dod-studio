@@ -604,8 +604,10 @@ export function initHdPane() {
   function renderMapList(status) {
     const fresh = status?.map_list;
     if (fresh) {
-      // A refresh keeps edits that aren't saved yet.
-      const keep = mapsDirty();
+      // A refresh keeps edits that aren't saved yet, unless it brought
+      // another install's list (the game path changed): those edits were
+      // to a different file.
+      const keep = mapsDirty() && mapFile.path === fresh.path;
       mapFile = fresh;
       if (!keep) {
         mapText = fresh.text;
@@ -632,20 +634,26 @@ export function initHdPane() {
       none.textContent = STRINGS.HD.MAPS_LIST_EMPTY;
       mapsPatterns.appendChild(none);
     }
+    // One chip per line, flowing across and down: the pattern, how many
+    // maps it picks (the names on hover), and an x to take it out.
     for (const pattern of patterns) {
       const test = patternTest(pattern);
       const hits = mapNames().filter(test);
       const item = document.createElement('li');
+      item.className = 'hd-chip';
       const name = document.createElement('span');
-      name.className = 'hd-my-style-name';
+      name.className = 'hd-chip-name';
       name.textContent = pattern;
       const what = document.createElement('span');
-      what.className = 'hd-miss-detail';
+      what.className = 'hd-chip-count';
       what.textContent = STRINGS.HD.patternCount(hits.length);
-      if (hits.length) what.title = hits.join('\n');
+      if (hits.length) item.title = hits.join('\n');
       else item.classList.add('hd-pattern-unused');
       const remove = document.createElement('button');
-      remove.textContent = STRINGS.HD.MAPS_REMOVE_BUTTON;
+      remove.className = 'hd-chip-x';
+      remove.textContent = '\u00d7';
+      remove.title = STRINGS.HD.MAPS_REMOVE_BUTTON;
+      remove.setAttribute('aria-label', STRINGS.HD.MAPS_REMOVE_BUTTON);
       remove.addEventListener('click', () => {
         removePattern(pattern);
         renderMapList();
@@ -654,9 +662,11 @@ export function initHdPane() {
       mapsPatterns.appendChild(item);
     }
 
-    // Every map, ticked when the list picks it.
+    // Every map, ticked when the list picks it. The search takes the same
+    // wildcards as a list line; without any it's a plain "contains".
     const query = mapsSearch.value.trim().toLowerCase();
-    const shown = mapFile.maps.filter((m) => (!query || m.name.toLowerCase().includes(query))
+    const matchesQuery = isWildcard(query) ? patternTest(query) : (name) => name.toLowerCase().includes(query);
+    const shown = mapFile.maps.filter((m) => (!query || matchesQuery(m.name))
       && (!mapsPickedOnly.checked || !picked || picked.has(m.name)));
     mapsAvailable.innerHTML = '';
     mapsAvailable.classList.toggle('hd-map-list-off', mapMode === 'every');
