@@ -1,8 +1,9 @@
 """The upscale styles, one per dodstudio_hd/<type>/<style> folder.
 
-Every build script prepares padded source PNGs in an input folder and calls
-`upscale(in_dir, out_dir, style)`, which writes a 4x PNG of each to out_dir
-under the same name. The script then does its own crop/resize/alpha work.
+Every build script hands its jobs to `upscale_batches`, which saves each
+one's padded source PNG and calls `upscale(in_dir, out_dir, style)` (a 4x
+PNG of each, under the same name) a batch at a time. The script then does
+its own crop/resize/alpha work on each.
 
   ultrasharp  4x-UltraSharp          -- default: sharp, keeps grain and grime
   remacri     Remacri                -- similar, slightly softer
@@ -19,7 +20,7 @@ The AI styles run Real-ESRGAN ncnn-vulkan (see README.md for where to get it
 and the extra models): REALESRGAN points at the .exe, default
 realesrgan/realesrgan-ncnn-vulkan.exe next to this file.
 """
-import os, re, subprocess, sys, time
+import os, re, shutil, subprocess, sys, time
 from PIL import Image, ImageFilter
 
 import hdcommon as C
@@ -159,3 +160,51 @@ def upscale(in_dir, out_dir, style):
             plain_x4(Image.open(os.path.join(in_dir, n)), args[0]).save(os.path.join(out_dir, n))
     else:
         sys.exit(f"{style!r} is a blend; build_all.py makes it from {args[0]} and {args[1]}")
+
+
+# Files per upscaler run: about a minute and a half of ultrasharp. Starting
+# the upscaler again costs about a second, so smaller only means more
+# progress lines and less lost to a stop. HD_BATCH overrides it (not set
+# by DoD Studio: it's for tuning from the command line).
+BATCH = 250
+
+
+def batch_size():
+    raw = os.environ.get("HD_BATCH")
+    if not raw:
+        return BATCH
+    if not raw.isdigit() or int(raw) < 1:
+        sys.exit(f"HD_BATCH={raw!r}: a whole number of files, 1 or more")
+    return int(raw)
+
+
+def upscale_batches(work, style, jobs, prepare, finish):
+    """Upscales `jobs` ({key: job}) in `style`, batch_size() at a time, and
+    returns how many `finish` wrote.
+
+    prepare(key, job) returns the padded input image, or None to skip the
+    job; finish(key, job, path) makes the output file from the 4x PNG at
+    `path`. Each batch's files are written before the next batch starts:
+    in one batch, every map's textures are half an hour of upscaling, and a
+    build stopped anywhere in it wrote nothing, while the next run's fresh
+    work folder threw the finished upscales away (#404). After each batch,
+    `@@progress N of M written`, which build_all.py passes on to DoD Studio."""
+    keys, size, done = list(jobs), batch_size(), 0
+    in_dir, out_dir = os.path.join(work, "in"), os.path.join(work, "out")
+    for start in range(0, len(keys), size):
+        batch = keys[start:start + size]
+        for d in (in_dir, out_dir):
+            shutil.rmtree(d, ignore_errors=True)
+            os.makedirs(d)
+        for key in batch:
+            img = prepare(key, jobs[key])
+            if img is not None:
+                img.save(os.path.join(in_dir, key + ".png"))
+        upscale(in_dir, out_dir, style)
+        for key in batch:
+            path = os.path.join(out_dir, key + ".png")
+            if os.path.exists(path):
+                finish(key, jobs[key], path)
+                done += 1
+        print(f"@@progress {done} of {len(jobs)} written", flush=True)
+    return done

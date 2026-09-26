@@ -19,7 +19,7 @@ usage: python sprites_hd.py <out_dir> [<source> ...]
   source: a .spr file, a folder of them, or a .txt list of .spr paths.
   With none, every world sprite of the game (dod/ shadowing valve/), plus
   those of any HD_ALSO install.
-env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK
+env:    HD_STYLE (default ultrasharp), HD_GAME, HD_ALSO, HD_WORK, HD_BATCH
 """
 import glob, os, re, sys
 import numpy as np
@@ -108,7 +108,9 @@ def main():
     print(f"{len(jobs)} sprite frames to build")
 
     masks = {}
-    for key, (fmt, w, h, idx, pal) in jobs.items():
+
+    def prepare(key, job):
+        fmt, w, h, idx, pal = job
         ind = np.frombuffer(idx, np.uint8).reshape(h, w)
         if fmt == SPR_INDEXALPHA:
             rgb = np.repeat(ind[:, :, None], 3, axis=2)
@@ -117,7 +119,7 @@ def main():
         if fmt == SPR_ALPHTEST:
             mask = ind == 255
             if mask.all():
-                continue
+                return None
             if mask.any():
                 _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
                 rgb = rgb[iy, ix]
@@ -125,15 +127,10 @@ def main():
         py, px = pad_amount(h), pad_amount(w)
         mode = "reflect" if min(h, w) > 1 else "edge"
         pad = np.pad(rgb, ((py, py), (px, px), (0, 0)), mode=mode)
-        Image.fromarray(pad).save(os.path.join(work, "in", key + ".png"))
+        return Image.fromarray(pad)
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
-
-    done = 0
-    for key, (fmt, w, h, idx, pal) in jobs.items():
-        src = os.path.join(work, "out", key + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        fmt, w, h, idx, pal = job
         tw, th = C.pot(w * 4), C.pot(h * 4)
         py, px = pad_amount(h), pad_amount(w)
         # The padded frame scaled so the original part is exactly tw x th.
@@ -145,11 +142,12 @@ def main():
             img = Image.new("RGBA", (tw, th), tuple(pal[765:768]) + (255,))
             img.putalpha(alpha)
         elif key in masks:
-            alpha = Image.fromarray(masks[key].astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
+            alpha = Image.fromarray(masks.pop(key).astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
         C.save_output(img, os.path.join(out_dir, key + ".tga"))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} sprite frame replacement(s) to {out_dir}")
 
 
