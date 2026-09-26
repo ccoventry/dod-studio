@@ -90,6 +90,9 @@ pub struct AnalyzerState {
     pub ended_early: bool,
     pub first_time_left: Option<std::time::Duration>,
     pub last_time_left: Option<std::time::Duration>,
+    /// The demo kept recording through a level change after the match, to
+    /// another map or the same one; everything from there on is ignored
+    /// (`use_segment_boundary`).
     pub map_changed: bool,
     pub initial_map_name: Option<String>,
     pub current_time: GameTime,
@@ -305,6 +308,55 @@ fn extract_ip_port(s: &str) -> Option<String> {
     None
 }
 
+/// Ends the analysed demo at a second signon (#217).
+///
+/// `SvcServerInfo` starts every signon. A second one means the server changed
+/// level and the demo kept recording: to another map, or to the *same* map,
+/// as when both halves of a match are played back to back. Everything after
+/// it re-sends teams, classes and the clock from scratch, so letting it
+/// through resets every player to Unassigned and restarts the demo clock.
+///
+/// Once the first segment has gameplay it is the match, and nothing after
+/// the boundary is analysed. Before that (a warm-up map, then the real one)
+/// a *different* map replaces the first segment outright.
+///
+/// Runs before every other hook, so none of them sees the new signon: the
+/// POV hook would otherwise take the new connection's player slot.
+pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
+        return;
+    };
+    let map_name = String::from_utf8_lossy(&msg.map_file_name)
+        .trim_end_matches('\0')
+        .to_string();
+    let clean_map = map_name
+        .trim_start_matches("maps/")
+        .trim_end_matches(".bsp")
+        .to_string();
+    let Some(ref initial) = state.initial_map_name else {
+        state.initial_map_name = Some(clean_map);
+        return;
+    };
+    let has_gameplay = state
+        .rounds
+        .iter()
+        .any(|r| matches!(r, Round::Completed { .. }))
+        || state
+            .players
+            .iter()
+            .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
+    if has_gameplay {
+        state.map_changed = true;
+    } else if initial != &clean_map {
+        state.initial_map_name = Some(clean_map);
+        state.players.clear();
+        state.rounds.clear();
+        state.team_scores.reset();
+        state.clan_match_detected = false;
+        state.clan_match_detection = ClanMatchDetection::WaitingForReset;
+    }
+}
+
 pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
         let hostname = String::from_utf8_lossy(&msg.hostname)
@@ -313,38 +365,6 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
         state.server_name = Some(hostname.clone());
         if let Some(addr) = extract_ip_port(&hostname) {
             state.server_address = Some(addr);
-        }
-
-        let map_name = String::from_utf8_lossy(&msg.map_file_name)
-            .trim_end_matches('\0')
-            .to_string();
-        let clean_map = map_name
-            .trim_start_matches("maps/")
-            .trim_end_matches(".bsp")
-            .to_string();
-        if let Some(ref initial) = state.initial_map_name {
-            if initial != &clean_map {
-                let has_gameplay = state
-                    .rounds
-                    .iter()
-                    .any(|r| matches!(r, Round::Completed { .. }))
-                    || state
-                        .players
-                        .iter()
-                        .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
-                if has_gameplay {
-                    state.map_changed = true;
-                } else {
-                    state.initial_map_name = Some(clean_map);
-                    state.players.clear();
-                    state.rounds.clear();
-                    state.team_scores.reset();
-                    state.clan_match_detected = false;
-                    state.clan_match_detection = ClanMatchDetection::WaitingForReset;
-                }
-            }
-        } else {
-            state.initial_map_name = Some(clean_map);
         }
     }
 
@@ -599,6 +619,9 @@ impl Analysis {
         let mut state = AnalyzerState::default();
 
         let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
+            if !state.map_changed {
+                use_segment_boundary(state, event);
+            }
             if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
                 return;
             }
@@ -990,6 +1013,9 @@ mod tests {
             let mut last_live_frame = None;
             let mut processed_frames = 0;
             let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
+                if !state.map_changed {
+                    use_segment_boundary(state, event);
+                }
                 if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
                     return;
                 }
@@ -1353,6 +1379,91 @@ mod tests {
         assert!(state.started_late);
         assert!(state.ended_early);
         assert!(state.players[0].has_pre_demo_activity);
+    }
+
+    fn server_info(map: &str) -> EngineMessage {
+        EngineMessage::SvcServerInfo(dem::types::SvcServerInfo {
+            protocol: 48,
+            spawn_count: 1,
+            map_checksum: 0,
+            client_dll_hash: dem::types::ByteString(vec![0; 16]),
+            max_players: 32,
+            player_index: 3,
+            is_deathmatch: 0,
+            game_dir: b"dod\0".to_vec(),
+            hostname: b"server\0".to_vec(),
+            map_file_name: format!("maps/{}.bsp\0", map).into_bytes(),
+            map_cycle: Vec::new(),
+            unknown: 0,
+        })
+    }
+
+    fn state_with_a_kill() -> AnalyzerState {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        let mut player = Player::new_mock(3, "Player");
+        player.update_session_stats(2, 1, 0);
+        state.players.push(player);
+        state
+    }
+
+    #[test]
+    fn a_same_map_signon_after_gameplay_ends_the_demo() {
+        // #217: both halves on dod_lennon2 in one recording.
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+    }
+
+    #[test]
+    fn a_different_map_after_gameplay_ends_the_demo() {
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_lennon2"));
+    }
+
+    #[test]
+    fn a_different_map_before_gameplay_replaces_the_warm_up() {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_warmup")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(!state.map_changed);
+        assert!(state.players.is_empty());
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_anzio"));
+    }
+
+    #[test]
+    fn a_same_map_signon_before_gameplay_changes_nothing() {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(!state.map_changed);
+        assert_eq!(state.players.len(), 1);
     }
 
     #[test]
