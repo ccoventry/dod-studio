@@ -73,6 +73,13 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Window layout** (`dodstudio_resizable_windows 1`,
+  `dodstudio_remember_window_layout 1`): every GameUI window can be resized
+  like the console, and each comes back where it was left after a restart
+  (the console loads no `.res`, so build mode can't save its place). Walks
+  the engine surface's popups through vgui2's own interfaces; only
+  `Frame::SetSizeable`/`IsSizeable` are per-build addresses. See
+  `src/window_layout.rs`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
