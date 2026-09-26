@@ -1,6 +1,6 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses } from './ipc_bridge.js';
+import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { isRangeModified as isKillRangeModified } from './take_index.js';
 import { STRINGS } from './strings.js';
@@ -220,6 +220,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The game is already open: if DoD Studio started it, its hook DLL takes
+  // console commands, so the preview goes straight to it (#413). Resolves true
+  // when it did; false leaves the caller to show the "already running" prompt.
+  async function sendPreviewToOpenGame(hlaePath, hlPath, highlights) {
+    btnLaunchPreview.disabled = true;
+    const originalLabel = btnLaunchPreview.textContent;
+    btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
+    const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    try {
+      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      if (sent) {
+        showToast(STRINGS.HIGHLIGHTS.sentToRunningGame(sent), 'success');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // Already toasted by ipc_bridge.js; the prompt still offers a way on.
+      return false;
+    } finally {
+      btnLaunchPreview.textContent = originalLabel;
+      updatePreviewButtonStates();
+    }
+  }
+
   if (btnLaunchPreview) {
     btnLaunchPreview.addEventListener('click', async () => {
       const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
@@ -240,6 +264,7 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (engineAlreadyRunning) {
+        if (await sendPreviewToOpenGame(hlaePath, hlPath, highlights)) return;
         requestProcessGuardedLaunch(() => performLaunchPreview(hlaePath, hlPath, highlights));
         return;
       }

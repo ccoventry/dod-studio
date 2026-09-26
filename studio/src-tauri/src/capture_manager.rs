@@ -1609,6 +1609,70 @@ pub async fn launch_demo_preview(
     .await
 }
 
+/// Process ids of every running `hl.exe` -- the games Studio could be talking
+/// to. `hlae.exe` is left out: it is the launcher, not the game.
+fn running_game_pids() -> Vec<u32> {
+    use sysinfo::{PidExt, ProcessExt, SystemExt};
+    let sys = sysinfo::System::new_all();
+    sys.processes()
+        .values()
+        .filter(|p| p.name().eq_ignore_ascii_case("hl.exe"))
+        .map(|p| p.pid().as_u32())
+        .collect()
+}
+
+/// Launch Preview for a game that is already running (#413): patches the
+/// same `<stem>_preview.dem` `launch_demo_preview` would (reusing one already
+/// on disk), then, instead of launching a second game, sends
+/// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
+///
+/// Resolves to the command sent, or `None` when no running game takes
+/// commands -- one Studio didn't start, or with its hooks off -- so the caller
+/// can fall back to the "already running" prompt.
+#[tauri::command]
+pub async fn send_preview_to_running_game(
+    hlae_path: String,
+    game_path: String,
+    streaks: Vec<SerializedStreak>,
+    goldsrc_hooks_dll_path: Option<String>,
+) -> Result<Option<String>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let pids = running_game_pids();
+        if pids.is_empty() {
+            return Ok(None);
+        }
+        let (patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let preview_stem = job
+            .output_demo
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
+
+        let command = format!("viewdemo {preview_stem}");
+        for pid in pids {
+            match native::sys::game_remote::send_console_commands(
+                pid,
+                std::slice::from_ref(&command),
+            )
+            .map_err(crate::messages::failed_to_send_to_running_game)?
+            {
+                native::sys::game_remote::Sent::Delivered => {
+                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
+                    return Ok(Some(command));
+                }
+                native::sys::game_remote::Sent::NotListening => continue,
+            }
+        }
+        Ok(None)
+    }))
+    .await
+}
+
 /// Patches every demo represented in `streaks` into its own bookmarked
 /// `<stem>_preview.dem` without launching HLAE, skipping any demo that
 /// already has one from an earlier run. Resolves to the number *freshly

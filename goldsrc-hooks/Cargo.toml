@@ -32,4 +32,8 @@ windows-sys = { version = "0.59", features = [
     # AddVectoredExceptionHandler and EXCEPTION_POINTERS live behind this one
     # rather than the Debug feature that names them -- see src/crash.rs.
     "Win32_System_Kernel",
+    # The named pipe Studio sends console commands through -- see src/remote.rs.
+    "Win32_System_Pipes",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
 ] }

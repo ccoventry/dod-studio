@@ -54,6 +54,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `remote`: DoD Studio can send console commands to the running game over
+//!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
+//!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
+//!   off.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -98,6 +102,7 @@ mod objicons;
 mod overview_map;
 mod patch;
 mod pe;
+mod remote;
 mod scan;
 mod scoreboard;
 mod sound_fix;
@@ -175,6 +180,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Only this user's own processes can reach the pipe, and only a game
+    // Studio launched has it, so on unless asked not to.
+    remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
@@ -255,6 +263,10 @@ fn install_fixes() {
     // console commands -- toggle the same ENABLED flags the env vars above
     // set as the initial default, so either mechanism works.
     commands::install();
+
+    // Studio's console commands can only run once the engine's function
+    // table is live, which is now.
+    remote::start();
 
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.

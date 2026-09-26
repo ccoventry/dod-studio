@@ -769,6 +769,29 @@ const ENGFUNCS_SLOT_CLIENT_CMD: usize = 20;
 type ClientCmdFn = unsafe extern "C" fn(*const c_char);
 static REAL_CLIENT_CMD: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
+/// Runs `line` as a console command through the engine's `pfnClientCmd`, as
+/// if `client.dll` had issued it. Main thread only, like every engine call.
+/// False before the engine's function table is captured.
+// Only `remote`'s 32-bit half calls it.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn client_cmd(line: &std::ffi::CStr) -> bool {
+    let Some(engfuncs) = engfuncs() else {
+        return false;
+    };
+    // Safety: a slot of the engine's function table, the one this file already
+    // redirects for its client-cmd watch.
+    unsafe {
+        let slot = *(engfuncs as *const ClEngineFuncsPartial as *const usize)
+            .add(ENGFUNCS_SLOT_CLIENT_CMD);
+        if slot == 0 {
+            return false;
+        }
+        let client_cmd: ClientCmdFn = std::mem::transmute(slot);
+        client_cmd(line.as_ptr());
+    }
+    true
+}
+
 /// Logs every console command `client.dll` issues to itself.
 ///
 /// The motivating case is DoD's own cvar-enforcement routine, which runs from
