@@ -1178,7 +1178,6 @@ export const STRINGS = {
     MAPS_SEARCH_LABEL: 'Your maps:',
     MAPS_SEARCH_PLACEHOLDER: 'Search (* and ? work here too)',
     MAPS_PICKED_ONLY: 'Picked only',
-    mapPickedBy: (pattern) => `picked by ${pattern}`,
     mapPickedByTitle: (pattern) => `Picked by ${pattern}. To leave this map out, remove or change that line.`,
     MAPS_NONE_FOUND: 'No maps found in dod\\maps. Check the Half-Life Executable on the Configuration page.',
     MAPS_NO_MATCH: 'No map matches the search.',

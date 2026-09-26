@@ -1933,19 +1933,28 @@ tr.keyboard-selected {
   font-size: 12px;
 }
 
+.hd-map-list li {
+  min-width: 0;
+}
+
 .hd-map-list label {
   display: flex;
   align-items: baseline;
   gap: 6px;
   padding: 1px 0;
+  min-width: 0;
 }
 
 .hd-map-name {
   font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .hd-map-list .hd-miss-detail {
   margin-left: auto;
+  padding-right: 8px;
   white-space: nowrap;
 }
 

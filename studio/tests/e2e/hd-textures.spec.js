@@ -652,7 +652,7 @@ test('map list: shows every map, what picks it, and what each line matches', asy
   const railroad = mapRow(page, 'dod_railroad2_s9a').locator('input');
   await expect(railroad).toBeChecked();
   await expect(railroad).toBeDisabled();
-  await expect(mapRow(page, 'dod_railroad2_s9a')).toContainText('picked by dod_railroad*');
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title', /Picked by dod_railroad\*/);
   await expect(mapRow(page, 'dod_anzio').locator('input')).toBeEnabled();
   await expect(mapRow(page, 'dod_caen').locator('input')).not.toBeChecked();
   await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();

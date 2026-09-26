@@ -694,11 +694,11 @@ export function initHdPane() {
       const name = document.createElement('span');
       name.className = 'hd-map-name';
       name.textContent = map.name;
+      // Which line picked it is the tooltip and the locked box, not text
+      // in the row: the rows are packed, and it read as clutter.
       const detail = document.createElement('span');
       detail.className = 'hd-miss-detail';
-      detail.textContent = by && isWildcard(by)
-        ? `${STRINGS.HD.mapPickedBy(by)} · ${formatSize(map.bytes)}`
-        : formatSize(map.bytes);
+      detail.textContent = formatSize(map.bytes);
       label.append(box, name, detail);
       item.appendChild(label);
       mapsAvailable.appendChild(item);
