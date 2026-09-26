@@ -73,6 +73,13 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Console commands from window buttons** (on by default): a button added
+  to any GameUI window in build mode (Ctrl+Shift+Alt+B) whose command is
+  `engine <console command>` runs it, as the ESC menu's `GameMenu.res`
+  entries already do. Stock, the window drops it: vgui2's
+  `Panel::OnCommand` is empty here, unlike Source's. One redirected call at
+  the end of `Frame::OnCommand`; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it
+  off. See `src/engine_buttons.rs`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area

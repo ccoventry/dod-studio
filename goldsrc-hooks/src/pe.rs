@@ -189,3 +189,24 @@ pub unsafe fn code_range(base: *mut u8) -> Option<(usize, usize)> {
         None
     }
 }
+
+/// `(TimeDateStamp, SizeOfImage)` from the module's headers: together, which
+/// compile of a DLL this is, for code that only trusts builds it was checked
+/// against.
+///
+/// Safety: `base` must point at a fully-mapped, valid PE image.
+// Only `demo_seek`'s 32-bit half calls it.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub unsafe fn image_identity(base: *mut u8) -> Option<(u32, u32)> {
+    unsafe {
+        let nt = nt_headers(base);
+        if (*nt).signature != 0x0000_4550 {
+            return None;
+        }
+        // SizeOfImage is 56 bytes into the optional header, inside the span
+        // `ImageOptionalHeader32` skips.
+        let optional = &(*nt).optional_header as *const ImageOptionalHeader32 as *const u8;
+        let size_of_image = std::ptr::read_unaligned(optional.add(56) as *const u32);
+        Some(((*nt).file_header.time_date_stamp, size_of_image))
+    }
+}

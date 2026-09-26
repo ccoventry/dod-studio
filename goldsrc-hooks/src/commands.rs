@@ -514,6 +514,8 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::engine_buttons::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
