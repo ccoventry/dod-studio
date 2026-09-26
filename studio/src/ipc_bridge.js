@@ -179,6 +179,21 @@ export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHook
     });
 }
 
+/** Launch Preview for a game that is already open (#413): generates the
+ *  preview demo as `launchDemoPreview` does, then sends `viewdemo <preview>`
+ *  to the running game through its hook DLL's pipe instead of launching a
+ *  second one. Resolves to the command sent, or `null` when no running game
+ *  takes commands (not started by DoD Studio), so the caller can fall back to
+ *  the "already running" prompt. */
+export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
+  return invoke("send_preview_to_running_game", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (send_preview_to_running_game):", err);
+      showToast(STRINGS.IPC.previewFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */

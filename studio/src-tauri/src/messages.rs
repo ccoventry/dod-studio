@@ -171,6 +171,10 @@ pub fn game_directory_not_found(game_dir: &str) -> String {
 pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str =
     "Could not resolve the 'dod' directory next to hl.exe";
 pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview patch job";
+
+pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
+    format!("Could not send the preview to the running game: {e}")
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 
@@ -435,6 +439,10 @@ mod tests {
         assert_eq!(
             FAILED_TO_BUILD_PREVIEW_PATCH_JOB,
             "Failed to build the preview patch job"
+        );
+        assert_eq!(
+            failed_to_send_to_running_game("pipe closed"),
+            "Could not send the preview to the running game: pipe closed"
         );
         assert_eq!(
             COULD_NOT_RESOLVE_PREVIEW_FILE_STEM,

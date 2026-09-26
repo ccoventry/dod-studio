@@ -139,6 +139,7 @@ export const STRINGS = {
       ? 'Every demo already had a preview — nothing new to generate.'
       : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
+    sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
     LAUNCHING_HLAE_TOAST: 'Launching HLAE...',
   },
