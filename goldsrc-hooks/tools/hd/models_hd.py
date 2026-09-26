@@ -18,7 +18,7 @@ and whichever the game loads finds its match.
 usage: python models_hd.py <out_dir> <source> [<source> ...]
   source: a .mdl file; a folder (every .mdl under it, recursively); or a .txt
   list of .mdl paths, one per line, relative ones read from <game>/valve/models
-env:    HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
+env:    HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
 """
 import glob, os, sys
 import numpy as np
@@ -66,36 +66,34 @@ def main():
     print(f"{len(jobs)} model skins to build")
 
     masks = {}
-    for key, (name, flags, w, h, idx, pal) in jobs.items():
+
+    def prepare(key, job):
+        name, flags, w, h, idx, pal = job
         ind = np.frombuffer(idx, np.uint8).reshape(h, w)
         rgb = np.frombuffer(pal, np.uint8).reshape(256, 3)[ind].copy()
         if flags & STUDIO_NF_MASKED:
             mask = ind == 255
             if mask.all():
-                continue
+                return None
             if mask.any():
                 _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
                 rgb = rgb[iy, ix]
             masks[key] = ~mask
         pad = np.pad(rgb, ((h // 2, h // 2), (w // 2, w // 2), (0, 0)), mode="reflect")
-        Image.fromarray(pad).save(os.path.join(work, "in", key + ".png"))
+        return Image.fromarray(pad)
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
-
-    done = 0
-    for key, (name, flags, w, h, idx, pal) in jobs.items():
-        src = os.path.join(work, "out", key + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        name, flags, w, h, idx, pal = job
         tw, th = C.pot(w * 4), C.pot(h * 4)
         centre = (tw // 2, th // 2, tw // 2 + tw, th // 2 + th)
         img = Image.open(src).convert("RGB").resize((tw * 2, th * 2), Image.LANCZOS).crop(centre)
         if key in masks:
-            alpha = Image.fromarray(masks[key].astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
+            alpha = Image.fromarray(masks.pop(key).astype(np.uint8) * 255, "L").resize((tw, th), Image.BILINEAR)
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
         C.save_output(img, os.path.join(out_dir, key + ".tga"))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} model skin replacement(s) to {out_dir}")
 
 
