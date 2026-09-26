@@ -500,7 +500,7 @@ body {
   color: #cccccc;
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
   color: #ffffff;
   border: 1px solid var(--border-color);
@@ -510,8 +510,13 @@ input[type="text"], input[type="number"], select {
   outline: none;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus {
   border-color: var(--primary-accent);
+}
+
+/* The map search: wide enough for a pattern, placeholder included. */
+#hd-maps-search {
+  min-width: 18em;
 }
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
