@@ -47,8 +47,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
-    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
+    anim_fix, crosshair, decals, demo_list_folders, ex_interp, hand_signals, hudelement,
+    overview_map, scoreboard, sound_fix, spectator_crosshair, spectator_target, texture_hires,
+    voice,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -514,6 +515,9 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
+    // one atomic load.
+    demo_list_folders::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -1059,6 +1063,15 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when `dodstudio_demo_list_folders` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_folders() {
+    handle_toggle(
+        demo_list_folders::NAME,
+        &demo_list_folders::ENABLED,
+        demo_list_folders::status,
+    );
+}
+
 /// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
@@ -1304,6 +1317,15 @@ pub fn install() {
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
+
+    // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
+    // Load Demo window asks for its list, so it needs no poll, and a failed
+    // registration costs only this one setting's type-ahead -- a plain toggle
+    // stands in for it.
+    match register(demo_list_folders::NAME, "0") {
+        Some(cvar) => demo_list_folders::set_cvar(cvar),
+        None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(

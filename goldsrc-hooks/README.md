@@ -73,6 +73,12 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Folders in the Load Demo window** (`dodstudio_demo_list_folders 1`): the
+  window lists `../` and each subfolder as well as the demos, and Load (or a
+  double-click) on a folder opens it. Each demo row is its path from `dod/`,
+  which is what `viewdemo` takes. Two vftable swaps -- the file system's
+  `Find*` for the window's own `"*.dem"` call, and the window's `OnCommand`
+  -- on both builds; off, the list is stock. See `src/demo_list_folders.rs`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area

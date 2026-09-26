@@ -45,6 +45,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hd_enabled` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `dodstudio_demo_list_folders` | `0` | the Load Demo window also lists folders (and `../`) and opens them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
 
 ## Commands
 
