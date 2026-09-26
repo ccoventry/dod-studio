@@ -188,7 +188,7 @@ pub use map_text::{MapText, TextSelection, TextStats, hide_map_text, map_text};
 pub use map_fetch::{DEFAULT_MIRROR, FetchOutcome, fetch_map, map_url};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use engine::StreamPatcher;
+pub use engine::{PatchStage, StreamPatcher};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use builder::{

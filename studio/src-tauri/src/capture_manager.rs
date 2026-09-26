@@ -59,6 +59,76 @@ use native::patch::{
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
+/// Every patch job's stage, folded into the one status line a batch shows
+/// (#75). Jobs report from their own worker threads, so each has an atomic
+/// slot: 0 not running, 1 clearing decals, 2 + percent while writing.
+struct PatchProgress {
+    slots: Vec<std::sync::atomic::AtomicU32>,
+    started: std::time::Instant,
+    /// Milliseconds after `started` of the last throttled emit.
+    last_emit_ms: std::sync::atomic::AtomicU32,
+}
+
+const PATCH_SLOT_IDLE: u32 = 0;
+const PATCH_SLOT_CLEARING: u32 = 1;
+const PATCH_SLOT_WRITING: u32 = 2;
+
+impl PatchProgress {
+    fn new(jobs: usize) -> Self {
+        Self {
+            slots: (0..jobs)
+                .map(|_| std::sync::atomic::AtomicU32::new(PATCH_SLOT_IDLE))
+                .collect(),
+            started: std::time::Instant::now(),
+            last_emit_ms: std::sync::atomic::AtomicU32::new(0),
+        }
+    }
+
+    /// Records a job's stage. True when the line should be sent now: always
+    /// for a change of stage, and for percentages at most every ~33ms across
+    /// the whole batch, per CLAUDE.md's telemetry throttle.
+    fn set(&self, job: usize, stage: native::patch::PatchStage) -> bool {
+        use std::sync::atomic::Ordering;
+        let value = match stage {
+            native::patch::PatchStage::ClearingDecals => PATCH_SLOT_CLEARING,
+            native::patch::PatchStage::Writing { percent } => PATCH_SLOT_WRITING + percent as u32,
+        };
+        let previous = self.slots[job].swap(value, Ordering::Relaxed);
+        let stage_changed = (previous >= PATCH_SLOT_WRITING) != (value >= PATCH_SLOT_WRITING)
+            || previous == PATCH_SLOT_IDLE;
+        let now = self.started.elapsed().as_millis() as u32;
+        let last = self.last_emit_ms.load(Ordering::Relaxed);
+        if !stage_changed && now.wrapping_sub(last) < 33 {
+            return false;
+        }
+        self.last_emit_ms.store(now, Ordering::Relaxed);
+        true
+    }
+
+    fn finish(&self, job: usize) {
+        self.slots[job].store(PATCH_SLOT_IDLE, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// The status line, and how many jobs' worth of work is done (fractional,
+    /// counting written percent, for the progress bar).
+    fn summary(&self, done: u32) -> (String, f64) {
+        let mut clearing = 0;
+        let mut writing = Vec::new();
+        for slot in &self.slots {
+            match slot.load(std::sync::atomic::Ordering::Relaxed) {
+                PATCH_SLOT_IDLE => {}
+                PATCH_SLOT_CLEARING => clearing += 1,
+                v => writing.push((v - PATCH_SLOT_WRITING).min(100) as u8),
+            }
+        }
+        let partial: f64 = writing.iter().map(|&p| p as f64 / 100.0).sum();
+        (
+            crate::messages::patching_status(done, self.slots.len(), clearing, &writing),
+            done as f64 + partial,
+        )
+    }
+}
+
 // ── IPC payload type ───────────────────────────────────────────────────────────
 
 /// Top-level payload from the frontend when the user triggers a capture batch.
@@ -939,6 +1009,20 @@ pub async fn start_capture_batch_impl(
         // below tell "a peer job's failure forced cancel_token_arc true"
         // apart from a genuine user Cancel, which never sets it.
         let first_error: Mutex<Option<(String, std::io::Error)>> = Mutex::new(None);
+        let progress = PatchProgress::new(patch_jobs.len());
+        let emit_progress = |app: &tauri::AppHandle, done: u32, in_progress: u32| {
+            let (status, index) = progress.summary(done);
+            let _ = app.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": true,
+                    "index": index,
+                    "total": total_patch_jobs,
+                    "in_progress": in_progress,
+                    "status": status
+                }),
+            );
+        };
 
         std::thread::scope(|scope| {
             let worker_count = PATCH_CONCURRENCY.min(patch_jobs.len()).max(1);
@@ -951,60 +1035,71 @@ pub async fn start_capture_batch_impl(
                 let patch_jobs = &patch_jobs;
                 let patcher_config = &patcher_config;
                 let cancel_token_arc = &cancel_token_arc;
-                scope.spawn(move || loop {
-                    if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= patch_jobs.len() {
-                        break;
-                    }
-                    let job = &patch_jobs[idx];
-                    let started = in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let done_so_far = completed_count.load(std::sync::atomic::Ordering::Relaxed);
-                    let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                        "running": true,
-                        "index": done_so_far,
-                        "total": total_patch_jobs,
-                        "in_progress": started,
-                        "status": format!("Patching {} / {} ({} in progress)", done_so_far, total_patch_jobs, started)
-                    }));
-                    let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
-                        .patch(job, patcher_config, cancel_token_arc);
-                    let still_running = in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
-                    match result {
-                        Ok(()) => {
-                            let done = completed_count.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                            let _ = app_handle_clone.emit("capture_status", serde_json::json!({
-                                "running": true,
-                                "index": done,
-                                "total": total_patch_jobs,
-                                "in_progress": still_running,
-                                "status": format!("Patching {} / {} ({} in progress)", done, total_patch_jobs, still_running)
-                            }));
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
-                            // Either a real user Cancel, or fallout from a
-                            // peer job's failure just below -- either way
-                            // this job's own output is incomplete.
-                            let _ = std::fs::remove_file(&job.output_demo);
+                let progress = &progress;
+                let emit_progress = &emit_progress;
+                scope.spawn(move || {
+                    loop {
+                        if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
                             break;
                         }
-                        Err(e) => {
-                            {
-                                let mut slot = first_error.lock().unwrap_or_else(|p| p.into_inner());
-                                if slot.is_none() {
-                                    *slot = Some((job.source_demo.clone(), e));
-                                }
+                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= patch_jobs.len() {
+                            break;
+                        }
+                        let job = &patch_jobs[idx];
+                        in_flight.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        // Each stage change, and each percent written (throttled
+                        // across the batch), updates the one status line.
+                        let result = StreamPatcher::new(&job.source_demo, &job.output_demo)
+                            .patch_with_stages(
+                                job,
+                                patcher_config,
+                                cancel_token_arc,
+                                &mut |stage| {
+                                    if progress.set(idx, stage) {
+                                        emit_progress(
+                                            &app_handle_clone,
+                                            completed_count
+                                                .load(std::sync::atomic::Ordering::Relaxed),
+                                            in_flight.load(std::sync::atomic::Ordering::Relaxed),
+                                        );
+                                    }
+                                },
+                            );
+                        progress.finish(idx);
+                        let still_running =
+                            in_flight.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) - 1;
+                        match result {
+                            Ok(()) => {
+                                let done = completed_count
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+                                    + 1;
+                                emit_progress(&app_handle_clone, done, still_running);
                             }
-                            // Stop everything else as fast as the existing
-                            // interrupt mechanism allows -- a batch is
-                            // already all-or-nothing (nothing opens the game
-                            // until every job has patched clean), so letting
-                            // peers run to completion after this would only
-                            // waste CPU on jobs the batch is aborting anyway.
-                            cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
-                            break;
+                            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => {
+                                // Either a real user Cancel, or fallout from a
+                                // peer job's failure just below -- either way
+                                // this job's own output is incomplete.
+                                let _ = std::fs::remove_file(&job.output_demo);
+                                break;
+                            }
+                            Err(e) => {
+                                {
+                                    let mut slot =
+                                        first_error.lock().unwrap_or_else(|p| p.into_inner());
+                                    if slot.is_none() {
+                                        *slot = Some((job.source_demo.clone(), e));
+                                    }
+                                }
+                                // Stop everything else as fast as the existing
+                                // interrupt mechanism allows -- a batch is
+                                // already all-or-nothing (nothing opens the game
+                                // until every job has patched clean), so letting
+                                // peers run to completion after this would only
+                                // waste CPU on jobs the batch is aborting anyway.
+                                cancel_token_arc.store(true, std::sync::atomic::Ordering::Relaxed);
+                                break;
+                            }
                         }
                     }
                 });
@@ -1981,6 +2076,43 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+    use native::patch::PatchStage;
+
+    #[test]
+    fn the_patching_line_names_what_each_job_is_doing() {
+        let progress = PatchProgress::new(3);
+        assert_eq!(progress.summary(0).0, "Patching 0 / 3");
+
+        progress.set(0, PatchStage::ClearingDecals);
+        assert_eq!(progress.summary(0).0, "Patching 0 / 3: clearing decals");
+
+        progress.set(0, PatchStage::Writing { percent: 40 });
+        let (line, index) = progress.summary(0);
+        assert_eq!(line, "Patching 0 / 3: writing, 40%");
+        assert!((index - 0.4).abs() < 1e-9);
+
+        progress.set(1, PatchStage::ClearingDecals);
+        progress.set(2, PatchStage::Writing { percent: 60 });
+        assert_eq!(
+            progress.summary(0).0,
+            "Patching 0 / 3: 1 clearing decals, 2 writing (50% on average)"
+        );
+
+        progress.finish(0);
+        progress.finish(2);
+        assert_eq!(progress.summary(2).0, "Patching 2 / 3: clearing decals");
+    }
+
+    #[test]
+    fn percentages_are_throttled_but_stage_changes_are_not() {
+        let progress = PatchProgress::new(1);
+        assert!(progress.set(0, PatchStage::ClearingDecals));
+        assert!(progress.set(0, PatchStage::Writing { percent: 0 }));
+        // Within 33ms of the last send.
+        assert!(!progress.set(0, PatchStage::Writing { percent: 1 }));
+        std::thread::sleep(std::time::Duration::from_millis(40));
+        assert!(progress.set(0, PatchStage::Writing { percent: 2 }));
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {
