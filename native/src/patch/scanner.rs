@@ -1,6 +1,7 @@
 // patch/scanner.rs
-// Life-bounded highlight scanner and HLTV detection.
-// All three functions perform std::fs I/O — native-only.
+// Life-bounded highlight scanner, HLTV detection, and the check that a
+// scanned demo is still the same file when a batch starts.
+// Every function here performs std::fs I/O — native-only.
 
 use crate::patch::types::{CaptureStreak, HighlightStatus};
 use crate::patch::{MAX_PAYLOAD_LIMIT_BYTES, NETWORK_HEADER_ALIGNMENT, SCANNER_SECTION_BOUNDARY};
@@ -171,6 +172,9 @@ pub fn scan_demo_for_highlights_with_analysis(
     }
 
     let mut streaks: Vec<CaptureStreak> = Vec::new();
+    let source_key = crate::utils::demo_hasher::demo_key_text(
+        crate::utils::demo_hasher::demo_key_of_bytes(&bytes),
+    );
 
     // ── Per-player life-bounded streak iteration ────────────────────────────────────────────
     for player in &analysis.state.players {
@@ -221,6 +225,7 @@ pub fn scan_demo_for_highlights_with_analysis(
                 frame_times: frame_times_arc.clone(),
                 status: HighlightStatus::None,
                 match_start_tick: analysis.state.match_start_tick,
+                source_key: Some(source_key.clone()),
             };
             streak.update_visuals();
             streaks.push(streak);
@@ -244,4 +249,128 @@ pub fn scan_demo_for_highlights_with_analysis(
         ),
         analysis,
     ))
+}
+
+// ── Source check ─────────────────────────────────────────────────────────────
+
+/// Refuses a batch whose source demos are no longer the files their streaks
+/// were scanned from (#196). Every tick a streak carries counts frames of the
+/// scanned file; patched into a different demo saved under the same name,
+/// they land on nonsense, and the game crashes minutes later instead of the
+/// batch failing now. Reads 64 KiB per distinct demo. Streaks with no
+/// `source_key` (saved before it existed) are not checked.
+pub fn check_sources_unchanged(streaks: &[CaptureStreak]) -> Result<(), String> {
+    let mut checked = std::collections::HashSet::new();
+    for streak in streaks {
+        let Some(expected) = streak.source_key.as_deref() else {
+            continue;
+        };
+        if !checked.insert((streak.source_demo.as_str(), expected)) {
+            continue;
+        }
+        let path = std::path::Path::new(&streak.source_demo);
+        let name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy();
+        let Some(key) = crate::utils::demo_hasher::calculate_demo_key(path) else {
+            return Err(crate::messages::source_demo_unreadable(name));
+        };
+        if crate::utils::demo_hasher::demo_key_text(key) != expected {
+            return Err(crate::messages::source_demo_changed(name));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod source_check_tests {
+    use super::*;
+    use crate::utils::demo_hasher::{demo_key_of_bytes, demo_key_text};
+
+    fn streak_for(path: &std::path::Path, key: Option<String>) -> CaptureStreak {
+        CaptureStreak {
+            start_tick: 0,
+            end_tick: 0,
+            source_demo: path.to_string_lossy().to_string(),
+            target_player: None,
+            kill_count: 0,
+            timeline_string: String::new(),
+            duration_string: String::new(),
+            player_index: 0,
+            kills: Vec::new(),
+            start_index: 0,
+            end_index: 0,
+            total_demo_frames: 0,
+            demo_fps: 100.0,
+            viewdemo_times: Vec::new(),
+            frame_times: Default::default(),
+            status: HighlightStatus::None,
+            match_start_tick: None,
+            source_key: key,
+        }
+    }
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let dir = std::env::temp_dir().join(format!("source_check_{}_{}", tag, std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn the_scanned_file_passes() {
+        let dir = temp_dir("same");
+        let demo = dir.join("match.dem");
+        let bytes = b"HLDEMO\0\0the scanned demo".to_vec();
+        std::fs::write(&demo, &bytes).unwrap();
+        let key = demo_key_text(demo_key_of_bytes(&bytes));
+        let streaks = [
+            streak_for(&demo, Some(key.clone())),
+            streak_for(&demo, Some(key)),
+        ];
+        assert_eq!(check_sources_unchanged(&streaks), Ok(()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_different_file_under_the_same_name_is_refused() {
+        let dir = temp_dir("swapped");
+        let demo = dir.join("match.dem");
+        let scanned = b"HLDEMO\0\0the scanned demo".to_vec();
+        let key = demo_key_text(demo_key_of_bytes(&scanned));
+        // Same length, different content: the size alone would not catch it.
+        std::fs::write(&demo, b"HLDEMO\0\0another demo!!!!").unwrap();
+        assert_eq!(
+            scanned.len(),
+            std::fs::metadata(&demo).unwrap().len() as usize
+        );
+        let err = check_sources_unchanged(&[streak_for(&demo, Some(key))]).unwrap_err();
+        assert!(
+            err.contains("match.dem") && err.contains("Scan it again"),
+            "{}",
+            err
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_missing_file_is_refused() {
+        let dir = temp_dir("missing");
+        let demo = dir.join("gone.dem");
+        let err = check_sources_unchanged(&[streak_for(&demo, Some("1-00".into()))]).unwrap_err();
+        assert!(
+            err.contains("gone.dem") && err.contains("could not be read"),
+            "{}",
+            err
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn streaks_saved_before_the_key_existed_are_not_checked() {
+        let dir = temp_dir("old");
+        let demo = dir.join("never_written.dem");
+        assert_eq!(check_sources_unchanged(&[streak_for(&demo, None)]), Ok(()));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
