@@ -54,6 +54,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
+//!   Demo window lists folders (and `../`) as well as demos, and opens them,
+//!   so `viewdemo` can reach demos outside `dod/` (issue #408).
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -85,6 +88,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_list_folders;
 mod detour;
 mod engine;
 mod ex_interp;
