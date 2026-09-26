@@ -1929,9 +1929,13 @@ tr.keyboard-selected {
   100% { background: var(--bg-input); border-color: var(--border-color); }
 }
 
-/* The mark after a map name that a pattern picked. */
+/* A map a pattern picked: its tick and its mark in the pattern colour. */
+.hd-box-pattern {
+  accent-color: #3ea86b;
+}
+
 .hd-map-via {
-  color: var(--text-muted);
+  color: #3ea86b;
   margin-left: 3px;
 }
 

@@ -686,7 +686,10 @@ export function initHdPane() {
       box.checked = mapMode === 'every' || !!by;
       box.disabled = mapMode === 'every';
       const byPattern = !!by && isWildcard(by);
-      if (byPattern) label.title = STRINGS.HD.mapPickedByTitle(by);
+      if (byPattern) {
+        label.title = STRINGS.HD.mapPickedByTitle(by);
+        box.classList.add('hd-box-pattern');
+      }
       // A pattern with a wildcard can't leave one map out; its line has to
       // change. So the box stays ticked, and a click points at the chip
       // that picked it instead: it flashes, and the message says why.
@@ -730,6 +733,7 @@ export function initHdPane() {
     const summary = [mapMode === 'every'
       ? STRINGS.HD.mapsSummaryEvery(count)
       : STRINGS.HD.mapsSummary(picked.size, count)];
+    if (mapMode === 'some' && [...picked.values()].some(isWildcard)) summary.push(STRINGS.HD.MAPS_TICK_LEGEND);
     if (mapsDirty()) summary.push(STRINGS.HD.MAPS_UNSAVED);
     mapsSummary.textContent = summary.join(' ');
     mapsSaveBtn.disabled = !mapsDirty() || (mapMode === 'some' && !mapPatterns(mapText).length);
