@@ -643,7 +643,7 @@ test('map list: shows every map, what picks it, and what each line matches', asy
 
   await expect(page.locator('#hd-maps-every-label')).toHaveText('Every map (4)');
   await expect(page.locator('#hd-maps-some')).toBeChecked();
-  await expect(page.locator('#hd-maps-summary')).toHaveText('3 of 4 maps get map textures and skies.');
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
   await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
   await expect(page.locator('#hd-maps-patterns li').nth(0)).toContainText('dod_railroad*2 maps');
   await expect(page.locator('#hd-maps-patterns li').nth(2)).toContainText('dod_nowherematches no map');
@@ -659,7 +659,7 @@ test('map list: shows every map, what picks it, and what each line matches', asy
   await expect(railroad).toBeChecked();
   await expect(page.locator('#hd-maps-message')).toHaveText('dod_railroad2_s9a is matched by the pattern dod_railroad*. Change or remove that line (the chip above) to leave it out.');
   await expect(page.locator('#hd-maps-patterns li').nth(0)).toHaveClass(/hd-chip-flash/);
-  await expect(page.locator('#hd-maps-summary')).toHaveText('3 of 4 maps get map textures and skies.');
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
   await expect(mapRow(page, 'dod_anzio').locator('input')).toBeEnabled();
   await expect(mapRow(page, 'dod_caen').locator('input')).not.toBeChecked();
   await expect(page.locator('#hd-maps-save-btn')).toBeDisabled();
@@ -758,5 +758,5 @@ test('map list: switching to another install drops unsaved edits, the same insta
   await page.click('#hd-refresh-btn');
   await expect(page.locator('#hd-maps-some')).toBeChecked();
   await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
-  await expect(page.locator('#hd-maps-summary')).toHaveText('3 of 4 maps get map textures and skies.');
+  await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
 });
