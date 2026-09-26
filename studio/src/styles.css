@@ -1919,6 +1919,22 @@ tr.keyboard-selected {
   color: #fff;
 }
 
+/* Clicking a map's box that a pattern picked points at the pattern's chip. */
+.hd-chip-flash {
+  animation: hd-chip-flash 1.2s ease-out;
+}
+
+@keyframes hd-chip-flash {
+  0%, 60% { background: #3a5a8a; border-color: #7fb0ff; }
+  100% { background: var(--bg-input); border-color: var(--border-color); }
+}
+
+/* The mark after a map name that a pattern picked. */
+.hd-map-via {
+  color: var(--text-muted);
+  margin-left: 3px;
+}
+
 .hd-map-list {
   list-style: none;
   margin: 6px 0 0;

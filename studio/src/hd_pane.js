@@ -641,6 +641,7 @@ export function initHdPane() {
       const hits = mapNames().filter(test);
       const item = document.createElement('li');
       item.className = 'hd-chip';
+      item.dataset.pattern = pattern;
       const name = document.createElement('span');
       name.className = 'hd-chip-name';
       name.textContent = pattern;
@@ -683,9 +684,24 @@ export function initHdPane() {
       box.type = 'checkbox';
       box.value = map.name;
       box.checked = mapMode === 'every' || !!by;
-      // A pattern with a wildcard can't leave one map out; its line has to change.
-      box.disabled = mapMode === 'every' || (!!by && isWildcard(by));
-      if (by && isWildcard(by)) label.title = STRINGS.HD.mapPickedByTitle(by);
+      box.disabled = mapMode === 'every';
+      const byPattern = !!by && isWildcard(by);
+      if (byPattern) label.title = STRINGS.HD.mapPickedByTitle(by);
+      // A pattern with a wildcard can't leave one map out; its line has to
+      // change. So the box stays ticked, and a click points at the chip
+      // that picked it instead: it flashes, and the message says why.
+      box.addEventListener('click', (e) => {
+        if (!byPattern) return;
+        e.preventDefault();
+        mapsMessage.textContent = STRINGS.HD.mapPickedByLine(map.name, by);
+        const chip = mapsPatterns.querySelector(`[data-pattern="${CSS.escape(by)}"]`);
+        if (chip) {
+          chip.classList.remove('hd-chip-flash');
+          void chip.offsetWidth; // restart the animation
+          chip.classList.add('hd-chip-flash');
+          chip.scrollIntoView({ block: 'nearest' });
+        }
+      });
       box.addEventListener('change', () => {
         if (box.checked) addPattern(map.name.toLowerCase());
         else removePattern(by);
@@ -694,8 +710,14 @@ export function initHdPane() {
       const name = document.createElement('span');
       name.className = 'hd-map-name';
       name.textContent = map.name;
-      // Which line picked it is the tooltip and the locked box, not text
-      // in the row: the rows are packed, and it read as clutter.
+      // Which line picked it is the tooltip and a small mark, not text in
+      // the row: the rows are packed, and it read as clutter.
+      if (byPattern) {
+        const via = document.createElement('span');
+        via.className = 'hd-map-via';
+        via.textContent = '\u2217';
+        name.appendChild(via);
+      }
       const detail = document.createElement('span');
       detail.className = 'hd-miss-detail';
       detail.textContent = formatSize(map.bytes);
