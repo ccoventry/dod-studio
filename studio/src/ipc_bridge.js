@@ -628,6 +628,47 @@ export async function hdBuild(gamePath, request) {
     });
 }
 
+/** The Blender page's status (#403): which Blender a step would run and its
+ *  add-ons, plus the maps and HD styles to pick from. */
+export async function blenderStatus(gamePath) {
+  return invoke("blender_status", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_status):", err);
+      showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Uses `path` (a blender.exe) from now on, or finds one again with null. */
+export async function blenderSetExe(path) {
+  return invoke("blender_set_exe", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_set_exe):", err);
+      showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Runs one step of the Blender pipeline on `request.agr`; progress arrives as
+ *  `blender_progress` events. Resolves to what the step made. */
+export async function blenderRun(gamePath, request) {
+  return invoke("blender_run", { gamePath, request })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_run):", err);
+      if (err !== "cancelled") showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Stops the running Blender step. */
+export async function blenderCancel() {
+  return invoke("blender_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_cancel):", err);
+      throw err;
+    });
+}
+
 /** Stops a running download or build. */
 export async function hdCancel() {
   return invoke("hd_cancel")
