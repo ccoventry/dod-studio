@@ -161,6 +161,12 @@ pub fn failed_to_launch_obs(err: impl Display) -> String {
     format!("Failed to launch OBS: {}", err)
 }
 
+/// The batch status line while the game fast-forwards to, then records, a
+/// clip (#76). 1-based.
+pub fn capturing_clip(clip: u32, total: u32) -> String {
+    format!("Capturing clip {} of {}", clip, total)
+}
+
 pub fn game_directory_not_found(game_dir: &str) -> String {
     format!("Game directory not found: {}", game_dir)
 }

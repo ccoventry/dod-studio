@@ -234,6 +234,41 @@ impl From<SerializedStreak> for CaptureStreak {
 
 // ── Managed state ──────────────────────────────────────────────────────────────
 
+/// How many of a capture batch's clips are recorded, from the engine's own
+/// console markers (#76). The progress bar used to count game sessions, and a
+/// chained batch is often a single session, so it sat at one end for the
+/// whole capture.
+#[derive(Debug, Default)]
+struct ClipTally {
+    /// Clips on every demo loaded so far, the current one included. This is
+    /// the "X of Y clips total" the notifications show.
+    through_current_demo: u32,
+    /// Clips recorded.
+    done: u32,
+}
+
+impl ClipTally {
+    /// A demo starts: every clip of the demos before it is recorded.
+    fn demo_loading(&mut self, clip_count: u32) {
+        self.done = self.through_current_demo;
+        self.through_current_demo += clip_count;
+    }
+
+    /// Clip `clip_idx` (1-based) of the current demo is next, so the ones
+    /// before it are recorded.
+    fn fast_forward_to(&mut self, clip_idx: u32, clip_count_this_demo: u32) {
+        let before_this_demo = self
+            .through_current_demo
+            .saturating_sub(clip_count_this_demo);
+        self.done = before_this_demo + clip_idx.saturating_sub(1);
+    }
+
+    /// The game session ended: every clip it loaded is recorded.
+    fn session_finished(&mut self) {
+        self.done = self.through_current_demo;
+    }
+}
+
 /// Tauri managed state for the capture subsystem.
 pub struct CaptureManager {
     /// Guards against duplicate batch launches.
@@ -1067,61 +1102,76 @@ pub async fn start_capture_batch_impl(
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let mut total_jobs: u32 = 0;
                 let mut current_idx: u32 = 0;
-                // Running tally of clips captured through and including the
+                // `through_current_demo` counts clips through and including the
                 // current demo -- updated once per DemoLoading (never per
                 // FastForwardToClip), so every fast-forward-to-clip notification
                 // within a demo reports the same "X of Y clips total" the
                 // demo-loading toast itself would have shown. See issue #98.
-                let mut clips_so_far: u32 = 0;
+                let mut clips = ClipTally::default();
+                let mut last_name = String::new();
+                // The bar counts clips when the batch knows how many, and
+                // game sessions otherwise.
+                let bar = |clips: &ClipTally, current_idx: u32, total_jobs: u32| {
+                    if total_batch_clips > 0 {
+                        (clips.done, total_batch_clips)
+                    } else {
+                        (current_idx, total_jobs)
+                    }
+                };
                 while let Ok(event) = engine_rx.recv() {
                     match event {
                         EngineEvent::Starting(total) => {
                             total_jobs = total as u32;
                             current_idx = 0;
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
                             let _ = app_emitter.emit(
                                 "capture_status",
                                 serde_json::json!({
                                     "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
+                                    "index": index,
+                                    "total": total,
                                     "status": "Starting"
                                 }),
                             );
                         }
                         EngineEvent::Launching(name) => {
                             current_idx += 1;
+                            last_name = name.clone();
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
                             let _ = app_emitter.emit(
                                 "capture_status",
                                 serde_json::json!({
                                     "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
+                                    "index": index,
+                                    "total": total,
                                     "name": name,
                                     "status": "Launching"
                                 }),
                             );
                         }
                         EngineEvent::Finished(name) => {
+                            clips.session_finished();
+                            let (index, total) = bar(&clips, current_idx, total_jobs);
                             let _ = app_emitter.emit(
                                 "capture_status",
                                 serde_json::json!({
                                     "running": true,
-                                    "index": current_idx,
-                                    "total": total_jobs,
+                                    "index": index,
+                                    "total": total,
                                     "name": name,
                                     "status": "Finished"
                                 }),
                             );
                         }
                         EngineEvent::DemoLoading(job_idx, total, clip_count) => {
-                            clips_so_far += clip_count;
+                            clips.demo_loading(clip_count);
                             let _ = app_emitter.emit(
                                 "capture_demo_loading",
                                 serde_json::json!({
                                     "index": job_idx,
                                     "total": total,
                                     "clip_count": clip_count,
-                                    "clips_so_far": clips_so_far,
+                                    "clips_so_far": clips.through_current_demo,
                                     "total_batch_clips": total_batch_clips,
                                 }),
                             );
@@ -1132,6 +1182,22 @@ pub async fn start_capture_batch_impl(
                             clip_idx,
                             clip_count_this_demo,
                         ) => {
+                            clips.fast_forward_to(clip_idx, clip_count_this_demo);
+                            if total_batch_clips > 0 {
+                                let _ = app_emitter.emit(
+                                    "capture_status",
+                                    serde_json::json!({
+                                        "running": true,
+                                        "index": clips.done,
+                                        "total": total_batch_clips,
+                                        "name": last_name,
+                                        "status": crate::messages::capturing_clip(
+                                            clips.done + 1,
+                                            total_batch_clips
+                                        )
+                                    }),
+                                );
+                            }
                             let _ = app_emitter.emit(
                                 "capture_fast_forward_to_clip",
                                 serde_json::json!({
@@ -1139,7 +1205,7 @@ pub async fn start_capture_batch_impl(
                                     "demo_total": total,
                                     "clip_index": clip_idx,
                                     "clip_count_this_demo": clip_count_this_demo,
-                                    "clips_so_far": clips_so_far,
+                                    "clips_so_far": clips.through_current_demo,
                                     "total_batch_clips": total_batch_clips,
                                 }),
                             );
@@ -2261,5 +2327,24 @@ mod tests {
     fn clean_commands_are_not_refused() {
         let err = first_banned_command_error(&["sensitivity 3".to_string()], &[]);
         assert!(err.is_none());
+    }
+
+    #[test]
+    fn the_clip_tally_counts_recorded_clips_across_demos() {
+        let mut clips = ClipTally::default();
+        clips.demo_loading(3);
+        clips.fast_forward_to(1, 3);
+        assert_eq!((clips.done, clips.through_current_demo), (0, 3));
+        clips.fast_forward_to(3, 3);
+        assert_eq!(clips.done, 2);
+
+        // The next demo: all three of the first are recorded.
+        clips.demo_loading(2);
+        assert_eq!((clips.done, clips.through_current_demo), (3, 5));
+        clips.fast_forward_to(2, 2);
+        assert_eq!(clips.done, 4);
+
+        clips.session_finished();
+        assert_eq!(clips.done, 5);
     }
 }
