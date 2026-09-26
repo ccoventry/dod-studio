@@ -659,6 +659,10 @@ test('map list: shows every map, what picks it, and what each line matches', asy
   await expect(railroad).toBeChecked();
   await expect(page.locator('#hd-maps-message')).toHaveText('dod_railroad2_s9a is matched by the pattern dod_railroad*. Change or remove that line (the chip above) to leave it out.');
   await expect(page.locator('#hd-maps-patterns li').nth(0)).toHaveClass(/hd-chip-flash/);
+  // Two tick colours, explained by two ticks, once a pattern picks something.
+  await expect(page.locator('#hd-maps-legend')).toBeVisible();
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('input')).toHaveClass(/hd-box-pattern/);
+  await expect(mapRow(page, 'dod_anzio').locator('input')).not.toHaveClass(/hd-box-pattern/);
   await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
   await expect(mapRow(page, 'dod_anzio').locator('input')).toBeEnabled();
   await expect(mapRow(page, 'dod_caen').locator('input')).not.toBeChecked();

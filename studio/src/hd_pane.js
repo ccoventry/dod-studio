@@ -86,6 +86,7 @@ export function initHdPane() {
   const mapsPatternHint = document.querySelector('#hd-maps-pattern-hint');
   const mapsSearch = document.querySelector('#hd-maps-search');
   const mapsPickedOnly = document.querySelector('#hd-maps-picked-only');
+  const mapsLegend = document.querySelector('#hd-maps-legend');
   const mapsAvailable = document.querySelector('#hd-maps-available');
   const mapsSummary = document.querySelector('#hd-maps-summary');
   const mapsSaveBtn = document.querySelector('#hd-maps-save-btn');
@@ -733,7 +734,9 @@ export function initHdPane() {
     const summary = [mapMode === 'every'
       ? STRINGS.HD.mapsSummaryEvery(count)
       : STRINGS.HD.mapsSummary(picked.size, count)];
-    if (mapMode === 'some' && [...picked.values()].some(isWildcard)) summary.push(STRINGS.HD.MAPS_TICK_LEGEND);
+    // The two tick colours, explained by two ticks: shown once a pattern
+    // has picked anything.
+    if (mapsLegend) mapsLegend.hidden = !(mapMode === 'some' && [...picked.values()].some(isWildcard));
     if (mapsDirty()) summary.push(STRINGS.HD.MAPS_UNSAVED);
     mapsSummary.textContent = summary.join(' ');
     mapsSaveBtn.disabled = !mapsDirty() || (mapMode === 'some' && !mapPatterns(mapText).length);

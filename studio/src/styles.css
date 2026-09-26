@@ -1929,14 +1929,57 @@ tr.keyboard-selected {
   100% { background: var(--bg-input); border-color: var(--border-color); }
 }
 
-/* A map a pattern picked: its tick and its mark in the pattern colour. */
+/* A map a pattern picked: its tick and its mark in the pattern colour,
+   against the browser's blue for a map with its own line. The legend beside
+   "Picked only" is two drawn ticks in the same two colours. */
+:root {
+  --hd-tick-own: #2b6fd6;
+  --hd-tick-pattern: #3ea86b;
+}
+
 .hd-box-pattern {
-  accent-color: #3ea86b;
+  accent-color: var(--hd-tick-pattern);
 }
 
 .hd-map-via {
-  color: #3ea86b;
+  color: var(--hd-tick-pattern);
   margin-left: 3px;
+}
+
+.hd-map-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-map-legend .hd-tick + span {
+  margin-right: 8px;
+}
+
+.hd-tick {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  text-align: center;
+  line-height: 13px;
+  font-size: 11px;
+  color: #fff;
+}
+
+.hd-tick::after {
+  content: "\2713";
+}
+
+.hd-tick-own {
+  background: var(--hd-tick-own);
+}
+
+.hd-tick-pattern {
+  background: var(--hd-tick-pattern);
 }
 
 .hd-map-list {
