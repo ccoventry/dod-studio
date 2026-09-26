@@ -48,7 +48,7 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
     anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
-    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
+    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice, window_layout,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -514,6 +514,9 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
+    // two while both of its settings are off.
+    window_layout::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
 }
@@ -1059,6 +1062,23 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when the window-layout cvars could not be registered.
+unsafe extern "C" fn cmd_resizable_windows() {
+    handle_toggle(
+        window_layout::RESIZABLE_NAME,
+        &window_layout::RESIZABLE,
+        window_layout::resizable_status,
+    );
+}
+
+unsafe extern "C" fn cmd_remember_window_layout() {
+    handle_toggle(
+        window_layout::REMEMBER_NAME,
+        &window_layout::REMEMBER,
+        window_layout::remember_status,
+    );
+}
+
 /// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
@@ -1304,6 +1324,20 @@ pub fn install() {
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
+
+    // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
+    // it walks the windows, so they need no poll here, and a failed
+    // registration costs only their type-ahead -- plain toggles stand in.
+    match (
+        register(window_layout::RESIZABLE_NAME, "0"),
+        register(window_layout::REMEMBER_NAME, "0"),
+    ) {
+        (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
+        _ => {
+            add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
+            add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
+        }
+    }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(

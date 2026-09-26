@@ -54,6 +54,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `window_layout`: the `dodstudio_resizable_windows` and
+//!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
+//!   resized, and each comes back where it was left after a restart (#408).
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -106,6 +109,7 @@ mod spectator_target;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod window_layout;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
