@@ -205,6 +205,11 @@ pub struct SerializedStreak {
     /// native patch engine.
     #[serde(default)]
     pub frame_times: Vec<f32>,
+    /// The scanned file's size and start hash, checked against the file on
+    /// disk before a batch or preview patches it (#196). Absent from
+    /// projects saved before it existed.
+    #[serde(default)]
+    pub source_key: Option<String>,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -228,6 +233,7 @@ impl From<SerializedStreak> for CaptureStreak {
             frame_times: std::sync::Arc::new(s.frame_times),
             match_start_tick: s.match_start_tick,
             status: native::patch::types::HighlightStatus::Pending,
+            source_key: s.source_key,
         }
     }
 }
@@ -845,6 +851,24 @@ pub async fn start_capture_batch_impl(
 
     // ── Offload blocking I/O to a dedicated thread ────────────────────────────
     tokio::task::spawn_blocking(move || {
+        // A different demo saved under a scanned one's name would take every
+        // highlight tick with it and crash the game minutes in (#196). Stop
+        // before anything is patched.
+        if let Err(e) = native::patch::check_sources_unchanged(&raw_streaks) {
+            log::error!("{}", e);
+            let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+            *running = false;
+            let _ = app_handle_clone.emit(
+                "capture_status",
+                serde_json::json!({
+                    "running": false,
+                    "error": true,
+                    "status": e
+                }),
+            );
+            return;
+        }
+
         let (patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
@@ -1267,6 +1291,7 @@ impl From<CaptureStreak> for SerializedStreak {
             // The inbound From<SerializedStreak> impl re-wraps it in Arc::new().
             frame_times: (*c.frame_times).clone(),
             match_start_tick: c.match_start_tick,
+            source_key: c.source_key,
         }
     }
 }
@@ -1546,6 +1571,9 @@ fn patch_bookmark_previews(
     }
     let capture_streaks: Vec<CaptureStreak> =
         streaks.into_iter().map(CaptureStreak::from).collect();
+    // Same check as a capture batch (#196): a preview patched from a
+    // different file crashes the game the same way.
+    native::patch::check_sources_unchanged(&capture_streaks)?;
     let jobs = build_preview_patch_jobs(capture_streaks, Some(dod_dir));
     if jobs.is_empty() {
         return Err(crate::messages::FAILED_TO_BUILD_PREVIEW_JOBS.to_string());

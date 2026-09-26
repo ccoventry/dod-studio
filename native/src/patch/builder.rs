@@ -1820,6 +1820,7 @@ mod tests {
                 viewdemo_times: Vec::new(),
                 frame_times: std::sync::Arc::new(Vec::new()),
                 match_start_tick: None,
+                source_key: None,
                 status: Default::default(),
             },
             CaptureStreak {
@@ -1839,6 +1840,7 @@ mod tests {
                 viewdemo_times: Vec::new(),
                 frame_times: std::sync::Arc::new(Vec::new()),
                 match_start_tick: None,
+                source_key: None,
                 status: Default::default(),
             },
             CaptureStreak {
@@ -1858,6 +1860,7 @@ mod tests {
                 viewdemo_times: Vec::new(),
                 frame_times: std::sync::Arc::new(Vec::new()),
                 match_start_tick: None,
+                source_key: None,
                 status: Default::default(),
             },
         ];
@@ -1950,6 +1953,7 @@ mod tests {
             viewdemo_times: Vec::new(),
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
+            source_key: None,
             status: Default::default(),
         }];
 
@@ -2128,6 +2132,7 @@ mod tests {
             viewdemo_times: Vec::new(),
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
+            source_key: None,
             status: Default::default(),
         }
     }
@@ -3029,6 +3034,7 @@ mod builder_grouping_tests {
             frame_times: Arc::new(vec![]),
             status: crate::patch::types::HighlightStatus::None,
             match_start_tick: None,
+            source_key: None,
         };
 
         let streak2 = CaptureStreak {
@@ -3049,6 +3055,7 @@ mod builder_grouping_tests {
             frame_times: Arc::new(vec![]),
             status: crate::patch::types::HighlightStatus::None,
             match_start_tick: None,
+            source_key: None,
         };
 
         let streak3 = CaptureStreak {
@@ -3069,6 +3076,7 @@ mod builder_grouping_tests {
             frame_times: Arc::new(vec![]),
             status: crate::patch::types::HighlightStatus::None,
             match_start_tick: None,
+            source_key: None,
         };
 
         let raw_streaks = vec![streak1, streak2, streak3];

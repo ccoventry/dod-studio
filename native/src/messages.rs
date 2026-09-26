@@ -52,6 +52,24 @@ pub fn url_returned_status(url: &str, status: impl Display) -> String {
     format!("{} returned {}", url, status)
 }
 
+// ── patch/scanner.rs ─────────────────────────────────────────────────────
+
+pub fn source_demo_unreadable(demo: impl Display) -> String {
+    format!(
+        "{} could not be read. It was scanned, but has since been moved, deleted or \
+         locked. Put it back, or remove its highlights and scan again.",
+        demo
+    )
+}
+
+pub fn source_demo_changed(demo: impl Display) -> String {
+    format!(
+        "{} is not the file that was scanned: it has been replaced or edited since. \
+         Scan it again before capturing, so the highlights match what is in it now.",
+        demo
+    )
+}
+
 // ── shared/hlae_ffmpeg.rs ────────────────────────────────────────────────
 
 pub fn not_a_file(path: impl Display) -> String {

@@ -197,7 +197,10 @@ pub use builder::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use scanner::{is_hltv_demo, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis};
+pub use scanner::{
+    check_sources_unchanged, is_hltv_demo, scan_demo_for_highlights,
+    scan_demo_for_highlights_with_analysis,
+};
 
 /// Whether a frame can carry injected payload: it must be a `NetworkMessage`
 /// whose contents were actually parsed (an unparsed one is opaque bytes there
