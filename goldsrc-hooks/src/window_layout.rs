@@ -14,11 +14,13 @@
 //! `Frame::SetSizeable(false)`. The console is resizable because its own code
 //! never does.
 //!
-//! Positions already hold for a whole session: the VCR bar stays where it was
-//! dragged, even across `viewdemo`s (tested live, pre-Anniversary, 2026-09-26).
-//! What is lost is the next session. The console loads no `.res` at all, so the
-//! build-mode editor's Save writes a file nothing reads, and the demo bar
-//! doesn't keep its saved position either.
+//! Positions mostly hold for a session: the VCR bar stays where it was dragged
+//! across `viewdemo`s, and the console keeps its place and size when closed
+//! and reopened (tested live, pre-Anniversary, 2026-09-26). What is lost is
+//! the next session, and the VCR bar's place once it is closed: reopened, by
+//! `viewdemo <demo>` or a bare `viewdemo`, it comes back centred. The console
+//! loads no `.res` at all, so the build-mode editor's Save writes a file
+//! nothing reads, and the demo bar doesn't keep its saved position either.
 //!
 //! ## How
 //!
@@ -32,11 +34,13 @@
 //!   remembering which it changed, so turning the setting off puts them back.
 //!   A window's controls stretch with it only as far as their `.res`
 //!   `autoResize`/`pinCorner` allow, and those can be set in build mode.
-//! - **Remembered:** the first time a window is seen visible, it is moved to
-//!   where it was saved under its module and panel name (and resized, when it
-//!   is resizable). From then on its place is recorded, and written to
-//!   `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` a few seconds after it
-//!   stops changing. A saved spot partly off screen after a resolution change
+//! - **Remembered:** each time a window becomes visible, it is moved to where
+//!   it was saved under its module and panel name (and resized, when it is
+//!   resizable) -- every time, not just the first, because the VCR bar comes
+//!   back centred whenever it is closed and reopened, by `viewdemo <demo>` or
+//!   a bare `viewdemo` (tested live). While it stays open its place is
+//!   recorded, and written to `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt`
+//!   a few seconds after it stops changing. A saved spot partly off screen after a resolution change
 //!   is pulled back on.
 //!
 //! Only `Frame::SetSizeable` and `Frame::IsSizeable` are per-build addresses;
@@ -284,6 +288,9 @@ mod hook {
 
     struct Window {
         key: String,
+        /// Put back since it last became visible. Cleared while it is hidden:
+        /// the VCR bar comes back centred every time it is reopened (tested
+        /// live), so each showing needs restoring, not just the first.
         restored: bool,
         /// Set when this module made it resizable, so turning the setting off
         /// can put it back.
@@ -513,7 +520,11 @@ mod hook {
                     window.made_sizeable = false;
                 }
 
-                if !remember || visible(api.panel, vp) & 0xff == 0 {
+                if visible(api.panel, vp) & 0xff == 0 {
+                    window.restored = false;
+                    continue;
+                }
+                if !remember {
                     continue;
                 }
                 let Some(saved) = state.saved.as_mut() else {
