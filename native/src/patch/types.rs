@@ -609,8 +609,13 @@ impl PatcherConfig {
         // than in any one caller's `extra_engine_args` so that *every* way the
         // app starts the game gets it: a capture batch, a preview, and Launch
         // Game (which used to ignore the setting altogether, #226).
+        //
+        // `-addons` makes the engine search `dod_addon` ahead of `dod`, which
+        // is where DoD Studio's own UI files go (`.res` layouts, menu
+        // entries) so the user's own `dod/resource` is never written (#408).
+        // Tested live: without it the engine ignores `dod_addon` entirely.
         let cmd_line_str = format!(
-            "-game dod -insecure -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            "-game dod -insecure -addons -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
             self.resolution_width, self.resolution_height, extra_engine_args
         );
 
@@ -868,6 +873,20 @@ mod launch_args_tests {
             assert!(
                 line.contains("-condebug"),
                 "launch args must carry -condebug, got: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_addons_is_passed_on_every_launch() {
+        // DoD Studio's UI files live in dod_addon, which the engine only
+        // searches with -addons; without it they silently don't load.
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let addons = line.find("-addons").expect("-addons present");
+            assert!(
+                line.find('+').is_none_or(|plus| addons < plus),
+                "-addons must precede any +command: {line}"
             );
         }
     }
