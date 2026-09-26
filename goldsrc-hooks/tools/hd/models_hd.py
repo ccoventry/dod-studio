@@ -5,7 +5,8 @@ For every skin in the given models, keyed by (texture name, FNV-1a-32 of its
 model skins:
 
   extract -> (masked skins: fill the cut-outs) -> reflect-pad -> 4x in the
-  style -> Lanczos to the power-of-two target (capped at 1024/side) ->
+  style -> Lanczos to the power-of-two target (capped at HD_CAP a side,
+  1024 by default) ->
   (masked: alpha from the original mask)
 
 Skins are UV atlases, not tiles, so the padding mirrors each edge rather
@@ -61,7 +62,7 @@ def main():
                 continue
             for name, flags, w, h, idx, pal in mdl_textures(f):
                 key = f"{C.file_stem_name(name)}_{C.fnv1a32(idx, pal):08x}"
-                if not os.path.exists(os.path.join(out_dir, key + ".tga")):
+                if not C.built(os.path.join(out_dir, key + ".tga"), C.pot(w * 4), C.pot(h * 4)):
                     jobs.setdefault(key, (name, flags, w, h, idx, pal))
     print(f"{len(jobs)} model skins to build")
 

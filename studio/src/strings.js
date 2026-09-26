@@ -1080,7 +1080,7 @@ export const STRINGS = {
     checkedAt: (time) => `Checked at ${time}.`,
     TABLE_STYLE: 'Style',
     USE_TITLE: 'Use it in the game',
-    USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
+    USE_HINT: "HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.",
     STYLE_LABEL: 'Style:',
     COPY_BUTTON: 'Copy',
     SETUP_TITLE: 'Tools',
@@ -1092,6 +1092,14 @@ export const STRINGS = {
     BUILD_HINT: 'Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.',
     BUILD_STYLES_LABEL: 'Styles:',
     BUILD_TYPES_LABEL: 'Files:',
+    BUILD_CAP_LABEL: 'Largest size:',
+    CAP_NAMES: { 1024: '1024 (the usual)', 2048: '2048', 4096: '4096' },
+    // Each cap's cost, since the number alone says nothing about it.
+    CAP_HINTS: {
+      1024: 'Every file is 4x its original, up to 1024 a side. Most map textures are 128 or 256 to begin with, so they end at 512 or 1024 either way.',
+      2048: 'Only files whose 4x is bigger than 1024 change: detail textures (most are 512, so they go from 1024 to 2048), a few large map textures and model skins. A 2048 file is 16 MB, four times a 1024 one, and the game is 32-bit: try one map before building everything.',
+      4096: 'Only files whose 4x is bigger than 2048 change, and almost none are: nothing in the game is over 512 a side except a few skies. This is here for files you upscale yourself. A 4096 file is 64 MB.',
+    },
     BUILD_BUTTON: 'Build',
     SCRIPTS_SUMMARY: 'Build from a Command Prompt instead',
     SCRIPTS_HINT: 'The same scripts run from goldsrc-hooks\\tools\\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:',

@@ -84,11 +84,11 @@ test('a status report fills the table, picks the built style and writes the cfg 
 
   // The default isn't built, so the built one is picked.
   await expect(page.locator('#hd-style-select')).toHaveValue('plain');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 1024');
   await expect(page.locator('#hd-style-select option[value="ultrasharp"]')).toContainText('(default) (not built yet)');
 
   await page.selectOption('#hd-style-select', 'remacri');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024');
 
   await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
   await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
@@ -191,8 +191,28 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args);
   expect(request).toEqual({
     gamePath: 'C:/games/Half-Life/hl.exe',
-    request: { styles: ['plain'], types: ['sky', 'sprites', 'models', 'detail'] },
+    request: { styles: ['plain'], types: ['sky', 'sprites', 'models', 'detail'], cap: 1024 },
   });
+});
+
+test('the largest size goes into the build and the cfg lines, and says what it costs', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-build-cap')).toHaveValue('1024');
+  await expect(page.locator('#hd-build-cap-hint')).toContainText('4x its original, up to 1024');
+
+  await page.selectOption('#hd-build-cap', '2048');
+  await expect(page.locator('#hd-build-cap-hint')).toContainText('detail textures');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 2048');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args.request);
+  expect(request.cap).toBe(2048);
+
+  // Remembered for the next visit.
+  await page.reload();
+  await page.waitForFunction(() => window.__harnessReady === true);
+  await expect(page.locator('#hd-build-cap')).toHaveValue('2048');
 });
 
 test('build progress, the finished line, and cancel', async ({ page }) => {

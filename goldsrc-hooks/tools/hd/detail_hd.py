@@ -3,7 +3,8 @@
 Reads the game's gfx/detail/*.tga (never writes there), and for each:
 
   wrap-pad half a tile each side -> 4x in the style -> Lanczos to 2x the
-  power-of-two target (capped at 1024/side) -> crop the centre tile -> match
+  power-of-two target (capped at HD_CAP a side, 1024 by default) -> crop the
+  centre tile -> match
   each channel's mean and spread to the original
 
 Wrap padding matters even more here than for walls: a detail texture is
@@ -12,7 +13,9 @@ matters because the engine blends detail multiplicatively over the wall
 (mid-grey = no change): an upscaler that brightened or flattened it would
 brighten or flatten every wall that uses it.
 
-Files already at 1024 (or whose 4x wouldn't be any bigger) are skipped.
+Files already built at the cap (or whose 4x wouldn't be any bigger) are
+skipped. Most detail textures are 512 a side, so a cap of 2048 or more is
+where they gain: at 1024 they are only 2x.
 
 usage: python detail_hd.py <out_dir> [<folder of .tga>]    (default gfx/detail)
 env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
@@ -37,12 +40,13 @@ def main():
     jobs = {}
     for f in sorted(glob.glob(os.path.join(src_dir, "*.tga"))):
         name = os.path.basename(f)
-        if os.path.exists(os.path.join(out_dir, name)):
-            continue
-        a = np.asarray(Image.open(f).convert("RGB"))
-        h, w = a.shape[:2]
+        with Image.open(f) as im:
+            w, h = im.size
         if C.pot(w * 4) <= w and C.pot(h * 4) <= h:
             continue  # already at the cap: nothing to gain
+        if C.built(os.path.join(out_dir, name), C.pot(w * 4), C.pot(h * 4)):
+            continue
+        a = np.asarray(Image.open(f).convert("RGB"))
         jobs[name] = a
         pad = np.pad(a, ((h // 2, h // 2), (w // 2, w // 2), (0, 0)), mode="wrap")
         Image.fromarray(pad).save(os.path.join(work, "in", name[:-4] + ".png"))

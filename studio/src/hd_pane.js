@@ -44,6 +44,8 @@ export function initHdPane() {
   const progressText = document.querySelector('#hd-setup-progress');
   const buildStyles = document.querySelector('#hd-build-styles');
   const buildTypes = document.querySelector('#hd-build-types');
+  const buildCap = document.querySelector('#hd-build-cap');
+  const buildCapHint = document.querySelector('#hd-build-cap-hint');
   const buildBtn = document.querySelector('#hd-build-btn');
   const buildCancelBtn = document.querySelector('#hd-build-cancel-btn');
   const buildProgress = document.querySelector('#hd-build-progress');
@@ -79,9 +81,30 @@ export function initHdPane() {
 
   const ticked = (container) => [...container.querySelectorAll('input:checked')].map((i) => i.value);
 
+  // The largest side a build makes (native::hd::build::CAPS). Remembered
+  // per viewer, and echoed as the gl_max_size line: the game shows textures
+  // at that size, whatever was built.
+  const STORE_CAP = 'dodstudio.hd.cap';
+  function cap() {
+    return parseInt(buildCap?.value, 10) || 1024;
+  }
+  function renderCap() {
+    if (buildCapHint) buildCapHint.textContent = STRINGS.HD.CAP_HINTS[cap()] || '';
+    renderCfgLines();
+  }
+  try {
+    const saved = localStorage.getItem(STORE_CAP);
+    if (saved && buildCap && [...buildCap.options].some((o) => o.value === saved)) buildCap.value = saved;
+  } catch { /* storage unavailable */ }
+  buildCap?.addEventListener('change', () => {
+    try { localStorage.setItem(STORE_CAP, buildCap.value); } catch { /* storage unavailable */ }
+    renderCap();
+  });
+  renderCap();
+
   function renderCfgLines() {
     if (!cvars || !cfgLines) return;
-    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${styleSelect.value}`;
+    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${styleSelect.value}\ngl_max_size ${cap()}`;
   }
 
   function allStyles(status) {
@@ -325,7 +348,7 @@ export function initHdPane() {
   });
 
   buildBtn?.addEventListener('click', async () => {
-    const request = { styles: ticked(buildStyles), types: ticked(buildTypes) };
+    const request = { styles: ticked(buildStyles), types: ticked(buildTypes), cap: cap() };
     setBusy(true);
     buildCancelBtn.disabled = false;
     buildProgress.textContent = '';

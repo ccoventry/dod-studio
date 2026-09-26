@@ -58,23 +58,35 @@
 //!
 //! `GL_Upload32` resizes and builds mipmaps in one fixed 2 MB static buffer,
 //! and refuses (`Sys_Error`, fatal) anything whose power-of-two-rounded size is
-//! over 512x1024 pixels. Its two resample helpers also index 1024-entry stack
-//! arrays by output width. [`install`] therefore:
+//! over 512x1024 pixels. [`install`] repoints its five uses of that buffer at
+//! a 64 MB one of ours and replaces the size check, so a texture up to
+//! 4096x4096 ([`MAX_SIDE`]) goes through.
 //!
-//! - repoints `GL_Upload32`'s five uses of that buffer at a 4 MB one of ours,
-//! - replaces the size check with one that allows up to 1024x1024 **and**
-//!   refuses any output wider than 1024 -- a case the stock check lets through
-//!   (2048x256 fits under its pixel budget) and then overruns the stack with.
+//! One more limit hides behind that check. When the rounded size differs from
+//! the texture's own (`gl_max_size` clamped it, or it wasn't a power of two),
+//! `GL_Upload32` resamples it through one of two helpers that index 1024-entry
+//! stack arrays by *output* width, so any resample wider than 1024 overruns
+//! the stack. The stock check let that happen too (2048x256 fits under its
+//! pixel budget). The replacement check keeps a texture wider than 1024 only
+//! when it needs no resample -- its rounded size is its own size -- and
+//! otherwise resamples it to 1024 wide, where the helpers are safe, instead of
+//! stopping the game.
 //!
-//! Replacements are also capped at 1024 per side by this module itself (512 if
-//! the ceiling could not be raised), so the engine's check is never the thing
-//! that stops them. `gl_max_size` (default 256) still clamps each side below
-//! that; set it to 512 or 1024 to see the extra resolution.
+//! So what a texture is shown at is decided by `gl_max_size` (default 256),
+//! as for stock textures: a replacement is uploaded at the largest power of
+//! two `gl_max_size` allows, up to 4096. Set `gl_max_size 1024` (or 2048, or
+//! 4096) in `movie.cfg` to see the extra resolution; the HD page's
+//! `movie.cfg` lines include it. Each step up costs four times the memory
+//! for every texture it enlarges, in a 32-bit game, so a whole map at 2048 is
+//! something to try rather than assume (see the size notes in
+//! `goldsrc-hooks/tools/hd/README.md`).
 //!
 //! Detail textures (`gfx/detail/*.tga`, drawn over walls when
 //! `r_detailtextures` is on) have a separate, smaller limit: their loader reads
 //! each TGA into a 1 MB buffer, so anything over 512x512 fails to load. With
-//! the ceiling raised, [`raise_detail_limit`] makes that 4 MB (1024x1024).
+//! the ceiling raised, [`raise_detail_limit`] makes that 64 MB, the same
+//! 4096x4096. Skies have their own 256x256 buffer, enlarged the same way by
+//! [`install_sky`]; `gl_max_size` never touches them.
 //!
 //! ## Same-named textures on consecutive maps
 //!
@@ -300,8 +312,8 @@ const DETAIL_STOCK_BYTES: usize = 0x10_0000;
 /// [ebp-0x10c]`, loading the path buffer's address for `LoadTGA`.
 const DETAIL_PATH_AT: usize = 0x4b;
 const DETAIL_PATH_STOLEN: &[u8] = &[0x8D, 0x85, 0xF4, 0xFE, 0xFF, 0xFF];
-/// 1024x1024 RGBA.
-const DETAIL_MAX_BYTES: usize = 1024 * 1024 * 4;
+/// [`MAX_SIDE`] squared, RGBA: what the upload ceiling allows.
+const DETAIL_MAX_BYTES: usize = RAISED_MAX_PIXELS * 4;
 
 /// One build's detail-texture loader, for [`install_detail`].
 struct DetailSite {
@@ -352,9 +364,9 @@ mod sky {
 }
 /// `push 0x100`.
 const SKY_DIM_PUSH: &[u8] = &[0x68, 0x00, 0x01, 0x00, 0x00];
-/// The stock face size, and the largest replacement face (1024x1024 RGBA).
+/// The stock face size, and the largest replacement face ([`MAX_SIDE`] squared).
 const SKY_STOCK_SIDE: u32 = 256;
-const SKY_MAX_SIDE: u32 = 1024;
+const SKY_MAX_SIDE: u32 = MAX_SIDE;
 const SKY_MAX_BYTES: usize = (SKY_MAX_SIDE * SKY_MAX_SIDE * 4) as usize;
 /// `R_LoadSkys`'s path buffer: `char path[64]` at `ebp-0x6c`, filled with
 /// `gfx/env/<skyname><face>.tga` before the face loads.
@@ -400,9 +412,16 @@ const PRE_SKY: SkySite = SkySite {
 
 /// The stock `GL_Upload32` pixel budget, and its buffer (4 bytes a pixel).
 const STOCK_MAX_PIXELS: usize = 0x80000;
-/// What [`install`] raises it to.
-const RAISED_MAX_PIXELS: usize = 0x10_0000;
-/// The resample helpers' stack arrays: output width may never exceed this.
+/// The largest replacement side, and what [`install`] raises the pixel
+/// budget to: a 64 MB scratch buffer. Beyond this is only memory: a 32-bit
+/// game, and the GPU driver's own copy of every texture.
+const MAX_SIDE: u32 = 4096;
+const RAISED_MAX_PIXELS: usize = (MAX_SIDE * MAX_SIDE) as usize;
+/// The engine's floor for `gl_max_size` (`GL_Upload32` rounds anything
+/// below it up to this).
+const MIN_GL_MAX_SIZE: u32 = 128;
+/// The resample helpers' stack arrays: a *resampled* output may never be
+/// wider than this. A texture uploaded at its own size is never resampled.
 const MAX_OUTPUT_WIDTH: u32 = 1024;
 
 /// `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE` in GoldSrc's `GL_TEXTURETYPE`:
@@ -1269,10 +1288,10 @@ static TOO_BIG: AtomicUsize = AtomicUsize::new(0);
 static GAMMA_TABLE: AtomicUsize = AtomicUsize::new(0);
 static DITHER_VALUE: AtomicUsize = AtomicUsize::new(0);
 
-/// Whether the 1024x1024 ceiling is in effect; replacements are capped to 512
-/// per side otherwise.
+/// Whether the [`MAX_SIDE`] ceiling is in effect; replacements are capped to
+/// 512 per side otherwise.
 static CEILING_RAISED: AtomicBool = AtomicBool::new(false);
-/// Whether detail textures may be up to 1024x1024 (512x512 otherwise).
+/// Whether detail textures may be up to [`MAX_SIDE`] square (512x512 otherwise).
 static DETAIL_RAISED: AtomicBool = AtomicBool::new(false);
 /// `redirect_detail_path`'s address, and where its stub returns to.
 static DETAIL_PATH_FN: AtomicUsize = AtomicUsize::new(0);
@@ -1569,7 +1588,7 @@ fn sky_stub(push_buffer: u8, stolen: &[u8]) -> Vec<u8> {
 }
 
 /// Lets `R_LoadSkys` use HD faces from [`SKY_DIR`]: enlarges its face buffer
-/// to 1024x1024, then hooks the moment each face is ready to upload. Faces
+/// to [`SKY_MAX_SIDE`] square, then hooks the moment each face is ready to upload. Faces
 /// without an HD copy upload exactly as before.
 fn install_sky(base: usize, site: &SkySite) -> Result<detour::Detour, String> {
     // Safety: `base` is hw.dll's module handle, mapped for the session.
@@ -1980,15 +1999,38 @@ fn match_engine_expansion(
     }
 }
 
+/// The largest side a replacement is uploaded at: the largest power of two
+/// `gl_max_size` allows, within the ceiling. `GL_Upload32` would clamp to
+/// `gl_max_size` and resample anyway; halving here first is the same picture
+/// for less work, and keeps a wide texture off the resample path.
+fn replacement_cap() -> u32 {
+    if !CEILING_RAISED.load(Ordering::Acquire) {
+        return MAX_OUTPUT_WIDTH / 2;
+    }
+    let Some(engfuncs) = engine::engfuncs() else {
+        return MAX_OUTPUT_WIDTH;
+    };
+    let max = unsafe { (engfuncs.pfn_get_cvar_float)(c"gl_max_size".as_ptr()) };
+    pot_floor(max)
+}
+
+/// The largest power of two at most `max`, as the engine bounds it: at least
+/// [`MIN_GL_MAX_SIZE`], at most [`MAX_SIDE`]. Anything unusable reads as the
+/// floor.
+fn pot_floor(max: f32) -> u32 {
+    let max = if max.is_finite() && max >= MIN_GL_MAX_SIZE as f32 {
+        (max.min(MAX_SIDE as f32)) as u32
+    } else {
+        MIN_GL_MAX_SIZE
+    };
+    1 << (31 - max.leading_zeros())
+}
+
 /// Loads, fits and prepares the replacement at `path`.
 fn load_replacement(path: &Path, i_type: u32, tint: [u8; 3]) -> Result<Rgba, String> {
     let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
     let mut img = decode_tga(&bytes)?;
-    let cap = if CEILING_RAISED.load(Ordering::Acquire) {
-        MAX_OUTPUT_WIDTH
-    } else {
-        MAX_OUTPUT_WIDTH / 2
-    };
+    let cap = replacement_cap();
     while img.width > cap || img.height > cap {
         img = halve(&img);
     }
@@ -2305,36 +2347,100 @@ fn swap_stub() -> Vec<u8> {
     code
 }
 
-/// The size-check stub, replacing `cmp eax, 0x80000; mov [ebp-0xc], eax;
-/// jbe ok`.
+/// A 32-bit register, as the size-check stub encodes it.
+#[derive(Clone, Copy)]
+enum Reg {
+    Ebx = 3,
+    Edi = 7,
+}
+
+/// Which registers `GL_Upload32` keeps the sizes in at its check. Both
+/// builds have the rounded width in `esi`, the product in `eax` and the
+/// original height at `[ebp+0x10]`; the rest differs.
+struct SizeRegs {
+    /// The stolen instruction that isn't the check itself, replayed first.
+    prologue: &'static [u8],
+    /// The rounded height, and the original width.
+    scaled_h: Reg,
+    orig_w: Reg,
+    /// Stores to redo after a shrink: the product, and whatever else holds
+    /// the rounded width.
+    after_shrink: &'static [u8],
+}
+
+/// Pre-Anniversary: `esi`/`edi` rounded, `ebx`/`[ebp+0x10]` original; the
+/// product's store `mov [ebp-0xc], eax` is part of the stolen span.
+const PRE_SIZE_REGS: SizeRegs = SizeRegs {
+    prologue: &[0x89, 0x45, 0xF4],
+    scaled_h: Reg::Edi,
+    orig_w: Reg::Ebx,
+    after_shrink: &[0x89, 0x45, 0xF4],
+};
+
+/// The size-check stub, replacing the `cmp eax, 0x80000; jbe ok` (and, on
+/// the pre-Anniversary build, the `mov [ebp-0xc], eax` between them).
 ///
 /// ```asm
-///     mov [ebp-0xc], eax            ; stolen; flags untouched
-///     cmp esi, 1024                 ; rounded width: the resample arrays' bound
-///     ja  too_big
-///     cmp eax, 0x100000             ; rounded width * height: our buffer's size
+///     <prologue>                    ; the stolen store, if any
+///     cmp esi, 1024                 ; rounded width
+///     jbe check                     ; a resample this wide is safe
+///     cmp esi, <orig_w>             ; wider: is it its own size?
+///     jne shrink
+///     cmp <scaled_h>, [ebp+0x10]
+///     je  check                     ; yes: uploaded as is, never resampled
+/// shrink:                           ; no: a resample would overrun the
+///     mov esi, 1024                 ; helpers' arrays, so resample to 1024
+///     cmp <scaled_h>, 1024          ; wide (and high) instead
+///     jbe +5
+///     mov <scaled_h>, 1024
+///     mov eax, esi
+///     imul eax, <scaled_h>
+///     <after_shrink>                ; the product (and width) stores
+/// check:
+///     cmp eax, RAISED_MAX_PIXELS    ; rounded width * height: our buffer
 ///     ja  too_big
 ///     jmp [SIZE_OK]
 /// too_big:
 ///     jmp [TOO_BIG]                 ; the engine's own Sys_Error
 /// ```
-fn size_check_stub() -> Vec<u8> {
-    size_limit(&[0x89, 0x45, 0xF4]) // mov [ebp-0xc], eax
-}
-
-/// The size limit both builds' size-check stubs share, after `prefix` (the
-/// build's stolen instructions that aren't the check itself).
-fn size_limit(prefix: &[u8]) -> Vec<u8> {
-    let mut code = prefix.to_vec();
+fn size_check_code(regs: &SizeRegs) -> Vec<u8> {
+    let (sh, ow) = (regs.scaled_h as u8, regs.orig_w as u8);
+    let side = MAX_OUTPUT_WIDTH.to_le_bytes();
+    let mut code = regs.prologue.to_vec();
     code.extend_from_slice(&[0x81, 0xFE]); // cmp esi, imm32
-    code.extend_from_slice(&MAX_OUTPUT_WIDTH.to_le_bytes());
-    code.extend_from_slice(&[0x77, 0x0D]); // ja too_big (+13)
+    code.extend_from_slice(&side);
+    let jbe_check = code.len();
+    code.extend_from_slice(&[0x76, 0]); // jbe check
+    code.extend_from_slice(&[0x3B, 0xC0 | (6 << 3) | ow]); // cmp esi, orig_w
+    code.extend_from_slice(&[0x75, 5]); // jne shrink (over the 5 bytes below)
+    code.extend_from_slice(&[0x3B, 0x40 | (sh << 3) | 5, 0x10]); // cmp scaled_h, [ebp+0x10]
+    let je_check = code.len();
+    code.extend_from_slice(&[0x74, 0]); // je check
+    // shrink:
+    code.push(0xBE); // mov esi, imm32
+    code.extend_from_slice(&side);
+    code.extend_from_slice(&[0x81, 0xF8 | sh]); // cmp scaled_h, imm32
+    code.extend_from_slice(&side);
+    code.extend_from_slice(&[0x76, 0x05]); // jbe +5
+    code.push(0xB8 | sh); // mov scaled_h, imm32
+    code.extend_from_slice(&side);
+    code.extend_from_slice(&[0x8B, 0xC6]); // mov eax, esi
+    code.extend_from_slice(&[0x0F, 0xAF, 0xC0 | sh]); // imul eax, scaled_h
+    code.extend_from_slice(regs.after_shrink);
+    // check:
+    let check = code.len();
+    code[jbe_check + 1] = (check - (jbe_check + 2)) as u8;
+    code[je_check + 1] = (check - (je_check + 2)) as u8;
     code.push(0x3D); // cmp eax, imm32
     code.extend_from_slice(&(RAISED_MAX_PIXELS as u32).to_le_bytes());
     code.extend_from_slice(&[0x77, 0x06]); // ja too_big (+6)
     indirect(&mut code, JMP, &SIZE_OK);
     indirect(&mut code, JMP, &TOO_BIG);
     code
+}
+
+fn size_check_stub() -> Vec<u8> {
+    size_check_code(&PRE_SIZE_REGS)
 }
 
 /// Reads the operand after `opcode` at `at`, refusing if the opcode bytes are
@@ -2398,8 +2504,8 @@ fn install_ceiling(
     }
 }
 
-/// Raises `GL_Upload32`'s ceiling to 1024x1024: a bigger scratch buffer, then
-/// a size check that matches it. Every byte to be changed is verified first;
+/// Raises `GL_Upload32`'s ceiling to [`MAX_SIDE`] square: a bigger scratch
+/// buffer, then a size check that matches it. Every byte to be changed is verified first;
 /// nothing is written unless all of it matches.
 fn raise_ceiling(
     upload32: usize,
@@ -2469,14 +2575,14 @@ fn raise_ceiling(
     Ok(detour)
 }
 
-/// Lets detail textures (`gfx/detail/*.tga`) be up to 1024x1024: the detail
+/// Lets detail textures (`gfx/detail/*.tga`) be up to [`MAX_SIDE`] square: the detail
 /// loader `malloc`s a 1 MB buffer and tells `LoadTGA` it holds 1 MB, so any
 /// TGA over 512x512 pixels' worth fails with "LoadTGA: texture too large
 /// (WxH>256x256)" (the "256x256" is hardcoded text, not the real limit) and
-/// the detail layer silently goes missing. Both immediates become 4 MB -- the
+/// the detail layer silently goes missing. Both immediates become 64 MB -- the
 /// allocation first, so the limit never exceeds what was allocated. What it
 /// loads goes to `GL_Upload32` as RGBA, which [`raise_ceiling`] already opened
-/// to 1024x1024.
+/// that far.
 fn raise_detail_limit(base: usize, loader: usize, sizes: [usize; 2]) -> Result<(), String> {
     for off in sizes {
         check_span(loader + off, DETAIL_STOCK_PUSH)?;
@@ -2495,7 +2601,7 @@ fn raise_detail_limit(base: usize, loader: usize, sizes: [usize; 2]) -> Result<(
     DETAIL_RAISED.store(true, Ordering::Release);
     unsafe {
         crate::debug::report(&format!(
-            "texture_hires: detail texture limit raised to 1024x1024 at +{:#x}",
+            "texture_hires: detail texture limit raised to {MAX_SIDE}x{MAX_SIDE} at +{:#x}",
             loader - base
         ))
     };
@@ -2523,12 +2629,12 @@ fn install_detail_redirect(loader: usize, site: &DetailSite) -> Result<detour::D
 }
 
 /// Finds `site`'s detail loader and, with the upload ceiling raised, lets it
-/// load 1024x1024; then points it at [`DETAIL_DIR`]. Says what it couldn't do.
+/// load up to [`MAX_SIDE`] square; then points it at [`DETAIL_DIR`]. Says what it couldn't do.
 fn install_detail(base: usize, site: &DetailSite, detours: &mut Vec<detour::Detour>) {
     // Safety: `base` is hw.dll's module handle, mapped for the session.
     match unsafe { scan::find_unique(base, site.pattern) } {
         Ok(loader) => {
-            // Only with the upload ceiling raised: a 1024x1024 detail texture
+            // Only with the upload ceiling raised: a larger detail texture
             // would otherwise get past LoadTGA and hit GL_Upload32's stock
             // Sys_Error.
             if CEILING_RAISED.load(Ordering::Acquire)
@@ -2843,9 +2949,19 @@ mod anniversary {
         stub: size_check_stub,
     };
 
-    /// As the pre-Anniversary size-check stub, less its stolen store.
+    /// 25th Anniversary: `esi`/`ebx` rounded, `edi`/`[ebp+0x10]` original.
+    /// The product's store (`mov [ebp-0x10], eax`) precedes the check, and
+    /// `[ebp-4]` holds the rounded width for the mipmap loop, so a shrink
+    /// stores both again.
+    pub(super) const SIZE_REGS: SizeRegs = SizeRegs {
+        prologue: &[],
+        scaled_h: Reg::Ebx,
+        orig_w: Reg::Edi,
+        after_shrink: &[0x89, 0x75, 0xFC, 0x89, 0x45, 0xF0],
+    };
+
     pub fn size_check_stub() -> Vec<u8> {
-        size_limit(&[])
+        size_check_code(&SIZE_REGS)
     }
 
     /// The detail loader's uncached path (the function around it is new C++
@@ -3043,7 +3159,7 @@ mod anniversary {
                 swap.stub_address(),
                 upload32 - base,
                 if CEILING_RAISED.load(Ordering::Acquire) {
-                    "1024x1024"
+                    "up to 4096x4096, gl_max_size decides"
                 } else {
                     "stock"
                 },
@@ -3168,7 +3284,7 @@ pub fn install() -> Result<(), String> {
             swap.stub_address(),
             upload32 - base,
             if CEILING_RAISED.load(Ordering::Acquire) {
-                "1024x1024"
+                "up to 4096x4096, gl_max_size decides"
             } else {
                 "stock"
             },
@@ -3284,12 +3400,12 @@ pub fn status() -> String {
         style_label(),
         SKY_REPLACED.load(Ordering::Relaxed),
         if CEILING_RAISED.load(Ordering::Relaxed) {
-            "1024x1024"
+            "up to 4096x4096, gl_max_size decides"
         } else {
             "stock"
         },
         if DETAIL_RAISED.load(Ordering::Relaxed) {
-            "up to 1024x1024"
+            "up to 4096x4096"
         } else {
             "up to 512x512"
         },
@@ -3354,7 +3470,7 @@ mod tests {
         fixed(SKY_UPLOAD, sky::HOOK_AT, &[0x8B, 0x04, 0x9D]);
         fixed(SKY_UPLOAD, sky::HEIGHT_PUSH, SKY_DIM_PUSH);
         fixed(SKY_UPLOAD, sky::WIDTH_PUSH, SKY_DIM_PUSH);
-        assert_eq!(SKY_MAX_BYTES, 1024 * 1024 * 4);
+        assert_eq!(SKY_MAX_BYTES, RAISED_MAX_PIXELS * 4);
     }
 
     #[test]
@@ -3533,7 +3649,9 @@ mod tests {
             [0x81, 0xFE],
             "the stub starts at the width check"
         );
-        assert_eq!(stub.len(), size_check_stub().len() - 3);
+        // Same shape as the pre-Anniversary stub: no stolen store to replay,
+        // but one more register to restore after a shrink.
+        assert_eq!(stub.len(), size_check_stub().len());
 
         let d = anniversary::DETAIL;
         scan::Pattern::parse(d.pattern).unwrap();
@@ -3587,17 +3705,208 @@ mod tests {
         assert_eq!(code.len(), 33 + 17 + 6 + 3 + 6);
     }
 
+    /// Walks the size-check stub as the CPU would for one texture, and says
+    /// where it ends up: `Ok((scaled_w, scaled_h, product))` past the check,
+    /// or `Err(())` at the Sys_Error jump. A tiny interpreter for exactly the
+    /// instructions `size_check_code` emits.
+    fn run_size_check(
+        regs: &SizeRegs,
+        sw: u32,
+        sh: u32,
+        ow: u32,
+        oh: u32,
+    ) -> Result<(u32, u32, u32), ()> {
+        let code = size_check_code(regs);
+        let (mut esi, mut scaled_h, mut eax) = (sw, sh, sw.wrapping_mul(sh));
+        let mut pc = regs.prologue.len();
+        let imm = |at: usize| u32::from_le_bytes(code[at..at + 4].try_into().unwrap());
+        let mut flags_below_eq = false;
+        let mut flags_eq = false;
+        loop {
+            match code[pc] {
+                0x81 if code[pc + 1] == 0xFE => {
+                    (flags_below_eq, flags_eq) = (esi <= imm(pc + 2), esi == imm(pc + 2));
+                    pc += 6;
+                }
+                0x81 => {
+                    assert_eq!(code[pc + 1], 0xF8 | regs.scaled_h as u8);
+                    (flags_below_eq, flags_eq) = (scaled_h <= imm(pc + 2), scaled_h == imm(pc + 2));
+                    pc += 6;
+                }
+                0x3B if code[pc + 1] & 0xC0 == 0xC0 => {
+                    assert_eq!(code[pc + 1], 0xC0 | (6 << 3) | regs.orig_w as u8);
+                    (flags_below_eq, flags_eq) = (esi <= ow, esi == ow);
+                    pc += 2;
+                }
+                0x3B => {
+                    assert_eq!(
+                        &code[pc + 1..pc + 3],
+                        &[0x40 | ((regs.scaled_h as u8) << 3) | 5, 0x10]
+                    );
+                    (flags_below_eq, flags_eq) = (scaled_h <= oh, scaled_h == oh);
+                    pc += 3;
+                }
+                0x76 => {
+                    pc += 2 + if flags_below_eq {
+                        code[pc + 1] as usize
+                    } else {
+                        0
+                    }
+                }
+                0x75 => pc += 2 + if !flags_eq { code[pc + 1] as usize } else { 0 },
+                0x74 => pc += 2 + if flags_eq { code[pc + 1] as usize } else { 0 },
+                0x77 => {
+                    if !flags_below_eq {
+                        return Err(());
+                    }
+                    pc += 2;
+                }
+                0xBE => {
+                    esi = imm(pc + 1);
+                    pc += 5;
+                }
+                op if op == 0xB8 | regs.scaled_h as u8 => {
+                    scaled_h = imm(pc + 1);
+                    pc += 5;
+                }
+                0x8B => {
+                    assert_eq!(code[pc + 1], 0xC6);
+                    eax = esi;
+                    pc += 2;
+                }
+                0x0F => {
+                    assert_eq!(&code[pc + 1..pc + 3], &[0xAF, 0xC0 | regs.scaled_h as u8]);
+                    eax = eax.wrapping_mul(scaled_h);
+                    pc += 3;
+                }
+                0x89 => {
+                    // A store of eax (the product) or esi (the width) to a
+                    // frame slot; the slot is the build's own business.
+                    assert!(matches!(code[pc + 1], 0x45 | 0x75));
+                    pc += 3;
+                }
+                0x3D => {
+                    (flags_below_eq, flags_eq) = (eax <= imm(pc + 1), eax == imm(pc + 1));
+                    pc += 5;
+                }
+                0xFF => {
+                    assert_eq!(code[pc + 1], 0x25);
+                    // The first indirect jump is SIZE_OK: reached only past the check.
+                    assert_eq!(pc, code.len() - 12);
+                    return Ok((esi, scaled_h, eax));
+                }
+                op => panic!("unexpected opcode {op:#x} at {pc}"),
+            }
+        }
+    }
+
+    #[test]
+    fn the_size_check_keeps_wide_textures_that_need_no_resample() {
+        for regs in [&PRE_SIZE_REGS, &anniversary::SIZE_REGS] {
+            // Under the resample bound: through, whatever the original size.
+            assert_eq!(
+                run_size_check(regs, 1024, 1024, 4096, 4096),
+                Ok((1024, 1024, 1024 * 1024))
+            );
+            assert_eq!(
+                run_size_check(regs, 256, 256, 300, 200),
+                Ok((256, 256, 256 * 256))
+            );
+            // Wider, at its own size: through, up to the ceiling.
+            assert_eq!(
+                run_size_check(regs, 2048, 2048, 2048, 2048),
+                Ok((2048, 2048, 2048 * 2048))
+            );
+            assert_eq!(
+                run_size_check(regs, 4096, 4096, 4096, 4096),
+                Ok((4096, 4096, 4096 * 4096))
+            );
+            assert_eq!(
+                run_size_check(regs, 2048, 256, 2048, 256),
+                Ok((2048, 256, 2048 * 256))
+            );
+            // Wider, but rounded or clamped: resampled to 1024 wide instead.
+            assert_eq!(
+                run_size_check(regs, 2048, 2048, 4096, 4096),
+                Ok((1024, 1024, 1024 * 1024))
+            );
+            assert_eq!(
+                run_size_check(regs, 2048, 512, 2048, 500),
+                Ok((1024, 512, 1024 * 512))
+            );
+            assert_eq!(
+                run_size_check(regs, 2048, 1024, 2000, 1024),
+                Ok((1024, 1024, 1024 * 1024))
+            );
+            // Over the buffer: the engine's own error, as before.
+            assert_eq!(run_size_check(regs, 8192, 8192, 8192, 8192), Err(()));
+            assert_eq!(
+                run_size_check(regs, 1024, 8192, 1024, 8192),
+                Ok((1024, 8192, 1024 * 8192))
+            );
+            assert_eq!(run_size_check(regs, 4096, 8192, 4096, 8192), Err(()));
+        }
+    }
+
     #[test]
     fn size_check_stub_branches_land_where_the_comments_say() {
         let code = size_check_stub();
-        // ja at [9] (+13) and ja at [16] (+6) both land on the TOO_BIG jump.
-        assert_eq!(code[9], 0x77);
-        assert_eq!(11 + code[10] as usize, 24);
-        assert_eq!(code[16], 0x77);
-        assert_eq!(18 + code[17] as usize, 24);
-        assert_eq!(&code[18..20], &[0xFF, 0x25]);
-        assert_eq!(&code[24..26], &[0xFF, 0x25]);
-        assert_eq!(code.len(), 30);
+        let ann = anniversary::size_check_stub();
+        assert_eq!(&code[..3], PRE_SIZE_REGS.prologue);
+        // cmp esi, 1024; jbe check; cmp esi, ebx; jne shrink; cmp edi, [ebp+0x10]; je check
+        assert_eq!(
+            &code[3..20],
+            &[
+                0x81, 0xFE, 0, 4, 0, 0, 0x76, 0x23, 0x3B, 0xF3, 0x75, 0x05, 0x3B, 0x7D, 0x10, 0x74,
+                0x1A
+            ]
+        );
+        // shrink: mov esi, 1024; cmp edi, 1024; jbe +5; mov edi, 1024; mov eax, esi; imul eax, edi; mov [ebp-0xc], eax
+        assert_eq!(
+            &code[20..46],
+            &[
+                0xBE, 0, 4, 0, 0, 0x81, 0xFF, 0, 4, 0, 0, 0x76, 0x05, 0xBF, 0, 4, 0, 0, 0x8B, 0xC6,
+                0x0F, 0xAF, 0xC7, 0x89, 0x45, 0xF4
+            ]
+        );
+        // check: cmp eax, 4096*4096; ja too_big; jmp [SIZE_OK]; too_big: jmp [TOO_BIG]
+        assert_eq!(&code[46..53], &[0x3D, 0, 0, 0, 1, 0x77, 0x06]);
+        assert_eq!(&code[53..55], &[0xFF, 0x25]);
+        assert_eq!(&code[59..61], &[0xFF, 0x25]);
+        assert_eq!(code.len(), 65);
+        // Anniversary: no prologue; ebx is the rounded height and edi the
+        // original width; the shrink stores the width for the mipmap loop
+        // and the product where its check found it.
+        assert_eq!(
+            &ann[..17],
+            &[
+                0x81, 0xFE, 0, 4, 0, 0, 0x76, 0x26, 0x3B, 0xF7, 0x75, 0x05, 0x3B, 0x5D, 0x10, 0x74,
+                0x1D
+            ]
+        );
+        assert_eq!(
+            &ann[17..46],
+            &[
+                0xBE, 0, 4, 0, 0, 0x81, 0xFB, 0, 4, 0, 0, 0x76, 0x05, 0xBB, 0, 4, 0, 0, 0x8B, 0xC6,
+                0x0F, 0xAF, 0xC3, 0x89, 0x75, 0xFC, 0x89, 0x45, 0xF0
+            ]
+        );
+        assert_eq!(&ann[46..], &code[46..]);
+        assert_eq!(ann.len(), 65);
+    }
+
+    #[test]
+    fn the_replacement_cap_follows_gl_max_size_as_the_engine_bounds_it() {
+        assert_eq!(pot_floor(256.0), 256);
+        assert_eq!(pot_floor(1024.0), 1024);
+        assert_eq!(pot_floor(1500.0), 1024);
+        assert_eq!(pot_floor(2048.0), 2048);
+        assert_eq!(pot_floor(4096.0), 4096);
+        assert_eq!(pot_floor(16384.0), MAX_SIDE);
+        assert_eq!(pot_floor(0.0), MIN_GL_MAX_SIZE);
+        assert_eq!(pot_floor(-1.0), MIN_GL_MAX_SIZE);
+        assert_eq!(pot_floor(f32::NAN), MIN_GL_MAX_SIZE);
+        assert_eq!(pot_floor(200.0), 128);
     }
 
     #[test]
