@@ -47,8 +47,8 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
-    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
+    anim_fix, crosshair, decals, demo_seek, ex_interp, hand_signals, hudelement, overview_map,
+    scoreboard, sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
 };
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
@@ -1059,6 +1059,15 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when `dodstudio_seek_skip_between` could not be a cvar.
+unsafe extern "C" fn cmd_seek_skip_between() {
+    handle_toggle(
+        demo_seek::SKIP_BETWEEN_NAME,
+        &demo_seek::SKIP_BETWEEN,
+        demo_seek::status,
+    );
+}
+
 /// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
@@ -1304,6 +1313,16 @@ pub fn install() {
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
+    add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
+    add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+
+    // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
+    // so it needs no poll, and a failed registration costs only this one
+    // setting's type-ahead -- a plain toggle stands in for it.
+    match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
+        Some(cvar) => demo_seek::set_skip_between_cvar(cvar),
+        None => add_command(demo_seek::SKIP_BETWEEN_NAME, cmd_seek_skip_between),
+    }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let gunshots = register(
