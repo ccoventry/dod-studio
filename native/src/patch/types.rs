@@ -609,8 +609,15 @@ impl PatcherConfig {
         // than in any one caller's `extra_engine_args` so that *every* way the
         // app starts the game gets it: a capture batch, a preview, and Launch
         // Game (which used to ignore the setting altogether, #226).
+        //
+        // `-demoedit` turns on the demo player's edit row (Master, Events,
+        // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
+        // GameUI, which otherwise sizes the bar so that row is cut off. It
+        // was on the command line once and fell off when the launchers were
+        // unified in 02b43c1; an install with a custom
+        // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game dod -insecure -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            "-game dod -insecure -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
             self.resolution_width, self.resolution_height, extra_engine_args
         );
 
@@ -868,6 +875,21 @@ mod launch_args_tests {
             assert!(
                 line.contains("-condebug"),
                 "launch args must carry -condebug, got: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_demoedit_is_passed_on_every_launch() {
+        // Without it the demo player's Master/Events/Save row is hidden on any
+        // install lacking a custom DemoPlayerDialog.res, which is how it went
+        // missing unnoticed once before.
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let demoedit = line.find("-demoedit").expect("-demoedit present");
+            assert!(
+                line.find('+').is_none_or(|plus| demoedit < plus),
+                "-demoedit must precede any +command: {line}"
             );
         }
     }
