@@ -696,15 +696,23 @@ test('map list: ticking and adding change the text, and Save sends it whole', as
   await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps');
   await expect(page.locator('#hd-maps-summary')).toContainText('Not saved yet');
 
-  await page.fill('#hd-maps-pattern', 'DOD_C*.bsp');
-  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Matches 1 map: dod_caen.');
-  await page.fill('#hd-maps-pattern', 'dod_saints*');
-  await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Matches none of your maps.');
-  await page.fill('#hd-maps-pattern', 'dod_railroad*');
+  // The search box is the Add box: the filtered list is the preview.
+  await page.fill('#hd-maps-search', 'DOD_C*.bsp');
+  await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
+  await expect(page.locator('#hd-maps-add-btn')).toBeEnabled();
+  await page.fill('#hd-maps-search', 'dod_saints*');
+  await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
+  await expect(page.locator('#hd-maps-add-btn')).toBeEnabled(); // a line for maps added later
+  await page.fill('#hd-maps-search', 'dod_railroad*');
   await expect(page.locator('#hd-maps-pattern-hint')).toHaveText('Already in the list.');
-  await page.fill('#hd-maps-pattern', 'dod_rail?oad');
-  await page.press('#hd-maps-pattern', 'Enter');
-  await expect(page.locator('#hd-maps-pattern')).toHaveValue('');
+  await expect(page.locator('#hd-maps-add-btn')).toBeDisabled();
+  await page.fill('#hd-maps-search', 'dod_rail?oad');
+  await page.press('#hd-maps-search', 'Enter');
+  // The text stays; the message says what happened.
+  await expect(page.locator('#hd-maps-search')).toHaveValue('dod_rail?oad');
+  await expect(page.locator('#hd-maps-message')).toHaveText('Added dod_rail?oad as a line. Save to keep it.');
+  await expect(page.locator('#hd-maps-patterns li')).toHaveCount(4);
+  await page.fill('#hd-maps-search', '');
 
   await page.click('#hd-maps-save-btn');
   // Comments and the user's own lines stay; only the changed lines move.
@@ -768,4 +776,29 @@ test('map list: switching to another install drops unsaved edits, the same insta
   await expect(page.locator('#hd-maps-some')).toBeChecked();
   await expect(page.locator('#hd-maps-patterns li')).toHaveCount(3);
   await expect(page.locator('#hd-maps-summary')).toContainText('3 of 4 maps get map textures and skies.');
+});
+
+test('map list: a map two patterns pick points at both; its own line plus a pattern is still green', async ({ page }) => {
+  const twice = { ...MAP_LIST, text: 'dod_railroad*\ndod_rail*\ndod_anzio\ndod_a*\n' };
+  await loadHarness(page, { status: { ...STATUS, map_list: twice } });
+  await page.click('#hd-refresh-btn');
+
+  const s9a = mapRow(page, 'dod_railroad2_s9a').locator('input');
+  await s9a.click();
+  await expect(s9a).toBeChecked();
+  await expect(page.locator('#hd-maps-message')).toHaveText(
+    'dod_railroad2_s9a is matched by the patterns dod_railroad* and dod_rail*. Change or remove those lines (the chips above) to leave it out.');
+  await expect(page.locator('#hd-maps-patterns li.hd-chip-flash')).toHaveCount(2);
+
+  // Its own line and a pattern: green, and unticking would not drop it.
+  const anzio = mapRow(page, 'dod_anzio').locator('input');
+  await expect(anzio).toHaveClass(/hd-box-pattern/);
+  await anzio.click();
+  await expect(anzio).toBeChecked();
+  await expect(page.locator('#hd-maps-message')).toContainText('dod_anzio is matched by its own line and by the pattern dod_a*.');
+  await expect(page.locator('#hd-maps-message')).toContainText('unticking alone would not');
+
+  // Every map: no Add button, nothing to point at.
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-maps-add-btn')).toBeHidden();
 });

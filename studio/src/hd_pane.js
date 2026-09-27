@@ -81,7 +81,6 @@ export function initHdPane() {
   const mapsSome = document.querySelector('#hd-maps-some');
   const mapsEditor = document.querySelector('#hd-maps-editor');
   const mapsPatterns = document.querySelector('#hd-maps-patterns');
-  const mapsPattern = document.querySelector('#hd-maps-pattern');
   const mapsAddBtn = document.querySelector('#hd-maps-add-btn');
   const mapsPatternHint = document.querySelector('#hd-maps-pattern-hint');
   const mapsSearch = document.querySelector('#hd-maps-search');
@@ -574,15 +573,20 @@ export function initHdPane() {
 
   const mapNames = () => (mapFile?.maps || []).map((m) => m.name);
 
-  // Every map name -> the first pattern that picks it.
+  // Every map name -> every line that picks it, in the list's order.
   function pickedBy() {
     const tests = mapPatterns(mapText).map((p) => [p, patternTest(p)]);
     const picked = new Map();
     for (const name of mapNames()) {
-      const hit = tests.find(([, test]) => test(name));
-      if (hit) picked.set(name, hit[0]);
+      const hits = tests.filter(([, test]) => test(name)).map(([p]) => p);
+      if (hits.length) picked.set(name, hits);
     }
     return picked;
+  }
+
+  // What the search box holds, read as a list line would be.
+  function searchText() {
+    return mapsSearch.value.trim().toLowerCase().replace(/\.bsp$/, '');
   }
 
   const isWildcard = (pattern) => /[*?]/.test(pattern);
@@ -666,8 +670,9 @@ export function initHdPane() {
 
     // Every map, ticked when the list picks it. The search is read exactly
     // as a list line is: `anzio` is one map, `anzio*` nothing (they all
-    // start with dod_), `*anzio*` every anzio map. One rule for both boxes.
-    const query = mapsSearch.value.trim().toLowerCase();
+    // start with dod_), `*anzio*` every anzio map. So what it shows is
+    // what "Add as a line" would pick.
+    const query = searchText();
     const matchesQuery = patternTest(query);
     const shown = mapFile.maps.filter((m) => (!query || matchesQuery(m.name))
       && (!mapsPickedOnly.checked || !picked || picked.has(m.name)));
@@ -679,37 +684,43 @@ export function initHdPane() {
       mapsAvailable.appendChild(none);
     }
     for (const map of shown) {
-      const by = picked?.get(map.name);
+      const bys = picked?.get(map.name) || [];
+      const byPatterns = bys.filter(isWildcard);
       const item = document.createElement('li');
       const label = document.createElement('label');
       const box = document.createElement('input');
       box.type = 'checkbox';
       box.value = map.name;
-      box.checked = mapMode === 'every' || !!by;
+      box.checked = mapMode === 'every' || bys.length > 0;
       box.disabled = mapMode === 'every';
-      const byPattern = !!by && isWildcard(by);
+      // A pattern with a wildcard can't leave one map out; its line has to
+      // change. So the box stays ticked (green, even when the map has a
+      // line of its own too: unticking that wouldn't drop it), and a click
+      // points at every chip that picked it instead: they flash, and the
+      // message says why.
+      const byPattern = byPatterns.length > 0;
       if (byPattern) {
-        label.title = STRINGS.HD.mapPickedByTitle(by);
+        label.title = STRINGS.HD.mapPickedByTitle(byPatterns);
         box.classList.add('hd-box-pattern');
       }
-      // A pattern with a wildcard can't leave one map out; its line has to
-      // change. So the box stays ticked, and a click points at the chip
-      // that picked it instead: it flashes, and the message says why.
       box.addEventListener('click', (e) => {
         if (!byPattern) return;
         e.preventDefault();
-        mapsMessage.textContent = STRINGS.HD.mapPickedByLine(map.name, by);
-        const chip = mapsPatterns.querySelector(`[data-pattern="${CSS.escape(by)}"]`);
-        if (chip) {
+        mapsMessage.textContent = STRINGS.HD.mapPickedByLine(map.name, byPatterns, bys.length > byPatterns.length);
+        let first = true;
+        for (const pattern of byPatterns) {
+          const chip = mapsPatterns.querySelector(`[data-pattern="${CSS.escape(pattern)}"]`);
+          if (!chip) continue;
           chip.classList.remove('hd-chip-flash');
           void chip.offsetWidth; // restart the animation
           chip.classList.add('hd-chip-flash');
-          chip.scrollIntoView({ block: 'nearest' });
+          if (first) chip.scrollIntoView({ block: 'nearest' });
+          first = false;
         }
       });
       box.addEventListener('change', () => {
         if (box.checked) addPattern(map.name.toLowerCase());
-        else removePattern(by);
+        else for (const line of bys) removePattern(line);
         renderMapList();
       });
       const name = document.createElement('span');
@@ -737,7 +748,9 @@ export function initHdPane() {
       : STRINGS.HD.mapsSummary(picked.size, count)];
     // The two tick colours, explained by two ticks: shown once a pattern
     // has picked anything.
-    if (mapsLegend) mapsLegend.hidden = !(mapMode === 'some' && [...picked.values()].some(isWildcard));
+    if (mapsLegend) mapsLegend.hidden = !(mapMode === 'some' && [...picked.values()].some((bys) => bys.some(isWildcard)));
+    // Adding a line only means something while picking maps.
+    if (mapsAddBtn) mapsAddBtn.hidden = mapMode !== 'some';
     if (mapsDirty()) summary.push(STRINGS.HD.MAPS_UNSAVED);
     mapsSummary.textContent = summary.join(' ');
     mapsSaveBtn.disabled = !mapsDirty() || (mapMode === 'some' && !mapPatterns(mapText).length);
@@ -745,34 +758,32 @@ export function initHdPane() {
     renderPatternHint();
   }
 
-  // What the pattern being typed would pick.
+  // Whether what's typed can become a line: the filtered list already
+  // shows what it would pick (a line matching nothing is allowed: it picks
+  // up maps added later).
   function renderPatternHint() {
-    const raw = mapsPattern.value.trim().toLowerCase().replace(/\.bsp$/, '');
-    mapsAddBtn.disabled = !raw;
-    if (!raw) {
-      mapsPatternHint.textContent = STRINGS.HD.MAPS_PATTERN_HELP;
-      return;
-    }
-    if (/[#\s]/.test(raw)) {
-      mapsAddBtn.disabled = true;
-      mapsPatternHint.textContent = STRINGS.HD.PATTERN_BAD;
-      return;
-    }
-    const hits = mapNames().filter(patternTest(raw));
-    mapsPatternHint.textContent = mapPatterns(mapText).includes(raw)
-      ? STRINGS.HD.PATTERN_ALREADY
-      : STRINGS.HD.patternMatches(hits.length, hits);
+    const raw = searchText();
+    let why = '';
+    if (/[#\s]/.test(raw)) why = STRINGS.HD.PATTERN_BAD;
+    else if (raw && mapPatterns(mapText).includes(raw)) why = STRINGS.HD.PATTERN_ALREADY;
+    mapsAddBtn.disabled = !raw || !!why;
+    mapsPatternHint.textContent = why || STRINGS.HD.MAPS_PATTERN_HELP;
   }
 
+  // Adds the search text as a line. The text stays, so the ticks turning
+  // green in place are the confirmation.
   function addTypedPattern() {
-    const raw = mapsPattern.value.trim().toLowerCase().replace(/\.bsp$/, '');
+    const raw = searchText();
     if (!raw || /[#\s]/.test(raw) || mapPatterns(mapText).includes(raw)) {
       renderPatternHint();
       return;
     }
+    if (mapMode !== 'some') {
+      mapMode = 'some';
+      mapsSome.checked = true;
+    }
     addPattern(raw);
-    mapsPattern.value = '';
-    mapsMessage.textContent = '';
+    mapsMessage.textContent = STRINGS.HD.patternAdded(raw, mapNames().filter(patternTest(raw)).length);
     renderMapList();
   }
 
@@ -808,12 +819,11 @@ export function initHdPane() {
     mapsMessage.textContent = '';
     renderMapList();
   });
-  mapsPattern?.addEventListener('input', renderPatternHint);
-  mapsPattern?.addEventListener('keydown', (e) => {
+  mapsSearch?.addEventListener('input', () => renderMapList());
+  mapsSearch?.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') addTypedPattern();
   });
   mapsAddBtn?.addEventListener('click', addTypedPattern);
-  mapsSearch?.addEventListener('input', () => renderMapList());
   mapsPickedOnly?.addEventListener('change', () => renderMapList());
   mapsSaveBtn?.addEventListener('click', saveMapList);
   mapsUndoBtn?.addEventListener('click', () => {

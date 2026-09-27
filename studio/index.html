@@ -815,16 +815,11 @@
                     <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
                     <ul id="hd-maps-patterns" class="hd-map-patterns"></ul>
                   </div>
-                  <div class="input-row">
-                    <label for="hd-maps-pattern" data-str="HD.MAPS_ADD_LABEL">Add a map or a pattern:</label>
-                    <input id="hd-maps-pattern" type="text" spellcheck="false" data-str-placeholder="HD.MAPS_ADD_PLACEHOLDER" placeholder="dod_railroad* or dod_anzio">
-                    <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add</button>
-                  </div>
-                  <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">* matches any run of characters, so dod_railroad* is every railroad map; ? matches one character.</p>
                 </div>
                 <div class="input-row">
                   <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
                   <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search as a line: *anzio*">
+                  <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add as a line</button>
                   <label class="hd-check">
                     <input type="checkbox" id="hd-maps-picked-only">
                     <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
@@ -834,6 +829,7 @@
                     <span class="hd-tick hd-tick-pattern"></span><span data-str="HD.MAPS_TICK_PATTERN">a pattern</span>
                   </span>
                 </div>
+                <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed.</p>
                 <ul id="hd-maps-available" class="hd-map-list"></ul>
                 <p id="hd-maps-summary" class="hd-hint"></p>
                 <div class="row-inputs">
