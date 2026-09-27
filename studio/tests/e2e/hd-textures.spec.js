@@ -670,15 +670,16 @@ test('map list: shows every map, what picks it, and what each line matches', asy
 
   await page.fill('#hd-maps-search', 'rail');
   await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
-  // The search takes wildcards too, matching anywhere in the name.
+  // The search takes wildcards too, naming the whole map as a list line
+  // does: anzio* finds nothing, *anzio* everything with anzio in it.
   await page.fill('#hd-maps-search', 'dod_r*');
   await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
-  await page.fill('#hd-maps-search', 'ca?n');
+  await page.fill('#hd-maps-search', 'dod_ca?n');
   await expect(page.locator('#hd-maps-available li')).toHaveText([/dod_caen/]);
   await page.fill('#hd-maps-search', 'rail*');
-  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
-  await page.fill('#hd-maps-search', 'x?z');
   await expect(page.locator('#hd-maps-available li')).toHaveText(['No map matches the search.']);
+  await page.fill('#hd-maps-search', '*rail*');
+  await expect(page.locator('#hd-maps-available li')).toHaveCount(2);
   await page.fill('#hd-maps-search', '');
   await page.check('#hd-maps-picked-only');
   await expect(page.locator('#hd-maps-available li')).toHaveCount(3);

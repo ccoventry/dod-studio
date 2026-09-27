@@ -1176,7 +1176,7 @@ export const STRINGS = {
     PATTERN_BAD: "A map name can't hold # or spaces.",
     MAPS_REMOVE_BUTTON: 'Remove',
     MAPS_SEARCH_LABEL: 'Your maps:',
-    MAPS_SEARCH_PLACEHOLDER: 'Search, with * and ? if you like',
+    MAPS_SEARCH_PLACEHOLDER: 'Search (* and ? as in a line)',
     MAPS_PICKED_ONLY: 'Picked only',
     mapPickedByTitle: (pattern) => `Matched by the pattern ${pattern}. To leave this map out, change or remove that line.`,
     mapPickedByLine: (map, pattern) => `${map} is matched by the pattern ${pattern}. Change or remove that line (the chip above) to leave it out.`,
