@@ -654,7 +654,8 @@ test('map list: shows every map, what picks it, and what each line matches', asy
   await expect(railroad).toBeChecked();
   await expect(railroad).toBeEnabled();
   await expect(mapRow(page, 'dod_railroad2_s9a').locator('.hd-map-via')).toHaveText('\u2217');
-  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title', /Matched by the pattern dod_railroad\*/);
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title', /^dod_railroad2_s9a - Matched by the pattern dod_railroad\*/);
+  await expect(mapRow(page, 'dod_caen').locator('label')).toHaveAttribute('title', 'dod_caen');
   await railroad.click();
   await expect(railroad).toBeChecked();
   await expect(page.locator('#hd-maps-message')).toHaveText('dod_railroad2_s9a is matched by the pattern dod_railroad*. Change or remove that line (the chip above) to leave it out.');

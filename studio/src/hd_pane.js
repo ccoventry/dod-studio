@@ -699,10 +699,8 @@ export function initHdPane() {
       // points at every chip that picked it instead: they flash, and the
       // message says why.
       const byPattern = byPatterns.length > 0;
-      if (byPattern) {
-        label.title = STRINGS.HD.mapPickedByTitle(byPatterns);
-        box.classList.add('hd-box-pattern');
-      }
+      label.title = byPattern ? `${map.name} - ${STRINGS.HD.mapPickedByTitle(byPatterns)}` : map.name;
+      if (byPattern) box.classList.add('hd-box-pattern');
       box.addEventListener('click', (e) => {
         if (!byPattern) return;
         e.preventDefault();
