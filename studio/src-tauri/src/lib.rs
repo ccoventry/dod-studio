@@ -617,6 +617,7 @@ pub fn run() {
             hd_manager::hd_misses,
             hd_manager::hd_save_style,
             hd_manager::hd_remove_style,
+            hd_manager::hd_save_map_list,
             hd_manager::hd_preview,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,

@@ -16,6 +16,7 @@
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
 pub mod build;
+pub mod map_list;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
@@ -151,6 +152,9 @@ pub struct HdStatus {
     /// The maps the style preview can sample ([`preview::map_choices`]),
     /// filled in by the caller.
     pub maps: Vec<String>,
+    /// The install's `hd_maps.txt` and every map it can pick from. Filled in
+    /// by the caller, which knows the scripts' folder: [`map_list::read`].
+    pub map_list: Option<map_list::MapList>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -194,6 +198,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         scripts: None,
         my_styles: None,
         maps: Vec::new(),
+        map_list: None,
     }
 }
 

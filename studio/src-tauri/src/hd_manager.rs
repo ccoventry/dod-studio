@@ -9,7 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use native::hd::build::{BuildOutcome, BuildRequest};
 use native::hd::my_styles::{self, StyleDef};
-use native::hd::{self, HdStatus, misses, python, setup::SetupOutcome, upscaler};
+use native::hd::{self, HdStatus, map_list, misses, python, setup::SetupOutcome, upscaler};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
@@ -63,6 +63,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.python = Some(python::resolve(&hd_tools));
         status.my_styles = Some(my_styles::read(&root, scripts.as_deref()));
         status.maps = hd::preview::map_choices(&exe, &root, scripts.as_deref());
+        status.map_list = Some(map_list::read(&exe, &root, scripts.as_deref()));
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
         status
     }))
@@ -227,6 +228,24 @@ pub async fn hd_save_style(
     let scripts = scripts_dir(&app);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         my_styles::save(&root, scripts.as_deref(), &name, &def)
+    }))
+    .await
+}
+
+/// Puts `text` in effect as the install's `hd_maps.txt`, or with `None`
+/// builds every map again (the list is set aside, not deleted).
+#[tauri::command]
+pub async fn hd_save_map_list(
+    app: AppHandle,
+    game_path: String,
+    text: Option<String>,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || match text {
+        Some(text) => map_list::save(&root, &text),
+        None => map_list::use_every_map(&root, scripts.as_deref()),
     }))
     .await
 }
