@@ -1165,7 +1165,7 @@ export const STRINGS = {
     MAPS_LIST_LABEL: 'Picked by:',
     MAPS_LIST_EMPTY: 'Nothing yet: tick maps below, or add a pattern.',
     MAPS_ADD_BUTTON: 'Add as a line',
-    MAPS_PATTERN_HELP: 'The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed.',
+    MAPS_PATTERN_HELP: 'The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.',
     patternCount: (count) => (count ? `${count} map${count === 1 ? '' : 's'}` : 'matches no map'),
     PATTERN_ALREADY: 'Already in the list.',
     PATTERN_BAD: "A map name can't hold # or spaces.",
@@ -1175,8 +1175,7 @@ export const STRINGS = {
     MAPS_SEARCH_PLACEHOLDER: 'Search as a line: *anzio*',
     MAPS_PICKED_ONLY: 'Picked only',
     // `patterns`: every wildcard line matching the map; `own`: it has a line of its own too.
-    mapPickedByTitle: (patterns) => `Matched by the pattern${patterns.length > 1 ? 's' : ''} ${patterns.join(' and ')}. To leave this map out, change or remove ${patterns.length > 1 ? 'those lines' : 'that line'}.`,
-    mapPickedByLine: (map, patterns, own) => `${map} is matched by ${own ? 'its own line and by ' : ''}the pattern${patterns.length > 1 ? 's' : ''} ${patterns.join(' and ')}. Change or remove ${patterns.length > 1 ? 'those lines (the chips above)' : 'that line (the chip above)'} to leave it out${own ? '; unticking alone would not' : ''}.`,
+    mapPickedByTitle: (patterns, own) => `Matched by ${own ? 'its own line and by ' : ''}the pattern${patterns.length > 1 ? 's' : ''} ${patterns.join(' and ')}. To leave this map out, change or remove ${patterns.length > 1 ? 'those lines' : 'that line'}${own ? '; unticking alone would not' : ''}.`,
     MAPS_NONE_FOUND: 'No maps found in dod\\maps. Check the Half-Life Executable on the Configuration page.',
     MAPS_NO_MATCH: 'No map matches the search.',
     mapsSummaryEvery: (count) => `All ${count} maps get map textures and skies.`,

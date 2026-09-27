@@ -658,7 +658,7 @@ test('map list: shows every map, what picks it, and what each line matches', asy
   await expect(mapRow(page, 'dod_caen').locator('label')).toHaveAttribute('title', 'dod_caen');
   await railroad.click();
   await expect(railroad).toBeChecked();
-  await expect(page.locator('#hd-maps-message')).toHaveText('dod_railroad2_s9a is matched by the pattern dod_railroad*. Change or remove that line (the chip above) to leave it out.');
+  await expect(page.locator('#hd-maps-message')).toHaveText('');
   await expect(page.locator('#hd-maps-patterns li').nth(0)).toHaveClass(/hd-chip-flash/);
   // Two tick colours, explained by two ticks, once a pattern picks something.
   await expect(page.locator('#hd-maps-legend')).toBeVisible();
@@ -789,8 +789,8 @@ test('map list: a map two patterns pick points at both; its own line plus a patt
   const s9a = mapRow(page, 'dod_railroad2_s9a').locator('input');
   await s9a.click();
   await expect(s9a).toBeChecked();
-  await expect(page.locator('#hd-maps-message')).toHaveText(
-    'dod_railroad2_s9a is matched by the patterns dod_railroad* and dod_rail*. Change or remove those lines (the chips above) to leave it out.');
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('label')).toHaveAttribute('title',
+    'dod_railroad2_s9a - Matched by the patterns dod_railroad* and dod_rail*. To leave this map out, change or remove those lines.');
   await expect(page.locator('#hd-maps-patterns li.hd-chip-flash')).toHaveCount(2);
 
   // Its own line and a pattern: green, and unticking would not drop it.
@@ -798,8 +798,7 @@ test('map list: a map two patterns pick points at both; its own line plus a patt
   await expect(anzio).toHaveClass(/hd-box-pattern/);
   await anzio.click();
   await expect(anzio).toBeChecked();
-  await expect(page.locator('#hd-maps-message')).toContainText('dod_anzio is matched by its own line and by the pattern dod_a*.');
-  await expect(page.locator('#hd-maps-message')).toContainText('unticking alone would not');
+  await expect(mapRow(page, 'dod_anzio').locator('label')).toHaveAttribute('title', /its own line and by the pattern dod_a\*.*unticking alone would not/);
 
   // Every map: no Add button, nothing to point at.
   await page.check('#hd-maps-every');

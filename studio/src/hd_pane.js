@@ -696,15 +696,16 @@ export function initHdPane() {
       // A pattern with a wildcard can't leave one map out; its line has to
       // change. So the box stays ticked (green, even when the map has a
       // line of its own too: unticking that wouldn't drop it), and a click
-      // points at every chip that picked it instead: they flash, and the
-      // message says why.
+      // points at every chip that picked it instead: they flash. The
+      // tooltip and the help line above the list say the rest.
       const byPattern = byPatterns.length > 0;
-      label.title = byPattern ? `${map.name} - ${STRINGS.HD.mapPickedByTitle(byPatterns)}` : map.name;
+      label.title = byPattern
+        ? `${map.name} - ${STRINGS.HD.mapPickedByTitle(byPatterns, bys.length > byPatterns.length)}`
+        : map.name;
       if (byPattern) box.classList.add('hd-box-pattern');
       box.addEventListener('click', (e) => {
         if (!byPattern) return;
         e.preventDefault();
-        mapsMessage.textContent = STRINGS.HD.mapPickedByLine(map.name, byPatterns, bys.length > byPatterns.length);
         let first = true;
         for (const pattern of byPatterns) {
           const chip = mapsPatterns.querySelector(`[data-pattern="${CSS.escape(pattern)}"]`);
