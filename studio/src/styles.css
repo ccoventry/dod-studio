@@ -1949,7 +1949,8 @@ input[type="checkbox"].hd-box-pattern {
 
 .hd-map-via {
   color: var(--hd-tick-pattern);
-  margin-left: 3px;
+  margin-left: -3px;
+  flex-shrink: 0;
 }
 
 .hd-map-legend {

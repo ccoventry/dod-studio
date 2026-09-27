@@ -726,17 +726,20 @@ export function initHdPane() {
       name.textContent = map.name;
       // Which line picked it is the tooltip and a small mark, not text in
       // the row: the rows are packed, and it read as clutter.
-      if (byPattern) {
-        // One mark, with a count when more than one pattern picks the map.
-        const via = document.createElement('span');
-        via.className = 'hd-map-via';
-        via.textContent = byPatterns.length > 1 ? `\u2217${byPatterns.length}` : '\u2217';
-        name.appendChild(via);
-      }
       const detail = document.createElement('span');
       detail.className = 'hd-miss-detail';
       detail.textContent = formatSize(map.bytes);
-      label.append(box, name, detail);
+      label.append(box, name);
+      if (byPattern) {
+        // One mark, with a count when more than one pattern picks the map.
+        // Beside the name, not inside it, so a long name shortens and the
+        // mark still shows.
+        const via = document.createElement('span');
+        via.className = 'hd-map-via';
+        via.textContent = byPatterns.length > 1 ? `\u2217${byPatterns.length}` : '\u2217';
+        label.appendChild(via);
+      }
+      label.appendChild(detail);
       item.appendChild(label);
       mapsAvailable.appendChild(item);
     }
