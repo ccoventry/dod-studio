@@ -664,10 +664,11 @@ export function initHdPane() {
       mapsPatterns.appendChild(item);
     }
 
-    // Every map, ticked when the list picks it. The search takes the same
-    // wildcards as a list line; without any it's a plain "contains".
+    // Every map, ticked when the list picks it. The search is a "contains":
+    // with * or ? in it, the pattern may sit anywhere in the name (`anzio*`
+    // finds every anzio map), unlike a list line, which names the whole map.
     const query = mapsSearch.value.trim().toLowerCase();
-    const matchesQuery = isWildcard(query) ? patternTest(query) : (name) => name.toLowerCase().includes(query);
+    const matchesQuery = isWildcard(query) ? patternTest(`*${query}*`) : (name) => name.toLowerCase().includes(query);
     const shown = mapFile.maps.filter((m) => (!query || matchesQuery(m.name))
       && (!mapsPickedOnly.checked || !picked || picked.has(m.name)));
     mapsAvailable.innerHTML = '';
