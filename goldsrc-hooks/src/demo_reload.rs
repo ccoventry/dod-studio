@@ -26,6 +26,14 @@
 //! The first attempt is at [`crate::commands::install`], right after
 //! `client.dll`'s `Initialize`. In case the engine has not registered
 //! `playdemo` by then, [`poll`] retries every frame for a few seconds.
+//!
+//! ## A demo started from the command line
+//!
+//! Launch Preview and capture start the game with `+viewdemo <name>` or
+//! `+playdemo <name>` on its command line, and the engine runs that before
+//! the wrap is in: live, the demo was a quarter of a second in when the wrap
+//! landed. So with no name noted, `dodstudio_reload_demo` takes the last
+//! `+playdemo`/`+viewdemo` from the game's own command line instead.
 
 // Only the 32-bit build installs anything; a host check still compiles it.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -210,9 +218,36 @@ fn replay_line(command: &str, name: &str) -> Option<String> {
     Some(format!("{command} \"{name}\"\n"))
 }
 
+/// The last `+playdemo <name>` or `+viewdemo <name>` among the game's
+/// command-line arguments, for a demo started at launch (see the module doc).
+/// A `+` or `-` argument right after the command is the next option, not a
+/// name.
+fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static str, String)> {
+    let mut found = None;
+    let mut args = args.into_iter().peekable();
+    while let Some(arg) = args.next() {
+        let command = if arg.eq_ignore_ascii_case("+playdemo") {
+            "playdemo"
+        } else if arg.eq_ignore_ascii_case("+viewdemo") {
+            "viewdemo"
+        } else {
+            continue;
+        };
+        if let Some(name) = args.next_if(|next| !next.starts_with(['+', '-'])) {
+            let name = name.trim().to_string();
+            if replay_line(command, &name).is_some() {
+                found = Some((command, name));
+            }
+        }
+    }
+    found
+}
+
 /// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
 pub unsafe extern "C" fn command() {
-    let last = LAST.with(|last| last.borrow().clone());
+    let last = LAST
+        .with(|last| last.borrow().clone())
+        .or_else(|| from_command_line(std::env::args()));
     let Some((command, name)) = last else {
         let why = if WRAPPED.load(Ordering::Relaxed) {
             "no demo has been played this session yet -- start one with playdemo or viewdemo first"
@@ -276,6 +311,53 @@ mod tests {
         assert_eq!(replay_line("playdemo", "a\"; quit"), None);
         assert_eq!(replay_line("playdemo", "a;quit"), None);
         assert_eq!(replay_line("playdemo", "a\nquit"), None);
+    }
+
+    fn args(line: &str) -> Vec<String> {
+        line.split_whitespace().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn a_launch_preview_command_line_gives_its_demo() {
+        let line = "hl.exe -game dod -insecure -demoedit -windowed -w 1280 -h 720 -gl -32bpp \
+                    -afxRenderMode standard -afxForceAlpha8 1 -condebug \
+                    +viewdemo k4_ktps9w1_gskill_allies_preview";
+        assert_eq!(
+            from_command_line(args(line)),
+            Some(("viewdemo", "k4_ktps9w1_gskill_allies_preview".to_string()))
+        );
+    }
+
+    #[test]
+    fn a_capture_command_line_gives_its_demo() {
+        let line = "hl.exe -game dod +exec dodstudio_helper.cfg +playdemo match1 -condebug";
+        assert_eq!(
+            from_command_line(args(line)),
+            Some(("playdemo", "match1".to_string()))
+        );
+    }
+
+    #[test]
+    fn the_last_demo_on_the_command_line_wins_and_options_are_not_names() {
+        assert_eq!(
+            from_command_line(args("hl.exe +PlayDemo first +viewdemo second")),
+            Some(("viewdemo", "second".to_string()))
+        );
+        assert_eq!(from_command_line(args("hl.exe +viewdemo -condebug")), None);
+        assert_eq!(
+            from_command_line(args("hl.exe +viewdemo +exec x.cfg")),
+            None
+        );
+        assert_eq!(from_command_line(args("hl.exe +viewdemo")), None);
+        assert_eq!(from_command_line(args("hl.exe -game dod")), None);
+    }
+
+    #[test]
+    fn a_command_line_name_that_would_break_the_line_is_not_used() {
+        assert_eq!(
+            from_command_line(vec!["+playdemo".to_string(), "a;quit".to_string()]),
+            None
+        );
     }
 
     #[test]
