@@ -84,9 +84,14 @@
 //! Detail textures (`gfx/detail/*.tga`, drawn over walls when
 //! `r_detailtextures` is on) have a separate, smaller limit: their loader reads
 //! each TGA into a 1 MB buffer, so anything over 512x512 fails to load. With
-//! the ceiling raised, [`raise_detail_limit`] makes that 64 MB, the same
-//! 4096x4096. Skies have their own 256x256 buffer, enlarged the same way by
-//! [`install_sky`]; `gl_max_size` never touches them.
+//! the ceiling raised, [`raise_detail_limit`] makes that 16 MB, 2048x2048.
+//! Skies have their own 256x256 buffer, enlarged to 1024x1024 by
+//! [`install_sky`]; `gl_max_size` never touches them. Both buffers are the
+//! engine's own, `malloc`ed afresh for every detail texture and every sky
+//! load, so they are sized for what the 4x build can make (a 512 detail
+//! original, a 256 sky face), not for the 4096 ceiling: at 64 MB a load the
+//! sky's unchecked `malloc` eventually failed in the 2 GB pre-Anniversary
+//! process and the engine wrote the face through a null pointer.
 //!
 //! ## Same-named textures on consecutive maps
 //!
@@ -312,8 +317,13 @@ const DETAIL_STOCK_BYTES: usize = 0x10_0000;
 /// [ebp-0x10c]`, loading the path buffer's address for `LoadTGA`.
 const DETAIL_PATH_AT: usize = 0x4b;
 const DETAIL_PATH_STOLEN: &[u8] = &[0x8D, 0x85, 0xF4, 0xFE, 0xFF, 0xFF];
-/// [`MAX_SIDE`] squared, RGBA: what the upload ceiling allows.
-const DETAIL_MAX_BYTES: usize = RAISED_MAX_PIXELS * 4;
+/// The largest HD detail texture: the 4x of a 512x512 original, the size
+/// most stock detail files are. Not [`MAX_SIDE`]: the loader `malloc`s this
+/// much for every detail texture a map loads (see the module doc), so every
+/// doubling quadruples that. A bigger file is skipped for its original.
+const DETAIL_MAX_SIDE: u32 = 2048;
+/// [`DETAIL_MAX_SIDE`] squared, RGBA.
+const DETAIL_MAX_BYTES: usize = (DETAIL_MAX_SIDE * DETAIL_MAX_SIDE * 4) as usize;
 
 /// One build's detail-texture loader, for [`install_detail`].
 struct DetailSite {
@@ -364,9 +374,12 @@ mod sky {
 }
 /// `push 0x100`.
 const SKY_DIM_PUSH: &[u8] = &[0x68, 0x00, 0x01, 0x00, 0x00];
-/// The stock face size, and the largest replacement face ([`MAX_SIDE`] squared).
+/// The stock face size, and the largest replacement face: the 4x of a stock
+/// face. `R_LoadSkys` `malloc`s the buffer on every sky load and never checks
+/// it (see the module doc), so this stays small; a bigger face is halved to
+/// fit.
 const SKY_STOCK_SIDE: u32 = 256;
-const SKY_MAX_SIDE: u32 = MAX_SIDE;
+const SKY_MAX_SIDE: u32 = 1024;
 const SKY_MAX_BYTES: usize = (SKY_MAX_SIDE * SKY_MAX_SIDE * 4) as usize;
 /// `R_LoadSkys`'s path buffer: `char path[64]` at `ebp-0x6c`, filled with
 /// `gfx/env/<skyname><face>.tga` before the face loads.
@@ -2601,7 +2614,7 @@ fn raise_detail_limit(base: usize, loader: usize, sizes: [usize; 2]) -> Result<(
     DETAIL_RAISED.store(true, Ordering::Release);
     unsafe {
         crate::debug::report(&format!(
-            "texture_hires: detail texture limit raised to {MAX_SIDE}x{MAX_SIDE} at +{:#x}",
+            "texture_hires: detail texture limit raised to {DETAIL_MAX_SIDE}x{DETAIL_MAX_SIDE} at +{:#x}",
             loader - base
         ))
     };
@@ -3308,6 +3321,7 @@ pub fn install() -> Result<(), String> {
 
 /// One line for `dodstudio_debug_status`.
 pub fn status() -> String {
+    let detail_limit = &*format!("up to {DETAIL_MAX_SIDE}x{DETAIL_MAX_SIDE}");
     let world = WORLD_SEEN.load(Ordering::Relaxed);
     let replaced = REPLACED.load(Ordering::Relaxed);
     let last = LAST_REPLACED
@@ -3405,7 +3419,7 @@ pub fn status() -> String {
             "stock"
         },
         if DETAIL_RAISED.load(Ordering::Relaxed) {
-            "up to 4096x4096"
+            detail_limit
         } else {
             "up to 512x512"
         },
@@ -3470,7 +3484,9 @@ mod tests {
         fixed(SKY_UPLOAD, sky::HOOK_AT, &[0x8B, 0x04, 0x9D]);
         fixed(SKY_UPLOAD, sky::HEIGHT_PUSH, SKY_DIM_PUSH);
         fixed(SKY_UPLOAD, sky::WIDTH_PUSH, SKY_DIM_PUSH);
-        assert_eq!(SKY_MAX_BYTES, RAISED_MAX_PIXELS * 4);
+        // The 4x of a stock face, the same 4 MB as before the ceiling was
+        // raised: R_LoadSkys mallocs it on every sky load, unchecked.
+        assert_eq!(SKY_MAX_BYTES, 4 * 1024 * 1024);
     }
 
     #[test]
@@ -3566,8 +3582,10 @@ mod tests {
         scan::Pattern::parse(DETAIL_LOADER).unwrap();
         fixed(DETAIL_LOADER, detail::ALLOC_SIZE, DETAIL_STOCK_PUSH);
         fixed(DETAIL_LOADER, detail::LOADTGA_SIZE, DETAIL_STOCK_PUSH);
-        // The new size must hold exactly what GL_Upload32's raised ceiling allows.
-        assert_eq!(DETAIL_MAX_BYTES, RAISED_MAX_PIXELS * 4);
+        // Sized for the 4x of a 512 original, not the upload ceiling: the
+        // loader mallocs it for every detail texture.
+        assert_eq!(DETAIL_MAX_BYTES, 16 * 1024 * 1024);
+        assert!(DETAIL_MAX_BYTES <= RAISED_MAX_PIXELS * 4);
     }
 
     #[test]

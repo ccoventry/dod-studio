@@ -14,8 +14,11 @@ matters because the engine blends detail multiplicatively over the wall
 brighten or flatten every wall that uses it.
 
 Files already built at the cap (or whose 4x wouldn't be any bigger) are
-skipped. Most detail textures are 512 a side, so a cap of 2048 or more is
-where they gain: at 1024 they are only 2x.
+skipped. Most detail textures are 512 a side, so a cap of 2048 is where
+they gain: at 1024 they are only 2x. Detail textures stop at 2048 whatever
+the cap (DETAIL_CAP): the game reads each one into a buffer it allocates
+for every detail texture a map loads, and the hook sizes that buffer for
+2048 (texture_hires.rs, DETAIL_MAX_SIDE). A bigger file would be skipped.
 
 usage: python detail_hd.py <out_dir> [<folder of .tga>]    (default gfx/detail)
 env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
@@ -26,6 +29,14 @@ from PIL import Image
 
 import hdcommon as C
 import styles as S
+
+# The hook's DETAIL_MAX_SIDE: the largest detail texture the game will load.
+DETAIL_CAP = min(C.CAP, 2048)
+
+
+def target(n):
+    """4x `n`, rounded up to a power of two, at most DETAIL_CAP."""
+    return min(C.pot(n * 4), DETAIL_CAP)
 
 
 def main():
@@ -42,9 +53,9 @@ def main():
         name = os.path.basename(f)
         with Image.open(f) as im:
             w, h = im.size
-        if C.pot(w * 4) <= w and C.pot(h * 4) <= h:
+        if target(w) <= w and target(h) <= h:
             continue  # already at the cap: nothing to gain
-        if C.built(os.path.join(out_dir, name), C.pot(w * 4), C.pot(h * 4)):
+        if C.built(os.path.join(out_dir, name), target(w), target(h)):
             continue
         a = np.asarray(Image.open(f).convert("RGB"))
         jobs[name] = a
@@ -60,7 +71,7 @@ def main():
         if not os.path.exists(src):
             continue
         h, w = a.shape[:2]
-        tw, th = C.pot(w * 4), C.pot(h * 4)
+        tw, th = target(w), target(h)
         centre = (tw // 2, th // 2, tw // 2 + tw, th // 2 + th)
         up = np.asarray(Image.open(src).convert("RGB").resize((tw * 2, th * 2), Image.LANCZOS).crop(centre)).astype(np.float32)
         o = a.astype(np.float32)
