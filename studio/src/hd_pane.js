@@ -664,12 +664,11 @@ export function initHdPane() {
       mapsPatterns.appendChild(item);
     }
 
-    // Every map, ticked when the list picks it. With * or ? the search
-    // names the whole map, exactly as a list line does (`anzio*` finds
-    // nothing, `*anzio*` every anzio map), so the two never disagree;
-    // without any it's a plain "contains".
+    // Every map, ticked when the list picks it. The search is read exactly
+    // as a list line is: `anzio` is one map, `anzio*` nothing (they all
+    // start with dod_), `*anzio*` every anzio map. One rule for both boxes.
     const query = mapsSearch.value.trim().toLowerCase();
-    const matchesQuery = isWildcard(query) ? patternTest(query) : (name) => name.toLowerCase().includes(query);
+    const matchesQuery = patternTest(query);
     const shown = mapFile.maps.filter((m) => (!query || matchesQuery(m.name))
       && (!mapsPickedOnly.checked || !picked || picked.has(m.name)));
     mapsAvailable.innerHTML = '';
