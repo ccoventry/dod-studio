@@ -729,9 +729,10 @@ export function initHdPane() {
       // Which line picked it is the tooltip and a small mark, not text in
       // the row: the rows are packed, and it read as clutter.
       if (byPattern) {
+        // One mark, with a count when more than one pattern picks the map.
         const via = document.createElement('span');
         via.className = 'hd-map-via';
-        via.textContent = '\u2217';
+        via.textContent = byPatterns.length > 1 ? `\u2217${byPatterns.length}` : '\u2217';
         name.appendChild(via);
       }
       const detail = document.createElement('span');

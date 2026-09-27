@@ -783,6 +783,8 @@ test('map list: a map two patterns pick points at both; its own line plus a patt
   await loadHarness(page, { status: { ...STATUS, map_list: twice } });
   await page.click('#hd-refresh-btn');
 
+  await expect(mapRow(page, 'dod_railroad2_s9a').locator('.hd-map-via')).toHaveText('\u22172');
+  await expect(mapRow(page, 'dod_anzio').locator('.hd-map-via')).toHaveText('\u2217');
   const s9a = mapRow(page, 'dod_railroad2_s9a').locator('input');
   await s9a.click();
   await expect(s9a).toBeChecked();
