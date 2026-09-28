@@ -1271,6 +1271,30 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// The scan status line: how many demos are done out of how many, and one demo
+/// still being parsed, when there is one. With `SCAN_CONCURRENCY` workers,
+/// "the current file" is one of the current files.
+fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
+    match current {
+        Some(name) => format!("Scanning {done} / {total} — {name}"),
+        None => format!("Scanning {done} / {total}"),
+    }
+}
+
+/// True when a progress line may go out at `now_ms`: at most one per ~33 ms
+/// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
+/// `u32::MAX` before the first one.
+fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
+    use std::sync::atomic::Ordering;
+    let last = last_ms.load(Ordering::Relaxed);
+    if last != u32::MAX && now_ms.saturating_sub(last) < 33 {
+        return false;
+    }
+    last_ms
+        .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
 pub async fn scan_directory_impl(
     app_handle: tauri::AppHandle,
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
@@ -1296,7 +1320,10 @@ pub async fn scan_directory_impl(
             if path_buf.is_dir() {
                 dir_stack.push(path_buf);
             } else if path_buf.is_file()
-                && path_buf.extension().map(|ext| ext == "dem").unwrap_or(false)
+                && path_buf
+                    .extension()
+                    .map(|ext| ext == "dem")
+                    .unwrap_or(false)
             {
                 let insert_idx = list
                     .binary_search_by(|p: &PathBuf| {
@@ -1340,106 +1367,152 @@ pub async fn scan_directory_impl(
         // free, with no re-sort needed once concurrent workers finish out of
         // order.
         let total = list.len();
-        let slots: Mutex<Vec<Option<SerializedDemo>>> = Mutex::new((0..total).map(|_| None).collect());
+        let slots: Mutex<Vec<Option<SerializedDemo>>> =
+            Mutex::new((0..total).map(|_| None).collect());
         let next_index = std::sync::atomic::AtomicUsize::new(0);
         // Completed-count progress rather than positional index -- same
         // reason the patch loop's `capture_status` event uses one: files
         // finish out of order once scanned concurrently.
         let completed = std::sync::atomic::AtomicU32::new(0);
         let found = std::sync::atomic::AtomicU32::new(0);
-
+        // Indices being parsed right now, so every progress line names a demo
+        // still in flight rather than one that just finished (#433).
+        let in_flight: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+        // ~33 ms telemetry throttle (CLAUDE.md), as ms since the scan began.
+        // Starts at u32::MAX so the first line always goes out.
+        let scan_started = std::time::Instant::now();
+        let last_emit_ms = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let emit_progress = |done: u32, current: Option<&str>| {
+            let now_ms = scan_started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+            if !progress_emit_due(&last_emit_ms, now_ms) {
+                return;
+            }
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": done,
+                    "found": found.load(std::sync::atomic::Ordering::Relaxed),
+                    "status": scan_status_line(done, total_files, current),
+                    "cancelled": false
+                }),
+            );
+        };
         std::thread::scope(|scope| {
             let worker_count = SCAN_CONCURRENCY.min(total).max(1);
             for _ in 0..worker_count {
-                let app_handle = &app_handle;
                 let cancel_token = &cancel_token;
                 let list = &list;
                 let slots = &slots;
                 let next_index = &next_index;
                 let completed = &completed;
                 let found = &found;
-                scope.spawn(move || loop {
-                    // Honour cancellation before starting the next parse
-                    // (I/O can be slow) -- a parse already in flight is not
-                    // interrupted, same blind spot the patch loop's
-                    // decal-flush pass has (#193).
-                    if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= total {
-                        break;
-                    }
-                    let file = &list[idx];
-                    let file_name = file
+                let in_flight = &in_flight;
+                let emit_progress = &emit_progress;
+                let file_name_at = move |i: usize| {
+                    list[i]
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
-                        .to_string();
+                        .to_string()
+                };
+                scope.spawn(move || {
+                    loop {
+                        // Honour cancellation before starting the next parse
+                        // (I/O can be slow) -- a parse already in flight is not
+                        // interrupted, same blind spot the patch loop's
+                        // decal-flush pass has (#193).
+                        if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= total {
+                            break;
+                        }
+                        let file = &list[idx];
+                        let file_name = file
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        // Sent when a demo starts too, not only when one finishes:
+                        // before #433 a one-demo folder showed a bare "Scanning..."
+                        // for the whole parse, since its first finish was its last.
+                        // The first of these also carries the total (`0 / N`).
+                        in_flight
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .push(idx);
+                        emit_progress(
+                            completed.load(std::sync::atomic::Ordering::Relaxed),
+                            Some(&file_name),
+                        );
 
-                    let serialized = scan_demo_for_highlights_with_analysis(file).ok().map(
-                        |(
-                            (
-                                tickrate,
-                                streaks,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                match_start_tick,
-                                frame_times_arc,
-                            ),
-                            analysis,
-                        )| {
-                            // Pre-warm the analyzer cache with the Analysis
-                            // this scan already computed, so opening this
-                            // demo in the Demo Analyzer afterward hits the
-                            // cache path instead of re-parsing.
-                            // Best-effort/silent, and safe under concurrency:
-                            // keyed per demo path, not one shared cache.
-                            native::warm_analyzer_cache(file, &analysis);
+                        let serialized = scan_demo_for_highlights_with_analysis(file).ok().map(
+                            |(
+                                (
+                                    tickrate,
+                                    streaks,
+                                    is_pov,
+                                    local_player_index,
+                                    playback_frames,
+                                    match_start_tick,
+                                    frame_times_arc,
+                                ),
+                                analysis,
+                            )| {
+                                // Pre-warm the analyzer cache with the Analysis
+                                // this scan already computed, so opening this
+                                // demo in the Demo Analyzer afterward hits the
+                                // cache path instead of re-parsing.
+                                // Best-effort/silent, and safe under concurrency:
+                                // keyed per demo path, not one shared cache.
+                                native::warm_analyzer_cache(file, &analysis);
 
-                            let serialized_streaks: Vec<SerializedStreak> = streaks
-                                .into_iter()
-                                .map(|mut s| {
-                                    s.match_start_tick = match_start_tick;
-                                    s.frame_times = frame_times_arc.clone();
-                                    SerializedStreak::from(s)
-                                })
-                                .collect();
+                                let serialized_streaks: Vec<SerializedStreak> = streaks
+                                    .into_iter()
+                                    .map(|mut s| {
+                                        s.match_start_tick = match_start_tick;
+                                        s.frame_times = frame_times_arc.clone();
+                                        SerializedStreak::from(s)
+                                    })
+                                    .collect();
 
-                            SerializedDemo {
-                                path: file.to_string_lossy().to_string(),
-                                name: file_name.clone(),
-                                tickrate,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                streaks: serialized_streaks,
-                            }
-                        },
-                    );
+                                SerializedDemo {
+                                    path: file.to_string_lossy().to_string(),
+                                    name: file_name.clone(),
+                                    tickrate,
+                                    is_pov,
+                                    local_player_index,
+                                    playback_frames,
+                                    streaks: serialized_streaks,
+                                }
+                            },
+                        );
 
-                    if serialized.is_some() {
-                        found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if serialized.is_some() {
+                            found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
+
+                        let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let still_running = {
+                            let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
+                            running.retain(|&i| i != idx);
+                            running.first().copied()
+                        };
+                        let current = still_running.map(file_name_at);
+                        emit_progress(done, current.as_deref());
                     }
-                    slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
-
-                    let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        serde_json::json!({
-                            "scanned": done,
-                            "found": found.load(std::sync::atomic::Ordering::Relaxed),
-                            "status": format!("Scanning {} / {} — {}", done, total_files, file_name),
-                            "cancelled": false
-                        }),
-                    );
                 });
             }
         });
 
-        let results: Vec<SerializedDemo> =
-            slots.into_inner().unwrap_or_else(|p| p.into_inner()).into_iter().flatten().collect();
+        let results: Vec<SerializedDemo> = slots
+            .into_inner()
+            .unwrap_or_else(|p| p.into_inner())
+            .into_iter()
+            .flatten()
+            .collect();
         let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
 
         // ── Final progress event (complete or cancelled) ────────────────────
@@ -1981,6 +2054,27 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
+        assert_eq!(
+            scan_status_line(0, 1, Some("a.dem")),
+            "Scanning 0 / 1 — a.dem"
+        );
+        assert_eq!(scan_status_line(1, 1, None), "Scanning 1 / 1");
+    }
+
+    #[test]
+    fn scan_progress_is_throttled_to_one_line_per_33_ms() {
+        let last = std::sync::atomic::AtomicU32::new(u32::MAX);
+        assert!(
+            progress_emit_due(&last, 0),
+            "the first line always goes out"
+        );
+        assert!(!progress_emit_due(&last, 20));
+        assert!(progress_emit_due(&last, 33));
+        assert!(!progress_emit_due(&last, 40));
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {
