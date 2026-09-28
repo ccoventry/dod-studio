@@ -13,6 +13,7 @@ import { streakUid, recordTake } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
+import { numberField } from './number_field.js';
 
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
@@ -89,11 +90,11 @@ const TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS = 8.0;
  * once at init and on every `input` event from the five timing fields.
  */
 export function renderTimingDiagram() {
-  const preRoll = parseFloat(document.querySelector('#config-pre-roll')?.value) || 0;
-  const postRoll = parseFloat(document.querySelector('#config-post-roll')?.value) || 0;
-  const startLead = parseFloat(document.querySelector('#config-record-start-lead')?.value) || 0;
-  const stopTrail = parseFloat(document.querySelector('#config-record-stop-trail')?.value) || 0;
-  const initialDelay = parseFloat(document.querySelector('#config-initial-delay')?.value) || 0;
+  const preRoll = numberField('#config-pre-roll', 0);
+  const postRoll = numberField('#config-post-roll', 0);
+  const startLead = numberField('#config-record-start-lead', 0);
+  const stopTrail = numberField('#config-record-stop-trail', 0);
+  const initialDelay = numberField('#config-initial-delay', 0);
   const streak = TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS;
 
   const note = document.querySelector('#timing-diagram-initial-delay-note');
@@ -291,9 +292,9 @@ export async function runObsConnectionTest({ auto = false } = {}) {
       host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
       port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
       password: document.querySelector('#config-obs-password')?.value || '',
-      gameWidth: parseInt(document.querySelector('#config-res-width')?.value, 10) || 1280,
-      gameHeight: parseInt(document.querySelector('#config-res-height')?.value, 10) || 720,
-      obsCaptureFps: parseInt(document.querySelector('#config-obs-capture-fps')?.value, 10) || 120,
+      gameWidth: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+      gameHeight: numberField('#config-res-height', 720, { integer: true, positive: true }),
+      obsCaptureFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     });
     renderObsReport(report);
   } catch (e) {
@@ -413,13 +414,13 @@ export async function refreshLaunchGuard(state) {
 
   const resolvedState = state || (currentGetState ? currentGetState() : null) || { targetDrives: [], currentScannedDemos: [] };
 
-  const preRollVal = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-  const postRollVal = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
-  const recordStartLeadVal = parseFloat(document.querySelector("#config-record-start-lead")?.value) || 0.0;
-  const recordStopTrailVal = parseFloat(document.querySelector("#config-record-stop-trail")?.value) || 0.0;
-  const captureFpsVal = parseInt(document.querySelector("#config-capture-fps")?.value, 10) || 300;
-  const resWidthVal = parseInt(document.querySelector("#config-res-width")?.value, 10) || 1280;
-  const resHeightVal = parseInt(document.querySelector("#config-res-height")?.value, 10) || 720;
+  const preRollVal = numberField('#config-pre-roll', 2.0);
+  const postRollVal = numberField('#config-post-roll', 0.6);
+  const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
+  const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
+  const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+  const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
+  const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -1177,22 +1178,22 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const sessionId = generateSessionId();
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
 
-    const captureFpsVal = parseInt(document.querySelector("#config-capture-fps")?.value, 10) || 300;
-    const obsCaptureFpsVal = parseInt(document.querySelector("#config-obs-capture-fps")?.value, 10) || 120;
-    const preRollVal = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-    const postRollVal = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
-    const recordStartLeadVal = parseFloat(document.querySelector("#config-record-start-lead")?.value) || 0.0;
-    const recordStopTrailVal = parseFloat(document.querySelector("#config-record-stop-trail")?.value) || 0.0;
-    const initialDelayVal = parseFloat(document.querySelector("#config-initial-delay")?.value) || 3.0;
-    const fastForwardSpeedVal = parseFloat(document.querySelector("#config-fast-forward-speed")?.value) || 0.05;
+    const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    const preRollVal = numberField('#config-pre-roll', 2.0);
+    const postRollVal = numberField('#config-post-roll', 0.6);
+    const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
+    const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
+    const initialDelayVal = numberField('#config-initial-delay', 3.0);
+    const fastForwardSpeedVal = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const hlaePathVal = document.querySelector("#hlae-path-input")?.value?.trim() || "";
     const hlPathVal = document.querySelector("#hl-path-input")?.value?.trim() || "";
     const ffmpegOverridePathVal = document.querySelector("#ffmpeg-override-path-input")?.value?.trim() || null;
     const goldsrcHooksDllPathVal = document.querySelector("#goldsrc-hooks-dll-path-input")?.value?.trim() || null;
 
-    const resWidthVal = parseInt(document.querySelector("#config-res-width")?.value, 10) || 1280;
-    const resHeightVal = parseInt(document.querySelector("#config-res-height")?.value, 10) || 720;
+    const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
+    const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
     // `?? true` not `|| false`: a missing element must not silently disable
     // the flush, since nothing in the captured video would show that it had.
     const decalFlushVal = document.querySelector("#config-decal-flush")?.checked ?? true;

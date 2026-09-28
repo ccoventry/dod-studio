@@ -38,6 +38,7 @@ import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
 import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
+import { numberField } from './number_field.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -425,13 +426,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     const hlPath = document.querySelector('#hl-path-input')?.value?.trim() || "";
     const ffmpegPath = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
-    const captureFps = parseInt(document.querySelector('#config-capture-fps')?.value, 10) || 300;
-    const obsCaptureFps = parseInt(document.querySelector('#config-obs-capture-fps')?.value, 10) || 120;
-    const preRoll = parseFloat(document.querySelector('#config-pre-roll')?.value) || 2.0;
-    const postRoll = parseFloat(document.querySelector('#config-post-roll')?.value) || 0.6;
+    const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    const preRoll = numberField('#config-pre-roll', 2.0);
+    const postRoll = numberField('#config-post-roll', 0.6);
 
-    const resWidth = parseInt(document.querySelector('#config-res-width')?.value, 10) || 1280;
-    const resHeight = parseInt(document.querySelector('#config-res-height')?.value, 10) || 720;
+    const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
+    const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
     // Defaults on when the element is missing, matching the backend default —
     // `?? true` rather than `|| false`, which would silently disable it.
     const decalFlush = document.querySelector('#config-decal-flush')?.checked ?? true;
@@ -462,10 +463,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     const updateChannel = document.querySelector('#config-update-channel')?.value || 'stable';
     const autoCheckUpdates = document.querySelector('#config-auto-check-updates')?.checked ?? true;
 
-    const recordStartLead = parseFloat(document.querySelector('#config-record-start-lead')?.value) || 0.0;
-    const recordStopTrail = parseFloat(document.querySelector('#config-record-stop-trail')?.value) || 0.0;
-    const initialDelay = parseFloat(document.querySelector('#config-initial-delay')?.value) || 3.0;
-    const fastForwardSpeed = parseFloat(document.querySelector('#config-fast-forward-speed')?.value) || 0.05;
+    const recordStartLead = numberField('#config-record-start-lead', 0.0);
+    const recordStopTrail = numberField('#config-record-stop-trail', 0.0);
+    const initialDelay = numberField('#config-initial-delay', 3.0);
+    const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
 
@@ -585,11 +586,13 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
       }
-      if (settings.pre_roll_seconds) {
+      // `!= null`, not truthiness: 0 is a real value for the five timing
+      // fields, and a truthy check skipped restoring it.
+      if (settings.pre_roll_seconds != null) {
         const inputEl = document.querySelector('#config-pre-roll');
         if (inputEl) inputEl.value = settings.pre_roll_seconds;
       }
-      if (settings.post_roll_seconds) {
+      if (settings.post_roll_seconds != null) {
         const inputEl = document.querySelector('#config-post-roll');
         if (inputEl) inputEl.value = settings.post_roll_seconds;
       }
@@ -654,15 +657,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
-      if (settings.record_start_lead) {
+      if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
       }
-      if (settings.record_stop_trail) {
+      if (settings.record_stop_trail != null) {
         const inputEl = document.querySelector('#config-record-stop-trail');
         if (inputEl) inputEl.value = settings.record_stop_trail;
       }
-      if (settings.initial_delay) {
+      if (settings.initial_delay != null) {
         const inputEl = document.querySelector('#config-initial-delay');
         if (inputEl) inputEl.value = settings.initial_delay;
       }
