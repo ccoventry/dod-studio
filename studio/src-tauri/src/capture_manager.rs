@@ -683,9 +683,11 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
 /// Runs verification for the batch that just ended and reports it to the
 /// frontend. Phase 1 is observe-only — nothing consumes this to change a
 /// highlight's status yet.
+/// `outcome` ("complete" / "cancelled") goes into the manifest file (#19).
 fn emit_take_verification(
     app: &tauri::AppHandle,
     manifest_slot: &Arc<Mutex<Option<CaptureManifest>>>,
+    outcome: &str,
 ) {
     let manifest = {
         let guard = manifest_slot.lock().unwrap_or_else(|p| p.into_inner());
@@ -714,6 +716,7 @@ fn emit_take_verification(
     }
 
     record_capture_settings(&manifest, &blocks);
+    crate::manifest_file::write(&manifest, outcome, Some(&blocks));
 
     let _ = app.emit(
         "capture_takes_verified",
@@ -898,6 +901,9 @@ pub async fn start_capture_batch_impl(
                     .collect(),
                 capture_fps: patcher_config.capture_fps,
             };
+            // On disk as well (#19), so a batch that goes wrong leaves a record
+            // behind after the process is gone. Rewritten with outcomes at the end.
+            crate::manifest_file::write(&manifest, "planned", None);
             let mut slot = manifest_arc.lock().unwrap_or_else(|p| p.into_inner());
             *slot = Some(manifest);
         }
@@ -1184,7 +1190,11 @@ pub async fn start_capture_batch_impl(
                                     "total": total_jobs
                                 }),
                             );
-                            emit_take_verification(&app_emitter, &manifest_for_listener);
+                            emit_take_verification(
+                                &app_emitter,
+                                &manifest_for_listener,
+                                "complete",
+                            );
                             break;
                         }
                         EngineEvent::Cancelled => {
@@ -1200,7 +1210,11 @@ pub async fn start_capture_batch_impl(
                             );
                             // A cancelled batch still leaves real finished takes on
                             // disk — verify anyway rather than discarding them.
-                            emit_take_verification(&app_emitter, &manifest_for_listener);
+                            emit_take_verification(
+                                &app_emitter,
+                                &manifest_for_listener,
+                                "cancelled",
+                            );
                             break;
                         }
                     }
