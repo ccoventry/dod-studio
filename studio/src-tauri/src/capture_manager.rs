@@ -1257,6 +1257,27 @@ pub struct SerializedDemo {
     pub local_player_index: Option<usize>,
     pub playback_frames: i32,
     pub streaks: Vec<SerializedStreak>,
+    /// `<size>-<hash>` of the file when it was scanned (see `demo_file_key`).
+    /// A later scan skips this demo while path and key still match. `None`
+    /// for demos from a project saved before the key existed, which are
+    /// simply scanned again.
+    #[serde(default)]
+    pub file_key: Option<String>,
+}
+
+/// A demo already in the queue, as the frontend passes it to a scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownDemo {
+    pub path: String,
+    pub file_key: String,
+}
+
+/// What a scan returns: the demos it parsed, and how many it skipped because
+/// they were already in the queue, unchanged on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanOutcome {
+    pub demos: Vec<SerializedDemo>,
+    pub unchanged: u32,
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1284,12 +1305,63 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// A demo file's identity for "has this changed since it was scanned": its
+/// size plus an FNV-1a hash of its first 64 KB -- the same key the Demo
+/// Auditor finds duplicates with (`native::utils::demo_hasher`), and the same
+/// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
+/// whole demo, so checking a folder of 50 costs milliseconds.
+fn demo_file_key(path: &Path) -> Option<String> {
+    native::utils::demo_hasher::calculate_demo_key(path)
+        .map(|(size, hash)| format!("{size}-{hash:016x}"))
+}
+
+/// Paths compare the way Windows does: case-insensitive, either slash.
+fn same_path_key(path: &str) -> String {
+    path.replace('/', "\\").to_lowercase()
+}
+
+/// Splits `list` into the files still to scan (with their keys, in order)
+/// and a count of those skipped because `known` has the same path with the
+/// same key.
+fn skip_known(list: Vec<PathBuf>, known: &[KnownDemo]) -> (Vec<PathBuf>, Vec<Option<String>>, u32) {
+    let known: std::collections::HashMap<String, &str> = known
+        .iter()
+        .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
+        .collect();
+    let mut keep = Vec::with_capacity(list.len());
+    let mut keys = Vec::with_capacity(list.len());
+    let mut unchanged = 0;
+    for path in list {
+        let key = demo_file_key(&path);
+        let already = key
+            .as_deref()
+            .is_some_and(|k| known.get(&same_path_key(&path.to_string_lossy())) == Some(&k));
+        if already {
+            unchanged += 1;
+        } else {
+            keep.push(path);
+            keys.push(key);
+        }
+    }
+    (keep, keys, unchanged)
+}
+
+/// The paths in `paths` that do not exist on disk, in the order given.
+fn missing_scan_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| !std::path::Path::new(p).exists())
+        .cloned()
+        .collect()
+}
+
 pub async fn scan_directory_impl(
     app_handle: tauri::AppHandle,
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDemo>, String> {
+    known: Vec<KnownDemo>,
+) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
     is_scanning.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1302,6 +1374,16 @@ pub async fn scan_directory_impl(
 
         let mut list = Vec::new();
         let mut dir_stack = Vec::new();
+
+        // A picked folder deleted since the picker last saw it used to scan to
+        // "0 demos found" with no reason given (#432).
+        let missing = missing_scan_paths(&paths);
+        if !missing.is_empty() {
+            if missing.len() == paths.len() {
+                return Err(crate::messages::scan_path_not_found(&missing[0]));
+            }
+            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
+        }
 
         // ── Phase 1: collect all .dem file paths ─────────────────────────────
         for path_str in paths {
@@ -1344,6 +1426,11 @@ pub async fn scan_directory_impl(
             }
         }
 
+        // Demos already in the queue and unchanged on disk are not parsed
+        // again: re-adding a folder to pick up one new demo used to re-parse
+        // every demo in it, 5-10 s each.
+        let (list, file_keys, unchanged) = skip_known(list, &known);
+
         let total_files = list.len() as u32;
 
         // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
@@ -1367,6 +1454,7 @@ pub async fn scan_directory_impl(
                 let app_handle = &app_handle;
                 let cancel_token = &cancel_token;
                 let list = &list;
+                let file_keys = &file_keys;
                 let slots = &slots;
                 let next_index = &next_index;
                 let completed = &completed;
@@ -1428,6 +1516,7 @@ pub async fn scan_directory_impl(
                                 local_player_index,
                                 playback_frames,
                                 streaks: serialized_streaks,
+                                file_key: file_keys[idx].clone(),
                             }
                         },
                     );
@@ -1462,11 +1551,15 @@ pub async fn scan_directory_impl(
                 "scanned": completed.load(std::sync::atomic::Ordering::Relaxed),
                 "found": results.len() as u32,
                 "status": if was_cancelled { "Cancelled" } else { "Complete" },
-                "cancelled": was_cancelled
+                "cancelled": was_cancelled,
+                "unchanged": unchanged
             }),
         );
 
-        Ok(results)
+        Ok(ScanOutcome {
+            demos: results,
+            unchanged,
+        })
     }))
     .await;
 
@@ -1994,6 +2087,45 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn a_known_unchanged_demo_is_skipped_and_a_changed_one_is_not() {
+        let scratch = Scratch::new("skip_known");
+        let a = scratch.path().join("a.dem");
+        let b = scratch.path().join("b.dem");
+        let c = scratch.path().join("c.dem");
+        std::fs::write(&a, b"HLDEMO aaaa").unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb").unwrap();
+        std::fs::write(&c, b"HLDEMO cccc").unwrap();
+        let key_b_before = demo_file_key(&b).unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb, re-recorded").unwrap();
+
+        let known = vec![
+            // Same file, different case and slashes: still a match.
+            KnownDemo {
+                path: a.to_string_lossy().to_uppercase().replace('\\', "/"),
+                file_key: demo_file_key(&a).unwrap(),
+            },
+            // Changed on disk since it was queued: scanned again.
+            KnownDemo {
+                path: b.to_string_lossy().into_owned(),
+                file_key: key_b_before,
+            },
+        ];
+        let (keep, keys, unchanged) = skip_known(vec![a, b.clone(), c.clone()], &known);
+
+        assert_eq!(unchanged, 1);
+        assert_eq!(keep, vec![b.clone(), c.clone()]);
+        assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
+    }
+
+    #[test]
+    fn missing_scan_paths_names_only_the_paths_that_are_gone() {
+        let scratch = Scratch::new("missing_scan_paths");
+        let here = scratch.path().to_string_lossy().to_string();
+        let gone = scratch.path().join("deleted").to_string_lossy().to_string();
+        assert_eq!(missing_scan_paths(&[here, gone.clone()]), vec![gone]);
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {

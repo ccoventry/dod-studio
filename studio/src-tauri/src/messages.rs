@@ -71,6 +71,10 @@ pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)
 }
 
+pub fn scan_path_not_found(path: &str) -> String {
+    format!("Not found: {path} (moved or deleted?)")
+}
+
 pub fn not_a_directory(path: &str) -> String {
     format!("Not a directory: {}", path)
 }
