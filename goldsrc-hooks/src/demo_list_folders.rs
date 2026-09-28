@@ -401,11 +401,15 @@ mod hook {
         }
     }
 
-    /// Repoints one vftable slot, returning what it held.
-    unsafe fn swap(vftable_slot: usize, ours: usize) -> Result<usize, String> {
+    /// Repoints one vftable slot, saving what it held into `original`
+    /// **before** the slot changes. The other order leaves a window where the
+    /// slot already points at our thunk but `original` still reads 0, and a
+    /// call landing in that window (any thread) would jump to address 0.
+    unsafe fn swap(vftable_slot: usize, ours: usize, original: &AtomicUsize) -> Result<(), String> {
         let old = unsafe { *(vftable_slot as *const usize) };
+        original.store(old, Ordering::Release);
         if unsafe { crate::patch::write_code_bytes(vftable_slot, &(ours as u32).to_le_bytes()) } {
-            Ok(old)
+            Ok(())
         } else {
             Err(format!(
                 "could not make the vftable at {vftable_slot:#x} writable"
@@ -448,34 +452,26 @@ mod hook {
         unsafe {
             let fs_vftable = *(fs as *const usize);
             FIND_IS_DIRECTORY.store(slot(fs, FS_SLOT_FIND_IS_DIRECTORY), Ordering::Relaxed);
-            FIND_FIRST.store(
-                swap(
-                    fs_vftable + FS_SLOT_FIND_FIRST * 4,
-                    find_first as FindFirstFn as usize,
-                )?,
-                Ordering::Relaxed,
-            );
-            FIND_NEXT.store(
-                swap(
-                    fs_vftable + FS_SLOT_FIND_NEXT * 4,
-                    find_next as FindNextFn as usize,
-                )?,
-                Ordering::Relaxed,
-            );
-            FIND_CLOSE.store(
-                swap(
-                    fs_vftable + FS_SLOT_FIND_CLOSE * 4,
-                    find_close as FindCloseFn as usize,
-                )?,
-                Ordering::Relaxed,
-            );
-            ON_COMMAND.store(
-                swap(
-                    gameui + ui.file_dialog_vftable + SLOT_ON_COMMAND * 4,
-                    on_command as OnCommandFn as usize,
-                )?,
-                Ordering::Relaxed,
-            );
+            swap(
+                fs_vftable + FS_SLOT_FIND_FIRST * 4,
+                find_first as FindFirstFn as usize,
+                &FIND_FIRST,
+            )?;
+            swap(
+                fs_vftable + FS_SLOT_FIND_NEXT * 4,
+                find_next as FindNextFn as usize,
+                &FIND_NEXT,
+            )?;
+            swap(
+                fs_vftable + FS_SLOT_FIND_CLOSE * 4,
+                find_close as FindCloseFn as usize,
+                &FIND_CLOSE,
+            )?;
+            swap(
+                gameui + ui.file_dialog_vftable + SLOT_ON_COMMAND * 4,
+                on_command as OnCommandFn as usize,
+                &ON_COMMAND,
+            )?;
         }
         Ok(format!("{} GameUI, {} file system", ui.name, fs_build.name))
     }
