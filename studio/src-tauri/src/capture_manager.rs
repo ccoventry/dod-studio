@@ -1271,6 +1271,16 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// The final `scan_progress` event's `skipped` list: `{name, reason}` per demo
+/// the scan could not read, in file-name order (workers finish out of order).
+fn skipped_demo_rows(mut skipped: Vec<(usize, String, String)>) -> Vec<serde_json::Value> {
+    skipped.sort_by_key(|(idx, _, _)| *idx);
+    skipped
+        .into_iter()
+        .map(|(_, name, reason)| serde_json::json!({ "name": name, "reason": reason }))
+        .collect()
+}
+
 pub async fn scan_directory_impl(
     app_handle: tauri::AppHandle,
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
@@ -1347,6 +1357,9 @@ pub async fn scan_directory_impl(
         // finish out of order once scanned concurrently.
         let completed = std::sync::atomic::AtomicU32::new(0);
         let found = std::sync::atomic::AtomicU32::new(0);
+        // Demos that could not be read, as (index, file name, reason). They
+        // used to vanish from the queue with no explanation (#23).
+        let skipped: Mutex<Vec<(usize, String, String)>> = Mutex::new(Vec::new());
 
         std::thread::scope(|scope| {
             let worker_count = SCAN_CONCURRENCY.min(total).max(1);
@@ -1358,6 +1371,7 @@ pub async fn scan_directory_impl(
                 let next_index = &next_index;
                 let completed = &completed;
                 let found = &found;
+                let skipped = &skipped;
                 scope.spawn(move || loop {
                     // Honour cancellation before starting the next parse
                     // (I/O can be slow) -- a parse already in flight is not
@@ -1377,7 +1391,16 @@ pub async fn scan_directory_impl(
                         .to_string_lossy()
                         .to_string();
 
-                    let serialized = scan_demo_for_highlights_with_analysis(file).ok().map(
+                    let scanned = scan_demo_for_highlights_with_analysis(file);
+                    if let Err(reason) = &scanned {
+                        log::warn!("Scan skipped {}: {}", file.display(), reason);
+                        skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
+                            idx,
+                            file_name.clone(),
+                            reason.clone(),
+                        ));
+                    }
+                    let serialized = scanned.ok().map(
                         |(
                             (
                                 tickrate,
@@ -1441,6 +1464,7 @@ pub async fn scan_directory_impl(
         let results: Vec<SerializedDemo> =
             slots.into_inner().unwrap_or_else(|p| p.into_inner()).into_iter().flatten().collect();
         let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
+        let skipped = skipped_demo_rows(skipped.into_inner().unwrap_or_else(|p| p.into_inner()));
 
         // ── Final progress event (complete or cancelled) ────────────────────
         let _ = app_handle.emit(
@@ -1449,7 +1473,8 @@ pub async fn scan_directory_impl(
                 "scanned": completed.load(std::sync::atomic::Ordering::Relaxed),
                 "found": results.len() as u32,
                 "status": if was_cancelled { "Cancelled" } else { "Complete" },
-                "cancelled": was_cancelled
+                "cancelled": was_cancelled,
+                "skipped": skipped
             }),
         );
 
@@ -1981,6 +2006,17 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn skipped_demos_are_reported_in_file_order_with_their_reason() {
+        let rows = skipped_demo_rows(vec![
+            (5, "b.dem".into(), "Failed to parse demo: eof".into()),
+            (2, "a.dem".into(), "Failed to read file: denied".into()),
+        ]);
+        assert_eq!(rows[0]["name"], "a.dem");
+        assert_eq!(rows[0]["reason"], "Failed to read file: denied");
+        assert_eq!(rows[1]["name"], "b.dem");
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {

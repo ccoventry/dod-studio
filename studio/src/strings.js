@@ -1017,6 +1017,14 @@ export const STRINGS = {
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
     readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
+    // Appended to the two statuses above when the scan skipped demos (#23).
+    skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
+    // `skipped` is [{name, reason}]; names the first three, counts the rest.
+    skippedDemosToast: (skipped) => {
+      const shown = skipped.slice(0, 3).map((s) => `${s.name} (${s.reason})`).join('; ');
+      const more = skipped.length > 3 ? `; and ${skipped.length - 3} more` : '';
+      return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
+    },
     statusGeneric: (status) => `Status: ${status}`,
     SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
     SCANNING_STATUS: 'Status: Scanning...',
