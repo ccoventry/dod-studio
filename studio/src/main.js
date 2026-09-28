@@ -1210,7 +1210,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="8">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
 
     try {
-      const newlyScanned = await scanDirectory(pathsToScan);
+      // Demos already queued and unchanged on disk are skipped, not
+      // re-parsed; ones from an older project (no file_key) are scanned.
+      const known = currentScannedDemos
+        .filter((d) => d.file_key)
+        .map((d) => ({ path: d.path, file_key: d.file_key }));
+      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known);
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
@@ -1235,7 +1240,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // it here in case the event arrives before renderMasterList finishes.
       updateDemoFooter(currentScannedDemos);
       if (newlyScanned.length > 0) markProjectDirty();
-      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length), 'success');
+      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       selectedDemoIdx = newlyScanned.length > 0
         ? currentScannedDemos.indexOf(newlyScanned[0])
         : (currentScannedDemos.length > 0 ? 0 : null);
