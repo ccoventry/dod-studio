@@ -350,6 +350,14 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
     }
 }
 
+/// The `host_framerate` fast-forward runs at: Configuration's FF Speed
+/// (`fast_forward_speed`), or the 0.05 default when that is not a positive
+/// number. `host_framerate 0` is real time, so 0 cannot mean "fast".
+pub(crate) fn fast_forward_host_framerate(config: &PatcherConfig) -> f32 {
+    let v = config.fast_forward_speed;
+    if v.is_finite() && v > 0.0 { v } else { 0.05 }
+}
+
 /// Whether a scheduled command lands while playback is still fast-forwarding.
 ///
 /// A block runs at `host_framerate 0.05` until the pre-roll drops it back to
@@ -592,7 +600,10 @@ pub fn build_batch_queue(
     helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
     helper_cfg_content
         .push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
-    helper_cfg_content.push_str("alias sys_fast_forward \"host_framerate 0.05\"\n");
+    helper_cfg_content.push_str(&format!(
+        "alias sys_fast_forward \"host_framerate {}\"\n",
+        fast_forward_host_framerate(config)
+    ));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
     // driven off the console-log markers these same stages already echo, so the
@@ -1159,7 +1170,7 @@ pub fn build_batch_queue(
                          usually fine — it simply takes effect early. It is worth checking only \
                          for commands that depend on playback running at real speed: anything \
                          touching sound, recording, or rendering, since the engine is at \
-                         `host_framerate 0.05` with its audio buffers unflushed. To have it run \
+                         `host_framerate {}` with its audio buffers unflushed. To have it run \
                          at normal speed instead, {}.",
                         custom.command,
                         relation_str.to_lowercase(),
@@ -1171,6 +1182,7 @@ pub fn build_batch_queue(
                         },
                         target_tick,
                         where_,
+                        fast_forward_host_framerate(config),
                         fix
                     ));
                 }
@@ -1918,6 +1930,57 @@ mod tests {
 
         // The primer never records anything, so it must carry no blocks.
         assert!(primer.blocks.is_empty());
+    }
+
+    #[test]
+    fn fast_forward_uses_ff_speed_and_falls_back_when_it_is_not_positive() {
+        let mut config = PatcherConfig::default();
+        config.fast_forward_speed = 0.1;
+        assert_eq!(fast_forward_host_framerate(&config), 0.1);
+        for bad in [0.0, -1.0, f32::NAN] {
+            config.fast_forward_speed = bad;
+            assert_eq!(fast_forward_host_framerate(&config), 0.05, "{bad}");
+        }
+    }
+
+    #[test]
+    fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
+        let mut config = PatcherConfig::default();
+        let game = std::env::temp_dir().join("dod_test_ff_speed_helper_cfg");
+        std::fs::create_dir_all(game.join("dod")).expect("dummy dod dir");
+        // game_path is hl.exe; the helper cfg lands in the dod/ beside it.
+        config.game_path = game.join("hl.exe").to_string_lossy().to_string();
+        config.primary_media_dir = Some(game.clone());
+        config.fast_forward_speed = 0.1;
+
+        let streak = CaptureStreak {
+            start_tick: 1000,
+            end_tick: 1200,
+            source_demo: "demo1.dem".to_string(),
+            target_player: None,
+            kill_count: 3,
+            timeline_string: String::new(),
+            duration_string: String::new(),
+            player_index: 0,
+            kills: Vec::new(),
+            start_index: 0,
+            end_index: 2,
+            total_demo_frames: 3000,
+            demo_fps: 100.0,
+            viewdemo_times: Vec::new(),
+            frame_times: std::sync::Arc::new(Vec::new()),
+            match_start_tick: None,
+            status: Default::default(),
+        };
+        build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
+
+        let cfg = std::fs::read_to_string(game.join("dod").join("dodstudio_helper.cfg"))
+            .expect("helper cfg written");
+        let _ = std::fs::remove_dir_all(&game);
+        assert!(
+            cfg.contains("alias sys_fast_forward \"host_framerate 0.1\""),
+            "{cfg}"
+        );
     }
 
     /// Every scheduled command `build_batch_queue` emits is an alias name built

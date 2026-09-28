@@ -4,6 +4,7 @@ import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngin
 import { showToast } from './toast.js';
 import { isRangeModified as isKillRangeModified } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { numberField } from './number_field.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -631,8 +632,8 @@ function renderTimeline(demo) {
     return;
   }
 
-  const preRollSecs = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-  const postRollSecs = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
+  const preRollSecs = numberField('#config-pre-roll', 2.0);
+  const postRollSecs = numberField('#config-post-roll', 0.6);
   const tickrate = demo.tickrate || 100;
   const preRollTicks = preRollSecs * tickrate;
   const postRollTicks = postRollSecs * tickrate;
