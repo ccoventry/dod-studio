@@ -1217,6 +1217,12 @@ export const STRINGS = {
     STATUS_DOWNLOADING: 'Downloading update…',
     STATUS_READY: 'Update downloaded — restart to apply.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
+    // Local and debug builds: report what's published, never offer to install
+    // it -- the installer would replace the *installed* app, not this one.
+    statusLocalBuild: (stable, experimental) =>
+      `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
+      + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
+      + 'Get the published build from the Releases page.',
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────
