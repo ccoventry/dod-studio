@@ -247,7 +247,13 @@ fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static
 pub unsafe extern "C" fn command() {
     let last = LAST
         .with(|last| last.borrow().clone())
-        .or_else(|| from_command_line(std::env::args()));
+        // `args_os`, not `args`: `std::env::args()` panics on any argument
+        // that isn't valid Unicode, and a panic in a console command handler
+        // is a game crash under `panic = "abort"`. A lossy name just fails to
+        // match and falls through to the "no demo" message.
+        .or_else(|| {
+            from_command_line(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
+        });
     let Some((command, name)) = last else {
         let why = if WRAPPED.load(Ordering::Relaxed) {
             "no demo has been played this session yet -- start one with playdemo or viewdemo first"
