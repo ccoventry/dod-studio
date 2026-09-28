@@ -896,17 +896,23 @@ export const STRINGS = {
     ADVICE:
       'These are set outside the app, so it cannot see them when it plans a capture. Either remove them from your configs, or state them in Initial Commands below so the pipeline works from the same values the engine does. Nothing here changes your config files.',
     location: (file, line) => `set in ${file}, line ${line}`,
-    OVERRIDE_TITLE: 'These Initial Commands will override your config files:',
-    OVERRIDE_ADVICE:
-      'Initial Commands run after the game loads its configs, so these values win. That is usually the point — but the config line stops applying, and nothing else would tell you.',
-    FROM_APP_NOTE: 'added by the app',
-    SHADOWED_TITLE: 'These Initial Commands will not take effect:',
-    SHADOWED_ADVICE:
-      'The app appends its own commands after yours, and the last one wins. Change the setting that owns the value instead — editing the line here cannot win.',
-    shadowedByApp: (cvar, yours, winner, setting) =>
-      `${cvar} ${yours} never applies — the app sets ${winner} from ${setting}`,
-    shadowedByYou: (cvar, yours, winner) =>
-      `${cvar} ${yours} never applies — a later Initial Command sets ${winner}`,
+    // Rule 1 of #216: one cvar, different values in more than one place.
+    CONFLICT_TITLE: 'These settings are given different values:',
+    CONFLICT_ADVICE:
+      'They run in order: your config files, then Initial Commands (with the ones DoD Studio adds last), then Scheduled Commands before each clip. The last one wins, so the others never apply. If DoD Studio sets the winning value, change that setting instead. Nothing here changes your config files.',
+    conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
+    stated: (value, source) => `${value} (${source})`,
+    sourceConfig: (file, line) => `${file}, line ${line}`,
+    SOURCE_INITIAL: 'Initial Commands',
+    sourceApp: (setting) => `DoD Studio, from ${setting}`,
+    sourceBefore: (secs) => `Scheduled, ${secs}s before`,
+    sourceAfter: (secs) => `Scheduled, ${secs}s after`,
+    // Rule 2 of #216: an After with no Before for the same cvar.
+    ASYMMETRIC_TITLE: 'These Scheduled Commands change a value for the rest of the batch:',
+    ASYMMETRIC_ADVICE:
+      'Scheduled Commands run around every clip, and nothing puts this value back. So the first clip records at one value and every clip after it at another. Add a Before command for the same setting with the value each clip should start from.',
+    asymmetricRow: (cvar, baseline, baselineSource, after, afterSource) =>
+      `${cvar}: the first clip records at ${baseline} (${baselineSource}), every later clip at ${after} (${afterSource})`,
     // Which setting owns a value the pipeline appends for itself, so the advice
     // can name the control rather than leaving the user to hunt for it.
     SETTING_FOR_CVAR: {
@@ -944,16 +950,7 @@ export const STRINGS = {
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
       "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
-    CUSTOM_TITLE: 'These Scheduled Commands override earlier values:',
-    CUSTOM_ADVICE:
-      'Scheduled commands run during playback, so they come after your configs and after the Initial Commands — they are the last word on whatever they set, and the only place a value changes partway through a capture.',
     hazardRow: (command) => `${command} — runs during playback`,
-    customOverridesInit: (cvar, value, previous) =>
-      `${cvar} ${value} replaces ${previous}, set before the demo loads`,
-    customOverridesConfig: (cvar, value, previous, source) =>
-      `${cvar} ${value} replaces ${previous} from ${source}`,
-    override: (cvar, initValue, cfgValue, file, line) =>
-      `${cvar} ${initValue} replaces ${cfgValue} from ${file}, line ${line}`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
       "The engine will use its default, 256, for the decal ring. That's a safe value on most maps — state r_decals in Initial Commands if you want a different one.",
