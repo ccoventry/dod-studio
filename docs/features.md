@@ -1,6 +1,6 @@
 # DoD Studio: what it does today
 
-Written from the `dev` branch at `9eb40a5` (2026-09-27). Everything here was read from the code, not from older docs. Open pull requests are not counted; where one changes a fact below, it is named.
+Written from the `dev` branch at `9eb40a5` (2026-09-27), updated for PR #436 (`dodstudio_allow_shaders`, 2026-09-28). Everything here was read from the code, not from older docs. Open pull requests are not counted; where one changes a fact below, it is named.
 
 When this file and the code disagree, the code wins. Fix this file in the same PR that changes the behaviour.
 
@@ -223,10 +223,11 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (14 cvars, 9 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 9 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
+| `dodstudio_allow_shaders` | cvar | 0 | Lets map surfaces be drawn through the engine's own GLSL shaders (`platform/gl_shaders`) during demo playback. Needs `gl_use_shaders 1`; `gl_reloadshaders` recompiles edits live. World surfaces only, not models. | Anniversary only (PRE has no shaders) |
 | `dodstudio_clear_decals` | command | — | Wipes every decal from the world right now | PRE only (PR #398 adds Anniversary) |
 | `dodstudio_deathmsg` | command | — | Kill feed: `max`, `offset`, `block`, `fake` | both |
 | `dodstudio_debug_hd_misses` | command | — | Lists textures that kept their original this session, and why | PRE only |
@@ -364,6 +365,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 |---|---|
 | Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | PRE only | decal clear, HD textures, hull-trace guard |
+| Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
 
 Open PRs close most of the gap: #393 (hull guard), #396 (ESC keeps GameUI windows open on Anniversary), #398 (decals, `ex_interp`), #399 (HD textures). The first-load lighting fix in #397 is PRE only.
