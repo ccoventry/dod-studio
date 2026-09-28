@@ -729,8 +729,9 @@ fn emit_take_verification(
 
 // ── Public command handler ─────────────────────────────────────────────────────
 
-/// `Some(message)` when `init_commands` or any `custom_commands` entry names
-/// a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
+/// `Some(message)` when `init_commands` or any `custom_commands` entry is too
+/// long for a demo's ConsoleCommand frame (`native::patch::too_long_commands`),
+/// names a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
 /// `custom_commands` names a `SCHEDULED_BANNED_COMMANDS` one (fine in Initial
 /// Commands, refused only here) — the first one found, checking the
 /// everywhere-banned tier before the scheduled-only tier. `None` means clean.
@@ -742,6 +743,18 @@ fn first_banned_command_error(
     custom_commands: &[CustomCommandPayload],
 ) -> Option<String> {
     let custom_texts: Vec<String> = custom_commands.iter().map(|c| c.command.clone()).collect();
+
+    // Each command is written into one ConsoleCommand frame as typed; one that
+    // does not fit used to abort the whole app partway through patching (#453).
+    let mut too_long = native::patch::too_long_commands(init_commands);
+    too_long.extend(native::patch::too_long_commands(&custom_texts));
+    if let Some(command) = too_long.first() {
+        return Some(format!(
+            "\"{command}\" is {} bytes — Initial and Scheduled Commands must be under {} bytes each to fit in a demo. Split it into shorter commands.",
+            command.len(),
+            native::patch::MAX_CONSOLE_CMD_LEN
+        ));
+    }
 
     let mut banned = native::patch::cfg_scan::banned_commands(init_commands);
     banned.extend(native::patch::cfg_scan::banned_commands(&custom_texts));
@@ -1244,6 +1257,27 @@ pub struct SerializedDemo {
     pub local_player_index: Option<usize>,
     pub playback_frames: i32,
     pub streaks: Vec<SerializedStreak>,
+    /// `<size>-<hash>` of the file when it was scanned (see `demo_file_key`).
+    /// A later scan skips this demo while path and key still match. `None`
+    /// for demos from a project saved before the key existed, which are
+    /// simply scanned again.
+    #[serde(default)]
+    pub file_key: Option<String>,
+}
+
+/// A demo already in the queue, as the frontend passes it to a scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KnownDemo {
+    pub path: String,
+    pub file_key: String,
+}
+
+/// What a scan returns: the demos it parsed, and how many it skipped because
+/// they were already in the queue, unchanged on disk.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanOutcome {
+    pub demos: Vec<SerializedDemo>,
+    pub unchanged: u32,
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1271,6 +1305,80 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// The scan status line: how many demos are done out of how many, and one demo
+/// still being parsed, when there is one. With `SCAN_CONCURRENCY` workers,
+/// "the current file" is one of the current files.
+fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
+    match current {
+        Some(name) => format!("Scanning {done} / {total} — {name}"),
+        None => format!("Scanning {done} / {total}"),
+    }
+}
+
+/// True when a progress line may go out at `now_ms`: at most one per ~33 ms
+/// (CLAUDE.md's telemetry throttle). `last_ms` holds the last emit time, or
+/// `u32::MAX` before the first one.
+fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> bool {
+    use std::sync::atomic::Ordering;
+    let last = last_ms.load(Ordering::Relaxed);
+    if last != u32::MAX && now_ms.saturating_sub(last) < 33 {
+        return false;
+    }
+    last_ms
+        .compare_exchange(last, now_ms, Ordering::Relaxed, Ordering::Relaxed)
+        .is_ok()
+}
+
+/// A demo file's identity for "has this changed since it was scanned": its
+/// size plus an FNV-1a hash of its first 64 KB -- the same key the Demo
+/// Auditor finds duplicates with (`native::utils::demo_hasher`), and the same
+/// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
+/// whole demo, so checking a folder of 50 costs milliseconds.
+fn demo_file_key(path: &Path) -> Option<String> {
+    native::utils::demo_hasher::calculate_demo_key(path)
+        .map(|(size, hash)| format!("{size}-{hash:016x}"))
+}
+
+/// Paths compare the way Windows does: case-insensitive, either slash.
+fn same_path_key(path: &str) -> String {
+    path.replace('/', "\\").to_lowercase()
+}
+
+/// Splits `list` into the files still to scan (with their keys, in order)
+/// and a count of those skipped because `known` has the same path with the
+/// same key.
+fn skip_known(list: Vec<PathBuf>, known: &[KnownDemo]) -> (Vec<PathBuf>, Vec<Option<String>>, u32) {
+    let known: std::collections::HashMap<String, &str> = known
+        .iter()
+        .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
+        .collect();
+    let mut keep = Vec::with_capacity(list.len());
+    let mut keys = Vec::with_capacity(list.len());
+    let mut unchanged = 0;
+    for path in list {
+        let key = demo_file_key(&path);
+        let already = key
+            .as_deref()
+            .is_some_and(|k| known.get(&same_path_key(&path.to_string_lossy())) == Some(&k));
+        if already {
+            unchanged += 1;
+        } else {
+            keep.push(path);
+            keys.push(key);
+        }
+    }
+    (keep, keys, unchanged)
+}
+
+/// The paths in `paths` that do not exist on disk, in the order given.
+fn missing_scan_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| !std::path::Path::new(p).exists())
+        .cloned()
+        .collect()
+}
+
 /// The final `scan_progress` event's `skipped` list: `{name, reason}` per demo
 /// the scan could not read, in file-name order (workers finish out of order).
 fn skipped_demo_rows(mut skipped: Vec<(usize, String, String)>) -> Vec<serde_json::Value> {
@@ -1286,7 +1394,8 @@ pub async fn scan_directory_impl(
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
-) -> Result<Vec<SerializedDemo>, String> {
+    known: Vec<KnownDemo>,
+) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
     is_scanning.store(true, std::sync::atomic::Ordering::SeqCst);
@@ -1300,13 +1409,26 @@ pub async fn scan_directory_impl(
         let mut list = Vec::new();
         let mut dir_stack = Vec::new();
 
+        // A picked folder deleted since the picker last saw it used to scan to
+        // "0 demos found" with no reason given (#432).
+        let missing = missing_scan_paths(&paths);
+        if !missing.is_empty() {
+            if missing.len() == paths.len() {
+                return Err(crate::messages::scan_path_not_found(&missing[0]));
+            }
+            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
+        }
+
         // ── Phase 1: collect all .dem file paths ─────────────────────────────
         for path_str in paths {
             let path_buf = PathBuf::from(path_str);
             if path_buf.is_dir() {
                 dir_stack.push(path_buf);
             } else if path_buf.is_file()
-                && path_buf.extension().map(|ext| ext == "dem").unwrap_or(false)
+                && path_buf
+                    .extension()
+                    .map(|ext| ext == "dem")
+                    .unwrap_or(false)
             {
                 let insert_idx = list
                     .binary_search_by(|p: &PathBuf| {
@@ -1341,6 +1463,11 @@ pub async fn scan_directory_impl(
             }
         }
 
+        // Demos already in the queue and unchanged on disk are not parsed
+        // again: re-adding a folder to pick up one new demo used to re-parse
+        // every demo in it, 5-10 s each.
+        let (list, file_keys, unchanged) = skip_known(list, &known);
+
         let total_files = list.len() as u32;
 
         // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
@@ -1350,7 +1477,8 @@ pub async fn scan_directory_impl(
         // free, with no re-sort needed once concurrent workers finish out of
         // order.
         let total = list.len();
-        let slots: Mutex<Vec<Option<SerializedDemo>>> = Mutex::new((0..total).map(|_| None).collect());
+        let slots: Mutex<Vec<Option<SerializedDemo>>> =
+            Mutex::new((0..total).map(|_| None).collect());
         let next_index = std::sync::atomic::AtomicUsize::new(0);
         // Completed-count progress rather than positional index -- same
         // reason the patch loop's `capture_status` event uses one: files
@@ -1360,109 +1488,156 @@ pub async fn scan_directory_impl(
         // Demos that could not be read, as (index, file name, reason). They
         // used to vanish from the queue with no explanation (#23).
         let skipped: Mutex<Vec<(usize, String, String)>> = Mutex::new(Vec::new());
-
+        // Indices being parsed right now, so every progress line names a demo
+        // still in flight rather than one that just finished (#433).
+        let in_flight: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+        // ~33 ms telemetry throttle (CLAUDE.md), as ms since the scan began.
+        // Starts at u32::MAX so the first line always goes out.
+        let scan_started = std::time::Instant::now();
+        let last_emit_ms = std::sync::atomic::AtomicU32::new(u32::MAX);
+        let emit_progress = |done: u32, current: Option<&str>| {
+            let now_ms = scan_started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
+            if !progress_emit_due(&last_emit_ms, now_ms) {
+                return;
+            }
+            let _ = app_handle.emit(
+                "scan_progress",
+                serde_json::json!({
+                    "scanned": done,
+                    "found": found.load(std::sync::atomic::Ordering::Relaxed),
+                    "status": scan_status_line(done, total_files, current),
+                    "cancelled": false
+                }),
+            );
+        };
         std::thread::scope(|scope| {
             let worker_count = SCAN_CONCURRENCY.min(total).max(1);
             for _ in 0..worker_count {
-                let app_handle = &app_handle;
                 let cancel_token = &cancel_token;
                 let list = &list;
+                let file_keys = &file_keys;
                 let slots = &slots;
                 let next_index = &next_index;
                 let completed = &completed;
                 let found = &found;
                 let skipped = &skipped;
-                scope.spawn(move || loop {
-                    // Honour cancellation before starting the next parse
-                    // (I/O can be slow) -- a parse already in flight is not
-                    // interrupted, same blind spot the patch loop's
-                    // decal-flush pass has (#193).
-                    if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
-                        break;
-                    }
-                    let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    if idx >= total {
-                        break;
-                    }
-                    let file = &list[idx];
-                    let file_name = file
+                let in_flight = &in_flight;
+                let emit_progress = &emit_progress;
+                let file_name_at = move |i: usize| {
+                    list[i]
                         .file_name()
                         .unwrap_or_default()
                         .to_string_lossy()
-                        .to_string();
+                        .to_string()
+                };
+                scope.spawn(move || {
+                    loop {
+                        // Honour cancellation before starting the next parse
+                        // (I/O can be slow) -- a parse already in flight is not
+                        // interrupted, same blind spot the patch loop's
+                        // decal-flush pass has (#193).
+                        if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
+                            break;
+                        }
+                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        if idx >= total {
+                            break;
+                        }
+                        let file = &list[idx];
+                        let file_name = file
+                            .file_name()
+                            .unwrap_or_default()
+                            .to_string_lossy()
+                            .to_string();
+                        // Sent when a demo starts too, not only when one finishes:
+                        // before #433 a one-demo folder showed a bare "Scanning..."
+                        // for the whole parse, since its first finish was its last.
+                        // The first of these also carries the total (`0 / N`).
+                        in_flight
+                            .lock()
+                            .unwrap_or_else(|p| p.into_inner())
+                            .push(idx);
+                        emit_progress(
+                            completed.load(std::sync::atomic::Ordering::Relaxed),
+                            Some(&file_name),
+                        );
 
-                    let scanned = scan_demo_for_highlights_with_analysis(file);
-                    if let Err(reason) = &scanned {
-                        log::warn!("Scan skipped {}: {}", file.display(), reason);
-                        skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
-                            idx,
-                            file_name.clone(),
-                            reason.clone(),
-                        ));
+                        let scanned = scan_demo_for_highlights_with_analysis(file);
+                        if let Err(reason) = &scanned {
+                            log::warn!("Scan skipped {}: {}", file.display(), reason);
+                            skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
+                                idx,
+                                file_name.clone(),
+                                reason.clone(),
+                            ));
+                        }
+                        let serialized = scanned.ok().map(
+                            |(
+                                (
+                                    tickrate,
+                                    streaks,
+                                    is_pov,
+                                    local_player_index,
+                                    playback_frames,
+                                    match_start_tick,
+                                    frame_times_arc,
+                                ),
+                                analysis,
+                            )| {
+                                // Pre-warm the analyzer cache with the Analysis
+                                // this scan already computed, so opening this
+                                // demo in the Demo Analyzer afterward hits the
+                                // cache path instead of re-parsing.
+                                // Best-effort/silent, and safe under concurrency:
+                                // keyed per demo path, not one shared cache.
+                                native::warm_analyzer_cache(file, &analysis);
+
+                                let serialized_streaks: Vec<SerializedStreak> = streaks
+                                    .into_iter()
+                                    .map(|mut s| {
+                                        s.match_start_tick = match_start_tick;
+                                        s.frame_times = frame_times_arc.clone();
+                                        SerializedStreak::from(s)
+                                    })
+                                    .collect();
+
+                                SerializedDemo {
+                                    path: file.to_string_lossy().to_string(),
+                                    name: file_name.clone(),
+                                    tickrate,
+                                    is_pov,
+                                    local_player_index,
+                                    playback_frames,
+                                    streaks: serialized_streaks,
+                                    file_key: file_keys[idx].clone(),
+                                }
+                            },
+                        );
+
+                        if serialized.is_some() {
+                            found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
+
+                        let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        let still_running = {
+                            let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
+                            running.retain(|&i| i != idx);
+                            running.first().copied()
+                        };
+                        let current = still_running.map(file_name_at);
+                        emit_progress(done, current.as_deref());
                     }
-                    let serialized = scanned.ok().map(
-                        |(
-                            (
-                                tickrate,
-                                streaks,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                match_start_tick,
-                                frame_times_arc,
-                            ),
-                            analysis,
-                        )| {
-                            // Pre-warm the analyzer cache with the Analysis
-                            // this scan already computed, so opening this
-                            // demo in the Demo Analyzer afterward hits the
-                            // cache path instead of re-parsing.
-                            // Best-effort/silent, and safe under concurrency:
-                            // keyed per demo path, not one shared cache.
-                            native::warm_analyzer_cache(file, &analysis);
-
-                            let serialized_streaks: Vec<SerializedStreak> = streaks
-                                .into_iter()
-                                .map(|mut s| {
-                                    s.match_start_tick = match_start_tick;
-                                    s.frame_times = frame_times_arc.clone();
-                                    SerializedStreak::from(s)
-                                })
-                                .collect();
-
-                            SerializedDemo {
-                                path: file.to_string_lossy().to_string(),
-                                name: file_name.clone(),
-                                tickrate,
-                                is_pov,
-                                local_player_index,
-                                playback_frames,
-                                streaks: serialized_streaks,
-                            }
-                        },
-                    );
-
-                    if serialized.is_some() {
-                        found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    }
-                    slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
-
-                    let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
-                    let _ = app_handle.emit(
-                        "scan_progress",
-                        serde_json::json!({
-                            "scanned": done,
-                            "found": found.load(std::sync::atomic::Ordering::Relaxed),
-                            "status": format!("Scanning {} / {} — {}", done, total_files, file_name),
-                            "cancelled": false
-                        }),
-                    );
                 });
             }
         });
 
-        let results: Vec<SerializedDemo> =
-            slots.into_inner().unwrap_or_else(|p| p.into_inner()).into_iter().flatten().collect();
+        let results: Vec<SerializedDemo> = slots
+            .into_inner()
+            .unwrap_or_else(|p| p.into_inner())
+            .into_iter()
+            .flatten()
+            .collect();
         let was_cancelled = cancel_token.load(std::sync::atomic::Ordering::SeqCst);
         let skipped = skipped_demo_rows(skipped.into_inner().unwrap_or_else(|p| p.into_inner()));
 
@@ -1474,11 +1649,15 @@ pub async fn scan_directory_impl(
                 "found": results.len() as u32,
                 "status": if was_cancelled { "Cancelled" } else { "Complete" },
                 "cancelled": was_cancelled,
+                "unchanged": unchanged,
                 "skipped": skipped
             }),
         );
 
-        Ok(results)
+        Ok(ScanOutcome {
+            demos: results,
+            unchanged,
+        })
     }))
     .await;
 
@@ -2018,6 +2197,66 @@ mod tests {
         assert_eq!(rows[1]["name"], "b.dem");
     }
 
+    #[test]
+    fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
+        assert_eq!(
+            scan_status_line(0, 1, Some("a.dem")),
+            "Scanning 0 / 1 — a.dem"
+        );
+        assert_eq!(scan_status_line(1, 1, None), "Scanning 1 / 1");
+    }
+
+    #[test]
+    fn scan_progress_is_throttled_to_one_line_per_33_ms() {
+        let last = std::sync::atomic::AtomicU32::new(u32::MAX);
+        assert!(
+            progress_emit_due(&last, 0),
+            "the first line always goes out"
+        );
+        assert!(!progress_emit_due(&last, 20));
+        assert!(progress_emit_due(&last, 33));
+        assert!(!progress_emit_due(&last, 40));
+    }
+
+    #[test]
+    fn a_known_unchanged_demo_is_skipped_and_a_changed_one_is_not() {
+        let scratch = Scratch::new("skip_known");
+        let a = scratch.path().join("a.dem");
+        let b = scratch.path().join("b.dem");
+        let c = scratch.path().join("c.dem");
+        std::fs::write(&a, b"HLDEMO aaaa").unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb").unwrap();
+        std::fs::write(&c, b"HLDEMO cccc").unwrap();
+        let key_b_before = demo_file_key(&b).unwrap();
+        std::fs::write(&b, b"HLDEMO bbbb, re-recorded").unwrap();
+
+        let known = vec![
+            // Same file, different case and slashes: still a match.
+            KnownDemo {
+                path: a.to_string_lossy().to_uppercase().replace('\\', "/"),
+                file_key: demo_file_key(&a).unwrap(),
+            },
+            // Changed on disk since it was queued: scanned again.
+            KnownDemo {
+                path: b.to_string_lossy().into_owned(),
+                file_key: key_b_before,
+            },
+        ];
+        let (keep, keys, unchanged) = skip_known(vec![a, b.clone(), c.clone()], &known);
+
+        assert_eq!(unchanged, 1);
+        assert_eq!(keep, vec![b.clone(), c.clone()]);
+        assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
+    }
+
+    #[test]
+    fn missing_scan_paths_names_only_the_paths_that_are_gone() {
+        let scratch = Scratch::new("missing_scan_paths");
+        let here = scratch.path().to_string_lossy().to_string();
+        let gone = scratch.path().join("deleted").to_string_lossy().to_string();
+        assert_eq!(missing_scan_paths(&[here, gone.clone()]), vec![gone]);
+    }
+
     fn sample_payload() -> CapturePayload {
         CapturePayload {
             hlae_path: "C:/hlae/hlae.exe".to_string(),
@@ -2212,6 +2451,23 @@ mod tests {
             commands,
             vec!["mirv_movie_filename \"F:\\DICE  WSOD25\\02 Audio Video\\clip\""]
         );
+    }
+
+    #[test]
+    fn a_command_too_long_for_a_demo_frame_is_refused_in_either_list() {
+        let long = format!("echo {}", "x".repeat(59)); // 64 bytes
+        let err = first_banned_command_error(std::slice::from_ref(&long), &[]);
+        assert!(err.is_some_and(|e| e.contains("64 bytes")));
+
+        let scheduled = vec![CustomCommandPayload {
+            command: long,
+            relation: "Before".to_string(),
+            offset_seconds: 1.0,
+        }];
+        assert!(first_banned_command_error(&[], &scheduled).is_some());
+
+        let fits = format!("echo {}", "x".repeat(58)); // 63 bytes
+        assert!(first_banned_command_error(&[fits], &[]).is_none());
     }
 
     #[test]
