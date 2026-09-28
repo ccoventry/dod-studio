@@ -2,6 +2,7 @@ mod audit_manager;
 mod capture_manager;
 mod dir_browser;
 mod hd_manager;
+mod manifest_file;
 mod map_manager;
 mod messages;
 mod render_manager;
