@@ -209,30 +209,196 @@ const OFFSET_UNSET: i32 = i32::MIN;
 /// Whether our `DeathMsg` handler is installed and should be kept installed.
 static HOOK_WANTED: AtomicBool = AtomicBool::new(false);
 
-/// The block list. `Vec<i32>` of player indices; `allow_list` inverts the sense
-/// so the listed players are the only ones that get through.
+/// The block list; `allow_list` inverts the sense so the listed players are
+/// the only ones that get through.
 static BLOCK: Mutex<BlockList> = Mutex::new(BlockList {
-    ids: Vec::new(),
+    players: Vec::new(),
     allow_list: false,
 });
 
+/// Whether `self` has already said it matches nobody in this HLTV demo. Reset
+/// by every `block`, so each new list says it once.
+static SELF_IN_HLTV_REPORTED: AtomicBool = AtomicBool::new(false);
+
 #[derive(Default)]
 struct BlockList {
-    ids: Vec<i32>,
+    players: Vec<Player>,
     allow_list: bool,
+}
+
+/// One entry in the block list.
+///
+/// A slot number is only good for one demo: the same player gets a different
+/// slot in every demo. A SteamID or `self` is resolved at each `DeathMsg`
+/// instead, so one command works across a whole batch and survives
+/// reconnects and slot reuse mid-demo (#468).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Player {
+    Slot(i32),
+    /// SteamID64, matched against the slot's userinfo `*sid`.
+    SteamId(u64),
+    /// The recording player in a POV demo. Nobody in an HLTV demo, which has
+    /// no recording player.
+    OwnPov,
+}
+
+/// What a `DeathMsg` slot resolves to, at the moment it arrives.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Who {
+    slot: i32,
+    /// 0 when unknown: no player there, or no `*sid`.
+    steam_id: u64,
+    /// The recording player of a POV demo.
+    is_own_pov: bool,
+}
+
+impl Player {
+    fn matches(self, who: &Who) -> bool {
+        match self {
+            Player::Slot(slot) => slot == who.slot,
+            Player::SteamId(id) => id != 0 && id == who.steam_id,
+            Player::OwnPov => who.is_own_pov,
+        }
+    }
+
+    /// Whether matching needs anything beyond the slot number.
+    fn needs_player_info(self) -> bool {
+        !matches!(self, Player::Slot(_))
+    }
+}
+
+impl std::fmt::Display for Player {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Player::Slot(slot) => write!(f, "{slot}"),
+            Player::SteamId(id) => write!(f, "{id}"),
+            Player::OwnPov => f.write_str("self"),
+        }
+    }
+}
+
+/// SteamID64 of account number 0 in the public universe; an individual
+/// account's SteamID64 is this plus its account number.
+const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
+
+/// A SteamID in either form a user is likely to paste: the 17-digit
+/// SteamID64, or `STEAM_X:Y:Z` (= base + 2Z + Y). X, the universe, is 0 or 1
+/// depending on the engine that printed it and does not change the account.
+fn parse_steam_id(text: &str) -> Option<u64> {
+    if text.len() >= 6 && text[..6].eq_ignore_ascii_case("STEAM_") {
+        let mut parts = text[6..].split(':');
+        let (Some(universe), Some(y), Some(z), None) =
+            (parts.next(), parts.next(), parts.next(), parts.next())
+        else {
+            return None;
+        };
+        universe.parse::<u8>().ok()?;
+        let y: u64 = y.parse().ok().filter(|y| *y <= 1)?;
+        let z: u64 = z.parse().ok()?;
+        return z
+            .checked_mul(2)
+            .and_then(|z2| z2.checked_add(y))
+            .and_then(|n| n.checked_add(STEAM_ID64_BASE));
+    }
+    if text.len() == 17 && text.bytes().all(|b| b.is_ascii_digit()) {
+        return text.parse().ok();
+    }
+    None
+}
+
+/// One `block` argument, without its `!`: `self`, a SteamID, or a slot.
+fn parse_player(text: &str) -> Option<Player> {
+    if text.eq_ignore_ascii_case("self") {
+        return Some(Player::OwnPov);
+    }
+    if let Some(id) = parse_steam_id(text) {
+        return Some(Player::SteamId(id));
+    }
+    // Slots are 1..=32; a longer number is a mistyped SteamID, not a slot.
+    if text.len() <= 3 {
+        return text.parse().ok().map(Player::Slot);
+    }
+    None
 }
 
 impl BlockList {
     /// True when a frag between these two should not be shown.
-    fn blocks(&self, killer: i32, victim: i32) -> bool {
-        if self.ids.is_empty() {
+    fn blocks(&self, killer: &Who, victim: &Who) -> bool {
+        if self.players.is_empty() {
             return false;
         }
-        let involved = self.ids.contains(&killer) || self.ids.contains(&victim);
+        let involved = self
+            .players
+            .iter()
+            .any(|p| p.matches(killer) || p.matches(victim));
         // An allow-list blocks everything the listed players were *not* part of;
         // a block-list blocks exactly what they were.
         if self.allow_list { !involved } else { involved }
     }
+
+    fn needs_player_info(&self) -> bool {
+        self.players.iter().any(|p| p.needs_player_info())
+    }
+
+    /// Whether the frag `killer -> victim` is hidden, asking the engine for
+    /// whatever the list needs at the moment it is called.
+    fn blocks_slots(&self, killer: i32, victim: i32) -> bool {
+        if self.players.is_empty() {
+            return false;
+        }
+        if !self.needs_player_info() {
+            return self.blocks(&Who::slot(killer), &Who::slot(victim));
+        }
+        let hltv = is_hltv();
+        if hltv
+            && self.players.contains(&Player::OwnPov)
+            && !SELF_IN_HLTV_REPORTED.swap(true, Ordering::Relaxed)
+        {
+            let note = format!(
+                "{COMMAND}: `self` matches nobody here -- an HLTV demo has no recording player\n"
+            );
+            crate::commands::console_print(&note);
+            unsafe { crate::debug::report(note.trim()) };
+        }
+        self.blocks(&resolve(killer, hltv), &resolve(victim, hltv))
+    }
+}
+
+impl Who {
+    fn slot(slot: i32) -> Self {
+        Who {
+            slot,
+            ..Who::default()
+        }
+    }
+}
+
+/// Whether the demo playing is an HLTV one: the client is a spectator-only
+/// view with no player of its own. The same test `anim_fix` uses.
+fn is_hltv() -> bool {
+    engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
+}
+
+/// Looks up a `DeathMsg` slot through `pfnGetPlayerInfo`. Slot 0 (the world)
+/// and anything past `MAX_CLIENTS` resolve to the slot number alone.
+fn resolve(slot: i32, hltv: bool) -> Who {
+    let mut who = Who::slot(slot);
+    let Some(engfuncs) = engine::engfuncs() else {
+        return who;
+    };
+    if !(1..=32).contains(&slot) {
+        return who;
+    }
+    // Zeroed first: the engine leaves `steam_id` alone unless a demo is
+    // playing, and leaves everything but `name` alone for an empty slot.
+    let mut info = engine::HudPlayerInfo::empty();
+    unsafe { (engfuncs.pfn_get_player_info)(slot, &mut info) };
+    if info.name.is_null() {
+        return who;
+    }
+    who.steam_id = info.steam_id;
+    who.is_own_pov = !hltv && info.thisplayer != 0;
+    who
 }
 
 // ── Patching ─────────────────────────────────────────────────────────────────
@@ -574,7 +740,7 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
         let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
         let blocked = BLOCK
             .lock()
-            .map(|list| list.blocks(killer, victim))
+            .map(|list| list.blocks_slots(killer, victim))
             .unwrap_or(false);
         if blocked {
             // 1 is what the engine's own dispatcher treats as handled.
@@ -736,7 +902,7 @@ fn fake(killer: i32, victim: i32, weapon: i32) -> Result<(), String> {
     // success and shows nothing is the worst of the three possible behaviours.
     if BLOCK
         .lock()
-        .map(|list| list.blocks(killer, victim))
+        .map(|list| list.blocks_slots(killer, victim))
         .unwrap_or(false)
     {
         return Err(format!(
@@ -770,6 +936,8 @@ fn usage() -> String {
          \x20 {COMMAND} offset default      hand y back to the game\n\
          \x20 {COMMAND} block <id>...       hide frags involving these players\n\
          \x20 {COMMAND} block !<id>...      hide everything EXCEPT these players\n\
+         \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y),\n\
+         \x20                               or self (the recording player; nobody in HLTV)\n\
          \x20 {COMMAND} block clear         stop hiding anything\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
          \x20                               weapon is a name (d_garand, garand) or 1..43\n"
@@ -782,9 +950,9 @@ pub(crate) fn status() -> String {
     let offset = PATCHED_OFFSET.load(Ordering::Acquire);
     let list = BLOCK.lock();
     let block = match list {
-        Ok(ref l) if l.ids.is_empty() => "nothing".to_string(),
+        Ok(ref l) if l.players.is_empty() => "nothing".to_string(),
         Ok(ref l) => {
-            let ids: Vec<String> = l.ids.iter().map(|i| i.to_string()).collect();
+            let ids: Vec<String> = l.players.iter().map(|p| p.to_string()).collect();
             if l.allow_list {
                 format!("everything except players {}", ids.join(", "))
             } else {
@@ -900,24 +1068,28 @@ fn dispatch(argv: &[String]) -> String {
             }
             if rest.len() == 1 && rest[0].eq_ignore_ascii_case("clear") {
                 if let Ok(mut list) = BLOCK.lock() {
-                    list.ids.clear();
+                    list.players.clear();
                     list.allow_list = false;
                 }
                 return format!("{COMMAND}: blocking nothing\n");
             }
-            let mut ids = Vec::new();
+            let mut players = Vec::new();
             let mut allow_list = false;
             for token in rest {
-                let (negated, digits) = match token.strip_prefix('!') {
+                let (negated, text) = match token.strip_prefix('!') {
                     Some(d) => (true, d),
                     None => (false, token.as_str()),
                 };
-                match digits.parse::<i32>() {
-                    Ok(id) => {
+                match parse_player(text) {
+                    Some(player) => {
                         allow_list |= negated;
-                        ids.push(id);
+                        players.push(player);
                     }
-                    Err(_) => return format!("{COMMAND} block: {token:?} is not a player index\n"),
+                    None => {
+                        return format!(
+                            "{COMMAND} block: {token:?} is not a slot number, a SteamID or self\n"
+                        );
+                    }
                 }
             }
             // A mixed list has no coherent reading -- "block everyone except 3,
@@ -931,9 +1103,10 @@ fn dispatch(argv: &[String]) -> String {
                 );
             }
             if let Ok(mut list) = BLOCK.lock() {
-                list.ids = ids;
+                list.players = players;
                 list.allow_list = allow_list;
             }
+            SELF_IN_HLTV_REPORTED.store(false, Ordering::Relaxed);
             HOOK_WANTED.store(true, Ordering::Relaxed);
             install_hook();
             status()
@@ -1107,26 +1280,36 @@ mod tests {
         assert!(parse_weapon("no_such_gun").is_err());
     }
 
+    fn slot(slot: i32) -> Who {
+        Who::slot(slot)
+    }
+
+    /// The example from #468: STEAM_0:0:8832199.
+    const ME: u64 = 76_561_197_977_930_126;
+
     #[test]
     fn a_block_list_hides_only_the_listed_players() {
         let list = BlockList {
-            ids: vec![3, 7],
+            players: vec![Player::Slot(3), Player::Slot(7)],
             allow_list: false,
         };
-        assert!(list.blocks(3, 9));
-        assert!(list.blocks(9, 7));
-        assert!(!list.blocks(1, 2));
+        assert!(list.blocks(&slot(3), &slot(9)));
+        assert!(list.blocks(&slot(9), &slot(7)));
+        assert!(!list.blocks(&slot(1), &slot(2)));
     }
 
     #[test]
     fn an_allow_list_hides_everything_else() {
         let list = BlockList {
-            ids: vec![3],
+            players: vec![Player::Slot(3)],
             allow_list: true,
         };
-        assert!(!list.blocks(3, 9), "a frag involving 3 must still show");
         assert!(
-            list.blocks(1, 2),
+            !list.blocks(&slot(3), &slot(9)),
+            "a frag involving 3 must still show"
+        );
+        assert!(
+            list.blocks(&slot(1), &slot(2)),
             "a frag with nobody listed must be hidden"
         );
     }
@@ -1135,10 +1318,106 @@ mod tests {
     fn an_empty_list_blocks_nothing_in_either_mode() {
         for allow_list in [false, true] {
             let list = BlockList {
-                ids: Vec::new(),
+                players: Vec::new(),
                 allow_list,
             };
-            assert!(!list.blocks(1, 2));
+            assert!(!list.blocks(&slot(1), &slot(2)));
+        }
+    }
+
+    #[test]
+    fn steam_ids_parse_in_both_forms() {
+        assert_eq!(parse_steam_id("76561197977930126"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:0:8832199"), Some(ME));
+        assert_eq!(parse_steam_id("steam_1:0:8832199"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:1:8832199"), Some(ME + 1));
+        assert_eq!(parse_steam_id("STEAM_0:2:8832199"), None);
+        assert_eq!(parse_steam_id("STEAM_0:0"), None);
+        assert_eq!(parse_steam_id("STEAM_0:0:1:2"), None);
+        assert_eq!(parse_steam_id("7656119797793012"), None, "16 digits");
+        assert_eq!(parse_steam_id("12"), None);
+    }
+
+    #[test]
+    fn block_arguments_are_a_slot_a_steam_id_or_self() {
+        assert_eq!(parse_player("3"), Some(Player::Slot(3)));
+        assert_eq!(parse_player("self"), Some(Player::OwnPov));
+        assert_eq!(parse_player("SELF"), Some(Player::OwnPov));
+        assert_eq!(parse_player("76561197977930126"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("STEAM_0:0:8832199"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("pov"), None);
+        assert_eq!(parse_player("12345"), None, "neither a slot nor a SteamID");
+        assert_eq!(parse_player(""), None);
+    }
+
+    #[test]
+    fn a_steam_id_matches_whatever_slot_the_player_has() {
+        let list = BlockList {
+            players: vec![Player::SteamId(ME)],
+            allow_list: true,
+        };
+        let me_in_slot_5 = Who {
+            slot: 5,
+            steam_id: ME,
+            is_own_pov: false,
+        };
+        let me_in_slot_12 = Who {
+            slot: 12,
+            ..me_in_slot_5
+        };
+        let other = Who {
+            slot: 7,
+            steam_id: ME + 2,
+            is_own_pov: false,
+        };
+        assert!(!list.blocks(&me_in_slot_5, &other));
+        assert!(!list.blocks(&other, &me_in_slot_12));
+        assert!(list.blocks(&other, &slot(9)));
+    }
+
+    #[test]
+    fn an_unknown_steam_id_never_matches() {
+        // A slot whose SteamID the engine did not report resolves to 0.
+        assert!(!Player::SteamId(0).matches(&slot(4)));
+    }
+
+    #[test]
+    fn self_and_a_steam_id_cover_both_demo_types() {
+        // `block !self !<steamid>`, the one line #468 says must work in both.
+        let list = BlockList {
+            players: vec![Player::OwnPov, Player::SteamId(ME)],
+            allow_list: true,
+        };
+        // POV demo: the recording player is flagged.
+        let pov_me = Who {
+            slot: 2,
+            steam_id: ME,
+            is_own_pov: true,
+        };
+        assert!(!list.blocks(&pov_me, &slot(8)));
+        // HLTV demo: `self` resolves for nobody, and the SteamID finds me.
+        let hltv_me = Who {
+            slot: 14,
+            steam_id: ME,
+            is_own_pov: false,
+        };
+        assert!(!list.blocks(&slot(3), &hltv_me));
+        assert!(list.blocks(&slot(3), &slot(8)));
+    }
+
+    #[test]
+    fn only_slot_lists_skip_the_engine_lookup() {
+        let slots = BlockList {
+            players: vec![Player::Slot(1)],
+            allow_list: false,
+        };
+        assert!(!slots.needs_player_info());
+        for player in [Player::OwnPov, Player::SteamId(ME)] {
+            let list = BlockList {
+                players: vec![Player::Slot(1), player],
+                allow_list: false,
+            };
+            assert!(list.needs_player_info());
         }
     }
 }

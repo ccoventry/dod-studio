@@ -81,6 +81,22 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block clear` | stop hiding anything |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
 
+A `block` id is any of:
+
+- **A slot number**, as before. It only holds for one demo, because the same
+  player gets a different slot in every demo.
+- **A SteamID**, either the 17-digit SteamID64 (`76561197977930126`) or
+  `STEAM_0:0:8832199`. It is matched against each player's userinfo `*sid` at
+  every death notice, so one command works across a whole batch of demos and
+  survives reconnects. The engine reports `*sid` only during demo playback.
+- **`self`**: the recording player in a POV demo. An HLTV demo has no
+  recording player, so there `self` matches nobody, and the console says so
+  once.
+
+Mix them freely. `dodstudio_deathmsg block !self !76561197977930126` shows
+only your own frags in both kinds of demo: in a POV demo both entries point
+at you, and in an HLTV demo `self` drops out and the SteamID finds you.
+
 ### `dodstudio_hide_hudelement`
 
 `dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the ten
