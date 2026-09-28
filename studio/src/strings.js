@@ -1024,7 +1024,7 @@ export const STRINGS = {
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
     scanCompleteToast: (count, unchanged = 0) =>
       unchanged > 0
-        ? `Scan complete (${count} demo(s) found, ${unchanged} already in the queue and unchanged)`
+        ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
         : `Scan complete (${count} demo(s) found)`,
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
