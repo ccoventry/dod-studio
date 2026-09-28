@@ -584,6 +584,16 @@ export async function isDebugBuild() {
   });
 }
 
+/** The git branch of the source tree this build came from, or null when it
+ *  wasn't built on this PC (every published installer). Best-effort, like
+ *  isDebugBuild(): a missing branch only leaves it out of the window title. */
+export async function localGitBranch() {
+  return invoke("local_git_branch").catch((err) => {
+    console.error("IPC Execution Error (local_git_branch):", err);
+    return null;
+  });
+}
+
 export async function restartApp() {
   return invoke("restart_app")
     .catch((err) => {
