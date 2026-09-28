@@ -516,6 +516,8 @@ pub fn poll() {
     crate::hull_trace_guard::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+    // Re-raises sv_allow_shaders after each demo load's disconnect reset.
+    crate::world_shaders::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -655,6 +657,9 @@ fn status_text() -> String {
     // the permanent, noisy default state for everyone who hasn't opted in.
     if texture_hires::has_observed() {
         lines.push(texture_hires::status());
+    }
+    if let Some(shaders) = crate::world_shaders::status_line() {
+        lines.push(shaders);
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -1350,6 +1355,11 @@ pub fn install() {
     // the hook if it's turned on in a session that started without it.
     if let Some(hd) = register(texture_hires::HD_NAME, bit(texture_hires::enabled())) {
         texture_hires::set_hd_cvar(hd);
+    }
+    // Outside the all-or-nothing tuple for the same reason as the HD switch:
+    // it is independent of every other setting here.
+    if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
+        crate::world_shaders::set_cvar(shaders);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
