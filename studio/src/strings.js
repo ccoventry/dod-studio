@@ -409,7 +409,7 @@ export const STRINGS = {
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     OBS_CHECKING_WARNING: 'Checking the OBS connection…',
-    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands ${n === 1 ? 'is' : 'are'} not allowed — remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
+    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
@@ -936,6 +936,10 @@ export const STRINGS = {
       mirv_fov: "can't change mid-demo — set it in Initial Commands instead",
       gl_widescreenfov: "can't change mid-demo — set it in Initial Commands instead",
     },
+    TOO_LONG_TITLE: 'These commands are too long to fit in a demo:',
+    TOO_LONG_ADVICE:
+      'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
+    tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
