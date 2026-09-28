@@ -5,6 +5,7 @@ import { showToast } from './toast.js';
 import { isRangeModified as isKillRangeModified } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
+import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -459,15 +460,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
 
-    const durTicks = streak.end_tick - streak.start_tick;
-    const tickrate = demo.tickrate || 100;
-    const durSecs = (durTicks / tickrate).toFixed(1);
-
-    // Time logic
-    const total_seconds = Math.floor(streak.start_tick / (demo.tickrate || 100));
-    const mins = Math.floor(total_seconds / 60);
-    const secs = Math.floor(total_seconds % 60).toString().padStart(2, '0');
-    const timeStr = `${mins}:${secs}`;
+    // Time matches the demo player's clock; see highlight_time.js (#464).
+    const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
+    const timeStr = formatClock(highlightStartSeconds(streak, demo.tickrate));
 
     // Details: precomputed weapon/timing chain from the backend
     // (e.g. "Rifle (+0:03) Rifle" — first kill weapon + gap + weapon chain).
