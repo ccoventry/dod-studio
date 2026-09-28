@@ -1271,6 +1271,15 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// The paths in `paths` that do not exist on disk, in the order given.
+fn missing_scan_paths(paths: &[String]) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|p| !std::path::Path::new(p).exists())
+        .cloned()
+        .collect()
+}
+
 pub async fn scan_directory_impl(
     app_handle: tauri::AppHandle,
     is_scanning: Arc<std::sync::atomic::AtomicBool>,
@@ -1289,6 +1298,16 @@ pub async fn scan_directory_impl(
 
         let mut list = Vec::new();
         let mut dir_stack = Vec::new();
+
+        // A picked folder deleted since the picker last saw it used to scan to
+        // "0 demos found" with no reason given (#432).
+        let missing = missing_scan_paths(&paths);
+        if !missing.is_empty() {
+            if missing.len() == paths.len() {
+                return Err(crate::messages::scan_path_not_found(&missing[0]));
+            }
+            log::warn!("Scan skipped paths that no longer exist: {:?}", missing);
+        }
 
         // ── Phase 1: collect all .dem file paths ─────────────────────────────
         for path_str in paths {
@@ -1981,6 +2000,14 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn missing_scan_paths_names_only_the_paths_that_are_gone() {
+        let scratch = Scratch::new("missing_scan_paths");
+        let here = scratch.path().to_string_lossy().to_string();
+        let gone = scratch.path().join("deleted").to_string_lossy().to_string();
+        assert_eq!(missing_scan_paths(&[here, gone.clone()]), vec![gone]);
+    }
 
     fn sample_payload() -> CapturePayload {
         CapturePayload {
