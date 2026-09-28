@@ -1,12 +1,14 @@
 # Sprint History Archive
 
 > Archived 2026-08-24. This is the full narrative content that used to live in
-> `docs/active_sprint_state.md` before that file was trimmed back down to a
+> `docs/active_sprint_state.md` (itself archived 2026-09-28, now
+> `docs/archive/active_sprint_state.md`) before that file was trimmed back down to a
 > lightweight current-state-only doc (it had grown into a long chronological
 > log — everything below was preserved here rather than deleted). Nothing
 > here is guaranteed current; read it as history, not status. For what's
-> actually true right now, see `active_sprint_state.md`. For ongoing
-> bug/feature tracking, see `engineering_backlog.md`.
+> actually true right now, read the code; ongoing bug/feature tracking is
+> in GitHub Issues. `engineering_backlog.md` and `bugs.md`, named
+> throughout below, are in `docs/archive/`.
 
 ---
 
