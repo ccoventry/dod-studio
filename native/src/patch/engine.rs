@@ -923,25 +923,28 @@ mod directory_tests {
         let job = PatchJob {
             source_demo: input.to_string_lossy().to_string(),
             output_demo: output.clone(),
-            streaks: vec![CaptureStreak {
-                start_tick: 3,
-                end_tick: 8,
-                source_demo: input.to_string_lossy().to_string(),
-                target_player: None,
-                kill_count: 0,
-                timeline_string: String::new(),
-                duration_string: String::new(),
-                player_index: 0,
-                kills: Vec::new(),
-                start_index: 0,
-                end_index: 0,
-                total_demo_frames: 14,
-                demo_fps: 100.0,
-                viewdemo_times: Vec::new(),
-                frame_times: std::sync::Arc::new(Vec::new()),
-                match_start_tick: None,
-                status: Default::default(),
-            }],
+            // Built from JSON rather than a struct literal, so the test keeps
+            // compiling when `CaptureStreak` gains an optional field (#417
+            // adds `source_key`). Missing optional fields deserialize to their
+            // defaults, and `frame_times` is `serde(skip)`.
+            streaks: vec![
+                serde_json::from_value::<CaptureStreak>(serde_json::json!({
+                    "start_tick": 3,
+                    "end_tick": 8,
+                    "source_demo": input.to_string_lossy(),
+                    "target_player": null,
+                    "kill_count": 0,
+                    "timeline_string": "",
+                    "duration_string": "",
+                    "player_index": 0,
+                    "kills": [],
+                    "start_index": 0,
+                    "end_index": 0,
+                    "total_demo_frames": 14,
+                    "demo_fps": 100.0,
+                }))
+                .unwrap(),
+            ],
             target_player: None,
             // Every kind the patcher writes: ConsoleCommand frames at
             // DemoStart and mid-playback, and a director event, which is a
