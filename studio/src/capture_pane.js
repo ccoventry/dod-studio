@@ -9,7 +9,7 @@ import { createListEditor } from './list_editor.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
@@ -1089,6 +1089,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
 
       let advanced = 0;
+      // A hand-set Captured confirmed on disk: no status change, but the
+      // set-by-hand mark goes (#105).
+      let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
         // A block can cover several highlights — overlapping ones are recorded
@@ -1112,8 +1115,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // Status only ever moves forward. Re-capturing something already
           // rendered must not knock it back down to Captured.
           if (streak.status === 'Rendered') return;
-          if (streak.status !== 'Captured') advanced += 1;
-          streak.status = 'Captured';
+          if (streak.statusByHand) markCleared = true;
+          if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
         });
         // Recorded even when the take isn't renderable yet — a future render
         // still needs to resolve this take_key back to these highlights once
@@ -1125,7 +1128,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       if (total === 0) return;
 
-      if (advanced > 0) {
+      if (advanced > 0 || markCleared) {
         // Both tables read status, and neither re-renders on its own.
         if (currentOnStatusChange) currentOnStatusChange();
       }

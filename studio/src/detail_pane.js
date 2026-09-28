@@ -2,7 +2,7 @@ import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
 import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses } from './ipc_bridge.js';
 import { showToast } from './toast.js';
-import { isRangeModified as isKillRangeModified } from './take_index.js';
+import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
 
@@ -494,6 +494,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
       ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop())}</span>`
       : '';
 
+    const byHandMark = streak.statusByHand
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
+      : '';
+
     tr.innerHTML = `
       <td style="padding: 8px;">${rowNum}</td>
       <td style="padding: 8px;">
@@ -517,7 +521,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
             `<option value="${s}" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
           ).join('')}
-        </select>${mergedBadge}
+        </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
         <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
@@ -566,11 +570,25 @@ export function renderDetailView(demo, selectedDemoIdx) {
     }
 
     const statusSelect = tr.querySelector('.streak-status-select');
-    statusSelect.addEventListener('change', (e) => {
-      streak.status = e.target.value;
-      statusSelect.style.color = statusColors[e.target.value] || '#888';
+    // Free in both directions (#105, D9); the mark and the Undo toast are
+    // what keep a hand-set status honest.
+    const afterStatusChange = () => {
+      renderDetailView(currentDemo, currentDemoIdx);
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
+    };
+    statusSelect.addEventListener('change', (e) => {
+      const previous = setStatusByHand(streak, e.target.value);
+      afterStatusChange();
+      showToast(STRINGS.HIGHLIGHTS.statusSetToast(e.target.value), 'info', 6000, {
+        action: {
+          label: STRINGS.HIGHLIGHTS.UNDO,
+          onClick: () => {
+            restoreStatus(streak, previous);
+            afterStatusChange();
+          },
+        },
+      });
     });
 
     const notesInput = tr.querySelector('.streak-notes-input');
