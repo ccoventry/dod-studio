@@ -181,12 +181,14 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-) -> Result<Vec<capture_manager::SerializedDemo>, String> {
+    known: Option<Vec<capture_manager::KnownDemo>>,
+) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
+        known.unwrap_or_default(),
     )
     .await
 }

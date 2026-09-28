@@ -409,7 +409,7 @@ export const STRINGS = {
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     OBS_CHECKING_WARNING: 'Checking the OBS connection…',
-    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands ${n === 1 ? 'is' : 'are'} not allowed — remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
+    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
@@ -936,6 +936,10 @@ export const STRINGS = {
       mirv_fov: "can't change mid-demo — set it in Initial Commands instead",
       gl_widescreenfov: "can't change mid-demo — set it in Initial Commands instead",
     },
+    TOO_LONG_TITLE: 'These commands are too long to fit in a demo:',
+    TOO_LONG_ADVICE:
+      'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
+    tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
@@ -1017,12 +1021,23 @@ export const STRINGS = {
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
     readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
+    // Appended to the two statuses above when the scan skipped demos (#23).
+    skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
+    // `skipped` is [{name, reason}]; names the first three, counts the rest.
+    skippedDemosToast: (skipped) => {
+      const shown = skipped.slice(0, 3).map((s) => `${s.name} (${s.reason})`).join('; ');
+      const more = skipped.length > 3 ? `; and ${skipped.length - 3} more` : '';
+      return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
+    },
     statusGeneric: (status) => `Status: ${status}`,
     SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
-    scanCompleteToast: (count) => `Scan complete (${count} demo(s) found)`,
+    scanCompleteToast: (count, unchanged = 0) =>
+      unchanged > 0
+        ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
+        : `Scan complete (${count} demo(s) found)`,
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 
