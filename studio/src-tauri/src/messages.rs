@@ -71,6 +71,12 @@ pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)
 }
 
+// Why a scan skipped a demo, in the user's words (#23). The scanner's own
+// error text ("failed to fill whole buffer") still goes to the log.
+pub const SCAN_FAIL_TOO_SHORT: &str = "File too short to be a demo";
+pub const SCAN_FAIL_NOT_A_DEMO: &str = "Not a Half-Life demo (bad header)";
+pub const SCAN_FAIL_CORRUPT: &str = "Demo is corrupt partway through";
+
 pub fn scan_path_not_found(path: &str) -> String {
     format!("Not found: {path} (moved or deleted?)")
 }

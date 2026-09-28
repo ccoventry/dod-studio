@@ -1379,6 +1379,34 @@ fn missing_scan_paths(paths: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// Why the scan could not use `path`, in plain words, from the file itself
+/// rather than the scanner's error text: shorter than a demo header, a header
+/// that isn't `HLDEMO`, or a good header on a demo that fails to parse later.
+/// A failure to open or read the file at all (`Failed to read file: ...`,
+/// e.g. access denied) is already readable and passes through as `reason`.
+fn plain_scan_failure(path: &Path, reason: &str) -> String {
+    // Already readable: the file could not be opened at all, or the (never
+    // firing, #247) HLTV guard refused it.
+    if reason.starts_with("Failed to read file") || reason.starts_with("Unsupported HLTV") {
+        return reason.to_string();
+    }
+    let mut head = [0u8; 8];
+    let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    if len < native::patch::DEMO_HEADER_SIZE as u64 {
+        return crate::messages::SCAN_FAIL_TOO_SHORT.to_string();
+    }
+    let read_ok = std::fs::File::open(path)
+        .and_then(|mut f| std::io::Read::read_exact(&mut f, &mut head))
+        .is_ok();
+    if !read_ok {
+        return reason.to_string();
+    }
+    if &head != b"HLDEMO\0\0" {
+        return crate::messages::SCAN_FAIL_NOT_A_DEMO.to_string();
+    }
+    crate::messages::SCAN_FAIL_CORRUPT.to_string()
+}
+
 /// The final `scan_progress` event's `skipped` list: `{name, reason}` per demo
 /// the scan could not read, in file-name order (workers finish out of order).
 fn skipped_demo_rows(mut skipped: Vec<(usize, String, String)>) -> Vec<serde_json::Value> {
@@ -1568,7 +1596,7 @@ pub async fn scan_directory_impl(
                             skipped.lock().unwrap_or_else(|p| p.into_inner()).push((
                                 idx,
                                 file_name.clone(),
-                                reason.clone(),
+                                plain_scan_failure(file, reason),
                             ));
                         }
                         let serialized = scanned.ok().map(
@@ -2185,6 +2213,35 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
+        let dir = Scratch::new("plain_scan_failure");
+        let short = dir.path().join("short.dem");
+        let text = dir.path().join("text.dem");
+        let corrupt = dir.path().join("corrupt.dem");
+        std::fs::write(&short, b"hello").unwrap();
+        std::fs::write(&text, vec![b'x'; 2048]).unwrap();
+        let mut demo = b"HLDEMO\0\0".to_vec();
+        demo.resize(2048, 0xAB);
+        std::fs::write(&corrupt, demo).unwrap();
+
+        let r = "Failed to read demo header: failed to fill whole buffer";
+        assert_eq!(
+            plain_scan_failure(&short, r),
+            crate::messages::SCAN_FAIL_TOO_SHORT
+        );
+        assert_eq!(
+            plain_scan_failure(&text, "Failed to parse demo: x"),
+            crate::messages::SCAN_FAIL_NOT_A_DEMO
+        );
+        assert_eq!(
+            plain_scan_failure(&corrupt, "Failed to parse demo: x"),
+            crate::messages::SCAN_FAIL_CORRUPT
+        );
+        let io = "Failed to read file: Access is denied. (os error 5)";
+        assert_eq!(plain_scan_failure(&corrupt, io), io);
+    }
 
     #[test]
     fn skipped_demos_are_reported_in_file_order_with_their_reason() {
