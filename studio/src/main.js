@@ -1155,11 +1155,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
     const masterTableBody = document.querySelector('#master-demo-table-body');
 
+    // Demos the scan could not read (#23). Only the final event carries it.
+    const skipped = Array.isArray(p.skipped) ? p.skipped : [];
+    if (skipped.length > 0) {
+      console.warn('Scan skipped unreadable demos:', skipped);
+      showToast(STRINGS.MAIN.skippedDemosToast(skipped), 'warning', 10000);
+    }
+
     if (p.cancelled) {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else if (p.status === 'Complete') {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else {
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status);
