@@ -1155,11 +1155,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
     const masterTableBody = document.querySelector('#master-demo-table-body');
 
+    // Demos the scan could not read (#23). Only the final event carries it.
+    const skipped = Array.isArray(p.skipped) ? p.skipped : [];
+    if (skipped.length > 0) {
+      console.warn('Scan skipped unreadable demos:', skipped);
+      showToast(STRINGS.MAIN.skippedDemosToast(skipped), 'warning', 10000);
+    }
+
     if (p.cancelled) {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else if (p.status === 'Complete') {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else {
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status);
@@ -1187,8 +1194,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   // re-walked on every add, or every scan re-processes every folder ever
   // added across the app's lifetime (dev only ever re-ingests the paths just
   // picked in that action; see views/capture/workspace.rs Add Files/Add Folder).
+  //
+  // Resolves true when the scan ran (a cancelled one included), false when it
+  // failed -- e.g. every picked path is gone, which the backend reports (#432).
   async function triggerAutoScan(pathsToScan) {
-    if (!pathsToScan || pathsToScan.length === 0) return;
+    if (!pathsToScan || pathsToScan.length === 0) return false;
 
     const scanStatusEl = document.querySelector('#scan-status');
     const scanSpinnerEl = document.querySelector('#scan-spinner');
@@ -1207,7 +1217,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="8">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
 
     try {
-      const newlyScanned = await scanDirectory(pathsToScan);
+      // Demos already queued and unchanged on disk are skipped, not
+      // re-parsed; ones from an older project (no file_key) are scanned.
+      const known = currentScannedDemos
+        .filter((d) => d.file_key)
+        .map((d) => ({ path: d.path, file_key: d.file_key }));
+      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known);
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
@@ -1232,7 +1247,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // it here in case the event arrives before renderMasterList finishes.
       updateDemoFooter(currentScannedDemos);
       if (newlyScanned.length > 0) markProjectDirty();
-      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length), 'success');
+      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       selectedDemoIdx = newlyScanned.length > 0
         ? currentScannedDemos.indexOf(newlyScanned[0])
         : (currentScannedDemos.length > 0 ? 0 : null);
@@ -1250,10 +1265,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
       showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
+      return false;
     } finally {
       if (addFilesBtn) addFilesBtn.disabled = false;
       if (addFolderBtn) addFolderBtn.disabled = false;
@@ -1303,11 +1320,17 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
         if (selected) {
           const folder = Array.isArray(selected) ? selected[0] : selected;
-          if (!scanPaths.includes(folder)) {
+          // Always scan (#432): a folder added before, then emptied from the
+          // list (bin icon, Clear All), used to be a silent no-op here.
+          // scanPaths only decides whether to remember it, and a folder that
+          // turned out not to exist is not remembered. The merge in
+          // triggerAutoScan replaces demos by path, so a re-scan adds no
+          // duplicate rows.
+          const scanned = await triggerAutoScan([folder]);
+          if (scanned && !scanPaths.includes(folder)) {
             scanPaths.push(folder);
             markProjectDirty();
             await persistAppSettings();
-            await triggerAutoScan([folder]);
           }
         }
       } catch (err) {

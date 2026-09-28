@@ -27,8 +27,13 @@ export async function openActivityLog() {
     });
 }
 
-export async function scanDirectory(scanPaths) {
-  return invoke("scan_directory", { paths: scanPaths })
+/**
+ * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
+ * already in the queue: the backend skips each one whose file is unchanged on
+ * disk and counts it in `unchanged` instead of parsing it again.
+ */
+export async function scanDirectory(scanPaths, known = []) {
+  return invoke("scan_directory", { paths: scanPaths, known })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
@@ -83,7 +88,7 @@ export async function scanGameConfigs(
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
+      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
     });
 }
 
