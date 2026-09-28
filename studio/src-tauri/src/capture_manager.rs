@@ -729,8 +729,9 @@ fn emit_take_verification(
 
 // ── Public command handler ─────────────────────────────────────────────────────
 
-/// `Some(message)` when `init_commands` or any `custom_commands` entry names
-/// a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
+/// `Some(message)` when `init_commands` or any `custom_commands` entry is too
+/// long for a demo's ConsoleCommand frame (`native::patch::too_long_commands`),
+/// names a `native::patch::cfg_scan::BANNED_COMMANDS` cvar (refused everywhere), or
 /// `custom_commands` names a `SCHEDULED_BANNED_COMMANDS` one (fine in Initial
 /// Commands, refused only here) — the first one found, checking the
 /// everywhere-banned tier before the scheduled-only tier. `None` means clean.
@@ -742,6 +743,18 @@ fn first_banned_command_error(
     custom_commands: &[CustomCommandPayload],
 ) -> Option<String> {
     let custom_texts: Vec<String> = custom_commands.iter().map(|c| c.command.clone()).collect();
+
+    // Each command is written into one ConsoleCommand frame as typed; one that
+    // does not fit used to abort the whole app partway through patching (#453).
+    let mut too_long = native::patch::too_long_commands(init_commands);
+    too_long.extend(native::patch::too_long_commands(&custom_texts));
+    if let Some(command) = too_long.first() {
+        return Some(format!(
+            "\"{command}\" is {} bytes — Initial and Scheduled Commands must be under {} bytes each to fit in a demo. Split it into shorter commands.",
+            command.len(),
+            native::patch::MAX_CONSOLE_CMD_LEN
+        ));
+    }
 
     let mut banned = native::patch::cfg_scan::banned_commands(init_commands);
     banned.extend(native::patch::cfg_scan::banned_commands(&custom_texts));
@@ -2308,6 +2321,23 @@ mod tests {
             commands,
             vec!["mirv_movie_filename \"F:\\DICE  WSOD25\\02 Audio Video\\clip\""]
         );
+    }
+
+    #[test]
+    fn a_command_too_long_for_a_demo_frame_is_refused_in_either_list() {
+        let long = format!("echo {}", "x".repeat(59)); // 64 bytes
+        let err = first_banned_command_error(std::slice::from_ref(&long), &[]);
+        assert!(err.is_some_and(|e| e.contains("64 bytes")));
+
+        let scheduled = vec![CustomCommandPayload {
+            command: long,
+            relation: "Before".to_string(),
+            offset_seconds: 1.0,
+        }];
+        assert!(first_banned_command_error(&[], &scheduled).is_some());
+
+        let fits = format!("echo {}", "x".repeat(58)); // 63 bytes
+        assert!(first_banned_command_error(&[fits], &[]).is_none());
     }
 
     #[test]
