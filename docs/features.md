@@ -52,7 +52,11 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 ### 2.2 Studio → Capture
 
-**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with two parallel workers. Each demo is fully analysed, and the result also warms the analyzer cache. Re-scanning a known demo keeps its statuses, selection, notes and kill ranges. Cancel Scan stops it.
+**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with two parallel workers. The status line shows `Scanning n / N — <demo>` from the start. Each demo is fully analysed, and the result also warms the analyzer cache. Cancel Scan stops it.
+
+- **Known demos are skipped.** A demo already in the queue whose file is unchanged is not parsed again. Unchanged means the same path and the same size plus hash of the first 64 KiB. The toast counts these separately. A changed file is rescanned, and the rescan keeps its statuses, selection, notes and kill ranges.
+- **Adding a folder always scans it**, including a folder that was added before. A folder that no longer exists gives a "Not found" error.
+- **Unreadable demos are named.** A warning toast lists each one with a reason: too short to be a demo, not a Half-Life demo (bad header), or corrupt partway through.
 
 **Master Demo Queue.** One row per demo with counts: Highlights, Selected, Pending, Captured, Rendered. Counts include only the recording player's streaks. A search box filters by name, path or map, and every bulk action works on the visible rows only:
 
@@ -84,7 +88,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 |---|---|
 | **Paths** | Half-Life executable, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Each shows "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
 | **Output Format** | Width and height (1280×720), Capture FPS (300), **Capture Mode** (Frame sequence, Video, OBS). Video mode adds a capture codec (Ut Video default, FFV1, x264 lossless, uncompressed). OBS mode adds host, port, password, OBS path, Launch OBS, **Test Connection**, and OBS Capture FPS (120). Test Connection is not read-only: it creates or repairs a `[DoD-Studio]` profile and scene in OBS and switches to them. |
-| **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
+| **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked; its value is the `host_framerate` used for fast-forward. Every timing field can be 0. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
 | **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, and **Clear Previews...**, which lists stale `_preview.dem` files the app made and deletes the ones you tick. |
 | **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Warning banners explain what will not take effect, what is refused, and what your own game configs set. See 3.5 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
@@ -173,6 +177,8 @@ On failure or cancel the copied demos, junctions and scratch files are removed. 
 ### 3.5 Command tiers
 
 Commands you type into Initial or Scheduled Commands are checked twice: once for the warning banner, and again when the batch starts. The lists live in `native/src/patch/cfg_scan.rs`; read it rather than trusting this summary.
+
+Every command must also fit a demo's 64-byte command field, which holds 63 characters. A longer one is refused the same way as a banned command, with a red row under its field.
 
 | Tier | Commands | What happens |
 |---|---|---|
@@ -342,6 +348,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Hook DLL log | `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, 30 days kept |
 | Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v2\` (no eviction) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
+| Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Project files | wherever you save them |
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_primer.dem`, `dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`) |
@@ -378,9 +385,6 @@ Each of these is true on `dev` today. Items with an issue number are tracked; th
 
 **Behaviour**
 
-- A Scheduled Command of 64 bytes or more aborts the whole app during patching. The code warns at 60 bytes and then panics under `panic = "abort"`. It should be refused up front like a banned command.
-- **FF Speed** is saved and sent but never used. The helper cfg hard-codes `host_framerate 0.05`.
-- Number fields cannot hold 0. A Pre-roll of 0 becomes 2.0, and the same happens to Post-roll, Initial Delay, FPS and resolution.
 - The uncaught-error toast says details went to `crash_log.md`; they go to the activity log.
 - Three different HLTV tests disagree: the analyzer's (any director message), the scanner's (a header string that never matches, #247), and the Explorer's (the filename).
 - A recovered render batch has stub rows. A job resumed without a rescan can fail with "no audio source".
