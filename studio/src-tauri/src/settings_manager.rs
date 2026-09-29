@@ -130,6 +130,10 @@ pub struct AppSettings {
     pub render_fps: i32,
     #[serde(default = "default_render_max_concurrent")]
     pub render_max_concurrent: i32,
+    /// How many demos a scan parses at once (#246). Each worker holds a
+    /// whole analysis, roughly 1.2 GB at peak; see `SCAN_CONCURRENCY`.
+    #[serde(default = "default_scan_workers")]
+    pub scan_workers: i32,
     /// JIT multi-drive export pool for Render Studio.
     #[serde(default)]
     pub render_export_dirs: Vec<String>,
@@ -180,6 +184,9 @@ fn default_render_fps() -> i32 {
 }
 fn default_render_max_concurrent() -> i32 {
     2
+}
+fn default_scan_workers() -> i32 {
+    crate::capture_manager::SCAN_CONCURRENCY as i32
 }
 fn default_analyzer_explorer_width() -> i32 {
     260
@@ -283,6 +290,7 @@ impl Default for AppSettings {
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
             render_max_concurrent: default_render_max_concurrent(),
+            scan_workers: default_scan_workers(),
             render_export_dirs: Vec::new(),
             notify_patching: default_notify_patching(),
             notify_demo_loading: default_notify_demo_loading(),
@@ -373,6 +381,22 @@ mod tests {
 
         assert_eq!(settings.hlae_path, "C:/hlae/hlae.exe");
         assert_eq!(settings.capture_fps, 300);
+        // Settings saved before #246 get today's worker count.
+        assert_eq!(
+            settings.scan_workers,
+            crate::capture_manager::SCAN_CONCURRENCY as i32
+        );
+    }
+
+    #[test]
+    fn test_scan_workers_roundtrip() {
+        let original = AppSettings {
+            scan_workers: 5,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.scan_workers, 5);
     }
 
     #[test]
