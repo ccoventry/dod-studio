@@ -614,6 +614,13 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Always shown (#430): the one fact that decides how big HD textures can
+    // get before the game runs out of memory.
+    lines.push(if crate::pe::process_is_large_address_aware() {
+        "address space: 4 GB (hl.exe is large-address-aware)".to_string()
+    } else {
+        "address space: 2 GB (hl.exe isn't large-address-aware; very large HD textures can run it out)".to_string()
+    });
     // Gated like the two fixes above rather than always shown like the
     // suppression cvars: logging is off by default and a permanent "logging
     // nothing" line would be noise in the overwhelmingly common case.
