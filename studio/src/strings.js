@@ -366,6 +366,11 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
+    SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
+    scanWorkersHint: (totalGb) => totalGb
+      ? `≈1.2 GB per worker; this PC has ${totalGb} GB`
+      : '≈1.2 GB per worker',
     CLEAR_PREVIEWS_BUTTON: 'Clear Previews...',
     NOTIFY_PATCHING_LABEL: 'Patching Started/Complete',
     NOTIFY_PATCHING_TITLE: 'One notification when patching begins, one when your demos are ready and capture is about to start. Not per-demo — decal clearing makes patching take real time now, but a toast per demo patched would be noise.',

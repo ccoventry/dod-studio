@@ -13,7 +13,8 @@ import {
   checkHlaeFfmpeg,
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
-  launchObs
+  launchObs,
+  systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
@@ -420,6 +421,27 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChange: () => persistAppSettings(),
   });
 
+  // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
+  // holds a whole analysis, so the hint puts the memory next to the number.
+  // Deliberately no clamp to the machine's RAM.
+  function readScanWorkers() {
+    return Math.min(8, Math.max(1, numberField('#config-scan-workers', 2, { integer: true, positive: true })));
+  }
+  let totalMemoryGb = null;
+  function updateScanWorkersHint() {
+    const hint = document.querySelector('#config-scan-workers-hint');
+    if (hint) hint.textContent = STRINGS.CAPTURE_CONFIG.scanWorkersHint(totalMemoryGb);
+  }
+  systemMemoryBytes().then((bytes) => {
+    if (bytes) totalMemoryGb = Math.round(bytes / 1024 ** 3);
+    updateScanWorkersHint();
+  });
+  const scanWorkersInput = document.querySelector('#config-scan-workers');
+  scanWorkersInput?.addEventListener('change', () => {
+    scanWorkersInput.value = readScanWorkers();
+    persistAppSettings();
+  });
+
   // Helper to persist application settings
   async function persistAppSettings() {
     const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim() || "";
@@ -474,6 +496,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
+    const scanWorkers = readScanWorkers();
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -525,6 +548,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      scan_workers: scanWorkers,
       render_export_dirs: renderExportDirs
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -693,6 +717,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.render_max_concurrent) {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
+      }
+      if (settings.scan_workers) {
+        const inputEl = document.querySelector('#config-scan-workers');
+        if (inputEl) inputEl.value = settings.scan_workers;
       }
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
         scanPaths = [...settings.pinned_folders];
@@ -1225,7 +1253,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const known = currentScannedDemos
         .filter((d) => d.file_key)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known);
+      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known, readScanWorkers());
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of

@@ -48,7 +48,14 @@ const PATCH_CONCURRENCY: usize = 4;
 /// memory pressure rather than CPU. This is a desktop app that may be running
 /// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
 /// stays at 4 because it streams frames rather than holding a full analysis.
-const SCAN_CONCURRENCY: usize = 2;
+///
+/// This is the default for the user's own setting (`AppSettings::scan_workers`,
+/// #246): the right number depends on the machine's RAM.
+pub const SCAN_CONCURRENCY: usize = 2;
+
+/// The range the scan worker box accepts (#246), the same as Max Concurrent
+/// Renders. Only the range: nothing clamps to the machine's RAM.
+pub const SCAN_WORKERS_MAX: usize = 8;
 
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
@@ -1319,8 +1326,14 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// Threads for a scan of `total` demos: the user's setting, kept to
+/// 1..=`SCAN_WORKERS_MAX`, and never more than there are demos.
+fn scan_worker_count(workers: usize, total: usize) -> usize {
+    workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
+}
+
 /// The scan status line: how many demos are done out of how many, and one demo
-/// still being parsed, when there is one. With `SCAN_CONCURRENCY` workers,
+/// still being parsed, when there is one. With several scan workers,
 /// "the current file" is one of the current files.
 fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
     match current {
@@ -1437,6 +1450,7 @@ pub async fn scan_directory_impl(
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
     known: Vec<KnownDemo>,
+    workers: usize,
 ) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1512,7 +1526,7 @@ pub async fn scan_directory_impl(
 
         let total_files = list.len() as u32;
 
-        // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
+        // ── Phase 2: parse each .dem file, up to `workers` at once ───
         // `list` is already sorted by filename (Phase 1's binary-search
         // insert), so each worker writes its result into a pre-sized slot at
         // its own original index -- the output comes out in sorted order for
@@ -1553,7 +1567,7 @@ pub async fn scan_directory_impl(
             );
         };
         std::thread::scope(|scope| {
-            let worker_count = SCAN_CONCURRENCY.min(total).max(1);
+            let worker_count = scan_worker_count(workers, total);
             for _ in 0..worker_count {
                 let cancel_token = &cancel_token;
                 let list = &list;
@@ -2266,6 +2280,16 @@ mod tests {
         assert_eq!(rows[0]["name"], "a.dem");
         assert_eq!(rows[0]["reason"], "Failed to read file: denied");
         assert_eq!(rows[1]["name"], "b.dem");
+    }
+
+    #[test]
+    fn the_scan_uses_the_worker_setting_within_its_range() {
+        assert_eq!(scan_worker_count(5, 100), 5);
+        assert_eq!(scan_worker_count(0, 100), 1);
+        assert_eq!(scan_worker_count(20, 100), SCAN_WORKERS_MAX);
+        // Never more threads than demos.
+        assert_eq!(scan_worker_count(8, 3), 3);
+        assert_eq!(scan_worker_count(4, 0), 1);
     }
 
     #[test]

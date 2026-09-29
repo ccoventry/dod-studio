@@ -1130,14 +1130,6 @@ pub fn build_batch_queue(
                 ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
-                let cmd_len = custom.command.len();
-                if cmd_len > crate::patch::CUSTOM_CMD_WARN_LIMIT {
-                    crate::log_markdown(&format!(
-                        "⚠️ **WARNING:** Custom command exceeds 60 bytes and will not fit in a demo ConsoleCommand frame's 64-byte command field: {}",
-                        custom.command
-                    ));
-                }
-
                 // Playback runs at `host_framerate 0.05` until the pre-roll
                 // drops it back to real time at `s_speed_tick`, and resumes
                 // fast-forwarding once the post-roll ends at `s_end`. A command
@@ -1984,9 +1976,9 @@ mod tests {
     }
 
     /// Every scheduled command `build_batch_queue` emits is an alias name built
-    /// from `demo_name`, and `engine.rs` silently truncates anything at or over
-    /// `MAX_CONSOLE_CMD_SAFE_LEN` when it writes the ConsoleCommand frame -- a
-    /// too-long name would not fail, it would just stop working. The
+    /// from `demo_name`, and `engine.rs` refuses anything longer than
+    /// `MAX_CONSOLE_CMD_SAFE_LEN` when it writes the ConsoleCommand frame (#454)
+    /// -- a too-long name would fail the whole patch. The
     /// `dodstudio_` prefix (#197) made all of these 9 bytes longer, so pin it.
     #[test]
     fn every_injected_command_fits_a_console_command_frame() {
