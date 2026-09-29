@@ -25,10 +25,10 @@
 //! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
-//!   suppress specific map-placed `env_sprite` entities by model path, an
-//!   allow-list rather than a blanket toggle. Full design write-up in the
-//!   module doc itself (issue #315).
+//! - `hide_entity`: the `dodstudio_hide_entity <model-path>...` command (old
+//!   name `dodstudio_hide_sprite`, #333) -- suppress specific world entities
+//!   by model path, an allow-list rather than a blanket toggle. Full design
+//!   write-up in the module doc itself (issue #315).
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -97,7 +97,7 @@ mod detour;
 mod engine;
 mod ex_interp;
 mod hand_signals;
-mod hide_sprite;
+mod hide_entity;
 mod hudelement;
 mod hull_trace_guard;
 mod msglog;

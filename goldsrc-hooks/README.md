@@ -10,12 +10,13 @@ instead of the list below.
 Two independent fixes, each off by default and toggled by its own env var:
 
 - **Sound fix** (`GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME=1`): forces DoD weapon-fire
-  sounds to play at full volume with no distance attenuation while
-  spectating, instead of fading out based on camera distance.
+  sounds to carry further while spectating: it lowers their distance
+  attenuation to `dodstudio_hltv_gunshot_attenuation` (default 0.3, against
+  the game's own 0.8), so they fade out over a longer distance.
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus thirteen control surfaces, always available and doing nothing until used:
+Plus these control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -27,16 +28,18 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
-- **Hide map sprite** (`dodstudio_hide_sprite <model-path>...`): suppresses
-  specific map-placed `env_sprite` entities by model path (e.g.
-  `sprites/mapsprites/flames.spr`) -- an allow-list, not a blanket toggle,
-  since most sprites in that folder are meaningful (smoke, fire, tracers). Not
-  every sprite-looking element qualifies: several DoD draws itself as an
-  ordinary 2D HUD element (the crosshair, the capture-area icon) rather than a
-  world-placed entity, and those never reach this command regardless of
-  spelling -- `dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those
-  instead. Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't
-  previously use. See the module doc in `src/hide_sprite.rs`.
+- **Hide an entity** (`dodstudio_hide_entity <model-path>...`, old name
+  `dodstudio_hide_sprite`): suppresses specific world entities by model path
+  (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`) -- an allow-list,
+  not a blanket toggle, since most map sprites are meaningful (smoke, fire,
+  tracers). `dodstudio_debug_status` says whether each path has matched
+  anything this session, so a typo shows. Not every sprite-looking element
+  qualifies: several DoD draws itself as an ordinary 2D HUD element (the
+  crosshair, the capture-area icon) rather than a world-placed entity, and
+  those never reach this command regardless of spelling --
+  `dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those instead.
+  Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't previously
+  use. See the module doc in `src/hide_entity.rs`.
 - **Scoreboard** (`dodstudio_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
@@ -86,7 +89,7 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
-  ten elements DoD draws that the stock `cl_hud_*` cvars don't already
+  nine elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
   icons, the objective icons and the rest. (The ammo counter/weapon-select
   menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
@@ -153,7 +156,7 @@ too -- the clamp visibly takes effect -- but no specific value is confirmed
 good yet; see `docs/goldsrc_ex_interp.md` §7. `dodstudio_objectives` is
 live-proven too: `offset`/`xoffset` reposition the icon row correctly, and
 `timer` was confirmed on `dod_charlie`, the one DoD 1.3 map with a
-reinforcement timer -- see `docs/goldsrc_objective_icons.md`. `dodstudio_hide_sprite`
+reinforcement timer -- see `docs/goldsrc_objective_icons.md`. `dodstudio_hide_entity`
 is live-proven as well: `sprites/mapsprites/flames.spr` on `dod_railroad2_s9a`
 (found by scanning the map's own BSP entity lump for `env_sprite` classnames,
 since the command's target has to be a real map-placed entity, not a 2D HUD

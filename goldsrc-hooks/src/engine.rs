@@ -1,6 +1,6 @@
 //! Captures the engine's `cl_enginefuncs_s` table (`pEngfuncs`), the
 //! `engine_studio_api_s` table (`pstudio`), a genuine per-frame callback, and
-//! a per-entity suppress-or-forward hook for `hide_sprite.rs`, by
+//! a per-entity suppress-or-forward hook for `hide_entity.rs`, by
 //! intercepting how `hw.dll` resolves `client.dll`'s entry points in the
 //! first place.
 //!
@@ -507,9 +507,10 @@ pub fn client_module_base() -> Option<usize> {
 
 /// The loaded engine's base address, or `None` before `hw.dll` exists.
 ///
-/// Unlike `client.dll`, which is unloaded and reloaded between demos and so is
-/// tracked through the IAT hook, `hw.dll` is loaded once and stays for the
-/// session -- asking the loader each time is both correct and cheap.
+/// `hw.dll` is loaded once and stays for the session, so asking the loader
+/// each time is both correct and cheap. (`client.dll` is tracked through the
+/// IAT hook instead; it does not reload between demos either, but whatever
+/// else might reload it is untested -- see CLAUDE.md.)
 pub fn engine_module_base() -> Option<usize> {
     let name = c"hw.dll";
     let handle = unsafe { GetModuleHandleA(name.as_ptr() as *const u8) };
@@ -965,7 +966,7 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 }
 
 /// Called once per entity the engine is about to add to the render list.
-/// Returning 0 suppresses that one entity; see `hide_sprite.rs`'s module doc
+/// Returning 0 suppresses that one entity; see `hide_entity.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
 unsafe extern "C" fn tramp_hud_add_entity(
     entity_type: i32,
@@ -974,7 +975,7 @@ unsafe extern "C" fn tramp_hud_add_entity(
 ) -> i32 {
     if !modelname.is_null() {
         let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
-        if crate::hide_sprite::should_hide(&name) {
+        if crate::hide_entity::should_hide(&name) {
             return 0;
         }
     }

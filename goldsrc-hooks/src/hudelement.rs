@@ -51,6 +51,11 @@
 //! only the second is the element's. It is not offered here, but the next
 //! person to add an entry should know the trap exists.
 //!
+//! `CHudDoDCrossHair` was listed until #312. `dodstudio_hide_crosshair` already
+//! owns the crosshair (a signature patch that `dodstudio_match_pov_crosshair`
+//! defers to), so two ways to hide one element went down to one; it is in
+//! `verify_hudelements.py`'s `KNOWN_EXCLUDED`.
+//!
 //! `CHudAmmo` overrides `Draw` and registers itself, so `verify_hudelements.py`
 //! has to be told about it by name (`KNOWN_EXCLUDED`) or its completeness check
 //! would fail. Disassembly of `client+0x28b00` shows every `FillRGBA`/`SPR_Draw`
@@ -194,12 +199,6 @@ pub struct Element {
 /// hiding. Derived by `goldsrc-hooks/tools/survey_client_dll.py elements`.
 pub const ELEMENTS: &[Element] = &[
     Element {
-        name: "crosshair",
-        class: ".?AVCHudDoDCrossHair@@",
-        vftable_rva: 0xac134,
-        what: "the crosshair, POV and spectator alike (dodstudio_hide_crosshair does this too)",
-    },
-    Element {
         name: "deathnotice",
         class: ".?AVCHudDeathNotice@@",
         vftable_rva: 0xac1c4,
@@ -260,7 +259,7 @@ static HIDDEN: AtomicU32 = AtomicU32::new(0);
 
 /// Each element's stock `Draw`, captured the first time the module resolves.
 /// Restoring writes these back rather than anything computed.
-static STOCK_DRAW: [AtomicUsize; 10] = [const { AtomicUsize::new(0) }; 10];
+static STOCK_DRAW: [AtomicUsize; 9] = [const { AtomicUsize::new(0) }; 9];
 
 /// `CHudBase::Draw` in the loaded module.
 static BASE_DRAW: AtomicUsize = AtomicUsize::new(0);
@@ -547,29 +546,31 @@ mod tests {
 
     #[test]
     fn lookup_is_case_insensitive_and_exact() {
-        assert_eq!(find("crosshair"), find("CROSSHAIR"));
-        assert!(find("crosshair").is_some());
-        assert!(find("cross").is_none());
-        assert!(find("crosshairr").is_none());
+        assert_eq!(find("saytext"), find("SAYTEXT"));
+        assert!(find("saytext").is_some());
+        assert!(find("say").is_none());
+        assert!(find("saytextt").is_none());
+        // Removed in #312: dodstudio_hide_crosshair owns the crosshair.
+        assert!(find("crosshair").is_none());
         assert!(find("").is_none());
     }
 
     #[test]
     fn hiding_and_showing_move_only_the_one_bit() {
         show_all();
-        let crosshair = find("crosshair").unwrap();
+        let feed = find("deathnotice").unwrap();
         let chat = find("saytext").unwrap();
 
-        set_hidden(crosshair, true);
-        assert!(is_hidden(crosshair));
+        set_hidden(feed, true);
+        assert!(is_hidden(feed));
         assert!(!is_hidden(chat));
         assert_eq!(hidden_count(), 1);
 
         set_hidden(chat, true);
         assert_eq!(hidden_count(), 2);
 
-        set_hidden(crosshair, false);
-        assert!(!is_hidden(crosshair));
+        set_hidden(feed, false);
+        assert!(!is_hidden(feed));
         assert!(is_hidden(chat));
 
         show_all();

@@ -253,9 +253,9 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
-| `dodstudio_hide_hudelement` | command | — | Hides one of ten HUD elements: `crosshair`, `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
+| `dodstudio_hide_hudelement` | command | — | Hides one of nine HUD elements: `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
-| `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
+| `dodstudio_hide_entity` | command | — | Hides world entities (sprites, props, brush entities) by model path, and says whether each path matched anything; old name `dodstudio_hide_sprite` still works | both |
 | `dodstudio_hltv_gunshot_attenuation` | cvar | 0.3 | How far gunshots carry while the gunshots fix is on | both |
 | `dodstudio_hltv_gunshots_fix` | cvar | 0 | Makes distant gunshots audible while spectating | both |
 | `dodstudio_hltv_show_viewmodel_animations` | cvar | 0 | Animates the spectated player's first-person gun (levels 0–4) | both |

@@ -1,5 +1,17 @@
-//! `dodstudio_hide_sprite` — suppress specific map-placed `env_sprite`
-//! entities by their model path (e.g. `sprites/mapsprites/caparea.spr`).
+//! `dodstudio_hide_entity` — suppress specific world entities by their model
+//! path (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`, a brush
+//! entity's `*12`).
+//!
+//! ## Renamed from `dodstudio_hide_sprite` (#333)
+//!
+//! `HUD_AddEntity` fires for every entity the engine is about to draw, and the
+//! match has only ever been on the model path, so the command was never
+//! sprite-only; the old name promised a restriction the code didn't have.
+//! `dodstudio_hide_sprite` stays registered as a second name for the same
+//! command for a release (`COMMAND_NAMES`), so configs using it keep working.
+//!
+//! Each entry records whether the engine has drawn anything by that path this
+//! session, and the status says so, so a typo stops failing silently.
 //!
 //! ## Why `dodstudio_hide_hudelement` can't reach this
 //!
@@ -69,11 +81,29 @@
 //! both ways.
 
 use std::sync::RwLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::names::console_name;
 
-pub const COMMAND_NAMES: &[&str] = &[COMMAND];
-const COMMAND: &str = console_name!("hide_sprite");
+/// The new name first (it is the one usage and replies use), then the old one.
+pub const COMMAND_NAMES: &[&str] = &[COMMAND, console_name!("hide_sprite")];
+const COMMAND: &str = console_name!("hide_entity");
+
+/// One model path to suppress, and whether the engine has drawn anything by
+/// that path since it was set.
+struct Entry {
+    path: String,
+    seen: AtomicBool,
+}
+
+impl Entry {
+    fn new(path: &str) -> Self {
+        Self {
+            path: path.to_string(),
+            seen: AtomicBool::new(false),
+        }
+    }
+}
 
 /// Model paths to suppress, exactly as typed (case-insensitive compare).
 /// Empty by default -- the whole point is that nothing is hidden until
@@ -81,13 +111,39 @@ const COMMAND: &str = console_name!("hide_sprite");
 /// this once per entity per frame, considerably hotter than the occasional
 /// console-command write, and CLAUDE.md's hot-path rule is explicit that a
 /// shared catalog like this belongs behind a lock readers don't block each
-/// other on.
-static HIDDEN: RwLock<Vec<String>> = RwLock::new(Vec::new());
+/// other on. `seen` is an atomic so a match can record itself under the
+/// read lock.
+static HIDDEN: RwLock<Vec<Entry>> = RwLock::new(Vec::new());
 
 /// Pure matcher, so it can be unit-tested without touching the shared
 /// `HIDDEN` static -- see the test module for why nothing here does that.
-fn matches(hidden: &[String], model_name: &str) -> bool {
-    hidden.iter().any(|h| h.eq_ignore_ascii_case(model_name))
+/// Marks the entry it matched as seen.
+fn matches(hidden: &[Entry], model_name: &str) -> bool {
+    match hidden
+        .iter()
+        .find(|h| h.path.eq_ignore_ascii_case(model_name))
+    {
+        Some(entry) => {
+            entry.seen.store(true, Ordering::Relaxed);
+            true
+        }
+        None => false,
+    }
+}
+
+/// `a (seen), b (not seen yet)`.
+fn describe(list: &[Entry]) -> String {
+    list.iter()
+        .map(|e| {
+            let seen = if e.seen.load(Ordering::Relaxed) {
+                "seen"
+            } else {
+                "not seen this session yet -- check the path"
+            };
+            format!("{} ({seen})", e.path)
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 /// Called from `engine::tramp_hud_add_entity` for every entity the engine is
@@ -108,7 +164,7 @@ pub fn should_hide(model_name: &str) -> bool {
 fn status() -> String {
     match HIDDEN.read() {
         Ok(list) if list.is_empty() => format!("{COMMAND} = hiding nothing\n"),
-        Ok(list) => format!("{COMMAND} = hiding {}\n", list.join(", ")),
+        Ok(list) => format!("{COMMAND} = hiding {}\n", describe(&list)),
         Err(_) => format!("{COMMAND} = (lock poisoned)\n"),
     }
 }
@@ -118,7 +174,7 @@ fn usage() -> String {
         "usage:\n\
          \x20 {COMMAND}                         what is being hidden\n\
          \x20 {COMMAND} <model-path>...          hide these entities by exact model path\n\
-         \x20                                    e.g. {COMMAND} sprites/mapsprites/caparea.spr\n\
+         \x20                                    e.g. {COMMAND} sprites/mapsprites/flames.spr\n\
          \x20 {COMMAND} clear                    stop hiding anything\n\
          \x20 no \"all\" -- deliberately an allow-list, not a blanket toggle; see the module doc\n"
     )
@@ -164,7 +220,7 @@ fn dispatch(argv: &[String]) -> String {
     // before -- the same "each call restates the whole set" shape
     // `dodstudio_deathmsg block <id>...` and `dodstudio_debug_msglog <name>...` use.
     if let Ok(mut list) = HIDDEN.write() {
-        *list = rest.to_vec();
+        *list = rest.iter().map(|path| Entry::new(path)).collect();
     }
     format!("{COMMAND}: hiding {}\n", rest.join(", "))
 }
@@ -175,7 +231,7 @@ pub unsafe extern "C" fn command() {
     crate::commands::console_print(&reply);
     unsafe {
         crate::debug::report(&format!(
-            "hide_sprite: {} -> {}",
+            "hide_entity: {} -> {}",
             argv.join(" "),
             reply.trim()
         ))
@@ -187,7 +243,7 @@ pub unsafe extern "C" fn command() {
 /// nothing" line would be noise in the overwhelmingly common case.
 pub(crate) fn status_line() -> Option<String> {
     match HIDDEN.read() {
-        Ok(list) if !list.is_empty() => Some(format!("{COMMAND} = hiding {}", list.join(", "))),
+        Ok(list) if !list.is_empty() => Some(format!("{COMMAND} = hiding {}", describe(&list))),
         _ => None,
     }
 }
@@ -206,10 +262,31 @@ mod tests {
 
     #[test]
     fn matching_is_case_insensitive() {
-        let hidden = vec!["sprites/mapsprites/caparea.spr".to_string()];
+        let hidden = vec![Entry::new("sprites/mapsprites/caparea.spr")];
         assert!(matches(&hidden, "sprites/mapsprites/caparea.spr"));
         assert!(matches(&hidden, "SPRITES/MAPSPRITES/CAPAREA.SPR"));
         assert!(!matches(&hidden, "sprites/mapsprites/speakerIcon.spr"));
+    }
+
+    #[test]
+    fn an_entry_reports_whether_anything_matched_it() {
+        let hidden = vec![
+            Entry::new("sprites/mapsprites/flames.spr"),
+            Entry::new("all"),
+        ];
+        assert!(describe(&hidden).contains("flames.spr (not seen"));
+        matches(&hidden, "sprites/mapsprites/flames.spr");
+        let text = describe(&hidden);
+        assert!(text.contains("flames.spr (seen)"), "{text}");
+        assert!(text.contains("all (not seen"), "{text}");
+    }
+
+    #[test]
+    fn the_old_name_still_works() {
+        assert_eq!(
+            COMMAND_NAMES,
+            ["dodstudio_hide_entity", "dodstudio_hide_sprite"]
+        );
     }
 
     #[test]
@@ -219,7 +296,7 @@ mod tests {
 
     #[test]
     fn bare_invocation_is_a_status_query_not_a_mutation() {
-        let reply = dispatch(&["hide_sprite".to_string()]);
+        let reply = dispatch(&["hide_entity".to_string()]);
         assert!(reply.contains("usage"), "{reply}");
     }
 
