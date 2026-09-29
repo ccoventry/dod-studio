@@ -15,7 +15,7 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus thirteen control surfaces, always available and doing nothing until used:
+Plus fourteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -55,6 +55,13 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the spectated player. `dodstudio_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **Map text** (`dodstudio_hide_map_text 1`): hides the text a map puts on
+  screen itself -- the `dod_anzio` mortar warning, the round result -- and
+  nothing else. It all arrives as the `HudText` user message, which DoD's own
+  clan-match prompts share, so a message is dropped only when its token is a
+  `message` the loaded map's own entities declare (read from the map's BSP once
+  per level). Same prepend/forward hook as `dodstudio_deathmsg`; nothing is
+  patched. See the module doc in `src/map_text.rs` (issue #287).
 - **Overview map** (`dodstudio_overviewmap <full|mini> <x> <y> <w> <h>`): places
   and sizes DoD's overview map, so the big one can be a corner inset instead of
   something that has to be off. The rects are cached in `gHUD` rather than
@@ -170,7 +177,10 @@ docs in `src/engine.rs`, `src/sound_fix.rs`, `src/scoreboard.rs`,
 `src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
 still needs a live check. `dodstudio_debug_msglog` reuses `dodstudio_deathmsg`'s
 already-proven prepend/forward mechanism unchanged, so the open question is
-only its own 71-entry name/thunk table, not the hook itself. `tools/` holds
+only its own 71-entry name/thunk table, not the hook itself. `dodstudio_hide_map_text` is
+not live-tested yet either; it rides the same mechanism, and its map-string
+parsing is unit-tested and was checked against the real `dod_anzio`,
+`dod_charlie`, `dod_lennon4` and `dod_avalanche` BSPs. `tools/` holds
 a verifier per patched site, which checks the Rust constants against a real
 `client.dll`.
 
