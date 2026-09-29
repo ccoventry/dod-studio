@@ -133,6 +133,12 @@ static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// Which of [`BUILDS`] matched.
 static BUILD: AtomicUsize = AtomicUsize::new(0);
+/// The `hw.dll` base a scan came up empty in, and why. `poll` asks every
+/// frame, and a miss rescans all of `.text` each time (1.1 ms, measured on
+/// the 25th Anniversary `hw.dll` before it had its own pattern) -- so a
+/// miss is remembered until the module changes, the same as a hit.
+static FAILED_BASE: AtomicUsize = AtomicUsize::new(0);
+static FAILED_WHY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// The ceiling currently written into the engine, or 0 before the first apply.
 static ACTIVE_MS: AtomicI32 = AtomicI32::new(0);
@@ -148,6 +154,9 @@ fn span() -> Result<(usize, &'static Build), String> {
             return Ok((cached, &BUILDS[BUILD.load(Ordering::Acquire)]));
         }
     }
+    if FAILED_BASE.load(Ordering::Acquire) == base {
+        return Err(FAILED_WHY.lock().map(|why| why.clone()).unwrap_or_default());
+    }
     let mut misses = Vec::new();
     for (index, build) in BUILDS.iter().enumerate() {
         // Safety: `engine_module_base` only returns a base for a mapped
@@ -162,10 +171,15 @@ fn span() -> Result<(usize, &'static Build), String> {
             Err(why) => misses.push(format!("{}: {why}", build.name)),
         }
     }
-    Err(format!(
+    let why = format!(
         "could not find the ex_interp clamp -- {}",
         misses.join("; ")
-    ))
+    );
+    if let Ok(mut failed) = FAILED_WHY.lock() {
+        failed.clone_from(&why);
+    }
+    FAILED_BASE.store(base, Ordering::Release);
+    Err(why)
 }
 
 /// Reads one ceiling immediate.
@@ -200,6 +214,11 @@ pub fn validate(ms: i32) -> Result<(), String> {
 /// the cvar takes effect without a restart.
 pub fn set_max(ms: i32) -> Result<bool, String> {
     validate(ms)?;
+    // The cvar's default: nothing has been written, so there is nothing to
+    // write or undo, and no reason to find the clamp at all.
+    if ms == STOCK_MS && ACTIVE_MS.load(Ordering::Acquire) == 0 {
+        return Ok(false);
+    }
     let (address, build) = span()?;
     // The default leaves every immediate at the engine's own value; anything
     // else is the ceiling on every path.
