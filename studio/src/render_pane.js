@@ -15,10 +15,13 @@ import {
   discardRenderAutosave,
   recoverRenderBatch,
   revealInExplorer,
+  writeTextFile,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { markerCsv, markerRows } from './marker_list.js';
+import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
@@ -380,6 +383,31 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
   }, { once: true });
 }
 
+/** Export Marker List (#110): a CSV of every captured highlight. */
+async function exportMarkerList(getTakeIndex, getAllDemos) {
+  const demos = getAllDemos ? getAllDemos() : [];
+  const takeIndex = getTakeIndex ? getTakeIndex() : {};
+  const count = markerRows(demos, takeIndex).length;
+  if (count === 0) {
+    showToast(STRINGS.RENDER.EXPORT_MARKERS_NONE, 'info');
+    return;
+  }
+  const path = await save({
+    defaultPath: 'dod_markers.csv',
+    filters: [{ name: 'CSV', extensions: ['csv'] }],
+  }).catch((err) => {
+    console.error('Save dialog failed:', err);
+    return null;
+  });
+  if (!path) return;
+  try {
+    await writeTextFile(path, markerCsv(demos, takeIndex));
+    showToast(STRINGS.RENDER.exportMarkersDone(count), 'success');
+  } catch (err) {
+    showToast(STRINGS.RENDER.exportMarkersFailed(err), 'error');
+  }
+}
+
 export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChange, takeTracking) {
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
@@ -390,6 +418,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
+  document.querySelector('#export-marker-list-btn')
+    ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
