@@ -245,6 +245,43 @@ impl RenderManager {
     }
 }
 
+/// A job as the autosave records it, with its own codec, fps and clip (#85).
+fn autosave_job(j: &RenderJobRuntime) -> AutosaveJob {
+    AutosaveJob {
+        take_folder: j.clip.take_folder.clone(),
+        output_path: j.output_path.clone(),
+        status: AutosaveJobStatus::Pending,
+        name: j.clip.base_name.clone(),
+        codec: Some(j.codec.to_str_id().to_string()),
+        custom_codec_args: Some(j.custom_codec_args.clone()),
+        fps: Some(j.fps),
+        clip: Some(j.clip.clone()),
+    }
+}
+
+/// Copies one job's settings into the autosave after they change while it
+/// sits Queued (#85), so a crash before it renders doesn't lose them. The
+/// autosave's jobs are indexed by job id, as the scheduler's own update is.
+fn update_autosave_job_settings(
+    render_session: &Arc<Mutex<Option<RenderSessionData>>>,
+    job: &RenderJobRuntime,
+) {
+    let mut guard = render_session.lock().unwrap();
+    let Some(session) = guard.as_mut() else {
+        return;
+    };
+    if let Ok(idx) = job.id.parse::<usize>()
+        && let Some(rj) = session.jobs.get_mut(idx)
+    {
+        rj.codec = Some(job.codec.to_str_id().to_string());
+        rj.custom_codec_args = Some(job.custom_codec_args.clone());
+        rj.fps = Some(job.fps);
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&*session) {
+        let _ = std::fs::write(autosave_path(), json);
+    }
+}
+
 fn write_autosave(
     render_session: &Arc<Mutex<Option<RenderSessionData>>>,
     jobs: &[RenderJobRuntime],
@@ -255,15 +292,7 @@ fn write_autosave(
         fps: config.fps,
         target_codec: config.target_codec.to_str_id().to_string(),
         target_custom_codec_args: config.custom_codec_args.clone(),
-        jobs: jobs
-            .iter()
-            .map(|j| AutosaveJob {
-                take_folder: j.clip.take_folder.clone(),
-                output_path: j.output_path.clone(),
-                status: AutosaveJobStatus::Pending,
-                name: j.clip.base_name.clone(),
-            })
-            .collect(),
+        jobs: jobs.iter().map(autosave_job).collect(),
     };
     if let Ok(json) = serde_json::to_string_pretty(&session)
         && let Err(e) = std::fs::write(autosave_path(), json)
@@ -742,6 +771,7 @@ pub async fn set_render_job_codec(
         job_id,
         requested.to_str_id()
     ));
+    update_autosave_job_settings(&state.render_session, job);
     drop(jobs);
     emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
@@ -1053,18 +1083,13 @@ pub fn recover_render_batch(
 ) -> Result<Vec<RenderJobView>, String> {
     let json = std::fs::read_to_string(autosave_path()).map_err(|e| e.to_string())?;
     let session: RenderSessionData = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    // The autosave snapshot only ever recorded one session-wide codec/fps
-    // (written once at batch start, before per-job settings existed) — every
-    // recovered job gets that same pair. A job individually changed before a
-    // crash — via `reset_render_job`'s codec/fps carry-over, or via
-    // `set_render_job_codec`'s "Skip" toggle — won't recover with that
-    // override; a known, pre-existing recovery-fidelity gap (see the doc
-    // comment below), not a regression from per-job settings. A recovered
-    // "Skip" job simply comes back as whatever `session.target_codec` was
-    // for the batch, and needs re-toggling by hand if that was Skip.
-    let recovered_codec = RenderCodec::from_str_id(&session.target_codec);
-    let recovered_fps = session.fps;
-    let recovered_custom_codec_args = session.target_custom_codec_args.clone();
+    // Each job recovers with its own codec/fps (#85) — a "Skip" toggle or
+    // Reset's carry-over included — and its own scanned clip. An autosave
+    // written before those were recorded falls back to the session-wide
+    // pair and a stub clip that a re-scan fills in.
+    let session_codec = RenderCodec::from_str_id(&session.target_codec);
+    let session_fps = session.fps;
+    let session_custom_codec_args = session.target_custom_codec_args.clone();
 
     let jobs: Vec<RenderJobRuntime> = session
         .jobs
@@ -1084,7 +1109,7 @@ pub fn recover_render_batch(
             .flatten();
             RenderJobRuntime {
                 id: i.to_string(),
-                clip: ClipData {
+                clip: rj.clip.clone().unwrap_or_else(|| ClipData {
                     take_folder: rj.take_folder.clone(),
                     clip_type: "single".to_string(),
                     img_folder: String::new(),
@@ -1106,7 +1131,7 @@ pub fn recover_render_batch(
                     date: String::new(),
                     video_file: None,
                     alpha_folder: None,
-                },
+                }),
                 status,
                 speed: String::new(),
                 progress,
@@ -1114,9 +1139,16 @@ pub fn recover_render_batch(
                 output_path: rj.output_path.clone(),
                 output_size_bytes,
                 cancel_flag: Arc::new(AtomicBool::new(false)),
-                codec: recovered_codec,
-                custom_codec_args: recovered_custom_codec_args.clone(),
-                fps: recovered_fps,
+                codec: rj
+                    .codec
+                    .as_deref()
+                    .map(RenderCodec::from_str_id)
+                    .unwrap_or(session_codec),
+                custom_codec_args: rj
+                    .custom_codec_args
+                    .clone()
+                    .unwrap_or_else(|| session_custom_codec_args.clone()),
+                fps: rj.fps.unwrap_or(session_fps),
             }
         })
         .collect();
