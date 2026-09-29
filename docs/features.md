@@ -1,6 +1,6 @@
 # DoD Studio: what it does today
 
-Written from the `dev` branch at `9eb40a5` (2026-09-27), updated for PR #436 (`dodstudio_allow_shaders`, 2026-09-28). Everything here was read from the code, not from older docs. Open pull requests are not counted; where one changes a fact below, it is named.
+Written from the `dev` branch at `9eb40a5` (2026-09-27), then refreshed against `dev` at `19602ab` (2026-09-29) for #436, #454–#458, #461, #462, #471, #472, #414, #418 and #421. Everything here was read from the code, not from older docs. Open pull requests are not counted; where one changes a fact below, it is named.
 
 When this file and the code disagree, the code wins. Fix this file in the same PR that changes the behaviour.
 
@@ -52,7 +52,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 ### 2.2 Studio → Capture
 
-**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with two parallel workers. The status line shows `Scanning n / N — <demo>` from the start. Each demo is fully analysed, and the result also warms the analyzer cache. Cancel Scan stops it.
+**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with a set number of parallel workers (Configuration → Pipeline, 1–8, default 2). The status line shows `Scanning n / N — <demo>` from the start. Each demo is fully analysed, and the result also warms the analyzer cache. Cancel Scan stops it.
 
 - **Known demos are skipped.** A demo already in the queue whose file is unchanged is not parsed again. Unchanged means the same path and the same size plus hash of the first 64 KiB. The toast counts these separately. A changed file is rescanned, and the rescan keeps its statuses, selection, notes and kill ranges.
 - **Adding a folder always scans it**, including a folder that was added before. A folder that no longer exists gives a "Not found" error.
@@ -64,7 +64,11 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 - **Clear Selected** and **Clear All** ask to save first when tracked work would be lost.
 - A **Maps needed** banner lists maps that are missing or a different build than the demo expects, with a Download button that fetches from the KTP mirror, verifies the checksum, and never overwrites a map in place. HLTV demos are skipped because their map cannot be verified.
 
-**Highlight Details.** One row per kill streak of the recording player, at or above **Min Kills** (default 1). Columns: select, kill range (narrowable), kills, time, duration, status (None / Pending / Captured / Rendered), notes, weapon timeline. Buttons:
+**Highlight Details.** One row per kill streak of the recording player, at or above **Min Kills** (default 1). Columns: select, kill range (narrowable), kills, time, duration, status (None / Pending / Captured / Rendered), notes, weapon timeline.
+
+Status can be changed by hand in either direction. A status set by hand shows a small ✎ and a toast with **Undo**. A verified capture or render replaces a hand-set status; a Rendered that a real render set is never knocked back to Captured.
+
+Buttons:
 
 - **Launch Preview** patches a `<stem>_preview.dem` with a bookmark per highlight and opens it with `viewdemo`.
 - **Generate All Previews** does the patching for every demo without launching.
@@ -72,9 +76,9 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 - **Launch Game (HLAE)** starts the game with no demo. It is hidden outside local and debug builds.
 - **Advanced Diagnostics** is a collapsed canvas timeline of the streaks with their pre/post-roll margins.
 
-If `hl.exe` or HLAE is already running, a dialog offers Force Relaunch, Copy View Command, or Cancel.
+If a game the hook DLL is in is already open, Launch Preview sends it `viewdemo <stem>_preview` over a local pipe (section 5.1) instead of relaunching. Otherwise, if `hl.exe` or HLAE is already running, a dialog offers Force Relaunch, Copy View Command, or Cancel.
 
-**Start Capture Batch** sits in the pinned footer. It is disabled while any of these is true: a banned command is present, no highlight is selected, no Destination is set, or the required disk space exceeds what is free. The footer shows free and required space and a progress bar. When the batch ends (or is cancelled), the app checks every planned take folder on disk, flips covered highlights to Captured, and writes `dodstudio_take.json` with the capture FPS into each take.
+**Start Capture Batch** sits in the pinned footer. It is disabled while any of these is true: a banned or too-long command is present, no highlight is selected, no Destination is set, or the required disk space exceeds what is free. The footer shows free and required space and a progress bar. When the batch ends (or is cancelled), the app checks every planned take folder on disk, flips covered highlights to Captured, and writes `dodstudio_take.json` with the capture FPS into each take.
 
 ### 2.3 Studio → Render
 
@@ -89,7 +93,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 | **Paths** | Half-Life executable, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Each shows "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
 | **Output Format** | Width and height (1280×720), Capture FPS (300), **Capture Mode** (Frame sequence, Video, OBS). Video mode adds a capture codec (Ut Video default, FFV1, x264 lossless, uncompressed). OBS mode adds host, port, password, OBS path, Launch OBS, **Test Connection**, and OBS Capture FPS (120). Test Connection is not read-only: it creates or repairs a `[DoD-Studio]` profile and scene in OBS and switches to them. |
 | **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked; its value is the `host_framerate` used for fast-forward. Every timing field can be 0. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
-| **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, and **Clear Previews...**, which lists stale `_preview.dem` files the app made and deletes the ones you tick. |
+| **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
 | **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Warning banners explain what will not take effect, what is refused, and what your own game configs set. See 3.5 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
 | **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives. |
@@ -227,9 +231,11 @@ At load the DLL hooks two imports of `hw.dll` (`GetProcAddress`, `LoadLibraryA`)
 
 It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and a crash handler records any crash as `module+offset` with a stack trail.
 
+**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off. Nothing comes back from the game over the pipe yet (issue #434, step 1).
+
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 9 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 10 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
@@ -257,6 +263,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |
 | `dodstudio_objectives` | command | — | Moves the objective icons and timer (`offset`, `xoffset`, `timer`) | both |
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |
+| `dodstudio_reload_demo` | command | — | Plays the last `playdemo`/`viewdemo` demo again from the start | both (wraps the engine's own commands through the SDK's command list, no per-build address) |
 
 Two fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off) and the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off).
 
@@ -306,7 +313,7 @@ Command-line only: `compare.py` (a side-by-side sheet of styles), `setup_tools.p
 | Clan match | Detected from the clan timer, wave respawn time, or a reset followed by a start with everyone at 0. |
 | Partial recording | "Started late" and "ended early" flags, from time-left and round state. |
 | British | Allies become British the first time anyone plays a British class. |
-| Map change | Once there is gameplay, a different map ends the analysis; before that, the warm-up is discarded. PR #418 extends this to a same-map level change. |
+| Map change | Once there is gameplay, a new level ends the analysis, even the same map loaded again; before that, the warm-up is discarded. |
 | Demo type | "HLTV" if any HLTV or director message appears, else "POV". PR #395 stops patched previews counting as HLTV. |
 
 Analyses are cached as JSON in `%APPDATA%\dod-studio\analyzer_cache\v2\`, keyed by path and invalidated by size and modified time.
@@ -403,10 +410,5 @@ Each of these is true on `dev` today. Items with an issue number are tracked; th
 **Naming and docs drift**
 
 - The installer and first window title still say "DoD Tools Studio", with identifier `com.dodtools.studio` (#258).
-- `docs/dodstudio_commands.md` gives `dodstudio_hltv_gunshot_attenuation` a default of 0.8; the code uses 0.3. The docs also describe the gunshots fix as "full volume, no attenuation", but the code only lowers attenuation.
-- The same doc and `goldsrc-hooks/README.md` say `dodstudio_hide_hudelement` has twelve elements; it has ten.
-- `dodstudio_debug_log_spectator_target` is not documented.
+- `goldsrc-hooks/README.md` still describes the gunshots fix as "full volume with no distance attenuation"; the code only lowers attenuation.
 - `goldsrc-hooks/src/engine.rs` still says `client.dll` reloads between demos; it does not.
-- `README.md` links the upstream fork as `cgdangelo/dod-studio`, which does not exist; it is `cgdangelo/dod-tools`.
-- `CLAUDE.md` names the wrong source file for `preview_cli` and leaves `goldsrc-hooks/` out of the workspace list.
-- `docs/engineering_backlog.md`, `docs/milestones.md`, `docs/active_sprint_state.md` and `docs/bugs.md` are finished journals; every open item in them is on GitHub Issues.
