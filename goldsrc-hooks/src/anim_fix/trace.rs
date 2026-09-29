@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 
 use super::ANIMATIONS_PLAYED;
-use super::sequences::model_sequence_strings;
+use super::sequences::model_sequences;
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
 /// The third-person model the spectated player was last seen holding.
@@ -193,16 +193,16 @@ pub(super) fn note_viewmodel(name: &str, deployable: bool, model: *mut ModelSPar
     // "reload"), so when a lookup comes back empty the only thing worth
     // knowing is what the model actually calls its animations -- and DoD is
     // not consistent about it. One line per weapon, not per frame.
-    let labels = model_sequence_strings(model);
+    let sequences = model_sequences(model);
     unsafe {
         crate::debug::report(&format!(
             "anim_fix: viewmodel seen -- \"{name}\" (deployable weapon: {}), {} sequences: [{}]",
             if deployable { "yes" } else { "no" },
-            labels.len(),
-            labels
+            sequences.len(),
+            sequences
                 .iter()
                 .enumerate()
-                .map(|(i, l)| format!("{i}:{l}"))
+                .map(|(i, s)| format!("{i}:{}", s.label))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))

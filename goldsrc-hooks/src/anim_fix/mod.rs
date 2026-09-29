@@ -71,11 +71,8 @@ use classify::{
     deploy_state_from_body_sequence, find_deployable_weapon, is_throw_label, model_stem,
     third_person_stem,
 };
-pub(crate) use sequences::sequence_labels;
-use sequences::{
-    animation_lookup_any, animation_lookup_sequence, model_sequence_duration,
-    model_sequence_strings,
-};
+pub(crate) use sequences::sequence_label;
+use sequences::{animation_lookup_any, animation_lookup_sequence, model_sequence_duration};
 pub use trace::{LOG_HELD_MODELS, status};
 use trace::{
     STAGE_DISABLED, STAGE_NO_ENGFUNCS, STAGE_NO_SPECTATED_PLAYER, STAGE_NO_VIEWMODEL_ENTITY,
@@ -274,10 +271,8 @@ fn play_viewmodel_animation(
     if played % ANIMATION_SUMMARY_EVERY == 0 {
         unsafe { crate::debug::report(&format!("anim_fix: {played} animations corrected so far")) };
     }
-    let played_label = model_sequence_strings(viewmodel)
-        .get(sequence as usize)
-        .cloned()
-        .unwrap_or_else(|| "<unknown>".into());
+    let played_label = sequence_label(viewmodel, sequence as usize);
+    let played_label = played_label.as_deref().unwrap_or("<unknown>");
     {
         let label = &played_label;
         let family = match state {
@@ -303,7 +298,7 @@ fn play_viewmodel_animation(
     // is whatever the replicated state then says is in hand, which is the only
     // answer available -- it is behind the player's own client, but an empty
     // hand for four seconds is further from the truth than a late draw.
-    if is_throw_label(&played_label) {
+    if is_throw_label(played_label) {
         match level() {
             // Never empty the hand in the first place.
             LEVEL_NEVER_EMPTY => {
@@ -633,9 +628,7 @@ pub fn apply() {
     let body_label = if spectated.model.is_null() {
         None
     } else {
-        model_sequence_strings(spectated.model)
-            .get(spectated.curstate.sequence.max(0) as usize)
-            .cloned()
+        sequence_label(spectated.model, spectated.curstate.sequence.max(0) as usize)
     };
 
     // Bipod state, preferring the body sequence because it carries the state in

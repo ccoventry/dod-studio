@@ -107,14 +107,21 @@ pub(super) fn classify_body_sequence(label: &str) -> BodyAction {
 /// carries the marker in some stances and so goes unreadable exactly when a
 /// machine gunner is prone. The body label carries it in every stance.
 pub(super) fn deploy_state_from_body_sequence(label: &str) -> Option<DeployState> {
-    let label = label.to_ascii_lowercase();
+    // Called every frame a bipod weapon is in view, so it compares in place
+    // rather than lowercasing a copy of the label first.
+    let starts_with = |prefix: &str| {
+        label
+            .as_bytes()
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+    };
     // `sandbag_` is deployed onto cover rather than on the bipod, but it drives
     // the same "down" first-person sequence family.
-    if label.starts_with("bipod_") || label.starts_with("sandbag_") {
+    if starts_with("bipod_") || starts_with("sandbag_") {
         Some(DeployState::Down)
     } else if ["stand_", "crouch_", "prone_", "sprint_"]
         .iter()
-        .any(|p| label.starts_with(p))
+        .any(|p| starts_with(p))
     {
         Some(DeployState::Up)
     } else {
@@ -243,8 +250,7 @@ pub(super) fn swap_family_prefix(label: &str, target: DeployState) -> String {
 /// Only the grenade families have this shape: every other attack animation
 /// returns the weapon to a pose that still holds it.
 pub(super) fn is_throw_label(label: &str) -> bool {
-    let l = label.to_ascii_lowercase();
-    l == "throw" || l == "exploding_throw"
+    label.eq_ignore_ascii_case("throw") || label.eq_ignore_ascii_case("exploding_throw")
 }
 
 #[cfg(test)]
@@ -335,6 +341,27 @@ mod tests {
         // be read as "not deployed".
         assert_eq!(deploy_state_from_body_sequence("dod_idle1"), None);
         assert_eq!(deploy_state_from_body_sequence("hs_gogogo"), None);
+    }
+
+    /// The prefix test compares in place; it must still ignore case, and a
+    /// label shorter than the prefix is simply not a match.
+    #[test]
+    fn body_deploy_state_ignores_case_and_short_labels() {
+        assert_eq!(
+            deploy_state_from_body_sequence("BIPOD_mg_shoot"),
+            Some(DeployState::Down)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("Prone_Bar_Reload"),
+            Some(DeployState::Up)
+        );
+        assert_eq!(
+            deploy_state_from_body_sequence("stand_"),
+            Some(DeployState::Up)
+        );
+        assert_eq!(deploy_state_from_body_sequence("stand"), None);
+        assert_eq!(deploy_state_from_body_sequence(""), None);
+        assert_eq!(deploy_state_from_body_sequence("bïpod_mg_aim"), None);
     }
 
     /// Every pair here is a real (v_*.mdl, p_*.mdl) pair shipped with DoD 1.3.
