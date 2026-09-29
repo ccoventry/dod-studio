@@ -80,6 +80,15 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   asking to relaunch. Remote clients are refused and only the same Windows
   user can write to it; `GOLDSRC_HOOKS_REMOTE=0` turns it off. See
   `src/remote.rs` and `native/src/sys/game_remote.rs`.
+- **Events to Studio** (on by default): a second pipe,
+  `\\.\pipe\dodstudio-hl-<pid>-events`, carries the capture pipeline's
+  `[dod-studio]` markers from the game to Studio as the engine runs each
+  `echo`, so a batch no longer depends on `qconsole.log` (issue #434, step 1).
+  The DLL wraps the engine's `echo` command through its command list
+  (`src/cmd_list.rs`, no per-build address). Markers queued before Studio
+  connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off, and
+  Studio then reads the log as before. See `src/events.rs` and
+  `native/src/obs/pipe_tail.rs`.
 - **Reload the demo** (`dodstudio_reload_demo`): plays the last `playdemo` or
   `viewdemo` again from the start, with the same name. The engine keeps no
   copy of the name, so the DLL wraps both engine commands to note it; the
