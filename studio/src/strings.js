@@ -1100,6 +1100,20 @@ export const STRINGS = {
   },
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
+  // #443: the capture summary strip above Start Capture Batch.
+  CAPTURE_SUMMARY: {
+    MODE_FRAMES: 'Frame sequence',
+    modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
+    modeObs: (fps) => `OBS @ ${fps} fps`,
+    format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
+    scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
+    banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
+    DECALS_CLEARED: 'Decals cleared',
+    DECALS_KEPT: 'Decals kept',
+    NO_DESTINATION: 'No destination folder',
+    LINK_TITLE: 'Open this setting in Configuration',
+  },
+
   HD: {
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
