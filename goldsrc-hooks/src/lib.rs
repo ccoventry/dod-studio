@@ -54,6 +54,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
+//!   Anniversary engine draw the world through `platform/gl_shaders` during
+//!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -107,6 +110,7 @@ mod spectator_target;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod world_shaders;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
