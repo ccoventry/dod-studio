@@ -2129,8 +2129,9 @@ pub fn check_engine_processes() -> bool {
 }
 
 /// Steam's state before a game launch: "not_running", "signed_out" or
-/// "ready". `hl.exe` started without a signed-in Steam starts Steam and
-/// exits, which HLAE reports only as "AfxHook error, Code: 1".
+/// "ready". `hl.exe` started without Steam exits straight away, reported
+/// only as "Failed to initalize authentication interface" or HLAE's
+/// "AfxHook error, Code: 1".
 #[tauri::command]
 pub async fn steam_state() -> Result<String, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {

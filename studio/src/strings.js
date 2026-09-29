@@ -1180,7 +1180,7 @@ export const STRINGS = {
   // Checked before DoD Studio starts the game (steam_guard.js).
   STEAM: {
     NOT_RUNNING_TITLE: "Steam isn't running",
-    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game starts Steam and closes, and HLAE shows an error. Start Steam now? The launch carries on once you're signed in.",
+    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game closes straight away with an authentication error. Start Steam now? The launch carries on once you're signed in.",
     START_STEAM: 'Start Steam',
     CANCEL: 'Cancel',
     WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
