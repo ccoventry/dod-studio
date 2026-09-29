@@ -17,7 +17,7 @@ import {
   revealInExplorer,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
-import { streakUid, resolveTake } from './take_index.js';
+import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify } from './os_notifications.js';
 
@@ -420,22 +420,24 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (uids.size === 0) return;
 
     let advanced = 0;
+    // A hand-set Rendered confirmed by this render: no status change, but
+    // the set-by-hand mark goes (#105).
+    let markCleared = false;
     demos.forEach(demo => {
       (demo.streaks || []).forEach(streak => {
         if (!uids.has(streakUid(demo.path, streak))) return;
         // Idempotent: separate_hud produces two render jobs (all + hudcolor)
         // sharing one take_key, so this fires twice per take — the second
         // pass is just a no-op instead of a double-toast.
-        if (streak.status === 'Rendered') return;
-        streak.status = 'Rendered';
-        advanced += 1;
+        if (streak.statusByHand) markCleared = true;
+        if (setVerifiedStatus(streak, 'Rendered')) advanced += 1;
       });
     });
 
     if (advanced > 0) {
       showToast(STRINGS.RENDER.highlightsMarkedRendered(advanced), 'success');
-      if (onTakeStatusChange) onTakeStatusChange();
     }
+    if ((advanced > 0 || markCleared) && onTakeStatusChange) onTakeStatusChange();
   });
 
   // Real-time per-job state, pushed by the backend scheduler. This is the
