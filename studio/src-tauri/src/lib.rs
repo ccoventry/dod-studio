@@ -90,6 +90,21 @@ async fn save_project_session(path: String, contents: String) -> Result<(), Stri
     .await
 }
 
+/// Which of a loaded project's demos are missing, and where each one moved,
+/// if a file with the same key turns up in `search_dirs` (#21).
+#[tauri::command]
+async fn locate_missing_demos(
+    demos: Vec<capture_manager::KnownDemo>,
+    search_dirs: Vec<String>,
+) -> Result<Vec<capture_manager::MissingDemo>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let dirs: Vec<std::path::PathBuf> =
+            search_dirs.iter().map(std::path::PathBuf::from).collect();
+        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn load_project_session(path: String) -> Result<String, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -599,6 +614,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            locate_missing_demos,
             run_demo_audit,
             delete_audit_files,
             cancel_audit,

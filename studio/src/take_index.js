@@ -83,6 +83,21 @@ export function recordTake(takeIndex, takeKey, uids) {
 }
 
 /**
+ * Points every uid of a relocated demo at its new path (#21). A uid starts
+ * with the demo's path, so without this a moved demo's captured takes would
+ * no longer resolve to its highlights.
+ */
+export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
+  if (!takeIndex) return;
+  const oldPrefix = `${oldPath}#`;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = takeIndex[key].map((uid) =>
+      uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
+    );
+  });
+}
+
+/**
  * Highlight uids the given take key maps to, or an empty array if this take
  * was never recorded (e.g. captured before Phase 3, or from a project saved
  * on an older version that had no take index at all).

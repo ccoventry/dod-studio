@@ -1017,6 +1017,19 @@ export const STRINGS = {
     NEW_SESSION_TOAST: 'Started a new session.',
     SAVE_PROJECT_ERROR: 'Error saving project session.',
     loadedDemosToast: (count) => `Loaded ${count} demos from project file`,
+    // #21: demos a loaded project names that are no longer where it says.
+    RELOCATE_DEMOS_TITLE: 'Demos have moved',
+    relocateDemosMessage: (rows) =>
+      `These demos are no longer at their saved location, but a matching file (same size and same start) was found for each:\n\n${rows}\n\nUse the new locations?`,
+    relocateDemoRow: (name, newPath) => `${name} → ${newPath}`,
+    RELOCATE_CONFIRM: 'Use new locations',
+    RELOCATE_CANCEL: 'Leave as missing',
+    relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,
+    missingDemosToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
+    },
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,

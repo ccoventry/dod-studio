@@ -1353,6 +1353,94 @@ fn demo_file_key(path: &Path) -> Option<String> {
         .map(|(size, hash)| format!("{size}-{hash:016x}"))
 }
 
+/// A project demo that is no longer at its saved path, and the file that
+/// looks like it moved there, if one was found (#21).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingDemo {
+    pub path: String,
+    pub candidate: Option<String>,
+}
+
+/// How deep, and how many entries, the search for a moved demo will walk, so
+/// pointing it at a drive root cannot turn a project load into a hang.
+const LOCATE_MAX_DEPTH: usize = 6;
+const LOCATE_MAX_ENTRIES: usize = 50_000;
+
+/// For every demo in `demos` whose file is gone, looks through `search_dirs`
+/// (recursively, bounded) for a `.dem` with the same `demo_file_key`: the
+/// same size and the same first 64 KB. Only files whose size matches are
+/// read at all, so a folder of hundreds of demos costs one `stat` each.
+///
+/// Suggests, never applies: the frontend asks before it moves anything. A
+/// demo with no saved key (a project from before #456) can only be reported
+/// missing.
+pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
+    let mut missing: Vec<MissingDemo> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .map(|d| MissingDemo {
+            path: d.path.clone(),
+            candidate: None,
+        })
+        .collect();
+    let wanted: Vec<(usize, &str, u64)> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let size = d.file_key.split_once('-')?.0.parse().ok()?;
+            Some((i, d.file_key.as_str(), size))
+        })
+        .collect();
+    if wanted.is_empty() {
+        return missing;
+    }
+
+    let mut visited = std::collections::HashSet::new();
+    let mut entries = 0usize;
+    let mut stack: Vec<(PathBuf, usize)> = search_dirs.iter().map(|d| (d.clone(), 0)).collect();
+    while let Some((dir, depth)) = stack.pop() {
+        if !visited.insert(same_path_key(&dir.to_string_lossy())) {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            entries += 1;
+            if entries > LOCATE_MAX_ENTRIES {
+                return missing;
+            }
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                if depth < LOCATE_MAX_DEPTH {
+                    stack.push((path, depth + 1));
+                }
+                continue;
+            }
+            let is_dem = path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dem"));
+            if !is_dem || !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
+                continue;
+            }
+            let Some(key) = demo_file_key(&path) else {
+                continue;
+            };
+            for (i, wanted_key, _) in &wanted {
+                if missing[*i].candidate.is_none() && key == *wanted_key {
+                    missing[*i].candidate = Some(path.to_string_lossy().to_string());
+                }
+            }
+            if missing.iter().all(|m| m.candidate.is_some()) {
+                return missing;
+            }
+        }
+    }
+    missing
+}
+
 /// Paths compare the way Windows does: case-insensitive, either slash.
 fn same_path_key(path: &str) -> String {
     path.replace('/', "\\").to_lowercase()
@@ -2318,6 +2406,66 @@ mod tests {
         assert_eq!(unchanged, 1);
         assert_eq!(keep, vec![b.clone(), c.clone()]);
         assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
+    }
+
+    #[test]
+    fn a_moved_demo_is_found_by_its_key_in_a_subfolder() {
+        let scratch = Scratch::new("locate_moved");
+        let old = scratch.path().join("old");
+        let new = scratch.path().join("archive").join("2026");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let moved = old.join("match.dem");
+        let kept = old.join("kept.dem");
+        std::fs::write(&moved, b"HLDEMO the moved one").unwrap();
+        std::fs::write(&kept, b"HLDEMO still here").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, new.join("renamed.dem")).unwrap();
+        // Same size, different content: must not be taken for it.
+        std::fs::write(new.join("decoy.dem"), b"HLDEMO the moved two").unwrap();
+
+        let demos = vec![
+            KnownDemo {
+                path: moved.to_string_lossy().into_owned(),
+                file_key: key,
+            },
+            KnownDemo {
+                path: kept.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&kept).unwrap(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+
+        assert_eq!(found.len(), 1, "only the missing demo is reported");
+        assert_eq!(found[0].path, moved.to_string_lossy());
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(new.join("renamed.dem").to_string_lossy().as_ref())
+        );
+    }
+
+    #[test]
+    fn a_missing_demo_with_no_key_or_no_match_is_reported_without_a_candidate() {
+        let scratch = Scratch::new("locate_none");
+        std::fs::write(scratch.path().join("other.dem"), b"HLDEMO other").unwrap();
+        let gone = scratch.path().join("gone.dem");
+        let demos = vec![
+            KnownDemo {
+                path: gone.to_string_lossy().into_owned(),
+                file_key: String::new(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone2.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "999-0000000000000000".to_string(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
     }
 
     #[test]

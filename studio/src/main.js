@@ -13,7 +13,8 @@ import {
   checkHlaeFfmpeg,
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
-  launchObs
+  launchObs,
+  locateMissingDemos
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
@@ -29,7 +30,7 @@ import { initHdPane } from './hd_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
-import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
+import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked, renameDemoInTakeIndex } from './take_index.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -858,6 +859,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               }
               updateDemoFooter(currentScannedDemos);
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
+              await checkMissingDemos(selected, data.scanPaths || []);
             }
           }
         }
@@ -866,6 +868,62 @@ window.addEventListener("DOMContentLoaded", async () => {
         showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
       }
     });
+  }
+
+  // A loaded project's demos may have moved or been deleted since it was
+  // saved (#21). Look for each missing one by its file key (size + first
+  // 64 KB) near the project and its old folders, and ask before using a
+  // match. Anything still missing is named in a toast.
+  async function checkMissingDemos(projectPath, savedScanPaths) {
+    const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
+    const nameOf = (p) => p.split(/[\\/]/).pop();
+    const dirs = [...new Set([
+      parentOf(projectPath),
+      ...savedScanPaths,
+      ...scanPaths,
+      ...currentScannedDemos.map((d) => parentOf(d.path)),
+    ].filter(Boolean))];
+    const missing = await locateMissingDemos(
+      currentScannedDemos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
+      dirs
+    );
+    if (missing.length === 0) return;
+
+    const found = missing.filter((m) => m.candidate);
+    let relocated = new Set();
+    if (found.length > 0) {
+      const rows = found.map((m) => STRINGS.MAIN.relocateDemoRow(nameOf(m.path), m.candidate)).join('\n');
+      const ok = await themedConfirm(STRINGS.MAIN.relocateDemosMessage(rows), {
+        title: STRINGS.MAIN.RELOCATE_DEMOS_TITLE,
+        confirmLabel: STRINGS.MAIN.RELOCATE_CONFIRM,
+        cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL,
+      });
+      if (ok) {
+        found.forEach((m) => {
+          const demo = currentScannedDemos.find((d) => d.path === m.path);
+          if (!demo) return;
+          demo.path = m.candidate;
+          (demo.streaks || []).forEach((s) => {
+            if (s.source_demo === m.path) s.source_demo = m.candidate;
+            // The cached uid still names the old path; streakUid rebuilds it.
+            if ('uid' in s) s.uid = undefined;
+          });
+          renameDemoInTakeIndex(takeIndex, m.path, m.candidate);
+          relocated.add(m.path);
+        });
+        renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
+        if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
+          selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+        }
+        markProjectDirty();
+        showToast(STRINGS.MAIN.relocatedDemosToast(relocated.size), 'success');
+      }
+    }
+
+    const stillMissing = missing.filter((m) => !relocated.has(m.path)).map((m) => nameOf(m.path));
+    if (stillMissing.length > 0) {
+      showToast(STRINGS.MAIN.missingDemosToast(stillMissing), 'warning', 10000);
+    }
   }
 
   // New Session (#122/#149) — resets to the same blank state the app starts

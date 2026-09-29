@@ -41,6 +41,17 @@ export async function scanDirectory(scanPaths, known = []) {
     });
 }
 
+// Which of a loaded project's demos are missing, and a moved copy of each if
+// one with the same file key turns up in `searchDirs` (#21). Resolves
+// `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
+export async function locateMissingDemos(demos, searchDirs) {
+  return invoke("locate_missing_demos", { demos, searchDirs })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_missing_demos):", err);
+      return [];
+    });
+}
+
 // Map library checks. Deliberately quiet on failure: a demo whose map cannot be
 // checked is still a demo the user can work with, so this reports and returns
 // nothing rather than interrupting a scan that otherwise succeeded.
