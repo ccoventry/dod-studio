@@ -1,8 +1,8 @@
 // steam_guard.js
 // Checked before DoD Studio starts the game (capture batch, preview, the
-// debug Launch Game). hl.exe started without Steam exits straight away, with
-// either its own "Failed to initalize authentication interface" box or
-// HLAE's "AfxHook error, Code: 1", neither of which says Steam. Whether the account owns the game can't be checked ahead;
+// debug Launch Game). hl.exe started without Steam exits straight away with
+// its own "Failed to initalize authentication interface" box, which doesn't
+// say Steam. Whether the account owns the game can't be checked ahead;
 // that failure is named in the batch's own error instead.
 
 import { steamState, startSteam } from './ipc_bridge.js';

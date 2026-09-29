@@ -1,10 +1,10 @@
 //! Whether Steam is running and signed in, checked before DoD Studio starts
 //! the game.
 //!
-//! `hl.exe` started with Steam closed exits straight away, seen two ways on
-//! 2026-09-29: the game's own "Failed to initalize authentication interface.
-//! Exiting..." box, or HLAE's "AfxHook error, Code: 1" when it loses the
-//! process mid-injection. Steam records its own state in the registry:
+//! `hl.exe` started with Steam closed exits straight away with its own
+//! "Failed to initalize authentication interface. Exiting..." box, and on
+//! Anniversary a `!m_bMounted` assert from `filesystem_stdio.dll` on the way
+//! out (both seen 2026-09-29). Steam records its own state in the registry:
 //! `HKCU\Software\Valve\Steam\ActiveProcess` holds `pid` (Steam's process)
 //! and `ActiveUser` (the signed-in account's id, 0 while nobody is signed in,
 //! including while Steam is still starting). Whether that account owns the
