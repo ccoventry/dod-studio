@@ -9,6 +9,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { escapeHtml as esc } from './html.js';
 
 function setAnalyzerFileIndicator(text) {
   const titleEl = document.querySelector('#analyzer-current-file');
@@ -158,14 +159,6 @@ function weaponName(w) {
   const resolved = weaponDisplayNames && weaponDisplayNames[w];
   if (resolved) return resolved;
   return String(w).replace(/([a-z0-9])([A-Z])/g, '$1 $2');
-}
-
-function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
 }
 
 // SteamID64 -> classic STEAM_0:X:YYYY. Falls back to the raw id for
