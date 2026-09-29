@@ -194,6 +194,15 @@ the stack runs out. The guard refuses any clip node the hull can't have, and
 stops a trace that is about to run out of stack. On by default for the same
 reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
 
+`src/sprite_blend.rs` stops `gl_spriteblend 0` at the session's first sprite
+load from leaving the crosshair and other sprites dark and dotted until the
+game restarts (issue #467). The engine only fills in the colour around a
+sprite's edges at upload when the cvar is non-zero, and it never uploads the
+same sprite twice. Two bytes in `GL_Upload32` make it always do so, on both
+builds, as if the value were its default of 1. Draw-time handling of the cvar
+is untouched. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off.
+`tools/verify_spriteblend_offsets.py` re-derives both sites.
+
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
 faulting address as `module+RVA` so a crash is diagnosable from the log alone. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.
