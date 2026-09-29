@@ -40,6 +40,7 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -548,6 +549,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
       render_export_dirs: renderExportDirs
     };
@@ -718,6 +720,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
@@ -1474,6 +1477,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,

@@ -536,6 +536,15 @@
                 </div>
               </div>
 
+              <!-- #108: named render setups. -->
+              <div class="input-row" style="margin-top: 6px;">
+                <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
+                <select id="render-preset-select"><option value="">—</option></select>
+                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
+                <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
+              </div>
+
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
               <div class="input-row" style="margin-top: 6px;">
                 <input type="text" id="render-export-dir-input" data-str-placeholder="RENDER.EXPORT_DIR_PLACEHOLDER" placeholder="Add export drive/folder..." style="flex: 1;" />
