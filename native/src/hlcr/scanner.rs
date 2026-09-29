@@ -235,17 +235,29 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
 /// pipeline keeps being bitten by. The check is cheap because the answer is in
 /// the container header.
 fn take_shape_is_renderable(folder: &Path) -> bool {
-    let streams = collect_image_folders(folder);
+    shape_is_renderable(&collect_image_folders(folder), &collect_wav_files(folder))
+}
+
+/// `take_shape_is_renderable` for a folder whose streams and wavs the caller
+/// already listed, so the folder isn't read again.
+fn shape_is_renderable(streams: &[PathBuf], wav_files: &[String]) -> bool {
     if streams.is_empty() {
         return false;
     }
-    if !collect_wav_files(folder).is_empty() {
+    if !wav_files.is_empty() {
         return true;
     }
     streams
         .iter()
         .filter_map(|s| stream_video_path(s))
         .any(|v| video_has_audio(&v))
+}
+
+/// A BMP stream folder: its first frame is there. Never a take itself, and
+/// the scan doesn't descend into it: listing its thousands of frames as
+/// candidate takes was two of the three times each one was read.
+fn is_bmp_stream_folder(entry: &walkdir::DirEntry) -> bool {
+    entry.file_type().is_dir() && entry.path().join("00000.bmp").exists()
 }
 
 pub fn scan_folder_background(
@@ -264,6 +276,7 @@ pub fn scan_folder_background(
 
         for entry in WalkDir::new(&source_folder)
             .into_iter()
+            .filter_entry(|e| !is_bmp_stream_folder(e))
             .filter_map(|e| e.ok())
         {
             if !entry.file_type().is_dir() {
@@ -279,14 +292,14 @@ pub fn scan_folder_background(
             if image_folders.is_empty() {
                 continue;
             }
+            let wav_files = collect_wav_files(&take_folder);
             // Shared with the capture-side take-verification predicate so the
             // two can never silently disagree about what counts as a take —
             // admits both the wav-beside-a-stream shape and an OBS take
             // (a stream folder whose video already carries its own audio).
-            if !take_shape_is_renderable(&take_folder) {
+            if !shape_is_renderable(&image_folders, &wav_files) {
                 continue;
             }
-            let wav_files = collect_wav_files(&take_folder);
 
             // Valid take found!
             processed_folders.insert(take_folder.clone());
