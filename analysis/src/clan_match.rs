@@ -70,6 +70,8 @@ pub fn use_clan_match_detection_updates(
             });
 
             state.team_scores.reset();
+            // Warm-up kills go with the warm-up, like the weapon breakdown.
+            state.kill_positions.clear();
 
             for player in state.players.iter_mut() {
                 player.kill_streaks.clear();

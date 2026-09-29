@@ -173,6 +173,16 @@ export async function getWeaponDisplayNames() {
   });
 }
 
+// The map's overview image and placement for the kill map (#448), or null
+// when there is none. A failure is logged and treated as "no overview" — the
+// kill map's distance table still works without the image.
+export async function loadMapOverview(gamePath, demoPath, mapName) {
+  return invoke("load_map_overview", { gamePath: gamePath || null, demoPath, mapName }).catch((err) => {
+    console.error("IPC Execution Error (load_map_overview):", err);
+    return null;
+  });
+}
+
 export async function startCaptureBatch(payload) {
   return invoke("start_capture_batch", { payload: payload })
     .catch((err) => {

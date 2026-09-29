@@ -21,6 +21,8 @@ ignores them; `cargo build --examples` and `cargo test` compile them.
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
+| `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
+| `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and

@@ -1344,6 +1344,46 @@ button.primary-btn:hover:not(:disabled) {
   z-index: 5;
 }
 
+/* Kill Map tab (#448): the overview image with an SVG of death markers laid
+   exactly over it, both scaled together. */
+.analyzer-killmap {
+  position: relative;
+  max-width: 1024px;
+  margin-bottom: 8px;
+}
+
+.analyzer-killmap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+}
+
+.analyzer-killmap svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.analyzer-killmap circle {
+  stroke: #000;
+  stroke-width: 1.5;
+  cursor: default;
+}
+
+.analyzer-killmap circle:hover {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.analyzer-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
 .analyzer-weapon-filters {
   display: flex;
   flex-direction: column;
