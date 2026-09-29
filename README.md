@@ -74,7 +74,8 @@ memory, which is exactly what VAC looks for. So:
 - **Use a separate copy of Half-Life for movies**, and point DoD Studio at that
   copy's `hl.exe`, never at the Steam install you play online with.
 - **Only play demos in it.** Never join a server from a game DoD Studio started.
-  If HLAE asks "You are about to connect to a server", answer No.
+  If HLAE asks "You are about to connect to a server", answer No. DoD
+  Studio's hook DLL refuses `connect` itself while it is loaded.
 - **Never inject the hook DLL by hand** (`inject.exe`) into a game you play
   online with.
 
