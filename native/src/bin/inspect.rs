@@ -3,11 +3,9 @@
 use clap::Parser;
 use dem::open_demo_from_bytes;
 use dem::types::{FrameData, MessageData, NetMessage};
-use std::collections::hash_map::DefaultHasher;
+use hl_demo_auditor::{FileKey, get_file_key};
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::hash::{Hash, Hasher};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -20,12 +18,6 @@ struct Args {
     /// Limit the number of unique demos to inspect (pass 99999 for all)
     #[arg(long, default_value_t = 99999)]
     limit: usize,
-}
-
-#[derive(Eq, PartialEq, Hash, Debug, Clone)]
-struct FileKey {
-    size: u64,
-    header_hash: u64,
 }
 
 struct InspectResult {
@@ -98,7 +90,8 @@ fn main() {
     let mut files = vec![];
     for folder in &args.paths {
         if folder.exists() {
-            scan_dir(folder, &mut files);
+            let never_cancel = std::sync::atomic::AtomicBool::new(false);
+            hl_demo_auditor::scan_dir(folder, &mut files, &never_cancel, &None);
         }
     }
 
@@ -238,36 +231,4 @@ fn main() {
             name, count, demos_with_msg, penetration
         );
     }
-}
-
-fn scan_dir(dir: &Path, files: &mut Vec<PathBuf>) {
-    if let Ok(entries) = fs::read_dir(dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                scan_dir(&path, files);
-            } else if path
-                .extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
-            {
-                files.push(path);
-            }
-        }
-    }
-}
-
-fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
-    let metadata = fs::metadata(path)?;
-    let size = metadata.len();
-
-    let mut file = fs::File::open(path)?;
-    let read_size = std::cmp::min(size, 65536) as usize;
-    let mut buffer = vec![0; read_size];
-    file.read_exact(&mut buffer)?;
-
-    let mut hasher = DefaultHasher::new();
-    buffer.hash(&mut hasher);
-    let header_hash = hasher.finish();
-
-    Ok(FileKey { size, header_hash })
 }
