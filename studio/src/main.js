@@ -902,8 +902,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // A loaded project's demos may have moved or been deleted since it was
   // saved (#21). Look for each missing one by its file key (size + first
   // 64 KB) near the project and its old folders, and ask before using a
-  // match. Anything still missing is named in a toast.
-  async function checkMissingDemos(projectPath, savedScanPaths) {
+  // match. Anything still missing is named in a toast. Also run by Start
+  // Capture Batch over the demos with a highlight picked (no project path
+  // then). Resolves to how many of `demos` are still missing.
+  async function checkMissingDemos(projectPath, savedScanPaths, demos = currentScannedDemos) {
     const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
     const nameOf = (p) => p.split(/[\\/]/).pop();
     // Nearest first: where each demo was, then the project's folder, then the
@@ -912,16 +914,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Scan entries that name single demo files aren't folders to search.
     const isDemoFile = (p) => /\.dem$/i.test(p);
     const dirs = [...new Set([
-      ...currentScannedDemos.map((d) => parentOf(d.path)),
-      parentOf(projectPath),
+      ...demos.map((d) => parentOf(d.path)),
+      projectPath && parentOf(projectPath),
       ...savedScanPaths.filter((p) => !isDemoFile(p)),
       ...scanPaths.filter((p) => !isDemoFile(p)),
     ].filter(Boolean))];
     const missing = await locateMissingDemos(
-      currentScannedDemos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
+      demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
       dirs
     );
-    if (missing.length === 0) return;
+    // A demo marked missing earlier that is back where the queue says.
+    const missingPaths = new Set(missing.map((m) => m.path));
+    const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
+    back.forEach((d) => {
+      d.missing = false;
+      d.foundAt = null;
+    });
+    if (missing.length === 0) {
+      if (back.length > 0) refreshAfterRelocation(false);
+      return 0;
+    }
 
     const found = missing.filter((m) => m.candidate);
     const relocated = new Set();
@@ -978,6 +990,16 @@ window.addEventListener("DOMContentLoaded", async () => {
         action: { label: STRINGS.MAIN.USE_ALL_FOUND_COPIES, onClick: () => useFoundCopies(leftFound) },
       });
     }
+    return stillMissing.length;
+  }
+
+  // Start Capture Batch's check: a demo can go missing after the queue was
+  // loaded. True when every demo with a highlight picked is where the queue
+  // says, after any the user chose to relocate.
+  async function pickedDemosPresent() {
+    const picked = currentScannedDemos.filter((d) => (d.streaks || []).some((s) => s.selected === true));
+    if (picked.length === 0) return true;
+    return (await checkMissingDemos(null, [], picked)) === 0;
   }
 
   // Uses the matches the load-time search found for demos left as missing:
@@ -1639,7 +1661,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     scanPaths,
     targetDrives,
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
