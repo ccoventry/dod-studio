@@ -39,7 +39,7 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char, c_void};
+use std::ffi::{CStr, CString, c_char};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine::{self, ClEngineFuncsPartial, ConsoleCommandFn};
@@ -48,7 +48,6 @@ use crate::names::console_name;
 pub const NAME: &str = console_name!("reload_demo");
 
 /// `cl_enginefunc_t` slots, from the public SDK's `APIProxy.h`.
-const SLOT_CLIENT_CMD: usize = 20;
 const SLOT_GET_FIRST_CMD_FUNCTION_HANDLE: usize = 102;
 
 /// A node of the engine's command list, as `Cmd_AddCommand` builds it.
@@ -61,7 +60,6 @@ struct CmdFunction {
 }
 
 type GetFirstCmdFn = unsafe extern "C" fn() -> *mut CmdFunction;
-type ClientCmdFn = unsafe extern "C" fn(*const c_char);
 
 /// The engine's own handlers, called by the wrappers.
 static REAL_PLAYDEMO: AtomicUsize = AtomicUsize::new(0);
@@ -274,25 +272,10 @@ pub unsafe extern "C" fn command() {
     }
 }
 
-/// Runs `line` through the engine's `pfnClientCmd`.
+/// Runs `line` through the engine's `pfnClientCmd` (`engine::client_cmd`,
+/// shared with the Studio pipe).
 fn client_cmd(line: &str) -> bool {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return false;
-    };
-    let Ok(line) = CString::new(line) else {
-        return false;
-    };
-    // Safety: slot 20 of the engine's own table, the one engine.rs already
-    // documents and watches.
-    unsafe {
-        let slot = *(engfuncs as *const ClEngineFuncsPartial as *const usize).add(SLOT_CLIENT_CMD);
-        if slot == 0 {
-            return false;
-        }
-        let client_cmd: ClientCmdFn = std::mem::transmute(slot as *const c_void);
-        client_cmd(line.as_ptr());
-    }
-    true
+    CString::new(line).is_ok_and(|line| engine::client_cmd(&line))
 }
 
 #[cfg(test)]

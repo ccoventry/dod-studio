@@ -515,6 +515,8 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Runs any console commands Studio has sent over the pipe.
+    crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     texture_hires::poll_hd();
