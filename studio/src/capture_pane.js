@@ -174,7 +174,9 @@ function generateSessionId() {
  * overlapping (or touching) pre/post-roll windows *within each source demo*
  * before billing them for disk space — two highlights that share footage
  * must not be double-counted, since the engine records that overlap once.
- * Base cost is `w * h * 3` bytes/frame at the configured capture FPS.
+ * Base cost is `w * h * 3` bytes/frame at the configured capture FPS, unless
+ * `bytesPerFrame` is given — AGR mode passes its own much smaller figure
+ * (`AGR_BYTES_PER_FRAME`, mirroring `sys::disk::AGR_BYTES_PER_FRAME`).
  *
  * Does not account for `mirv_movie_separate_hud 1` typed into Initial
  * Commands — that triples the real cost (HUD pass recorded as its own
@@ -185,7 +187,7 @@ function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   const {
     preRollSeconds, postRollSeconds,
     recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight,
+    captureFps, resWidth, resHeight, bytesPerFrame,
   } = opts;
   let totalSeconds = 0;
 
@@ -235,9 +237,11 @@ function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   });
 
   const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
-  const bytesPerFrame = resWidth * resHeight * 3;
-  return frames * bytesPerFrame;
+  return frames * (bytesPerFrame ?? resWidth * resHeight * 3);
 }
+
+/** What one recorded AGR frame costs on disk — see `sys::disk::AGR_BYTES_PER_FRAME`. */
+const AGR_BYTES_PER_FRAME = 8 * 1024;
 
 const PATH_PROBLEM_REASONS = {
   not_absolute: STRINGS.CAPTURE.pathProblem.notAbsolute,
@@ -421,14 +425,19 @@ export async function refreshLaunchGuard(state) {
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
   const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
   const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  // AGR mode writes a few KB a frame, at its own rate — sizing it like a
+  // frame sequence would block batches that fit with room to spare.
+  const agrMode = document.querySelector('#config-capture-mode')?.value === 'agr';
+  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
     recordStartLead: recordStartLeadVal,
     recordStopTrail: recordStopTrailVal,
-    captureFps: captureFpsVal,
+    captureFps: agrMode ? agrFpsVal : captureFpsVal,
     resWidth: resWidthVal,
     resHeight: resHeightVal,
+    bytesPerFrame: agrMode ? AGR_BYTES_PER_FRAME : undefined,
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -928,10 +937,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // window, so they change the disk estimate the guard is built on.
   ['#config-res-width', '#config-res-height', '#config-ffmpeg-capture',
    '#config-pre-roll', '#config-post-roll', '#config-capture-fps',
-   '#config-record-start-lead', '#config-record-stop-trail'].forEach(selector => {
+   '#config-record-start-lead', '#config-record-stop-trail', '#config-agr-fps'].forEach(selector => {
     const el = document.querySelector(selector);
     if (el) el.addEventListener('input', () => { refreshLaunchGuard(); notifySettingsChange(); });
   });
+  // AGR mode sizes a batch in KB rather than GB, so switching mode moves the
+  // disk estimate too.
+  document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -1185,6 +1197,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
     const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+    const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRollVal = numberField('#config-pre-roll', 2.0);
     const postRollVal = numberField('#config-post-roll', 0.6);
     const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
@@ -1269,6 +1283,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       capture_directories: outputDrivePool,
       capture_fps: captureFpsVal,
       obs_capture_fps: obsCaptureFpsVal,
+      agr_fps: agrFpsVal,
       drives: state.targetDrives || [],
       record_start_lead: recordStartLeadVal,
       record_stop_trail: recordStopTrailVal,

@@ -272,6 +272,8 @@
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_VIDEO_TITLE">Video</option>
                     <option value="obs" data-str="CAPTURE_CONFIG.CAPTURE_MODE_OBS"
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_OBS_TITLE">OBS (real time)</option>
+                    <option value="agr" data-str="CAPTURE_CONFIG.CAPTURE_MODE_AGR"
+                            data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_AGR_TITLE">AGR for Blender (no video)</option>
                   </select>
                   <input type="checkbox" id="config-ffmpeg-capture" hidden />
                 </div>
@@ -282,6 +284,13 @@
                      Every entry is also RGB/4:4:4 because hudAlpha carries the
                      HUD matte in its red channel. Disabled unless Video is on;
                      it has no meaning for a frame sequence. -->
+                <!-- Shown only in AGR mode (#450). Empty means "the same as
+                     Capture FPS", which is hidden in this mode, so the
+                     placeholder names the number it will use. -->
+                <div class="control-group" id="agr-fps-group" style="display: none;">
+                  <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
+                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
                          data-str-title="CAPTURE_CONFIG.CAPTURE_CODEC_TITLE">Capture Codec:</label>

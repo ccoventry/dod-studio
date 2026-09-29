@@ -280,6 +280,12 @@ pub enum CaptureMode {
     /// whatever the screen actually showed. In exchange the file is finished
     /// and playable the moment the clip ends, audio already muxed.
     Obs,
+    /// No video at all: HLAE's `mirv_agr` records every drawn model's bones
+    /// and the camera into one `.agr` file per block, for the Blender page
+    /// (#403, #450). `mirv_recordmovie` is never issued; the record aliases
+    /// start and stop `mirv_agr` instead, and `host_framerate` pins the
+    /// recorded rate to `PatcherConfig::agr_fps`.
+    Agr,
 }
 
 impl CaptureMode {
@@ -288,6 +294,7 @@ impl CaptureMode {
             Self::FrameSequence => "frame_sequence",
             Self::DirectToVideo => "direct_to_video",
             Self::Obs => "obs",
+            Self::Agr => "agr",
         }
     }
 
@@ -298,14 +305,16 @@ impl CaptureMode {
         match id {
             "direct_to_video" => Self::DirectToVideo,
             "obs" => Self::Obs,
+            "agr" => Self::Agr,
             _ => Self::FrameSequence,
         }
     }
 
-    /// Whether HLAE is doing the recording. False only for OBS, where
-    /// `mirv_recordmovie` is never issued and the engine simply plays back.
+    /// Whether HLAE records a movie (`mirv_recordmovie_*`). False for OBS,
+    /// where the engine simply plays back, and for AGR, where HLAE records
+    /// with `mirv_agr` instead and writes no frames.
     pub fn hlae_records(self) -> bool {
-        !matches!(self, Self::Obs)
+        matches!(self, Self::FrameSequence | Self::DirectToVideo)
     }
 }
 
@@ -388,6 +397,12 @@ pub struct PatcherConfig {
     /// can actually sustain at the configured resolution or frames get
     /// dropped (confirmed live: 300fps @ 2560x1440 lost 98.5% of frames).
     pub obs_capture_fps: i32,
+    /// AGR mode's recorded rate, in frames per game second. `0` (the default)
+    /// means "the same as `capture_fps`" — see `effective_agr_fps`. Its own
+    /// setting because the cost is different: an AGR frame is a few KB, so a
+    /// preview can drop to 30 while a slow-motion take wants 300.
+    #[serde(default)]
+    pub agr_fps: i32,
     pub exit_on_finish: bool,
     pub init_commands: Vec<String>,
     pub custom_commands: Vec<CustomCommand>,
@@ -512,6 +527,16 @@ impl PatcherConfig {
             self.capture_mode = CaptureMode::DirectToVideo;
         }
         self.ffmpeg_capture = self.capture_mode == CaptureMode::DirectToVideo;
+    }
+
+    /// The rate AGR mode records at: `agr_fps` when set, otherwise the
+    /// capture FPS, and never below 1 so `1 / fps` always has a meaning.
+    pub fn effective_agr_fps(&self) -> i32 {
+        if self.agr_fps > 0 {
+            self.agr_fps
+        } else {
+            self.capture_fps.max(1)
+        }
     }
 
     pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
@@ -665,6 +690,7 @@ impl Default for PatcherConfig {
             post_roll_ticks: 60,
             capture_fps: 300,
             obs_capture_fps: 120,
+            agr_fps: 0,
             exit_on_finish: true,
             init_commands: Vec::new(),
             custom_commands: Vec::new(),
