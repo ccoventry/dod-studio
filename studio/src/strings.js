@@ -76,6 +76,11 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // #21: a project demo that is not at its saved path.
+    MISSING_BADGE: 'missing',
+    missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
+    LOCATE_DEMO_BUTTON: 'Locate…',
+    LOCATE_DEMO_TITLE: 'Pick where this demo is now',
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
@@ -1037,6 +1042,11 @@ export const STRINGS = {
     RELOCATE_CONFIRM: 'Use new locations',
     RELOCATE_CANCEL: 'Leave as missing',
     relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,
+    LOCATE_DEMO_DIALOG_TITLE: 'Where is this demo now?',
+    LOCATE_MISMATCH_TITLE: 'Different file',
+    locateMismatchMessage: (name) =>
+      `This file doesn't match the ${name} that was scanned (its size or start is different). Its highlights may not line up with it.\n\nUse it anyway?`,
+    LOCATE_MISMATCH_CONFIRM: 'Use it anyway',
     missingDemosToast: (names) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';

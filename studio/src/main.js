@@ -918,7 +918,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (missing.length === 0) return;
 
     const found = missing.filter((m) => m.candidate);
-    let relocated = new Set();
+    const relocated = new Set();
     if (found.length > 0) {
       const rows = found.map((m) => STRINGS.MAIN.relocateDemoRow(nameOf(m.path), m.candidate)).join('\n');
       const ok = await themedConfirm(STRINGS.MAIN.relocateDemosMessage(rows), {
@@ -930,27 +930,75 @@ window.addEventListener("DOMContentLoaded", async () => {
         found.forEach((m) => {
           const demo = currentScannedDemos.find((d) => d.path === m.path);
           if (!demo) return;
-          demo.path = m.candidate;
-          (demo.streaks || []).forEach((s) => {
-            if (s.source_demo === m.path) s.source_demo = m.candidate;
-            // The cached uid still names the old path; streakUid rebuilds it.
-            if ('uid' in s) s.uid = undefined;
-          });
-          renameDemoInTakeIndex(takeIndex, m.path, m.candidate);
+          relocateDemo(demo, m.candidate);
           relocated.add(m.path);
         });
-        renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
-        if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
-          selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-        }
-        markProjectDirty();
         showToast(STRINGS.MAIN.relocatedDemosToast(relocated.size), 'success');
       }
     }
 
-    const stillMissing = missing.filter((m) => !relocated.has(m.path)).map((m) => nameOf(m.path));
+    const stillMissing = missing.filter((m) => !relocated.has(m.path));
+    stillMissing.forEach((m) => {
+      const demo = currentScannedDemos.find((d) => d.path === m.path);
+      // Runtime only: non-enumerable, so it never reaches the project file.
+      if (demo) Object.defineProperty(demo, 'missing', { value: true, writable: true, configurable: true, enumerable: false });
+    });
+    refreshAfterRelocation(relocated.size > 0);
     if (stillMissing.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(stillMissing), 'warning', 10000);
+      showToast(STRINGS.MAIN.missingDemosToast(stillMissing.map((m) => nameOf(m.path))), 'warning', 10000);
+    }
+  }
+
+  // Points a demo, its highlights and the take index at a new file (#21).
+  function relocateDemo(demo, newPath) {
+    const oldPath = demo.path;
+    demo.path = newPath;
+    if (demo.missing) demo.missing = false;
+    (demo.streaks || []).forEach((s) => {
+      if (s.source_demo === oldPath) s.source_demo = newPath;
+      // The cached uid still names the old path; streakUid rebuilds it.
+      if ('uid' in s) s.uid = undefined;
+    });
+    renameDemoInTakeIndex(takeIndex, oldPath, newPath);
+  }
+
+  function refreshAfterRelocation(changed) {
+    renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
+    if (!changed) return;
+    if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
+      selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+    }
+    markProjectDirty();
+  }
+
+  // A missing demo's Locate button (#21): pick the file by hand. When the
+  // demo has a saved file key and the pick doesn't match it, ask first.
+  async function locateDemoByHand(demo) {
+    try {
+      const picked = await open({
+        multiple: false,
+        title: STRINGS.MAIN.LOCATE_DEMO_DIALOG_TITLE,
+        filters: [{ name: 'Demo', extensions: ['dem'] }],
+      });
+      const newPath = Array.isArray(picked) ? picked[0] : picked;
+      if (!newPath) return;
+      if (demo.file_key) {
+        const parent = newPath.replace(/[\\/][^\\/]*$/, '');
+        const [match] = await locateMissingDemos([{ path: demo.path, file_key: demo.file_key }], [parent]);
+        const same = (a, b) => a && b && a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase();
+        if (match && !same(match.candidate, newPath)) {
+          const ok = await themedConfirm(STRINGS.MAIN.locateMismatchMessage(demo.name || demo.path), {
+            title: STRINGS.MAIN.LOCATE_MISMATCH_TITLE,
+            confirmLabel: STRINGS.MAIN.LOCATE_MISMATCH_CONFIRM,
+          });
+          if (!ok) return;
+        }
+      }
+      relocateDemo(demo, newPath);
+      refreshAfterRelocation(true);
+      showToast(STRINGS.MAIN.relocatedDemosToast(1), 'success');
+    } catch (err) {
+      console.error('Locate demo error:', err);
     }
   }
 
@@ -1870,7 +1918,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm);
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand);
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
