@@ -1113,8 +1113,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
             Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
           }
           // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured.
-          if (streak.status === 'Rendered') return;
+          // rendered must not knock it back down to Captured -- unless that
+          // Rendered was set by hand: a verified capture beats an unverified
+          // claim (#105, decided 2026-09-29).
+          if (streak.status === 'Rendered' && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
           if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
         });
