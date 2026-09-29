@@ -1101,6 +1101,9 @@ export const STRINGS = {
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
   HD: {
+    // #430: whether hl.exe gets 2 GB or 4 GB of address space.
+    ADDRESS_SPACE_4GB: 'This hl.exe gets 4 GB of memory, room for the biggest HD textures.',
+    ADDRESS_SPACE_2GB: 'This hl.exe gets 2 GB of memory (the pre-Anniversary build isn\'t marked for more), so very large HD textures or a long session over many maps can run it out.',
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
     REFRESHING: 'Checking...',
