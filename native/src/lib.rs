@@ -130,7 +130,7 @@ fn build_file_info(demo_path: &PathBuf) -> Result<FileInfo, String> {
 // 4: `DemoInfo::map_segments` (#217). A v3 entry would load with no segments,
 // hiding the map picker on exactly the demos that need it.
 #[cfg(not(target_arch = "wasm32"))]
-const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 4;
+const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 5;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]
@@ -224,6 +224,57 @@ where
     Ok((file_info, analysis, false))
 }
 
+/// Deletes the `v<N>` folders under the analyzer cache that an older schema
+/// left: `N` below `current`, and nothing written there for a week. A schema
+/// bump makes every old entry a miss forever, so the folder is dead weight
+/// (359 MB of it on one machine, 2026-09). The week spares an older build
+/// still in use beside this one (an installed release next to a dev build),
+/// whose cache would otherwise be deleted under it every run. Leaves anything
+/// that isn't a `v<N>` folder alone. Best-effort.
+#[cfg(not(target_arch = "wasm32"))]
+fn sweep_stale_analyzer_caches(cache_root: &std::path::Path, current: u32) -> usize {
+    sweep_stale_analyzer_caches_older_than(cache_root, current, STALE_CACHE_AGE)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const STALE_CACHE_AGE: std::time::Duration = std::time::Duration::from_secs(7 * 24 * 60 * 60);
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sweep_stale_analyzer_caches_older_than(
+    cache_root: &std::path::Path,
+    current: u32,
+    min_age: std::time::Duration,
+) -> usize {
+    let Ok(entries) = fs::read_dir(cache_root) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(version) = name
+            .to_str()
+            .and_then(|n| n.strip_prefix('v'))
+            .and_then(|v| v.parse::<u32>().ok())
+        else {
+            continue;
+        };
+        let idle_long_enough = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.elapsed().ok())
+            .is_some_and(|age| age >= min_age);
+        if version < current
+            && idle_long_enough
+            && entry.file_type().is_ok_and(|t| t.is_dir())
+            && fs::remove_dir_all(entry.path()).is_ok()
+        {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn write_analyzer_cache_entry(
     cache_path: &PathBuf,
@@ -234,6 +285,16 @@ fn write_analyzer_cache_entry(
 ) {
     if let Some(parent) = cache_path.parent() {
         let _ = fs::create_dir_all(parent);
+        // Once per run, clear out the caches older schema versions left:
+        // nothing reads them again, and they had grown to hundreds of MB.
+        static SWEPT: std::sync::Once = std::sync::Once::new();
+        if let Some(cache_root) = parent.parent().map(PathBuf::from) {
+            SWEPT.call_once(|| {
+                std::thread::spawn(move || {
+                    sweep_stale_analyzer_caches(&cache_root, ANALYZER_CACHE_SCHEMA_VERSION)
+                });
+            });
+        }
     }
     let entry_ref = AnalyzerCacheEntryRef {
         size_bytes,
@@ -511,6 +572,7 @@ mod activity_log_tests {
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod analyzer_cache_tests {
     use super::*;
+    use crate::test_support::Scratch;
 
     #[test]
     fn a_picked_map_segment_is_cached_beside_the_default_analysis() {
@@ -521,5 +583,32 @@ mod analyzer_cache_tests {
         assert_eq!(second, "0000000000000abc.segment1.json");
         let first = analyzer_cache_file_name(0xabc, AnalysisOptions { segment: Some(0) });
         assert_ne!(first, default);
+    }
+
+    /// Old schema folders idle for the grace period go; the current one, a
+    /// newer one, a recently used one, and anything that isn't a `v<N>`
+    /// folder stay.
+    #[test]
+    fn stale_cache_versions_are_swept() {
+        let root = Scratch::new("analyzer_cache_sweep");
+        for dir in ["v1", "v2", "v3", "v4", "other"] {
+            fs::create_dir_all(root.join(dir)).unwrap();
+            fs::write(root.join(dir).join("x.json"), b"{}").unwrap();
+        }
+        fs::write(root.join("v9"), b"a file, not a folder").unwrap();
+
+        // Just written, so a week's grace keeps everything.
+        assert_eq!(sweep_stale_analyzer_caches(&root, 3), 0);
+        assert!(root.join("v1").is_dir());
+
+        let swept = sweep_stale_analyzer_caches_older_than(&root, 3, std::time::Duration::ZERO);
+        assert_eq!(swept, 2);
+        assert!(!root.join("v1").exists());
+        assert!(!root.join("v2").exists());
+        assert!(root.join("v3").join("x.json").is_file());
+        // A newer build's cache is never this build's to delete.
+        assert!(root.join("v4").is_dir());
+        assert!(root.join("other").is_dir());
+        assert!(root.join("v9").is_file());
     }
 }

@@ -3,6 +3,7 @@ mod clan_match;
 mod kill;
 mod localization;
 mod mortality;
+mod objective;
 mod player;
 mod round;
 mod scoreboard;
@@ -14,8 +15,11 @@ mod weapon_names;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
-    kill::{use_kill_streak_updates, use_weapon_breakdown_updates},
+    kill::{
+        use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
+    },
     mortality::with_mortality_detection,
+    objective::use_objective_updates,
     player::use_player_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
@@ -35,6 +39,7 @@ pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
     localization::{get_active_language, set_active_language, translate_key},
     mortality::{Mortality, MortalityChange, MortalityState},
+    objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
     round::Round,
 };
@@ -114,6 +119,9 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Flag layout, ownership, captures and capture attempts (#192).
+    #[serde(default)]
+    pub objectives: Objectives,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -365,6 +373,7 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"InitObj"
             | b"SetObj"
             | b"StartProg"
+            | b"StartProgF"
             | b"CancelProg"
     )
 }
@@ -490,6 +499,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         state.players.clear();
         state.rounds.clear();
         state.team_scores.reset();
+        state.objectives = Objectives::default();
         state.clan_match_detected = false;
         state.clan_match_detection = ClanMatchDetection::WaitingForReset;
     }
@@ -705,6 +715,7 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                 }
             }
             state.team_scores.convert_allies_to_british();
+            state.objectives.convert_allies_to_british();
             for round in &mut state.rounds {
                 if let Round::Completed {
                     winner_stats: Some((winner_team, _)),
@@ -913,8 +924,10 @@ impl SegmentAnalyzer {
         use_scoreboard_updates(state, event);
         use_kill_streak_updates(state, event);
         use_weapon_breakdown_updates(state, event);
+        use_teamkill_and_suicide_updates(state, event);
         use_team_score_updates(state, event);
         use_rounds_updates(state, event);
+        use_objective_updates(state, event);
         use_chat_updates(state, event);
         use_clan_match_detection_updates(Duration::from_secs(30), state, event);
         use_pov_stats_updates(state, event);
@@ -1221,6 +1234,7 @@ mod tests {
             b"InitObj",
             b"SetObj",
             b"StartProg",
+            b"StartProgF",
             b"CancelProg",
         ] {
             assert!(is_relevant_message(name), "{:?} should be relevant", name);
@@ -1274,8 +1288,10 @@ mod tests {
                 use_scoreboard_updates(state, event);
                 use_kill_streak_updates(state, event);
                 use_weapon_breakdown_updates(state, event);
+                use_teamkill_and_suicide_updates(state, event);
                 use_team_score_updates(state, event);
                 use_rounds_updates(state, event);
+                use_objective_updates(state, event);
                 use_chat_updates(state, event);
                 use_clan_match_detection_updates(Duration::from_secs(30), state, event);
                 use_pov_stats_updates(state, event);
