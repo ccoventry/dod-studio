@@ -32,12 +32,22 @@ export async function openActivityLog() {
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
  */
-export async function scanDirectory(scanPaths, known = []) {
-  return invoke("scan_directory", { paths: scanPaths, known })
+export async function scanDirectory(scanPaths, known = [], workers = undefined) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
       throw err;
+    });
+}
+
+// Total RAM for the scan worker hint (#246). Quiet on failure: the hint just
+// leaves out the "this PC has" half.
+export async function systemMemoryBytes() {
+  return invoke("system_memory_bytes")
+    .catch((err) => {
+      console.error("IPC Execution Error (system_memory_bytes):", err);
+      return null;
     });
 }
 
