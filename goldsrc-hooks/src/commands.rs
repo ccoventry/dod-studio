@@ -1457,10 +1457,10 @@ mod tests {
     /// returning an empty reply that reads as a broken command.
     #[test]
     fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
-        // anim_fix::LEVEL is also mutated by anim_fix.rs's own tests, and
+        // anim_fix::LEVEL is also mutated by anim_fix's own tests, and
         // cargo runs a crate's tests in parallel by default -- without this,
         // one of those can flip LEVEL mid-assertion here (issue #321).
-        // anim_fix.rs's tests already take the same lock for the same
+        // anim_fix's tests already take the same lock for the same
         // reason; sound_fix::ENABLED has no other test touching it, so it
         // does not need one of its own.
         let _statics = anim_fix::tests::lock_statics();
