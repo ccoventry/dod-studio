@@ -104,6 +104,9 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+                  <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
+                </select>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -842,9 +845,12 @@
                   <option value="HLTV" data-str="ANALYZER.TYPE_HLTV">HLTV</option>
                 </select>
                 <input type="text" id="analyzer-filter-map" data-str-placeholder="ANALYZER.MAP_PLACEHOLDER" placeholder="Map" />
+                <input type="text" id="analyzer-filter-player" list="analyzer-player-options" data-str-placeholder="ANALYZER.PLAYER_PLACEHOLDER" data-str-title="ANALYZER.PLAYER_FILTER_TITLE" placeholder="Player" />
+                <datalist id="analyzer-player-options"></datalist>
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
+                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">
