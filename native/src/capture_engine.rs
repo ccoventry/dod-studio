@@ -101,15 +101,10 @@ fn marker_stall_deadline(longest_gap: std::time::Duration) -> std::time::Duratio
 /// `remove_file_retrying` is the second, independent line of defence for
 /// whatever this window doesn't cover.
 fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
-    use sysinfo::{ProcessExt, SystemExt};
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        sys.refresh_processes();
-        if !sys
-            .processes()
-            .values()
-            .any(|p| p.name().eq_ignore_ascii_case("hl.exe"))
-        {
+        crate::sys::process::refresh(sys);
+        if !crate::sys::process::any_named(sys, &["hl.exe"]) {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -697,10 +692,7 @@ pub fn spawn_capture_engine(
             let mut obs_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
-            let mut sys = {
-                use sysinfo::SystemExt;
-                sysinfo::System::new_all()
-            };
+            let mut sys = crate::sys::process::snapshot();
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -746,9 +738,8 @@ pub fn spawn_capture_engine(
                 }
 
                 let hl_alive = {
-                    use sysinfo::{SystemExt, ProcessExt};
-                    sys.refresh_processes();
-                    let alive = sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                    crate::sys::process::refresh(&mut sys);
+                    let alive = crate::sys::process::any_named(&sys, &["hl.exe"]);
                     if alive {
                         hl_seen_alive = true;
                         hl_first_seen.get_or_insert_with(std::time::Instant::now);
