@@ -115,7 +115,7 @@ fn build_file_info(demo_path: &PathBuf) -> Result<FileInfo, String> {
 // caches written by an older schema are treated as a miss instead of
 // silently deserializing with new fields missing/defaulted.
 #[cfg(not(target_arch = "wasm32"))]
-const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 2;
+const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 3;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]

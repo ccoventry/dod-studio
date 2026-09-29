@@ -26,6 +26,8 @@ const EMPTY = {
   custom: [],
   bannedInit: [],
   bannedScheduled: [],
+  tooLongInit: [],
+  tooLongScheduled: [],
   decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
@@ -36,15 +38,20 @@ const EMPTY = {
 let report = EMPTY;
 
 /**
- * How many banned commands (see `cfg_scan::BANNED_COMMANDS`) the most
- * recently fetched report found, across Initial and Scheduled Commands
- * combined. `refreshLaunchGuard` (capture_pane.js) reads this to block Start
+ * How many banned commands (see `cfg_scan::BANNED_COMMANDS`) and commands
+ * too long to fit a demo frame (#453) the most recently fetched report
+ * found, across Initial and Scheduled Commands combined. `refreshLaunchGuard` (capture_pane.js) reads this to block Start
  * Capture Batch — reflects whatever `refreshCfgWarnings` last resolved, so
  * it can go briefly stale between an edit and the next scan finishing, same
  * as every other advisory here.
  */
 export function bannedCommandCount() {
-  return (report?.bannedInit?.length ?? 0) + (report?.bannedScheduled?.length ?? 0);
+  return (
+    (report?.bannedInit?.length ?? 0) +
+    (report?.bannedScheduled?.length ?? 0) +
+    (report?.tooLongInit?.length ?? 0) +
+    (report?.tooLongScheduled?.length ?? 0)
+  );
 }
 
 /**
@@ -79,6 +86,14 @@ function valueOf(command) {
  *  (arguments and all), but BANNED_REASONS is keyed by the bare cvar. */
 function cvarOf(command) {
   return String(command).trim().split(/\s+/)[0] ?? '';
+}
+
+/** Commands too long for one demo ConsoleCommand frame (#453) — blocking. */
+function tooLongSection(commands) {
+  const rows = commands
+    .map((c) => `<li><code>${STRINGS.CFG.tooLongRow(c, new TextEncoder().encode(c).length)}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.TOO_LONG_TITLE, STRINGS.CFG.TOO_LONG_ADVICE, rows, '#f44336');
 }
 
 function section(title, advice, rows, accent) {
@@ -140,6 +155,8 @@ function render() {
   const custom = report?.custom ?? [];
   const bannedInit = report?.bannedInit ?? [];
   const bannedScheduled = report?.bannedScheduled ?? [];
+  const tooLongInit = report?.tooLongInit ?? [];
+  const tooLongScheduled = report?.tooLongScheduled ?? [];
   const decalDefaultRing = report?.decalDefaultRing ?? null;
   const decalFlushIsNoop = report?.decalFlushIsNoop ?? false;
   const noopInit = report?.noopInit ?? [];
@@ -176,6 +193,9 @@ function render() {
       .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, STRINGS.CFG.BANNED_REASONS[cvarOf(b.command)])}</code></li>`)
       .join('');
     initParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
+  }
+  if (tooLongInit.length > 0) {
+    initParts.push(tooLongSection(tooLongInit));
   }
   // Next, because something the user typed is being thrown away rather than
   // winning.
@@ -246,6 +266,9 @@ function render() {
       .map((b) => `<li><code>${STRINGS.CFG.bannedRowDetailed(b.command, STRINGS.CFG.BANNED_REASONS[cvarOf(b.command)])}</code></li>`)
       .join('');
     schedParts.push(section(STRINGS.CFG.BANNED_TITLE, STRINGS.CFG.BANNED_ADVICE, rows, '#f44336'));
+  }
+  if (tooLongScheduled.length > 0) {
+    schedParts.push(tooLongSection(tooLongScheduled));
   }
   // Next, because this one does not merely surprise: it breaks the
   // flush and leaves a capture that completes and looks plausible.
