@@ -957,14 +957,57 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
 
     const stillMissing = missing.filter((m) => !relocated.has(m.path));
+    const leftFound = [];
     stillMissing.forEach((m) => {
       const demo = currentScannedDemos.find((d) => d.path === m.path);
-      // Runtime only: non-enumerable, so it never reaches the project file.
-      if (demo) Object.defineProperty(demo, 'missing', { value: true, writable: true, configurable: true, enumerable: false });
+      if (!demo) return;
+      // Runtime only: non-enumerable, so neither reaches the project file.
+      // `foundAt` keeps a declined match for the row's Use found copy button.
+      const runtime = { writable: true, configurable: true, enumerable: false };
+      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
+      Object.defineProperty(demo, 'foundAt', { ...runtime, value: m.candidate || null });
+      if (m.candidate) leftFound.push(demo);
     });
     refreshAfterRelocation(relocated.size > 0);
-    if (stillMissing.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(stillMissing.map((m) => nameOf(m.path))), 'warning', 10000);
+    const notFound = stillMissing.filter((m) => !m.candidate);
+    if (notFound.length > 0) {
+      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => nameOf(m.path))), 'warning', 10000);
+    }
+    if (leftFound.length > 0) {
+      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => nameOf(d.path))), 'warning', 15000, {
+        action: { label: STRINGS.MAIN.USE_ALL_FOUND_COPIES, onClick: () => useFoundCopies(leftFound) },
+      });
+    }
+  }
+
+  // Uses the matches the load-time search found for demos left as missing:
+  // one row's Use found copy button, or the toast's button for all of them.
+  // Each is checked again first, since the file may have moved since.
+  async function useFoundCopies(demos) {
+    const pending = demos.filter((d) => d.missing && d.foundAt);
+    if (pending.length === 0) return;
+    try {
+      const matches = await locateMissingDemos(
+        pending.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
+        [...new Set(pending.map((d) => folderOf(d.foundAt)))]
+      );
+      const gone = [];
+      let used = 0;
+      pending.forEach((demo) => {
+        const match = matches.find((m) => m.path === demo.path);
+        if (match && match.candidate) {
+          relocateDemo(demo, match.candidate);
+          used += 1;
+        } else {
+          gone.push(fileNameOf(demo.foundAt));
+          demo.foundAt = null;
+        }
+      });
+      refreshAfterRelocation(used > 0);
+      if (used > 0) showToast(STRINGS.MAIN.relocatedDemosToast(used), 'success');
+      if (gone.length > 0) showToast(STRINGS.MAIN.foundCopiesGoneToast(gone), 'warning', 8000);
+    } catch (err) {
+      console.error('Use found copy error:', err);
     }
   }
 
@@ -973,6 +1016,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const oldPath = demo.path;
     demo.path = newPath;
     if (demo.missing) demo.missing = false;
+    if (demo.foundAt) demo.foundAt = null;
     (demo.streaks || []).forEach((s) => {
       if (s.source_demo === oldPath) s.source_demo = newPath;
       // The cached uid still names the old path; streakUid rebuilds it.
@@ -1937,7 +1981,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand);
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');

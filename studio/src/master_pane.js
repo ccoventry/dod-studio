@@ -46,6 +46,8 @@ let wasEmptyQueue = false;
 let currentOnRequestTrackedDeleteConfirm = null;
 // main.js's handler for a missing demo's Locate button (#21).
 let currentOnLocateDemo = null;
+// main.js's handler for a missing demo's Use found copy button (#21).
+let currentOnUseFoundCopy = null;
 let currentSearchTerm = '';
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
@@ -72,12 +74,15 @@ export function getVisibleDemos() {
   return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm));
 }
 
-export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo) {
+export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy) {
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
   }
   if (onLocateDemo) {
     currentOnLocateDemo = onLocateDemo;
+  }
+  if (onUseFoundCopy) {
+    currentOnUseFoundCopy = onUseFoundCopy;
   }
   if (onRequestTrackedDeleteConfirm) {
     currentOnRequestTrackedDeleteConfirm = onRequestTrackedDeleteConfirm;
@@ -431,9 +436,25 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, demoIsTracked ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
       renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
     });
+    // A match the load-time search found but the user left as missing:
+    // one click to use it after all.
+    if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
+      const useBtn = document.createElement('button');
+      useBtn.type = 'button';
+      useBtn.className = 'use-found-copy-btn';
+      useBtn.textContent = STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON;
+      useBtn.title = STRINGS.WORKSPACE.useFoundCopyTitle(demo.foundAt);
+      useBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      useBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // do not select the row
+        currentOnUseFoundCopy(demo);
+      });
+      tdActions.appendChild(useBtn);
+    }
     if (demo.missing && currentOnLocateDemo) {
       const locateBtn = document.createElement('button');
       locateBtn.type = 'button';
+      locateBtn.className = 'locate-demo-btn';
       locateBtn.textContent = STRINGS.WORKSPACE.LOCATE_DEMO_BUTTON;
       locateBtn.title = STRINGS.WORKSPACE.LOCATE_DEMO_TITLE;
       locateBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';

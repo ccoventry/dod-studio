@@ -81,6 +81,8 @@ export const STRINGS = {
     missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
     LOCATE_DEMO_BUTTON: 'Locate…',
     LOCATE_DEMO_TITLE: 'Pick where this demo is now',
+    USE_FOUND_COPY_BUTTON: 'Use found copy',
+    useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
@@ -1053,6 +1055,14 @@ export const STRINGS = {
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
       return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
     },
+    leftMissingToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `Left ${names.length} moved demo(s) as missing: ${shown}${more}. Each row has a Use found copy button.`;
+    },
+    USE_ALL_FOUND_COPIES: 'Use all found copies',
+    foundCopiesGoneToast: (names) =>
+      `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
