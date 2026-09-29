@@ -905,11 +905,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   async function checkMissingDemos(projectPath, savedScanPaths) {
     const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
     const nameOf = (p) => p.split(/[\\/]/).pop();
+    // Nearest first: where each demo was, then the project's folder, then the
+    // scan folders. The search is breadth-first in this order, so a demo moved
+    // next door is found before a big scan folder uses up the search budget.
+    // Scan entries that name single demo files aren't folders to search.
+    const isDemoFile = (p) => /\.dem$/i.test(p);
     const dirs = [...new Set([
-      parentOf(projectPath),
-      ...savedScanPaths,
-      ...scanPaths,
       ...currentScannedDemos.map((d) => parentOf(d.path)),
+      parentOf(projectPath),
+      ...savedScanPaths.filter((p) => !isDemoFile(p)),
+      ...scanPaths.filter((p) => !isDemoFile(p)),
     ].filter(Boolean))];
     const missing = await locateMissingDemos(
       currentScannedDemos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),

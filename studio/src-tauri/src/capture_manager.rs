@@ -1384,10 +1384,24 @@ const LOCATE_MAX_ENTRIES: usize = 50_000;
 /// same size and the same first 64 KB. Only files whose size matches are
 /// read at all, so a folder of hundreds of demos costs one `stat` each.
 ///
+/// Breadth-first across all of `search_dirs` together, in the order given:
+/// every folder's own files, then every first-level subfolder, and so on. A
+/// demo moved one folder down is found before the entry budget can be spent
+/// deep inside some large folder listed earlier (a whole `dod/`, say), which
+/// is what a depth-first walk did.
+///
 /// Suggests, never applies: the frontend asks before it moves anything. A
 /// demo with no saved key (a project from before #456) can only be reported
 /// missing.
 pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+}
+
+fn locate_missing_demos_within(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    max_entries: usize,
+) -> Vec<MissingDemo> {
     let mut missing: Vec<MissingDemo> = demos
         .iter()
         .filter(|d| !Path::new(&d.path).is_file())
@@ -1411,8 +1425,9 @@ pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec
 
     let mut visited = std::collections::HashSet::new();
     let mut entries = 0usize;
-    let mut stack: Vec<(PathBuf, usize)> = search_dirs.iter().map(|d| (d.clone(), 0)).collect();
-    while let Some((dir, depth)) = stack.pop() {
+    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
+        search_dirs.iter().map(|d| (d.clone(), 0)).collect();
+    while let Some((dir, depth)) = queue.pop_front() {
         if !visited.insert(same_path_key(&dir.to_string_lossy())) {
             continue;
         }
@@ -1421,14 +1436,14 @@ pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec
         };
         for entry in read.flatten() {
             entries += 1;
-            if entries > LOCATE_MAX_ENTRIES {
+            if entries > max_entries {
                 return missing;
             }
             let path = entry.path();
             let Ok(meta) = entry.metadata() else { continue };
             if meta.is_dir() {
                 if depth < LOCATE_MAX_DEPTH {
-                    stack.push((path, depth + 1));
+                    queue.push_back((path, depth + 1));
                 }
                 continue;
             }
@@ -2529,6 +2544,47 @@ mod tests {
         assert_eq!(
             found[0].candidate.as_deref(),
             Some(new.join("renamed.dem").to_string_lossy().as_ref())
+        );
+    }
+
+    /// A big folder listed first (a whole `dod/`) must not use up the entry
+    /// budget before a demo one folder down from its old place is reached:
+    /// the live failure that broke #477's test.
+    #[test]
+    fn a_nearby_move_is_found_even_behind_a_big_folder() {
+        let scratch = Scratch::new("locate_budget");
+        let big = scratch.path().join("big");
+        let mut deep = big.clone();
+        for level in 0..4 {
+            deep = deep.join(format!("level{level}"));
+            std::fs::create_dir_all(&deep).unwrap();
+            for i in 0..20 {
+                std::fs::write(deep.join(format!("f{i}.txt")), b"x").unwrap();
+            }
+        }
+        let project = scratch.path().join("project");
+        std::fs::create_dir_all(project.join("subfolder")).unwrap();
+        let moved = project.join("match.dem");
+        std::fs::write(&moved, b"HLDEMO moved one level down").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, project.join("subfolder").join("match.dem")).unwrap();
+
+        let demos = vec![KnownDemo {
+            path: moved.to_string_lossy().into_owned(),
+            file_key: key,
+        }];
+        // 30 entries: the big tree has 84, the project folder 1, then its
+        // subfolder 1. Depth-first from `big` spent them all first.
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(
+                project
+                    .join("subfolder")
+                    .join("match.dem")
+                    .to_string_lossy()
+                    .as_ref()
+            )
         );
     }
 
