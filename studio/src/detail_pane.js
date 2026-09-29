@@ -5,6 +5,8 @@ import { showToast } from './toast.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
+import { automaticClipName } from './clip_name.js';
+import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -447,6 +449,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
+        <th>${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
@@ -549,6 +552,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+      </td>
+      <td style="padding: 8px;">
         <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
       </td>
       <td class="details-cell" title="${timelineText}">${timelineText}</td>
@@ -614,6 +620,23 @@ export function renderDetailView(demo, selectedDemoIdx) {
           },
         },
       });
+    });
+
+    // #441: the automatic name shows greyed until a typed one replaces it.
+    const clipNameInput = tr.querySelector('.streak-clip-name-input');
+    clipNameInput.value = streak.clipName || '';
+    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate()).name;
+    clipNameInput.addEventListener('input', (e) => {
+      streak.clipName = e.target.value;
+    });
+    clipNameInput.addEventListener('change', (e) => {
+      const typed = e.target.value.trim();
+      if (typed) streak.clipName = typed;
+      else delete streak.clipName;
+      e.target.value = typed;
+      refreshClipNamePreview();
+      if (currentOnSelectionChange) currentOnSelectionChange();
+      if (currentOnDirty) currentOnDirty();
     });
 
     const notesInput = tr.querySelector('.streak-notes-input');

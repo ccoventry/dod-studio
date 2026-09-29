@@ -18,6 +18,8 @@ import {
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
+import { clipNamesForTakes, maxNameLength } from './clip_name.js';
+import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
 import { STRINGS } from './strings.js';
 import { notify } from './os_notifications.js';
 
@@ -543,6 +545,19 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       const maxConcurrentVal = Math.min(8, Math.max(1, parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2));
       checkNvencConcurrencyWarning();
       const exportDirs = (getExportDirs ? getExportDirs() : []).filter(Boolean);
+      // #441: a bad template is caught here, before anything is queued, not
+      // halfway through a batch.
+      const templateErrors = clipNameTemplateErrors();
+      if (templateErrors.length) {
+        showToast(STRINGS.CLIP_NAME.renderTemplateInvalid(templateErrors[0]), 'error');
+        return;
+      }
+      const clipNames = clipNamesForTakes(
+        getTakeIndex ? getTakeIndex() : null,
+        getAllDemos ? getAllDemos() : [],
+        getClipNameTemplate(),
+        { maxLength: maxNameLength(exportDirs) },
+      );
       // FFmpeg override is shared with the capture config panel.
       const ffmpegPathVal = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
 
@@ -559,6 +574,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         ffmpeg_path: ffmpegPathVal || null,
         export_directories: exportDirs,
         max_concurrent_renders: maxConcurrentVal,
+        clip_names: clipNames,
       };
 
       // Populates the real job table (below) as Queued rows via the

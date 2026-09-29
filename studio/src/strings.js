@@ -83,12 +83,16 @@ export const STRINGS = {
     TRACKED_NOTE_SUFFIX: ' (had tracked work; user confirmed)',
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
+    REASON_CLIP_NAME: 'a typed clip name',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
 
   // ── Highlight Details (detail_pane.js) + Advanced Diagnostics ───────────
   HIGHLIGHTS: {
+    // #441: the name the finished file gets.
+    COL_CLIP_NAME: 'Clip Name',
+    CLIP_NAME_INPUT_TITLE: 'The finished file is named after this. The grey name is the automatic one, from the template in Configuration > Render Output. Type your own to use it instead; clear it to go back.',
     // Placeholder naming — "Capture"/"Render" is a stand-in until better
     // names are picked (per #81 discussion), not a final decision.
     SUBTAB_HIGHLIGHTS: 'Capture',
@@ -1271,5 +1275,51 @@ export const STRINGS = {
       const onThisDemo = `Fast-forwarding to clip ${clipIndex} of ${clipCountThisDemo}`;
       return totalBatchClips ? `${onThisDemo} · ${clipsSoFar} of ${totalBatchClips} clips total` : onThisDemo;
     },
+  },
+
+  // #441: clip names, their template and its checks.
+  CLIP_NAME: {
+    TEMPLATE_LABEL: 'Clip Name Template:',
+    TEMPLATE_TITLE: 'How each highlight\'s automatic clip name is built. The finished file is named after it. A name typed on a Highlight Details row wins over this.',
+    INSERT_LABEL: 'Insert:',
+    RESET_BUTTON: 'Default',
+    RESET_TITLE: 'Go back to the default template.',
+    MISSING_VALUE: 'unknown',
+    strayBrace: (pos) => `The "}" at character ${pos} has no "{" before it.`,
+    unclosedBrace: (pos) => `The "{" at character ${pos} is never closed.`,
+    EMPTY_PLACEHOLDER: '"{}" has no placeholder name in it.',
+    unknownPlaceholder: (raw) => `${raw} isn't a placeholder. Pick one from the list below.`,
+    unknownModifier: (raw) => `${raw}: only :lower and :upper can follow a placeholder name.`,
+    fallbackNotAllowed: (raw) => `${raw}: only {team_name} and {opponent} take a word after |.`,
+    invalidCharacters: (text) => `Windows doesn't allow \\ / : * ? " < > | in a file name: ${text}`,
+    EMPTY_TEMPLATE: 'This template gives an empty name.',
+    NO_DISTINGUISHING: 'No {row}, {time} or {demo}, so two highlights can get the same name. Their files still stay separate (a _2 is added), but the names won\'t say which is which.',
+    previewName: (name) => `Preview: ${name}`,
+    previewPath: (path, length) => `${path} (${length} characters)`,
+    longName: (length) => `This name is ${length} characters long. Some programs have trouble past 120.`,
+    TRIMMED: 'Shortened so the full path stays under the Windows limit (victims, demo and weapons are cut first).',
+    PREVIEW_TYPED: 'The selected highlight has a typed name, which wins over the template:',
+    PREVIEW_NONE: 'Select a demo with highlights to see a preview.',
+    DESCRIPTIONS: {
+      player: 'The player whose highlight it is',
+      faction: 'Their side: Allies, British, Axis',
+      enemy_faction: 'The side of the players they killed',
+      map: 'The map, without dod_',
+      kills: 'Kills in the chosen Kill Range',
+      weapons: 'Each weapon used, joined with -',
+      first_weapon: 'The weapon of the first kill',
+      victims: 'The players killed, joined with -',
+      first_victim: 'The first player killed',
+      row: 'The highlight\'s row number',
+      time: 'Time into the demo, like 12m34s',
+      demo: 'The demo file name, without .dem',
+      date: 'The demo file\'s date, YYYY-MM-DD',
+      team_name: 'Their team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
+      opponent: 'The other team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
+      lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
+      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
+    },
+    chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
+    renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
   },
 };
