@@ -129,6 +129,12 @@ export const STRINGS = {
     // this one later") rather than the implicit default every unset row
     // used to show — see isHighlightTracked's doc comment (take_index.js).
     STATUS_UNSET_DEFAULT: 'None',
+    // A status picked from the dropdown rather than set by a verified
+    // capture or render (#105).
+    STATUS_BY_HAND_MARK: '✎',
+    STATUS_BY_HAND_TITLE: 'Set by hand. The next capture or render that DoD Studio checks on disk replaces this mark.',
+    statusSetToast: (status) => `Status set to ${status}.`,
+    UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
     tickLabel: (tick) => `Tick ${tick}`,
@@ -139,6 +145,7 @@ export const STRINGS = {
       ? 'Every demo already had a preview — nothing new to generate.'
       : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
+    sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
     LAUNCHING_HLAE_TOAST: 'Launching HLAE...',
   },
@@ -360,6 +367,11 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
+    SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
+    scanWorkersHint: (totalGb) => totalGb
+      ? `≈1.2 GB per worker; this PC has ${totalGb} GB`
+      : '≈1.2 GB per worker',
     CLEAR_PREVIEWS_BUTTON: 'Clear Previews...',
     NOTIFY_PATCHING_LABEL: 'Patching Started/Complete',
     NOTIFY_PATCHING_TITLE: 'One notification when patching begins, one when your demos are ready and capture is about to start. Not per-demo — decal clearing makes patching take real time now, but a toast per demo patched would be noise.',

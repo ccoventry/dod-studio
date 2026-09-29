@@ -73,6 +73,18 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Commands from Studio** (on by default): the game serves a local named
+  pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
+  to it as a console command on the next frame. Launch Preview uses it when
+  the game is already open, sending `viewdemo <demo>_preview` instead of
+  asking to relaunch. Remote clients are refused and only the same Windows
+  user can write to it; `GOLDSRC_HOOKS_REMOTE=0` turns it off. See
+  `src/remote.rs` and `native/src/sys/game_remote.rs`.
+- **Reload the demo** (`dodstudio_reload_demo`): plays the last `playdemo` or
+  `viewdemo` again from the start, with the same name. The engine keeps no
+  copy of the name, so the DLL wraps both engine commands to note it; the
+  wrap goes through the SDK's command-list functions, with no per-build
+  address. See `src/demo_reload.rs`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   ten elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area

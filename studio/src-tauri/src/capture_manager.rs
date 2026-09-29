@@ -48,7 +48,14 @@ const PATCH_CONCURRENCY: usize = 4;
 /// memory pressure rather than CPU. This is a desktop app that may be running
 /// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
 /// stays at 4 because it streams frames rather than holding a full analysis.
-const SCAN_CONCURRENCY: usize = 2;
+///
+/// This is the default for the user's own setting (`AppSettings::scan_workers`,
+/// #246): the right number depends on the machine's RAM.
+pub const SCAN_CONCURRENCY: usize = 2;
+
+/// The range the scan worker box accepts (#246), the same as Max Concurrent
+/// Renders. Only the range: nothing clamps to the machine's RAM.
+pub const SCAN_WORKERS_MAX: usize = 8;
 
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
@@ -1319,8 +1326,14 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// Threads for a scan of `total` demos: the user's setting, kept to
+/// 1..=`SCAN_WORKERS_MAX`, and never more than there are demos.
+fn scan_worker_count(workers: usize, total: usize) -> usize {
+    workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
+}
+
 /// The scan status line: how many demos are done out of how many, and one demo
-/// still being parsed, when there is one. With `SCAN_CONCURRENCY` workers,
+/// still being parsed, when there is one. With several scan workers,
 /// "the current file" is one of the current files.
 fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
     match current {
@@ -1525,6 +1538,7 @@ pub async fn scan_directory_impl(
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
     known: Vec<KnownDemo>,
+    workers: usize,
 ) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1600,7 +1614,7 @@ pub async fn scan_directory_impl(
 
         let total_files = list.len() as u32;
 
-        // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
+        // ── Phase 2: parse each .dem file, up to `workers` at once ───
         // `list` is already sorted by filename (Phase 1's binary-search
         // insert), so each worker writes its result into a pre-sized slot at
         // its own original index -- the output comes out in sorted order for
@@ -1641,7 +1655,7 @@ pub async fn scan_directory_impl(
             );
         };
         std::thread::scope(|scope| {
-            let worker_count = SCAN_CONCURRENCY.min(total).max(1);
+            let worker_count = scan_worker_count(workers, total);
             for _ in 0..worker_count {
                 let cancel_token = &cancel_token;
                 let list = &list;
@@ -1939,6 +1953,70 @@ pub async fn launch_demo_preview(
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
 
         Ok(())
+    }))
+    .await
+}
+
+/// Process ids of every running `hl.exe` -- the games Studio could be talking
+/// to. `hlae.exe` is left out: it is the launcher, not the game.
+fn running_game_pids() -> Vec<u32> {
+    use sysinfo::{PidExt, ProcessExt, SystemExt};
+    let sys = sysinfo::System::new_all();
+    sys.processes()
+        .values()
+        .filter(|p| p.name().eq_ignore_ascii_case("hl.exe"))
+        .map(|p| p.pid().as_u32())
+        .collect()
+}
+
+/// Launch Preview for a game that is already running (#413): patches the
+/// same `<stem>_preview.dem` `launch_demo_preview` would (reusing one already
+/// on disk), then, instead of launching a second game, sends
+/// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
+///
+/// Resolves to the command sent, or `None` when no running game takes
+/// commands -- one Studio didn't start, or with its hooks off -- so the caller
+/// can fall back to the "already running" prompt.
+#[tauri::command]
+pub async fn send_preview_to_running_game(
+    hlae_path: String,
+    game_path: String,
+    streaks: Vec<SerializedStreak>,
+    goldsrc_hooks_dll_path: Option<String>,
+) -> Result<Option<String>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let pids = running_game_pids();
+        if pids.is_empty() {
+            return Ok(None);
+        }
+        let (patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let preview_stem = job
+            .output_demo
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
+
+        let command = format!("viewdemo {preview_stem}");
+        for pid in pids {
+            match native::sys::game_remote::send_console_commands(
+                pid,
+                std::slice::from_ref(&command),
+            )
+            .map_err(crate::messages::failed_to_send_to_running_game)?
+            {
+                native::sys::game_remote::Sent::Delivered => {
+                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
+                    return Ok(Some(command));
+                }
+                native::sys::game_remote::Sent::NotListening => continue,
+            }
+        }
+        Ok(None)
     }))
     .await
 }
@@ -2354,6 +2432,16 @@ mod tests {
         assert_eq!(rows[0]["name"], "a.dem");
         assert_eq!(rows[0]["reason"], "Failed to read file: denied");
         assert_eq!(rows[1]["name"], "b.dem");
+    }
+
+    #[test]
+    fn the_scan_uses_the_worker_setting_within_its_range() {
+        assert_eq!(scan_worker_count(5, 100), 5);
+        assert_eq!(scan_worker_count(0, 100), 1);
+        assert_eq!(scan_worker_count(20, 100), SCAN_WORKERS_MAX);
+        // Never more threads than demos.
+        assert_eq!(scan_worker_count(8, 3), 3);
+        assert_eq!(scan_worker_count(4, 0), 1);
     }
 
     #[test]
