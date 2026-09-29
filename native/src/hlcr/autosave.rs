@@ -33,6 +33,11 @@ pub struct RenderJob {
     pub custom_codec_args: Option<String>,
     #[serde(default)]
     pub fps: Option<u32>,
+    /// The scanned take, so a recovered job renders as it was queued instead
+    /// of as a stub that needs a re-scan (an OBS take's Skip needs its
+    /// `video_file`, which the stub lacks). `None` in an older autosave.
+    #[serde(default)]
+    pub clip: Option<crate::hlcr::scanner::ClipData>,
 }
 
 /// Persisted render-session snapshot written to `.render_autosave.json`.

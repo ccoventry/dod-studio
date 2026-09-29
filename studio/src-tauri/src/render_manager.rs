@@ -265,6 +265,7 @@ fn write_autosave(
                 codec: Some(j.codec.to_str_id().to_string()),
                 custom_codec_args: Some(j.custom_codec_args.clone()),
                 fps: Some(j.fps),
+                clip: Some(j.clip.clone()),
             })
             .collect(),
     };
@@ -1094,7 +1095,9 @@ pub fn recover_render_batch(
             .flatten();
             RenderJobRuntime {
                 id: i.to_string(),
-                clip: ClipData {
+                // The scanned clip when the autosave has it; otherwise a stub
+                // that a re-scan fills in.
+                clip: rj.clip.clone().unwrap_or_else(|| ClipData {
                     take_folder: rj.take_folder.clone(),
                     clip_type: "single".to_string(),
                     img_folder: String::new(),
@@ -1116,7 +1119,7 @@ pub fn recover_render_batch(
                     date: String::new(),
                     video_file: None,
                     alpha_folder: None,
-                },
+                }),
                 status,
                 speed: String::new(),
                 progress,
