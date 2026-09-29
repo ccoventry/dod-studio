@@ -272,6 +272,12 @@ function createJobRow(j) {
  * since it never had a click in flight to lose.
  */
 function updateJobRow(row, j) {
+  // Snapshots arrive every scheduler tick while anything renders, and most
+  // rows (queued, finished) haven't changed; skip those outright.
+  const signature = JSON.stringify(j);
+  if (row.dataset.signature === signature) return;
+  row.dataset.signature = signature;
+
   row.querySelector('.rj-name').textContent = j.name;
   row.querySelector('.rj-stream').textContent = j.stream;
   row.querySelector('.rj-frames').textContent = j.frames;
