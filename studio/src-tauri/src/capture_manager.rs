@@ -1381,8 +1381,7 @@ fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> boo
 /// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
 /// whole demo, so checking a folder of 50 costs milliseconds.
 fn demo_file_key(path: &Path) -> Option<String> {
-    native::utils::demo_hasher::calculate_demo_key(path)
-        .map(|(size, hash)| format!("{size}-{hash:016x}"))
+    native::utils::demo_hasher::demo_key_text(path)
 }
 
 /// Paths compare the way Windows does: case-insensitive, either slash.
