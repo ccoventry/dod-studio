@@ -14,6 +14,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { computeRequiredCaptureBytes } from './capture_estimate.js';
 
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
@@ -168,76 +169,6 @@ function generateSessionId() {
 }
 
 // ── Pre-Flight Disk Space Estimator ───────────────────────────────────────────
-
-/**
- * Sums required capture bytes across every selected streak, merging
- * overlapping (or touching) pre/post-roll windows *within each source demo*
- * before billing them for disk space — two highlights that share footage
- * must not be double-counted, since the engine records that overlap once.
- * Base cost is `w * h * 3` bytes/frame at the configured capture FPS.
- *
- * Does not account for `mirv_movie_separate_hud 1` typed into Initial
- * Commands — that triples the real cost (HUD pass recorded as its own
- * stream), but there is no longer a dedicated setting to read it from, and
- * this does not parse Initial Commands text to find it.
- */
-function computeRequiredCaptureBytes(currentScannedDemos, opts) {
-  const {
-    preRollSeconds, postRollSeconds,
-    recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight,
-  } = opts;
-  let totalSeconds = 0;
-
-  (currentScannedDemos || []).forEach(demo => {
-    const intervals = (demo.streaks || [])
-      // Opt-in model (detail_pane.js): a streak counts as selected only once
-      // explicitly checked. `undefined` covers both demos never opened in the
-      // Highlight Details view and every non-recording-player streak (which
-      // never renders as a checkable row at all) — neither should ever be
-      // billed for capture space.
-      .filter(streak => streak.selected === true)
-      .map(streak => {
-        const fps = streak.demo_fps || 100;
-        const startSec = streak.start_tick / fps;
-        const endSec = streak.end_tick / fps;
-        return [startSec, endSec];
-      })
-      .sort((a, b) => a[0] - b[0]);
-
-    // Two different windows are at play, and mixing them up is what this used
-    // to get wrong:
-    //  - whether two highlights collapse into ONE take is decided by
-    //    pre/post-roll (native/src/patch/builder.rs's blocks_merge), and
-    //  - how many frames actually get written is start-lead -> stop-trail
-    //    (PatcherConfig::calculate_total_capture_duration).
-    // So merge on the roll window, then bill the lead/trail window.
-    let mergedStart = null;
-    let mergedEnd = null;
-    const bill = () => {
-      totalSeconds += recordStartLead + (mergedEnd - mergedStart) + recordStopTrail;
-    };
-    intervals.forEach(([start, end]) => {
-      if (mergedStart === null) {
-        mergedStart = start;
-        mergedEnd = end;
-      } else if (start - preRollSeconds <= mergedEnd + postRollSeconds) {
-        mergedEnd = Math.max(mergedEnd, end);
-      } else {
-        bill();
-        mergedStart = start;
-        mergedEnd = end;
-      }
-    });
-    if (mergedStart !== null) {
-      bill();
-    }
-  });
-
-  const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
-  const bytesPerFrame = resWidth * resHeight * 3;
-  return frames * bytesPerFrame;
-}
 
 const PATH_PROBLEM_REASONS = {
   not_absolute: STRINGS.CAPTURE.pathProblem.notAbsolute,
