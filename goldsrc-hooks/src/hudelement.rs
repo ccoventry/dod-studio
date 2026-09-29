@@ -393,8 +393,8 @@ pub fn hidden_count() -> usize {
 /// Writes the vftable slots to match what was asked for, returning how many
 /// changed.
 ///
-/// Called every frame. After the first resolve this is twelve dword
-/// comparisons -- cheap insurance against a `client.dll` reload (see the
+/// Called every frame. After the first resolve this is one dword comparison
+/// per element -- cheap insurance against a `client.dll` reload (see the
 /// module doc's "Re-applied every frame" section), not a cost a plain demo
 /// change is known to trigger.
 pub fn apply() -> Result<usize, String> {

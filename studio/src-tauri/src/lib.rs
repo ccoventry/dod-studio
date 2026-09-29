@@ -2,6 +2,7 @@ mod audit_manager;
 mod capture_manager;
 mod dir_browser;
 mod hd_manager;
+mod manifest_file;
 mod map_manager;
 mod messages;
 mod render_manager;
@@ -181,13 +182,29 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-) -> Result<Vec<capture_manager::SerializedDemo>, String> {
+    known: Option<Vec<capture_manager::KnownDemo>>,
+    workers: Option<usize>,
+) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
+        known.unwrap_or_default(),
+        workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
     )
+    .await
+}
+
+/// Total physical RAM in bytes, for the scan worker box's hint line (#246).
+#[tauri::command]
+async fn system_memory_bytes() -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        use sysinfo::SystemExt;
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        Ok(sys.total_memory())
+    }))
     .await
 }
 
@@ -598,6 +615,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            system_memory_bytes,
             run_demo_audit,
             delete_audit_files,
             cancel_audit,

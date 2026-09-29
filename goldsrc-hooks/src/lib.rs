@@ -58,6 +58,9 @@
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
 //!   off.
+//! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
+//!   Anniversary engine draw the world through `platform/gl_shaders` during
+//!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -89,6 +92,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_reload;
 mod detour;
 mod engine;
 mod ex_interp;
@@ -111,6 +115,7 @@ mod spectator_target;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod world_shaders;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};

@@ -3,7 +3,7 @@
 Tooling for **Day of Defeat 1.3** (GoldSrc) demo files: parsing them for match
 analytics, and driving the engine plus HLAE to batch-record highlight clips.
 
-A creative fork of [cgdangelo/dod-studio](https://github.com/cgdangelo/dod-studio).
+A creative fork of [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools).
 
 ---
 
@@ -29,7 +29,7 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
 > [!NOTE]
 > **The GUI was rewritten.** Earlier revisions shipped an `egui` desktop app
 > with a WebAssembly target. That has been removed. The current frontend is
-> Tauri v2 + Vite under `studio/`, and the old `dod-studio-gui` binary
+> Tauri v2 + Vite under `studio/`, and the old `dod-tools-gui` binary
 > and `trunk serve` workflow no longer exist.
 
 ---
@@ -42,7 +42,8 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
     native/           capture engine, demo patcher, take management, FFmpeg
     hl-demo-auditor/  duplicate-demo detector
     benchmark/        parsing/patching performance harness
-    studio/   Tauri v2 + Vite frontend
+    goldsrc-hooks/    32-bit DLL injected into hl.exe: HLTV fixes, HUD control, HD textures
+    studio/           Tauri v2 + Vite frontend
     web-analyzer/     analysis/ compiled to wasm, browser-based demo viewer
 
 ## Quick start
@@ -99,7 +100,7 @@ still present, so the patch is still required.
 ## Licensing
 
 This project is MIT (see `LICENSE`), which carries two copyright lines.
-Charles D'Angelo's is from [cgdangelo/dod-studio](https://github.com/cgdangelo/dod-studio),
+Charles D'Angelo's is from [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools),
 which this is a fork of — MIT requires that notice be retained, so it stays.
 The second covers the work done here since the fork.
 
@@ -120,4 +121,6 @@ above and are themselves LGPL-3.0, being changes to an LGPL work.
 ## Documentation
 
 Engineering notes live in `docs/` — architecture decisions, GoldSrc and DoD
-engine quirks, HLAE protocol constraints, and a running bug log.
+engine quirks, and HLAE protocol constraints. `docs/dodstudio_commands.md`
+lists the in-game `dodstudio_*` console commands. Bugs and planned work are
+tracked in GitHub Issues; retired planning docs are in `docs/archive/`.
