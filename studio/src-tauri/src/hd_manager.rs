@@ -44,8 +44,8 @@ fn scripts_dir(app: &AppHandle) -> Option<PathBuf> {
 /// `hl.exe` the Configuration page holds.
 #[tauri::command]
 pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, String> {
-    let root = hd::hd_root(&game_exe(&game_path)?)
-        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let exe = game_exe(&game_path)?;
+    let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
     // A big HD folder is tens of thousands of files, and finding Python runs
     // a few processes: neither belongs on the async runtime's own threads.
@@ -58,6 +58,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
             upscaler::chosen(&hd_tools).map(|dir| dir.to_string_lossy().to_string());
         status.python = Some(python::resolve(&hd_tools));
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
+        status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         status
     }))
     .await
