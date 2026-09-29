@@ -74,7 +74,7 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
-  twelve elements DoD draws that the stock `cl_hud_*` cvars don't already
+  ten elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
   icons, the objective icons and the rest. (The ammo counter/weapon-select
   menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,

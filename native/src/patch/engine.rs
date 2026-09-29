@@ -12,6 +12,23 @@ use std::sync::{
 
 // ── Internal helper ───────────────────────────────────────────────────────────
 
+/// An error, not a panic, for a command too long for one ConsoleCommand frame.
+/// Release builds abort on panic (#225), so this used to take the whole app
+/// down mid-batch (#453). User commands are refused before a batch starts
+/// (`patch::too_long_commands`); this is the backstop for any other path.
+fn check_console_cmd_len(cmd: &str) -> std::io::Result<()> {
+    if cmd.len() <= crate::patch::MAX_CONSOLE_CMD_SAFE_LEN {
+        return Ok(());
+    }
+    let msg = format!(
+        "Command too long for a ConsoleCommand frame (the demo format's 64-byte command field): '{}', {} bytes",
+        cmd,
+        cmd.len()
+    );
+    log::error!("{}", msg);
+    Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, msg))
+}
+
 fn write_console_cmd(
     writer: &mut std::io::BufWriter<std::fs::File>,
     time: f32,
@@ -20,30 +37,7 @@ fn write_console_cmd(
 ) -> std::io::Result<i32> {
     use std::io::Write;
     log::debug!("Injecting Command: {} at tick: {}", cmd, tick);
-    let command_string = cmd;
-    if command_string.len() >= crate::patch::MAX_CONSOLE_CMD_LEN {
-        let msg = format!(
-            "FATAL: Command too long for a ConsoleCommand frame (the demo format's 64-byte command field). Command: '{}', Length: {}",
-            command_string,
-            command_string.len()
-        );
-        log::error!("{}", msg);
-        use std::io::Write as _;
-        let _ = (|| -> Result<(), Box<dyn std::error::Error>> {
-            let exe_path = std::env::current_exe()?;
-            let exe_dir = exe_path.parent().ok_or("Failed to get exe parent")?;
-            let local_dir = exe_dir.join("local");
-            std::fs::create_dir_all(&local_dir)?;
-            let log_path = local_dir.join("crash_log.md");
-            let mut file = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log_path)?;
-            writeln!(file, "{}", msg)?;
-            Ok(())
-        })();
-        panic!("{}", msg);
-    }
+    check_console_cmd_len(cmd)?;
     writer.write_all(&[3_u8])?;
     writer.write_all(&time.to_le_bytes())?;
     writer.write_all(&tick.to_le_bytes())?;
@@ -825,6 +819,23 @@ mod director_event_tests {
         expected.push(0x01); // svc_nop
 
         assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn a_console_command_too_long_for_its_frame_is_an_error_not_a_panic() {
+        assert!(check_console_cmd_len(&"a".repeat(63)).is_ok());
+        let err = check_console_cmd_len(&"a".repeat(64)).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+    }
+
+    #[test]
+    fn too_long_commands_names_only_the_ones_that_do_not_fit() {
+        let fits = "a".repeat(63);
+        let too_long = "b".repeat(64);
+        assert_eq!(
+            crate::patch::too_long_commands(&[fits, too_long.clone()]),
+            vec![too_long]
+        );
     }
 }
 

@@ -87,6 +87,22 @@ pub struct EventApiPartial {
     ),
 }
 
+/// Partial mirror of `demo_api_s` (`common/demo_api.h`): `IsRecording`, then
+/// `IsPlayingback`. Only those two are declared. DoD's own `client.dll` calls
+/// `[pDemoAPI+0]` and `[pDemoAPI+4]` and tests the `int` result (for example
+/// at `client.dll+0x22110` and `+0x22139`), which pins both offsets.
+#[repr(C)]
+pub struct DemoApiPartial {
+    pub is_recording: unsafe extern "C" fn() -> i32,
+    pub is_playingback: unsafe extern "C" fn() -> i32,
+}
+
+/// `gEngfuncs.pfnGetCvarPointer` (slot 72). Looks up any registered cvar by
+/// name -- the engine's own included -- and returns its `cvar_s`, or null.
+/// DoD's `client.dll` calls this slot 11 times with a cvar name
+/// (`"r_decals"`, `"crosshair"`, `"developer"`, ...) and stores the result.
+pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
+
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
 pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char);
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
@@ -443,14 +459,18 @@ pub struct ClEngineFuncsPartial {
     pub pfn_weapon_anim: WeaponAnimFn,
     _slots_between: [*mut c_void; 4], // pfnRandomFloat, pfnRandomLong, pfnHookEvent, Con_IsVisible
     pub pfn_get_game_directory: GetGameDirectoryFn,
-    _slots_after_gamedir: [*mut c_void; 2], // pfnGetCvarPointer, Key_LookupBinding
+    /// Slot 72. See [`GetCvarPointerFn`].
+    pub pfn_get_cvar_pointer: GetCvarPointerFn,
+    _slot_key_lookup_binding: *mut c_void,
     /// Slot 74: `"maps/<name>.bsp"`. Confirmed in DoD's `client.dll` (7 calls
     /// through `gEngfuncs+0x128`): the one at RVA 0x26c00 prefixes the result
     /// with `"dod/"` and cuts it at the last `'.'` -- a map path.
     pub pfn_get_level_name: GetLevelNameFn,
     _slots_after_level_name: [*mut c_void; 9], // pfnGetScreenFade .. pEfxAPI
     pub p_event_api: *mut EventApiPartial,
-    _slots_after_event_api: [*mut c_void; 3], // pDemoAPI, pNetAPI, pVoiceTweak
+    /// Slot 85. See [`DemoApiPartial`].
+    pub p_demo_api: *mut DemoApiPartial,
+    _slots_after_demo_api: [*mut c_void; 2], // pNetAPI, pVoiceTweak
     pub is_spectate_only: IsSpectateOnlyFn,
 }
 
