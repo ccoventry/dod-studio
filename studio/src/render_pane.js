@@ -17,9 +17,10 @@ import {
   revealInExplorer,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
-import { streakUid, resolveTake } from './take_index.js';
+import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify } from './os_notifications.js';
+import { escapeHtml as esc } from './html.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // id:status pairs from the last snapshot Export Pool Free/Required
@@ -27,14 +28,6 @@ let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot
 // job was added/removed/changed status" (worth a refresh) apart from "only
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
-
-function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
@@ -420,22 +413,24 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (uids.size === 0) return;
 
     let advanced = 0;
+    // A hand-set Rendered confirmed by this render: no status change, but
+    // the set-by-hand mark goes (#105).
+    let markCleared = false;
     demos.forEach(demo => {
       (demo.streaks || []).forEach(streak => {
         if (!uids.has(streakUid(demo.path, streak))) return;
         // Idempotent: separate_hud produces two render jobs (all + hudcolor)
         // sharing one take_key, so this fires twice per take — the second
         // pass is just a no-op instead of a double-toast.
-        if (streak.status === 'Rendered') return;
-        streak.status = 'Rendered';
-        advanced += 1;
+        if (streak.statusByHand) markCleared = true;
+        if (setVerifiedStatus(streak, 'Rendered')) advanced += 1;
       });
     });
 
     if (advanced > 0) {
       showToast(STRINGS.RENDER.highlightsMarkedRendered(advanced), 'success');
-      if (onTakeStatusChange) onTakeStatusChange();
     }
+    if ((advanced > 0 || markCleared) && onTakeStatusChange) onTakeStatusChange();
   });
 
   // Real-time per-job state, pushed by the backend scheduler. This is the
