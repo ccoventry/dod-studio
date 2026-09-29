@@ -1,4 +1,5 @@
-//! The `dodstudio_*` console surface: eleven cvars and eight commands.
+//! The `dodstudio_*` console surface: its cvars and commands (`install`
+//! registers them all).
 //!
 //! ## Why cvars rather than commands
 //!
@@ -919,7 +920,7 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
 /// `dodstudio_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
-/// value cannot carry, and there are thirteen of them -- thirteen cvars would
+/// value cannot carry, and there is one per element -- a cvar for each would
 /// bury everything else in the console's type-ahead.
 unsafe extern "C" fn cmd_hudelement() {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -1217,7 +1218,7 @@ unsafe extern "C" fn cmd_gunshot_attenuation() {
     }
 
     console_print(&format!(
-        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <0.05..0.79>  (lower carries further; the game's own default is 0.8)\n",
+        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <value above 0 and below 0.8>  (lower carries further; the game's own default is 0.8)\n",
         sound_fix::carry_attenuation()
     ));
 }
