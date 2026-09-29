@@ -64,6 +64,19 @@ impl std::fmt::Display for Cancelled {
 pub const MAX_CONSOLE_CMD_LEN: usize = 64;
 /// The longest command that still leaves room for the field's NUL terminator.
 pub const MAX_CONSOLE_CMD_SAFE_LEN: usize = 63;
+
+/// The commands in `commands` that cannot fit one ConsoleCommand frame (64
+/// bytes or more, so no room for the NUL), in the order given. Initial and
+/// Scheduled Commands are each written into exactly one frame, as typed, so
+/// these have to be refused before a batch starts (#453) rather than reach
+/// `engine::write_console_cmd`.
+pub fn too_long_commands(commands: &[String]) -> Vec<String> {
+    commands
+        .iter()
+        .filter(|c| c.len() > MAX_CONSOLE_CMD_SAFE_LEN)
+        .cloned()
+        .collect()
+}
 pub const MAX_DIRECTOR_STUFFTEXT_LEN: usize = 253;
 pub const IO_BUFFER_CAPACITY: usize = 262_144;
 pub const MAX_PAYLOAD_LIMIT_BYTES: usize = 2_097_152;
@@ -85,7 +98,6 @@ pub const EVENT_FRAME_SIZE: usize = 84;
 
 // Command Injection Logic
 pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
-pub const CUSTOM_CMD_WARN_LIMIT: usize = 60;
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
 /// Upper bound on the size of a `NetworkMessage` frame the decal passes will

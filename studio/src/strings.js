@@ -129,6 +129,12 @@ export const STRINGS = {
     // this one later") rather than the implicit default every unset row
     // used to show — see isHighlightTracked's doc comment (take_index.js).
     STATUS_UNSET_DEFAULT: 'None',
+    // A status picked from the dropdown rather than set by a verified
+    // capture or render (#105).
+    STATUS_BY_HAND_MARK: '✎',
+    STATUS_BY_HAND_TITLE: 'Set by hand. The next capture or render that DoD Studio checks on disk replaces this mark.',
+    statusSetToast: (status) => `Status set to ${status}.`,
+    UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
     tickLabel: (tick) => `Tick ${tick}`,
@@ -139,6 +145,7 @@ export const STRINGS = {
       ? 'Every demo already had a preview — nothing new to generate.'
       : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
+    sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
     LAUNCHING_HLAE_TOAST: 'Launching HLAE...',
   },
@@ -360,6 +367,11 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
+    SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
+    scanWorkersHint: (totalGb) => totalGb
+      ? `≈1.2 GB per worker; this PC has ${totalGb} GB`
+      : '≈1.2 GB per worker',
     CLEAR_PREVIEWS_BUTTON: 'Clear Previews...',
     NOTIFY_PATCHING_LABEL: 'Patching Started/Complete',
     NOTIFY_PATCHING_TITLE: 'One notification when patching begins, one when your demos are ready and capture is about to start. Not per-demo — decal clearing makes patching take real time now, but a toast per demo patched would be noise.',
@@ -409,7 +421,7 @@ export const STRINGS = {
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     OBS_CHECKING_WARNING: 'Checking the OBS connection…',
-    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands ${n === 1 ? 'is' : 'are'} not allowed — remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
+    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
@@ -936,6 +948,10 @@ export const STRINGS = {
       mirv_fov: "can't change mid-demo — set it in Initial Commands instead",
       gl_widescreenfov: "can't change mid-demo — set it in Initial Commands instead",
     },
+    TOO_LONG_TITLE: 'These commands are too long to fit in a demo:',
+    TOO_LONG_ADVICE:
+      'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
+    tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
@@ -1017,12 +1033,23 @@ export const STRINGS = {
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
     readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
+    // Appended to the two statuses above when the scan skipped demos (#23).
+    skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
+    // `skipped` is [{name, reason}]; names the first three, counts the rest.
+    skippedDemosToast: (skipped) => {
+      const shown = skipped.slice(0, 3).map((s) => `${s.name} (${s.reason})`).join('; ');
+      const more = skipped.length > 3 ? `; and ${skipped.length - 3} more` : '';
+      return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
+    },
     statusGeneric: (status) => `Status: ${status}`,
     SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
-    scanCompleteToast: (count) => `Scan complete (${count} demo(s) found)`,
+    scanCompleteToast: (count, unchanged = 0) =>
+      unchanged > 0
+        ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
+        : `Scan complete (${count} demo(s) found)`,
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 
