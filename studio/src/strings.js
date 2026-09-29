@@ -1036,9 +1036,10 @@ export const STRINGS = {
     loadedDemosToast: (count) => `Loaded ${count} demos from project file`,
     // #21: demos a loaded project names that are no longer where it says.
     RELOCATE_DEMOS_TITLE: 'Demos have moved',
-    relocateDemosMessage: (rows) =>
-      `These demos are no longer at their saved location, but a matching file (same size and same start) was found for each:\n\n${rows}\n\nUse the new locations?`,
-    relocateDemoRow: (name, newPath) => `${name} → ${newPath}`,
+    RELOCATE_DEMOS_MESSAGE: 'These demos aren\'t at their saved location any more, but a matching file (same size, same start) was found for each. Hover one for its full path.',
+    RELOCATE_DEMOS_QUESTION: 'Use the new locations?',
+    relocateRenamed: (oldName, newName) => `${oldName} → ${newName}`,
+    relocateFolder: (folder) => `now in ${folder}`,
     RELOCATE_CONFIRM: 'Use new locations',
     RELOCATE_CANCEL: 'Leave as missing',
     relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,

@@ -8,7 +8,7 @@
 import { STRINGS } from './strings.js';
 
 let pendingResolve = null;
-let modal, titleEl, messageEl, okBtn, cancelBtn;
+let modal, titleEl, messageEl, okBtn, cancelBtn, detailsEl, footerEl;
 
 export function initThemedConfirm() {
   modal = document.querySelector('#themed-confirm-modal');
@@ -17,6 +17,18 @@ export function initThemedConfirm() {
   messageEl = document.querySelector('#themed-confirm-message');
   okBtn = document.querySelector('#themed-confirm-ok-btn');
   cancelBtn = document.querySelector('#themed-confirm-cancel-btn');
+  // A list under the message, and a line after it, for dialogs that need
+  // more than a sentence (#477's moved demos). Made here so every page that
+  // hosts the modal gets them.
+  if (messageEl && !detailsEl) {
+    detailsEl = document.createElement('div');
+    detailsEl.id = 'themed-confirm-details';
+    detailsEl.style.cssText = 'display: none; flex-direction: column; gap: 10px; margin: 10px 0; max-height: 50vh; overflow-y: auto;';
+    footerEl = document.createElement('p');
+    footerEl.id = 'themed-confirm-footer';
+    footerEl.style.display = 'none';
+    messageEl.after(detailsEl, footerEl);
+  }
 
   okBtn?.addEventListener('click', () => resolveAndClose(true));
   cancelBtn?.addEventListener('click', () => resolveAndClose(false));
@@ -31,10 +43,37 @@ function resolveAndClose(result) {
 /**
  * Same Promise<boolean> shape as plugin-dialog's confirm(message, options),
  * so it drops into existing `await confirm(...)` call sites unchanged.
+ *
+ * `details`: an optional list shown under the message, one entry per item,
+ * each `{ primary, secondary, title }` (a main line, a smaller second line,
+ * and a hover text). `footer`: an optional line after the list.
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
+  if (detailsEl) {
+    detailsEl.replaceChildren(...(details || []).map((item) => {
+      const entry = document.createElement('div');
+      entry.className = 'themed-confirm-detail';
+      if (item.title) entry.title = item.title;
+      const primary = document.createElement('div');
+      primary.textContent = item.primary;
+      primary.style.cssText = 'font-weight: 600; word-break: break-word;';
+      entry.append(primary);
+      if (item.secondary) {
+        const secondary = document.createElement('div');
+        secondary.textContent = item.secondary;
+        secondary.style.cssText = 'font-size: 0.85em; color: var(--text-muted, #999); word-break: break-word;';
+        entry.append(secondary);
+      }
+      return entry;
+    }));
+    detailsEl.style.display = details && details.length ? 'flex' : 'none';
+  }
+  if (footerEl) {
+    footerEl.textContent = footer || '';
+    footerEl.style.display = footer ? '' : 'none';
+  }
   if (okBtn) okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
   if (cancelBtn) cancelBtn.textContent = cancelLabel || STRINGS.THEMED_CONFIRM_MODAL.CANCEL_BUTTON;
   if (modal) modal.style.display = 'flex';

@@ -26,6 +26,7 @@
 
   <button id="trigger-default-btn">Trigger (defaults)</button>
   <button id="trigger-custom-btn">Trigger (custom labels)</button>
+  <button id="trigger-details-btn">Trigger (details)</button>
   <div id="result"></div>
 
   <script type="module">
@@ -44,6 +45,16 @@
         confirmLabel: 'Remove',
         cancelLabel: 'Keep It',
       });
+      document.querySelector('#result').textContent = String(result);
+    });
+
+    document.querySelector('#trigger-details-btn').addEventListener('click', async () => {
+      const details = Array.from({ length: 30 }, (_, i) => ({
+        primary: `demo${i}.dem`,
+        secondary: `now in C:\…\dod\folder${i}`,
+        title: `C:\games\dod\folder${i}\demo${i}.dem`,
+      }));
+      const result = await themedConfirm('These demos moved.', { details, footer: 'Use the new locations?' });
       document.querySelector('#result').textContent = String(result);
     });
 

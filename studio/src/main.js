@@ -41,6 +41,7 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { fileNameOf, folderOf, shortFolder } from './path_display.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -925,11 +926,24 @@ window.addEventListener("DOMContentLoaded", async () => {
     const found = missing.filter((m) => m.candidate);
     const relocated = new Set();
     if (found.length > 0) {
-      const rows = found.map((m) => STRINGS.MAIN.relocateDemoRow(nameOf(m.path), m.candidate)).join('\n');
-      const ok = await themedConfirm(STRINGS.MAIN.relocateDemosMessage(rows), {
+      // One entry per demo: its name (or old -> new when it was renamed),
+      // then the folder it's in now, shortened to the drive and the last
+      // folders; the full path is the entry's hover text.
+      const details = found.map((m) => {
+        const oldName = nameOf(m.path);
+        const newName = fileNameOf(m.candidate);
+        return {
+          primary: oldName === newName ? oldName : STRINGS.MAIN.relocateRenamed(oldName, newName),
+          secondary: STRINGS.MAIN.relocateFolder(shortFolder(folderOf(m.candidate))),
+          title: m.candidate,
+        };
+      });
+      const ok = await themedConfirm(STRINGS.MAIN.RELOCATE_DEMOS_MESSAGE, {
         title: STRINGS.MAIN.RELOCATE_DEMOS_TITLE,
         confirmLabel: STRINGS.MAIN.RELOCATE_CONFIRM,
         cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL,
+        details,
+        footer: STRINGS.MAIN.RELOCATE_DEMOS_QUESTION,
       });
       if (ok) {
         found.forEach((m) => {
