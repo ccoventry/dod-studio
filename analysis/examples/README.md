@@ -18,6 +18,7 @@ ignores them; `cargo build --examples` and `cargo test` compile them.
 | `reconcile_probe` | Do derived kill counts agree with the server's own frag counter? |
 | `reconnect_probe` | What does a reconnect do to the server's score counters? |
 | `capwindow_probe` | How far is a flag capture from the objective-score credits it earned? |
+| `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
@@ -58,6 +59,12 @@ Measured across 624 demos — a mixed POV library plus 126 LAN HLTV recordings.
   in all 26,476 captures, never two. Co-cappers appear as `ObjScore` increments
   in the *same frame*, 99.5% of the time, so no tolerance window is needed.
   About 20% of captures had at least one co-capper.
+- **The analyzer's cap credits match the raw measurement.** `objective_probe`
+  runs the real `Analysis` (#192), so its figures start at the match going
+  live. Over the 52 HLTV demos in the local library: 2,103 captures, 22.3%
+  multi-capper, 1.255 credits per capture, against `capwindow_probe`'s
+  whole-file 2,140 captures, 22.1% and 1.252 on the same files. About 30% of
+  timed capture attempts are cancelled (cap blocks).
 - **Kill counts reconcile, once resets are handled.** Comparing a reset-aware
   derived count against the server's own frag counter over 6,567 player rows:
   75.3% agree exactly, 89.8% within one kill. Counting naively, without

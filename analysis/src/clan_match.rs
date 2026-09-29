@@ -72,6 +72,7 @@ pub fn use_clan_match_detection_updates(
             state.team_scores.reset();
             // Warm-up kills go with the warm-up, like the weapon breakdown.
             state.kill_positions.clear();
+            state.objectives.clear_match_totals();
 
             for player in state.players.iter_mut() {
                 player.kill_streaks.clear();
@@ -83,6 +84,10 @@ pub fn use_clan_match_detection_updates(
                 player.stats_seeded = true;
                 player.has_pre_demo_activity = false;
                 player.has_reconnected = false;
+                player.obj_points = 0;
+                player.cap_credits = 0;
+                player.teamkills = 0;
+                player.suicides = 0;
 
                 player.mortality.clear();
                 player.mortality.push(MortalityChange::new(

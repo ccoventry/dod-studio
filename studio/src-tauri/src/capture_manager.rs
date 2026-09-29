@@ -1362,8 +1362,7 @@ fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> boo
 /// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
 /// whole demo, so checking a folder of 50 costs milliseconds.
 fn demo_file_key(path: &Path) -> Option<String> {
-    native::utils::demo_hasher::calculate_demo_key(path)
-        .map(|(size, hash)| format!("{size}-{hash:016x}"))
+    native::utils::demo_hasher::demo_key_text(path)
 }
 
 /// Paths compare the way Windows does: case-insensitive, either slash.
@@ -1872,13 +1871,7 @@ pub async fn launch_demo_preview(
 /// Process ids of every running `hl.exe` -- the games Studio could be talking
 /// to. `hlae.exe` is left out: it is the launcher, not the game.
 fn running_game_pids() -> Vec<u32> {
-    use sysinfo::{PidExt, ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes()
-        .values()
-        .filter(|p| p.name().eq_ignore_ascii_case("hl.exe"))
-        .map(|p| p.pid().as_u32())
-        .collect()
+    native::sys::process::pids_named(&["hl.exe"])
 }
 
 /// Launch Preview for a game that is already running (#413): patches the
@@ -2118,41 +2111,29 @@ pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
 // before launching, and let the user force-kill stragglers instead of
 // hunting them down in Task Manager.
 
-fn is_engine_process_name(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower == "hl.exe" || lower == "hlae.exe"
-}
+/// The game and its launcher: what Launch Preview and Kill Engine look for.
+const ENGINE_PROCESS_NAMES: &[&str] = &["hl.exe", "hlae.exe"];
 
 /// True if an OBS Studio process is currently running, under any of its
 /// installed binary names. Used to turn a bare "could not connect" into a
 /// deterministic answer instead of asking the user to interpret a raw OS
 /// socket error themselves.
 fn is_obs_process_running() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes().values().any(|p| {
-        let lower = p.name().to_lowercase();
-        lower == "obs64.exe" || lower == "obs32.exe" || lower == "obs.exe"
-    })
+    native::sys::process::is_running(&["obs64.exe", "obs32.exe", "obs.exe"])
 }
 
 /// True if any `hl.exe` or `hlae.exe` process is currently running.
 #[tauri::command]
 pub fn check_engine_processes() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes()
-        .values()
-        .any(|p| is_engine_process_name(p.name()))
+    native::sys::process::is_running(ENGINE_PROCESS_NAMES)
 }
 
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
 #[tauri::command]
 pub fn kill_engine_processes() -> Result<(), String> {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
+    let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {
-        if is_engine_process_name(process.name()) && !process.kill() {
+        if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
             log::warn!("Failed to kill engine process pid={}", process.pid());
         }
     }

@@ -335,7 +335,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Binary | What it does |
 |---|---|
 | `preview_cli` | Drag demos or folders onto it; writes `<stem>_preview.dem` bookmark files into a `previews` folder. `--player` picks one player in an HLTV demo. |
-| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `patch-streak` is an older standalone patcher. |
+| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `stats <demos>` prints league stats as JSON: teamkills, suicides, objective points, cap credits, every flag capture and cap blocks. `patch-streak` is an older standalone patcher. |
 | `dod-studio-dump` | Header, frame and message counts, first commands and sounds of one demo. |
 | `dod-studio-inspect` | Library statistics across folders: maps, message frequency, duplicates. |
 | `check_maps` | Per-demo map status against a maps folder, with optional download. |
