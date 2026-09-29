@@ -145,8 +145,8 @@ pub struct DemoInfo {
     pub map_checksum: u32,
 }
 
-impl From<Demo> for DemoInfo {
-    fn from(value: Demo) -> Self {
+impl From<&Demo> for DemoInfo {
+    fn from(value: &Demo) -> Self {
         let map_name = value
             .header
             .map_name
@@ -698,8 +698,25 @@ impl Analysis {
 
         process_event(&mut state, &AnalyzerEvent::Finalization);
 
-        Ok(Analysis::new(demo.into(), state))
+        let info = DemoInfo::from(&demo);
+        release_frames(demo);
+        Ok(Analysis::new(info, state))
     }
+}
+
+/// Frees the decoded frame tree. That's about a third of a cold parse (441 ms
+/// of ~1.3 s, `docs/demo_analyzer_load_performance.md`) and nothing needs the
+/// tree once the analysis is built, so where there are threads the caller
+/// doesn't wait for it. The browser build (wasm) frees it in place.
+fn release_frames(demo: Demo) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut demo = demo;
+        let entries = std::mem::take(&mut demo.directory.entries);
+        std::thread::spawn(move || drop(entries));
+    }
+    #[cfg(target_arch = "wasm32")]
+    drop(demo);
 }
 
 impl<'a> From<&'a [u8]> for Analysis {

@@ -701,6 +701,8 @@ pub fn spawn_capture_engine(
                 use sysinfo::SystemExt;
                 sysinfo::System::new_all()
             };
+            let mut last_process_check: Option<std::time::Instant> = None;
+            let mut hl_alive_cached = false;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -745,10 +747,22 @@ pub fn spawn_capture_engine(
                     }
                 }
 
-                let hl_alive = {
+                // The process list is re-read at most every 250 ms: OBS mode
+                // spins this loop every 16 ms for its markers, and enumerating
+                // every process 62 times a second for the whole batch buys
+                // nothing when a quarter-second-late "the game is gone" is
+                // as good as an immediate one.
+                if last_process_check
+                    .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(250))
+                {
+                    last_process_check = Some(std::time::Instant::now());
                     use sysinfo::{SystemExt, ProcessExt};
                     sys.refresh_processes();
-                    let alive = sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                    hl_alive_cached =
+                        sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                }
+                let hl_alive = {
+                    let alive = hl_alive_cached;
                     if alive {
                         hl_seen_alive = true;
                         hl_first_seen.get_or_insert_with(std::time::Instant::now);
