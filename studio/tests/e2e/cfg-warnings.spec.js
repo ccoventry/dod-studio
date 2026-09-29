@@ -25,6 +25,7 @@ const EMPTY_REPORT = {
   noopInit: [],
   noopScheduled: [],
   fatalCvars: [],
+  configCfgWritable: false,
 };
 
 async function loadHarness(page, report) {
@@ -95,5 +96,21 @@ test.describe('fatal cvar banner', () => {
     expect(fatalAt).toBeGreaterThanOrEqual(0);
     expect(bannedAt).toBeGreaterThanOrEqual(0);
     expect(fatalAt).toBeLessThan(bannedAt);
+  });
+});
+
+// #478: the engine saves over config.cfg on quit.
+test.describe('writable config.cfg note', () => {
+  test('shows when config.cfg is not read-only', async ({ page }) => {
+    await loadHarness(page, { ...EMPTY_REPORT, configCfgWritable: true });
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('saved over when the game closes');
+    await expect(banner).toContainText('Read-only');
+  });
+
+  test('stays hidden when config.cfg is read-only or missing', async ({ page }) => {
+    await loadHarness(page, EMPTY_REPORT);
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
   });
 });

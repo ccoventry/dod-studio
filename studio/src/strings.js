@@ -979,6 +979,12 @@ export const STRINGS = {
       "DoD's own client checks these whenever the HUD is on screen, and for most cvars it just forces the right value back silently. For these it also closes the game outright rather than merely correcting course. Nothing here changes your config files -- open the file named above and remove the line, or give it the value DoD requires. Setting it in Initial Commands instead is not a way round this: the app refuses these there, for the same reason.",
     fatalRow: (cvar, value, required, file, line) =>
       `${cvar} ${value} — DoD requires ${required}, set in ${file}, line ${line}`,
+    // #478: the engine rewrites config.cfg on quit.
+    CONFIG_WRITABLE_TITLE: 'Your config.cfg is saved over when the game closes:',
+    CONFIG_WRITABLE_ROW:
+      'config.cfg is not read-only, so the game writes its current settings into it on quit, including values your Initial and Scheduled Commands set.',
+    CONFIG_WRITABLE_ADVICE:
+      'To keep your own values, make config.cfg read-only (right-click it, Properties, tick Read-only). The trade-off: settings you change inside the game, like binds and options, stop being saved too. DoD Studio never changes this file.',
     NOOP_TITLE: 'These commands have no effect:',
     NOOP_ADVICE:
       'The pipeline (or the engine itself) always overrides or drops these before they could ever apply — not wrong, just wasted keystrokes.',

@@ -33,6 +33,7 @@ const EMPTY = {
   noopInit: [],
   noopScheduled: [],
   fatalCvars: [],
+  configCfgWritable: false,
 };
 
 let report = EMPTY;
@@ -162,6 +163,7 @@ function render() {
   const noopInit = report?.noopInit ?? [];
   const noopScheduled = report?.noopScheduled ?? [];
   const fatalCvars = report?.fatalCvars ?? [];
+  const configCfgWritable = report?.configCfgWritable ?? false;
   // Banned commands are already flagged, more specifically, in the banned
   // section above — MID_DEMO_HAZARDS is a superset of BANNED_COMMANDS on the
   // Rust side, so without this a banned command would otherwise also show up
@@ -255,6 +257,12 @@ function render() {
       .map((n) => `<li><code>${STRINGS.CFG.noopRow(n.command, STRINGS.CFG.NOOP_REASONS[n.cvar], n.source)}</code></li>`)
       .join('');
     initParts.push(section(STRINGS.CFG.NOOP_TITLE, STRINGS.CFG.NOOP_ADVICE, rows));
+  }
+  // Advisory, like the no-op list: nothing is wrong with this capture, but
+  // its values leak into the user's own config the next time the game quits.
+  if (configCfgWritable) {
+    const rows = `<li>${STRINGS.CFG.CONFIG_WRITABLE_ROW}</li>`;
+    initParts.push(section(STRINGS.CFG.CONFIG_WRITABLE_TITLE, STRINGS.CFG.CONFIG_WRITABLE_ADVICE, rows));
   }
   renderInto('#init-commands-warning-banner', joinSections(initParts));
 
