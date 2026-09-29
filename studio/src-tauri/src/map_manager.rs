@@ -223,6 +223,11 @@ pub struct CfgReport {
     /// Commands but refused here because the decal flush sizes itself
     /// against them once, before the demo plays.
     pub banned_scheduled: Vec<BannedCommandRow>,
+    /// Initial / Scheduled Commands too long for one ConsoleCommand frame
+    /// (`native::patch::too_long_commands`). Blocking, like the banned lists:
+    /// `start_capture_batch` refuses them too (#453).
+    pub too_long_init: Vec<String>,
+    pub too_long_scheduled: Vec<String>,
     /// The `r_decals` ring size this capture will silently use, when nothing
     /// — no config file, no Initial Command — states one (see
     /// `ring_limit_from_init` / `ring_limit_from_game_config`). `None`
@@ -577,6 +582,8 @@ pub async fn scan_game_configs(
             custom,
             banned_init,
             banned_scheduled,
+            too_long_init: native::patch::too_long_commands(&init_commands),
+            too_long_scheduled: native::patch::too_long_commands(&command_texts),
             decal_default_ring,
             decal_flush_is_noop,
             noop_init,
@@ -994,6 +1001,15 @@ mod tests {
         assert_eq!(r.banned_init.len(), 1, "{:?}", r.banned_init);
         assert_eq!(r.banned_init[0].cvar, "mirv_recordmovie_start");
         assert!(r.banned_scheduled.is_empty());
+    }
+
+    #[test]
+    fn a_command_too_long_for_a_demo_frame_is_reported_in_its_own_list() {
+        let long = format!("echo {}", "x".repeat(59)); // 64 bytes
+        let r = report("too_long", &[long.as_str()], &[long.as_str()], 120);
+
+        assert_eq!(r.too_long_init, vec![long.clone()]);
+        assert_eq!(r.too_long_scheduled, vec![long]);
     }
 
     #[test]

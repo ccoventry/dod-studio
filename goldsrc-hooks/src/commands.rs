@@ -1,4 +1,5 @@
-//! The `dodstudio_*` console surface: eleven cvars and eight commands.
+//! The `dodstudio_*` console surface: its cvars and commands (`install`
+//! registers them all).
 //!
 //! ## Why cvars rather than commands
 //!
@@ -517,8 +518,14 @@ pub fn poll() {
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
+    // Runs any console commands Studio has sent over the pipe.
+    crate::remote::poll();
+    // Only until playdemo is wrapped, normally already done at install.
+    crate::demo_reload::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+    // Re-raises sv_allow_shaders after each demo load's disconnect reset.
+    crate::world_shaders::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -658,6 +665,9 @@ fn status_text() -> String {
     // the permanent, noisy default state for everyone who hasn't opted in.
     if texture_hires::has_observed() {
         lines.push(texture_hires::status());
+    }
+    if let Some(shaders) = crate::world_shaders::status_line() {
+        lines.push(shaders);
     }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
@@ -917,7 +927,7 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
 /// `dodstudio_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
-/// value cannot carry, and there are thirteen of them -- thirteen cvars would
+/// value cannot carry, and there is one per element -- a cvar for each would
 /// bury everything else in the console's type-ahead.
 unsafe extern "C" fn cmd_hudelement() {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -1232,7 +1242,7 @@ unsafe extern "C" fn cmd_gunshot_attenuation() {
     }
 
     console_print(&format!(
-        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <0.05..0.79>  (lower carries further; the game's own default is 0.8)\n",
+        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <value above 0 and below 0.8>  (lower carries further; the game's own default is 0.8)\n",
         sound_fix::carry_attenuation()
     ));
 }
@@ -1323,6 +1333,8 @@ pub fn install() {
     );
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
+    add_command(crate::demo_reload::NAME, crate::demo_reload::command);
+    crate::demo_reload::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
@@ -1384,6 +1396,11 @@ pub fn install() {
     // the hook if it's turned on in a session that started without it.
     if let Some(hd) = register(texture_hires::HD_NAME, bit(texture_hires::enabled())) {
         texture_hires::set_hd_cvar(hd);
+    }
+    // Outside the all-or-nothing tuple for the same reason as the HD switch:
+    // it is independent of every other setting here.
+    if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
+        crate::world_shaders::set_cvar(shaders);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
