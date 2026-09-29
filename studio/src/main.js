@@ -23,6 +23,7 @@ import { initRollFloors } from './roll_floors.js';
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
+import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
@@ -497,6 +498,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
     const scanWorkers = readScanWorkers();
+    // "When a batch finishes" (#440). Off unless the select says otherwise.
+    const finishClipsAfterBatch = document.querySelector('#config-finish-clips')?.value === 'finish';
+    const finishCodecObs = document.querySelector('#config-finish-codec-obs')?.value || 'source_copy';
+    const finishCodecVideo = document.querySelector('#config-finish-codec-video')?.value || 'render_tab';
+    const finishCodecFrames = document.querySelector('#config-finish-codec-frames')?.value || 'render_tab';
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -549,7 +555,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
       scan_workers: scanWorkers,
-      render_export_dirs: renderExportDirs
+      render_export_dirs: renderExportDirs,
+      finish_clips_after_batch: finishClipsAfterBatch,
+      finish_codec_obs: finishCodecObs,
+      finish_codec_video: finishCodecVideo,
+      finish_codec_frames: finishCodecFrames
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -722,6 +732,15 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
       }
+      const finishClipsEl = document.querySelector('#config-finish-clips');
+      if (finishClipsEl) finishClipsEl.value = settings.finish_clips_after_batch ? 'finish' : 'off';
+      [['#config-finish-codec-obs', settings.finish_codec_obs],
+       ['#config-finish-codec-video', settings.finish_codec_video],
+       ['#config-finish-codec-frames', settings.finish_codec_frames]].forEach(([sel, value]) => {
+        const el = document.querySelector(sel);
+        // Only a value the select offers — assigning an unknown one blanks it.
+        if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
+      });
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
         scanPaths = [...settings.pinned_folders];
       }
@@ -1479,6 +1498,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     getAllDemos: () => currentScannedDemos,
     onStatusChange: onHighlightStatusChange
   });
+
+  // "When a batch finishes" (#440): queues a verified batch's takes into the
+  // Render tab's own queue. capture_pane.js hands it each verified batch.
+  initFinishClips({ getExportDirs: () => renderExportDirs, onSettingsChange: persistAppSettings });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a

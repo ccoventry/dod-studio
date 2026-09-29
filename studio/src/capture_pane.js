@@ -14,6 +14,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { requestFinishClips } from './finish_clips.js';
 
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
@@ -1143,6 +1144,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       } else {
         showToast(`${STRINGS.CAPTURE.allTakesVerified(total)}${marked}`, 'success');
       }
+
+      // "When a batch finishes" (#440) — a no-op unless that is set to finish
+      // clips. After the status flip above, so the take index already maps
+      // each take back to its highlights when its render lands.
+      requestFinishClips(payload, lastDispatch?.captureMode);
     }).then(unlistenFn => {
       unlistenTakesVerified = unlistenFn;
     }).catch(err => {
@@ -1207,6 +1213,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     // both fields again in `normalise_capture_mode`, which is what keeps an
     // older frontend working against this build.
     const captureModeVal = document.querySelector("#config-capture-mode")?.value || "frame_sequence";
+    // The finish step (#440) picks its codec by the mode this batch used.
+    lastDispatch.captureMode = captureModeVal;
     const ffmpegCaptureVal = captureModeVal === "direct_to_video";
     const ffmpegCaptureCodecVal = document.querySelector("#config-capture-codec")?.value || "utvideo";
     const obsHostVal = document.querySelector("#config-obs-host")?.value?.trim() || "127.0.0.1";
