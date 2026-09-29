@@ -439,10 +439,14 @@ pub struct AnalyzerReportPayload {
     pub state: analysis::AnalyzerState,
 }
 
+/// `segment` picks one map of a demo that recorded through a level change
+/// (an index into `demo_info.map_segments`, #217); `None` lets the analyzer
+/// choose, as it always has.
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
     demo_path: String,
+    segment: Option<usize>,
 ) -> Result<AnalyzerReportPayload, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         use tauri::Emitter;
@@ -470,7 +474,8 @@ async fn analyze_demo_full(
             }
         };
 
-        match native::run_analyzer_cached(&path, progress_cb) {
+        let options = analysis::AnalysisOptions { segment };
+        match native::run_analyzer_cached(&path, options, progress_cb) {
             Ok((file_info, analysis, _from_cache)) => {
                 // Independent metadata lookup (not `file_info.created_at`) to avoid
                 // depending on `web_time::SystemTime`'s exact type identity here.

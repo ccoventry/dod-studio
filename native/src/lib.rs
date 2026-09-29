@@ -1,7 +1,7 @@
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[cfg(not(target_arch = "wasm32"))]
-use analysis::Analysis;
+use analysis::{Analysis, AnalysisOptions};
 #[cfg(not(target_arch = "wasm32"))]
 use filetime::FileTime;
 #[cfg(not(target_arch = "wasm32"))]
@@ -73,6 +73,18 @@ pub fn run_analyzer_with_progress<F>(
 where
     F: FnMut(usize, usize),
 {
+    run_analyzer_with_options(demo_path, AnalysisOptions::default(), progress_cb)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn run_analyzer_with_options<F>(
+    demo_path: &PathBuf,
+    options: AnalysisOptions,
+    progress_cb: F,
+) -> Result<(FileInfo, Analysis), String>
+where
+    F: FnMut(usize, usize),
+{
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
@@ -83,7 +95,7 @@ where
     file.read_to_end(&mut bytes)
         .map_err(|e| format!("Could not read the file: {}", e))?;
 
-    let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
+    let analysis = Analysis::try_from_bytes_with_options(bytes.as_slice(), options, progress_cb)?;
     let file_info = build_file_info(demo_path)?;
 
     Ok((file_info, analysis))
@@ -114,8 +126,11 @@ fn build_file_info(demo_path: &PathBuf) -> Result<FileInfo, String> {
 // Bump whenever `AnalyzerState`/`Player`/related computed fields change, so
 // caches written by an older schema are treated as a miss instead of
 // silently deserializing with new fields missing/defaulted.
+//
+// 4: `DemoInfo::map_segments` (#217). A v3 entry would load with no segments,
+// hiding the map picker on exactly the demos that need it.
 #[cfg(not(target_arch = "wasm32"))]
-const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 3;
+const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 4;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]
@@ -136,7 +151,7 @@ struct AnalyzerCacheEntryRef<'a> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
+fn analyzer_cache_path(demo_path: &PathBuf, options: AnalysisOptions) -> Option<PathBuf> {
     let canonical = fs::canonicalize(demo_path).ok()?;
     let key = canonical.to_string_lossy();
     let hash = crate::utils::demo_hasher::fnv1a_hash(key.as_bytes());
@@ -144,18 +159,30 @@ fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
         crate::shared::paths::get_appdata_dir()
             .join("analyzer_cache")
             .join(format!("v{}", ANALYZER_CACHE_SCHEMA_VERSION))
-            .join(format!("{:016x}.json", hash)),
+            .join(analyzer_cache_file_name(hash, options)),
     )
+}
+
+/// The default analysis keeps the plain `<hash>.json` name; a picked map
+/// segment (#217) gets its own file beside it.
+#[cfg(not(target_arch = "wasm32"))]
+fn analyzer_cache_file_name(hash: u64, options: AnalysisOptions) -> String {
+    match options.segment {
+        None => format!("{:016x}.json", hash),
+        Some(segment) => format!("{:016x}.segment{}.json", hash, segment),
+    }
 }
 
 /// Same as `run_analyzer_with_progress`, but backed by an on-disk JSON cache
 /// keyed on the demo's canonicalized path, size, and mtime. A cache hit skips
 /// straight to a ~10-15ms file read + deserialize instead of the full ~1.3s
 /// parse; `progress_cb` is not invoked on the cache-hit path. Returns whether
-/// the result came from cache as the third tuple element.
+/// the result came from cache as the third tuple element. Each map segment
+/// picked through `options` is cached separately.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_analyzer_cached<F>(
     demo_path: &PathBuf,
+    options: AnalysisOptions,
     progress_cb: F,
 ) -> Result<(FileInfo, Analysis, bool), String>
 where
@@ -171,7 +198,7 @@ where
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let cache_path = analyzer_cache_path(demo_path);
+    let cache_path = analyzer_cache_path(demo_path, options);
 
     if let Some(cache_path) = &cache_path
         && let Ok(bytes) = fs::read(cache_path)
@@ -182,7 +209,7 @@ where
         return Ok((entry.file_info, entry.analysis, true));
     }
 
-    let (file_info, analysis) = run_analyzer_with_progress(demo_path, progress_cb)?;
+    let (file_info, analysis) = run_analyzer_with_options(demo_path, options, progress_cb)?;
 
     if let Some(cache_path) = &cache_path {
         write_analyzer_cache_entry(
@@ -238,7 +265,7 @@ pub fn warm_analyzer_cache(demo_path: &PathBuf, analysis: &Analysis) {
         .map(|d| d.as_secs())
         .unwrap_or(0);
 
-    let Some(cache_path) = analyzer_cache_path(demo_path) else {
+    let Some(cache_path) = analyzer_cache_path(demo_path, AnalysisOptions::default()) else {
         return;
     };
     let Ok(file_info) = build_file_info(demo_path) else {
@@ -478,5 +505,21 @@ mod activity_log_tests {
         assert!(path.exists(), "nothing was written to {}", path.display());
         let body = std::fs::read_to_string(&path).unwrap_or_default();
         assert!(body.contains("activity log redirect probe"));
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod analyzer_cache_tests {
+    use super::*;
+
+    #[test]
+    fn a_picked_map_segment_is_cached_beside_the_default_analysis() {
+        // #217: the default keeps the name every earlier cache used.
+        let default = analyzer_cache_file_name(0xabc, AnalysisOptions::default());
+        assert_eq!(default, "0000000000000abc.json");
+        let second = analyzer_cache_file_name(0xabc, AnalysisOptions { segment: Some(1) });
+        assert_eq!(second, "0000000000000abc.segment1.json");
+        let first = analyzer_cache_file_name(0xabc, AnalysisOptions { segment: Some(0) });
+        assert_ne!(first, default);
     }
 }

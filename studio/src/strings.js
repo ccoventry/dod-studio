@@ -838,6 +838,10 @@ export const STRINGS = {
     MATCH_TYPE_PREGAME: 'Clan Match (Pre-game)',
     MATCH_TYPE_INCOMPLETE: 'Clan Match (Incomplete Recording)',
     MATCH_TYPE_FULL: 'Clan Match (Fully Recorded)',
+    // Map picker (#217), shown only when a demo holds more than one map.
+    MAP_SEGMENT_LABEL: 'Map',
+    MAP_SEGMENT_HINT: 'This demo kept recording through a map change. Each map is analyzed separately.',
+    mapSegmentOption: (mapName, start, end) => `${mapName} (${start}–${end})`,
     RECORDED_BY_HLTV_DEFAULT: 'HLTV',
     RECORDED_BY_UNKNOWN: 'Unknown',
     WEAPON_UNKNOWN: 'Unknown',
