@@ -521,6 +521,7 @@ pub fn poll() {
     crate::demo_reload::poll();
     // Only until connect is wrapped, normally already done at install.
     crate::connect_guard::poll();
+    crate::events::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
@@ -616,6 +617,13 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Always shown (#430): the one fact that decides how big HD textures can
+    // get before the game runs out of memory.
+    lines.push(if crate::pe::process_is_large_address_aware() {
+        "address space: 4 GB (hl.exe is large-address-aware)".to_string()
+    } else {
+        "address space: 2 GB (hl.exe isn't large-address-aware; very large HD textures can run it out)".to_string()
+    });
     // Gated like the two fixes above rather than always shown like the
     // suppression cvars: logging is off by default and a permanent "logging
     // nothing" line would be noise in the overwhelmingly common case.
@@ -655,6 +663,12 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(events) = crate::events::status_line() {
+        lines.push(events);
+    }
+    if let Some(sprites) = crate::sprite_blend::status_line() {
+        lines.push(sprites);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
@@ -1318,6 +1332,7 @@ pub fn install() {
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
     crate::connect_guard::install();
+    crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
@@ -1453,10 +1468,10 @@ mod tests {
     /// returning an empty reply that reads as a broken command.
     #[test]
     fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
-        // anim_fix::LEVEL is also mutated by anim_fix.rs's own tests, and
+        // anim_fix::LEVEL is also mutated by anim_fix's own tests, and
         // cargo runs a crate's tests in parallel by default -- without this,
         // one of those can flip LEVEL mid-assertion here (issue #321).
-        // anim_fix.rs's tests already take the same lock for the same
+        // anim_fix's tests already take the same lock for the same
         // reason; sound_fix::ENABLED has no other test touching it, so it
         // does not need one of its own.
         let _statics = anim_fix::tests::lock_statics();

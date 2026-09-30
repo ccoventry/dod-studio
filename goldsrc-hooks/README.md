@@ -19,7 +19,7 @@ Plus thirteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
-  players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
+  players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen
@@ -80,6 +80,15 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   asking to relaunch. Remote clients are refused and only the same Windows
   user can write to it; `GOLDSRC_HOOKS_REMOTE=0` turns it off. See
   `src/remote.rs` and `native/src/sys/game_remote.rs`.
+- **Events to Studio** (on by default): a second pipe,
+  `\\.\pipe\dodstudio-hl-<pid>-events`, carries the capture pipeline's
+  `[dod-studio]` markers from the game to Studio as the engine runs each
+  `echo`, so a batch no longer depends on `qconsole.log` (issue #434, step 1).
+  The DLL wraps the engine's `echo` command through its command list
+  (`src/cmd_list.rs`, no per-build address). Markers queued before Studio
+  connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off, and
+  Studio then reads the log as before. See `src/events.rs` and
+  `native/src/obs/pipe_tail.rs`.
 - **Reload the demo** (`dodstudio_reload_demo`): plays the last `playdemo` or
   `viewdemo` again from the start, with the same name. The engine keeps no
   copy of the name, so the DLL wraps both engine commands to note it; the
@@ -156,7 +165,8 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 ## Status
 
 The animation fix and all four `dodstudio_deathmsg` subcommands are live-proven
-against a running game. `dodstudio_ex_interp_max`'s mechanism is live-proven
+against a running game, except `block` by SteamID or `self` (#468), which is
+not yet. `dodstudio_ex_interp_max`'s mechanism is live-proven
 too -- the clamp visibly takes effect -- but no specific value is confirmed
 good yet; see `docs/goldsrc_ex_interp.md` §7. `dodstudio_objectives` is
 live-proven too: `offset`/`xoffset` reposition the icon row correctly, and
@@ -201,6 +211,15 @@ player-movement trace a previous map's collision data, and it recurses until
 the stack runs out. The guard refuses any clip node the hull can't have, and
 stops a trace that is about to run out of stack. On by default for the same
 reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+
+`src/sprite_blend.rs` stops `gl_spriteblend 0` at the session's first sprite
+load from leaving the crosshair and other sprites dark and dotted until the
+game restarts (issue #467). The engine only fills in the colour around a
+sprite's edges at upload when the cvar is non-zero, and it never uploads the
+same sprite twice. Two bytes in `GL_Upload32` make it always do so, on both
+builds, as if the value were its default of 1. Draw-time handling of the cvar
+is untouched. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off.
+`tools/verify_spriteblend_offsets.py` re-derives both sites.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the

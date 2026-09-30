@@ -54,6 +54,14 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `events`: the game tells DoD Studio what a capture batch is doing over a
+//!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
+//!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
+//!   turns it off.
+//! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
+//!   longer darkens sprites until the game restarts (issue #467). Two bytes in
+//!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
+//!   turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -90,6 +98,7 @@
 //! session.
 
 mod anim_fix;
+mod cmd_list;
 mod commands;
 mod connect_guard;
 mod crash;
@@ -100,6 +109,7 @@ mod decals;
 mod demo_reload;
 mod detour;
 mod engine;
+mod events;
 mod ex_interp;
 mod hand_signals;
 mod hide_sprite;
@@ -117,6 +127,7 @@ mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod sprite_blend;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
@@ -190,6 +201,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the engine's own default upload behaviour, so on unless asked
+    // not to.
+    sprite_blend::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
+        Ordering::Relaxed,
+    );
     // Only this user's own processes can reach the pipe, and only a game
     // Studio launched has it, so on unless asked not to.
     remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
@@ -198,6 +215,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         !connect_guard::allowed_by_env(std::env::var(connect_guard::ALLOW_ENV).ok().as_deref()),
         Ordering::Relaxed,
     );
+    // Studio falls back to qconsole.log without it, so on unless asked not to.
+    events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
@@ -288,6 +307,8 @@ fn install_fixes() {
     tempent_fix::install();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // Before any map loads, so before the first HUD sprite is uploaded.
+    sprite_blend::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

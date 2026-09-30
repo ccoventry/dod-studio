@@ -169,9 +169,9 @@ Every launch (batch, preview, Launch Game) uses one command line:
 
 A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-demoedit` (PR #401) and `-addons` (PR #412) are not on `dev` yet.
 
-While the game runs, the app tails `qconsole.log` for its markers and turns them into status lines and notifications. The batch ends when:
+While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 
-- the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call), or OBS sees `BATCH_COMPLETE`;
+- `BATCH_COMPLETE` arrives over the events pipe (any mode), OBS mode sees it in the log, or the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call; the fallback);
 - you cancel (the app kills `hl.exe`);
 - the game closes on its own ("closed manually or crashed");
 - in OBS mode, markers stop arriving for too long, or OBS disconnects.
@@ -233,7 +233,9 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 **Refuses to join a server.** While the DLL is loaded, the engine's `connect`, `retry`, `reconnect` and `listen` are refused, with a console message and a hook-log line (issue #451): joining a VAC-secured server with it loaded is a ban risk. `connect local` (what `map` runs) still works. `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off. See `docs/vac_safety.md`.
 
-**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off. Nothing comes back from the game over the pipe yet (issue #434, step 1).
+**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off.
+
+**Events to Studio.** A second pipe, `\\.\pipe\dodstudio-hl-<pid>-events`, carries the pipeline's `[dod-studio]` markers from the game as the engine runs each `echo` (the DLL wraps `echo` through the engine's command list, with no per-build address). Markers from before Studio connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off; Studio then reads `qconsole.log` as before (issue #434, step 1).
 
 ### 5.2 Console commands
 
@@ -267,7 +269,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |
 | `dodstudio_reload_demo` | command | — | Plays the last `playdemo`/`viewdemo` demo again from the start | both (wraps the engine's own commands through the SDK's command list, no per-build address) |
 
-Two fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off) and the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off).
+Three fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off), the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off), and the **sprite-blend upload fix** (`gl_spriteblend 0` at the first sprite load no longer darkens sprites for the session, #467, both builds, `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off).
 
 Not compiled on `dev`: `spectator_bars.rs` (both approaches failed live; issue #328).
 
@@ -335,7 +337,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Binary | What it does |
 |---|---|
 | `preview_cli` | Drag demos or folders onto it; writes `<stem>_preview.dem` bookmark files into a `previews` folder. `--player` picks one player in an HLTV demo. |
-| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `patch-streak` is an older standalone patcher. |
+| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `stats <demos>` prints league stats as JSON: teamkills, suicides, objective points, cap credits, every flag capture and cap blocks. `patch-streak` is an older standalone patcher. |
 | `dod-studio-dump` | Header, frame and message counts, first commands and sounds of one demo. |
 | `dod-studio-inspect` | Library statistics across folders: maps, message frequency, duplicates. |
 | `check_maps` | Per-demo map status against a maps folder, with optional download. |
