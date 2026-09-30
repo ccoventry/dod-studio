@@ -1305,11 +1305,14 @@ pub struct ScanOutcome {
 }
 
 /// A scanned file with the same key as a queued demo at another path, or as
-/// a file earlier in the same scan: the same demo under another name.
+/// another file in the same scan: the same demo under another name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScanCopy {
     pub path: String,
     pub same_as: String,
+    /// `same_as` was already in the queue; otherwise it's the copy this scan
+    /// kept.
+    pub queued: bool,
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1501,8 +1504,11 @@ fn same_path_key(path: &str) -> String {
 /// Splits `list` into the files still to scan (with their keys, in order),
 /// a count of those skipped because `known` has the same path with the same
 /// key, and the identical copies skipped: files at a path `known` doesn't
-/// have whose key matches a known demo, or a file kept earlier in this scan.
-/// Only the key (size + first 64 KB) is read for those, never the demo.
+/// have whose key matches a queued demo, or another file in this scan. Of
+/// several new files that are one demo, the one with the shortest name is
+/// kept ("match.dem" over "match - Copy.dem" and "match (2).dem"), whatever
+/// order the scan found them in. Only the key (size + first 64 KB) is read
+/// for the rest, never the demo.
 fn skip_known(
     list: Vec<PathBuf>,
     known: &[KnownDemo],
@@ -1511,17 +1517,52 @@ fn skip_known(
         .iter()
         .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
         .collect();
-    let mut path_by_key: std::collections::HashMap<String, String> = known
+    let queued_by_key: std::collections::HashMap<&str, &str> = known
         .iter()
         .filter(|k| !k.file_key.is_empty())
-        .map(|k| (k.file_key.clone(), k.path.clone()))
+        .map(|k| (k.file_key.as_str(), k.path.as_str()))
         .collect();
-    let mut keep = Vec::with_capacity(list.len());
-    let mut keys = Vec::with_capacity(list.len());
+    let name_rank = |path: &Path| {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        (name.chars().count(), name)
+    };
+
+    let entries: Vec<(PathBuf, Option<String>)> = list
+        .into_iter()
+        .map(|path| {
+            let key = demo_file_key(&path);
+            (path, key)
+        })
+        .collect();
+    // The copy to keep for each key that no queued demo has.
+    let mut keeper_by_key: std::collections::HashMap<&str, &Path> =
+        std::collections::HashMap::new();
+    for (path, key) in &entries {
+        let Some(key) = key.as_deref() else { continue };
+        if known_by_path.contains_key(&same_path_key(&path.to_string_lossy()))
+            || queued_by_key.contains_key(key)
+        {
+            continue;
+        }
+        keeper_by_key
+            .entry(key)
+            .and_modify(|best| {
+                if name_rank(path) < name_rank(best) {
+                    *best = path;
+                }
+            })
+            .or_insert(path);
+    }
+
+    let mut keep = Vec::with_capacity(entries.len());
+    let mut keys = Vec::with_capacity(entries.len());
     let mut unchanged = 0;
     let mut copies = Vec::new();
-    for path in list {
-        let key = demo_file_key(&path);
+    for (path, key) in &entries {
         let path_text = path.to_string_lossy().into_owned();
         let queued_key = known_by_path.get(&same_path_key(&path_text));
         if key.as_deref().is_some_and(|k| queued_key == Some(&k)) {
@@ -1530,19 +1571,30 @@ fn skip_known(
         }
         // A queued path that changed on disk is a rescan, never a copy.
         if queued_key.is_none()
-            && let Some(same_as) = key.as_ref().and_then(|k| path_by_key.get(k))
+            && let Some(k) = key.as_deref()
         {
-            copies.push(ScanCopy {
-                path: path_text,
-                same_as: same_as.clone(),
-            });
-            continue;
+            if let Some(same_as) = queued_by_key.get(k) {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: same_as.to_string(),
+                    queued: true,
+                });
+                continue;
+            }
+            if let Some(keeper) = keeper_by_key
+                .get(k)
+                .filter(|keeper| **keeper != path.as_path())
+            {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: keeper.to_string_lossy().into_owned(),
+                    queued: false,
+                });
+                continue;
+            }
         }
-        if let Some(k) = &key {
-            path_by_key.entry(k.clone()).or_insert(path_text);
-        }
-        keep.push(path);
-        keys.push(key);
+        keep.push(path.clone());
+        keys.push(key.clone());
     }
     (keep, keys, unchanged, copies)
 }
@@ -2561,14 +2613,15 @@ mod tests {
     }
 
     /// A copy of a queued demo, and a second copy within the scan, are
-    /// reported without being kept for parsing.
+    /// reported without being kept for parsing. Within the scan the shorter
+    /// name is kept even though it sorts after its copy.
     #[test]
     fn identical_copies_are_skipped_before_parsing() {
         let scratch = Scratch::new("skip_copies");
         let queued = scratch.path().join("queued.dem");
         let copy = scratch.path().join("queued copy.dem");
         let fresh = scratch.path().join("fresh.dem");
-        let fresh_copy = scratch.path().join("fresh copy.dem");
+        let fresh_copy = scratch.path().join("fresh - Copy.dem");
         std::fs::write(&queued, b"HLDEMO the queued one").unwrap();
         std::fs::write(&copy, b"HLDEMO the queued one").unwrap();
         std::fs::write(&fresh, b"HLDEMO a new one").unwrap();
@@ -2580,9 +2633,11 @@ mod tests {
 
         let (keep, _, unchanged, copies) = skip_known(
             vec![
+                // "fresh - Copy.dem" sorts first (' ' < '.'), as the scan's
+                // list is.
                 copy.clone(),
-                fresh.clone(),
                 fresh_copy.clone(),
+                fresh.clone(),
                 queued.clone(),
             ],
             &known,
@@ -2596,10 +2651,12 @@ mod tests {
                 ScanCopy {
                     path: copy.to_string_lossy().into_owned(),
                     same_as: queued.to_string_lossy().into_owned(),
+                    queued: true,
                 },
                 ScanCopy {
                     path: fresh_copy.to_string_lossy().into_owned(),
                     same_as: fresh.to_string_lossy().into_owned(),
+                    queued: false,
                 },
             ]
         );

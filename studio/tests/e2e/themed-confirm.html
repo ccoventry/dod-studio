@@ -27,6 +27,7 @@
   <button id="trigger-default-btn">Trigger (defaults)</button>
   <button id="trigger-custom-btn">Trigger (custom labels)</button>
   <button id="trigger-details-btn">Trigger (details)</button>
+  <button id="trigger-notice-btn">Trigger (notice, no cancel)</button>
   <div id="result"></div>
 
   <script type="module">
@@ -45,6 +46,11 @@
         confirmLabel: 'Remove',
         cancelLabel: 'Keep It',
       });
+      document.querySelector('#result').textContent = String(result);
+    });
+
+    document.querySelector('#trigger-notice-btn').addEventListener('click', async () => {
+      const result = await themedConfirm('One of each was added.', { confirmLabel: 'OK', hideCancel: true });
       document.querySelector('#result').textContent = String(result);
     });
 

@@ -48,7 +48,7 @@ function resolveAndClose(result) {
  * each `{ primary, secondary, title }` (a main line, a smaller second line,
  * and a hover text). `footer`: an optional line after the list.
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -75,7 +75,11 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
     footerEl.style.display = footer ? '' : 'none';
   }
   if (okBtn) okBtn.textContent = confirmLabel || STRINGS.THEMED_CONFIRM_MODAL.CONFIRM_BUTTON;
-  if (cancelBtn) cancelBtn.textContent = cancelLabel || STRINGS.THEMED_CONFIRM_MODAL.CANCEL_BUTTON;
+  if (cancelBtn) {
+    cancelBtn.textContent = cancelLabel || STRINGS.THEMED_CONFIRM_MODAL.CANCEL_BUTTON;
+    // `hideCancel`: a notice with one button, not a question.
+    cancelBtn.style.display = hideCancel ? 'none' : '';
+  }
   if (modal) modal.style.display = 'flex';
   return new Promise((resolve) => { pendingResolve = resolve; });
 }

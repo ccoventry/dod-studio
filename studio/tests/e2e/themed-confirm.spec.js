@@ -96,4 +96,14 @@ test.describe('themed_confirm details (#477)', () => {
     await expect(page.locator('#themed-confirm-details')).toBeHidden();
     await expect(page.locator('#themed-confirm-footer')).toBeHidden();
   });
+
+  test('a notice hides Cancel, and the next confirm shows it again', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-notice-btn').click();
+    await expect(page.locator('#themed-confirm-cancel-btn')).toBeHidden();
+    await page.locator('#themed-confirm-ok-btn').click();
+    await expect(page.locator('#result')).toHaveText('true');
+    await page.locator('#trigger-default-btn').click();
+    await expect(page.locator('#themed-confirm-cancel-btn')).toBeVisible();
+  });
 });

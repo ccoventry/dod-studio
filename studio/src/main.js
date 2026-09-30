@@ -1058,22 +1058,55 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
-  // Identical copies a scan skipped (#21). A copy the user picked by hand, or
-  // one of a queued demo whose own file is missing, is offered in that row's
-  // place: same file, so the row keeps its highlights, statuses and notes.
-  // Anything else (a folder scan's copies) is only named in a toast.
+  // Identical copies a scan skipped (#21), in two kinds:
+  // - Copies of a demo that was already queued. One the user picked by hand,
+  //   or one of a queued demo whose own file is missing, is offered in that
+  //   row's place: same file, so the row keeps its highlights, statuses and
+  //   notes. Several copies of one row: the shortest name is offered.
+  // - Copies of each other within this scan: the scan kept one (the shortest
+  //   name). Picked by hand, they're listed in a dialog; from a folder, a toast.
   async function offerIdenticalCopies(copies, pickedFiles) {
+    const nameOfRow = (d) => d.name || fileNameOf(d.path);
+    const byName = (a, b) => fileNameOf(a.demo.path).length - fileNameOf(b.demo.path).length
+      || fileNameOf(a.demo.path).localeCompare(fileNameOf(b.demo.path));
+    const ofQueued = copies.filter((c) => c.queued);
+    const ofEachOther = copies.filter((c) => !c.queued);
+
     const offered = [];
     const skipped = [];
-    copies.forEach((c) => {
-      const queued = currentScannedDemos.includes(c.sameAs);
-      if (queued && (pickedFiles || c.sameAs.missing) && !offered.some((o) => o.sameAs === c.sameAs)) {
-        offered.push(c);
+    [...ofQueued].sort(byName).forEach((c) => {
+      const entry = offered.find((o) => o.sameAs === c.sameAs);
+      if (entry) {
+        // Another copy of the same row: named on that row's entry.
+        entry.others.push(fileNameOf(c.demo.path));
+      } else if (pickedFiles || c.sameAs.missing) {
+        offered.push({ ...c, others: [] });
       } else {
         skipped.push(c);
       }
     });
-    const nameOfRow = (d) => d.name || fileNameOf(d.path);
+
+    if (ofEachOther.length > 0 && pickedFiles) {
+      // One entry per demo added, naming the copies that weren't.
+      const groups = new Map();
+      ofEachOther.forEach((c) => {
+        if (!groups.has(c.sameAs)) groups.set(c.sameAs, []);
+        groups.get(c.sameAs).push(fileNameOf(c.demo.path));
+      });
+      await themedConfirm(STRINGS.MAIN.PICKED_COPIES_MESSAGE, {
+        title: STRINGS.MAIN.PICKED_COPIES_TITLE,
+        confirmLabel: STRINGS.MAIN.PICKED_COPIES_OK,
+        hideCancel: true,
+        details: [...groups].map(([kept, names]) => ({
+          primary: nameOfRow(kept),
+          secondary: STRINGS.MAIN.pickedCopiesSkipped(names),
+          title: kept.path,
+        })),
+      });
+    } else {
+      skipped.push(...ofEachOther);
+    }
+
     if (skipped.length > 0) {
       showToast(STRINGS.MAIN.identicalCopiesToast(skipped.map((c) => [fileNameOf(c.demo.path), nameOfRow(c.sameAs)])), 'warning', 12000);
     }
@@ -1086,11 +1119,12 @@ window.addEventListener("DOMContentLoaded", async () => {
         primary: STRINGS.MAIN.relocateRenamed(nameOfRow(c.sameAs), fileNameOf(c.demo.path)),
         // The queued file hasn't moved, so not "now in": either the same
         // folder as it, or where the copy is.
-        secondary: c.sameAs.missing
+        secondary: (c.sameAs.missing
           ? STRINGS.MAIN.identicalCopyQueuedMissing(shortFolder(folderOf(c.demo.path)))
           : samePath(folderOf(c.demo.path), folderOf(c.sameAs.path))
             ? STRINGS.MAIN.IDENTICAL_COPY_SAME_FOLDER
-            : STRINGS.MAIN.identicalCopyFolder(shortFolder(folderOf(c.demo.path))),
+            : STRINGS.MAIN.identicalCopyFolder(shortFolder(folderOf(c.demo.path))))
+          + (c.others.length ? STRINGS.MAIN.identicalCopyOthers(c.others) : ''),
         title: c.demo.path,
       })),
       footer: STRINGS.MAIN.IDENTICAL_COPIES_QUESTION,
@@ -1548,10 +1582,13 @@ window.addEventListener("DOMContentLoaded", async () => {
       // reach here parsed.
       const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
       unparsedCopies.forEach((c) => {
-        const sameAs = currentScannedDemos.find((d) => samePath(d.path, c.same_as))
-          || newlyScanned.find((d) => samePath(d.path, c.same_as));
-        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs });
+        const sameAs = c.queued
+          ? currentScannedDemos.find((d) => samePath(d.path, c.same_as))
+          : newlyScanned.find((d) => samePath(d.path, c.same_as));
+        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs, queued: Boolean(c.queued) });
       });
+      // The frontend fallback's copies are all of queued demos.
+      copies.forEach((c) => { if (c.queued === undefined) c.queued = currentScannedDemos.includes(c.sameAs); });
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
