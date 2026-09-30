@@ -19,7 +19,7 @@ Plus thirteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
-  players, or injects one by hand. HLAE's `mirv_deathmsg` supports only
+  players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen
@@ -148,7 +148,8 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 ## Status
 
 The animation fix and all four `dodstudio_deathmsg` subcommands are live-proven
-against a running game. `dodstudio_ex_interp_max`'s mechanism is live-proven
+against a running game, except `block` by SteamID or `self` (#468), which is
+not yet. `dodstudio_ex_interp_max`'s mechanism is live-proven
 too -- the clamp visibly takes effect -- but no specific value is confirmed
 good yet; see `docs/goldsrc_ex_interp.md` §7. `dodstudio_objectives` is
 live-proven too: `offset`/`xoffset` reposition the icon row correctly, and

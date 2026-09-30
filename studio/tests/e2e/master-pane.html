@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for master_pane.js's missing-demo row (#21): just the queue
+  table and search box it queries. See tests/e2e/README.md for the general
+  shape. Three demos: one present, one missing with a found copy, one missing
+  with nothing found.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>master_pane.js test harness</title>
+</head>
+<body>
+  <input id="demo-search-input" />
+  <table><tbody id="master-demo-table-body"></tbody></table>
+  <div id="result"></div>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+
+    const runtime = { writable: true, configurable: true, enumerable: false };
+    const missing = (demo, foundAt) => {
+      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
+      Object.defineProperty(demo, 'foundAt', { ...runtime, value: foundAt });
+      return demo;
+    };
+    const demos = [
+      { name: 'here.dem', path: 'C:\\demos\\here.dem', streaks: [] },
+      missing({ name: 'moved.dem', path: 'C:\\demos\\moved.dem', streaks: [] }, 'C:\\demos\\sub\\moved.dem'),
+      missing({ name: 'gone.dem', path: 'C:\\demos\\gone.dem', streaks: [] }, null),
+    ];
+
+    const result = document.querySelector('#result');
+    initMasterPane(
+      null,
+      null,
+      (demo) => { result.textContent = `locate ${demo.name}`; },
+      (demo) => { result.textContent = `use ${demo.name}`; }
+    );
+    renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
