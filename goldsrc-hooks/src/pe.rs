@@ -176,6 +176,23 @@ struct ImageSectionHeader {
 
 const IMAGE_SCN_MEM_EXECUTE: u32 = 0x2000_0000;
 
+/// The module's `SizeOfImage`: every address from `base` up to `base` plus
+/// this is mapped.
+///
+/// Safety: `base` must point at a fully-mapped, valid PE image.
+pub unsafe fn image_size(base: *mut u8) -> Option<usize> {
+    unsafe {
+        let nt = nt_headers(base);
+        if (*nt).signature != 0x0000_4550 {
+            return None;
+        }
+        // SizeOfImage is at +56 of the optional header, so +54 of the bytes
+        // after `magic`.
+        let bytes = &(*nt).optional_header._skip_to_data_dirs;
+        Some(u32::from_le_bytes([bytes[54], bytes[55], bytes[56], bytes[57]]) as usize)
+    }
+}
+
 /// `(rva, length)` of the module's first executable section — the range worth
 /// searching for a code signature.
 ///
