@@ -271,17 +271,24 @@ impl std::fmt::Display for Player {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Player::Slot(slot) => write!(f, "{slot}"),
-            Player::SteamId(id) => f.write_str(&classic_steam_id(*id)),
+            Player::SteamId(id) => match classic_steam_id(*id) {
+                Some(classic) => f.write_str(&classic),
+                None => write!(f, "{id}"),
+            },
             Player::OwnPov => f.write_str("self"),
         }
     }
 }
 
 /// A SteamID64 in the `STEAM_0:Y:Z` form GoldSrc's own `status` prints, the
-/// one players and server admins recognise (#537).
-fn classic_steam_id(id: u64) -> String {
-    let account = id.wrapping_sub(STEAM_ID64_BASE);
-    format!("STEAM_0:{}:{}", account % 2, account / 2)
+/// one players and server admins recognise (#537). `None` for an id that
+/// isn't a player's own account, such as the HLTV proxy's: that form only
+/// exists for individual accounts, base + a 32-bit account number.
+fn classic_steam_id(id: u64) -> Option<String> {
+    let account = id
+        .checked_sub(STEAM_ID64_BASE)
+        .filter(|&a| a <= u64::from(u32::MAX))?;
+    Some(format!("STEAM_0:{}:{}", account % 2, account / 2))
 }
 
 /// One block-list entry for `status`: slots as `slot N`, SteamIDs in the
@@ -560,7 +567,10 @@ fn players() -> String {
         let id = if who.steam_id == 0 {
             "SteamID unknown (0)".to_string()
         } else {
-            format!("{} ({})", who.steam_id, classic_steam_id(who.steam_id))
+            match classic_steam_id(who.steam_id) {
+                Some(classic) => format!("{} ({classic})", who.steam_id),
+                None => format!("{} (not a player account)", who.steam_id),
+            }
         };
         let own = if who.is_own_pov { "  <- self" } else { "" };
         out.push_str(&format!("  {slot:>2}  {name}  {id}{own}\n"));
@@ -1632,6 +1642,22 @@ mod tests {
         assert_eq!(parse_player("pov"), None);
         assert_eq!(parse_player("12345"), None, "neither a slot nor a SteamID");
         assert_eq!(parse_player(""), None);
+    }
+
+    #[test]
+    fn only_player_accounts_get_the_classic_form() {
+        assert_eq!(
+            classic_steam_id(76_561_197_972_576_011).as_deref(),
+            Some("STEAM_0:1:6155141")
+        );
+        // The HLTV proxy's id from a real demo's `players` list: not an
+        // individual account, so no STEAM_0 form (#539 live test).
+        assert_eq!(classic_steam_id(90_071_996_842_377_220), None);
+        assert_eq!(classic_steam_id(12), None);
+        assert_eq!(
+            Player::SteamId(90_071_996_842_377_220).to_string(),
+            "90071996842377220"
+        );
     }
 
     #[test]
