@@ -143,10 +143,13 @@ pub type GetPlayerInfoFn = unsafe extern "C" fn(slot: i32, info: *mut HudPlayerI
 /// (pre-Anniversary +0xab70, 25th Anniversary +0x195620): an empty slot gets
 /// `name = null` and `thisplayer = 0` and nothing else. Otherwise every field
 /// is written, except `steam_id`, which is copied from the player's record
-/// **only while a demo is recording or playing back** and left untouched
-/// otherwise. The record's value is `_atoi64` of the userinfo `*sid` key,
-/// parsed alongside `name`, `topcolor` and `*hltv` on every userinfo update.
-/// So a caller must zero the struct first and treat 0 as "unknown".
+/// **only when the game is Counter-Strike or Condition Zero**: the two flags
+/// tested (PRE `hw.dll+0xac5f`, Anniversary `+0x1956e4`) are the ones the
+/// engine sets for `cstrike`/`czero` (their other readers test `cl_autobuy`,
+/// `cl_rebuy`, `czero`). In DoD it is never filled; a 2026-09-30 live check
+/// listed every player of an HLTV demo with 0. An earlier note here said the
+/// gate was demo playback, which was wrong. Callers zero the struct first and
+/// treat 0 as "unknown"; `deathmsg` reads `*sid` from the userinfo instead.
 #[repr(C)]
 pub struct HudPlayerInfo {
     pub name: *const c_char,

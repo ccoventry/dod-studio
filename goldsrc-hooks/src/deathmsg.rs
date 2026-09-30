@@ -379,6 +379,46 @@ fn is_hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
+/// Bytes of a player's userinfo string (`MAX_INFO_STRING`).
+const USERINFO_LEN: usize = 256;
+
+/// The SteamID in the userinfo stored just before a player's name.
+///
+/// The engine's player record (0x250 bytes, the same on both `hw.dll`
+/// builds) is `userid`, then `userinfo[256]`, then `name[32]`, and
+/// `pfnGetPlayerInfo` hands out a pointer to `name`. So the userinfo is the
+/// 256 bytes before it. It's only trusted when it really is this player's:
+/// its `name` key must equal the name. Otherwise 0.
+///
+/// Safety: `name` is the pointer `pfnGetPlayerInfo` returned, into the
+/// engine's static player array, whose earlier bytes are always mapped.
+unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
+    if name.is_null() {
+        return 0;
+    }
+    let userinfo =
+        unsafe { std::slice::from_raw_parts((name as *const u8).sub(USERINFO_LEN), USERINFO_LEN) };
+    let name = unsafe { CStr::from_ptr(name) }.to_bytes();
+    sid_from_userinfo(userinfo, name).unwrap_or(0)
+}
+
+/// `*sid` from a `\key\value\...` userinfo buffer, if its `name` is `name`.
+fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
+    let end = buffer.iter().position(|&b| b == 0).unwrap_or(buffer.len());
+    let text = buffer[..end].strip_prefix(b"\\")?;
+    let mut fields = text.split(|&b| b == b'\\');
+    let mut sid = None;
+    let mut name_ok = false;
+    while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
+        match key {
+            b"name" => name_ok = value == name,
+            b"*sid" => sid = std::str::from_utf8(value).ok()?.parse::<u64>().ok(),
+            _ => {}
+        }
+    }
+    sid.filter(|&id| name_ok && id != 0)
+}
+
 /// `players`: every occupied slot with the name and SteamID `block` would
 /// match against right now. For finding the id to block, and for checking
 /// that the engine hands SteamIDs over at all (0 means it didn't).
@@ -432,7 +472,13 @@ fn lookup(slot: i32, hltv: bool) -> Option<(String, Who)> {
     if info.name.is_null() {
         return None;
     }
-    who.steam_id = info.steam_id;
+    // Always 0 in DoD (see `engine::HudPlayerInfo`), so the SteamID comes
+    // from the player's own userinfo.
+    who.steam_id = if info.steam_id != 0 {
+        info.steam_id
+    } else {
+        unsafe { steam_id_from_record(info.name) }
+    };
     who.is_own_pov = !hltv && info.thisplayer != 0;
     let name = unsafe { CStr::from_ptr(info.name) }
         .to_string_lossy()
@@ -1364,6 +1410,34 @@ mod tests {
             };
             assert!(!list.blocks(&slot(1), &slot(2)));
         }
+    }
+
+    #[test]
+    fn the_steam_id_comes_from_the_matching_userinfo_only() {
+        // As recorded in wsod25_grp5_h1_hltv.dem.
+        let mut record = [0u8; USERINFO_LEN];
+        let info = b"\\model\\us-inf\\name\\dicE[: :]m00cat :D\\*sid\\76561197972576011\\*hltv\\0";
+        record[..info.len()].copy_from_slice(info);
+        assert_eq!(
+            sid_from_userinfo(&record, b"dicE[: :]m00cat :D"),
+            Some(76_561_197_972_576_011)
+        );
+        assert_eq!(
+            sid_from_userinfo(&record, b"someone else"),
+            None,
+            "not this player's"
+        );
+        assert_eq!(sid_from_userinfo(&[0u8; 16], b"x"), None, "empty");
+        assert_eq!(
+            sid_from_userinfo(b"\\name\\bot\\*sid\\0", b"bot"),
+            None,
+            "a bot's 0"
+        );
+        assert_eq!(
+            sid_from_userinfo(b"name\\bot", b"bot"),
+            None,
+            "not userinfo"
+        );
     }
 
     #[test]
