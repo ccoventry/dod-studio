@@ -1048,9 +1048,9 @@ export const STRINGS = {
     relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,
     LOCATE_DEMO_DIALOG_TITLE: 'Where is this demo now?',
     LOCATE_MISMATCH_TITLE: 'Different file',
-    locateMismatchMessage: (name) =>
-      `This file doesn't match the ${name} that was scanned (its size or start is different). Its highlights may not line up with it.\n\nUse it anyway?`,
-    LOCATE_MISMATCH_CONFIRM: 'Use it anyway',
+    locateMismatchMessage: (name, picked) =>
+      `${picked} isn't the ${name} that was scanned (its size or start is different), so this row's highlights won't line up with it.\n\nReplace the row with ${picked}? It's scanned fresh with its own highlights, and this row's statuses and notes are dropped.`,
+    LOCATE_MISMATCH_CONFIRM: 'Replace with this demo',
     locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
     missingDemosToast: (names) => {
       const shown = names.slice(0, 3).join(', ');
@@ -1065,6 +1065,12 @@ export const STRINGS = {
     USE_ALL_FOUND_COPIES: 'Use all found copies',
     foundCopiesGoneToast: (names) =>
       `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
+    // #21: demos whose file changed on disk after they were scanned.
+    CHANGED_DEMOS_TITLE: 'Demos have changed',
+    CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
+    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_RESCAN: 'Rescan',
+    RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,

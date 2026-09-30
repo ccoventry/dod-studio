@@ -1366,6 +1366,19 @@ fn demo_file_key(path: &Path) -> Option<String> {
         .map(|(size, hash)| format!("{size}-{hash:016x}"))
 }
 
+/// The demos whose file is still there but is no longer the one that was
+/// scanned: its key (size + first 64 KB) differs from the saved one. Their
+/// highlights are frame numbers in the old file, so they don't line up (#21).
+/// Missing files and demos with no saved key are left out.
+pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
+    demos
+        .iter()
+        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
+        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
+        .map(|d| d.path.clone())
+        .collect()
+}
+
 /// A project demo that is no longer at its saved path, and the file that
 /// looks like it moved there, if one was found (#21).
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2585,6 +2598,38 @@ mod tests {
                     .to_string_lossy()
                     .as_ref()
             )
+        );
+    }
+
+    #[test]
+    fn a_demo_replaced_in_place_is_changed_and_an_untouched_one_is_not() {
+        let scratch = Scratch::new("changed_demos");
+        let same = scratch.path().join("same.dem");
+        let replaced = scratch.path().join("replaced.dem");
+        std::fs::write(&same, b"HLDEMO the scanned file").unwrap();
+        std::fs::write(&replaced, b"HLDEMO the scanned file, too").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: replaced.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&replaced).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
+        assert_eq!(
+            changed_demos(&demos),
+            vec![replaced.to_string_lossy().into_owned()]
         );
     }
 

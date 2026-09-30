@@ -15,6 +15,7 @@ import {
   diagnoseExecutablePaths,
   launchObs,
   locateMissingDemos,
+  changedDemos,
   systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -1006,7 +1007,23 @@ window.addEventListener("DOMContentLoaded", async () => {
   async function pickedDemosPresent() {
     const picked = currentScannedDemos.filter((d) => (d.streaks || []).some((s) => s.selected === true));
     if (picked.length === 0) return true;
-    return (await checkMissingDemos(null, [], picked)) === 0;
+    if ((await checkMissingDemos(null, [], picked)) !== 0) return false;
+
+    // A file replaced in place (or pointed at by an older build's "Use it
+    // anyway") is at the right path but isn't the demo that was scanned:
+    // every highlight would record the wrong moment, and any past its end
+    // would leave the game stopped at the end of the demo.
+    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })));
+    if (changed.length === 0) return true;
+    const rescan = await themedConfirm(STRINGS.MAIN.CHANGED_DEMOS_MESSAGE, {
+      title: STRINGS.MAIN.CHANGED_DEMOS_TITLE,
+      confirmLabel: STRINGS.MAIN.CHANGED_DEMOS_RESCAN,
+      cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL_PLAIN,
+      details: changed.map((p) => ({ primary: fileNameOf(p), secondary: shortFolder(folderOf(p)), title: p })),
+      footer: STRINGS.MAIN.CHANGED_DEMOS_QUESTION,
+    });
+    if (rescan) await triggerAutoScan(changed);
+    return false;
   }
 
   // Uses the matches the load-time search found for demos left as missing:
@@ -1038,6 +1055,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     } catch (err) {
       console.error('Use found copy error:', err);
     }
+  }
+
+  // Takes a demo out of the queue and scans `newPath` in its place, with its
+  // own highlights: for a file that isn't the one that was scanned (#21).
+  async function replaceDemoWithScan(demo, newPath) {
+    replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo));
+    await triggerAutoScan([newPath]);
   }
 
   // Windows paths compare without case and either slash.
@@ -1093,11 +1117,15 @@ window.addEventListener("DOMContentLoaded", async () => {
         const parent = newPath.replace(/[\\/][^\\/]*$/, '');
         const [match] = await locateMissingDemos([{ path: demo.path, file_key: demo.file_key }], [parent]);
         if (match && !samePath(match.candidate, newPath)) {
-          const ok = await themedConfirm(STRINGS.MAIN.locateMismatchMessage(demo.name || demo.path), {
+          // A different file: this row's highlights are frame numbers in the
+          // old one and won't line up, so the only useful thing is to scan it
+          // fresh in this row's place.
+          const ok = await themedConfirm(STRINGS.MAIN.locateMismatchMessage(demo.name || fileNameOf(demo.path), fileNameOf(newPath)), {
             title: STRINGS.MAIN.LOCATE_MISMATCH_TITLE,
             confirmLabel: STRINGS.MAIN.LOCATE_MISMATCH_CONFIRM,
           });
-          if (!ok) return;
+          if (ok) await replaceDemoWithScan(demo, newPath);
+          return;
         }
       }
       relocateDemo(demo, newPath);

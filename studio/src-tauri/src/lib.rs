@@ -106,6 +106,15 @@ async fn locate_missing_demos(
     .await
 }
 
+/// Which demos are no longer the file they were scanned from (#21).
+#[tauri::command]
+async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(capture_manager::changed_demos(&demos))
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn load_project_session(path: String) -> Result<String, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -631,6 +640,7 @@ pub fn run() {
             save_project_session,
             load_project_session,
             locate_missing_demos,
+            changed_demos,
             system_memory_bytes,
             run_demo_audit,
             delete_audit_files,
