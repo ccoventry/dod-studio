@@ -161,4 +161,25 @@ export const STRINGS = {
     CHAT_TEAM_BADGE: '(Team)',
     CHAT_SENDER_UNKNOWN: 'Unknown',
   },
+
+  // Web-only: several demos picked at once (issue #102). Not in the
+  // desktop app's strings.js — there is no batch list there.
+  BATCH: {
+    batchSummary: (total, done, failed) => {
+      const parts = [`${done} of ${total} analyzed`];
+      if (failed) parts.push(`${failed} failed`);
+      return parts.join(', ');
+    },
+    STATUS_WAITING: 'Waiting',
+    statusAnalyzingPct: (pct) => `Analyzing… ${pct}%`,
+    STATUS_DONE: 'Done',
+    statusFailed: (err) => `Failed: ${err}`,
+    VIEW_BUTTON: 'View',
+    VIEW_BUTTON_TITLE: 'Show this demo\'s report below',
+    DOWNLOAD_ONE_BUTTON: 'JSON',
+    DOWNLOAD_ONE_TITLE: 'Download this demo\'s results as a JSON file',
+    DOWNLOAD_ALL_BUTTON: 'Download all (JSON)',
+    DOWNLOAD_ALL_TITLE: 'Download every demo\'s results as one JSON file (a list, one entry per demo)',
+    NO_DEMO_FILES: 'None of those files are .dem demos.',
+  },
 };

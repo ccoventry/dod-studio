@@ -1,4 +1,5 @@
-//! The `dodstudio_*` console surface: eleven cvars and eight commands.
+//! The `dodstudio_*` console surface: its cvars and commands (`install`
+//! registers them all).
 //!
 //! ## Why cvars rather than commands
 //!
@@ -514,6 +515,10 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Runs any console commands Studio has sent over the pipe.
+    crate::remote::poll();
+    // Only until playdemo is wrapped, normally already done at install.
+    crate::demo_reload::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
@@ -609,6 +614,13 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Always shown (#430): the one fact that decides how big HD textures can
+    // get before the game runs out of memory.
+    lines.push(if crate::pe::process_is_large_address_aware() {
+        "address space: 4 GB (hl.exe is large-address-aware)".to_string()
+    } else {
+        "address space: 2 GB (hl.exe isn't large-address-aware; very large HD textures can run it out)".to_string()
+    });
     // Gated like the two fixes above rather than always shown like the
     // suppression cvars: logging is off by default and a permanent "logging
     // nothing" line would be noise in the overwhelmingly common case.
@@ -919,7 +931,7 @@ unsafe extern "C" fn cmd_spectator_crosshair() {
 /// `dodstudio_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
-/// value cannot carry, and there are thirteen of them -- thirteen cvars would
+/// value cannot carry, and there is one per element -- a cvar for each would
 /// bury everything else in the console's type-ahead.
 unsafe extern "C" fn cmd_hudelement() {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -1217,7 +1229,7 @@ unsafe extern "C" fn cmd_gunshot_attenuation() {
     }
 
     console_print(&format!(
-        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <0.05..0.79>  (lower carries further; the game's own default is 0.8)\n",
+        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <value above 0 and below 0.8>  (lower carries further; the game's own default is 0.8)\n",
         sound_fix::carry_attenuation()
     ));
 }
@@ -1308,6 +1320,8 @@ pub fn install() {
     );
     add_command(HUDELEMENT_NAME, cmd_hudelement);
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
+    add_command(crate::demo_reload::NAME, crate::demo_reload::command);
+    crate::demo_reload::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
@@ -1443,10 +1457,10 @@ mod tests {
     /// returning an empty reply that reads as a broken command.
     #[test]
     fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
-        // anim_fix::LEVEL is also mutated by anim_fix.rs's own tests, and
+        // anim_fix::LEVEL is also mutated by anim_fix's own tests, and
         // cargo runs a crate's tests in parallel by default -- without this,
         // one of those can flip LEVEL mid-assertion here (issue #321).
-        // anim_fix.rs's tests already take the same lock for the same
+        // anim_fix's tests already take the same lock for the same
         // reason; sound_fix::ENABLED has no other test touching it, so it
         // does not need one of its own.
         let _statics = anim_fix::tests::lock_statics();

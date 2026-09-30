@@ -1,8 +1,9 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses } from './ipc_bridge.js';
+import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { showToast } from './toast.js';
-import { isRangeModified as isKillRangeModified } from './take_index.js';
+import { ensureSteamReady } from './steam_guard.js';
+import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
 
@@ -221,6 +222,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The game is already open: if DoD Studio started it, its hook DLL takes
+  // console commands, so the preview goes straight to it (#413). Resolves true
+  // when it did; false leaves the caller to show the "already running" prompt.
+  async function sendPreviewToOpenGame(hlaePath, hlPath, highlights) {
+    btnLaunchPreview.disabled = true;
+    const originalLabel = btnLaunchPreview.textContent;
+    btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
+    const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    try {
+      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      if (sent) {
+        showToast(STRINGS.HIGHLIGHTS.sentToRunningGame(sent), 'success');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // Already toasted by ipc_bridge.js; the prompt still offers a way on.
+      return false;
+    } finally {
+      btnLaunchPreview.textContent = originalLabel;
+      updatePreviewButtonStates();
+    }
+  }
+
   if (btnLaunchPreview) {
     btnLaunchPreview.addEventListener('click', async () => {
       const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
@@ -241,10 +266,12 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (engineAlreadyRunning) {
+        if (await sendPreviewToOpenGame(hlaePath, hlPath, highlights)) return;
         requestProcessGuardedLaunch(() => performLaunchPreview(hlaePath, hlPath, highlights));
         return;
       }
 
+      if (!(await ensureSteamReady())) return;
       await performLaunchPreview(hlaePath, hlPath, highlights);
     });
   }
@@ -494,6 +521,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
       ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop())}</span>`
       : '';
 
+    const byHandMark = streak.statusByHand
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
+      : '';
+
     tr.innerHTML = `
       <td style="padding: 8px;">${rowNum}</td>
       <td style="padding: 8px;">
@@ -517,7 +548,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
             `<option value="${s}" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
           ).join('')}
-        </select>${mergedBadge}
+        </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
         <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
@@ -566,11 +597,25 @@ export function renderDetailView(demo, selectedDemoIdx) {
     }
 
     const statusSelect = tr.querySelector('.streak-status-select');
-    statusSelect.addEventListener('change', (e) => {
-      streak.status = e.target.value;
-      statusSelect.style.color = statusColors[e.target.value] || '#888';
+    // Free in both directions (#105, D9); the mark and the Undo toast are
+    // what keep a hand-set status honest.
+    const afterStatusChange = () => {
+      renderDetailView(currentDemo, currentDemoIdx);
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
+    };
+    statusSelect.addEventListener('change', (e) => {
+      const previous = setStatusByHand(streak, e.target.value);
+      afterStatusChange();
+      showToast(STRINGS.HIGHLIGHTS.statusSetToast(e.target.value), 'info', 6000, {
+        action: {
+          label: STRINGS.HIGHLIGHTS.UNDO,
+          onClick: () => {
+            restoreStatus(streak, previous);
+            afterStatusChange();
+          },
+        },
+      });
     });
 
     const notesInput = tr.querySelector('.streak-notes-input');
