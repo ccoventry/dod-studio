@@ -935,6 +935,13 @@ window.addEventListener("DOMContentLoaded", async () => {
       return 0;
     }
 
+    // A match that is already another row's file (an identical copy) isn't
+    // offered: two rows on one file would share its take records.
+    missing.forEach((m) => {
+      if (m.candidate && currentScannedDemos.some((d) => d.path !== m.path && samePath(d.path, m.candidate))) {
+        m.candidate = null;
+      }
+    });
     const found = missing.filter((m) => m.candidate);
     const relocated = new Set();
     if (found.length > 0) {
@@ -1033,10 +1040,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // Windows paths compare without case and either slash.
+  function samePath(a, b) {
+    const norm = (p) => p.replace(/\//g, '\\').toLowerCase();
+    return Boolean(a && b) && norm(a) === norm(b);
+  }
+
   // Points a demo, its highlights and the take index at a new file (#21).
   function relocateDemo(demo, newPath) {
     const oldPath = demo.path;
     demo.path = newPath;
+    // The queue shows the file's name; follow a rename (or a different file).
+    if (!demo.name || demo.name === fileNameOf(oldPath)) demo.name = fileNameOf(newPath);
     if (demo.missing) demo.missing = false;
     if (demo.foundAt) demo.foundAt = null;
     (demo.streaks || []).forEach((s) => {
@@ -1067,11 +1082,17 @@ window.addEventListener("DOMContentLoaded", async () => {
       });
       const newPath = Array.isArray(picked) ? picked[0] : picked;
       if (!newPath) return;
+      // Another row's own file: two rows on one file would share its take
+      // records and capture one demo's highlights from the other's footage.
+      const taken = currentScannedDemos.find((d) => d !== demo && samePath(d.path, newPath));
+      if (taken) {
+        showToast(STRINGS.MAIN.locateAlreadyQueued(taken.name || fileNameOf(newPath)), 'error', 10000);
+        return;
+      }
       if (demo.file_key) {
         const parent = newPath.replace(/[\\/][^\\/]*$/, '');
         const [match] = await locateMissingDemos([{ path: demo.path, file_key: demo.file_key }], [parent]);
-        const same = (a, b) => a && b && a.replace(/\//g, '\\').toLowerCase() === b.replace(/\//g, '\\').toLowerCase();
-        if (match && !same(match.candidate, newPath)) {
+        if (match && !samePath(match.candidate, newPath)) {
           const ok = await themedConfirm(STRINGS.MAIN.locateMismatchMessage(demo.name || demo.path), {
             title: STRINGS.MAIN.LOCATE_MISMATCH_TITLE,
             confirmLabel: STRINGS.MAIN.LOCATE_MISMATCH_CONFIRM,

@@ -1051,6 +1051,7 @@ export const STRINGS = {
     locateMismatchMessage: (name) =>
       `This file doesn't match the ${name} that was scanned (its size or start is different). Its highlights may not line up with it.\n\nUse it anyway?`,
     LOCATE_MISMATCH_CONFIRM: 'Use it anyway',
+    locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
     missingDemosToast: (names) => {
       const shown = names.slice(0, 3).join(', ');
       const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
