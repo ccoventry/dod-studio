@@ -419,6 +419,28 @@ fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
     sid.filter(|&id| name_ok && id != 0)
 }
 
+/// Puts `STEAM_0:1:6155141` back together. GoldSrc's console tokenizer makes
+/// `:` a token of its own, so typed unquoted it arrives as `STEAM_0`, `:`,
+/// `1`, `:`, `6155141` (seen live 2026-09-30). Any token that is `:`, or
+/// follows one, is glued onto the one before it.
+fn rejoin_colons(tokens: &[String]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    let mut glue_next = false;
+    for token in tokens {
+        match out.last_mut() {
+            Some(last) if token == ":" => {
+                last.push(':');
+                glue_next = true;
+                continue;
+            }
+            Some(last) if glue_next => last.push_str(token),
+            _ => out.push(token.clone()),
+        }
+        glue_next = false;
+    }
+    out
+}
+
 /// `players`: every occupied slot with the name and SteamID `block` would
 /// match against right now. For finding the id to block, and for checking
 /// that the engine hands SteamIDs over at all (0 means it didn't).
@@ -1161,7 +1183,7 @@ fn dispatch(argv: &[String]) -> String {
             }
             let mut players = Vec::new();
             let mut allow_list = false;
-            for token in rest {
+            for token in &rejoin_colons(rest) {
                 let (negated, text) = match token.strip_prefix('!') {
                     Some(d) => (true, d),
                     None => (false, token.as_str()),
@@ -1437,6 +1459,25 @@ mod tests {
             sid_from_userinfo(b"name\\bot", b"bot"),
             None,
             "not userinfo"
+        );
+    }
+
+    #[test]
+    fn a_classic_steam_id_split_at_its_colons_is_put_back_together() {
+        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            rejoin_colons(&argv(&["!STEAM_0", ":", "1", ":", "6155141", "13"])),
+            argv(&["!STEAM_0:1:6155141", "13"])
+        );
+        assert_eq!(
+            rejoin_colons(&argv(&["!self", "!STEAM_0:1:6155141"])),
+            argv(&["!self", "!STEAM_0:1:6155141"]),
+            "quoted: already whole"
+        );
+        assert_eq!(
+            rejoin_colons(&argv(&[":", "3"])),
+            argv(&[":", "3"]),
+            "nothing to glue onto"
         );
     }
 
