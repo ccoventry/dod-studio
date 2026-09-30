@@ -33,6 +33,7 @@ fn main() {
             } => {
                 run_analyze_subcommand(demo_paths, output_format);
             }
+            Commands::Stats { demo_paths } => run_stats_subcommand(demo_paths),
             Commands::PatchStreak {
                 input,
                 output,
@@ -96,6 +97,103 @@ fn run_analyze_subcommand(demo_paths: Vec<PathBuf>, output_format: OutputFormat)
             println!("{output}");
         }),
     };
+}
+
+/// One read-only stats document per demo, as JSON (#192): the columns a
+/// league scoreboard can take from a demo, keyed by the player's global id
+/// (a SteamID64 when the demo carries one).
+#[cfg(not(target_arch = "wasm32"))]
+fn run_stats_subcommand(demo_paths: Vec<PathBuf>) {
+    let mut rows = vec![];
+    for p in &demo_paths {
+        match run_analyzer(p) {
+            Ok((file, analysis)) => rows.push(stats_json(&file, &analysis)),
+            Err(e) => eprintln!("Error analyzing {}: {}", p.display(), e),
+        }
+    }
+    println!("{}", Json(json!(rows)));
+}
+
+/// `1` or `2` from a `_h1`/`_h2` part of a demo's file name, the league's
+/// naming convention. Nothing in the recording itself is checked.
+#[cfg(not(target_arch = "wasm32"))]
+fn half_from_file_name(name: &str) -> Option<u8> {
+    let stem = name.rsplit_once('.').map_or(name, |(stem, _)| stem);
+    stem.to_lowercase()
+        .split(['_', '-', ' '])
+        .find_map(|part| match part {
+            "h1" => Some(1),
+            "h2" => Some(2),
+            _ => None,
+        })
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
+    let state = &analysis.state;
+    let team_name = |team: &Team| format!("{team:?}").to_lowercase();
+
+    let players = state
+        .players
+        .iter()
+        .map(|player| {
+            json!({
+                "id": player.id.to_string(),
+                "steam_id": SteamId::try_from(&player.id).ok().map(|s| s.to_string()),
+                "name": player.name,
+                "team": player.team.as_ref().map(team_name),
+                "score": player.stats.0,
+                "kills": player.stats.1,
+                "deaths": player.stats.2,
+                "teamkills": player.teamkills,
+                "suicides": player.suicides,
+                "obj_points": player.obj_points,
+                "cap_credits": player.cap_credits,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let captures = state
+        .objectives
+        .captures
+        .iter()
+        .map(|capture| {
+            json!({
+                "time": capture.time.real_offset.as_secs_f32(),
+                "flag": capture.flag_name,
+                "team": team_name(&capture.team),
+                "cappers": capture.cappers().map(|id| id.to_string()).collect::<Vec<_>>(),
+                "previous_owner": capture.previous_owner.as_ref().map(team_name),
+                "break": capture.is_break(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    json!({
+        "file": file.name,
+        "path": file.path,
+        "map": analysis.demo_info.map_name,
+        "demo_type": analysis.demo_info.demo_type,
+        "half": half_from_file_name(&file.name),
+        "match_start_witnessed": state.match_start_witnessed,
+        "started_late": state.started_late,
+        "ended_early": state.ended_early,
+        "teams": {
+            "allies": if state.allies_are_british {
+                state.team_scores.get_team_score(Team::British)
+            } else {
+                state.team_scores.get_team_score(Team::Allies)
+            },
+            "axis": state.team_scores.get_team_score(Team::Axis),
+        },
+        // A block is credited to the team that stopped the capture.
+        "cap_blocks": {
+            "allies": state.objectives.blocked_attempts(&Team::Axis),
+            "axis": state.objectives.blocked_attempts(&Team::Allies),
+        },
+        "players": players,
+        "captures": captures,
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -250,6 +348,13 @@ enum Commands {
         /// The kind of string output to produce from an analysis
         #[arg(long, value_enum, default_value_t = OutputFormat::Markdown)]
         output_format: OutputFormat,
+    },
+    /// Print league stats per demo as JSON: kills, deaths, teamkills,
+    /// suicides, objective points, cap credits, captures and cap blocks.
+    /// Reads the demos only.
+    Stats {
+        /// List of paths to demo files
+        demo_paths: Vec<PathBuf>,
     },
     /// Export patched demo capturing player killstreaks
     PatchStreak {
@@ -707,6 +812,29 @@ impl Display for Markdown {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::half_from_file_name;
+
+    #[test]
+    fn half_comes_from_the_file_name() {
+        assert_eq!(
+            half_from_file_name("ktps8w1-dyelife_soul_lenn_h1.dem"),
+            Some(1)
+        );
+        assert_eq!(
+            half_from_file_name("ktps9qf-dice_clinic_m1_armory_h2_hltv.dem"),
+            Some(2)
+        );
+        assert_eq!(
+            half_from_file_name("ktps8w8-stealth_ih_saints_h1_p2.dem"),
+            Some(1)
+        );
+        assert_eq!(half_from_file_name("k4-ktps9w3-ih-anzio-axis.dem"), None);
+        assert_eq!(half_from_file_name("solifotw-greetz1.dem"), None);
     }
 }
 

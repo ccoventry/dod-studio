@@ -91,6 +91,30 @@ async fn save_project_session(path: String, contents: String) -> Result<(), Stri
     .await
 }
 
+/// Which of a loaded project's demos are missing, and where each one moved,
+/// if a file with the same key turns up in `search_dirs` (#21).
+#[tauri::command]
+async fn locate_missing_demos(
+    demos: Vec<capture_manager::KnownDemo>,
+    search_dirs: Vec<String>,
+) -> Result<Vec<capture_manager::MissingDemo>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let dirs: Vec<std::path::PathBuf> =
+            search_dirs.iter().map(std::path::PathBuf::from).collect();
+        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+    }))
+    .await
+}
+
+/// Which demos are no longer the file they were scanned from (#21).
+#[tauri::command]
+async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(capture_manager::changed_demos(&demos))
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn load_project_session(path: String) -> Result<String, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
@@ -200,7 +224,6 @@ async fn scan_directory(
 #[tauri::command]
 async fn system_memory_bytes() -> Result<u64, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
-        use sysinfo::SystemExt;
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
         Ok(sys.total_memory())
@@ -615,6 +638,8 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            locate_missing_demos,
+            changed_demos,
             system_memory_bytes,
             run_demo_audit,
             delete_audit_files,
