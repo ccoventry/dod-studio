@@ -86,10 +86,12 @@ A `block` id is any of:
 
 - **A slot number**, as before. It only holds for one demo, because the same
   player gets a different slot in every demo.
-- **A SteamID**, either the 17-digit SteamID64 (`76561197977930126`) or
-  `STEAM_0:0:8832199`. It is matched against each player's userinfo `*sid` at
-  every death notice, so one command works across a whole batch of demos and
-  survives reconnects. The engine reports `*sid` only during demo playback.
+- **A SteamID**: the 17-digit SteamID64 (`76561197977930126`),
+  `STEAM_0:0:8832199`, or SteamID3 `[U:1:17664398]`. Paste it as is: the
+  console splits it at each `:`, and the hook joins it back. It is matched
+  against each player's userinfo `*sid` at every death notice, so one command
+  works across a whole batch of demos and survives reconnects.
+  `dodstudio_deathmsg players` lists every player's slot and SteamID.
 - **`self`**: the recording player in a POV demo. An HLTV demo has no
   recording player, so there `self` matches nobody, and the console says so
   once.

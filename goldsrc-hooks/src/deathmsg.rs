@@ -281,10 +281,19 @@ impl std::fmt::Display for Player {
 /// account's SteamID64 is this plus its account number.
 const STEAM_ID64_BASE: u64 = 76_561_197_960_265_728;
 
-/// A SteamID in either form a user is likely to paste: the 17-digit
-/// SteamID64, or `STEAM_X:Y:Z` (= base + 2Z + Y). X, the universe, is 0 or 1
-/// depending on the engine that printed it and does not change the account.
+/// A SteamID in any form a user is likely to paste: the 17-digit SteamID64,
+/// `STEAM_X:Y:Z` (= base + 2Z + Y; X, the universe, is 0 or 1 depending on
+/// the engine that printed it and does not change the account), or the newer
+/// SteamID3 `[U:1:N]` (= base + N), with or without its brackets.
 fn parse_steam_id(text: &str) -> Option<u64> {
+    let bare = text
+        .strip_prefix('[')
+        .and_then(|t| t.strip_suffix(']'))
+        .unwrap_or(text);
+    if bare.len() > 4 && bare[..4].eq_ignore_ascii_case("U:1:") {
+        let n: u64 = bare[4..].parse().ok()?;
+        return n.checked_add(STEAM_ID64_BASE);
+    }
     if text.len() >= 6 && text[..6].eq_ignore_ascii_case("STEAM_") {
         let mut parts = text[6..].split(':');
         let (Some(universe), Some(y), Some(z), None) =
@@ -1043,7 +1052,7 @@ fn usage() -> String {
          \x20 {COMMAND} offset default      hand y back to the game\n\
          \x20 {COMMAND} block <id>...       hide frags involving these players\n\
          \x20 {COMMAND} block !<id>...      hide everything EXCEPT these players\n\
-         \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y),\n\
+         \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y, [U:1:n]),\n\
          \x20                               or self (the recording player; nobody in HLTV)\n\
          \x20 {COMMAND} block clear         stop hiding anything\n\
          \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
@@ -1489,6 +1498,16 @@ mod tests {
         assert_eq!(parse_steam_id("STEAM_0:1:8832199"), Some(ME + 1));
         assert_eq!(parse_steam_id("STEAM_0:2:8832199"), None);
         assert_eq!(parse_steam_id("STEAM_0:0"), None);
+        // SteamID3: account number 17664398 = 2 * 8832199.
+        assert_eq!(parse_steam_id("[U:1:17664398]"), Some(ME));
+        assert_eq!(parse_steam_id("U:1:17664398"), Some(ME));
+        assert_eq!(parse_steam_id("[u:1:17664398]"), Some(ME));
+        assert_eq!(parse_steam_id("[U:1:]"), None);
+        assert_eq!(
+            parse_steam_id("[G:1:17664398]"),
+            None,
+            "a group, not a user"
+        );
         assert_eq!(parse_steam_id("STEAM_0:0:1:2"), None);
         assert_eq!(parse_steam_id("7656119797793012"), None, "16 digits");
         assert_eq!(parse_steam_id("12"), None);
