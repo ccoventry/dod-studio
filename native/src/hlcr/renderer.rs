@@ -1076,6 +1076,7 @@ mod tests {
             date: String::new(),
             video_file: None,
             alpha_folder: None,
+            clip_name: None,
         }
     }
 
