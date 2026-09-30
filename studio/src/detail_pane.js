@@ -7,6 +7,7 @@ import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus 
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { statusColor as colorOfStatus } from './status_colors.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -495,15 +496,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // (e.g. "Rifle (+0:03) Rifle" — first kill weapon + gap + weapon chain).
     const timelineText = streak.timeline_string || STRINGS.HIGHLIGHTS.fallbackKillCount(streak.kill_count);
 
-    // Status badge colours matching HighlightStatus enum
-    const statusColors = {
-      Pending: '#888',
-      Captured: '#4caf50',
-      Rendered: '#2196f3',
-      None: '#555',
-    };
+    // Shared with the Master Demo Queue's columns (status_colors.js, #527).
     const statusLabel = streak.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT;
-    const statusColor = statusColors[statusLabel] || '#888';
+    const statusColor = colorOfStatus(statusLabel);
 
     const maxKillIdx = Math.max((streak.kills || []).length - 1, 0);
     const isRangeModified = isKillRangeModified(streak);
@@ -541,7 +536,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
-            `<option value="${s}" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
+            // Each option in its own colour, not the selected one's (#527).
+            `<option value="${s}" style="color: ${colorOfStatus(s)};" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
           ).join('')}
         </select>${byHandMark}${mergedBadge}
       </td>
