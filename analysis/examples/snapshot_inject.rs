@@ -523,6 +523,7 @@ fn main() {
                             sequence_info,
                             message_length: 0,
                             messages: MessageData::Parsed(msgs),
+                            source_span: None,
                         },
                     ))),
                 }
