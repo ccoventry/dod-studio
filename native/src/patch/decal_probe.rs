@@ -4,7 +4,7 @@
 // decal.
 //
 // ── Why it matters ───────────────────────────────────────────────────────────
-// The ring sweep in `decal_strip.rs` can only place flush decals at positions
+// The ring sweep in `decal_strip` can only place flush decals at positions
 // the demo hands it — real decal positions it harvests, or floor points under
 // the player's own path. On a 20-minute match demo that yields ~30 usable
 // spots against the 68 a 256-slot ring needs, and relaxing the camera filters
