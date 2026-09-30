@@ -43,6 +43,7 @@ import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
 import { fileNameOf, folderOf, shortFolder } from './path_display.js';
+import { splitIdenticalCopies } from './demo_copies.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -1493,7 +1494,13 @@ window.addEventListener("DOMContentLoaded", async () => {
       const known = currentScannedDemos
         .filter((d) => d.file_key)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const { demos: scanned, unchanged } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      // An identical copy under another name would be a second row for the
+      // same demo, capturing every highlight twice (#21).
+      const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
+      if (copies.length > 0) {
+        showToast(STRINGS.MAIN.identicalCopiesToast(copies.map((c) => [fileNameOf(c.demo.path), c.sameAs.name || fileNameOf(c.sameAs.path)])), 'warning', 12000);
+      }
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of

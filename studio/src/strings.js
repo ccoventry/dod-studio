@@ -1065,6 +1065,12 @@ export const STRINGS = {
     USE_ALL_FOUND_COPIES: 'Use all found copies',
     foundCopiesGoneToast: (names) =>
       `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
+    // #21: a scanned demo that is an identical copy of one already queued.
+    identicalCopiesToast: (pairs) => {
+      const shown = pairs.slice(0, 3).map(([copy, original]) => `${copy} (same as ${original})`).join(', ');
+      const more = pairs.length > 3 ? ` and ${pairs.length - 3} more` : '';
+      return `Skipped ${pairs.length} identical cop${pairs.length === 1 ? 'y' : 'ies'} of a demo already in the queue: ${shown}${more}.`;
+    },
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
