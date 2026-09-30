@@ -17,9 +17,9 @@
 
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 /// Prefix `build_safe_echos` puts on every marker.
@@ -102,6 +102,59 @@ pub struct Marker {
     pub next_clip_progress: Option<(u32, u32, u32, u32)>,
     /// The text after the tag, for logging.
     pub label: String,
+    /// True when it came over the game's events pipe (`pipe_tail`) rather
+    /// than from `qconsole.log`.
+    pub via_pipe: bool,
+}
+
+/// Which source's markers go on to the capture loop (#434).
+///
+/// Both carry the same lines in the same order: the hook forwards every
+/// tagged `echo`, and the log holds every one the engine printed. The log is
+/// the source until the events pipe connects; from then on the pipe is, and
+/// the log's markers are dropped. The pipe replays everything since the game
+/// started, so its first `log_delivered` markers are ones the log already
+/// sent, and are skipped.
+#[derive(Default)]
+pub struct MarkerGate {
+    inner: Mutex<GateState>,
+}
+
+#[derive(Default)]
+struct GateState {
+    pipe_active: bool,
+    log_delivered: usize,
+}
+
+impl MarkerGate {
+    /// Whether a marker read from the log goes on, counting it if it does.
+    pub fn admit_from_log(&self) -> bool {
+        let Ok(mut state) = self.inner.lock() else {
+            return true;
+        };
+        if state.pipe_active {
+            return false;
+        }
+        state.log_delivered += 1;
+        true
+    }
+
+    /// Hands the stream to the pipe. Returns how many of the pipe's first
+    /// markers the log already delivered (0 on a reconnect).
+    pub fn switch_to_pipe(&self) -> usize {
+        let Ok(mut state) = self.inner.lock() else {
+            return 0;
+        };
+        if state.pipe_active {
+            return 0;
+        }
+        state.pipe_active = true;
+        state.log_delivered
+    }
+
+    pub fn pipe_active(&self) -> bool {
+        self.inner.lock().map(|s| s.pipe_active).unwrap_or(false)
+    }
 }
 
 /// Tails `qconsole.log` and sends every `[dod-studio]` marker onward.
@@ -182,9 +235,15 @@ impl LogTailer {
     ///
     /// Returns when cancelled or when the receiver hangs up. Intended to own a
     /// thread of its own; `capture_engine` reads the channel.
-    pub fn run(mut self, tx: Sender<Marker>, cancel: Arc<AtomicBool>) {
+    ///
+    /// Once `gate` hands the stream to the events pipe, markers are still read
+    /// (so the offset keeps up) but no longer sent.
+    pub fn run(mut self, tx: Sender<Marker>, cancel: Arc<AtomicBool>, gate: Arc<MarkerGate>) {
         while !cancel.load(Ordering::Relaxed) {
             for marker in self.poll() {
+                if !gate.admit_from_log() {
+                    continue;
+                }
                 if tx.send(marker).is_err() {
                     return;
                 }
@@ -194,7 +253,7 @@ impl LogTailer {
     }
 }
 
-fn parse_marker(line: &str) -> Option<Marker> {
+pub(crate) fn parse_marker(line: &str) -> Option<Marker> {
     let line = line.trim_end_matches('\r').trim();
     let (_, rest) = line.split_once(LOG_TAG)?;
     let label = rest.trim().to_string();
@@ -216,6 +275,7 @@ fn parse_marker(line: &str) -> Option<Marker> {
         kind,
         tick: parse_tick(&label),
         label,
+        via_pipe: false,
     })
 }
 
