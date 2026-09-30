@@ -7,6 +7,7 @@ import { logFrontendEvent } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { makeClearable } from './clearable_input.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -97,6 +98,7 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
       currentSearchTerm = (e.target.value || '').toLowerCase().trim();
       renderMasterList(currentDemos, null, currentOnSelectDemo);
     });
+    makeClearable(searchInput, STRINGS.WORKSPACE.SEARCH_CLEAR_TITLE);
   }
 
   const selectAllCb = document.querySelector('#master-select-all-cb');
