@@ -944,19 +944,12 @@ pub fn spawn_capture_engine(
                         || obs_batch_complete_seen
                         || pipe_batch_complete_seen)
                 {
-                    let via = if pipe_batch_complete_seen && !exit_trigger.exists() {
-                        "BATCH_COMPLETE from the game events pipe".to_string()
-                    } else if obs_batch_complete_seen && !exit_trigger.exists() {
-                        // The common OBS-mode case: caught it off the marker,
-                        // ahead of exit_trigger ever needing to be written.
-                        "BATCH_COMPLETE marker".to_string()
-                    } else {
-                        format!(
-                            "done marker: {}, exit trigger: {}",
-                            dummy_path.exists(),
-                            exit_trigger.exists()
-                        )
-                    };
+                    let via = completion_source(
+                        pipe_batch_complete_seen,
+                        obs_batch_complete_seen,
+                        dummy_path.exists(),
+                        exit_trigger.exists(),
+                    );
                     log_markdown(&format!(
                         "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
                         start_time.elapsed().as_secs_f32(),
@@ -1105,8 +1098,47 @@ pub fn spawn_capture_engine(
         .unwrap();
 }
 
+/// How the end of a batch was noticed, for the "Batch complete" log line.
+///
+/// The events pipe's `BATCH_COMPLETE` is named whenever it arrived (#434).
+/// Outside OBS mode the capture loop checks only every 500 ms, and the
+/// exit-trigger folder appears a few frames after the marker, so both are
+/// usually there by the same check; naming the folder then hid that the pipe
+/// had already delivered.
+fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool) -> String {
+    if pipe_seen {
+        "BATCH_COMPLETE from the game events pipe".to_string()
+    } else if obs_seen && !trigger {
+        // The common OBS-mode case: caught it off the marker, ahead of
+        // exit_trigger ever needing to be written.
+        "BATCH_COMPLETE marker".to_string()
+    } else {
+        format!("done marker: {dummy}, exit trigger: {trigger}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::completion_source;
+
+    #[test]
+    fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {
+        // Marker and exit-trigger folder both there by the same check.
+        assert_eq!(
+            completion_source(true, false, false, true),
+            "BATCH_COMPLETE from the game events pipe"
+        );
+        assert_eq!(
+            completion_source(false, true, false, false),
+            "BATCH_COMPLETE marker"
+        );
+        // No pipe (an old hook DLL, or GOLDSRC_HOOKS_EVENTS=0): the folder.
+        assert_eq!(
+            completion_source(false, false, false, true),
+            "done marker: false, exit trigger: true"
+        );
+    }
+
     use super::*;
     use crate::test_support::Scratch;
     use std::time::Duration;
