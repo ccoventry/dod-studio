@@ -885,7 +885,7 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe never started after the HLAE launcher exited");
+                    failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat");
                     break;
                 }
                 // hl.exe was running and has now disappeared without ever writing
