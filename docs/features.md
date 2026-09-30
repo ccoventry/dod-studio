@@ -235,6 +235,8 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 **Events to Studio.** A second pipe, `\\.\pipe\dodstudio-hl-<pid>-events`, carries the pipeline's `[dod-studio]` markers from the game as the engine runs each `echo` (the DLL wraps `echo` through the engine's command list, with no per-build address). Markers from before Studio connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off; Studio then reads `qconsole.log` as before (issue #434, step 1).
 
+**Batch end without Studio.** If a batch's `BATCH_COMPLETE` marker goes by and no Studio is reading the events pipe five seconds later (Studio was closed mid-batch), the game quits itself instead of sitting there (issue #545). A connected Studio still ends the game as before.
+
 ### 5.2 Console commands
 
 Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 10 commands).

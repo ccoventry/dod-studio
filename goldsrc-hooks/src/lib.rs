@@ -58,6 +58,9 @@
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
 //!   turns it off.
+//! - `batch_end`: when a batch's `BATCH_COMPLETE` goes by and no Studio is on
+//!   the events pipe, the game quits itself after a few seconds instead of
+//!   sitting there (issue #545). On with the events pipe.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -94,6 +97,7 @@
 //! session.
 
 mod anim_fix;
+mod batch_end;
 mod cmd_list;
 mod commands;
 mod crash;

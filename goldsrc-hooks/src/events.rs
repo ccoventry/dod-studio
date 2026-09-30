@@ -46,7 +46,7 @@ pub static ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// What the pipeline puts in front of every marker it echoes (Studio's
 /// `native::obs::log_tail::LOG_TAG`).
-const TAG: &str = "[dod-studio]";
+pub(crate) const TAG: &str = "[dod-studio]";
 
 /// The first line on every connection. Untagged, so it is never a marker.
 pub const HELLO: &str = "dodstudio-hooks events 1";
@@ -94,6 +94,7 @@ fn emit(line: String) {
 
 unsafe extern "C" fn wrapped_echo() {
     if let Some(line) = marker_line(&cmd_list::args()) {
+        crate::batch_end::on_marker(&line);
         emit(line);
     }
     unsafe { call_real(&REAL_ECHO) };
@@ -163,6 +164,12 @@ fn try_wrap() -> bool {
         };
     }
     found
+}
+
+/// Whether Studio is reading the events pipe, as far as the pipe knows: a
+/// reader that has gone is noticed at the next failed write.
+pub fn studio_connected() -> bool {
+    server::CONNECTED.load(Ordering::Relaxed)
 }
 
 /// One `dodstudio_debug_status` line.
