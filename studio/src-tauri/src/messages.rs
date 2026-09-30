@@ -66,6 +66,8 @@ pub fn failed_to_read_file(path: &str, err: impl Display) -> String {
 
 pub const HLAE_EXECUTABLE_NOT_FOUND: &str = "HLAE executable not found at specified path.";
 pub const HL_EXECUTABLE_NOT_FOUND: &str = "Half-Life executable not found at specified path.";
+pub const STEAM_NOT_FOUND: &str =
+    "Couldn't find Steam to start it. Start Steam yourself, then try again.";
 
 pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)

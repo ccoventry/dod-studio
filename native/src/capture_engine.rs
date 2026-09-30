@@ -844,6 +844,15 @@ pub fn spawn_capture_engine(
 
                 if cancel_token.load(Ordering::Relaxed) {
                     log_markdown(&format!("[HLAE] Cancelled by user after {:.1}s", start_time.elapsed().as_secs_f32()));
+                    // A cancel in the first few seconds catches the launcher
+                    // still injecting into hl.exe. Killing only hl.exe then
+                    // leaves HLAE open on "AfxHook error, Code: 1" (seen
+                    // 2026-09-29, a cancel 1.0s in), so the launcher goes first.
+                    if !launcher_exit_logged {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
+                    }
                     std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
                     wait_for_hl_exe_to_exit(&mut sys);
                     break;
@@ -924,7 +933,7 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe never started after the HLAE launcher exited".into());
+                    failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
                     break;
                 }
                 // hl.exe was running and has now disappeared without ever writing

@@ -1,3 +1,4 @@
+import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -730,6 +731,7 @@ async function initStandaloneLaunchButton() {
       return;
     }
 
+    if (!(await ensureSteamReady())) return;
     await performLaunch();
   });
 }
@@ -840,7 +842,7 @@ function initClearPreviewsModal() {
   }
 }
 
-export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished) {
+export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
   const statusEl = document.querySelector('#batch-status');
@@ -1334,6 +1336,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // A demo may have moved since the queue was loaded (#21). main.js looks
+      // for it the same way Load Project does and offers the match; a demo
+      // still missing after that stops the batch, since its highlights
+      // cannot be captured.
+      if (pickedDemosPresent && !(await pickedDemosPresent())) {
+        showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+        return;
+      }
+
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
 
@@ -1371,6 +1382,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // Before any patching: without Steam the game can't start.
+      if (!(await ensureSteamReady())) {
+        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        return;
+      }
       runBatch();
     });
   }
