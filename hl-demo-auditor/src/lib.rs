@@ -5,11 +5,40 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::Sender;
 
+/// A demo file's identity: its size plus an FNV-1a hash of its first 64 KB.
+///
+/// The one definition in the workspace. The Demo Auditor groups duplicates
+/// by it; Studio's scan (`capture_manager::demo_file_key`) uses its text form
+/// to skip demos already queued and unchanged, and saves that text in project
+/// files, so [`FileKey::to_text`] must never change shape. Reads 64 KB, not
+/// the whole demo, so keying a folder of hundreds costs milliseconds.
 #[derive(Eq, PartialEq, Hash, Debug, Clone)]
 pub struct FileKey {
     pub size: u64,
     pub header_hash: u64,
 }
+
+impl FileKey {
+    /// `<size>-<hash as 16 hex digits>`, e.g. `5242880-00c0ffee00c0ffee`.
+    pub fn to_text(&self) -> String {
+        format!("{}-{:016x}", self.size, self.header_hash)
+    }
+
+    /// The inverse of [`FileKey::to_text`]; `None` for anything else.
+    pub fn from_text(text: &str) -> Option<Self> {
+        let (size, hash) = text.split_once('-')?;
+        if hash.len() != 16 {
+            return None;
+        }
+        Some(Self {
+            size: size.parse().ok()?,
+            header_hash: u64::from_str_radix(hash, 16).ok()?,
+        })
+    }
+}
+
+/// How much of a file [`get_file_key`] hashes.
+pub const KEY_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone)]
 pub struct DuplicateGroup {
@@ -74,7 +103,7 @@ pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
 
     // Hash the first 64KB (or less if the file is smaller)
     let mut file = fs::File::open(path)?;
-    let read_size = std::cmp::min(size, 65536) as usize;
+    let read_size = std::cmp::min(size, KEY_BYTES) as usize;
     let mut buffer = vec![0; read_size];
     file.read_exact(&mut buffer)?;
 
@@ -173,6 +202,26 @@ pub fn find_duplicates(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_text_form_round_trips_and_keeps_its_shape() {
+        let key = FileKey {
+            size: 5_242_880,
+            header_hash: 0x00c0_ffee_00c0_ffee,
+        };
+        // Saved in project files: this exact shape must never change.
+        assert_eq!(key.to_text(), "5242880-00c0ffee00c0ffee");
+        assert_eq!(FileKey::from_text(&key.to_text()), Some(key));
+        assert_eq!(FileKey::from_text("12-abc"), None);
+        assert_eq!(FileKey::from_text("x-00c0ffee00c0ffee"), None);
+        assert_eq!(FileKey::from_text(""), None);
+    }
+
+    #[test]
+    fn fnv_matches_the_reference_vectors() {
+        assert_eq!(fnv1a_hash(b""), 0xcbf2_9ce4_8422_2325);
+        assert_eq!(fnv1a_hash(b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
 
     #[test]
     fn test_demos_are_unique() {

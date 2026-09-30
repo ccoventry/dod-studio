@@ -224,7 +224,6 @@ async fn scan_directory(
 #[tauri::command]
 async fn system_memory_bytes() -> Result<u64, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
-        use sysinfo::SystemExt;
         let mut sys = sysinfo::System::new();
         sys.refresh_memory();
         Ok(sys.total_memory())
