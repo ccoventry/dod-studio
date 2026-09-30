@@ -1078,7 +1078,7 @@ export const STRINGS = {
     IDENTICAL_COPIES_KEEP: 'Keep the queued files',
     identicalCopyQueuedMissing: (folder) => `in ${folder} (the queued file is missing)`,
     IDENTICAL_COPY_SAME_FOLDER: 'in the same folder as the queued file',
-    identicalCopyOthers: (names) => ` · also picked, not added: ${names.join(', ')}`,
+    identicalCopyOthers: (names) => ` · other copies, not added: ${names.join(', ')}`,
     PICKED_COPIES_TITLE: 'Identical copies picked',
     PICKED_COPIES_MESSAGE: "Some of the files you picked are identical copies of each other under different names. One of each was added, the one with the shortest name, so no highlight is captured twice.",
     PICKED_COPIES_OK: 'OK',
