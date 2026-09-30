@@ -304,6 +304,20 @@ pub struct CfgReport {
     /// warning this report carries: everything else degrades a capture,
     /// this one crashes the game.
     pub fatal_cvars: Vec<CfgFatalRow>,
+    /// `dod/config.cfg` exists and is not read-only (#478). The engine
+    /// rewrites that file from its current values whenever the game quits,
+    /// so anything Initial or Scheduled Commands set ends up saved in it.
+    /// Advisory: the app never changes the file or its attributes.
+    pub config_cfg_writable: bool,
+}
+
+/// Whether `<game_dir>/config.cfg` exists and is not read-only. The engine's
+/// own `Host_WriteConfiguration` ("This file is overwritten whenever you
+/// change your user settings in the game.") rewrites only that file; the
+/// user's other configs are never written back.
+fn config_cfg_is_writable(game_dir: &Path) -> bool {
+    std::fs::metadata(game_dir.join("config.cfg"))
+        .is_ok_and(|m| m.is_file() && !m.permissions().readonly())
 }
 
 /// Scheduled commands in the order the engine reaches them.
@@ -352,6 +366,7 @@ pub async fn scan_game_configs(
 
     tokio::task::spawn_blocking(move || {
         let scan = native::patch::cfg_scan::scan(&dir);
+        let config_cfg_writable = config_cfg_is_writable(&dir);
 
         // The list the engine will actually receive, so the app's own additions
         // — the movie fps, the decal pin — are checked too. game_path is
@@ -589,6 +604,7 @@ pub async fn scan_game_configs(
             noop_init,
             noop_scheduled,
             fatal_cvars,
+            config_cfg_writable,
         }
     })
     .await
@@ -1641,6 +1657,26 @@ mod tests {
         let row = conflict(&r, "sensitivity").expect("reported");
         assert_eq!(values_of(row), [("3", "initial"), ("5", "before")]);
         assert_eq!(row.effective.value, "5");
+    }
+
+    #[test]
+    fn a_writable_config_cfg_is_reported_and_a_read_only_one_is_not() {
+        let dir = Scratch::new("cfg_readonly");
+        assert!(!config_cfg_is_writable(dir.path()), "no config.cfg at all");
+
+        let cfg = dir.path().join("config.cfg");
+        std::fs::write(&cfg, "sensitivity 2\n").unwrap();
+        assert!(config_cfg_is_writable(dir.path()));
+
+        let mut perms = std::fs::metadata(&cfg).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&cfg, perms.clone()).unwrap();
+        assert!(!config_cfg_is_writable(dir.path()));
+
+        // Put it back so the scratch folder can be removed.
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&cfg, perms).unwrap();
     }
 
     #[test]

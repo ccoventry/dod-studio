@@ -1486,15 +1486,30 @@ window.addEventListener("DOMContentLoaded", async () => {
       const targetId = btn.getAttribute('data-tab');
       const targetEl = document.getElementById(targetId);
       if (targetEl) targetEl.style.display = 'block';
+      refreshCommandWarningsIfShown();
     });
   });
+
+  // The game's config files change outside the app: the read-only flag on
+  // config.cfg (#478), or lines in config.cfg/movie.cfg. The Commands tab's
+  // warnings are only as fresh as their last check, so it runs again whenever
+  // that tab comes into view: opening it, returning to Configuration on it,
+  // or coming back to this window (from Explorer or an editor) while it shows.
+  function refreshCommandWarningsIfShown() {
+    const tab = document.getElementById('tab-custom-commands');
+    if (tab && tab.offsetParent !== null) refreshInitCommandWarnings();
+  }
+  window.addEventListener('focus', refreshCommandWarningsIfShown);
 
   // Top nav bar view routing (shared with detail_pane.js — see nav.js)
   switchNavTab('workspace');
 
   const navTabBtns = document.querySelectorAll('.nav-tab-btn');
   navTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => switchNavTab(btn.getAttribute('data-nav')));
+    btn.addEventListener('click', () => {
+      switchNavTab(btn.getAttribute('data-nav'));
+      refreshCommandWarningsIfShown();
+    });
   });
 
   // Capture Studio in-workflow phase switch (Highlights <-> Configuration) —
