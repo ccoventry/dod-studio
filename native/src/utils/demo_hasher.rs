@@ -1,25 +1,20 @@
-use std::fs;
-use std::io::Read;
+//! The demo file key and its hash, from `hl-demo-auditor`, the one place they
+//! are defined. Kept as a path for the callers that already use it.
+
 use std::path::Path;
 
-pub fn fnv1a_hash(data: &[u8]) -> u64 {
-    let mut hash = 0xcbf29ce484222325;
-    for &byte in data {
-        hash ^= byte as u64;
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
-    hash
+pub use hl_demo_auditor::{FileKey, fnv1a_hash};
+
+/// `(size, hash)` of a demo's key; see [`hl_demo_auditor::FileKey`].
+pub fn calculate_demo_key(path: &Path) -> Option<(u64, u64)> {
+    hl_demo_auditor::get_file_key(path)
+        .ok()
+        .map(|key| (key.size, key.header_hash))
 }
 
-pub fn calculate_demo_key(path: &Path) -> Option<(u64, u64)> {
-    let metadata = fs::metadata(path).ok()?;
-    let size = metadata.len();
-
-    let mut file = fs::File::open(path).ok()?;
-    let read_size = std::cmp::min(size, 65536) as usize;
-    let mut buffer = vec![0; read_size];
-    file.read_exact(&mut buffer).ok()?;
-
-    let hash = fnv1a_hash(&buffer);
-    Some((size, hash))
+/// The key's text form, `<size>-<hash>`, as saved in project files.
+pub fn demo_key_text(path: &Path) -> Option<String> {
+    hl_demo_auditor::get_file_key(path)
+        .ok()
+        .map(|key| key.to_text())
 }
