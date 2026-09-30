@@ -101,15 +101,10 @@ fn marker_stall_deadline(longest_gap: std::time::Duration) -> std::time::Duratio
 /// `remove_file_retrying` is the second, independent line of defence for
 /// whatever this window doesn't cover.
 fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
-    use sysinfo::{ProcessExt, SystemExt};
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        sys.refresh_processes();
-        if !sys
-            .processes()
-            .values()
-            .any(|p| p.name().eq_ignore_ascii_case("hl.exe"))
-        {
+        crate::sys::process::refresh(sys);
+        if !crate::sys::process::any_named(sys, &["hl.exe"]) {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -697,10 +692,9 @@ pub fn spawn_capture_engine(
             let mut obs_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
-            let mut sys = {
-                use sysinfo::SystemExt;
-                sysinfo::System::new_all()
-            };
+            let mut sys = crate::sys::process::snapshot();
+            let mut last_process_check: Option<std::time::Instant> = None;
+            let mut hl_alive_cached = false;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -745,10 +739,20 @@ pub fn spawn_capture_engine(
                     }
                 }
 
+                // The process list is re-read at most every 250 ms: OBS mode
+                // spins this loop every 16 ms for its markers, and enumerating
+                // every process 62 times a second for the whole batch buys
+                // nothing when a quarter-second-late "the game is gone" is
+                // as good as an immediate one.
+                if last_process_check
+                    .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(250))
+                {
+                    last_process_check = Some(std::time::Instant::now());
+                    crate::sys::process::refresh(&mut sys);
+                    hl_alive_cached = crate::sys::process::any_named(&sys, &["hl.exe"]);
+                }
                 let hl_alive = {
-                    use sysinfo::{SystemExt, ProcessExt};
-                    sys.refresh_processes();
-                    let alive = sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                    let alive = hl_alive_cached;
                     if alive {
                         hl_seen_alive = true;
                         hl_first_seen.get_or_insert_with(std::time::Instant::now);

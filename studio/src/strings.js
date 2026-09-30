@@ -76,6 +76,13 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // #21: a project demo that is not at its saved path.
+    MISSING_BADGE: 'missing',
+    missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
+    LOCATE_DEMO_BUTTON: 'Locate…',
+    LOCATE_DEMO_TITLE: 'Pick where this demo is now',
+    USE_FOUND_COPY_BUTTON: 'Use found copy',
+    useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
@@ -437,6 +444,7 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
+    DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     OBS_CHECKING_WARNING: 'Checking the OBS connection…',
@@ -1048,6 +1056,59 @@ export const STRINGS = {
     NEW_SESSION_TOAST: 'Started a new session.',
     SAVE_PROJECT_ERROR: 'Error saving project session.',
     loadedDemosToast: (count) => `Loaded ${count} demos from project file`,
+    // #21: demos a loaded project names that are no longer where it says.
+    RELOCATE_DEMOS_TITLE: 'Demos have moved',
+    RELOCATE_DEMOS_MESSAGE: 'These demos aren\'t at their saved location any more, but a matching file (same size, same start) was found for each. Hover one for its full path.',
+    RELOCATE_DEMOS_QUESTION: 'Use the new locations?',
+    relocateRenamed: (oldName, newName) => `${oldName} → ${newName}`,
+    relocateFolder: (folder) => `now in ${folder}`,
+    RELOCATE_CONFIRM: 'Use new locations',
+    RELOCATE_CANCEL: 'Leave as missing',
+    relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,
+    LOCATE_DEMO_DIALOG_TITLE: 'Where is this demo now?',
+    LOCATE_MISMATCH_TITLE: 'Different file',
+    locateMismatchMessage: (name, picked) =>
+      `${picked} isn't the ${name} that was scanned (its size or start is different), so this row's highlights won't line up with it.\n\nReplace the row with ${picked}? It's scanned fresh with its own highlights, and this row's statuses and notes are dropped.`,
+    LOCATE_MISMATCH_CONFIRM: 'Replace with this demo',
+    locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
+    missingDemosToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
+    },
+    leftMissingToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `Left ${names.length} moved demo(s) as missing: ${shown}${more}. Each row has a Use found copy button.`;
+    },
+    USE_ALL_FOUND_COPIES: 'Use all found copies',
+    foundCopiesGoneToast: (names) =>
+      `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
+    // #21: a scanned demo that is an identical copy of one already queued.
+    identicalCopiesToast: (pairs) => {
+      const shown = pairs.slice(0, 3).map(([copy, original]) => `${copy} (same as ${original})`).join(', ');
+      const more = pairs.length > 3 ? ` and ${pairs.length - 3} more` : '';
+      return `Skipped ${pairs.length} identical cop${pairs.length === 1 ? 'y' : 'ies'} of a demo already in the queue: ${shown}${more}.`;
+    },
+    IDENTICAL_COPIES_TITLE: 'Already in the queue',
+    IDENTICAL_COPIES_MESSAGE: "These files are identical copies of demos already in the queue, under another name. They weren't added as new rows, which would capture every highlight twice.",
+    IDENTICAL_COPIES_QUESTION: 'Point those rows at these files instead? They keep their highlights, statuses and notes.',
+    IDENTICAL_COPIES_SWITCH: 'Use these files',
+    IDENTICAL_COPIES_KEEP: 'Keep the queued files',
+    identicalCopyQueuedMissing: (folder) => `in ${folder} (the queued file is missing)`,
+    IDENTICAL_COPY_SAME_FOLDER: 'in the same folder as the queued file',
+    identicalCopyOthers: (names) => ` · other copies, not added: ${names.join(', ')}`,
+    PICKED_COPIES_TITLE: 'Identical copies picked',
+    PICKED_COPIES_MESSAGE: "Some of the files you picked are identical copies of each other under different names. One of each was added, the one with the shortest name, so no highlight is captured twice.",
+    PICKED_COPIES_OK: 'OK',
+    pickedCopiesSkipped: (names) => `not added: ${names.join(', ')}`,
+    identicalCopyFolder: (folder) => `in ${folder}`,
+    // #21: demos whose file changed on disk after they were scanned.
+    CHANGED_DEMOS_TITLE: 'Demos have changed',
+    CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
+    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_RESCAN: 'Rescan',
+    RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
@@ -1120,6 +1181,9 @@ export const STRINGS = {
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
   HD: {
+    // #430: whether hl.exe gets 2 GB or 4 GB of address space.
+    ADDRESS_SPACE_4GB: 'This hl.exe gets 4 GB of memory, room for the biggest HD textures.',
+    ADDRESS_SPACE_2GB: 'This hl.exe gets 2 GB of memory (the pre-Anniversary build isn\'t marked for more), so very large HD textures or a long session over many maps can run it out.',
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
     REFRESHING: 'Checking...',

@@ -41,6 +41,9 @@ import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
 import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { fileNameOf, samePath } from './path_display.js';
+import { createProjectDemos } from './project_demos.js';
+import { splitIdenticalCopies } from './demo_copies.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -890,6 +893,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               }
               updateDemoFooter(currentScannedDemos);
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
+              await checkMissingDemos(selected, data.scanPaths || []);
             }
           }
         }
@@ -899,6 +903,31 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
+
+  function refreshAfterRelocation(changed) {
+    renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
+    if (!changed) return;
+    if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
+      selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+    }
+    markProjectDirty();
+  }
+
+  // Missing, moved, changed and copied demos (#21): project_demos.js.
+  const {
+    checkMissingDemos,
+    pickedDemosPresent,
+    useFoundCopies,
+    offerIdenticalCopies,
+    locateDemoByHand,
+  } = createProjectDemos({
+    getDemos: () => currentScannedDemos,
+    getTakeIndex: () => takeIndex,
+    getScanPaths: () => scanPaths,
+    refreshQueue: refreshAfterRelocation,
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+  });
 
   // New Session (#122/#149) — resets to the same blank state the app starts
   // in: no session file, no demos, no take index. Reuses replaceScannedDemos
@@ -1232,7 +1261,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   //
   // Resolves true when the scan ran (a cancelled one included), false when it
   // failed -- e.g. every picked path is gone, which the backend reports (#432).
-  async function triggerAutoScan(pathsToScan) {
+  // `pickedFiles`: the paths are files the user picked one by one (+ Add
+  // Demo Files), so a copy of a queued demo is offered in its place rather
+  // than only skipped (#21).
+  async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
 
     const scanStatusEl = document.querySelector('#scan-status');
@@ -1257,7 +1289,21 @@ window.addEventListener("DOMContentLoaded", async () => {
       const known = currentScannedDemos
         .filter((d) => d.file_key)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: newlyScanned, unchanged } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      // An identical copy under another name would be a second row for the
+      // same demo, capturing every highlight twice (#21). The scan skips them
+      // by key before parsing (`unparsedCopies`, each naming the queued or
+      // scanned demo it copies); the split below is a fallback for any that
+      // reach here parsed.
+      const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
+      unparsedCopies.forEach((c) => {
+        const sameAs = c.queued
+          ? currentScannedDemos.find((d) => samePath(d.path, c.same_as))
+          : newlyScanned.find((d) => samePath(d.path, c.same_as));
+        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs, queued: Boolean(c.queued) });
+      });
+      // The frontend fallback's copies are all of queued demos.
+      copies.forEach((c) => { if (c.queued === undefined) c.queued = currentScannedDemos.includes(c.sameAs); });
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
@@ -1300,6 +1346,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
@@ -1335,7 +1382,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           await persistAppSettings();
           // Scan only the files just picked, not the full accumulated
           // scanPaths history — see triggerAutoScan's doc comment.
-          await triggerAutoScan(files);
+          await triggerAutoScan(files, { pickedFiles: true });
         }
       } catch (err) {
         console.error("Error opening demo files dialog:", err);
@@ -1474,7 +1521,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     scanPaths,
     targetDrives,
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
   initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
@@ -1817,7 +1864,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm);
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
