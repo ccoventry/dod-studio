@@ -54,6 +54,7 @@ export async function ensureSteamReady() {
       isCancelled: () => cancelled,
     });
     if (result === 'timeout') showToast(STRINGS.STEAM.NOT_SIGNED_IN, 'error', 10000);
+    if (result === 'cancelled') showToast(STRINGS.STEAM.WAIT_CANCELLED, 'info');
     return result === 'ready';
   } finally {
     waiting = false;

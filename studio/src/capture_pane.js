@@ -1363,7 +1363,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       }
 
       // Before any patching: without Steam the game can't start.
-      if (!(await ensureSteamReady())) return;
+      if (!(await ensureSteamReady())) {
+        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        return;
+      }
       runBatch();
     });
   }

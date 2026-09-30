@@ -1185,6 +1185,9 @@ export const STRINGS = {
     CANCEL: 'Cancel',
     WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
     STILL_WAITING: 'Still waiting for Steam to sign in.',
+    WAIT_CANCELLED: 'Cancelled. Nothing was launched.',
+    // Beside Start Capture Batch when the Steam check stopped it.
+    BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
     NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
   },
   IPC: {
