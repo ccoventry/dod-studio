@@ -428,6 +428,39 @@ fn sid_from_userinfo(buffer: &[u8], name: &[u8]) -> Option<u64> {
     sid.filter(|&id| name_ok && id != 0)
 }
 
+/// A `block` argument list: the players, and whether it's `!` (hide everyone
+/// else). The console's pieces are rejoined first, so every check below sees
+/// whole ids: counting `!` on the raw pieces once read `!STEAM_0 : 1 :
+/// 6155141` as a mix of one `!` id and four plain ones (seen live).
+fn parse_block_args(rest: &[String]) -> Result<(Vec<Player>, bool), String> {
+    let tokens = rejoin_colons(rest);
+    let mut players = Vec::new();
+    let mut negations = 0;
+    for token in &tokens {
+        let (negated, text) = match token.strip_prefix('!') {
+            Some(d) => (true, d),
+            None => (false, token.as_str()),
+        };
+        let Some(player) = parse_player(text) else {
+            return Err(format!(
+                "{COMMAND} block: {token:?} is not a slot number, a SteamID or self\n"
+            ));
+        };
+        negations += usize::from(negated);
+        players.push(player);
+    }
+    // A mixed list has no coherent reading -- "block everyone except 3, and
+    // also block 5" is two different questions -- so say so rather than pick
+    // one.
+    if negations != 0 && negations != tokens.len() {
+        return Err(format!(
+            "{COMMAND} block: mix of plain and !-prefixed ids. Use all-plain to hide those \
+             players, or all-! to hide everyone else.\n"
+        ));
+    }
+    Ok((players, negations != 0))
+}
+
 /// Puts `STEAM_0:1:6155141` back together. GoldSrc's console tokenizer makes
 /// `:` a token of its own, so typed unquoted it arrives as `STEAM_0`, `:`,
 /// `1`, `:`, `6155141` (seen live 2026-09-30). Any token that is `:`, or
@@ -1190,35 +1223,10 @@ fn dispatch(argv: &[String]) -> String {
                 }
                 return format!("{COMMAND}: blocking nothing\n");
             }
-            let mut players = Vec::new();
-            let mut allow_list = false;
-            for token in &rejoin_colons(rest) {
-                let (negated, text) = match token.strip_prefix('!') {
-                    Some(d) => (true, d),
-                    None => (false, token.as_str()),
-                };
-                match parse_player(text) {
-                    Some(player) => {
-                        allow_list |= negated;
-                        players.push(player);
-                    }
-                    None => {
-                        return format!(
-                            "{COMMAND} block: {token:?} is not a slot number, a SteamID or self\n"
-                        );
-                    }
-                }
-            }
-            // A mixed list has no coherent reading -- "block everyone except 3,
-            // and also block 5" is two different questions -- so say so rather
-            // than pick one.
-            let negations = rest.iter().filter(|t| t.starts_with('!')).count();
-            if negations != 0 && negations != rest.len() {
-                return format!(
-                    "{COMMAND} block: mix of plain and !-prefixed ids. Use all-plain to hide those \
-                     players, or all-! to hide everyone else.\n"
-                );
-            }
+            let (players, allow_list) = match parse_block_args(rest) {
+                Ok(parsed) => parsed,
+                Err(why) => return why,
+            };
             if let Ok(mut list) = BLOCK.lock() {
                 list.players = players;
                 list.allow_list = allow_list;
@@ -1468,6 +1476,35 @@ mod tests {
             sid_from_userinfo(b"name\\bot", b"bot"),
             None,
             "not userinfo"
+        );
+    }
+
+    #[test]
+    fn a_pasted_classic_steam_id_is_one_negated_player_not_a_mix() {
+        let argv = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let me = 76_561_197_972_576_011;
+        assert_eq!(
+            parse_block_args(&argv(&["!STEAM_0", ":", "1", ":", "6155141"])),
+            Ok((vec![Player::SteamId(me)], true))
+        );
+        assert_eq!(
+            parse_block_args(&argv(&[
+                "!self", "!STEAM_0", ":", "1", ":", "6155141", "!13"
+            ])),
+            Ok((
+                vec![Player::OwnPov, Player::SteamId(me), Player::Slot(13)],
+                true
+            ))
+        );
+        assert_eq!(
+            parse_block_args(&argv(&["STEAM_0", ":", "1", ":", "6155141"])),
+            Ok((vec![Player::SteamId(me)], false))
+        );
+        assert!(
+            parse_block_args(&argv(&["!3", "5"]))
+                .unwrap_err()
+                .contains("mix"),
+            "a real mix is still refused"
         );
     }
 
