@@ -47,4 +47,5 @@ export function showToast(message, type = 'info', duration = 3000, { action } = 
       }
     }, fadeOutDuration);
   }, displayDuration);
+  return toast;
 }
