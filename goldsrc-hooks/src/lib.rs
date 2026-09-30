@@ -58,6 +58,10 @@
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
 //!   turns it off.
+//! - `pmove_guard`: stop the session's first demo crashing when it sends
+//!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
+//!   One pointer write at start-up, both builds. On by default;
+//!   `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -116,6 +120,7 @@ mod objicons;
 mod overview_map;
 mod patch;
 mod pe;
+mod pmove_guard;
 mod remote;
 mod scan;
 mod scoreboard;
@@ -194,6 +199,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // A crash fix, so on unless asked not to.
+    pmove_guard::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_PMOVE_GUARD", true),
         Ordering::Relaxed,
     );
     // Restores the engine's own default upload behaviour, so on unless asked
@@ -297,6 +307,8 @@ fn install_fixes() {
     tempent_fix::install();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // Before any map loads, so before the first demo's InitHUD.
+    pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
     sprite_blend::install();
 
