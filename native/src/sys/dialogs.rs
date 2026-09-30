@@ -53,8 +53,10 @@ impl ErrorDialog {
                 .lines
                 .iter()
                 .find_map(|l| {
+                    // Only the expression's own line: the box goes on with
+                    // "For information on how your program can cause…".
                     l.split_once("Expression:")
-                        .map(|(_, e)| e.trim().to_string())
+                        .map(|(_, e)| e.lines().next().unwrap_or("").trim().to_string())
                 })
                 .unwrap_or_default();
             if expression.is_empty() {
@@ -260,13 +262,13 @@ mod tests {
         let assert_box = dialog(
             "Microsoft Visual C++ Runtime Library",
             &[
-                "Assertion failed!\n\nProgram: ...filesystem_stdio.dll\nLine: 84\n\nExpression: !m_bMounted",
+                // The real box's text, as read live on 2026-09-29.
+                "Assertion failed!\n\nProgram: ...filesystem_stdio.dll\nLine: 84\n\nExpression: !m_bMounted\n\nFor information on how your program can cause an assertion\nfailure, see the Visual C++ documentation on asserts",
             ],
         );
-        assert!(
-            assert_box.summary().contains("!m_bMounted"),
-            "{}",
-            assert_box.summary()
+        assert_eq!(
+            assert_box.summary(),
+            "The game stopped on one of its own internal checks (\"Assertion failed\": !m_bMounted)."
         );
     }
 
