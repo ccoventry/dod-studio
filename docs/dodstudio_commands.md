@@ -79,6 +79,7 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
 | `dodstudio_deathmsg block !<id>...` | hide everything *except* these players |
 | `dodstudio_deathmsg block clear` | stop hiding anything |
+| `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
 
 A `block` id is any of:

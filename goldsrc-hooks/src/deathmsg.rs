@@ -379,26 +379,65 @@ fn is_hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
+/// `players`: every occupied slot with the name and SteamID `block` would
+/// match against right now. For finding the id to block, and for checking
+/// that the engine hands SteamIDs over at all (0 means it didn't).
+fn players() -> String {
+    if engine::engfuncs().is_none() {
+        return format!("{COMMAND} players: the game's functions aren't captured yet\n");
+    }
+    let hltv = is_hltv();
+    let mut out = format!(
+        "{COMMAND} players ({} demo):\n",
+        if hltv { "HLTV" } else { "POV" }
+    );
+    let mut any = false;
+    for slot in 1..=32 {
+        let Some((name, who)) = lookup(slot, hltv) else {
+            continue;
+        };
+        any = true;
+        let id = if who.steam_id == 0 {
+            "SteamID unknown (0)".to_string()
+        } else {
+            let account = who.steam_id.wrapping_sub(STEAM_ID64_BASE);
+            format!("{} (STEAM_0:{}:{})", who.steam_id, account % 2, account / 2)
+        };
+        let own = if who.is_own_pov { "  <- self" } else { "" };
+        out.push_str(&format!("  {slot:>2}  {name}  {id}{own}\n"));
+    }
+    if !any {
+        out.push_str("  nobody: no demo or game loaded\n");
+    }
+    out
+}
+
 /// Looks up a `DeathMsg` slot through `pfnGetPlayerInfo`. Slot 0 (the world)
 /// and anything past `MAX_CLIENTS` resolve to the slot number alone.
 fn resolve(slot: i32, hltv: bool) -> Who {
+    lookup(slot, hltv).map_or(Who::slot(slot), |(_, who)| who)
+}
+
+/// `resolve`, plus the player's name; `None` for an empty or invalid slot.
+fn lookup(slot: i32, hltv: bool) -> Option<(String, Who)> {
     let mut who = Who::slot(slot);
-    let Some(engfuncs) = engine::engfuncs() else {
-        return who;
-    };
+    let engfuncs = engine::engfuncs()?;
     if !(1..=32).contains(&slot) {
-        return who;
+        return None;
     }
     // Zeroed first: the engine leaves `steam_id` alone unless a demo is
     // playing, and leaves everything but `name` alone for an empty slot.
     let mut info = engine::HudPlayerInfo::empty();
     unsafe { (engfuncs.pfn_get_player_info)(slot, &mut info) };
     if info.name.is_null() {
-        return who;
+        return None;
     }
     who.steam_id = info.steam_id;
     who.is_own_pov = !hltv && info.thisplayer != 0;
-    who
+    let name = unsafe { CStr::from_ptr(info.name) }
+        .to_string_lossy()
+        .into_owned();
+    Some((name, who))
 }
 
 // ── Patching ─────────────────────────────────────────────────────────────────
@@ -939,6 +978,7 @@ fn usage() -> String {
          \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y),\n\
          \x20                               or self (the recording player; nobody in HLTV)\n\
          \x20 {COMMAND} block clear         stop hiding anything\n\
+         \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
          \x20                               weapon is a name (d_garand, garand) or 1..43\n"
     )
@@ -1111,6 +1151,7 @@ fn dispatch(argv: &[String]) -> String {
             install_hook();
             status()
         }
+        "players" => players(),
         "fake" => {
             let (Some(k), Some(v), Some(w)) = (argv.get(2), argv.get(3), argv.get(4)) else {
                 return format!(
