@@ -41,6 +41,27 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
     });
 }
 
+// Which of a loaded project's demos are missing, and a moved copy of each if
+// one with the same file key turns up in `searchDirs` (#21). Resolves
+// `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
+// Paths of the demos whose file no longer matches its saved key (#21).
+// Empty when the check itself fails, so a broken check never blocks a batch.
+export async function changedDemos(demos) {
+  return invoke("changed_demos", { demos })
+    .catch((err) => {
+      console.error("IPC Execution Error (changed_demos):", err);
+      return [];
+    });
+}
+
+export async function locateMissingDemos(demos, searchDirs) {
+  return invoke("locate_missing_demos", { demos, searchDirs })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_missing_demos):", err);
+      return [];
+    });
+}
+
 // Total RAM for the scan worker hint (#246). Quiet on failure: the hint just
 // leaves out the "this PC has" half.
 export async function systemMemoryBytes() {
