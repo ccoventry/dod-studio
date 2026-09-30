@@ -544,6 +544,9 @@ pub fn spawn_capture_engine(
             let mut obs_session: Option<crate::obs::ObsSession> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
+            // The log feeds the markers until the game's events pipe
+            // connects, then the pipe does (#434); see `MarkerGate`.
+            let marker_gate = Arc::new(crate::obs::MarkerGate::default());
 
             if obs_mode {
                 if obs_take_folders.is_empty() {
@@ -610,12 +613,30 @@ pub fn spawn_capture_engine(
             let log_len_before_launch = console_log_len(&log_path);
             let tailer = crate::obs::LogTailer::at_end(&log_path);
             let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            let log_marker_tx = marker_tx.clone();
             if let Err(e) = std::thread::Builder::new()
                 .name("obs_log_tail".into())
-                .spawn(move || tailer.run(marker_tx, cancel))
+                .spawn(move || tailer.run(log_marker_tx, cancel, gate))
             {
                 log_crash_abort!(tx, format!("could not start the console log reader: {}", e));
                 return;
+            }
+            // The same markers straight from the game, when its hook DLL
+            // serves the events pipe. Not fatal if it can't start: the log
+            // above is still reading.
+            let pipe_tailer = crate::obs::PipeTailer::new(|pid, hello| {
+                log_markdown(&format!(
+                    "[HLAE] Game events pipe connected (hl.exe PID {pid}, `{hello}`) — markers now come from the game directly, not qconsole.log"
+                ));
+            });
+            let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            if let Err(e) = std::thread::Builder::new()
+                .name("events_pipe_tail".into())
+                .spawn(move || pipe_tailer.run(marker_tx, cancel, gate))
+            {
+                log_markdown(&format!("[HLAE] Could not start the game events reader ({e}); using qconsole.log only"));
             }
 
             // MUST be embedded here, not appended to `cmd` below: HLAE's own
@@ -690,6 +711,10 @@ pub fn spawn_capture_engine(
             // taskkilling right after it means hl.exe is dead before it ever
             // gets to process the command that would restart it. See #obs.
             let mut obs_batch_complete_seen = false;
+            // BATCH_COMPLETE straight from the game (#434): the same "done"
+            // the exit-trigger folder signals, a moment sooner and without the
+            // folder, in every capture mode. The folder stays the fallback.
+            let mut pipe_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
             let mut sys = crate::sys::process::snapshot();
@@ -714,6 +739,9 @@ pub fn spawn_capture_engine(
                     }
                     if obs_mode && marker.kind == crate::obs::MarkerKind::BatchComplete {
                         obs_batch_complete_seen = true;
+                    }
+                    if marker.via_pipe && marker.kind == crate::obs::MarkerKind::BatchComplete {
+                        pipe_batch_complete_seen = true;
                     }
                     if marker.kind == crate::obs::MarkerKind::DemoStart
                         && let Some((job_idx, total, clips)) = marker.demo_progress {
@@ -911,19 +939,17 @@ pub fn spawn_capture_engine(
                     break;
                 }
                 if start_time.elapsed().as_secs() > 10
-                    && (dummy_path.exists() || exit_trigger.exists() || obs_batch_complete_seen)
+                    && (dummy_path.exists()
+                        || exit_trigger.exists()
+                        || obs_batch_complete_seen
+                        || pipe_batch_complete_seen)
                 {
-                    let via = if obs_batch_complete_seen && !exit_trigger.exists() {
-                        // The common OBS-mode case: caught it off the marker,
-                        // ahead of exit_trigger ever needing to be written.
-                        "BATCH_COMPLETE marker".to_string()
-                    } else {
-                        format!(
-                            "done marker: {}, exit trigger: {}",
-                            dummy_path.exists(),
-                            exit_trigger.exists()
-                        )
-                    };
+                    let via = completion_source(
+                        pipe_batch_complete_seen,
+                        obs_batch_complete_seen,
+                        dummy_path.exists(),
+                        exit_trigger.exists(),
+                    );
                     log_markdown(&format!(
                         "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
                         start_time.elapsed().as_secs_f32(),
@@ -962,7 +988,12 @@ pub fn spawn_capture_engine(
                 // visible from out here separates them from an access violation
                 // — the exit status belongs to the launcher, which handed off
                 // long ago — so the wording covers both rather than guessing.
-                if hl_seen_alive && !hl_alive && !dummy_path.exists() && !exit_trigger.exists() {
+                if hl_seen_alive
+                    && !hl_alive
+                    && !dummy_path.exists()
+                    && !exit_trigger.exists()
+                    && !pipe_batch_complete_seen
+                {
                     log_markdown(&format!(
                         "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
                         start_time.elapsed().as_secs_f32()
@@ -1067,8 +1098,47 @@ pub fn spawn_capture_engine(
         .unwrap();
 }
 
+/// How the end of a batch was noticed, for the "Batch complete" log line.
+///
+/// The events pipe's `BATCH_COMPLETE` is named whenever it arrived (#434).
+/// Outside OBS mode the capture loop checks only every 500 ms, and the
+/// exit-trigger folder appears a few frames after the marker, so both are
+/// usually there by the same check; naming the folder then hid that the pipe
+/// had already delivered.
+fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool) -> String {
+    if pipe_seen {
+        "BATCH_COMPLETE from the game events pipe".to_string()
+    } else if obs_seen && !trigger {
+        // The common OBS-mode case: caught it off the marker, ahead of
+        // exit_trigger ever needing to be written.
+        "BATCH_COMPLETE marker".to_string()
+    } else {
+        format!("done marker: {dummy}, exit trigger: {trigger}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::completion_source;
+
+    #[test]
+    fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {
+        // Marker and exit-trigger folder both there by the same check.
+        assert_eq!(
+            completion_source(true, false, false, true),
+            "BATCH_COMPLETE from the game events pipe"
+        );
+        assert_eq!(
+            completion_source(false, true, false, false),
+            "BATCH_COMPLETE marker"
+        );
+        // No pipe (an old hook DLL, or GOLDSRC_HOOKS_EVENTS=0): the folder.
+        assert_eq!(
+            completion_source(false, false, false, true),
+            "done marker: false, exit trigger: true"
+        );
+    }
+
     use super::*;
     use crate::test_support::Scratch;
     use std::time::Duration;
