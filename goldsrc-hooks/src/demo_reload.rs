@@ -13,15 +13,8 @@
 //!
 //! ## Wrapping an engine command without an offset
 //!
-//! `cl_enginefunc_t` slots 102-104 walk the engine's command list
-//! (`pfnGetFirstCmdFunctionHandle`, `pfnGetNextCmdFunctionHandle`,
-//! `pfnGetCmdFunctionName`). Each node is `Cmd_AddCommand`'s 16-byte
-//! allocation, `{ next, name, function, flags }`, the same in both builds
-//! (pre-Anniversary `hw.dll+0x28090`, 25th Anniversary `+0x1b50c0`), so the
-//! handler is swapped by writing the node's `function` field. Nodes live on
-//! the engine's heap, so no page protection needs changing, and no per-build
-//! address is involved. `tools/verify_cmd_list_slots.py` checks the slots and
-//! the layout against both `hw.dll`s.
+//! Through the engine's own command list, with no per-build address; see
+//! [`crate::cmd_list`].
 //!
 //! The first attempt is at [`crate::commands::install`], right after
 //! `client.dll`'s `Initialize`. In case the engine has not registered
@@ -39,27 +32,14 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::cell::RefCell;
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, CString};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine::{self, ClEngineFuncsPartial, ConsoleCommandFn};
+use crate::cmd_list::{self, call_real, wrap};
+use crate::engine;
 use crate::names::console_name;
 
 pub const NAME: &str = console_name!("reload_demo");
-
-/// `cl_enginefunc_t` slots, from the public SDK's `APIProxy.h`.
-const SLOT_GET_FIRST_CMD_FUNCTION_HANDLE: usize = 102;
-
-/// A node of the engine's command list, as `Cmd_AddCommand` builds it.
-#[repr(C)]
-struct CmdFunction {
-    next: *mut CmdFunction,
-    name: *const c_char,
-    function: Option<ConsoleCommandFn>,
-    flags: i32,
-}
-
-type GetFirstCmdFn = unsafe extern "C" fn() -> *mut CmdFunction;
 
 /// The engine's own handlers, called by the wrappers.
 static REAL_PLAYDEMO: AtomicUsize = AtomicUsize::new(0);
@@ -68,9 +48,6 @@ static WRAPPED: AtomicBool = AtomicBool::new(false);
 
 /// How many more frames `poll` retries a wrap that found nothing.
 static RETRIES_LEFT: AtomicU32 = AtomicU32::new(300);
-
-/// The list is a few hundred nodes; this only stops a corrupted one looping.
-const MAX_NODES: usize = 8192;
 
 thread_local! {
     /// The last `playdemo`/`viewdemo` and the name it was given. Console
@@ -106,37 +83,16 @@ fn try_wrap() -> bool {
     if WRAPPED.load(Ordering::Relaxed) {
         return true;
     }
-    let Some(engfuncs) = engine::engfuncs() else {
-        return false;
-    };
-    // Safety: slot 102 of the engine's own table, checked in both builds by
-    // tools/verify_cmd_list_slots.py.
-    let first = unsafe {
-        let slot = *(engfuncs as *const ClEngineFuncsPartial as *const usize)
-            .add(SLOT_GET_FIRST_CMD_FUNCTION_HANDLE);
-        if slot == 0 {
-            return false;
-        }
-        let get_first: GetFirstCmdFn = std::mem::transmute(slot);
-        get_first()
-    };
-
     let mut found_playdemo = false;
-    let mut node = first;
-    let mut seen = 0;
-    while !node.is_null() && seen < MAX_NODES {
-        seen += 1;
-        // Safety: a live node of the engine's list; see the module doc.
-        let entry = unsafe { &mut *node };
-        if !entry.name.is_null() {
-            let name = unsafe { CStr::from_ptr(entry.name) }.to_bytes();
-            if name.eq_ignore_ascii_case(b"playdemo") {
-                found_playdemo |= wrap(entry, &REAL_PLAYDEMO, wrapped_playdemo);
-            } else if name.eq_ignore_ascii_case(b"viewdemo") {
-                wrap(entry, &REAL_VIEWDEMO, wrapped_viewdemo);
-            }
+    let listed = cmd_list::for_each(|name, entry| {
+        if name.eq_ignore_ascii_case(b"playdemo") {
+            found_playdemo |= wrap(entry, &REAL_PLAYDEMO, wrapped_playdemo);
+        } else if name.eq_ignore_ascii_case(b"viewdemo") {
+            wrap(entry, &REAL_VIEWDEMO, wrapped_viewdemo);
         }
-        node = entry.next;
+    });
+    if !listed {
+        return false;
     }
     if found_playdemo {
         WRAPPED.store(true, Ordering::Relaxed);
@@ -154,19 +110,6 @@ fn try_wrap() -> bool {
     found_playdemo
 }
 
-/// Points `entry` at `wrapper`, keeping its handler in `real`.
-fn wrap(entry: &mut CmdFunction, real: &AtomicUsize, wrapper: ConsoleCommandFn) -> bool {
-    let Some(current) = entry.function else {
-        return false;
-    };
-    if current as usize == wrapper as usize {
-        return true;
-    }
-    real.store(current as usize, Ordering::Relaxed);
-    entry.function = Some(wrapper);
-    true
-}
-
 unsafe extern "C" fn wrapped_playdemo() {
     remember("playdemo");
     unsafe { call_real(&REAL_PLAYDEMO) };
@@ -175,14 +118,6 @@ unsafe extern "C" fn wrapped_playdemo() {
 unsafe extern "C" fn wrapped_viewdemo() {
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
-}
-
-unsafe fn call_real(real: &AtomicUsize) {
-    let address = real.load(Ordering::Relaxed);
-    if address != 0 {
-        let real: ConsoleCommandFn = unsafe { std::mem::transmute(address) };
-        unsafe { real() };
-    }
 }
 
 /// Notes the name the command was given. A bare `playdemo` (it prints its
@@ -346,22 +281,6 @@ mod tests {
         assert_eq!(
             from_command_line(vec!["+playdemo".to_string(), "a;quit".to_string()]),
             None
-        );
-    }
-
-    #[test]
-    fn a_node_is_laid_out_as_cmd_add_command_builds_it() {
-        assert_eq!(
-            std::mem::size_of::<CmdFunction>(),
-            4 * std::mem::size_of::<usize>()
-        );
-        assert_eq!(
-            std::mem::offset_of!(CmdFunction, name),
-            std::mem::size_of::<usize>()
-        );
-        assert_eq!(
-            std::mem::offset_of!(CmdFunction, function),
-            2 * std::mem::size_of::<usize>()
         );
     }
 }
