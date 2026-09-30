@@ -573,6 +573,36 @@ button.primary-btn:hover:not(:disabled) {
   background: var(--primary-hover);
 }
 
+/* A text box's clear button (clearable_input.js, #529): an × at its
+   right-hand end, shown only while the box has text. */
+.clearable-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.clearable-x {
+  position: absolute;
+  right: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.clearable-x[hidden] {
+  display: none;
+}
+
+/* Outranks the global button:hover:not(:disabled) background. */
+.clearable-x:hover:not(:disabled) {
+  background: transparent;
+  color: #fff;
+}
+
 /* Master Demo Queue Table */
 .table-wrapper {
   overflow-x: auto;

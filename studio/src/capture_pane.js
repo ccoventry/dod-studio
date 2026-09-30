@@ -17,6 +17,7 @@ import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -832,10 +833,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initImportCfgButton();
 
   // The pipeline turns some settings into init commands, so the warnings go
-  // stale when one changes.
+  // stale when one changes -- including by undo, which fires no 'change'
+  // until blur (#535).
   FIELDS_THAT_BECOME_COMMANDS.forEach((sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("change", refreshInitCommandWarnings);
+    refreshAfterTyping(document.querySelector(sel), refreshInitCommandWarnings);
   });
 
   const addInitCommandBtn = document.querySelector('#add-init-command-btn');

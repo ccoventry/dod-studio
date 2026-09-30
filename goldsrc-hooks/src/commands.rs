@@ -519,6 +519,7 @@ pub fn poll() {
     crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
+    crate::events::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
@@ -660,6 +661,9 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(events) = crate::events::status_line() {
+        lines.push(events);
     }
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
@@ -1325,6 +1329,7 @@ pub fn install() {
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
+    crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
