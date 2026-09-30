@@ -109,5 +109,8 @@ jobs:
           tagName: experimental-latest
           releaseName: "DoD Studio ${{ steps.version.outputs.EXPERIMENTAL_VERSION }} (experimental)"
           releaseBody: "On-demand experimental build from `dev` — not for general use. Built from commit ${{ github.sha }}."
+          # What changed, from the merged PRs' titles, grouped by .github/release.yml
+          # (#165). releaseBody is prepended to the generated notes.
+          generateReleaseNotes: true
           releaseDraft: false
           prerelease: true
