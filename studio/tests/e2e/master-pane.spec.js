@@ -32,3 +32,38 @@ test.describe('master_pane missing demos', () => {
     await expect(row(page, 'here.dem').locator('.locate-demo-btn')).toHaveCount(0);
   });
 });
+
+test.describe('master_pane search clear button (#529)', () => {
+  const search = (page) => page.locator('#demo-search-input');
+  const x = (page) => page.locator('.clearable-x');
+  const rows = (page) => page.locator('#master-demo-table-body tr');
+
+  test('the × shows only while the box has text', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(x(page)).toBeHidden();
+    await search(page).fill('moved');
+    await expect(x(page)).toBeVisible();
+    await search(page).fill('');
+    await expect(x(page)).toBeHidden();
+  });
+
+  test('clicking it clears the text, re-filters and keeps focus in the box', async ({ page }) => {
+    await gotoHarness(page);
+    await search(page).fill('moved');
+    await expect(rows(page)).toHaveCount(1);
+    await x(page).click();
+    await expect(search(page)).toHaveValue('');
+    await expect(rows(page)).toHaveCount(3);
+    await expect(search(page)).toBeFocused();
+    await expect(x(page)).toBeHidden();
+  });
+
+  test('Esc in the box does the same', async ({ page }) => {
+    await gotoHarness(page);
+    await search(page).fill('gone');
+    await expect(rows(page)).toHaveCount(1);
+    await search(page).press('Escape');
+    await expect(search(page)).toHaveValue('');
+    await expect(rows(page)).toHaveCount(3);
+  });
+});
