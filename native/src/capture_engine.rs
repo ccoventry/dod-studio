@@ -838,6 +838,22 @@ pub fn spawn_capture_engine(
                         }
                         std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
                         wait_for_hl_exe_to_exit(&mut sys);
+                        // A game already exiting when its box came up (the
+                        // Anniversary !m_bMounted assert, after the user
+                        // clicked the Steam box themselves) can't be killed:
+                        // Windows won't terminate a terminating process. Its
+                        // box is answered instead, so it doesn't sit there.
+                        let left = crate::sys::dialogs::error_dialogs(&game_pids, &[]);
+                        if !left.is_empty() {
+                            for dialog in &left {
+                                log_markdown(&format!(
+                                    "[HLAE] The game was already exiting and couldn't be ended; answered its box with Ignore: {}",
+                                    dialog.full_text()
+                                ));
+                                crate::sys::dialogs::dismiss(dialog);
+                            }
+                            wait_for_hl_exe_to_exit(&mut sys);
+                        }
                         break;
                     }
                 }

@@ -7,9 +7,10 @@
 //! interface" (Steam not running) and, on Anniversary, a Visual C++
 //! "Assertion failed! ... !m_bMounted" box after it.
 //!
-//! Read-only: this looks at windows belonging to the given process ids and
-//! reads their text. It never clicks, closes or types into anything; what to
-//! do about a box is the caller's decision.
+//! Reading is all `error_dialogs` does: it looks at windows belonging to the
+//! given process ids and reads their text; what to do about a box is the
+//! caller's. The one exception is `dismiss`, for a box whose process can't
+//! be ended any other way (see there).
 
 /// One error box, and the text on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,6 +92,21 @@ pub fn error_dialogs(_pids: &[u32], _launcher_pids: &[u32]) -> Vec<ErrorDialog> 
     Vec::new()
 }
 
+/// Answers a box with Ignore (and closes it, for an OK-only one).
+///
+/// Only for a box whose process is already exiting: Windows refuses to
+/// terminate a process that is terminating, so killing the game does nothing
+/// while Anniversary's `!m_bMounted` assert (raised during its own exit) is
+/// up, and the box would wait for a click. Ignore lets that exit finish.
+/// Seen live 2026-09-29.
+#[cfg(windows)]
+pub fn dismiss(dialog: &ErrorDialog) {
+    win::dismiss(dialog.window)
+}
+
+#[cfg(not(windows))]
+pub fn dismiss(_dialog: &ErrorDialog) {}
+
 #[cfg(windows)]
 mod win {
     use super::ErrorDialog;
@@ -112,6 +128,7 @@ mod win {
         fn GetWindowThreadProcessId(window: Hwnd, pid: *mut u32) -> u32;
         fn IsWindowVisible(window: Hwnd) -> Bool;
         fn GetClassNameW(window: Hwnd, name: *mut u16, max: i32) -> i32;
+        fn PostMessageW(window: Hwnd, msg: u32, wparam: usize, lparam: isize) -> Bool;
         fn SendMessageTimeoutW(
             window: Hwnd,
             msg: u32,
@@ -183,6 +200,17 @@ mod win {
         // SAFETY: `pid` is a valid out pointer.
         unsafe { GetWindowThreadProcessId(window, &mut pid) };
         pid
+    }
+
+    pub(super) fn dismiss(window: Hwnd) {
+        const WM_COMMAND: u32 = 0x0111;
+        const WM_CLOSE: u32 = 0x0010;
+        const IDIGNORE: usize = 5;
+        // SAFETY: posting to a window handle; a stale one just fails.
+        unsafe {
+            PostMessageW(window, WM_COMMAND, IDIGNORE, 0);
+            PostMessageW(window, WM_CLOSE, 0, 0);
+        }
     }
 
     pub(super) fn error_dialogs(pids: &[u32], launcher_pids: &[u32]) -> Vec<ErrorDialog> {
