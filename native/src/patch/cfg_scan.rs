@@ -96,66 +96,221 @@ impl CfgScan {
     pub fn is_empty(&self) -> bool {
         self.settings.is_empty() && self.unreferenced.is_empty()
     }
+}
 
-    /// Which of these init commands will override something a config already
-    /// sets.
-    ///
-    /// Init commands reach the engine after its configs have run, so where both
-    /// name the same cvar the init command is the one that takes effect. That
-    /// is usually what the user wants — it is the whole point of putting it
-    /// there — but they should not have to find out by noticing their movie
-    /// looks different. Silence here would mean a value they had set
-    /// deliberately, years ago, quietly stopping applying.
-    pub fn overrides_in(&self, init_commands: &[String]) -> Vec<CommandOverride> {
-        let mut out = Vec::new();
-        for command in init_commands {
-            let trimmed = command.trim();
-            let mut parts = trimmed.split_whitespace();
-            let Some(head) = parts.next() else { continue };
-            let Some(value) = parts.next() else { continue };
-            if parts.next().is_some() {
-                continue;
-            }
-            let Some(setting) = self.effective(head) else {
-                continue;
-            };
-            // Setting it to what the config already says overrides nothing that
-            // anyone would notice.
-            if setting.value.eq_ignore_ascii_case(&unquote(value)) {
-                continue;
-            }
-            out.push(CommandOverride {
-                command: trimmed.to_string(),
-                cvar: setting.cvar.clone(),
-                init_value: unquote(value),
-                cfg_value: setting.value.clone(),
-                file: setting.file.clone(),
-                line: setting.line,
-            });
-        }
-        out
+/// Where a value was stated, for the two value-warning rules (#216).
+#[derive(Debug, Clone, PartialEq)]
+pub enum ValueSource {
+    /// A line in a config the engine executes.
+    Config { file: PathBuf, line: usize },
+    /// An Initial Command the user typed.
+    Initial,
+    /// An Initial Command the pipeline appends for itself
+    /// (`builder::final_init_commands`), e.g. `mirv_movie_fps` from Capture FPS.
+    App,
+    /// A Scheduled Command, `offset_seconds` before each highlight.
+    ScheduledBefore { offset_seconds: f32 },
+    /// A Scheduled Command, `offset_seconds` after each highlight.
+    ScheduledAfter { offset_seconds: f32 },
+}
+
+impl ValueSource {
+    pub fn is_config(&self) -> bool {
+        matches!(self, ValueSource::Config { .. })
+    }
+
+    pub fn is_scheduled(&self) -> bool {
+        matches!(
+            self,
+            ValueSource::ScheduledBefore { .. } | ValueSource::ScheduledAfter { .. }
+        )
     }
 }
 
-/// One init command silently beaten by a later one in the same list.
-///
-/// The list the engine receives is the user's own init commands followed by the
-/// ones the pipeline appends for itself, so a `mirv_movie_fps 500` typed by hand
-/// is overwritten by the Capture FPS setting a few entries later. Nothing about
-/// the list on screen shows that: both lines are there, and only the last one
-/// happens.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandShadow {
+/// One value stated for a cvar, and where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct StatedValue {
+    pub value: String,
+    pub source: ValueSource,
+}
+
+/// Rule 1: a cvar given two or more different values across the configs,
+/// Initial Commands and Scheduled `Before` commands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ValueConflict {
     pub cvar: String,
-    /// The command that will not take effect.
-    pub shadowed: String,
-    pub shadowed_value: String,
-    /// The one that will.
-    pub winner: String,
-    pub winner_value: String,
-    /// Position of the winner in the list, so a caller can tell whether it came
-    /// from the user's own entries or was appended after them.
-    pub winner_index: usize,
+    /// Every value stated, in the order the engine runs them: configs, then
+    /// Initial Commands, then Scheduled `Before` commands furthest back first.
+    pub values: Vec<StatedValue>,
+    /// The last of `values`: the one in effect when the highlight plays.
+    pub effective: StatedValue,
+}
+
+/// Rule 2: a Scheduled `After` command with no `Before` for the same cvar,
+/// whose value differs from the baseline. Scheduled Commands fire around every
+/// highlight, so nothing puts the value back: the first clip records at the
+/// baseline and every later clip at the `After`'s value.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AsymmetricAfter {
+    pub cvar: String,
+    /// The last unpaired `After` to fire, which is the value every later clip
+    /// starts from.
+    pub after: StatedValue,
+    /// Rule 1's effective value, which the first clip records at.
+    pub baseline: StatedValue,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ValueWarnings {
+    pub conflicts: Vec<ValueConflict>,
+    pub asymmetric: Vec<AsymmetricAfter>,
+}
+
+/// A Scheduled Command, as the value rules need it.
+#[derive(Debug, Clone, Copy)]
+pub struct ScheduledCommand<'a> {
+    pub command: &'a str,
+    pub after: bool,
+    pub offset_seconds: f32,
+}
+
+/// Whether two stated values are the same setting. Case-insensitive, and
+/// numeric where both sides are numbers, so `1` and `1.0` agree.
+fn same_value(a: &str, b: &str) -> bool {
+    match (a.parse::<f64>(), b.parse::<f64>()) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a.eq_ignore_ascii_case(b),
+    }
+}
+
+/// The two value-conflict rules from #216, replacing the old override,
+/// shadowed and "Scheduled Commands override earlier values" warnings.
+///
+/// **Rule 1, conflicting values.** Pool every value stated for a cvar in the
+/// executed configs (duplicates included), `init_commands` and the
+/// `Before` commands. If they all agree, however many there are, say nothing.
+/// Otherwise report it once, naming every value and the effective one: the
+/// last in firing order.
+///
+/// **Rule 2, asymmetric value.** An `After` command with no `Before` for the
+/// same cvar ("unpaired"), whose value differs from Rule 1's effective value.
+/// An `After`'s value is never part of Rule 1's pool, paired or not, so once
+/// any `Before` pairs it neither rule looks at it again. That is the accepted
+/// gap in #216: a paired `After` is presumed to be a deliberate restore.
+///
+/// `init_commands` is the list the engine receives (`final_init_commands`),
+/// whose first `user_count` entries the user typed and the rest the pipeline
+/// appends. `scheduled` must already be in firing order (`Before`s furthest
+/// back first, then `After`s nearest first) and exclude anything reported
+/// elsewhere as a hazard or banned.
+///
+/// A conflict made only of config lines is **not** reported: those are
+/// between the user's own files, nothing the app sends is involved, and the
+/// scanner records every `word value` line as an assignment, including
+/// commands such as `echo`, which would make config-only "conflicts" noisy.
+pub fn value_warnings(
+    scan: &CfgScan,
+    init_commands: &[String],
+    user_count: usize,
+    scheduled: &[ScheduledCommand],
+) -> ValueWarnings {
+    // Pool per cvar, in firing order, cvars in first-seen order and spelling.
+    // A Vec rather than a map: a config is a couple of hundred lines.
+    let mut pool: Vec<(String, Vec<StatedValue>)> = Vec::new();
+    let mut add = |cvar: &str, value: String, source: ValueSource| {
+        let stated = StatedValue { value, source };
+        match pool.iter_mut().find(|(c, _)| c.eq_ignore_ascii_case(cvar)) {
+            Some((_, values)) => values.push(stated),
+            None => pool.push((cvar.to_string(), vec![stated])),
+        }
+    };
+
+    for setting in scan.settings.iter().filter(|s| s.auto_executed) {
+        add(
+            &setting.cvar,
+            setting.value.clone(),
+            ValueSource::Config {
+                file: setting.file.clone(),
+                line: setting.line,
+            },
+        );
+    }
+    for (index, command) in init_commands.iter().enumerate() {
+        if let Some((cvar, value)) = assigned_cvar(command) {
+            let source = if index < user_count {
+                ValueSource::Initial
+            } else {
+                ValueSource::App
+            };
+            add(&cvar, value, source);
+        }
+    }
+    for s in scheduled.iter().filter(|s| !s.after) {
+        if let Some((cvar, value)) = assigned_cvar(s.command) {
+            add(
+                &cvar,
+                value,
+                ValueSource::ScheduledBefore {
+                    offset_seconds: s.offset_seconds,
+                },
+            );
+        }
+    }
+
+    let mut out = ValueWarnings::default();
+    for (cvar, values) in &pool {
+        let effective = values.last().expect("a pool entry has a value").clone();
+        let disagree = values
+            .iter()
+            .any(|v| !same_value(&v.value, &effective.value));
+        let app_side = values.iter().any(|v| !v.source.is_config());
+        if disagree && app_side {
+            out.conflicts.push(ValueConflict {
+                cvar: cvar.clone(),
+                values: values.clone(),
+                effective,
+            });
+        }
+    }
+
+    // Rule 2. The last unpaired After per cvar is what later clips start from.
+    let mut last_after: Vec<(String, StatedValue)> = Vec::new();
+    for s in scheduled.iter().filter(|s| s.after) {
+        if let Some((cvar, value)) = assigned_cvar(s.command) {
+            let stated = StatedValue {
+                value,
+                source: ValueSource::ScheduledAfter {
+                    offset_seconds: s.offset_seconds,
+                },
+            };
+            match last_after
+                .iter_mut()
+                .find(|(c, _)| c.eq_ignore_ascii_case(&cvar))
+            {
+                Some((_, slot)) => *slot = stated,
+                None => last_after.push((cvar, stated)),
+            }
+        }
+    }
+    for (cvar, after) in last_after {
+        let Some((_, values)) = pool.iter().find(|(c, _)| c.eq_ignore_ascii_case(&cvar)) else {
+            // Nothing states a baseline, so there is nothing known to differ
+            // from. The old warnings were silent here too.
+            continue;
+        };
+        let paired = values
+            .iter()
+            .any(|v| matches!(v.source, ValueSource::ScheduledBefore { .. }));
+        let baseline = values.last().expect("a pool entry has a value");
+        if !paired && !same_value(&after.value, &baseline.value) {
+            out.asymmetric.push(AsymmetricAfter {
+                cvar,
+                after,
+                baseline: baseline.clone(),
+            });
+        }
+    }
+    out
 }
 
 /// Cvars that must not change once a demo is playing.
@@ -516,71 +671,6 @@ pub fn assigned_cvar(command: &str) -> Option<(String, String)> {
     Some((head.to_string(), unquote(value)))
 }
 
-/// Commands in this list that a later command in the same list overrides.
-///
-/// Last one wins, as the console does — so every entry for a cvar except the
-/// final one is dead, and each is reported against the one that beat it.
-pub fn self_overrides(commands: &[String]) -> Vec<CommandShadow> {
-    let assignments: Vec<(usize, String, String, String)> = commands
-        .iter()
-        .enumerate()
-        .filter_map(|(i, raw)| {
-            let trimmed = raw.trim();
-            let mut parts = trimmed.split_whitespace();
-            let head = parts.next()?;
-            let value = parts.next()?;
-            if parts.next().is_some() || !is_cvar_name(head) {
-                return None;
-            }
-            Some((i, head.to_lowercase(), unquote(value), trimmed.to_string()))
-        })
-        .collect();
-
-    let mut out = Vec::new();
-    for (index, (_, cvar, value, command)) in assignments.iter().enumerate() {
-        let Some((w_pos, _, w_value, w_command)) = assignments
-            .iter()
-            .skip(index + 1)
-            .find(|(_, other, _, _)| other == cvar)
-        else {
-            continue;
-        };
-        // Repeating a value changes nothing anyone would notice.
-        if value.eq_ignore_ascii_case(w_value) {
-            continue;
-        }
-        out.push(CommandShadow {
-            cvar: cvar.clone(),
-            shadowed: command.clone(),
-            shadowed_value: value.clone(),
-            winner: w_command.clone(),
-            winner_value: w_value.clone(),
-            winner_index: *w_pos,
-        });
-    }
-    out
-}
-
-/// An init command that will take precedence over a config file's value.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CommandOverride {
-    pub command: String,
-    pub cvar: String,
-    pub init_value: String,
-    pub cfg_value: String,
-    pub file: PathBuf,
-    pub line: usize,
-}
-
-impl CommandOverride {
-    pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
-    }
-}
-
 /// Scan a mod folder's configs. Never writes anything.
 ///
 /// `game_dir` is the folder holding the configs — for DoD, `<hl.exe dir>/dod`.
@@ -855,8 +945,28 @@ mod tests {
         assert_eq!(scan.unreferenced[0].file_name().unwrap(), "movie.cfg");
     }
 
+    fn init(commands: &[&str]) -> Vec<String> {
+        commands.iter().map(|c| c.to_string()).collect()
+    }
+
+    fn before(command: &str, offset_seconds: f32) -> ScheduledCommand<'_> {
+        ScheduledCommand {
+            command,
+            after: false,
+            offset_seconds,
+        }
+    }
+
+    fn after(command: &str, offset_seconds: f32) -> ScheduledCommand<'_> {
+        ScheduledCommand {
+            command,
+            after: true,
+            offset_seconds,
+        }
+    }
+
     #[test]
-    fn an_init_command_that_overrides_a_config_value_is_reported() {
+    fn an_init_command_that_overrides_a_config_value_is_a_conflict() {
         // The case that matters: someone sets mirv_fov in Init Commands with a
         // different value sitting in movie.cfg. The init command wins, which is
         // the point — but they should be told, not left to notice.
@@ -864,41 +974,281 @@ mod tests {
         std::fs::write(dir.join("config.cfg"), "exec movie.cfg\n").unwrap();
         std::fs::write(dir.join("movie.cfg"), "mirv_fov \"105\"\nr_decals \"0\"\n").unwrap();
 
-        let scan = scan(&dir);
-        let hits = scan.overrides_in(&[
-            "mirv_fov 90".to_string(),
-            "sys_autodir".to_string(),
-            "cl_showfps 1".to_string(),
-        ]);
+        let w = value_warnings(
+            &scan(&dir),
+            &init(&["mirv_fov 90", "sys_autodir", "cl_showfps 1"]),
+            3,
+            &[],
+        );
 
-        assert_eq!(hits.len(), 1, "{:?}", hits);
-        assert_eq!(hits[0].cvar, "mirv_fov");
-        assert_eq!(hits[0].init_value, "90");
-        assert_eq!(hits[0].cfg_value, "105");
-        assert_eq!(hits[0].file_name(), "movie.cfg");
-        assert_eq!(hits[0].line, 1);
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        let c = &w.conflicts[0];
+        assert_eq!(c.cvar, "mirv_fov");
+        assert_eq!(c.effective.value, "90");
+        assert_eq!(c.effective.source, ValueSource::Initial);
+        assert_eq!(c.values[0].value, "105");
+        assert!(
+            matches!(&c.values[0].source, ValueSource::Config { file, line: 1 }
+                if file.file_name().unwrap() == "movie.cfg")
+        );
     }
 
     #[test]
-    fn a_command_beaten_by_a_later_one_in_the_same_list_is_reported() {
+    fn a_command_beaten_by_a_later_one_in_the_same_list_is_a_conflict() {
         // The real shape: the user types `mirv_movie_fps 500`, and the pipeline
         // appends the Capture FPS setting after it. Both lines are on screen and
         // only the second one happens.
-        let hits = self_overrides(&[
-            "mirv_fov 105".to_string(),
-            "mirv_movie_fps 500".to_string(),
-            "sys_autodir".to_string(),
-            "mirv_movie_fps 120".to_string(),
-        ]);
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&[
+                "mirv_fov 105",
+                "mirv_movie_fps 500",
+                "sys_autodir",
+                "mirv_movie_fps 120",
+            ]),
+            2,
+            &[],
+        );
 
-        assert_eq!(hits.len(), 1, "{:?}", hits);
-        assert_eq!(hits[0].cvar, "mirv_movie_fps");
-        assert_eq!(hits[0].shadowed_value, "500");
-        assert_eq!(hits[0].winner_value, "120");
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        let c = &w.conflicts[0];
+        assert_eq!(c.cvar, "mirv_movie_fps");
+        assert_eq!(c.values[0].value, "500");
+        assert_eq!(c.values[0].source, ValueSource::Initial);
+        assert_eq!(c.effective.value, "120");
         assert_eq!(
-            hits[0].winner_index, 3,
+            c.effective.source,
+            ValueSource::App,
             "so a caller can tell who appended it"
         );
+    }
+
+    #[test]
+    fn repeating_the_same_value_is_silent_everywhere() {
+        // Rule 1's "who cares" case: the same value in a config twice, in
+        // Initial Commands and before the clip is nothing worth saying.
+        let dir = scratch("same_everywhere");
+        std::fs::write(
+            dir.join("config.cfg"),
+            "sensitivity \"2\"\nexec movie.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("movie.cfg"), "sensitivity 2.0\n").unwrap();
+
+        let w = value_warnings(
+            &scan(&dir),
+            &init(&["sensitivity 2", "sensitivity \"2\""]),
+            2,
+            &[before("sensitivity 2", 3.0)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn setting_a_cvar_to_what_the_config_already_says_is_silent() {
+        let dir = scratch("agrees");
+        std::fs::write(dir.join("config.cfg"), "mirv_fov \"105\"\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &init(&["mirv_fov 105"]), 1, &[]);
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn a_conflict_only_between_config_lines_is_not_reported() {
+        // Nothing the app sends is involved, and `echo` lines count as
+        // assignments to the scanner. See `value_warnings`' doc comment.
+        let dir = scratch("config_only");
+        std::fs::write(
+            dir.join("config.cfg"),
+            "gl_max_size 256\necho \"one\"\nexec movie.cfg\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("movie.cfg"), "gl_max_size 2048\necho \"two\"\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &[], 0, &[]);
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn a_config_only_conflict_is_reported_once_the_app_names_the_cvar() {
+        // Any app-side value, even one agreeing with the effective config line,
+        // brings the whole pool into view.
+        let dir = scratch("config_then_init");
+        std::fs::write(dir.join("config.cfg"), "gl_max_size 256\nexec movie.cfg\n").unwrap();
+        std::fs::write(dir.join("movie.cfg"), "gl_max_size 2048\n").unwrap();
+
+        let w = value_warnings(&scan(&dir), &init(&["gl_max_size 2048"]), 1, &[]);
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        assert_eq!(w.conflicts[0].values.len(), 3);
+        assert_eq!(w.conflicts[0].effective.value, "2048");
+    }
+
+    #[test]
+    fn the_last_before_to_fire_is_the_effective_value() {
+        // Scheduled is given in firing order: 10s back runs before 2s back, so
+        // the 2s one, nearest the highlight, is what the clip records at.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &[],
+            0,
+            &[
+                before("hud_deathnotice_time 555", 10.0),
+                before("hud_deathnotice_time 1", 2.0),
+            ],
+        );
+        assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+        assert_eq!(w.conflicts[0].effective.value, "1");
+        assert_eq!(
+            w.conflicts[0].effective.source,
+            ValueSource::ScheduledBefore {
+                offset_seconds: 2.0
+            }
+        );
+    }
+
+    #[test]
+    fn every_combination_of_sources_conflicts() {
+        let dir = scratch("combos");
+        std::fs::write(dir.join("config.cfg"), "sensitivity 1\n").unwrap();
+        let cfg = scan(&dir);
+        let none = CfgScan::default();
+
+        // config + Initial, config + Scheduled, Initial + Scheduled, all three.
+        let cases: [(&CfgScan, Vec<String>, Vec<ScheduledCommand>, &str, usize); 4] = [
+            (&cfg, init(&["sensitivity 2"]), vec![], "2", 2),
+            (&cfg, vec![], vec![before("sensitivity 3", 1.0)], "3", 2),
+            (
+                &none,
+                init(&["sensitivity 2"]),
+                vec![before("sensitivity 3", 1.0)],
+                "3",
+                2,
+            ),
+            (
+                &cfg,
+                init(&["sensitivity 2"]),
+                vec![before("sensitivity 3", 1.0)],
+                "3",
+                3,
+            ),
+        ];
+        for (scan, init_commands, scheduled, effective, count) in cases {
+            let w = value_warnings(scan, &init_commands, init_commands.len(), &scheduled);
+            assert_eq!(w.conflicts.len(), 1, "{:?}", w.conflicts);
+            assert_eq!(w.conflicts[0].effective.value, effective);
+            assert_eq!(w.conflicts[0].values.len(), count);
+        }
+    }
+
+    #[test]
+    fn an_after_value_is_never_part_of_the_conflict_pool() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert!(w.conflicts.is_empty(), "{:?}", w.conflicts);
+    }
+
+    #[test]
+    fn an_unpaired_after_that_differs_from_the_baseline_is_asymmetric() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert_eq!(w.asymmetric.len(), 1, "{:?}", w.asymmetric);
+        let a = &w.asymmetric[0];
+        assert_eq!(a.after.value, "1");
+        assert_eq!(a.baseline.value, "6");
+        assert_eq!(a.baseline.source, ValueSource::Initial);
+    }
+
+    #[test]
+    fn the_last_unpaired_after_is_what_later_clips_start_from() {
+        // 5 then back to the baseline 6 before the next clip: no asymmetry.
+        let restored = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                after("hud_deathnotice_time 5", 0.5),
+                after("hud_deathnotice_time 6", 2.0),
+            ],
+        );
+        assert!(restored.asymmetric.is_empty(), "{:?}", restored.asymmetric);
+
+        let not_restored = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                after("hud_deathnotice_time 6", 0.5),
+                after("hud_deathnotice_time 5", 2.0),
+            ],
+        );
+        assert_eq!(not_restored.asymmetric.len(), 1);
+        assert_eq!(not_restored.asymmetric[0].after.value, "5");
+    }
+
+    #[test]
+    fn an_unpaired_after_matching_the_baseline_is_silent() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[after("hud_deathnotice_time 6.0", 0.5)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn an_unpaired_after_with_no_baseline_anywhere_is_silent() {
+        let w = value_warnings(
+            &CfgScan::default(),
+            &[],
+            0,
+            &[after("hud_deathnotice_time 1", 0.5)],
+        );
+        assert_eq!(w, ValueWarnings::default());
+    }
+
+    #[test]
+    fn any_before_pairs_the_after_and_silences_rule_two() {
+        // Baseline 6, After 1: asymmetric. Add a Before at 555 and Rule 2 goes
+        // quiet at once; Rule 1 now reports 6 against 555 instead.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                before("hud_deathnotice_time 555", 3.0),
+                after("hud_deathnotice_time 1", 0.5),
+            ],
+        );
+        assert!(w.asymmetric.is_empty(), "{:?}", w.asymmetric);
+        assert_eq!(w.conflicts.len(), 1);
+        assert_eq!(w.conflicts[0].effective.value, "555");
+    }
+
+    #[test]
+    fn a_paired_after_with_a_differing_value_is_the_accepted_gap() {
+        // #216's known, accepted gap: a Before equal to the baseline pairs the
+        // After, Rule 1's pool is all one value, and the After's own (still
+        // different) value is looked at by neither rule. Asserted so a change
+        // here is a decision, not an accident.
+        let w = value_warnings(
+            &CfgScan::default(),
+            &init(&["hud_deathnotice_time 6"]),
+            1,
+            &[
+                before("hud_deathnotice_time 6", 3.0),
+                after("hud_deathnotice_time 1", 0.5),
+            ],
+        );
+        assert_eq!(w, ValueWarnings::default());
     }
 
     #[test]
@@ -1233,29 +1583,6 @@ mod tests {
     }
 
     #[test]
-    fn repeating_the_same_value_shadows_nothing_worth_saying() {
-        assert!(
-            self_overrides(&[
-                "mirv_movie_fps 120".to_string(),
-                "mirv_movie_fps 120".to_string(),
-            ])
-            .is_empty()
-        );
-    }
-
-    #[test]
-    fn setting_a_cvar_to_what_the_config_already_says_is_not_an_override() {
-        let dir = scratch("agrees");
-        std::fs::write(dir.join("config.cfg"), "mirv_fov \"105\"\n").unwrap();
-
-        assert!(
-            scan(&dir)
-                .overrides_in(&["mirv_fov 105".to_string()])
-                .is_empty()
-        );
-    }
-
-    #[test]
     fn every_assignment_is_recorded_not_just_the_ones_the_pipeline_reads() {
         // Most configs never mention r_decals. The collisions that surprise
         // people are the ones nobody thought to watch for.
@@ -1277,7 +1604,9 @@ mod tests {
             "nor is a bare command"
         );
         assert_eq!(
-            scan.overrides_in(&["volume 1".to_string()]).len(),
+            value_warnings(&scan, &["volume 1".to_string()], 1, &[])
+                .conflicts
+                .len(),
             1,
             "and a collision on any of them is worth reporting"
         );

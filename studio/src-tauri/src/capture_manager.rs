@@ -2080,6 +2080,7 @@ fn patch_bookmark_previews(
 /// `+viewdemo <stem>_preview`.
 #[tauri::command]
 pub async fn launch_demo_preview(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
@@ -2100,12 +2101,75 @@ pub async fn launch_demo_preview(
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
 
         let mut cmd = patcher_config.build_hlae_process(&format!("+viewdemo {}", preview_stem));
-        cmd.spawn()
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
+        watch_for_error_dialogs(app, launcher);
 
         Ok(())
     }))
     .await
+}
+
+/// After a preview or Launch Game: reports any error box the game, the HLAE
+/// launcher or its injector shows (`native::sys::dialogs`) as an
+/// `external_error` event, each box once. Report only, unlike a batch: the
+/// user is at the game, so the box stays for them to close. Stops once the
+/// launcher has exited and no game has been running for 5 seconds.
+fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
+    std::thread::spawn(move || {
+        let launcher_pid = launcher.id();
+        let mut launcher_running = true;
+        let mut reported: Vec<isize> = Vec::new();
+        let mut last_game_seen = std::time::Instant::now();
+        let mut sys = native::sys::process::snapshot();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if launcher_running && !matches!(launcher.try_wait(), Ok(None)) {
+                launcher_running = false;
+            }
+            native::sys::process::refresh(&mut sys);
+            let game_pids: Vec<u32> = sys
+                .processes()
+                .values()
+                .filter(|p| native::sys::process::is_named(p, &["hl.exe"]))
+                .map(|p| p.pid().as_u32())
+                .collect();
+            let mut launcher_pids: Vec<u32> = sys
+                .processes()
+                .values()
+                .filter(|p| {
+                    native::sys::process::is_named(p, &["injector.exe"])
+                        && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
+                })
+                .map(|p| p.pid().as_u32())
+                .collect();
+            if launcher_running {
+                launcher_pids.push(launcher_pid);
+            }
+            if !game_pids.is_empty() {
+                last_game_seen = std::time::Instant::now();
+            }
+            for dialog in native::sys::dialogs::error_dialogs(&game_pids, &launcher_pids) {
+                if reported.contains(&dialog.window) {
+                    continue;
+                }
+                reported.push(dialog.window);
+                log_markdown(&format!(
+                    "[launch] Error box from PID {}: {}",
+                    dialog.pid,
+                    dialog.full_text()
+                ));
+                let _ = app.emit("external_error", dialog.summary());
+            }
+            if !launcher_running
+                && launcher_pids.is_empty()
+                && last_game_seen.elapsed() > std::time::Duration::from_secs(5)
+            {
+                break;
+            }
+        }
+    });
 }
 
 /// Process ids of every running `hl.exe` -- the games Studio could be talking
@@ -2296,8 +2360,10 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
         };
 
         let mut cmd = patcher_config.build_hlae_process("");
-        cmd.spawn()
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae)?;
+        watch_for_error_dialogs(app, launcher);
 
         Ok(())
     }))
@@ -2366,6 +2432,28 @@ fn is_obs_process_running() -> bool {
 #[tauri::command]
 pub fn check_engine_processes() -> bool {
     native::sys::process::is_running(ENGINE_PROCESS_NAMES)
+}
+
+/// Steam's state before a game launch: "not_running", "signed_out" or
+/// "ready". `hl.exe` started without Steam exits straight away, reported
+/// only as "Failed to initalize authentication interface".
+#[tauri::command]
+pub async fn steam_state() -> Result<String, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        Ok(native::sys::steam::state().as_str().to_string())
+    }))
+    .await
+}
+
+/// Starts Steam from where it recorded its own install. Steam outlives
+/// DoD Studio, so the child is not tracked.
+#[tauri::command]
+pub fn start_steam() -> Result<(), String> {
+    let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
+    std::process::Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
 }
 
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
