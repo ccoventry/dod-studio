@@ -13,14 +13,15 @@ const GAME_PATH = 'C:/games/dod/hl.exe';
 
 /** The backend's CfgReport shape (serde camelCase), with everything empty. */
 const EMPTY_REPORT = {
-  settings: [],
-  unreferenced: [],
-  overrides: [],
+  unseen: [],
+  conflicts: [],
+  asymmetric: [],
+  custom: [],
   bannedInit: [],
   bannedScheduled: [],
-  unseen: [],
-  midDemoHazards: [],
-  selfOverrides: [],
+  tooLongInit: [],
+  tooLongScheduled: [],
+  decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
   noopScheduled: [],
@@ -95,5 +96,73 @@ test.describe('fatal cvar banner', () => {
     expect(fatalAt).toBeGreaterThanOrEqual(0);
     expect(bannedAt).toBeGreaterThanOrEqual(0);
     expect(fatalAt).toBeLessThan(bannedAt);
+  });
+});
+
+// The two value rules from #216, which replaced the override / shadowed /
+// "Scheduled Commands override earlier values" sections.
+test.describe('value rules (#216)', () => {
+  const config = (value, line) => ({ value, kind: 'config', file: 'movie.cfg', line });
+
+  test('a conflict names every value and the one in effect, under Initial Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      conflicts: [
+        {
+          cvar: 'mirv_movie_fps',
+          values: [config('300', 2), { value: '500', kind: 'initial' }, { value: '120', kind: 'app' }],
+          effective: { value: '120', kind: 'app' },
+          scheduled: false,
+        },
+      ],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText('These settings are given different values:');
+    const row = banner.locator('li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('300 (movie.cfg, line 2)');
+    await expect(row).toContainText('500 (Initial Commands)');
+    await expect(row).toContainText('120 (DoD Studio, from Output Format → Capture FPS)');
+    await expect(row).toContainText('in effect: 120');
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a conflict involving a Before shows under Scheduled Commands only', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      conflicts: [
+        {
+          cvar: 'hud_deathnotice_time',
+          values: [config('10', 3), { value: '555', kind: 'before', offsetSeconds: 2 }],
+          effective: { value: '555', kind: 'before', offsetSeconds: 2 },
+          scheduled: true,
+        },
+      ],
+    });
+
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+    const row = page.locator('#scheduled-commands-warning-banner li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText('555 (Scheduled, 2s before)');
+  });
+
+  test('an unpaired After says what the first and later clips record at', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      asymmetric: [
+        {
+          cvar: 'hud_deathnotice_time',
+          after: { value: '1', kind: 'after', offsetSeconds: 0.5 },
+          baseline: config('10', 3),
+        },
+      ],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toContainText('change a value for the rest of the batch');
+    const row = banner.locator('li code');
+    await expect(row).toContainText('the first clip records at 10 (movie.cfg, line 3)');
+    await expect(row).toContainText('every later clip at 1 (Scheduled, 0.5s after)');
   });
 });
