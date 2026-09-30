@@ -57,6 +57,10 @@
 //! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `events`: the game tells DoD Studio what a capture batch is doing over a
+//!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
+//!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
+//!   turns it off.
 //! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
@@ -93,6 +97,7 @@
 //! session.
 
 mod anim_fix;
+mod cmd_list;
 mod commands;
 mod crash;
 mod crosshair;
@@ -103,6 +108,7 @@ mod demo_list_folders;
 mod demo_reload;
 mod detour;
 mod engine;
+mod events;
 mod ex_interp;
 mod hand_signals;
 mod hide_sprite;
@@ -203,6 +209,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // Only this user's own processes can reach the pipe, and only a game
     // Studio launched has it, so on unless asked not to.
     remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
+    // Studio falls back to qconsole.log without it, so on unless asked not to.
+    events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
