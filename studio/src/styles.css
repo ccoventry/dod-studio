@@ -889,6 +889,19 @@ button.primary-btn:hover:not(:disabled) {
   gap: 16px;
 }
 
+/* Capture footer (#534): the status line sits on its own line under the
+   buttons, the row's full width, and shows at most two lines;
+   status_line.js puts the whole message in its tooltip. */
+#batch-status {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
 #export-pool-free-indicator,
 #render-footer-pool-free,
 #footer-audit-summary {
