@@ -7,6 +7,7 @@ import { logFrontendEvent } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { statusCountColor } from './status_colors.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -375,21 +376,21 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdPending = document.createElement('td');
     tdPending.style.padding = '6px 8px';
     tdPending.style.textAlign = 'center';
-    tdPending.style.color = pending > 0 ? '#ffa726' : '#555';
+    tdPending.style.color = statusCountColor('Pending', pending);
     tdPending.textContent = pending;
 
     // Col 6: Captured count  [M4]
     const tdCaptured = document.createElement('td');
     tdCaptured.style.padding = '6px 8px';
     tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = captured > 0 ? '#4caf50' : '#555';
+    tdCaptured.style.color = statusCountColor('Captured', captured);
     tdCaptured.textContent = captured;
 
     // Col 7: Rendered count  [M4]
     const tdRendered = document.createElement('td');
     tdRendered.style.padding = '6px 8px';
     tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = rendered > 0 ? '#2196f3' : '#555';
+    tdRendered.style.color = statusCountColor('Rendered', rendered);
     tdRendered.textContent = rendered;
 
     // Col 8: Actions — remove-from-queue only, no status badge  [M3]
