@@ -1071,6 +1071,12 @@ export const STRINGS = {
       const more = pairs.length > 3 ? ` and ${pairs.length - 3} more` : '';
       return `Skipped ${pairs.length} identical cop${pairs.length === 1 ? 'y' : 'ies'} of a demo already in the queue: ${shown}${more}.`;
     },
+    IDENTICAL_COPIES_TITLE: 'Already in the queue',
+    IDENTICAL_COPIES_MESSAGE: "These files are identical copies of demos already in the queue, under another name. They weren't added as new rows, which would capture every highlight twice.",
+    IDENTICAL_COPIES_QUESTION: 'Point those rows at these files instead? They keep their highlights, statuses and notes.',
+    IDENTICAL_COPIES_SWITCH: 'Use these files',
+    IDENTICAL_COPIES_KEEP: 'Keep the queued files',
+    identicalCopyQueuedMissing: (folder) => `in ${folder} (the queued file is missing)`,
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",

@@ -1058,6 +1058,45 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   }
 
+  // Identical copies a scan skipped (#21). A copy the user picked by hand, or
+  // one of a queued demo whose own file is missing, is offered in that row's
+  // place: same file, so the row keeps its highlights, statuses and notes.
+  // Anything else (a folder scan's copies) is only named in a toast.
+  async function offerIdenticalCopies(copies, pickedFiles) {
+    const offered = [];
+    const skipped = [];
+    copies.forEach((c) => {
+      const queued = currentScannedDemos.includes(c.sameAs);
+      if (queued && (pickedFiles || c.sameAs.missing) && !offered.some((o) => o.sameAs === c.sameAs)) {
+        offered.push(c);
+      } else {
+        skipped.push(c);
+      }
+    });
+    const nameOfRow = (d) => d.name || fileNameOf(d.path);
+    if (skipped.length > 0) {
+      showToast(STRINGS.MAIN.identicalCopiesToast(skipped.map((c) => [fileNameOf(c.demo.path), nameOfRow(c.sameAs)])), 'warning', 12000);
+    }
+    if (offered.length === 0) return;
+    const ok = await themedConfirm(STRINGS.MAIN.IDENTICAL_COPIES_MESSAGE, {
+      title: STRINGS.MAIN.IDENTICAL_COPIES_TITLE,
+      confirmLabel: STRINGS.MAIN.IDENTICAL_COPIES_SWITCH,
+      cancelLabel: STRINGS.MAIN.IDENTICAL_COPIES_KEEP,
+      details: offered.map((c) => ({
+        primary: STRINGS.MAIN.relocateRenamed(nameOfRow(c.sameAs), fileNameOf(c.demo.path)),
+        secondary: c.sameAs.missing
+          ? STRINGS.MAIN.identicalCopyQueuedMissing(shortFolder(folderOf(c.demo.path)))
+          : STRINGS.MAIN.relocateFolder(shortFolder(folderOf(c.demo.path))),
+        title: c.demo.path,
+      })),
+      footer: STRINGS.MAIN.IDENTICAL_COPIES_QUESTION,
+    });
+    if (!ok) return;
+    offered.forEach((c) => relocateDemo(c.sameAs, c.demo.path));
+    refreshAfterRelocation(true);
+    showToast(STRINGS.MAIN.relocatedDemosToast(offered.length), 'success');
+  }
+
   // Takes a demo out of the queue and scans `newPath` in its place, with its
   // own highlights: for a file that isn't the one that was scanned (#21).
   async function replaceDemoWithScan(demo, newPath) {
@@ -1469,7 +1508,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   //
   // Resolves true when the scan ran (a cancelled one included), false when it
   // failed -- e.g. every picked path is gone, which the backend reports (#432).
-  async function triggerAutoScan(pathsToScan) {
+  // `pickedFiles`: the paths are files the user picked one by one (+ Add
+  // Demo Files), so a copy of a queued demo is offered in its place rather
+  // than only skipped (#21).
+  async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
     if (!pathsToScan || pathsToScan.length === 0) return false;
 
     const scanStatusEl = document.querySelector('#scan-status');
@@ -1498,9 +1540,6 @@ window.addEventListener("DOMContentLoaded", async () => {
       // An identical copy under another name would be a second row for the
       // same demo, capturing every highlight twice (#21).
       const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
-      if (copies.length > 0) {
-        showToast(STRINGS.MAIN.identicalCopiesToast(copies.map((c) => [fileNameOf(c.demo.path), c.sameAs.name || fileNameOf(c.sameAs.path)])), 'warning', 12000);
-      }
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
@@ -1543,6 +1582,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
@@ -1578,7 +1618,7 @@ window.addEventListener("DOMContentLoaded", async () => {
           await persistAppSettings();
           // Scan only the files just picked, not the full accumulated
           // scanPaths history — see triggerAutoScan's doc comment.
-          await triggerAutoScan(files);
+          await triggerAutoScan(files, { pickedFiles: true });
         }
       } catch (err) {
         console.error("Error opening demo files dialog:", err);
