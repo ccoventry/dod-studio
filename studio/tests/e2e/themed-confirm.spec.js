@@ -66,3 +66,44 @@ test.describe('themed_confirm', () => {
     await expect(page.locator('#result')).toHaveText('true');
   });
 });
+
+test.describe('themed_confirm details (#477)', () => {
+  test('a long list scrolls on its own; the question and buttons stay outside it', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-details-btn').click();
+
+    const details = page.locator('#themed-confirm-details');
+    await expect(details.locator('.themed-confirm-detail')).toHaveCount(30);
+    await expect(details.locator('.themed-confirm-detail').first()).toHaveAttribute('title', 'C:\games\dod\folder0\demo0.dem');
+    const scrolls = await details.evaluate((el) => el.scrollHeight > el.clientHeight && getComputedStyle(el).overflowY === 'auto');
+    expect(scrolls).toBe(true);
+
+    await expect(page.locator('#themed-confirm-footer')).toHaveText('Use the new locations?');
+    const outside = await page.evaluate(() => {
+      const list = document.querySelector('#themed-confirm-details');
+      return !list.contains(document.querySelector('#themed-confirm-footer'))
+        && !list.contains(document.querySelector('#themed-confirm-ok-btn'));
+    });
+    expect(outside).toBe(true);
+    await expect(page.locator('#themed-confirm-ok-btn')).toBeInViewport();
+  });
+
+  test('a plain confirm afterwards shows no list or footer', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-details-btn').click();
+    await page.locator('#themed-confirm-cancel-btn').click();
+    await page.locator('#trigger-default-btn').click();
+    await expect(page.locator('#themed-confirm-details')).toBeHidden();
+    await expect(page.locator('#themed-confirm-footer')).toBeHidden();
+  });
+
+  test('a notice hides Cancel, and the next confirm shows it again', async ({ page }) => {
+    await gotoHarness(page);
+    await page.locator('#trigger-notice-btn').click();
+    await expect(page.locator('#themed-confirm-cancel-btn')).toBeHidden();
+    await page.locator('#themed-confirm-ok-btn').click();
+    await expect(page.locator('#result')).toHaveText('true');
+    await page.locator('#trigger-default-btn').click();
+    await expect(page.locator('#themed-confirm-cancel-btn')).toBeVisible();
+  });
+});

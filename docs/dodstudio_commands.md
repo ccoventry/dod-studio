@@ -15,11 +15,10 @@ them; everything else is a setting you'd use for a capture. No name is the
 start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
-**Scope:** the surface actually on `dev` today. Several more entries are open
-PRs, listed separately at the bottom so this stays honest about what's
-*shipped* versus what's *proposed* -- update this table as part of merging
-each one, the same way every one of them already updates `README.md`'s own
-control-surface list.
+**Scope:** the surface actually on `dev` today: fifteen cvars and nine
+commands. Entries still in open PRs are not listed -- update this file as
+part of merging each one, the same way every one of them already updates
+`README.md`'s own control-surface list.
 
 ## Cvars
 
@@ -32,10 +31,11 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 
 | cvar | default | what it does | doc |
 | --- | --- | --- | --- |
-| `dodstudio_hltv_gunshots_fix` | `1` if `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME=1` at launch, else `0` | forces DoD weapon-fire sounds to full volume with no distance attenuation while spectating | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
+| `dodstudio_hltv_gunshots_fix` | `1` if `GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME=1` at launch, else `0` | while spectating, lowers the attenuation of DoD weapon-fire sounds to `dodstudio_hltv_gunshot_attenuation` so they carry further. Only ever lowers it, never touches volume, and keeps the sounds positional | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_hltv_show_viewmodel_animations` | `0` (off) unless `GOLDSRC_HOOKS_ANIM_FIX` sets a starting level | `0`=off, `1`=empty hand on throw, `2`=redraw immediately, `3`=never empty, `4`=redraw after a 1s lookahead (the recommended setting) -- corrects MG42/MG34/BAR/Bren viewmodel deploy animations while spectating in-eye | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
-| `dodstudio_hltv_gunshot_attenuation` | `0.8` (`ATTN_NORM`, the game's own default) | how far gunshots carry while the gunshots fix is on, `0.05..0.79` (lower carries further); no effect while the fix is off | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
+| `dodstudio_hltv_gunshot_attenuation` | `0.3` (audible to ~3300 units, against the game's own `ATTN_NORM` 0.8 at ~1250) | how far gunshots carry while the gunshots fix is on: any value above 0 and below 0.8 (lower carries further; 0 would make them non-positional); no effect while the fix is off | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
+| `dodstudio_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
 | `dodstudio_hide_scoreboard` | `0` | stops a POV demo's recorded TAB presses from putting the scoreboard over the shot | [`goldsrc_scoreboard.md`](goldsrc_scoreboard.md) |
 | `dodstudio_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
 | `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
@@ -44,6 +44,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven, no specific value settled on yet | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
 | `dodstudio_hd_enabled` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
+| `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
@@ -56,9 +57,10 @@ argument count, which a cvar's single value can't hold.
 
 ### `dodstudio_debug_status`
 
-No arguments. Unconditionally reports every cvar above plus
-`dodstudio_deathmsg`'s own status; the animation fix and gunshots fix are only
-included while enabled, since a flag being on says nothing about whether
+No arguments. Always reports the four suppression cvars, the two
+`debug_log_*` cvars and `dodstudio_deathmsg`'s own status; the rest
+(including the animation fix and gunshots fix) are only included while
+enabled, since a flag being on says nothing about whether
 their preconditions are currently being met and they'd otherwise be noise
 when off. Force-calls the per-frame `poll()` first, so chaining a cvar set
 and a status query on one `;`-joined console line reports the post-change
@@ -75,16 +77,35 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | --- | --- |
 | `dodstudio_deathmsg` | status + usage |
 | `dodstudio_deathmsg max <4..127>` | lines of kill feed shown at once (default 4) |
-| `dodstudio_deathmsg offset <0..4096>` | y the feed starts at (default 20) |
+| `dodstudio_deathmsg offset <-4096..4096>` | y the feed starts at (default 20); negative pulls it above the top of the screen |
 | `dodstudio_deathmsg offset default` | hand y back to the game |
 | `dodstudio_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
 | `dodstudio_deathmsg block !<id>...` | hide everything *except* these players |
 | `dodstudio_deathmsg block clear` | stop hiding anything |
+| `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
+
+A `block` id is any of:
+
+- **A slot number**, as before. It only holds for one demo, because the same
+  player gets a different slot in every demo.
+- **A SteamID**: the 17-digit SteamID64 (`76561197977930126`),
+  `STEAM_0:0:8832199`, or SteamID3 `[U:1:17664398]`. Paste it as is: the
+  console splits it at each `:`, and the hook joins it back. It is matched
+  against each player's userinfo `*sid` at every death notice, so one command
+  works across a whole batch of demos and survives reconnects.
+  `dodstudio_deathmsg players` lists every player's slot and SteamID.
+- **`self`**: the recording player in a POV demo. An HLTV demo has no
+  recording player, so there `self` matches nobody, and the console says so
+  once.
+
+Mix them freely. `dodstudio_deathmsg block !self !76561197977930126` shows
+only your own frags in both kinds of demo: in a POV demo both entries point
+at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
 ### `dodstudio_hide_hudelement`
 
-`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the twelve
+`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the ten
 elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
 chat, the kill feed, the status bar, the objective icons and the rest.
 `dodstudio_hide_hudelement all 0` puts everything back. See
@@ -96,6 +117,12 @@ No arguments. Empties the engine's 4096-slot decal pool on command,
 unlinking each decal from its surface first the way the engine's own remove
 functions do. Nothing to do with `r_decals`. Pre-Anniversary `hw.dll` only.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
+
+### `dodstudio_reload_demo`
+
+No arguments. Plays the last demo started with `playdemo` or `viewdemo`
+again, from the start, by running the same command with the same name. Says
+so when no demo has been played this session. See `src/demo_reload.rs`.
 
 ### `dodstudio_overviewmap`
 

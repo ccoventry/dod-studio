@@ -54,6 +54,17 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
+//!   longer darkens sprites until the game restarts (issue #467). Two bytes in
+//!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
+//!   turns it off.
+//! - `remote`: DoD Studio can send console commands to the running game over
+//!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
+//!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
+//!   off.
+//! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
+//!   Anniversary engine draw the world through `platform/gl_shaders` during
+//!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -85,6 +96,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_reload;
 mod detour;
 mod engine;
 mod ex_interp;
@@ -98,14 +110,17 @@ mod objicons;
 mod overview_map;
 mod patch;
 mod pe;
+mod remote;
 mod scan;
 mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod sprite_blend;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod world_shaders;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use windows_sys::Win32::Foundation::{BOOL, HINSTANCE, TRUE};
@@ -175,6 +190,15 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the engine's own default upload behaviour, so on unless asked
+    // not to.
+    sprite_blend::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
+        Ordering::Relaxed,
+    );
+    // Only this user's own processes can reach the pipe, and only a game
+    // Studio launched has it, so on unless asked not to.
+    remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
@@ -256,11 +280,17 @@ fn install_fixes() {
     // set as the initial default, so either mechanism works.
     commands::install();
 
+    // Studio's console commands can only run once the engine's function
+    // table is live, which is now.
+    remote::start();
+
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.
     tempent_fix::install();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // Before any map loads, so before the first HUD sprite is uploaded.
+    sprite_blend::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

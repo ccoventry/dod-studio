@@ -109,7 +109,7 @@ don't regress these while porting).
 - Concrete, portable takeaways: add a hover rule to the render jobs table,
   and consider tokenizing status colors into CSS variables (dovetails with
   the Theme System backlog item under R&D & Architectural Enhancements in
-  `engineering_backlog.md`, since both need a real color-token system
+  `archive/engineering_backlog.md`, since both need a real color-token system
   instead of scattered hex literals). The palette-swap-to-Catppuccin
   and rounded-corner styling are aesthetic calls for the user to make, not
   objectively missing functionality.
@@ -142,7 +142,7 @@ don't regress these while porting).
 
 Don't implement all of this at once — it's a large surface. Once the user
 picks a subset (the multi-select/delete/sort/skip-rendered table upgrades
-are probably the highest-value, most self-contained slice), triage those
-into `engineering_backlog.md`'s Medium/Low Priority lists individually,
+are probably the highest-value, most self-contained slice), file those
+as GitHub issues individually (the open ones today are #40 and #70),
 the same way the Capture Studio parity gaps were triaged from
 `archive/tauri_parity_audit.md`.

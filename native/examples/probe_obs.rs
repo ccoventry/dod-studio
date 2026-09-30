@@ -1138,11 +1138,7 @@ fn dump_scenes(client: &mut ObsClient) {
 /// takes it down too. So "is it running right now" genuinely has to be asked
 /// rather than assumed from having launched it earlier.
 fn game_is_running() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes()
-        .values()
-        .any(|p| p.name().eq_ignore_ascii_case("hl.exe"))
+    native::sys::process::is_running(&["hl.exe"])
 }
 
 /// One-line rendering of a response object, so four probes fit on four lines.
