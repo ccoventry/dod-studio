@@ -48,7 +48,14 @@ const PATCH_CONCURRENCY: usize = 4;
 /// memory pressure rather than CPU. This is a desktop app that may be running
 /// alongside the game, so the last 4.8 seconds is not worth 2.2GB. Patching
 /// stays at 4 because it streams frames rather than holding a full analysis.
-const SCAN_CONCURRENCY: usize = 2;
+///
+/// This is the default for the user's own setting (`AppSettings::scan_workers`,
+/// #246): the right number depends on the machine's RAM.
+pub const SCAN_CONCURRENCY: usize = 2;
+
+/// The range the scan worker box accepts (#246), the same as Max Concurrent
+/// Renders. Only the range: nothing clamps to the machine's RAM.
+pub const SCAN_WORKERS_MAX: usize = 8;
 
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
@@ -1286,12 +1293,26 @@ pub struct KnownDemo {
     pub file_key: String,
 }
 
-/// What a scan returns: the demos it parsed, and how many it skipped because
-/// they were already in the queue, unchanged on disk.
+/// What a scan returns: the demos it parsed, how many it skipped because
+/// they were already in the queue, unchanged on disk, and the identical
+/// copies it skipped without parsing (#21).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanOutcome {
     pub demos: Vec<SerializedDemo>,
     pub unchanged: u32,
+    #[serde(default)]
+    pub copies: Vec<ScanCopy>,
+}
+
+/// A scanned file with the same key as a queued demo at another path, or as
+/// another file in the same scan: the same demo under another name.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScanCopy {
+    pub path: String,
+    pub same_as: String,
+    /// `same_as` was already in the queue; otherwise it's the copy this scan
+    /// kept.
+    pub queued: bool,
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -1319,8 +1340,14 @@ impl From<CaptureStreak> for SerializedStreak {
     }
 }
 
+/// Threads for a scan of `total` demos: the user's setting, kept to
+/// 1..=`SCAN_WORKERS_MAX`, and never more than there are demos.
+fn scan_worker_count(workers: usize, total: usize) -> usize {
+    workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
+}
+
 /// The scan status line: how many demos are done out of how many, and one demo
-/// still being parsed, when there is one. With `SCAN_CONCURRENCY` workers,
+/// still being parsed, when there is one. With several scan workers,
 /// "the current file" is one of the current files.
 fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
     match current {
@@ -1349,8 +1376,123 @@ fn progress_emit_due(last_ms: &std::sync::atomic::AtomicU32, now_ms: u32) -> boo
 /// `<size>-<hash>` text form #196's `source_key` uses. Reads 64 KB, not the
 /// whole demo, so checking a folder of 50 costs milliseconds.
 fn demo_file_key(path: &Path) -> Option<String> {
-    native::utils::demo_hasher::calculate_demo_key(path)
-        .map(|(size, hash)| format!("{size}-{hash:016x}"))
+    native::utils::demo_hasher::demo_key_text(path)
+}
+
+/// The demos whose file is still there but is no longer the one that was
+/// scanned: its key (size + first 64 KB) differs from the saved one. Their
+/// highlights are frame numbers in the old file, so they don't line up (#21).
+/// Missing files and demos with no saved key are left out.
+pub fn changed_demos(demos: &[KnownDemo]) -> Vec<String> {
+    demos
+        .iter()
+        .filter(|d| !d.file_key.is_empty() && Path::new(&d.path).is_file())
+        .filter(|d| demo_file_key(Path::new(&d.path)).is_some_and(|key| key != d.file_key))
+        .map(|d| d.path.clone())
+        .collect()
+}
+
+/// A project demo that is no longer at its saved path, and the file that
+/// looks like it moved there, if one was found (#21).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MissingDemo {
+    pub path: String,
+    pub candidate: Option<String>,
+}
+
+/// How deep, and how many entries, the search for a moved demo will walk, so
+/// pointing it at a drive root cannot turn a project load into a hang.
+const LOCATE_MAX_DEPTH: usize = 6;
+const LOCATE_MAX_ENTRIES: usize = 50_000;
+
+/// For every demo in `demos` whose file is gone, looks through `search_dirs`
+/// (recursively, bounded) for a `.dem` with the same `demo_file_key`: the
+/// same size and the same first 64 KB. Only files whose size matches are
+/// read at all, so a folder of hundreds of demos costs one `stat` each.
+///
+/// Breadth-first across all of `search_dirs` together, in the order given:
+/// every folder's own files, then every first-level subfolder, and so on. A
+/// demo moved one folder down is found before the entry budget can be spent
+/// deep inside some large folder listed earlier (a whole `dod/`, say), which
+/// is what a depth-first walk did.
+///
+/// Suggests, never applies: the frontend asks before it moves anything. A
+/// demo with no saved key (a project from before #456) can only be reported
+/// missing.
+pub fn locate_missing_demos(demos: &[KnownDemo], search_dirs: &[PathBuf]) -> Vec<MissingDemo> {
+    locate_missing_demos_within(demos, search_dirs, LOCATE_MAX_ENTRIES)
+}
+
+fn locate_missing_demos_within(
+    demos: &[KnownDemo],
+    search_dirs: &[PathBuf],
+    max_entries: usize,
+) -> Vec<MissingDemo> {
+    let mut missing: Vec<MissingDemo> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .map(|d| MissingDemo {
+            path: d.path.clone(),
+            candidate: None,
+        })
+        .collect();
+    let wanted: Vec<(usize, &str, u64)> = demos
+        .iter()
+        .filter(|d| !Path::new(&d.path).is_file())
+        .enumerate()
+        .filter_map(|(i, d)| {
+            let size = d.file_key.split_once('-')?.0.parse().ok()?;
+            Some((i, d.file_key.as_str(), size))
+        })
+        .collect();
+    if wanted.is_empty() {
+        return missing;
+    }
+
+    let mut visited = std::collections::HashSet::new();
+    let mut entries = 0usize;
+    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
+        search_dirs.iter().map(|d| (d.clone(), 0)).collect();
+    while let Some((dir, depth)) = queue.pop_front() {
+        if !visited.insert(same_path_key(&dir.to_string_lossy())) {
+            continue;
+        }
+        let Ok(read) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in read.flatten() {
+            entries += 1;
+            if entries > max_entries {
+                return missing;
+            }
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else { continue };
+            if meta.is_dir() {
+                if depth < LOCATE_MAX_DEPTH {
+                    queue.push_back((path, depth + 1));
+                }
+                continue;
+            }
+            let is_dem = path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dem"));
+            if !is_dem || !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
+                continue;
+            }
+            let Some(key) = demo_file_key(&path) else {
+                continue;
+            };
+            for (i, wanted_key, _) in &wanted {
+                if missing[*i].candidate.is_none() && key == *wanted_key {
+                    missing[*i].candidate = Some(path.to_string_lossy().to_string());
+                }
+            }
+            if missing.iter().all(|m| m.candidate.is_some()) {
+                return missing;
+            }
+        }
+    }
+    missing
 }
 
 /// Paths compare the way Windows does: case-insensitive, either slash.
@@ -1358,30 +1500,102 @@ fn same_path_key(path: &str) -> String {
     path.replace('/', "\\").to_lowercase()
 }
 
-/// Splits `list` into the files still to scan (with their keys, in order)
-/// and a count of those skipped because `known` has the same path with the
-/// same key.
-fn skip_known(list: Vec<PathBuf>, known: &[KnownDemo]) -> (Vec<PathBuf>, Vec<Option<String>>, u32) {
-    let known: std::collections::HashMap<String, &str> = known
+/// Splits `list` into the files still to scan (with their keys, in order),
+/// a count of those skipped because `known` has the same path with the same
+/// key, and the identical copies skipped: files at a path `known` doesn't
+/// have whose key matches a queued demo, or another file in this scan. Of
+/// several new files that are one demo, the one with the shortest name is
+/// kept ("match.dem" over "match - Copy.dem" and "match (2).dem"), whatever
+/// order the scan found them in. Only the key (size + first 64 KB) is read
+/// for the rest, never the demo.
+fn skip_known(
+    list: Vec<PathBuf>,
+    known: &[KnownDemo],
+) -> (Vec<PathBuf>, Vec<Option<String>>, u32, Vec<ScanCopy>) {
+    let known_by_path: std::collections::HashMap<String, &str> = known
         .iter()
         .map(|k| (same_path_key(&k.path), k.file_key.as_str()))
         .collect();
-    let mut keep = Vec::with_capacity(list.len());
-    let mut keys = Vec::with_capacity(list.len());
-    let mut unchanged = 0;
-    for path in list {
-        let key = demo_file_key(&path);
-        let already = key
-            .as_deref()
-            .is_some_and(|k| known.get(&same_path_key(&path.to_string_lossy())) == Some(&k));
-        if already {
-            unchanged += 1;
-        } else {
-            keep.push(path);
-            keys.push(key);
+    let queued_by_key: std::collections::HashMap<&str, &str> = known
+        .iter()
+        .filter(|k| !k.file_key.is_empty())
+        .map(|k| (k.file_key.as_str(), k.path.as_str()))
+        .collect();
+    let name_rank = |path: &Path| {
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_lowercase();
+        (name.chars().count(), name)
+    };
+
+    let entries: Vec<(PathBuf, Option<String>)> = list
+        .into_iter()
+        .map(|path| {
+            let key = demo_file_key(&path);
+            (path, key)
+        })
+        .collect();
+    // The copy to keep for each key that no queued demo has.
+    let mut keeper_by_key: std::collections::HashMap<&str, &Path> =
+        std::collections::HashMap::new();
+    for (path, key) in &entries {
+        let Some(key) = key.as_deref() else { continue };
+        if known_by_path.contains_key(&same_path_key(&path.to_string_lossy()))
+            || queued_by_key.contains_key(key)
+        {
+            continue;
         }
+        keeper_by_key
+            .entry(key)
+            .and_modify(|best| {
+                if name_rank(path) < name_rank(best) {
+                    *best = path;
+                }
+            })
+            .or_insert(path);
     }
-    (keep, keys, unchanged)
+
+    let mut keep = Vec::with_capacity(entries.len());
+    let mut keys = Vec::with_capacity(entries.len());
+    let mut unchanged = 0;
+    let mut copies = Vec::new();
+    for (path, key) in &entries {
+        let path_text = path.to_string_lossy().into_owned();
+        let queued_key = known_by_path.get(&same_path_key(&path_text));
+        if key.as_deref().is_some_and(|k| queued_key == Some(&k)) {
+            unchanged += 1;
+            continue;
+        }
+        // A queued path that changed on disk is a rescan, never a copy.
+        if queued_key.is_none()
+            && let Some(k) = key.as_deref()
+        {
+            if let Some(same_as) = queued_by_key.get(k) {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: same_as.to_string(),
+                    queued: true,
+                });
+                continue;
+            }
+            if let Some(keeper) = keeper_by_key
+                .get(k)
+                .filter(|keeper| **keeper != path.as_path())
+            {
+                copies.push(ScanCopy {
+                    path: path_text,
+                    same_as: keeper.to_string_lossy().into_owned(),
+                    queued: false,
+                });
+                continue;
+            }
+        }
+        keep.push(path.clone());
+        keys.push(key.clone());
+    }
+    (keep, keys, unchanged, copies)
 }
 
 /// The paths in `paths` that do not exist on disk, in the order given.
@@ -1437,6 +1651,7 @@ pub async fn scan_directory_impl(
     cancel_token: Arc<std::sync::atomic::AtomicBool>,
     paths: Vec<String>,
     known: Vec<KnownDemo>,
+    workers: usize,
 ) -> Result<ScanOutcome, String> {
     // ── Reset state flags ─────────────────────────────────────────────────────
     cancel_token.store(false, std::sync::atomic::Ordering::SeqCst);
@@ -1508,11 +1723,11 @@ pub async fn scan_directory_impl(
         // Demos already in the queue and unchanged on disk are not parsed
         // again: re-adding a folder to pick up one new demo used to re-parse
         // every demo in it, 5-10 s each.
-        let (list, file_keys, unchanged) = skip_known(list, &known);
+        let (list, file_keys, unchanged, copies) = skip_known(list, &known);
 
         let total_files = list.len() as u32;
 
-        // ── Phase 2: parse each .dem file, up to SCAN_CONCURRENCY at once ───
+        // ── Phase 2: parse each .dem file, up to `workers` at once ───
         // `list` is already sorted by filename (Phase 1's binary-search
         // insert), so each worker writes its result into a pre-sized slot at
         // its own original index -- the output comes out in sorted order for
@@ -1553,7 +1768,7 @@ pub async fn scan_directory_impl(
             );
         };
         std::thread::scope(|scope| {
-            let worker_count = SCAN_CONCURRENCY.min(total).max(1);
+            let worker_count = scan_worker_count(workers, total);
             for _ in 0..worker_count {
                 let cancel_token = &cancel_token;
                 let list = &list;
@@ -1699,6 +1914,7 @@ pub async fn scan_directory_impl(
         Ok(ScanOutcome {
             demos: results,
             unchanged,
+            copies,
         })
     }))
     .await;
@@ -1827,6 +2043,7 @@ fn patch_bookmark_previews(
 /// `+viewdemo <stem>_preview`.
 #[tauri::command]
 pub async fn launch_demo_preview(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
@@ -1847,10 +2064,131 @@ pub async fn launch_demo_preview(
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
 
         let mut cmd = patcher_config.build_hlae_process(&format!("+viewdemo {}", preview_stem));
-        cmd.spawn()
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
+        watch_for_error_dialogs(app, launcher);
 
         Ok(())
+    }))
+    .await
+}
+
+/// After a preview or Launch Game: reports any error box the game, the HLAE
+/// launcher or its injector shows (`native::sys::dialogs`) as an
+/// `external_error` event, each box once. Report only, unlike a batch: the
+/// user is at the game, so the box stays for them to close. Stops once the
+/// launcher has exited and no game has been running for 5 seconds.
+fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
+    std::thread::spawn(move || {
+        let launcher_pid = launcher.id();
+        let mut launcher_running = true;
+        let mut reported: Vec<isize> = Vec::new();
+        let mut last_game_seen = std::time::Instant::now();
+        let mut sys = native::sys::process::snapshot();
+        loop {
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if launcher_running && !matches!(launcher.try_wait(), Ok(None)) {
+                launcher_running = false;
+            }
+            native::sys::process::refresh(&mut sys);
+            let game_pids: Vec<u32> = sys
+                .processes()
+                .values()
+                .filter(|p| native::sys::process::is_named(p, &["hl.exe"]))
+                .map(|p| p.pid().as_u32())
+                .collect();
+            let mut launcher_pids: Vec<u32> = sys
+                .processes()
+                .values()
+                .filter(|p| {
+                    native::sys::process::is_named(p, &["injector.exe"])
+                        && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
+                })
+                .map(|p| p.pid().as_u32())
+                .collect();
+            if launcher_running {
+                launcher_pids.push(launcher_pid);
+            }
+            if !game_pids.is_empty() {
+                last_game_seen = std::time::Instant::now();
+            }
+            for dialog in native::sys::dialogs::error_dialogs(&game_pids, &launcher_pids) {
+                if reported.contains(&dialog.window) {
+                    continue;
+                }
+                reported.push(dialog.window);
+                log_markdown(&format!(
+                    "[launch] Error box from PID {}: {}",
+                    dialog.pid,
+                    dialog.full_text()
+                ));
+                let _ = app.emit("external_error", dialog.summary());
+            }
+            if !launcher_running
+                && launcher_pids.is_empty()
+                && last_game_seen.elapsed() > std::time::Duration::from_secs(5)
+            {
+                break;
+            }
+        }
+    });
+}
+
+/// Process ids of every running `hl.exe` -- the games Studio could be talking
+/// to. `hlae.exe` is left out: it is the launcher, not the game.
+fn running_game_pids() -> Vec<u32> {
+    native::sys::process::pids_named(&["hl.exe"])
+}
+
+/// Launch Preview for a game that is already running (#413): patches the
+/// same `<stem>_preview.dem` `launch_demo_preview` would (reusing one already
+/// on disk), then, instead of launching a second game, sends
+/// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
+///
+/// Resolves to the command sent, or `None` when no running game takes
+/// commands -- one Studio didn't start, or with its hooks off -- so the caller
+/// can fall back to the "already running" prompt.
+#[tauri::command]
+pub async fn send_preview_to_running_game(
+    hlae_path: String,
+    game_path: String,
+    streaks: Vec<SerializedStreak>,
+    goldsrc_hooks_dll_path: Option<String>,
+) -> Result<Option<String>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let pids = running_game_pids();
+        if pids.is_empty() {
+            return Ok(None);
+        }
+        let (patcher_config, dod_dir) =
+            resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
+        let job = jobs
+            .first()
+            .ok_or_else(|| crate::messages::FAILED_TO_BUILD_PREVIEW_PATCH_JOB.to_string())?;
+        let preview_stem = job
+            .output_demo
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
+
+        let command = format!("viewdemo {preview_stem}");
+        for pid in pids {
+            match native::sys::game_remote::send_console_commands(
+                pid,
+                std::slice::from_ref(&command),
+            )
+            .map_err(crate::messages::failed_to_send_to_running_game)?
+            {
+                native::sys::game_remote::Sent::Delivered => {
+                    log::info!("[preview] sent \"{command}\" to the running game (pid {pid})");
+                    return Ok(Some(command));
+                }
+                native::sys::game_remote::Sent::NotListening => continue,
+            }
+        }
+        Ok(None)
     }))
     .await
 }
@@ -1985,8 +2323,10 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
         };
 
         let mut cmd = patcher_config.build_hlae_process("");
-        cmd.spawn()
+        let launcher = cmd
+            .spawn()
             .map_err(crate::messages::failed_to_launch_hlae)?;
+        watch_for_error_dialogs(app, launcher);
 
         Ok(())
     }))
@@ -2040,41 +2380,51 @@ pub async fn launch_obs(app: tauri::AppHandle) -> Result<(), String> {
 // before launching, and let the user force-kill stragglers instead of
 // hunting them down in Task Manager.
 
-fn is_engine_process_name(name: &str) -> bool {
-    let lower = name.to_lowercase();
-    lower == "hl.exe" || lower == "hlae.exe"
-}
+/// The game and its launcher: what Launch Preview and Kill Engine look for.
+const ENGINE_PROCESS_NAMES: &[&str] = &["hl.exe", "hlae.exe"];
 
 /// True if an OBS Studio process is currently running, under any of its
 /// installed binary names. Used to turn a bare "could not connect" into a
 /// deterministic answer instead of asking the user to interpret a raw OS
 /// socket error themselves.
 fn is_obs_process_running() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes().values().any(|p| {
-        let lower = p.name().to_lowercase();
-        lower == "obs64.exe" || lower == "obs32.exe" || lower == "obs.exe"
-    })
+    native::sys::process::is_running(&["obs64.exe", "obs32.exe", "obs.exe"])
 }
 
 /// True if any `hl.exe` or `hlae.exe` process is currently running.
 #[tauri::command]
 pub fn check_engine_processes() -> bool {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
-    sys.processes()
-        .values()
-        .any(|p| is_engine_process_name(p.name()))
+    native::sys::process::is_running(ENGINE_PROCESS_NAMES)
+}
+
+/// Steam's state before a game launch: "not_running", "signed_out" or
+/// "ready". `hl.exe` started without Steam exits straight away, reported
+/// only as "Failed to initalize authentication interface".
+#[tauri::command]
+pub async fn steam_state() -> Result<String, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        Ok(native::sys::steam::state().as_str().to_string())
+    }))
+    .await
+}
+
+/// Starts Steam from where it recorded its own install. Steam outlives
+/// DoD Studio, so the child is not tracked.
+#[tauri::command]
+pub fn start_steam() -> Result<(), String> {
+    let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
+    std::process::Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
 }
 
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
 #[tauri::command]
 pub fn kill_engine_processes() -> Result<(), String> {
-    use sysinfo::{ProcessExt, SystemExt};
-    let sys = sysinfo::System::new_all();
+    let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {
-        if is_engine_process_name(process.name()) && !process.kill() {
+        if native::sys::process::is_named(process, ENGINE_PROCESS_NAMES) && !process.kill() {
             log::warn!("Failed to kill engine process pid={}", process.pid());
         }
     }
@@ -2269,6 +2619,16 @@ mod tests {
     }
 
     #[test]
+    fn the_scan_uses_the_worker_setting_within_its_range() {
+        assert_eq!(scan_worker_count(5, 100), 5);
+        assert_eq!(scan_worker_count(0, 100), 1);
+        assert_eq!(scan_worker_count(20, 100), SCAN_WORKERS_MAX);
+        // Never more threads than demos.
+        assert_eq!(scan_worker_count(8, 3), 3);
+        assert_eq!(scan_worker_count(4, 0), 1);
+    }
+
+    #[test]
     fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
         assert_eq!(
             scan_status_line(0, 1, Some("a.dem")),
@@ -2313,11 +2673,195 @@ mod tests {
                 file_key: key_b_before,
             },
         ];
-        let (keep, keys, unchanged) = skip_known(vec![a, b.clone(), c.clone()], &known);
+        let (keep, keys, unchanged, copies) = skip_known(vec![a, b.clone(), c.clone()], &known);
 
         assert_eq!(unchanged, 1);
         assert_eq!(keep, vec![b.clone(), c.clone()]);
         assert_eq!(keys, vec![demo_file_key(&b), demo_file_key(&c)]);
+        assert!(copies.is_empty());
+    }
+
+    /// A copy of a queued demo, and a second copy within the scan, are
+    /// reported without being kept for parsing. Within the scan the shorter
+    /// name is kept even though it sorts after its copy.
+    #[test]
+    fn identical_copies_are_skipped_before_parsing() {
+        let scratch = Scratch::new("skip_copies");
+        let queued = scratch.path().join("queued.dem");
+        let copy = scratch.path().join("queued copy.dem");
+        let fresh = scratch.path().join("fresh.dem");
+        let fresh_copy = scratch.path().join("fresh - Copy.dem");
+        std::fs::write(&queued, b"HLDEMO the queued one").unwrap();
+        std::fs::write(&copy, b"HLDEMO the queued one").unwrap();
+        std::fs::write(&fresh, b"HLDEMO a new one").unwrap();
+        std::fs::write(&fresh_copy, b"HLDEMO a new one").unwrap();
+        let known = vec![KnownDemo {
+            path: queued.to_string_lossy().into_owned(),
+            file_key: demo_file_key(&queued).unwrap(),
+        }];
+
+        let (keep, _, unchanged, copies) = skip_known(
+            vec![
+                // "fresh - Copy.dem" sorts first (' ' < '.'), as the scan's
+                // list is.
+                copy.clone(),
+                fresh_copy.clone(),
+                fresh.clone(),
+                queued.clone(),
+            ],
+            &known,
+        );
+
+        assert_eq!(keep, vec![fresh.clone()]);
+        assert_eq!(unchanged, 1);
+        assert_eq!(
+            copies,
+            vec![
+                ScanCopy {
+                    path: copy.to_string_lossy().into_owned(),
+                    same_as: queued.to_string_lossy().into_owned(),
+                    queued: true,
+                },
+                ScanCopy {
+                    path: fresh_copy.to_string_lossy().into_owned(),
+                    same_as: fresh.to_string_lossy().into_owned(),
+                    queued: false,
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn a_moved_demo_is_found_by_its_key_in_a_subfolder() {
+        let scratch = Scratch::new("locate_moved");
+        let old = scratch.path().join("old");
+        let new = scratch.path().join("archive").join("2026");
+        std::fs::create_dir_all(&old).unwrap();
+        std::fs::create_dir_all(&new).unwrap();
+        let moved = old.join("match.dem");
+        let kept = old.join("kept.dem");
+        std::fs::write(&moved, b"HLDEMO the moved one").unwrap();
+        std::fs::write(&kept, b"HLDEMO still here").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, new.join("renamed.dem")).unwrap();
+        // Same size, different content: must not be taken for it.
+        std::fs::write(new.join("decoy.dem"), b"HLDEMO the moved two").unwrap();
+
+        let demos = vec![
+            KnownDemo {
+                path: moved.to_string_lossy().into_owned(),
+                file_key: key,
+            },
+            KnownDemo {
+                path: kept.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&kept).unwrap(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+
+        assert_eq!(found.len(), 1, "only the missing demo is reported");
+        assert_eq!(found[0].path, moved.to_string_lossy());
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(new.join("renamed.dem").to_string_lossy().as_ref())
+        );
+    }
+
+    /// A big folder listed first (a whole `dod/`) must not use up the entry
+    /// budget before a demo one folder down from its old place is reached:
+    /// the live failure that broke #477's test.
+    #[test]
+    fn a_nearby_move_is_found_even_behind_a_big_folder() {
+        let scratch = Scratch::new("locate_budget");
+        let big = scratch.path().join("big");
+        let mut deep = big.clone();
+        for level in 0..4 {
+            deep = deep.join(format!("level{level}"));
+            std::fs::create_dir_all(&deep).unwrap();
+            for i in 0..20 {
+                std::fs::write(deep.join(format!("f{i}.txt")), b"x").unwrap();
+            }
+        }
+        let project = scratch.path().join("project");
+        std::fs::create_dir_all(project.join("subfolder")).unwrap();
+        let moved = project.join("match.dem");
+        std::fs::write(&moved, b"HLDEMO moved one level down").unwrap();
+        let key = demo_file_key(&moved).unwrap();
+        std::fs::rename(&moved, project.join("subfolder").join("match.dem")).unwrap();
+
+        let demos = vec![KnownDemo {
+            path: moved.to_string_lossy().into_owned(),
+            file_key: key,
+        }];
+        // 30 entries: the big tree has 84, the project folder 1, then its
+        // subfolder 1. Depth-first from `big` spent them all first.
+        let found = locate_missing_demos_within(&demos, &[project.clone(), big], 30);
+        assert_eq!(
+            found[0].candidate.as_deref(),
+            Some(
+                project
+                    .join("subfolder")
+                    .join("match.dem")
+                    .to_string_lossy()
+                    .as_ref()
+            )
+        );
+    }
+
+    #[test]
+    fn a_demo_replaced_in_place_is_changed_and_an_untouched_one_is_not() {
+        let scratch = Scratch::new("changed_demos");
+        let same = scratch.path().join("same.dem");
+        let replaced = scratch.path().join("replaced.dem");
+        std::fs::write(&same, b"HLDEMO the scanned file").unwrap();
+        std::fs::write(&replaced, b"HLDEMO the scanned file, too").unwrap();
+        let demos = vec![
+            KnownDemo {
+                path: same.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&same).unwrap(),
+            },
+            KnownDemo {
+                path: replaced.to_string_lossy().into_owned(),
+                file_key: demo_file_key(&replaced).unwrap(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "1-00".into(),
+            },
+        ];
+        std::fs::write(&replaced, b"HLDEMO a different, shorter one").unwrap();
+        assert_eq!(
+            changed_demos(&demos),
+            vec![replaced.to_string_lossy().into_owned()]
+        );
+    }
+
+    #[test]
+    fn a_missing_demo_with_no_key_or_no_match_is_reported_without_a_candidate() {
+        let scratch = Scratch::new("locate_none");
+        std::fs::write(scratch.path().join("other.dem"), b"HLDEMO other").unwrap();
+        let gone = scratch.path().join("gone.dem");
+        let demos = vec![
+            KnownDemo {
+                path: gone.to_string_lossy().into_owned(),
+                file_key: String::new(),
+            },
+            KnownDemo {
+                path: scratch
+                    .path()
+                    .join("gone2.dem")
+                    .to_string_lossy()
+                    .into_owned(),
+                file_key: "999-0000000000000000".to_string(),
+            },
+        ];
+        let found = locate_missing_demos(&demos, &[scratch.path().to_path_buf()]);
+        assert_eq!(found.len(), 2);
+        assert!(found.iter().all(|m| m.candidate.is_none()), "{found:?}");
     }
 
     #[test]

@@ -73,6 +73,25 @@ unsafe fn rva<T>(base: *mut u8, rva: u32) -> *mut T {
     unsafe { base.add(rva as usize) as *mut T }
 }
 
+/// `IMAGE_FILE_LARGE_ADDRESS_AWARE`: 4 GB of address space instead of 2 on
+/// 64-bit Windows (#430).
+const IMAGE_FILE_LARGE_ADDRESS_AWARE: u16 = 0x20;
+
+/// Whether the module at `base` (a loaded PE image) is large-address-aware.
+///
+/// # Safety
+/// `base` must be the base of a PE image mapped in this process.
+pub unsafe fn is_large_address_aware(base: *mut u8) -> bool {
+    unsafe { (*nt_headers(base)).file_header.characteristics & IMAGE_FILE_LARGE_ADDRESS_AWARE != 0 }
+}
+
+/// Whether this process (`hl.exe`) gets 4 GB of address space rather than 2.
+pub fn process_is_large_address_aware() -> bool {
+    let base =
+        unsafe { windows_sys::Win32::System::LibraryLoader::GetModuleHandleA(std::ptr::null()) };
+    !base.is_null() && unsafe { is_large_address_aware(base as *mut u8) }
+}
+
 unsafe fn nt_headers(base: *mut u8) -> *mut ImageNtHeaders32 {
     unsafe {
         let dos = base as *const ImageDosHeader;

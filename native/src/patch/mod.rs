@@ -98,7 +98,6 @@ pub const EVENT_FRAME_SIZE: usize = 84;
 
 // Command Injection Logic
 pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
-pub const CUSTOM_CMD_WARN_LIMIT: usize = 60;
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
 /// Upper bound on the size of a `NetworkMessage` frame the decal passes will

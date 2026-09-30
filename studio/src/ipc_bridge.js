@@ -32,12 +32,43 @@ export async function openActivityLog() {
  * already in the queue: the backend skips each one whose file is unchanged on
  * disk and counts it in `unchanged` instead of parsing it again.
  */
-export async function scanDirectory(scanPaths, known = []) {
-  return invoke("scan_directory", { paths: scanPaths, known })
+export async function scanDirectory(scanPaths, known = [], workers = undefined) {
+  return invoke("scan_directory", { paths: scanPaths, known, workers })
     .catch((err) => {
       console.error("IPC Execution Error (scan_directory):", err);
       showToast(STRINGS.IPC.scanError(err), 'error');
       throw err;
+    });
+}
+
+// Which of a loaded project's demos are missing, and a moved copy of each if
+// one with the same file key turns up in `searchDirs` (#21). Resolves
+// `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
+// Paths of the demos whose file no longer matches its saved key (#21).
+// Empty when the check itself fails, so a broken check never blocks a batch.
+export async function changedDemos(demos) {
+  return invoke("changed_demos", { demos })
+    .catch((err) => {
+      console.error("IPC Execution Error (changed_demos):", err);
+      return [];
+    });
+}
+
+export async function locateMissingDemos(demos, searchDirs) {
+  return invoke("locate_missing_demos", { demos, searchDirs })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_missing_demos):", err);
+      return [];
+    });
+}
+
+// Total RAM for the scan worker hint (#246). Quiet on failure: the hint just
+// leaves out the "this PC has" half.
+export async function systemMemoryBytes() {
+  return invoke("system_memory_bytes")
+    .catch((err) => {
+      console.error("IPC Execution Error (system_memory_bytes):", err);
+      return null;
     });
 }
 
@@ -88,7 +119,7 @@ export async function scanGameConfigs(
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
     });
 }
 
@@ -184,9 +215,43 @@ export async function launchDemoPreview(hlaePath, gamePath, streaks, goldsrcHook
     });
 }
 
+/** Launch Preview for a game that is already open (#413): generates the
+ *  preview demo as `launchDemoPreview` does, then sends `viewdemo <preview>`
+ *  to the running game through its hook DLL's pipe instead of launching a
+ *  second one. Resolves to the command sent, or `null` when no running game
+ *  takes commands (not started by DoD Studio), so the caller can fall back to
+ *  the "already running" prompt. */
+export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, goldsrcHooksDllPath) {
+  return invoke("send_preview_to_running_game", { hlaePath, gamePath, streaks, goldsrcHooksDllPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (send_preview_to_running_game):", err);
+      showToast(STRINGS.IPC.previewFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */
+// Resolves "not_running", "signed_out" or "ready"; "ready" when the check
+// itself fails, so a broken check never blocks a launch.
+export async function steamState() {
+  return invoke("steam_state")
+    .catch((err) => {
+      console.error("IPC Execution Error (steam_state):", err);
+      return "ready";
+    });
+}
+
+export async function startSteam() {
+  return invoke("start_steam")
+    .catch((err) => {
+      console.error("IPC Execution Error (start_steam):", err);
+      showToast(String(err), 'error');
+      throw err;
+    });
+}
+
 export async function checkEngineProcesses() {
   return invoke("check_engine_processes")
     .catch((err) => {

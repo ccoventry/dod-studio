@@ -1,7 +1,7 @@
 # The HLTV viewmodel animation fix
 
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
-> Lives in `goldsrc-hooks/src/anim_fix.rs`, on branch
+> Lives in `goldsrc-hooks/src/anim_fix/`, on branch
 > `feat/goldsrc-hooks-companion-dll`. Tracked by
 > [#204](https://github.com/ccoventry/dod-studio/issues/204).
 > Defaults **off**. It is a cvar: turn it on in the console with
