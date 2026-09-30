@@ -101,15 +101,10 @@ fn marker_stall_deadline(longest_gap: std::time::Duration) -> std::time::Duratio
 /// `remove_file_retrying` is the second, independent line of defence for
 /// whatever this window doesn't cover.
 fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
-    use sysinfo::{ProcessExt, SystemExt};
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
-        sys.refresh_processes();
-        if !sys
-            .processes()
-            .values()
-            .any(|p| p.name().eq_ignore_ascii_case("hl.exe"))
-        {
+        crate::sys::process::refresh(sys);
+        if !crate::sys::process::any_named(sys, &["hl.exe"]) {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -690,7 +685,7 @@ pub fn spawn_capture_engine(
             let start_time = std::time::Instant::now();
             let mut launcher_exit_logged = false;
             let mut hl_seen_alive = false;
-            let mut failure_reason: Option<&'static str> = None;
+            let mut failure_reason: Option<String> = None;
             // Stall detection state. Both stay untouched outside OBS mode,
             // where no markers are drained and `last_marker_at` never leaves
             // `None` — the watchdog below is inert as a result.
@@ -722,10 +717,10 @@ pub fn spawn_capture_engine(
             let mut pipe_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
-            let mut sys = {
-                use sysinfo::SystemExt;
-                sysinfo::System::new_all()
-            };
+            let mut sys = crate::sys::process::snapshot();
+            let mut last_process_check: Option<std::time::Instant> = None;
+            let mut last_dialog_check: Option<std::time::Instant> = None;
+            let mut hl_alive_cached = false;
             loop {
                 // Drain whatever the engine has echoed since the last pass.
                 // This is the whole synchronisation mechanism: markers reach
@@ -773,10 +768,20 @@ pub fn spawn_capture_engine(
                     }
                 }
 
+                // The process list is re-read at most every 250 ms: OBS mode
+                // spins this loop every 16 ms for its markers, and enumerating
+                // every process 62 times a second for the whole batch buys
+                // nothing when a quarter-second-late "the game is gone" is
+                // as good as an immediate one.
+                if last_process_check
+                    .is_none_or(|t| t.elapsed() >= std::time::Duration::from_millis(250))
+                {
+                    last_process_check = Some(std::time::Instant::now());
+                    crate::sys::process::refresh(&mut sys);
+                    hl_alive_cached = crate::sys::process::any_named(&sys, &["hl.exe"]);
+                }
                 let hl_alive = {
-                    use sysinfo::{SystemExt, ProcessExt};
-                    sys.refresh_processes();
-                    let alive = sys.processes().values().any(|p| p.name().eq_ignore_ascii_case("hl.exe"));
+                    let alive = hl_alive_cached;
                     if alive {
                         hl_seen_alive = true;
                         hl_first_seen.get_or_insert_with(std::time::Instant::now);
@@ -818,8 +823,80 @@ pub fn spawn_capture_engine(
                             }
                         }
 
+                // An error box from the game or HLAE stops everything until
+                // someone clicks it, and nothing about it reaches Studio. Read
+                // it (never click it), say what it means, and end the batch the
+                // way a failure does. Only processes this batch started: the
+                // game, the launcher, and the launcher's own injector.
+                if last_dialog_check.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
+                    last_dialog_check = Some(std::time::Instant::now());
+                    let launcher_pid = child.id();
+                    let game_pids: Vec<u32> = sys
+                        .processes()
+                        .values()
+                        .filter(|p| crate::sys::process::is_named(p, &["hl.exe"]))
+                        .map(|p| p.pid().as_u32())
+                        .collect();
+                    let mut launcher_pids: Vec<u32> = sys
+                        .processes()
+                        .values()
+                        .filter(|p| {
+                            crate::sys::process::is_named(p, &["injector.exe"])
+                                && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
+                        })
+                        .map(|p| p.pid().as_u32())
+                        .collect();
+                    if !launcher_exit_logged {
+                        launcher_pids.push(launcher_pid);
+                    }
+                    if let Some(dialog) = crate::sys::dialogs::error_dialogs(&game_pids, &launcher_pids).into_iter().next() {
+                        log_markdown(&format!(
+                            "[HLAE] Error box from PID {} after {:.1}s: {}",
+                            dialog.pid,
+                            start_time.elapsed().as_secs_f32(),
+                            dialog.full_text()
+                        ));
+                        failure_reason = Some(dialog.summary());
+                        for pid in launcher_pids.iter().filter(|&&pid| pid != launcher_pid) {
+                            std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output().ok();
+                        }
+                        if !launcher_exit_logged {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                        }
+                        std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
+                        wait_for_hl_exe_to_exit(&mut sys);
+                        // A game already exiting when its box came up (the
+                        // Anniversary !m_bMounted assert, after the user
+                        // clicked the Steam box themselves) can't be killed:
+                        // Windows won't terminate a terminating process. Its
+                        // box is answered instead, so it doesn't sit there.
+                        let left = crate::sys::dialogs::error_dialogs(&game_pids, &[]);
+                        if !left.is_empty() {
+                            for dialog in &left {
+                                log_markdown(&format!(
+                                    "[HLAE] The game was already exiting and couldn't be ended; answered its box with Ignore: {}",
+                                    dialog.full_text()
+                                ));
+                                crate::sys::dialogs::dismiss(dialog);
+                            }
+                            wait_for_hl_exe_to_exit(&mut sys);
+                        }
+                        break;
+                    }
+                }
+
                 if cancel_token.load(Ordering::Relaxed) {
                     log_markdown(&format!("[HLAE] Cancelled by user after {:.1}s", start_time.elapsed().as_secs_f32()));
+                    // A cancel in the first few seconds catches the launcher
+                    // still injecting into hl.exe. Killing only hl.exe then
+                    // leaves HLAE open on "AfxHook error, Code: 1" (seen
+                    // 2026-09-29, a cancel 1.0s in), so the launcher goes first.
+                    if !launcher_exit_logged {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
+                    }
                     std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
                     wait_for_hl_exe_to_exit(&mut sys);
                     break;
@@ -846,7 +923,7 @@ pub fn spawn_capture_engine(
                                 "the demo never started playing — hl.exe came up but produced no console markers at all"
                             } else {
                                 "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
-                            });
+                            }.into());
                             std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
                             wait_for_hl_exe_to_exit(&mut sys);
                             break;
@@ -856,7 +933,7 @@ pub fn spawn_capture_engine(
                 // and then report the batch as finished.
                 if obs_session.as_ref().is_some_and(|s| s.is_dead()) {
                     log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
-                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect");
+                    failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
                     std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
                     wait_for_hl_exe_to_exit(&mut sys);
                     break;
@@ -905,7 +982,7 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe never came up after the launcher exited ({:.1}s elapsed) — treating as failure",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe never started after the HLAE launcher exited");
+                    failure_reason = Some("hl.exe never started after the HLAE launcher exited. Check that Steam is running and signed in to an account that owns Day of Defeat".into());
                     break;
                 }
                 // hl.exe was running and has now disappeared without ever writing
@@ -928,7 +1005,7 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)");
+                    failure_reason = Some("hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into());
                     break;
                 }
                 // 500 ms is fine for watching a process; it is far too coarse

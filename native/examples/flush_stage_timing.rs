@@ -20,6 +20,11 @@
 //! interrupted from this crate (it is one call into `dem-patch`); the serialise
 //! now can be, via `Demo::write_to_bytes_cancellable`.
 //!
+//! The serialise has since stopped re-encoding frames the clean did not edit
+//! (`Demo::write_to_bytes_reusing_source_cancellable`). Same demo, maps dir
+//! set, ring 256, best of three: `clean_ms` 4973 -> 2172, the write inside it
+//! ~3000ms -> ~80ms, and the output byte-identical to before.
+//!
 //! ```text
 //! cargo run --release -p native --example flush_stage_timing -- <demo>
 //! ```

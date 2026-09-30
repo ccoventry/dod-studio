@@ -86,14 +86,9 @@ fn forward(lines: impl Iterator<Item = String>, mut skip: usize, tx: &Sender<Mar
 
 /// The first running `hl.exe` whose events pipe opens.
 fn open_any_game() -> Option<(u32, std::fs::File)> {
-    use sysinfo::{PidExt, ProcessExt, SystemExt};
-    let mut sys = sysinfo::System::new();
-    sys.refresh_processes();
-    sys.processes()
-        .values()
-        .filter(|p| p.name().eq_ignore_ascii_case("hl.exe"))
-        .find_map(|p| {
-            let pid = p.pid().as_u32();
+    crate::sys::process::pids_named(&["hl.exe"])
+        .into_iter()
+        .find_map(|pid| {
             let name = crate::sys::game_remote::events_pipe_name(pid);
             std::fs::OpenOptions::new()
                 .read(true)
