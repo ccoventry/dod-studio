@@ -127,7 +127,6 @@ pub fn install() {
 
 fn install_inner() -> Result<(&'static str, usize), String> {
     let base = engine::engine_module_base().ok_or("hw.dll is not loaded yet")?;
-    let value_address = spriteblend_value_address()?;
 
     let mut errors = Vec::new();
     for site in SITES {
@@ -142,9 +141,10 @@ fn install_inner() -> Result<(&'static str, usize), String> {
         // Safety: both offsets are inside the matched span.
         let operand =
             unsafe { ((found + site.cvar_operand_at) as *const u32).read_unaligned() } as usize;
-        if operand != value_address {
+        // Safety: `base` is hw.dll's handle; the check reads only inside it.
+        if let Err(why) = unsafe { check_is_spriteblend_value(base, operand) } {
             return Err(format!(
-                "the {} pattern matched at +{:#x}, but it reads {operand:#x}, not gl_spriteblend's value at {value_address:#x}",
+                "the {} pattern matched at +{:#x}, but its operand {operand:#x} {why}",
                 site.build,
                 found - base
             ));
@@ -168,16 +168,49 @@ fn install_inner() -> Result<(&'static str, usize), String> {
     Err(format!("no known build matched ({})", errors.join("; ")))
 }
 
-/// `&gl_spriteblend.value`, from the engine's own cvar list.
-fn spriteblend_value_address() -> Result<usize, String> {
-    let engfuncs = engine::engfuncs().ok_or("the engine function table is not available yet")?;
-    let name = CString::new("gl_spriteblend").map_err(|e| e.to_string())?;
-    // Safety: the engine's own lookup, main thread.
-    let cvar = unsafe { (engfuncs.pfn_get_cvar_pointer)(name.as_ptr()) };
-    if cvar.is_null() {
-        return Err("the engine has no gl_spriteblend cvar".to_string());
+/// Checks that `operand` is `gl_spriteblend.value`.
+///
+/// Not by asking the engine: this installs before the renderer registers its
+/// cvars, so `pfnGetCvarPointer("gl_spriteblend")` returns null then (the
+/// first live test found the fix never installed for that reason). The cvar
+/// is a static `cvar_t` inside hw.dll whose `name` pointer is set at compile
+/// time, so the operand is accepted when the struct around it lies inside
+/// hw.dll and its `name` reads "gl_spriteblend". The same test
+/// `tools/verify_spriteblend_offsets.py` makes offline. Once the cvar is
+/// registered, the engine's own answer must agree as well.
+///
+/// Safety: `base` is hw.dll's module handle.
+unsafe fn check_is_spriteblend_value(base: usize, operand: usize) -> Result<(), &'static str> {
+    const NAME: &[u8] = b"gl_spriteblend\0";
+    let size =
+        unsafe { crate::pe::image_size(base as *mut u8) }.ok_or("hw.dll has no PE header")?;
+    let inside = |address: usize, len: usize| address >= base && address + len <= base + size;
+    let value_at = std::mem::offset_of!(engine::CvarSPartial, value);
+    let cvar = operand
+        .checked_sub(value_at)
+        .ok_or("is not a cvar's value")?;
+    if !inside(cvar, std::mem::size_of::<engine::CvarSPartial>()) {
+        return Err("is not inside hw.dll");
     }
-    Ok(cvar as usize + std::mem::offset_of!(engine::CvarSPartial, value))
+    // Safety: inside the mapped image, checked above.
+    let name = unsafe { (cvar as *const usize).read_unaligned() };
+    if !inside(name, NAME.len()) {
+        return Err("is not a cvar with a name inside hw.dll");
+    }
+    // Safety: inside the mapped image, checked above.
+    let bytes = unsafe { std::slice::from_raw_parts(name as *const u8, NAME.len()) };
+    if bytes != NAME {
+        return Err("is not gl_spriteblend's value (the cvar there has another name)");
+    }
+    if let Some(engfuncs) = engine::engfuncs() {
+        let lookup = CString::new("gl_spriteblend").map_err(|_| "bad name")?;
+        // Safety: the engine's own lookup, main thread.
+        let registered = unsafe { (engfuncs.pfn_get_cvar_pointer)(lookup.as_ptr()) };
+        if !registered.is_null() && registered as usize != cvar {
+            return Err("names gl_spriteblend, but the engine registered another one");
+        }
+    }
+    Ok(())
 }
 
 /// One `dodstudio_debug_status` line, once installed.
