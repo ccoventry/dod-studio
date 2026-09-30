@@ -614,6 +614,13 @@ fn status_text() -> String {
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
+    // Always shown (#430): the one fact that decides how big HD textures can
+    // get before the game runs out of memory.
+    lines.push(if crate::pe::process_is_large_address_aware() {
+        "address space: 4 GB (hl.exe is large-address-aware)".to_string()
+    } else {
+        "address space: 2 GB (hl.exe isn't large-address-aware; very large HD textures can run it out)".to_string()
+    });
     // Gated like the two fixes above rather than always shown like the
     // suppression cvars: logging is off by default and a permanent "logging
     // nothing" line would be noise in the overwhelmingly common case.
@@ -1450,10 +1457,10 @@ mod tests {
     /// returning an empty reply that reads as a broken command.
     #[test]
     fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
-        // anim_fix::LEVEL is also mutated by anim_fix.rs's own tests, and
+        // anim_fix::LEVEL is also mutated by anim_fix's own tests, and
         // cargo runs a crate's tests in parallel by default -- without this,
         // one of those can flip LEVEL mid-assertion here (issue #321).
-        // anim_fix.rs's tests already take the same lock for the same
+        // anim_fix's tests already take the same lock for the same
         // reason; sound_fix::ENABLED has no other test touching it, so it
         // does not need one of its own.
         let _statics = anim_fix::tests::lock_statics();
