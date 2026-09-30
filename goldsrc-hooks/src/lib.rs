@@ -58,6 +58,10 @@
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
 //!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
+//! - `sprite_blend`: `gl_spriteblend 0` at the session's first sprite load no
+//!   longer darkens sprites until the game restarts (issue #467). Two bytes in
+//!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
+//!   turns it off.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -117,6 +121,7 @@ mod scoreboard;
 mod sound_fix;
 mod spectator_crosshair;
 mod spectator_target;
+mod sprite_blend;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
@@ -194,6 +199,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // not to.
     engine_buttons::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
+    // Restores the engine's own default upload behaviour, so on unless asked
+    // not to.
+    sprite_blend::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_SPRITEBLEND_FIX", true),
         Ordering::Relaxed,
     );
     // Only this user's own processes can reach the pipe, and only a game
@@ -289,6 +300,8 @@ fn install_fixes() {
     tempent_fix::install();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
+    // Before any map loads, so before the first HUD sprite is uploaded.
+    sprite_blend::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

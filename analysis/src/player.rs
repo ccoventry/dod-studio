@@ -31,6 +31,27 @@ pub struct Player {
     pub kill_streaks: Vec<KillStreak>,
     pub weapon_breakdown: HashMap<Weapon, (u32, u32)>,
     pub mortality: Vec<MortalityChange>,
+
+    /// Objective points: the sum of this player's `ObjScore` *increments*
+    /// since the match went live. Unlike `stats.0`, which the same message
+    /// overwrites, a counter reset cannot lose any.
+    #[serde(default)]
+    pub obj_points: u32,
+
+    /// Flag captures credited to this player, co-cappers included
+    /// (`objective.rs`).
+    #[serde(default)]
+    pub cap_credits: u32,
+
+    /// Kills of a teammate, resolved against both teams at the moment of the
+    /// kill.
+    #[serde(default)]
+    pub teamkills: u32,
+
+    /// Deaths with no other player to credit: killed by the world, or by
+    /// themselves.
+    #[serde(default)]
+    pub suicides: u32,
 }
 
 impl Hash for Player {
@@ -65,6 +86,10 @@ impl Player {
             kill_streaks: vec![],
             weapon_breakdown: HashMap::new(),
             mortality: vec![],
+            obj_points: 0,
+            cap_credits: 0,
+            teamkills: 0,
+            suicides: 0,
         }
     }
 
@@ -140,6 +165,10 @@ impl Player {
             kill_streaks: vec![],
             weapon_breakdown: HashMap::new(),
             mortality: vec![],
+            obj_points: 0,
+            cap_credits: 0,
+            teamkills: 0,
+            suicides: 0,
         }
     }
 }

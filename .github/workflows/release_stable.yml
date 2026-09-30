@@ -117,5 +117,8 @@ jobs:
           tagName: v${{ steps.version.outputs.RELEASE_VERSION }}
           releaseName: "DoD Studio v${{ steps.version.outputs.RELEASE_VERSION }}"
           releaseBody: "See assets below to download."
+          # What changed, from the merged PRs' titles, grouped by .github/release.yml
+          # (#165). releaseBody is prepended to the generated notes.
+          generateReleaseNotes: true
           releaseDraft: false
           prerelease: false
