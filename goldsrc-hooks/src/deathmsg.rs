@@ -220,7 +220,7 @@ static BLOCK: Mutex<BlockList> = Mutex::new(BlockList {
 /// by every `block`, so each new list says it once.
 static SELF_IN_HLTV_REPORTED: AtomicBool = AtomicBool::new(false);
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 struct BlockList {
     players: Vec<Player>,
     allow_list: bool,
@@ -271,9 +271,65 @@ impl std::fmt::Display for Player {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Player::Slot(slot) => write!(f, "{slot}"),
-            Player::SteamId(id) => write!(f, "{id}"),
+            Player::SteamId(id) => f.write_str(&classic_steam_id(*id)),
             Player::OwnPov => f.write_str("self"),
         }
+    }
+}
+
+/// A SteamID64 in the `STEAM_0:Y:Z` form GoldSrc's own `status` prints, the
+/// one players and server admins recognise (#537).
+fn classic_steam_id(id: u64) -> String {
+    let account = id.wrapping_sub(STEAM_ID64_BASE);
+    format!("STEAM_0:{}:{}", account % 2, account / 2)
+}
+
+/// One block-list entry for `status`: slots as `slot N`, SteamIDs in the
+/// classic form, either with the player's current name when they're in the
+/// loaded demo; `self` as itself (#537).
+fn describe(player: Player, name: Option<&str>) -> String {
+    let id = match player {
+        Player::Slot(slot) => format!("slot {slot}"),
+        Player::SteamId(_) => player.to_string(),
+        Player::OwnPov => return player.to_string(),
+    };
+    match name {
+        Some(name) => format!("{id} ({name})"),
+        None => id,
+    }
+}
+
+/// What `status` says the block list hides. `name_of` looks a player up in
+/// the loaded demo; it's a parameter so the wording is testable without one.
+fn blocking_text(list: &BlockList, name_of: impl Fn(Player) -> Option<String>) -> String {
+    if list.players.is_empty() {
+        return "nothing".to_string();
+    }
+    let who: Vec<String> = list
+        .players
+        .iter()
+        .map(|&p| describe(p, name_of(p).as_deref()))
+        .collect();
+    if list.allow_list {
+        format!("everything except {}", who.join(", "))
+    } else {
+        format!("frags involving {}", who.join(", "))
+    }
+}
+
+/// A block-list entry's current name: the slot's occupant, or whoever in the
+/// loaded demo has that SteamID. Looked up live, since names change between
+/// demos. `None` for `self`, which needs no name.
+fn current_name(player: Player) -> Option<String> {
+    let hltv = is_hltv();
+    match player {
+        Player::Slot(slot) => lookup(slot, hltv).map(|(name, _)| name),
+        Player::SteamId(id) => (1..=32).find_map(|slot| {
+            lookup(slot, hltv)
+                .filter(|(_, who)| who.steam_id == id)
+                .map(|(name, _)| name)
+        }),
+        Player::OwnPov => None,
     }
 }
 
@@ -504,8 +560,7 @@ fn players() -> String {
         let id = if who.steam_id == 0 {
             "SteamID unknown (0)".to_string()
         } else {
-            let account = who.steam_id.wrapping_sub(STEAM_ID64_BASE);
-            format!("{} (STEAM_0:{}:{})", who.steam_id, account % 2, account / 2)
+            format!("{} ({})", who.steam_id, classic_steam_id(who.steam_id))
         };
         let own = if who.is_own_pov { "  <- self" } else { "" };
         out.push_str(&format!("  {slot:>2}  {name}  {id}{own}\n"));
@@ -1098,17 +1153,10 @@ fn usage() -> String {
 pub(crate) fn status() -> String {
     let max = PATCHED_MAX.load(Ordering::Acquire);
     let offset = PATCHED_OFFSET.load(Ordering::Acquire);
-    let list = BLOCK.lock();
+    // Copied out, so the lock isn't held across the engine lookups.
+    let list = BLOCK.lock().map(|l| l.clone());
     let block = match list {
-        Ok(ref l) if l.players.is_empty() => "nothing".to_string(),
-        Ok(ref l) => {
-            let ids: Vec<String> = l.players.iter().map(|p| p.to_string()).collect();
-            if l.allow_list {
-                format!("everything except players {}", ids.join(", "))
-            } else {
-                format!("frags involving players {}", ids.join(", "))
-            }
-        }
+        Ok(ref l) => blocking_text(l, current_name),
         Err(_) => "unknown".to_string(),
     };
     format!(
@@ -1584,6 +1632,40 @@ mod tests {
         assert_eq!(parse_player("pov"), None);
         assert_eq!(parse_player("12345"), None, "neither a slot nor a SteamID");
         assert_eq!(parse_player(""), None);
+    }
+
+    #[test]
+    fn status_shows_classic_steam_ids_and_current_names() {
+        // #537's example: typed as `block !STEAM_0:1:6155141`.
+        let m00cat = 76_561_197_972_576_011;
+        let list = BlockList {
+            players: vec![Player::SteamId(m00cat), Player::Slot(13), Player::OwnPov],
+            allow_list: true,
+        };
+        let names = |p: Player| match p {
+            Player::SteamId(id) if id == m00cat => Some("dicE[: :]m00cat :D".to_string()),
+            Player::Slot(13) => Some("Brain".to_string()),
+            _ => None,
+        };
+        assert_eq!(
+            blocking_text(&list, names),
+            "everything except STEAM_0:1:6155141 (dicE[: :]m00cat :D), slot 13 (Brain), self"
+        );
+        // Nobody by those ids in the loaded demo: no names.
+        let block = BlockList {
+            allow_list: false,
+            ..list
+        };
+        assert_eq!(
+            blocking_text(&block, |_| None),
+            "frags involving STEAM_0:1:6155141, slot 13, self"
+        );
+        assert_eq!(blocking_text(&BlockList::default(), |_| None), "nothing");
+        // Round trip: what status prints parses back to the same player.
+        assert_eq!(
+            parse_player(&Player::SteamId(ME).to_string()),
+            Some(Player::SteamId(ME))
+        );
     }
 
     #[test]
