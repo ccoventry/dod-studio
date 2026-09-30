@@ -169,9 +169,9 @@ Every launch (batch, preview, Launch Game) uses one command line:
 
 A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-demoedit` (PR #401) and `-addons` (PR #412) are not on `dev` yet.
 
-While the game runs, the app tails `qconsole.log` for its markers and turns them into status lines and notifications. The batch ends when:
+While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 
-- the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call), or OBS sees `BATCH_COMPLETE`;
+- `BATCH_COMPLETE` arrives over the events pipe (any mode), OBS mode sees it in the log, or the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call; the fallback);
 - you cancel (the app kills `hl.exe`);
 - the game closes on its own ("closed manually or crashed");
 - in OBS mode, markers stop arriving for too long, or OBS disconnects.
@@ -231,7 +231,9 @@ At load the DLL hooks two imports of `hw.dll` (`GetProcAddress`, `LoadLibraryA`)
 
 It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and a crash handler records any crash as `module+offset` with a stack trail.
 
-**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off. Nothing comes back from the game over the pipe yet (issue #434, step 1).
+**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off.
+
+**Events to Studio.** A second pipe, `\\.\pipe\dodstudio-hl-<pid>-events`, carries the pipeline's `[dod-studio]` markers from the game as the engine runs each `echo` (the DLL wraps `echo` through the engine's command list, with no per-build address). Markers from before Studio connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off; Studio then reads `qconsole.log` as before (issue #434, step 1).
 
 ### 5.2 Console commands
 
