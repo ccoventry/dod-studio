@@ -204,6 +204,16 @@ the stack runs out. The guard refuses any clip node the hull can't have, and
 stops a trace that is about to run out of stack. On by default for the same
 reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
 
+`src/pmove_guard.rs` stops a crash (`hw.dll+0x3a77c`, issue #546) when the
+session's first demo sends DoD's `InitHUD` in its very first packets: the
+client then drops the map's static models to the ground through
+`EV_SetTraceHull`, which writes through the engine's `pmove` pointer, and
+nothing has set that pointer yet. At start-up the guard points it at the
+engine's own `g_clmove`, the value the engine stores there itself a moment
+later; in that one case the models keep their authored height instead of the
+game closing. On by default; `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
+`tools/verify_pmove_guard.py` re-derives both builds.
+
 `src/sprite_blend.rs` stops `gl_spriteblend 0` at the session's first sprite
 load from leaving the crosshair and other sprites dark and dotted until the
 game restarts (issue #467). The engine only fills in the colour around a

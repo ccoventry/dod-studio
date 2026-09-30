@@ -662,6 +662,9 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(pmove) = crate::pmove_guard::status_line() {
+        lines.push(pmove);
+    }
     if let Some(events) = crate::events::status_line() {
         lines.push(events);
     }

@@ -267,7 +267,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |
 | `dodstudio_reload_demo` | command | — | Plays the last `playdemo`/`viewdemo` demo again from the start | both (wraps the engine's own commands through the SDK's command list, no per-build address) |
 
-Three fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off), the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off), and the **sprite-blend upload fix** (`gl_spriteblend 0` at the first sprite load no longer darkens sprites for the session, #467, both builds, `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off).
+Four fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off), the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off), and the **sprite-blend upload fix** (`gl_spriteblend 0` at the first sprite load no longer darkens sprites for the session, #467, both builds, `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off), and the **first-demo pmove guard** (a session's first demo sending `InitHUD` in its first packets no longer crashes while DoD places the map's models, #546, both builds, `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off).
 
 Not compiled on `dev`: `spectator_bars.rs` (both approaches failed live; issue #328).
 
