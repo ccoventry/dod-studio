@@ -1500,6 +1500,30 @@ mod tests {
             parse_block_args(&argv(&["STEAM_0", ":", "1", ":", "6155141"])),
             Ok((vec![Player::SteamId(me)], false))
         );
+        // All three SteamID forms on one line, as the console splits them.
+        assert_eq!(
+            parse_block_args(&argv(&[
+                "!STEAM_0",
+                ":",
+                "1",
+                ":",
+                "6155141",
+                "!76561197977930126",
+                "![U",
+                ":",
+                "1",
+                ":",
+                "17664398]",
+            ])),
+            Ok((
+                vec![
+                    Player::SteamId(me),
+                    Player::SteamId(76_561_197_977_930_126),
+                    Player::SteamId(76_561_197_977_930_126),
+                ],
+                true
+            ))
+        );
         assert!(
             parse_block_args(&argv(&["!3", "5"]))
                 .unwrap_err()
