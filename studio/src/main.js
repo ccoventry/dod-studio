@@ -1084,9 +1084,13 @@ window.addEventListener("DOMContentLoaded", async () => {
       cancelLabel: STRINGS.MAIN.IDENTICAL_COPIES_KEEP,
       details: offered.map((c) => ({
         primary: STRINGS.MAIN.relocateRenamed(nameOfRow(c.sameAs), fileNameOf(c.demo.path)),
+        // The queued file hasn't moved, so not "now in": either the same
+        // folder as it, or where the copy is.
         secondary: c.sameAs.missing
           ? STRINGS.MAIN.identicalCopyQueuedMissing(shortFolder(folderOf(c.demo.path)))
-          : STRINGS.MAIN.relocateFolder(shortFolder(folderOf(c.demo.path))),
+          : samePath(folderOf(c.demo.path), folderOf(c.sameAs.path))
+            ? STRINGS.MAIN.IDENTICAL_COPY_SAME_FOLDER
+            : STRINGS.MAIN.identicalCopyFolder(shortFolder(folderOf(c.demo.path))),
         title: c.demo.path,
       })),
       footer: STRINGS.MAIN.IDENTICAL_COPIES_QUESTION,

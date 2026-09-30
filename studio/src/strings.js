@@ -1077,6 +1077,8 @@ export const STRINGS = {
     IDENTICAL_COPIES_SWITCH: 'Use these files',
     IDENTICAL_COPIES_KEEP: 'Keep the queued files',
     identicalCopyQueuedMissing: (folder) => `in ${folder} (the queued file is missing)`,
+    IDENTICAL_COPY_SAME_FOLDER: 'in the same folder as the queued file',
+    identicalCopyFolder: (folder) => `in ${folder}`,
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
