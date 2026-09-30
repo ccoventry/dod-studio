@@ -2331,6 +2331,28 @@ pub fn check_engine_processes() -> bool {
     native::sys::process::is_running(ENGINE_PROCESS_NAMES)
 }
 
+/// Steam's state before a game launch: "not_running", "signed_out" or
+/// "ready". `hl.exe` started without Steam exits straight away, reported
+/// only as "Failed to initalize authentication interface".
+#[tauri::command]
+pub async fn steam_state() -> Result<String, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        Ok(native::sys::steam::state().as_str().to_string())
+    }))
+    .await
+}
+
+/// Starts Steam from where it recorded its own install. Steam outlives
+/// DoD Studio, so the child is not tracked.
+#[tauri::command]
+pub fn start_steam() -> Result<(), String> {
+    let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
+    std::process::Command::new(exe)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
+}
+
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
 #[tauri::command]
 pub fn kill_engine_processes() -> Result<(), String> {

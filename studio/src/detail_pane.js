@@ -2,6 +2,7 @@ import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
 import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { showToast } from './toast.js';
+import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
@@ -270,6 +271,7 @@ window.addEventListener("DOMContentLoaded", () => {
         return;
       }
 
+      if (!(await ensureSteamReady())) return;
       await performLaunchPreview(hlaePath, hlPath, highlights);
     });
   }

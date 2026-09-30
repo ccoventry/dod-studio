@@ -1238,6 +1238,19 @@ export const STRINGS = {
   },
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
+  // Checked before DoD Studio starts the game (steam_guard.js).
+  STEAM: {
+    NOT_RUNNING_TITLE: "Steam isn't running",
+    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game closes straight away with an authentication error. Start Steam now? The launch carries on once you're signed in.",
+    START_STEAM: 'Start Steam',
+    CANCEL: 'Cancel',
+    WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
+    STILL_WAITING: 'Still waiting for Steam to sign in.',
+    WAIT_CANCELLED: 'Cancelled. Nothing was launched.',
+    // Beside Start Capture Batch when the Steam check stopped it.
+    BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
+    NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
+  },
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,

@@ -1,3 +1,4 @@
+import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -729,6 +730,7 @@ async function initStandaloneLaunchButton() {
       return;
     }
 
+    if (!(await ensureSteamReady())) return;
     await performLaunch();
   });
 }
@@ -1369,6 +1371,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // Before any patching: without Steam the game can't start.
+      if (!(await ensureSteamReady())) {
+        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        return;
+      }
       runBatch();
     });
   }
