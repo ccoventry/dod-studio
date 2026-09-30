@@ -859,22 +859,10 @@ button.primary-btn:hover:not(:disabled) {
   gap: 16px;
 }
 
-/* Capture footer (#534): the status line gets the row's free width, beside
-   the buttons, instead of the left third of a centred grid; the space
-   readouts sit at the right-hand end. It shows at most two lines, and
+/* Capture footer (#534): the status line sits on its own line under the
+   buttons, the row's full width, and shows at most two lines;
    status_line.js puts the whole message in its tooltip. */
-.capture-studio-footer-row.footer-row-grid-centered {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.capture-studio-footer-row .footer-row-left {
-  justify-self: stretch;
-  min-width: 0;
-}
-
 #batch-status {
-  flex: 1;
-  min-width: 0;
   margin: 0;
   display: -webkit-box;
   -webkit-box-orient: vertical;
