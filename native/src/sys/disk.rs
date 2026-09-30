@@ -28,10 +28,10 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     use std::collections::HashMap;
     use std::sync::{Mutex, OnceLock};
     use std::time::Instant;
-    use sysinfo::{DiskExt, System, SystemExt};
+    use sysinfo::Disks;
 
-    // Shared sysinfo System handle — only refreshed when cache is stale.
-    static SYSTEM: OnceLock<Mutex<System>> = OnceLock::new();
+    // Shared sysinfo disk list — only refreshed when cache is stale.
+    static DISKS: OnceLock<Mutex<Disks>> = OnceLock::new();
 
     // Per-path TTL cache: path_key → (last_refresh, available_bytes)
     static CACHE: OnceLock<Mutex<HashMap<String, (Instant, u64)>>> = OnceLock::new();
@@ -71,20 +71,16 @@ pub fn get_available_bytes(path: &std::path::Path) -> u64 {
     let result = match diagnose_path(path) {
         PathStatus::Malformed | PathStatus::NotAbsolute | PathStatus::NotADirectory => u64::MAX,
         PathStatus::Ok | PathStatus::NotFound => {
-            let sys_mutex = SYSTEM.get_or_init(|| {
-                let mut sys = System::new();
-                sys.refresh_disks_list();
-                Mutex::new(sys)
-            });
+            let disks_mutex = DISKS.get_or_init(|| Mutex::new(Disks::new_with_refreshed_list()));
 
-            if let Ok(mut sys) = sys_mutex.lock() {
-                sys.refresh_disks_list();
-                sys.refresh_disks();
+            if let Ok(mut disks) = disks_mutex.lock() {
+                // Re-lists too, so a drive plugged in since the last call counts.
+                disks.refresh(true);
 
                 let mut best_bytes = u64::MAX;
                 let mut best_len = 0usize;
 
-                for disk in sys.disks() {
+                for disk in disks.list() {
                     // Normalise mount point in-place without an extra owned String.
                     let mount_cow = disk.mount_point().to_string_lossy();
                     let mount_key: String = mount_cow
@@ -167,4 +163,25 @@ pub fn diagnose_path(path: &std::path::Path) -> PathStatus {
 #[cfg(target_arch = "wasm32")]
 pub fn diagnose_path(_path: &std::path::Path) -> PathStatus {
     PathStatus::Ok
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    /// A real, existing folder resolves to its drive's free space; a path that
+    /// can never be written to reports "unknown" (u64::MAX) instead of the
+    /// free space of whatever drive it prefix-matches.
+    #[test]
+    fn free_space_of_a_real_folder_and_a_bad_path() {
+        let dir = std::env::temp_dir();
+        let bytes = get_available_bytes(&dir);
+        assert!(bytes > 0 && bytes < u64::MAX, "{}: {bytes}", dir.display());
+        // Cached for TTL_MS, so a second call agrees.
+        assert_eq!(get_available_bytes(&dir), bytes);
+        assert_eq!(
+            get_available_bytes(std::path::Path::new("relative/folder")),
+            u64::MAX
+        );
+    }
 }
