@@ -661,6 +661,9 @@ fn status_text() -> String {
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
     }
+    if let Some(sprites) = crate::sprite_blend::status_line() {
+        lines.push(sprites);
+    }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
     }

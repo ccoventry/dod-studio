@@ -41,6 +41,7 @@ import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
 import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
 import { splitIdenticalCopies } from './demo_copies.js';
@@ -307,6 +308,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initOsNotifications();
 
   let scanPaths = [];
+  // Set when the saved pinned list held single demo files (older builds), so
+  // the cleaned list is written back once after settings load.
+  let pinnedListCleaned = false;
   // Analyzer Explorer sidebar's "Recent" quick-links tier — most-recent-first,
   // capped at 10, pushed via recordDemoFolderVisit() below whenever browsing
   // into a folder yields a non-empty demo listing. Mirrors dev's
@@ -729,7 +733,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (inputEl) inputEl.value = settings.scan_workers;
       }
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
-        scanPaths = [...settings.pinned_folders];
+        // Folders only: older builds added every file picked with
+        // + Add Demo Files, one path per demo. Cleaned up once, here.
+        scanPaths = pinnedFoldersOnly(settings.pinned_folders);
+        if (scanPaths.length !== settings.pinned_folders.length) pinnedListCleaned = true;
       }
       if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
         demoFolderHistory = [...settings.demo_folder_history];
@@ -761,6 +768,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // present. Not awaited: a background check shouldn't block startup.
   initUpdater(settings, persistAppSettings);
   initAppMenu();
+  if (pinnedListCleaned) persistAppSettings();
 
   // Save Project Session — also called from the Clear All modal's "Save
   // Session First" action, so it lives here as a plain function rather than
@@ -793,7 +801,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       const hlPath = document.querySelector('#hl-path-input')?.value || "";
       const projectData = JSON.stringify({
         version: "0.12.0",
-        scanPaths: scanPaths,
+        // The folders this project's demos are in, not the app-wide pinned
+        // list (that is every folder ever added, nothing to do with the
+        // project). Read back only to look for demos that have moved (#21).
+        scanPaths: projectFolders(currentScannedDemos),
         demos: currentScannedDemos,
         hlaePath: hlaePath,
         hlPath: hlPath,
@@ -1253,11 +1264,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Scans only the given paths and merges the results into the existing
   // master list (replacing entries with matching `path`, appending new ones).
-  // `scanPaths` itself is a separately-persisted "known library" list reused
-  // by the capture batch payload (`capture_directories`) — it must NOT be
-  // re-walked on every add, or every scan re-processes every folder ever
-  // added across the app's lifetime (dev only ever re-ingests the paths just
-  // picked in that action; see views/capture/workspace.rs Add Files/Add Folder).
+  // `scanPaths` is the app-wide pinned-folder list (settings' pinned_folders,
+  // also the Demo Analyzer's Pinned tier) -- it must NOT be re-walked on every
+  // add, or every scan re-processes every folder ever added across the app's
+  // lifetime. Capture's output folders are a separate list (targetDrives).
   //
   // Resolves true when the scan ran (a cancelled one included), false when it
   // failed -- e.g. every picked path is gone, which the backend reports (#432).
@@ -1373,15 +1383,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
         if (selected) {
           const files = Array.isArray(selected) ? selected : [selected];
-          files.forEach(f => {
-            if (!scanPaths.includes(f)) {
-              scanPaths.push(f);
-              markProjectDirty();
-            }
-          });
-          await persistAppSettings();
-          // Scan only the files just picked, not the full accumulated
-          // scanPaths history — see triggerAutoScan's doc comment.
+          // Files aren't remembered in the pinned-folder list (only folders
+          // are); the scan itself adds them to the queue and the project.
           await triggerAutoScan(files, { pickedFiles: true });
         }
       } catch (err) {
@@ -1487,15 +1490,30 @@ window.addEventListener("DOMContentLoaded", async () => {
       const targetId = btn.getAttribute('data-tab');
       const targetEl = document.getElementById(targetId);
       if (targetEl) targetEl.style.display = 'block';
+      refreshCommandWarningsIfShown();
     });
   });
+
+  // The game's config files change outside the app: the read-only flag on
+  // config.cfg (#478), or lines in config.cfg/movie.cfg. The Commands tab's
+  // warnings are only as fresh as their last check, so it runs again whenever
+  // that tab comes into view: opening it, returning to Configuration on it,
+  // or coming back to this window (from Explorer or an editor) while it shows.
+  function refreshCommandWarningsIfShown() {
+    const tab = document.getElementById('tab-custom-commands');
+    if (tab && tab.offsetParent !== null) refreshInitCommandWarnings();
+  }
+  window.addEventListener('focus', refreshCommandWarningsIfShown);
 
   // Top nav bar view routing (shared with detail_pane.js — see nav.js)
   switchNavTab('workspace');
 
   const navTabBtns = document.querySelectorAll('.nav-tab-btn');
   navTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => switchNavTab(btn.getAttribute('data-nav')));
+    btn.addEventListener('click', () => {
+      switchNavTab(btn.getAttribute('data-nav'));
+      refreshCommandWarningsIfShown();
+    });
   });
 
   // Capture Studio in-workflow phase switch (Highlights <-> Configuration) —
