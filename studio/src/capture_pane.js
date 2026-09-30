@@ -15,6 +15,7 @@ import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 
+let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
 let unlistenFastForwardToClip = null;
@@ -964,6 +965,16 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // above, but previously not part of AppSettings at all — reset to default
   // every restart.
   refreshLaunchGuard();
+
+  // An error box shown by the game or HLAE after a preview or Launch Game,
+  // read by the backend (native::sys::dialogs). A batch reports its own
+  // through capture_status instead.
+  if (!listeningForExternalErrors) {
+    listeningForExternalErrors = true;
+    listen('external_error', (event) => {
+      showToast(String(event.payload || ''), 'error', 15000);
+    });
+  }
 
   if (!unlistenCaptureStatus) {
     listen('capture_status', (event) => {
