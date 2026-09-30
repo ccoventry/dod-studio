@@ -1,0 +1,21 @@
+# Groups GitHub's generated release notes (#165). Both release workflows ask
+# tauri-action for them (generateReleaseNotes). Categories go by PR label;
+# an unlabelled PR lands under "Other changes".
+changelog:
+  exclude:
+    labels:
+      - duplicate
+      - wontfix
+  categories:
+    - title: New features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Other changes
+      labels:
+        - "*"

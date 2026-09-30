@@ -3,6 +3,7 @@ mod clan_match;
 mod kill;
 mod localization;
 mod mortality;
+mod objective;
 mod player;
 mod round;
 mod scoreboard;
@@ -14,8 +15,11 @@ mod weapon_names;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
-    kill::{use_kill_streak_updates, use_weapon_breakdown_updates},
+    kill::{
+        use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
+    },
     mortality::with_mortality_detection,
+    objective::use_objective_updates,
     player::use_player_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
@@ -35,6 +39,7 @@ pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
     localization::{get_active_language, set_active_language, translate_key},
     mortality::{Mortality, MortalityChange, MortalityState},
+    objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
     round::Round,
 };
@@ -108,6 +113,9 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Flag layout, ownership, captures and capture attempts (#192).
+    #[serde(default)]
+    pub objectives: Objectives,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -137,8 +145,8 @@ pub struct DemoInfo {
     pub map_checksum: u32,
 }
 
-impl From<Demo> for DemoInfo {
-    fn from(value: Demo) -> Self {
+impl From<&Demo> for DemoInfo {
+    fn from(value: &Demo) -> Self {
         let map_name = value
             .header
             .map_name
@@ -265,6 +273,7 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"InitObj"
             | b"SetObj"
             | b"StartProg"
+            | b"StartProgF"
             | b"CancelProg"
     )
 }
@@ -369,6 +378,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         state.players.clear();
         state.rounds.clear();
         state.team_scores.reset();
+        state.objectives = Objectives::default();
         state.clan_match_detected = false;
         state.clan_match_detection = ClanMatchDetection::WaitingForReset;
     }
@@ -584,6 +594,7 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                 }
             }
             state.team_scores.convert_allies_to_british();
+            state.objectives.convert_allies_to_british();
             for round in &mut state.rounds {
                 if let Round::Completed {
                     winner_stats: Some((winner_team, _)),
@@ -648,8 +659,10 @@ impl Analysis {
             use_scoreboard_updates(state, event);
             use_kill_streak_updates(state, event);
             use_weapon_breakdown_updates(state, event);
+            use_teamkill_and_suicide_updates(state, event);
             use_team_score_updates(state, event);
             use_rounds_updates(state, event);
+            use_objective_updates(state, event);
             use_chat_updates(state, event);
             use_clan_match_detection_updates(Duration::from_secs(30), state, event);
             use_pov_stats_updates(state, event);
@@ -702,8 +715,25 @@ impl Analysis {
 
         process_event(&mut state, &AnalyzerEvent::Finalization);
 
-        Ok(Analysis::new(demo.into(), state))
+        let info = DemoInfo::from(&demo);
+        release_frames(demo);
+        Ok(Analysis::new(info, state))
     }
+}
+
+/// Frees the decoded frame tree. That's about a third of a cold parse (441 ms
+/// of ~1.3 s, `docs/demo_analyzer_load_performance.md`) and nothing needs the
+/// tree once the analysis is built, so where there are threads the caller
+/// doesn't wait for it. The browser build (wasm) frees it in place.
+fn release_frames(demo: Demo) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut demo = demo;
+        let entries = std::mem::take(&mut demo.directory.entries);
+        std::thread::spawn(move || drop(entries));
+    }
+    #[cfg(target_arch = "wasm32")]
+    drop(demo);
 }
 
 impl<'a> From<&'a [u8]> for Analysis {
@@ -1015,6 +1045,7 @@ mod tests {
             b"InitObj",
             b"SetObj",
             b"StartProg",
+            b"StartProgF",
             b"CancelProg",
         ] {
             assert!(is_relevant_message(name), "{:?} should be relevant", name);
@@ -1068,8 +1099,10 @@ mod tests {
                 use_scoreboard_updates(state, event);
                 use_kill_streak_updates(state, event);
                 use_weapon_breakdown_updates(state, event);
+                use_teamkill_and_suicide_updates(state, event);
                 use_team_score_updates(state, event);
                 use_rounds_updates(state, event);
+                use_objective_updates(state, event);
                 use_chat_updates(state, event);
                 use_clan_match_detection_updates(Duration::from_secs(30), state, event);
                 use_pov_stats_updates(state, event);

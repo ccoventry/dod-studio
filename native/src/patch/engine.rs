@@ -469,6 +469,30 @@ impl StreamPatcher {
             }
         }
 
+        // Commands are written as their frame comes up, so one scheduled past
+        // the last frame is never written, silently. That happens when the
+        // highlights are from a different, longer file than this one (#21),
+        // and it drops the command that moves on to the next demo too, so the
+        // game sits at the end of this one. The batch checks file keys before
+        // it gets here; this is the record if anything slips past.
+        // Breadcrumbs are left out: they're spread to the header's frame
+        // count, which can run a little past the frames actually walked.
+        let unwritten: Vec<&(i32, String)> = scheduled_queue
+            .iter()
+            .filter(|(_, cmd)| !cmd.contains("BREADCRUMB"))
+            .collect();
+        if let Some((first_tick, first_cmd)) = unwritten.first() {
+            crate::log_markdown(&format!(
+                "⚠️ **{} scheduled command(s) fell past the end of** `{}` ({} frames) **and were not written.** \
+                 The highlights don't match this file. First: frame {} `{}`.",
+                unwritten.len(),
+                source_demo.display(),
+                frame_counter,
+                first_tick,
+                first_cmd
+            ));
+        }
+
         // [STEP 4] Directory Offset Rewrite (EOF Handling)
         // 4b: Copy the remaining directory entries from the input to the output.
         let mut dir_count_buf = [0u8; 4];
