@@ -25,8 +25,13 @@ always ends the game it started, and only that one.
                                 hook log since launch (default 60 s)
     cmd <console command>       send it over the remote pipe
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
-    expect <regex>              check the regex appears in either log
+    expect <regex>              check the regex appears in either log (or in
+                                the events pipe's lines, once listening)
     expect_not <regex>          check it doesn't
+    listen_events               read the game's events pipe from here on, as
+                                Studio does during a batch (#434)
+    expect_exit <seconds>       check the game exits on its own within the
+                                time; only expect/expect_not may follow
 
 Examples:
 
@@ -54,6 +59,7 @@ Needs Pillow for screenshots.
 """
 
 import argparse
+import threading
 import ctypes
 import json
 import os
@@ -336,6 +342,12 @@ def run(args):
         if pid is None:
             report["error"] = "hl.exe never started"
             return report, out
+        events = []
+
+        def seen(rx):
+            return bool(rx.search(console.text()) or rx.search(hooklog.text())
+                        or rx.search("\n".join(events)))
+
         if args.demo and not args.at_launch:
             # Through the pipe, not `+playdemo` on the command line: the engine
             # splits its command line at every '-', which cuts most demo names.
@@ -346,6 +358,21 @@ def run(args):
         for step in args.step:
             kind, _, rest = step.partition(" ")
             result = {"step": step}
+            if kind == "expect_exit":
+                end = time.time() + float(rest or 10)
+                while time.time() < end and alive(pid):
+                    time.sleep(0.25)
+                result["ok"] = not alive(pid)
+                report["expected_exit"] = result["ok"]
+                report["steps"].append(result)
+                continue
+            if report.get("expected_exit") and kind in ("expect", "expect_not"):
+                # Checks of the logs still work after the game has gone.
+                time.sleep(0.5)
+                hit = seen(re.compile(rest))
+                result["ok"] = hit if kind == "expect" else not hit
+                report["steps"].append(result)
+                continue
             if not alive(pid):
                 result["ok"] = False
                 result["note"] = "game had already exited"
@@ -369,12 +396,36 @@ def run(args):
                 end = time.time() + float(secs)
                 rx = re.compile(pattern)
                 while time.time() < end and alive(pid):
-                    if rx.search(console.text()) or rx.search(hooklog.text()):
+                    if seen(rx):
                         result["ok"] = True
                         break
                     time.sleep(0.5)
                 else:
                     result["ok"] = False
+            elif kind == "listen_events":
+                name = rf"\\.\pipe\dodstudio-hl-{pid}-events"
+
+                def read_events():
+                    deadline = time.time() + 30
+                    while time.time() < deadline:
+                        try:
+                            with open(name, "rb", buffering=0) as pipe:
+                                buf = b""
+                                while chunk := pipe.read(4096):
+                                    buf += chunk
+                                    *lines, buf = buf.split(b"\n")
+                                    events.extend(l.decode("utf-8", "replace").rstrip("\r") for l in lines)
+                            return
+                        except OSError:
+                            time.sleep(0.5)
+
+                threading.Thread(target=read_events, daemon=True).start()
+                # The hook's hello line says the connection is up.
+                end = time.time() + 30
+                while time.time() < end and not events:
+                    time.sleep(0.25)
+                result["ok"] = bool(events)
+                result["note"] = events[0] if events else "no hello from the events pipe"
             elif kind == "cmd":
                 err = send_commands(pid, [rest])
                 result["ok"] = err is None
@@ -389,12 +440,13 @@ def run(args):
                     report["shots"].append(str(path))
             elif kind in ("expect", "expect_not"):
                 rx = re.compile(rest)
-                hit = bool(rx.search(console.text()) or rx.search(hooklog.text()))
+                hit = seen(rx)
                 result["ok"] = hit if kind == "expect" else not hit
             else:
                 result["ok"] = False
                 result["note"] = "unknown step"
             report["steps"].append(result)
+        report["events"] = events
         report["alive_at_end"] = alive(pid)
         report["dialogs"] = dialogs(pid) if report["alive_at_end"] else []
     finally:
@@ -416,8 +468,8 @@ def verdict(report):
     if report.get("error"):
         return False
     steps_ok = all(s.get("ok") for s in report["steps"])
-    return (steps_ok and not report["crashes"] and not report.get("dialogs")
-            and report.get("alive_at_end", False))
+    running_as_expected = report.get("expected_exit") or report.get("alive_at_end", False)
+    return steps_ok and not report["crashes"] and not report.get("dialogs") and running_as_expected
 
 
 def write_report(report, out):
