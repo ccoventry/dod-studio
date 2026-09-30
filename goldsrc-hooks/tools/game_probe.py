@@ -25,6 +25,9 @@ always ends the game it started, and only that one.
                                 hook log since launch (default 60 s)
     cmd <console command>       send it over the remote pipe
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
+    window                      note the game window's size, minimised and foreground state
+    focus                       bring the game window to the front (25th Anniversary
+                                frames are black while it's behind other windows)
     expect <regex>              check the regex appears in either log (or in
                                 the events pipe's lines, once listening)
     expect_not <regex>          check it doesn't
@@ -282,6 +285,66 @@ def dialogs(pid):
     return texts
 
 
+def game_hwnd(pid):
+    best = None
+
+    def cb(hwnd, _):
+        nonlocal best
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            rect = wintypes.RECT()
+            user32.GetClientRect(hwnd, ctypes.byref(rect))
+            if best is None or rect.right * rect.bottom > best[0]:
+                best = (rect.right * rect.bottom, hwnd)
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(cb), 0)
+    return best[1] if best else None
+
+
+def focus_window(pid):
+    """Brings the game's window to the front. Only the game's own window, and
+    only on request: the 25th Anniversary build draws nothing into its frames
+    while it's in the background."""
+    hwnd = game_hwnd(pid)
+    if not hwnd:
+        return "no visible window"
+    # Windows only hands the foreground to the process that has input; a
+    # synthetic Alt press satisfies that rule (the usual workaround).
+    user32.keybd_event(0x12, 0, 0, 0)
+    user32.SetForegroundWindow(hwnd)
+    user32.keybd_event(0x12, 0, 2, 0)
+    time.sleep(0.5)
+    fg = user32.GetForegroundWindow()
+    return "foreground" if fg == hwnd else f"not foreground (the foreground window is {fg:#x})"
+
+
+def window_state(pid):
+    """The game's biggest window: size, minimised, foreground. For telling a
+    black capture from a game that isn't drawing."""
+    best = None
+
+    def cb(hwnd, _):
+        nonlocal best
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            rect = wintypes.RECT()
+            user32.GetClientRect(hwnd, ctypes.byref(rect))
+            area = rect.right * rect.bottom
+            if best is None or area > best[0]:
+                best = (area, hwnd, rect.right, rect.bottom)
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(cb), 0)
+    if best is None:
+        return "no visible window"
+    _, hwnd, w, h = best
+    return (f"{w}x{h}, minimised={bool(user32.IsIconic(hwnd))}, "
+            f"foreground={user32.GetForegroundWindow() == hwnd}")
+
+
 def alive(pid):
     return pid in pids_named("hl.exe")
 
@@ -343,6 +406,7 @@ def run(args):
             report["error"] = "hl.exe never started"
             return report, out
         events = []
+        launched_at = time.time()
 
         def seen(rx):
             return bool(rx.search(console.text()) or rx.search(hooklog.text())
@@ -357,7 +421,7 @@ def run(args):
                 return report, out
         for step in args.step:
             kind, _, rest = step.partition(" ")
-            result = {"step": step}
+            result = {"step": step, "at_s": round(time.time() - launched_at, 1)}
             if kind == "expect_exit":
                 end = time.time() + float(rest or 10)
                 while time.time() < end and alive(pid):
@@ -402,6 +466,12 @@ def run(args):
                     time.sleep(0.5)
                 else:
                     result["ok"] = False
+            elif kind == "focus":
+                result["note"] = focus_window(pid)
+                result["ok"] = result["note"].startswith("foreground")
+            elif kind == "window":
+                result["note"] = window_state(pid)
+                result["ok"] = True
             elif kind == "listen_events":
                 name = rf"\\.\pipe\dodstudio-hl-{pid}-events"
 
@@ -488,7 +558,7 @@ def write_report(report, out):
     for d in report.get("dialogs", []):
         lines.append(f"- **message box open:** {d}")
     lines += ["", "## Steps", ""]
-    lines += [f"- {'ok ' if s.get('ok') else 'FAIL'} `{s['step']}`" + (f" -- {s['note']}" if s.get("note") else "")
+    lines += [f"- {'ok ' if s.get('ok') else 'FAIL'} [{s.get('at_s', '?')} s] `{s['step']}`" + (f" -- {s['note']}" if s.get("note") else "")
               for s in report["steps"]]
     lines += ["", "## Crashes", ""] + ([f"    {c}" for c in report["crashes"]] or ["none"])
     lines += ["", "## Hook log (tail)", "", "```", *report["hook_log"].splitlines()[-40:], "```"]
