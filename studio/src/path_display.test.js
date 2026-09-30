@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fileNameOf, folderOf, shortFolder } from './path_display.js';
+import { fileNameOf, folderOf, shortFolder, samePath } from './path_display.js';
 
 const post = 'C:\\Program Files (x86)\\Steam\\steamapps\\common\\Half-Life - POST-Anniversary for Movies\\dod\\test stuff\\subfolder';
 
@@ -25,5 +25,17 @@ describe('path_display', () => {
 
   it('uses forward slashes when the path does', () => {
     expect(shortFolder('C:/one/two/three/four/five', 16)).toBe('C:/…/four/five');
+  });
+});
+
+describe('samePath', () => {
+  it('ignores case and slash direction', () => {
+    expect(samePath('C:\\Demos\\A.dem', 'c:/demos/a.dem')).toBe(true);
+    expect(samePath('C:\\demos\\a.dem', 'C:\\demos\\b.dem')).toBe(false);
+  });
+
+  it('is false when either side is missing', () => {
+    expect(samePath(null, 'C:\\a.dem')).toBe(false);
+    expect(samePath('C:\\a.dem', '')).toBe(false);
   });
 });
