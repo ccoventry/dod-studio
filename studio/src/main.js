@@ -1536,10 +1536,18 @@ window.addEventListener("DOMContentLoaded", async () => {
       const known = currentScannedDemos
         .filter((d) => d.file_key)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: scanned, unchanged } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
-      // same demo, capturing every highlight twice (#21).
+      // same demo, capturing every highlight twice (#21). The scan skips them
+      // by key before parsing (`unparsedCopies`, each naming the queued or
+      // scanned demo it copies); the split below is a fallback for any that
+      // reach here parsed.
       const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
+      unparsedCopies.forEach((c) => {
+        const sameAs = currentScannedDemos.find((d) => samePath(d.path, c.same_as))
+          || newlyScanned.find((d) => samePath(d.path, c.same_as));
+        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs });
+      });
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
