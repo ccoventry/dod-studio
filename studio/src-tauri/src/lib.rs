@@ -91,7 +91,6 @@ async fn save_project_session(path: String, contents: String) -> Result<(), Stri
     .await
 }
 
-<<<<<<< HEAD
 /// `Documents\dod-studio\projects`, made if it's missing: where Save and
 /// Load Project start (#354), so project files don't land wherever the last
 /// file dialog happened to be.
@@ -105,7 +104,10 @@ async fn default_projects_dir() -> Result<String, String> {
         std::fs::create_dir_all(&dir)
             .map_err(|e| messages::failed_to_write_file(&dir.to_string_lossy(), e))?;
         Ok(dir.to_string_lossy().to_string())
-=======
+    }))
+    .await
+}
+
 /// Which of a loaded project's demos are missing, and where each one moved,
 /// if a file with the same key turns up in `search_dirs` (#21).
 #[tauri::command]
@@ -126,7 +128,6 @@ async fn locate_missing_demos(
 async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         Ok(capture_manager::changed_demos(&demos))
->>>>>>> origin/dev
     }))
     .await
 }
@@ -654,12 +655,9 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
-<<<<<<< HEAD
             default_projects_dir,
-=======
             locate_missing_demos,
             changed_demos,
->>>>>>> origin/dev
             system_memory_bytes,
             run_demo_audit,
             delete_audit_files,
