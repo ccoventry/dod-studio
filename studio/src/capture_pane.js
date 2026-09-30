@@ -1,3 +1,4 @@
+import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -9,12 +10,13 @@ import { createListEditor } from './list_editor.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 
+let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
 let unlistenFastForwardToClip = null;
@@ -729,6 +731,7 @@ async function initStandaloneLaunchButton() {
       return;
     }
 
+    if (!(await ensureSteamReady())) return;
     await performLaunch();
   });
 }
@@ -839,7 +842,7 @@ function initClearPreviewsModal() {
   }
 }
 
-export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished) {
+export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
   const statusEl = document.querySelector('#batch-status');
@@ -965,6 +968,16 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // every restart.
   refreshLaunchGuard();
 
+  // An error box shown by the game or HLAE after a preview or Launch Game,
+  // read by the backend (native::sys::dialogs). A batch reports its own
+  // through capture_status instead.
+  if (!listeningForExternalErrors) {
+    listeningForExternalErrors = true;
+    listen('external_error', (event) => {
+      showToast(String(event.payload || ''), 'error', 15000);
+    });
+  }
+
   if (!unlistenCaptureStatus) {
     listen('capture_status', (event) => {
       const payload = event.payload || {};
@@ -1089,6 +1102,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
 
       let advanced = 0;
+      // A hand-set Captured confirmed on disk: no status change, but the
+      // set-by-hand mark goes (#105).
+      let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
         // A block can cover several highlights — overlapping ones are recorded
@@ -1110,10 +1126,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
             Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
           }
           // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured.
-          if (streak.status === 'Rendered') return;
-          if (streak.status !== 'Captured') advanced += 1;
-          streak.status = 'Captured';
+          // rendered must not knock it back down to Captured -- unless that
+          // Rendered was set by hand: a verified capture beats an unverified
+          // claim (#105, decided 2026-09-29).
+          if (streak.status === 'Rendered' && !streak.statusByHand) return;
+          if (streak.statusByHand) markCleared = true;
+          if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
         });
         // Recorded even when the take isn't renderable yet — a future render
         // still needs to resolve this take_key back to these highlights once
@@ -1125,7 +1143,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       if (total === 0) return;
 
-      if (advanced > 0) {
+      if (advanced > 0 || markCleared) {
         // Both tables read status, and neither re-renders on its own.
         if (currentOnStatusChange) currentOnStatusChange();
       }
@@ -1318,6 +1336,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // A demo may have moved since the queue was loaded (#21). main.js looks
+      // for it the same way Load Project does and offers the match; a demo
+      // still missing after that stops the batch, since its highlights
+      // cannot be captured.
+      if (pickedDemosPresent && !(await pickedDemosPresent())) {
+        showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+        return;
+      }
+
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
 
@@ -1355,6 +1382,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // Before any patching: without Steam the game can't start.
+      if (!(await ensureSteamReady())) {
+        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        return;
+      }
       runBatch();
     });
   }
