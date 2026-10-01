@@ -73,10 +73,9 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
-//! - `spectator_bars`: the `dodstudio_hide_spectator_bars` and
-//!   `dodstudio_hide_spectator_gui` cvars -- hide the two dark bands a
-//!   spectator sees, or the whole spectator panel, on screen and without a
-//!   capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
+//! - `spectator_bars`: the `dodstudio_hide_spectator_bars` cvar -- hide the
+//!   two dark bands a spectator sees and everything on them, on screen and
+//!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
 //!   see `docs/goldsrc_spectator_bars.md`.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in

@@ -237,7 +237,7 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (17 cvars, 10 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (16 cvars, 10 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
@@ -257,8 +257,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
 | `dodstudio_hide_hudelement` | command | — | Hides one of ten HUD elements: `crosshair`, `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
-| `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the two dark bands at the top and bottom of a spectator's screen | both |
-| `dodstudio_hide_spectator_gui` | cvar | 0 | Hides the whole spectator panel: bands, score, timer, player name, menu row | both |
+| `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
 | `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
 | `dodstudio_hltv_gunshot_attenuation` | cvar | 0.3 | How far gunshots carry while the gunshots fix is on | both |
 | `dodstudio_hltv_gunshots_fix` | cvar | 0 | Makes distant gunshots audible while spectating | both |

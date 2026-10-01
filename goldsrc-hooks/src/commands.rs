@@ -1390,12 +1390,9 @@ pub fn install() {
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
     }
-    // The same: two switches of their own, both off until asked for.
-    if let (Some(bars), Some(gui)) = (
-        register(crate::spectator_bars::BARS_NAME, "0"),
-        register(crate::spectator_bars::GUI_NAME, "0"),
-    ) {
-        crate::spectator_bars::set_cvars(bars, gui);
+    // The same: a switch of its own, off until asked for.
+    if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
+        crate::spectator_bars::set_cvar(bars);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,

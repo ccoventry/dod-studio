@@ -1,8 +1,8 @@
 # The spectator top/bottom bars: why one `.res` edit sticks and the other doesn't
 
 > **Shipped 2026-09-30 (issue #328):** `dodstudio_hide_spectator_bars 1` hides
-> the two dark bands, and `dodstudio_hide_spectator_gui 1` hides the whole
-> spectator panel. Both work on screen with no capture running, on both builds.
+> the spectator panel: the two dark bands and the text and menu row on them.
+> It works on screen with no capture running, on both builds.
 > Code: `goldsrc-hooks/src/spectator_bars.rs`. The "Shipped mechanism" section
 > below is the current truth; everything from §1 on is the earlier R&D, kept
 > as a record, and several of its claims are corrected there.
@@ -33,30 +33,35 @@ constructor itself calls `SetVisible(true)` *after* `LoadControlSettings`
 and re-positions it at the bottom edge on every vgui frame, which defeats
 `tall 0` and `ypos 9999` as well.
 
-**How the cvars hide them.** Every panel's paint goes through one function,
+**How the cvar hides them.** Every panel's paint goes through one function,
 vgui2's `IPanel::PaintTraverse` (interface `VGUI_Panel007`, vtable slot 41):
 `client.dll`'s `Panel::PaintTraverse` (`+0x57560`) calls it for each child
 (`+0x576f2`), and the engine calls it for the root. `spectator_bars.rs` swaps
-that one vtable slot for a filter. A panel it names is not painted, and
-neither is anything under it, since children are only painted from inside
-their parent's paint. Nothing about the panel is changed, so there is nothing
-for the game to put back, and turning the cvar off shows it again at once.
+that one vtable slot for a filter. The `SpectatorGUI` frame is not painted,
+and neither is anything under it, since children are only painted from inside
+their parent's paint: the bands, the score and timer text, the player label,
+the DUCK row and the inset outline all go together. Nothing about the panel
+is changed, so there is nothing for the game to put back, and turning the
+cvar off shows it again at once.
 
-| cvar | what is not painted |
-| --- | --- |
-| `dodstudio_hide_spectator_bars 1` | `TopBar` and `bottombarblank`, only when their parent is `SpectatorGUI` (the scoreboard has a `TopBar` of its own) |
-| `dodstudio_hide_spectator_gui 1` | the `SpectatorGUI` frame: bands, score and timer text, the player label, the DUCK row, the inset outline |
+The first version had two cvars: this one hid only the bands (`TopBar` and
+`bottombarblank`, matched by name under the `SpectatorGUI` parent, since the
+scoreboard has a `TopBar` of its own) and left the text floating, and
+`dodstudio_hide_spectator_gui` hid the frame. The bands-only one was dropped
+at the user's request and the frame behaviour took its name. Bringing it back
+is one name comparison and a `GetParent` call (slot 19, `ret 4`); commit
+`ffc1f434` has it.
 
 **The interface.** `VGUI_Panel007` is the class `VPanelWrapper` in
-`vgui2.dll`, 60 slots, slot 0 the virtual destructor. Used here: 19
-`GetParent`, 36 `GetName`, 41 `PaintTraverse`. The two installs' `vgui2.dll`
+`vgui2.dll`, 60 slots, slot 0 the virtual destructor. Used here: 36
+`GetName`, 41 `PaintTraverse` (19 is `GetParent`). The two installs' `vgui2.dll`
 are different files (the 25th Anniversary one was rebuilt with a newer
 compiler) but the layout is identical, as it has to be: `client.dll`, compiled
 against it, is byte-identical in both. `goldsrc-hooks/tools/verify_vgui2_ipanel.py`
-checks the three slots against both files.
+checks the two slots against both files.
 
 **Guards at install.** The vtable must identify itself by RTTI as
-`VPanelWrapper`, the three slots must point into `vgui2.dll`'s own code, and
+`VPanelWrapper`, the two slots must point into `vgui2.dll`'s own code, and
 each must end in the `ret` its argument count demands. Otherwise nothing is
 patched, and the log and console say why.
 
@@ -66,12 +71,13 @@ Mean brightness of the band regions in frames recorded with
 
 | build | bands showing (top / bottom) | `dodstudio_hide_spectator_bars 1` | turned off again |
 | --- | --- | --- | --- |
-| pre-Anniversary | 27 / 27 | 115 / 115, the scene's own level | 27 / 27 |
-| 25th Anniversary | 24 / 18 | 94 / 77 | not measured |
+| pre-Anniversary | 27 / 27 | 114 / 115, the scene's own level | 27 / 27 |
+| 25th Anniversary | 24 / 18 | 94 / 76 | 24 / 19 |
 
-`dodstudio_hide_spectator_gui 1` also removed the score, timer and player
-name (pre-Anniversary). HLAE's `mirv_movie_hidepanels` defaults to 1, so its
-recorded frames never show these panels either way; this is about the screen.
+The score, timer and player name go with the bands. Measured on the one-cvar
+build; the earlier bands-only build gave the same figures. HLAE's
+`mirv_movie_hidepanels` defaults to 1, so its recorded frames never show
+these panels either way; this is about the screen.
 
 **Corrections to the R&D below.**
 - "Slot 8 is `SetVisible`" (§3) is wrong. Slot 8 of a vgui2 `Panel`/`Frame`

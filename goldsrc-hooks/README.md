@@ -50,10 +50,10 @@ Plus thirteen control surfaces, always available and doing nothing until used:
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
-  bands across the top and bottom of the screen while spectating, on screen
-  and with no capture running, which HLAE's `mirv_movie_hidepanels` cannot do.
-  `dodstudio_hide_spectator_gui 1` hides the whole spectator panel, text and
-  menu row included. A filter on vgui2's `IPanel::PaintTraverse`; see
+  bands across the top and bottom of the screen while spectating, and the
+  text and menu row on them, on screen and with no capture running, which
+  HLAE's `mirv_movie_hidepanels` cannot do. A filter on vgui2's
+  `IPanel::PaintTraverse`; see
   `src/spectator_bars.rs` and `docs/goldsrc_spectator_bars.md`.
 - **Hand signals** (`dodstudio_hide_hand_signals 1`): stops players miming their
   voice commands -- the nod, the point, the wave. Replaces any `hs_*` body

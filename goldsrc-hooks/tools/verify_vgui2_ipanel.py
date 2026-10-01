@@ -2,19 +2,19 @@
 """Checks `spectator_bars.rs`'s IPanel slots against real `vgui2.dll` files.
 
 `spectator_bars.rs` swaps vgui2's `IPanel::PaintTraverse` vtable slot for a
-filter (issue #328), and calls `GetName` and `GetParent` through the same
-table. The unit tests prove the filter's own logic; only the binaries can
-prove the slot numbers:
+filter (issue #328), and calls `GetName` through the same table. The unit
+tests prove the filter's own logic; only the binaries can prove the slot
+numbers:
 
   1. `vgui2.dll` has exactly one RTTI class `.?AVVPanelWrapper@@`, with one
      vtable of 60 slots, and it is the vtable of the `VGUI_Panel007` singleton
      (the interface name string is in the file).
-  2. Each of the three slots the module uses ends in the `ret` its argument
+  2. Each of the two slots the module uses ends in the `ret` its argument
      count demands, found by the *same* first-`ret` scan the DLL runs at
      install (so a build where that scan would misread is caught here).
-  3. Each forwards where it should: `GetParent` and `GetName` into the VPanel
-     object's own vtable (+0x78 and +0x88), `PaintTraverse` to the client
-     panel's vtable +0xc after fetching it through +0xe8 (`Client()`).
+  3. Each forwards where it should: `GetName` into the VPanel object's own
+     vtable (+0x88), `PaintTraverse` to the client panel's vtable +0xc after
+     fetching it through +0xe8 (`Client()`).
 
 The slot numbers and ret sizes are read out of `spectator_bars.rs` rather
 than restated.
@@ -45,7 +45,7 @@ RUST = Path(__file__).resolve().parent.parent / "src" / "spectator_bars.rs"
 CLASS = b".?AVVPanelWrapper@@"
 RET_WINDOW = 64
 # What each wrapper must forward through, as displacements in its calls.
-FORWARDS = {"GET_PARENT": [0x78], "GET_NAME": [0x88], "PAINT_TRAVERSE": [0xE8, 0x0C]}
+FORWARDS = {"GET_NAME": [0x88], "PAINT_TRAVERSE": [0xE8, 0x0C]}
 
 
 def constants():
