@@ -104,6 +104,15 @@ pub struct DemoApiPartial {
 pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
 
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
+/// A client event handler, `void (*)(struct event_args_s *args)`.
+pub type EventHandlerFn = unsafe extern "C" fn(args: *mut c_void);
+/// `gEngfuncs.pfnHookEvent` (slot 69): registers the handler for one event
+/// script. DoD's `client.dll` calls it once per script from inside
+/// `Initialize` (`push handler; push "events/weapons/colt.sc"; call
+/// [gEngfuncs+0x114]` at `client.dll+0x106e5`), 52 slots after the
+/// `pfnAddCommand` slot its console commands go through -- the same in both
+/// builds.
+pub type HookEventFn = unsafe extern "C" fn(name: *const c_char, handler: EventHandlerFn);
 pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char);
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
 pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
@@ -524,7 +533,10 @@ pub struct ClEngineFuncsPartial {
     pub get_entity_by_index: GetEntityByIndexFn,
     _slots_before_weapon_anim: [*mut c_void; 12], // GetClientTime .. pfnPlaybackEvent
     pub pfn_weapon_anim: WeaponAnimFn,
-    _slots_between: [*mut c_void; 4], // pfnRandomFloat, pfnRandomLong, pfnHookEvent, Con_IsVisible
+    _slots_before_hook_event: [*mut c_void; 2], // pfnRandomFloat, pfnRandomLong
+    /// Slot 69. See [`HookEventFn`].
+    pub pfn_hook_event: HookEventFn,
+    _slot_con_is_visible: *mut c_void,
     pub pfn_get_game_directory: GetGameDirectoryFn,
     /// Slot 72. See [`GetCvarPointerFn`].
     pub pfn_get_cvar_pointer: GetCvarPointerFn,
@@ -737,7 +749,7 @@ static ON_ENGINE_READY: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 /// This exists so that work runs **on the engine thread, at a deterministic
 /// point**, rather than from our worker thread whenever it happens to notice.
 /// It matters because that work mutates engine-owned global state --
-/// `pfnAddCommand` prepends to the engine's command list, and `sound_fix`
+/// `pfnAddCommand` prepends to the engine's command list, and `fire_sounds`
 /// overwrites a function pointer inside the live `event_api_s` -- none of
 /// which is thread-safe against an engine that may be running concurrently.
 /// Registering right after `Initialize` also matches where DoD's own client
@@ -775,7 +787,13 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
         return 0;
     }
     let real: InitializeFn = unsafe { std::mem::transmute(real) };
-    let result = unsafe { real(engfuncs, version) };
+    let result = if engfuncs.is_null() {
+        unsafe { real(engfuncs, version) }
+    } else {
+        // The client registers its event handlers from inside Initialize;
+        // missing_shots notes the weapon ones as they go past.
+        unsafe { crate::missing_shots::noting_event_handlers(engfuncs, || real(engfuncs, version)) }
+    };
 
     // Only once the client is genuinely initialised, and only if we actually
     // captured the table -- installing against a null pEngfuncs would crash
