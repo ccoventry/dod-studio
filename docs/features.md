@@ -237,7 +237,7 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 11 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (16 cvars, 13 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
@@ -261,6 +261,9 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
 | `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
 | `dodstudio_spec_match_pov` | cvar | 0 | Makes a spectated first-person view match the player's own recording: weapon animations (grenades and priming included), the gunshots an HLTV demo lost, and the POV-style crosshair, hidden when the player's own would be while playing (sprinting, jumping, prone transitions, crawling, ladders, reloads, weapon switches, bolt cycling, knives, snipers, undeployed machine guns), and the camera at ground level for a prone player | both |
+| `dodstudio_seek_by` | command | — | `viewdemo` only: jumps playback by a number of seconds, back if negative | both |
+| `dodstudio_seek_skip_between` | cvar | 0 | `1` makes a forward seek skip the commands it jumps over, so it lands clean | both |
+| `dodstudio_seek_to` | command | — | `viewdemo` only: jumps playback to a demo time | both |
 | `dodstudio_spec_lock` | cvar | 0 | HLTV demos: keeps the camera on the player being watched when he dies, where the game moves on four seconds later | both |
 | `dodstudio_spec_target` | command | — | HLTV demos: puts the camera on a player by number (`dodstudio_deathmsg players` lists them) | both |
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |

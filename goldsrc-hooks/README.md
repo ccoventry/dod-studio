@@ -34,7 +34,7 @@ joins this switch rather than adding a command:
   player goes prone. The game's in-eye camera has no prone case and leaves it
   at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
 
-Plus nineteen control surfaces, always available and doing nothing until used:
+Plus twenty control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -111,6 +111,12 @@ Plus nineteen control surfaces, always available and doing nothing until used:
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Seek** (`dodstudio_seek_to <seconds>`, `dodstudio_seek_by <seconds>`):
+  jumps `viewdemo` playback to a time, the way the demo editor's Goto does,
+  through `DemoPlayer.dll`'s own `IDemoPlayer`. A forward jump normally runs
+  every director event and console command it skips, all at once;
+  `dodstudio_seek_skip_between 1` lands clean instead. Refuses while the demo
+  is still loading. Both builds; see `docs/goldsrc_viewdemo.md`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when

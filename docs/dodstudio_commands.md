@@ -46,6 +46,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
 | `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 
 ## Commands
 
@@ -114,6 +115,15 @@ No arguments. Empties the engine's 4096-slot decal pool on command,
 unlinking each decal from its surface first the way the engine's own remove
 functions do. Nothing to do with `r_decals`. Pre-Anniversary `hw.dll` only.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
+
+### `dodstudio_seek_to` / `dodstudio_seek_by`
+
+`dodstudio_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `dodstudio_seek_by <seconds>` jumps
+from where playback is, back when negative. Neither pauses, and both refuse
+while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
+Anniversary `DemoPlayer.dll`. Nothing in the pipeline calls them yet. See
+[`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 
 ### `dodstudio_reload_demo`
 
