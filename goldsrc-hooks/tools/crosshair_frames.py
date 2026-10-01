@@ -119,7 +119,8 @@ def cmd_hook(args):
             continue
         at = float(clock.group(1))
         if "mirv_recordmovie_start" in line:
-            start = at
+            # The first recording in the log is the one the frames are from.
+            start = at if start is None else start
         elif "POV would" in line:
             hide = "draw the crosshair" not in line
             trail.append((at, "hide: " + line.rsplit("-- ", 1)[1].strip() if hide else "draw"))

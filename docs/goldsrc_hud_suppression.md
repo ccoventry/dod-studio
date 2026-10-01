@@ -362,17 +362,25 @@ stays `prone_forward` while the player slides to a stop); fully underwater
 and the scoped FG42 while zoomed are left out, because nothing replicated says
 so reliably.
 
-The hide costs no new hook. The spectator branch reads its sprite rect from
-the four immediates above, and a rect of `0,0,0,0` draws nothing, so hiding is
-the same patch with an empty rect, put back the frame the state ends.
+The hide costs no new hook. The spectator draw (`client+0x2d1f0`) already has
+a gate of its own, 13 bytes just before the rect: it skips the crosshair while
+the view is zoomed (`0 < fov < 90`). While the player's own view would have no
+crosshair, those 13 bytes become a jump to the same exit; when the state ends,
+the stock bytes go back.
+
+An empty rect does **not** work, and was the first attempt: the engine takes a
+rect with no size to mean the whole sprite, so all sixteen tiles of
+`customXHair.spr` appeared below and right of the screen centre.
 
 To check it against a recording: `goldsrc-hooks/tools/crosshair_frames.py`
 finds the crosshair in recorded frames, and compares them with the hook's own
 trail (`hook`) or with a POV demo's state from
-`analysis/examples/crosshair_pov_probe.rs` (`pov`). On
-`monday-wsod25_r07_m1_h1_hltv` the frames and the trail agree on 1863 of 1916
-(pre-Anniversary) and 1371 of 1411 (25th Anniversary); every miss is the one
-frame at a change.
+`analysis/examples/crosshair_pov_probe.rs` (`pov`). It looks at the screen
+centre only, which is how the whole-sheet draw got past it at first; look at a
+frame too. On `monday-wsod25_r07_m1_h1_hltv`, in a stretch where the spectated
+player sprints, goes prone, crawls and gets up, the frames and the trail agree
+on 884 of 919 (pre-Anniversary) and 929 of 967 (25th Anniversary); every miss
+is the one frame at a change.
 
 ### It loses to §3, by construction
 
