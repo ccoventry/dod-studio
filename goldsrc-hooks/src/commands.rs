@@ -54,6 +54,8 @@ use crate::{
 
 const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
 const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
+/// A sub-option of the animation fix -- see `anim_fix::GRENADE_PINPULL`.
+const GRENADE_PINPULL_NAME: &str = console_name!("hltv_grenade_pinpull");
 const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
@@ -79,6 +81,7 @@ const CVAR_FLAGS: i32 = 0;
 /// The cvars the engine handed back, read once per frame by `poll`.
 static CVAR_GUNSHOTS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_ANIMATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_GRENADE_PINPULL: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_ATTENUATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_TARGET_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
@@ -446,6 +449,11 @@ pub fn poll() {
         poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
         poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
         poll_flag(
+            GRENADE_PINPULL_NAME,
+            &CVAR_GRENADE_PINPULL,
+            &anim_fix::GRENADE_PINPULL,
+        );
+        poll_flag(
             HELD_MODELS_NAME,
             &CVAR_HELD_MODELS,
             &anim_fix::LOG_HELD_MODELS,
@@ -571,7 +579,8 @@ fn log_level_changes() {
 /// log budget ran out" -- their counters are the honest number, and are
 /// noise when off. `dodstudio_hltv_gunshot_attenuation`'s value is folded
 /// into the gunshots line rather than given its own, since it does nothing
-/// while the fix is off.
+/// while the fix is off -- and `dodstudio_hltv_grenade_pinpull` into the
+/// animation line, for the same reason.
 fn status_text() -> String {
     let bit = |on: bool| if on { "1" } else { "0" };
     let mut lines: Vec<String> = vec![
@@ -605,7 +614,11 @@ fn status_text() -> String {
         ),
     ];
     if anim_fix::enabled() {
-        lines.push(format!("viewmodel animations: {}", anim_fix::status()));
+        lines.push(format!(
+            "viewmodel animations: {} ({GRENADE_PINPULL_NAME} = {})",
+            anim_fix::status(),
+            anim_fix::grenade_pinpull_description()
+        ));
     }
     if sound_fix::ENABLED.load(Ordering::Relaxed) {
         lines.push(format!(
@@ -781,6 +794,15 @@ unsafe extern "C" fn cmd_gunshots_fix() {
 
 unsafe extern "C" fn cmd_animation_fix() {
     handle_level(ANIMATION_FIX_NAME, &anim_fix::LEVEL, anim_fix::status);
+}
+
+unsafe extern "C" fn cmd_grenade_pinpull() {
+    handle_toggle(GRENADE_PINPULL_NAME, &anim_fix::GRENADE_PINPULL, || {
+        format!(
+            "grenade pin pull: {} -- a sub-option of {ANIMATION_FIX_NAME}",
+            anim_fix::grenade_pinpull_description()
+        )
+    });
 }
 
 /// `handle_toggle` for the animation fix, which takes an iteration number
@@ -1272,6 +1294,7 @@ fn add_command(name: &str, function: engine::ConsoleCommandFn) {
 fn install_fallback_commands() {
     add_command(GUNSHOTS_FIX_NAME, cmd_gunshots_fix);
     add_command(ANIMATION_FIX_NAME, cmd_animation_fix);
+    add_command(GRENADE_PINPULL_NAME, cmd_grenade_pinpull);
     add_command(ATTENUATION_NAME, cmd_gunshot_attenuation);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
     add_command(SPECTATOR_TARGET_LOG_NAME, cmd_log_spectator_target);
@@ -1289,7 +1312,7 @@ fn install_fallback_commands() {
     engine::set_per_frame_prologue(poll);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {GRENADE_PINPULL_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -1341,6 +1364,13 @@ pub fn install() {
         bit(sound_fix::ENABLED.load(Ordering::Relaxed)),
     );
     let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
+    // Defaults on: it is a sub-option of the (default-off) animation fix, so
+    // it changes nothing until that is turned on, and the timing it replaces
+    // emptied the hand half a second before the grenade was thrown.
+    let grenade_pinpull = register(
+        GRENADE_PINPULL_NAME,
+        bit(anim_fix::GRENADE_PINPULL.load(Ordering::Relaxed)),
+    );
     let attenuation = register(
         ATTENUATION_NAME,
         &sound_fix::carry_attenuation().to_string(),
@@ -1394,6 +1424,7 @@ pub fn install() {
     let (
         Some(gunshots),
         Some(animation),
+        Some(grenade_pinpull),
         Some(attenuation),
         Some(held_models),
         Some(spectator_target_log),
@@ -1407,6 +1438,7 @@ pub fn install() {
     ) = (
         gunshots,
         animation,
+        grenade_pinpull,
         attenuation,
         held_models,
         spectator_target_log,
@@ -1425,6 +1457,7 @@ pub fn install() {
 
     CVAR_GUNSHOTS.store(gunshots, Ordering::Relaxed);
     CVAR_ANIMATION.store(animation, Ordering::Relaxed);
+    CVAR_GRENADE_PINPULL.store(grenade_pinpull, Ordering::Relaxed);
     CVAR_ATTENUATION.store(attenuation, Ordering::Relaxed);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
     CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
@@ -1440,7 +1473,7 @@ pub fn install() {
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {GRENADE_PINPULL_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -1510,6 +1543,11 @@ mod tests {
         let both = status_text();
         assert!(both.contains("viewmodel animations"), "{both}");
         assert!(both.contains("gunshots"), "{both}");
+        // The grenade pin-pull sub-option is folded into the animation line
+        // the way attenuation is folded into the gunshots line: only shown
+        // while the fix it belongs to is on, and absent from the idle report.
+        assert!(both.contains(GRENADE_PINPULL_NAME), "{both}");
+        assert!(!idle.contains(GRENADE_PINPULL_NAME), "{idle}");
 
         // A command has no type-ahead value to read, so this is the only
         // place that says which elements are hidden.

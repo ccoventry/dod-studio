@@ -234,7 +234,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // obvious from the log rather than mistaken for a broken hook.
     unsafe {
         debug::report(&format!(
-            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}) (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations toggle live)",
+            "goldsrc-hooks: starting state -- gunshots fix: {}, animation fix: {} ({}), grenade pin pull: {} (env vars set the default; dodstudio_hltv_gunshots_fix / dodstudio_hltv_show_viewmodel_animations / dodstudio_hltv_grenade_pinpull toggle live)",
             if sound_fix::ENABLED.load(Ordering::Relaxed) {
                 "ON"
             } else {
@@ -242,6 +242,7 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
             },
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
+            anim_fix::grenade_pinpull_description(),
         ))
     };
 

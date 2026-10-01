@@ -22,6 +22,13 @@
 //!   matters only for automatic fire: a held trigger leaves the body sequence
 //!   sitting on the same `_shoot` label, so the individual rounds after the
 //!   first have no sequence change to key off.
+//! - **pin pull, then throw** -- a grenade's firing sequence
+//!   (`stand_gren_shoot`, `crouch_stick_roll`, ...) marks the button's
+//!   *release*; the server holds the grenade another 0.5s before it leaves
+//!   the hand, and the pull itself is never networked. So the body change
+//!   plays `pinpull` and books `throw` for `GRENADE_WINDUP_SECONDS` later
+//!   (`dodstudio_hltv_grenade_pinpull`, default on; off plays `throw` at the
+//!   body change as it used to).
 //! - **reload** -- from the spectated player's body animation as well
 //!   (`crouch_bar_reload`, `prone_webley_reload`, ...).
 //! - **draw** -- when the viewmodel *settles* on a different weapon. Not
@@ -64,12 +71,12 @@ mod classify;
 mod sequences;
 mod trace;
 
-use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
     ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_throw_label, model_stem,
-    third_person_stem,
+    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, is_throw_label,
+    model_stem, third_person_stem,
 };
 pub(crate) use sequences::sequence_label;
 use sequences::{animation_lookup_any, animation_lookup_sequence, model_sequence_duration};
@@ -145,6 +152,45 @@ pub fn level() -> i32 {
 
 pub fn enabled() -> bool {
     level() > LEVEL_OFF
+}
+
+/// `dodstudio_hltv_grenade_pinpull`: whether a grenade's body-sequence change
+/// plays `pinpull` and schedules `throw` for `GRENADE_WINDUP_SECONDS` later
+/// (on), or plays `throw` on the spot as it used to (off).
+///
+/// A sub-option of the fix, which stays off by default; this one defaults on
+/// because the previous timing emptied the hand half a second before the
+/// grenade was thrown. The body change is the *release* of the button -- the
+/// server's `WeaponIdle` sets the body sequence and `m_flStartThrow = time +
+/// 0.5` in the same call, and the grenade entity and `weapons/grenthrow.wav`
+/// follow 0.461-0.566s later (median 0.494s over 846 throws). The real pin
+/// pull is never networked, so `pinpull` here is the nearest stand-in for a
+/// moment that cannot be seen, not a reading of it. See the note above
+/// `is_grenade_viewmodel` in `classify.rs`.
+pub static GRENADE_PINPULL: AtomicBool = AtomicBool::new(true);
+
+/// How long the server holds a released grenade before it leaves the hand:
+/// `m_flStartThrow = gpGlobals->time + 0.5` in `dod.dll`'s `WeaponIdle`
+/// (hand `0x9c66`, stick `0x15296`, the same double constant at `0xcf5c8`).
+/// The primed `_ex` classes use 0.3s, but nothing in an HLTV stream tells
+/// them apart, so they get this value too.
+pub const GRENADE_WINDUP_SECONDS: f64 = 0.5;
+
+/// What the pin-pull option is doing, for `dodstudio_debug_status` and the
+/// startup line.
+pub fn grenade_pinpull_description() -> &'static str {
+    if GRENADE_PINPULL.load(Ordering::Relaxed) {
+        "1 (pin pull at the wind-up, throw 0.5s later)"
+    } else {
+        "0 (throw at the wind-up)"
+    }
+}
+
+/// Whether a firing body sequence on this viewmodel is a grenade wind-up to
+/// animate as pin pull now and throw later, rather than an attack to play on
+/// the spot. Every other weapon keeps the two-trigger firing path untouched.
+fn pin_pull_on_windup(viewmodel_name: &str) -> bool {
+    GRENADE_PINPULL.load(Ordering::Relaxed) && is_grenade_viewmodel(viewmodel_name)
 }
 
 /// Whether the viewmodel on screen is the weapon the spectated player is
@@ -298,33 +344,38 @@ fn play_viewmodel_animation(
     // is whatever the replicated state then says is in hand, which is the only
     // answer available -- it is behind the player's own client, but an empty
     // hand for four seconds is further from the truth than a late draw.
+    //
+    // Measured from when the throw is *played*, which with the pin-pull option
+    // on is `GRENADE_WINDUP_SECONDS` after the body change, not the body
+    // change itself -- the hand is only empty once the grenade has left it.
     if is_throw_label(played_label) {
-        match level() {
-            // Never empty the hand in the first place.
-            LEVEL_NEVER_EMPTY => {
-                unsafe {
-                    crate::debug::report(
-                        "anim_fix: skipping the throw animation, so the grenade stays in hand",
-                    )
-                };
-                return;
-            }
-            LEVEL_REDRAW_NOW | LEVEL_LOOKAHEAD => {
-                let ends =
-                    engine::client_time() + model_sequence_duration(viewmodel, sequence).max(0.05);
-                let at = if level() == LEVEL_LOOKAHEAD {
-                    ends + LOOKAHEAD_SECONDS
-                } else {
-                    ends
-                };
-                REDRAW_AFTER.store(at.to_bits(), Ordering::Relaxed);
-            }
-            // LEVEL_EMPTY_HAND: play it and leave the hand as it lands.
-            _ => {}
+        // Never empty the hand in the first place.
+        if level() == LEVEL_NEVER_EMPTY {
+            unsafe {
+                crate::debug::report(
+                    "anim_fix: skipping the throw animation, so the grenade stays in hand",
+                )
+            };
+            return;
+        }
+        let ends = engine::client_time() + model_sequence_duration(viewmodel, sequence).max(0.05);
+        if let Some(at) = redraw_time_after_throw(level(), ends) {
+            REDRAW_AFTER.store(at.to_bits(), Ordering::Relaxed);
         }
     }
 
     unsafe { (engfuncs.pfn_weapon_anim)(sequence, 0) };
+}
+
+/// When an option draws again after a throw that ends at `throw_ends`, or
+/// `None` for the options that leave the hand as the throw left it.
+fn redraw_time_after_throw(level: i32, throw_ends: f64) -> Option<f64> {
+    match level {
+        LEVEL_REDRAW_NOW => Some(throw_ends),
+        LEVEL_LOOKAHEAD => Some(throw_ends + LOOKAHEAD_SECONDS),
+        // LEVEL_EMPTY_HAND: play it and leave the hand as it lands.
+        _ => None,
+    }
 }
 
 /// When to draw whatever is in hand after a throw empties it, as demo-time
@@ -344,6 +395,94 @@ fn redraw_after_throw_if_due(now: f64, state: Option<DeployState>, viewmodel: *m
     play_viewmodel_animation(
         animation_lookup_sequence("draw", state, viewmodel),
         "throw finished, drawing what is now in hand",
+        state,
+        viewmodel,
+    );
+}
+
+/// When to play the throw a grenade wind-up scheduled, as demo-time bits, or
+/// zero for "nothing pending". Same shape as `REDRAW_AFTER`, and cancelled
+/// in the same places: a weapon change or a camera change before it fires.
+static THROW_AFTER: AtomicU64 = AtomicU64::new(0);
+
+/// Books the throw for `GRENADE_WINDUP_SECONDS` after a wind-up seen at `now`.
+/// A second wind-up before the first fires simply moves the booking.
+fn schedule_throw(now: f64) {
+    THROW_AFTER.store((now + GRENADE_WINDUP_SECONDS).to_bits(), Ordering::Relaxed);
+}
+
+/// A booked throw first seen this long after it was due is dropped instead of
+/// played. `apply()` only reaches the throw on frames that are in-eye on this
+/// weapon; if none came for this long the camera was elsewhere, and the
+/// grenade is long gone. A hitch hands `HUD_Frame` at most 1.0s at a time
+/// (`engine::tramp_hud_frame`), so an honest frame can never be later than
+/// this.
+const STALE_THROW_SECONDS: f64 = 1.0;
+
+/// Consumes the pending throw if its time has come. `false` when nothing is
+/// pending, it is not due yet, or it went stale -- so the ordinary frame is
+/// one relaxed load.
+fn take_due_throw(now: f64) -> bool {
+    let due = f64::from_bits(THROW_AFTER.load(Ordering::Relaxed));
+    if due == 0.0 || now < due {
+        return false;
+    }
+    THROW_AFTER.store(0, Ordering::Relaxed);
+    let overdue = now - due;
+    if overdue > STALE_THROW_SECONDS {
+        unsafe {
+            crate::debug::report(&format!(
+                "anim_fix: booked throw dropped -- {overdue:.3}s overdue, the frames it waited for were not in-eye on this grenade"
+            ))
+        };
+        return false;
+    }
+    true
+}
+
+/// Drops a pending throw, saying why, and reports whether there was one.
+fn cancel_pending_throw(why: &str) -> bool {
+    if THROW_AFTER.swap(0, Ordering::Relaxed) == 0 {
+        return false;
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "anim_fix: pending throw cancelled -- {why} before it fired"
+        ))
+    };
+    true
+}
+
+/// The grenade wind-up: `pinpull` now, `throw` booked for when the grenade
+/// actually leaves the hand.
+///
+/// `pinpull` is 0.867s long and is left to run; the throw cuts it short at
+/// `GRENADE_WINDUP_SECONDS`, which is what a POV recording of a quick throw
+/// looks like too.
+fn wind_up_throw(now: f64, state: Option<DeployState>, viewmodel: *mut ModelSPartial) {
+    schedule_throw(now);
+    play_viewmodel_animation(
+        animation_lookup_sequence("pinpull", state, viewmodel),
+        &format!("grenade wind-up, pin pull now and the throw in {GRENADE_WINDUP_SECONDS:.3}s"),
+        state,
+        viewmodel,
+    );
+}
+
+/// Plays the throw a wind-up booked, once its time has come.
+///
+/// Called every frame, ahead of `redraw_after_throw_if_due`, so the
+/// emptied-hand options run from the moment the throw plays. Not deduplicated
+/// through `claim_fire`: the sound trigger never fires for a grenade
+/// (`weapons/grenthrow.wav` has no `_shoot` in it), so there is nothing to
+/// dedup against, and a stale claim must not be able to swallow the throw.
+fn throw_if_due(now: f64, state: Option<DeployState>, viewmodel: *mut ModelSPartial) {
+    if !take_due_throw(now) {
+        return;
+    }
+    play_viewmodel_animation(
+        animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel),
+        &format!("scheduled throw fired, {GRENADE_WINDUP_SECONDS:.3}s after the wind-up"),
         state,
         viewmodel,
     );
@@ -666,10 +805,12 @@ pub fn apply() {
     let deploy_state_changed =
         previous_state.is_some() && state.is_some() && previous_state != state;
 
-    let viewmodel_changed =
-        viewmodel_changed_to_a_new_weapon(viewmodel_model, engine::client_time());
+    let now = engine::client_time();
+    let viewmodel_changed = viewmodel_changed_to_a_new_weapon(viewmodel_model, now);
 
     if switched_players {
+        // A throw the previous player wound up must not empty this one's hand.
+        cancel_pending_throw("spectated player changed");
         // Snap the new viewmodel straight to the right family's idle so it
         // doesn't sit on whatever sequence the previously-spectated player
         // left it on -- and adopt it as the weapon in hand, so the change of
@@ -712,13 +853,21 @@ pub fn apply() {
             }
             match body_label.as_deref().map(classify_body_sequence) {
                 Some(BodyAction::Shoot) => {
-                    if claim_fire(engine::client_time()) {
-                        play_viewmodel_animation(
-                            animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
-                            "spectated player fired",
-                            state,
-                            viewmodel_model,
-                        );
+                    if claim_fire(now) {
+                        // A grenade's firing sequence is the *release*, and
+                        // the grenade leaves the hand half a second later --
+                        // so pin pull now, throw then. Every other weapon
+                        // fires on the spot.
+                        if pin_pull_on_windup(&viewmodel_name) {
+                            wind_up_throw(now, state, viewmodel_model);
+                        } else {
+                            play_viewmodel_animation(
+                                animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
+                                "spectated player fired",
+                                state,
+                                viewmodel_model,
+                            );
+                        }
                     } else {
                         // A detected shot that plays nothing looks identical in
                         // the log to a shot that was never detected, and the
@@ -745,7 +894,9 @@ pub fn apply() {
         if viewmodel_changed {
             // A real switch draws anyway, so drop any re-draw a throw had
             // queued -- otherwise it would fire again a moment later and
-            // restart the animation this line just began.
+            // restart the animation this line just began. Same for a throw
+            // still waiting on its wind-up: the grenade is no longer in view.
+            cancel_pending_throw("weapon changed");
             REDRAW_AFTER.store(0, Ordering::Relaxed);
             play_viewmodel_animation(
                 animation_lookup_sequence("draw", state, viewmodel_model),
@@ -757,8 +908,11 @@ pub fn apply() {
     }
 
     // Last, so anything this frame genuinely wanted to play has already had
-    // its say: a throw's hand stays empty until something draws into it.
-    redraw_after_throw_if_due(engine::client_time(), state, viewmodel_model);
+    // its say: the throw a wind-up booked, then -- measured from that throw --
+    // the re-draw, since a throw's hand stays empty until something draws
+    // into it.
+    throw_if_due(now, state, viewmodel_model);
+    redraw_after_throw_if_due(now, state, viewmodel_model);
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);
@@ -981,32 +1135,52 @@ pub(crate) mod tests {
         SETTLED_VIEWMODEL.store(std::ptr::null_mut(), Ordering::Relaxed);
         LAST_DRAW_TRIGGERED.store(0f64.to_bits(), Ordering::Relaxed);
         REDRAW_AFTER.store(0, Ordering::Relaxed);
+        THROW_AFTER.store(0, Ordering::Relaxed);
+        GRENADE_PINPULL.store(true, Ordering::Relaxed);
         LEVEL.store(LEVEL_REDRAW_NOW, Ordering::Relaxed);
         guard
     }
 
     /// The options have to actually differ, or the number is decoration. This
     /// pins what each one does with a throw, which is the only thing they
-    /// disagree about.
+    /// disagree about -- and that all of them measure from the moment the
+    /// throw plays, which is `GRENADE_WINDUP_SECONDS` after the body change
+    /// rather than the body change itself.
     #[test]
     fn each_option_treats_an_emptied_hand_differently() {
         let _statics = reset_settle_state();
 
-        // 1: the throw plays and nothing is queued behind it.
-        LEVEL.store(LEVEL_EMPTY_HAND, Ordering::Relaxed);
-        REDRAW_AFTER.store(0, Ordering::Relaxed);
-        assert_eq!(REDRAW_AFTER.load(Ordering::Relaxed), 0);
+        // The body change at 10.0 is the wind-up; the throw plays at 10.5.
+        let body_change = 10.0f64;
+        schedule_throw(body_change);
+        assert!(!take_due_throw(body_change), "the throw is not the wind-up");
+        let throw_at = body_change + GRENADE_WINDUP_SECONDS;
+        assert!(take_due_throw(throw_at));
+        // The shortest throw play_viewmodel_animation allows for.
+        let ends = throw_at + 0.05;
 
-        // 2 and 4 both queue a draw; 4 waits LOOKAHEAD_SECONDS longer. The
-        // scheduling itself lives in play_viewmodel_animation, which needs the
-        // engine, so assert the arithmetic that decides between them.
-        let ends = 10.0f64;
-        let now_at = ends;
-        let later_at = ends + LOOKAHEAD_SECONDS;
+        // 1: the throw plays and nothing is queued behind it.
+        assert_eq!(redraw_time_after_throw(LEVEL_EMPTY_HAND, ends), None);
+
+        // 2 and 4 both queue a draw; 4 waits LOOKAHEAD_SECONDS longer.
+        let now_at = redraw_time_after_throw(LEVEL_REDRAW_NOW, ends).unwrap();
+        let later_at = redraw_time_after_throw(LEVEL_LOOKAHEAD, ends).unwrap();
+        assert_eq!(now_at, ends);
         assert!(later_at > now_at, "option 4 must wait longer than option 2");
         assert_eq!(later_at - now_at, LOOKAHEAD_SECONDS);
 
-        // 3 is the only one that suppresses the throw outright.
+        // Both are measured from the throw, so each lands exactly the wind-up
+        // later than it would have from the body change -- the hand is not
+        // empty until the grenade has left it.
+        let from_body_change = body_change + 0.05;
+        assert!((now_at - from_body_change - GRENADE_WINDUP_SECONDS).abs() < 1e-9);
+        assert!(
+            (later_at - from_body_change - LOOKAHEAD_SECONDS - GRENADE_WINDUP_SECONDS).abs() < 1e-9
+        );
+
+        // 3 is the only one that suppresses the throw outright; it never
+        // queues anything either.
+        assert_eq!(redraw_time_after_throw(LEVEL_NEVER_EMPTY, ends), None);
         assert_eq!(
             level_description(LEVEL_NEVER_EMPTY),
             "no throw animation, grenade stays in hand"
@@ -1014,6 +1188,97 @@ pub(crate) mod tests {
         for other in [LEVEL_EMPTY_HAND, LEVEL_REDRAW_NOW, LEVEL_LOOKAHEAD] {
             assert_ne!(other, LEVEL_NEVER_EMPTY);
         }
+    }
+
+    /// The throw is booked for the server's wind-up after the body change --
+    /// the grenade is still in the hand until then -- and consumed exactly
+    /// once when its time comes, not on every frame afterwards.
+    #[test]
+    fn a_scheduled_throw_fires_at_the_windup_and_not_before() {
+        let _statics = reset_settle_state();
+        assert!(!take_due_throw(0.0), "nothing pending at the start");
+
+        schedule_throw(10.0);
+        assert!(!take_due_throw(10.0), "not on the frame of the body change");
+        assert!(!take_due_throw(10.25));
+        assert!(!take_due_throw(10.0 + GRENADE_WINDUP_SECONDS - 0.001));
+        assert_ne!(THROW_AFTER.load(Ordering::Relaxed), 0, "still pending");
+
+        assert!(take_due_throw(10.0 + GRENADE_WINDUP_SECONDS), "due now");
+        assert_eq!(THROW_AFTER.load(Ordering::Relaxed), 0, "consumed");
+        assert!(!take_due_throw(10.51), "not twice");
+        assert!(!take_due_throw(9999.0));
+
+        // A frame that lands a little late still fires it -- a hitch can hand
+        // the clock up to 1.0s in one step -- but one that lands long after
+        // means the camera was elsewhere, and the throw is dropped, not
+        // played on whatever grenade is in hand by then.
+        schedule_throw(20.0);
+        assert!(take_due_throw(
+            20.0 + GRENADE_WINDUP_SECONDS + STALE_THROW_SECONDS
+        ));
+        schedule_throw(30.0);
+        assert!(!take_due_throw(
+            30.0 + GRENADE_WINDUP_SECONDS + STALE_THROW_SECONDS + 0.001
+        ));
+        assert_eq!(THROW_AFTER.load(Ordering::Relaxed), 0, "dropped, not kept");
+    }
+
+    /// A pending throw belongs to the grenade that was wound up. If the
+    /// viewmodel is a different weapon by the time it would fire -- a death,
+    /// a switch, or the camera moving to another player -- it must not play.
+    #[test]
+    fn a_weapon_change_cancels_the_pending_throw() {
+        let _statics = reset_settle_state();
+        assert!(!cancel_pending_throw("nothing"), "nothing to cancel yet");
+
+        schedule_throw(10.0);
+        assert!(cancel_pending_throw("weapon changed"));
+        assert!(!take_due_throw(10.0 + GRENADE_WINDUP_SECONDS), "cancelled");
+        assert!(!take_due_throw(9999.0));
+        assert!(!cancel_pending_throw("again"), "already cancelled");
+
+        // And a wind-up after the cancel books a fresh throw of its own.
+        schedule_throw(30.0);
+        assert!(!take_due_throw(30.1));
+        assert!(take_due_throw(30.0 + GRENADE_WINDUP_SECONDS));
+    }
+
+    /// `dodstudio_hltv_grenade_pinpull 0` is the previous behaviour -- throw
+    /// at the body change -- and the pin pull only ever applies to the three
+    /// grenades; a rifle's firing path is untouched either way.
+    #[test]
+    fn pin_pull_off_restores_the_old_timing() {
+        let _statics = reset_settle_state();
+
+        GRENADE_PINPULL.store(true, Ordering::Relaxed);
+        for grenade in [
+            "models/v_grenade.mdl",
+            "models/v_stick.mdl",
+            "models/v_mills.mdl",
+        ] {
+            assert!(pin_pull_on_windup(grenade), "{grenade}");
+        }
+        for other in [
+            "models/v_garand.mdl",
+            "models/v_mg42.mdl",
+            "models/v_knife.mdl",
+        ] {
+            assert!(!pin_pull_on_windup(other), "{other}");
+        }
+        assert!(grenade_pinpull_description().starts_with("1 "));
+
+        let on = grenade_pinpull_description();
+
+        GRENADE_PINPULL.store(false, Ordering::Relaxed);
+        assert!(!pin_pull_on_windup("models/v_stick.mdl"));
+        assert!(!pin_pull_on_windup("models/v_garand.mdl"));
+        let off = grenade_pinpull_description();
+        assert!(off.starts_with("0 "));
+        assert_ne!(
+            on, off,
+            "the two states must read differently in dodstudio_debug_status"
+        );
     }
 
     /// Every option in range needs its own description -- `dodstudio_debug_status`

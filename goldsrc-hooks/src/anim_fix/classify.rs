@@ -140,16 +140,25 @@ pub(super) fn deploy_state_from_body_sequence(label: &str) -> Option<DeployState
 /// every grenade, and "slash1" the knife and spade.
 pub(super) const ATTACK_SEQUENCES: &[&str] = &["shoot", "launch", "fire", "throw", "slash1"];
 
-// Why grenades get no pin-pull animation, despite having one.
+// Why the grenade pin pull plays on the wind-up, and not when the pin comes out.
 //
 // A grenade's viewmodel animates `idle -> pinpull -> (cook) -> throw`, and the
-// pin pull is unreachable for a spectated player: `p_grenade`, `p_stick` and
-// `p_mills` carry a single `idle` sequence each, and `weapons/grenpinpull.wav`
-// appears in no demo's `svc_sound`, POV included -- it is played client-side
-// for the local player only, exactly like the animation it accompanies.
+// real pin pull is unobservable for a spectated player. `dod.dll`'s
+// `StartThrow` (hand `0x9ac0`, stick `0x150f0`) sends `svc_weaponanim` to the
+// owner alone and writes nothing into `entity_state_player_t`; `p_grenade`,
+// `p_stick` and `p_mills` carry a single `idle` sequence each; and
+// `weapons/grenpinpull.wav` appears in no demo's `svc_sound`, POV included. A
+// probe over 107 pulls in three POV halves found no HLTV-visible field, sound,
+// event or message that moves at the pull above its no-pull baseline -- the
+// only marker is `clientdata_t::weaponanim`, which never reaches an HLTV
+// recording (`analysis/examples/grenade_pinpull_tell_probe.rs`).
 //
-// What is observable is the body sequence entering its grenade attack, and
-// that is the **release**, not the pull. Two measurements settle it:
+// What is observable is the body sequence entering its grenade attack
+// (`stand_gren_shoot`, `crouch_stick_roll`, ...), and that is the **release**
+// of the button, not the pull. The server's `WeaponIdle` sets the body
+// sequence there and `m_flStartThrow = time + 0.5` (double constant at
+// `dod.dll+0xcf5c8`); the grenade entity and `weapons/grenthrow.wav` arrive on
+// the first idle call after that. Two measurements agree:
 //
 // - body sequence to `weapons/grenthrow.wav`: 846 throws across three HLTV
 //   halves, 0.461s to 0.566s, median 0.494s, one-to-one with no orphans in
@@ -160,13 +169,34 @@ pub(super) const ATTACK_SEQUENCES: &[&str] = &["shoot", "launch", "fire", "throw
 //   grenades, rolling one out and picking it back up to shorten the remaining
 //   fuse, which widens the spread further still.
 //
-// So the steady 0.49s is the throw animation's own wind-up before the grenade
-// leaves the hand, and playing `throw` the moment the body sequence changes is
-// right. An earlier attempt read that gap as the pin pull and deferred the
-// throw by it, which played `pinpull` at the instant the player was actually
-// throwing and released the grenade half a second late.
+// So the steady 0.49s is the server's wind-up between the release and the
+// grenade leaving the hand. `GRENADE_WINDUP_SECONDS` in `mod.rs` plays
+// `pinpull` at the body change, as the nearest stand-in for a pull that cannot
+// be seen, and schedules `throw` for 0.5s later, when the grenade actually
+// leaves. Playing `throw` at the body change itself -- the previous behaviour,
+// still available with `dodstudio_hltv_grenade_pinpull 0` -- emptied the hand
+// half a second before the grenade was thrown. An earlier attempt deferred
+// the throw by this same gap but read it as the pull, which is why it was
+// reverted; the timing was right, the reason was not.
 //
-// See `analysis/examples/grenade_timing_probe.rs`.
+// The `exploding_` family (a primed grenade picked back up, a second weapon
+// class on the server) cannot be told apart from the plain one in an HLTV
+// stream, so it gets the plain `pinpull`/`throw` pair; the primed wind-up is
+// 0.3s, so its throw lands 0.2s late. Unverified: the primed class asks for
+// `*_primgren_shoot`, which no player model has, so its release may show no
+// attack body sequence at all -- then nothing plays, as before this change. See
+// `analysis/examples/grenade_timing_probe.rs` and
+// `docs/goldsrc_hltv_animation_fix.md` section 8.
+
+/// Whether a viewmodel is one of the three grenades, which are the only
+/// weapons whose attack is a wind-up followed by a throw rather than a shot.
+///
+/// Exact on the stem, not a substring: `v_grenade`, `v_stick` and `v_mills`
+/// are the three files, and nothing else in the 41 `v_*.mdl` set shares a
+/// stem with them.
+pub(super) fn is_grenade_viewmodel(viewmodel_name: &str) -> bool {
+    matches!(model_stem(viewmodel_name), "grenade" | "stick" | "mills")
+}
 
 /// `"models/v_98k.mdl"` -> `"98k"`, `"models/p_mg42bd.mdl"` -> `"mg42bd"`.
 ///
@@ -445,6 +475,38 @@ mod tests {
         ] {
             assert!(!is_throw_label(label), "{label}");
         }
+    }
+
+    /// The three grenade viewmodels, and nothing else: the pin pull must not
+    /// play for a weapon that has no pin, and the stem test must be exact so
+    /// that nothing merely containing one of the words qualifies.
+    #[test]
+    fn only_the_three_grenades_are_grenade_viewmodels() {
+        for name in [
+            "models/v_grenade.mdl",
+            "models/v_stick.mdl",
+            "models/v_mills.mdl",
+            "models\\v_stick.mdl",
+        ] {
+            assert!(is_grenade_viewmodel(name), "{name}");
+        }
+        for name in [
+            "models/v_garand.mdl",
+            "models/v_98k.mdl",
+            "models/v_mg42.mdl",
+            "models/v_knife.mdl",
+            "models/v_spade.mdl",
+            // A stem that only contains the word is not the weapon.
+            "models/v_stickgren.mdl",
+            "models/v_grenade_launcher.mdl",
+            "",
+        ] {
+            assert!(!is_grenade_viewmodel(name), "{name}");
+        }
+        // `model_stem` strips `p_` and `w_` the same as `v_`, so this is only
+        // ever asked about the viewmodel's own name -- which is all `apply()`
+        // ever hands it.
+        assert!(is_grenade_viewmodel("models/p_stick.mdl"));
     }
 
     #[test]
