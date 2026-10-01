@@ -33,6 +33,10 @@ always ends the game it started, and only that one.
                                 needs focus first
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
+    key <name>                  press and release one key in the game window: esc,
+                                enter, tab, space, backquote, f1..f12, or a letter
+                                or digit. Focuses the game first, and refuses unless
+                                the game's window really is in front
     expect <regex>              check the regex appears in either log (or in
                                 the events pipe's lines, once listening)
     expect_not <regex>          check it doesn't
@@ -377,6 +381,28 @@ def focus_window(pid):
     return "foreground" if fg == hwnd else f"not foreground (the foreground window is {fg:#x})"
 
 
+# Virtual-key codes for the `key` step. Letters and digits map to themselves.
+KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC0,
+        **{f"f{n}": 0x6F + n for n in range(1, 13)}}
+
+
+def press_key(pid, name):
+    """Presses one key in the game's window. The key goes wherever the
+    foreground is, so this refuses unless that is the game's own window."""
+    name = name.strip().lower()
+    vk = KEYS.get(name) or (ord(name.upper()) if len(name) == 1 and name.isalnum() else None)
+    if vk is None:
+        return f"unknown key {name!r}"
+    state = focus_window(pid)
+    if not state.startswith("foreground"):
+        return f"not pressed: {state}"
+    scan = user32.MapVirtualKeyW(vk, 0)
+    user32.keybd_event(vk, scan, 0, 0)
+    time.sleep(0.05)
+    user32.keybd_event(vk, scan, 2, 0)
+    return None
+
+
 def record_clip(pid, folder, seconds, fps, hooklog=None):
     """Records `seconds` of HLAE frames at `fps` into `folder/` (PNGs) and
     writes `folder.png`, a contact sheet of up to 24 evenly spaced frames, for
@@ -637,6 +663,11 @@ def run(args):
             elif kind == "focus":
                 result["note"] = focus_window(pid)
                 result["ok"] = result["note"].startswith("foreground")
+            elif kind == "key":
+                err = press_key(pid, rest)
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
             elif kind == "window":
                 result["note"] = window_state(pid)
                 result["ok"] = True
