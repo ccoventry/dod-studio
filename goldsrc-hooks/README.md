@@ -7,21 +7,28 @@ reverse-engineering. For every `dodstudio_*` cvar/command in one scannable
 table, see [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
 instead of the list below.
 
-Two independent fixes, each off by default and toggled by its own env var:
+**Match POV** (`dodstudio_spec_match_pov 1`, off by default;
+`GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
+making a spectated first-person view look and sound like the player's own
+recording. Three things come on together, and anything else of that kind
+joins this switch rather than adding a command:
 
-- **Sound fix** (`GOLDSRC_HOOKS_FORCE_WEAPON_VOLUME=1`): forces DoD weapon-fire
-  sounds to play at full volume with no distance attenuation while
-  spectating, instead of fading out based on camera distance.
-- **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
-  viewmodel deploy (bipod up/down) animations while spectating in-eye.
+- **Viewmodel animations**: the first-person weapon fires, reloads and draws,
+  the MG42/MG34/BAR/Bren use the right bipod family, and grenades play the pin
+  pull, the throw, and the catch and wind-up of a primed one. See
+  `docs/goldsrc_hltv_animation_fix.md`.
+- **Missing gunshots**: an HLTV demo has no fire event for about 60% of the
+  rounds fired in some recordings, so they play with no sound, flash or
+  impact. Each one still restarts the shooter's body animation; this finds
+  them there and calls the weapon's own event handler. See
+  `docs/goldsrc_hltv_missing_gunshots.md`.
+- **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
+  tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
+  tile of `crosshairs.spr`. Loses to `dodstudio_hide_crosshair`, which stubs
+  the whole function. See `docs/goldsrc_hud_suppression.md` section 6.
 
-Plus eighteen control surfaces, always available and doing nothing until used:
+Plus sixteen control surfaces, always available and doing nothing until used:
 
-- **Missing gunshots** (`dodstudio_hltv_play_missing_gunshots 1`): an HLTV demo
-  has no fire event for about 60% of the rounds fired, so they play with no
-  sound, flash or impact. Each one still restarts the shooter's body
-  animation; this finds them there and calls the weapon's own event handler.
-  See `docs/goldsrc_hltv_missing_gunshots.md`.
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
   players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
@@ -118,11 +125,6 @@ Plus eighteen control surfaces, always available and doing nothing until used:
   arguments to list them. `dodstudio_hide_hudelement all 0` puts everything
   back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
   dword, no code patch -- see `docs/goldsrc_hud_suppression.md` section 7.
-- **Spectator crosshair** (`dodstudio_match_pov_crosshair 1`): draws the
-  spectator crosshair from `sprites/customXHair.spr`, using the same tile
-  `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24 tile of
-  `crosshairs.spr`. Loses to `dodstudio_hide_crosshair`, which stubs the whole
-  function. Same doc, section 6.
 - **Objective icons** (`dodstudio_objectives`): places the territory-flag icon
   row in the top-left corner, and the objective timer beside it. The game draws
   both ~117 pixels lower at 1080p while spectating than it does in a POV demo,
@@ -183,10 +185,10 @@ element like the crosshair or the capture-area icon -- see the module doc's
 came back across a `clear`/re-set cycle, which confirms `HUD_AddEntity`'s
 return-value contract (0 = suppress) actually holds in this build and not
 only in Xash3D's open-source equivalent. The
-sound fix, `dodstudio_hide_scoreboard`, `dodstudio_mute_voice_commands`,
-`dodstudio_hide_crosshair`, `dodstudio_match_pov_crosshair` and
+`dodstudio_hide_scoreboard`, `dodstudio_mute_voice_commands`,
+`dodstudio_hide_crosshair`, the spectator crosshair and
 `dodstudio_debug_msglog` are confirmed by static analysis only -- see the module
-docs in `src/engine.rs`, `src/sound_fix.rs`, `src/scoreboard.rs`,
+docs in `src/engine.rs`, `src/scoreboard.rs`,
 `src/voice.rs`, `src/crosshair.rs`, `src/spectator_crosshair.rs` and
 `src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
 still needs a live check. `dodstudio_debug_msglog` reuses `dodstudio_deathmsg`'s

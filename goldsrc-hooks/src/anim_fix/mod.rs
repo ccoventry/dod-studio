@@ -89,7 +89,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// `dodstudio_hltv_show_viewmodel_animations`: 0 is off, 1 is on.
+/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),
@@ -385,7 +385,7 @@ pub fn install() {
 /// to detect, while the sound fires per round. Anything the body sequence
 /// already caught is filtered out by `claim_fire`.
 ///
-/// Called from `sound_fix`'s `EV_PlaySound` hook, on the engine thread, same as
+/// Called from `fire_sounds`' `EV_PlaySound` hook, on the engine thread, same as
 /// `apply()`.
 pub fn on_weapon_fired(entity_index: i32) {
     if !enabled() {

@@ -2,7 +2,9 @@
 
 An HLTV demo is quieter than the match was. Whole bursts play with no sound,
 no muzzle flash and no bullet impact, while the player's model stands there
-firing. `dodstudio_hltv_play_missing_gunshots 1` puts those rounds back.
+firing. `dodstudio_spec_match_pov 1` puts those rounds back (it also turns on the
+viewmodel animations and the POV crosshair; until 2026-10-01 this part had a
+cvar of its own, `dodstudio_hltv_play_missing_gunshots`).
 
 Code: `goldsrc-hooks/src/missing_shots.rs`. Probe:
 `analysis/examples/hltv_shot_evidence_probe.rs`.
@@ -109,7 +111,7 @@ Each frame, for each of the 32 player slots, it compares `curstate.sequence`
 and `curstate.frame` with the frame before. A restart in a bullet weapon's
 `*_shoot` sequence is a round. Then:
 
-1. **Did its own event come?** `sound_fix`'s `EV_PlaySound` hook reports every
+1. **Did its own event come?** `fire_sounds`' `EV_PlaySound` hook reports every
    real `_shoot` sample with the entity that fired it. The restart and its
    event ride in the same demo message, so the sound lands within one rendered
    frame of the restart, either side. A restart waits one frame; a real shot
@@ -158,9 +160,8 @@ eighth round since a reload or death was the pinging one 377 times of 409
 reload or death is seen, none of their restored rounds ping.
 
 Because it is the game's own handler, a restored round gets the same sound,
-flash, tracer and impact as a recorded one, goes through
-`dodstudio_hltv_gunshots_fix`'s attenuation the same way, and drives the
-in-eye viewmodel's firing animation through the same sound trigger
+flash, tracer and impact as a recorded one, is heard as far as one is, and
+drives the in-eye viewmodel's firing animation through the same sound trigger
 (`goldsrc_hltv_animation_fix.md` §6).
 
 ### Getting the handlers without an address
@@ -194,7 +195,7 @@ for each weapon script and forwards the call. The log says how many it got:
 
 ## 5. Checking it
 
-`dodstudio_hltv_play_missing_gunshots 2` logs every round it plays (1 logs the
+`dodstudio_spec_match_pov 2` logs every round it plays (1 logs the
 first twenty, then every 200th):
 
 ```

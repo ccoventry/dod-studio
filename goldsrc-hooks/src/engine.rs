@@ -749,7 +749,7 @@ static ON_ENGINE_READY: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 /// This exists so that work runs **on the engine thread, at a deterministic
 /// point**, rather than from our worker thread whenever it happens to notice.
 /// It matters because that work mutates engine-owned global state --
-/// `pfnAddCommand` prepends to the engine's command list, and `sound_fix`
+/// `pfnAddCommand` prepends to the engine's command list, and `fire_sounds`
 /// overwrites a function pointer inside the live `event_api_s` -- none of
 /// which is thread-safe against an engine that may be running concurrently.
 /// Registering right after `Initialize` also matches where DoD's own client

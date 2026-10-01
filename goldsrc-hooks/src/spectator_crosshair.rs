@@ -1,5 +1,7 @@
-//! `dodstudio_match_pov_crosshair`: draw the spectator crosshair from the
-//! same sprite and the same tile the player's own `cl_xhair_style` picks.
+//! The crosshair part of `dodstudio_spec_match_pov`: draw the spectator crosshair
+//! from the same sprite and the same tile the player's own `cl_xhair_style`
+//! picks. (It had a cvar of its own, `dodstudio_match_pov_crosshair`, until
+//! the three match-POV settings became one.)
 //!
 //! ## The two crosshairs are drawn by two different code paths
 //!
@@ -110,11 +112,11 @@ use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
 
 use crate::crosshair;
 use crate::engine;
-use crate::names::console_name;
 use crate::scan;
 
-/// The cvar name, for status and error text. Registered in `commands.rs`.
-pub const NAME: &str = console_name!("match_pov_crosshair");
+/// The cvar this follows, for status and error text. Registered in
+/// `commands.rs`.
+pub const NAME: &str = crate::names::SPEC_MATCH_POV;
 
 /// DoD's own cvar, read here rather than mirrored: whatever the player sets for
 /// their POV crosshair is what the spectator view should show.
@@ -336,7 +338,8 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
 }
 
 /// Whether the spectator crosshair is currently drawn from `customXHair.spr`.
-pub fn matching() -> bool {
+#[cfg(test)]
+fn matching() -> bool {
     ACTIVE_STYLE.load(Ordering::Relaxed) != 0
 }
 
