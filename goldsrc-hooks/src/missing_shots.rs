@@ -47,7 +47,12 @@
 //!
 //! - Know the spread: the lost event carried it. A small random one is used,
 //!   so a restored round's impact is near, not at, where the real one landed.
-//! - Tell a Garand's last round, so a restored one has no clip ping.
+//! - Be sure of a Garand's last round. The ping is an argument of the event
+//!   (`bparam1` 0), so a restored round has to work it out: the eighth round
+//!   since the body's reload or the player's death pings. Across 33 halves
+//!   that is the recorded pinging round 377 times of 409, and an earlier
+//!   round pings 14 times of 5736. Before the first reload or death is seen,
+//!   no restored round pings.
 //! - Restore melee, grenades or rockets. Their events carry arguments (hit or
 //!   miss, which swing) that the body does not show.
 //! - See two rounds from one player inside a single rendered frame. At 60 fps
@@ -131,6 +136,39 @@ const WEAPONS: &[(&str, &[&str])] = &[
 static HANDLERS: [AtomicPtr<c_void>; WEAPONS.len()] =
     [const { AtomicPtr::new(std::ptr::null_mut()) }; WEAPONS.len()];
 
+/// What a recorded event for an ordinary round of a weapon carries as
+/// `[iparam1, bparam1, bparam2]`, from every fire event in 33 HLTV halves
+/// (`hltv_shot_evidence_probe` prints the table). Zero is not "ordinary" for
+/// all of them, and the handlers act on the difference:
+///
+/// - Garand, K43, M1 carbine: `bparam1` is 1 on every round but the last
+///   (5971 of 6384 Garand shots). On the Garand, 0 plays the clip ping --
+///   `client.dll+0x7c2e`, `test ebp, ebp; jne` past the `clipding` sample.
+/// - Scoped K98: `bparam2` is 1 on three shots in four.
+/// - BAR: `iparam1` is the rounds left in the magazine, 19 down to 0. The
+///   MG42 and .30 cal read it the same way (belt rounds left, for the
+///   first-person belt); no recorded event for either was available, so
+///   theirs follows the BAR's.
+/// - Everything else: all zero (pistols and the bolt rifles set `bparam1`
+///   on the last round instead).
+fn ordinary_args(event: &str) -> [i32; 3] {
+    match event {
+        "garand" | "k43" | "m1carbine" => [0, 1, 0],
+        "scopedkar" => [0, 0, 1],
+        "bar" | "mg42" | "30cal" => [10, 0, 0],
+        _ => [0, 0, 0],
+    }
+}
+
+/// Rounds in a Garand clip. The last one pings.
+const GARAND_CLIP: i32 = 8;
+
+/// Whether a body sequence starting means the Garand in hand next has a full
+/// clip: its reload, or the player dying (the respawn brings a fresh one).
+fn refills_the_clip(label: &str) -> bool {
+    label.ends_with("_garand_reload") || label.starts_with("die_") || label.starts_with("dead")
+}
+
 /// The body tokens whose `*_shoot` sequence is not a bullet leaving a barrel.
 const NOT_BULLETS: &[&str] = &[
     "gren", "stick", "mills", "knife", "spade", "bazooka", "pschreck", "piat",
@@ -165,6 +203,9 @@ static PENDING: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
 /// The frame number a real shot was heard on and not yet paired with a
 /// restart. Zero for none.
 static HEARD: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+/// How many Garand rounds each player has fired since the clip was last
+/// known full, or -1 while that is not known.
+static CLIP_ROUND: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
 
 /// Counts `poll` calls. Starts at 1 so zero can mean "none" above.
 static FRAME_NUMBER: AtomicU32 = AtomicU32::new(1);
@@ -343,6 +384,7 @@ fn forget(slot: usize) {
     SEEN[slot].store(false, Ordering::Relaxed);
     PENDING[slot].store(0, Ordering::Relaxed);
     HEARD[slot].store(0, Ordering::Relaxed);
+    CLIP_ROUND[slot].store(-1, Ordering::Relaxed);
 }
 
 fn forget_everyone() {
@@ -422,6 +464,7 @@ pub fn poll() {
             // The demo went backwards: a seek. Nothing follows from before it.
             PENDING[slot].store(0, Ordering::Relaxed);
             HEARD[slot].store(0, Ordering::Relaxed);
+            CLIP_ROUND[slot].store(-1, Ordering::Relaxed);
             continue;
         }
 
@@ -441,11 +484,23 @@ pub fn poll() {
             // Safety: null for an index the engine has not precached, which
             // `sequence_label` handles.
             let body = unsafe { (studio.get_model_by_index)(state.modelindex) };
-            let fired = usize::try_from(now_body.0)
+            let label = usize::try_from(now_body.0)
                 .ok()
-                .and_then(|sequence| crate::anim_fix::sequence_label(body, sequence))
-                .is_some_and(|label| is_bullet_shoot(&label));
-            if fired {
+                .and_then(|sequence| crate::anim_fix::sequence_label(body, sequence));
+            let label = label.as_deref().unwrap_or("");
+            if before.0 != now_body.0 && refills_the_clip(label) {
+                CLIP_ROUND[slot].store(0, Ordering::Relaxed);
+            }
+            if is_bullet_shoot(label) {
+                // Every Garand round counts towards the clip, recorded or not.
+                // Safety: null for an index the engine has not precached.
+                let held = unsafe { (studio.get_model_by_index)(state.weaponmodel) };
+                if holds(held, "garand") {
+                    let round = CLIP_ROUND[slot].load(Ordering::Relaxed);
+                    if round >= 0 {
+                        CLIP_ROUND[slot].store(round + 1, Ordering::Relaxed);
+                    }
+                }
                 if heard_with(HEARD[slot].swap(0, Ordering::Relaxed), frame_number) {
                     HAD_EVENT.fetch_add(1, Ordering::Relaxed);
                 } else {
@@ -454,6 +509,14 @@ pub fn poll() {
             }
         }
     }
+}
+
+/// Whether `held`, a third-person weapon model, fires the `event` script.
+fn holds(held: *mut ModelSPartial, event: &str) -> bool {
+    !held.is_null()
+        // Safety: a non-null model from the engine's own lookup.
+        && weapon_for_held_model(&unsafe { (*held).name_str() })
+            .is_some_and(|weapon| WEAPONS[weapon].0 == event)
 }
 
 /// Calls the weapon's own fire handler for a round whose event was lost.
@@ -482,6 +545,13 @@ fn stand_in(slot: usize, entity: &ClEntityS, held: *mut ModelSPartial) {
         return;
     };
     let state = &entity.curstate;
+    let event = WEAPONS[weapon].0;
+    let [iparam1, mut bparam1, bparam2] = ordinary_args(event);
+    let last_of_the_clip =
+        event == "garand" && CLIP_ROUND[slot].load(Ordering::Relaxed) == GARAND_CLIP;
+    if last_of_the_clip {
+        bparam1 = 0;
+    }
     let mut args = EventArgs {
         entindex: slot as i32,
         origin: [state.origin.x, state.origin.y, state.origin.z],
@@ -489,6 +559,9 @@ fn stand_in(slot: usize, entity: &ClEntityS, held: *mut ModelSPartial) {
         ducking: i32::from(state.usehull == 1),
         fparam1: next_spread(),
         fparam2: next_spread(),
+        iparam1,
+        bparam1,
+        bparam2,
         ..EventArgs::default()
     };
     let played = PLAYED.fetch_add(1, Ordering::Relaxed) + 1;
@@ -496,8 +569,12 @@ fn stand_in(slot: usize, entity: &ClEntityS, held: *mut ModelSPartial) {
     if played <= 20 || played.is_multiple_of(200) || EVERY_ROUND.load(Ordering::Relaxed) {
         unsafe {
             crate::debug::report(&format!(
-                "missing_shots: player {slot} fired a round with no fire event -- playing {} ({played} so far)",
-                WEAPONS[weapon].0
+                "missing_shots: player {slot} fired a round with no fire event -- playing {event}{} ({played} so far)",
+                if last_of_the_clip {
+                    ", the clip's last"
+                } else {
+                    ""
+                }
             ))
         };
     }
@@ -601,6 +678,44 @@ mod tests {
                 assert!(seen.insert(*stem), "{stem} is listed twice");
             }
         }
+    }
+
+    /// An all-zero Garand event is the round that pings, which is how every
+    /// restored Garand round came to ping.
+    #[test]
+    fn an_ordinary_round_carries_what_a_recorded_one_does() {
+        assert_eq!(ordinary_args("garand"), [0, 1, 0]);
+        assert_eq!(ordinary_args("k43"), [0, 1, 0]);
+        assert_eq!(ordinary_args("m1carbine"), [0, 1, 0]);
+        assert_eq!(ordinary_args("scopedkar"), [0, 0, 1]);
+        assert_eq!(ordinary_args("bar")[0], 10);
+        assert_eq!(ordinary_args("mp40"), [0, 0, 0]);
+        assert_eq!(ordinary_args("colt"), [0, 0, 0]);
+        assert_eq!(ordinary_args("kar"), [0, 0, 0]);
+        // Every name it knows is a weapon in the table.
+        for event in [
+            "garand",
+            "k43",
+            "m1carbine",
+            "scopedkar",
+            "bar",
+            "mg42",
+            "30cal",
+        ] {
+            assert!(WEAPONS.iter().any(|(e, _)| *e == event), "{event}");
+        }
+    }
+
+    #[test]
+    fn a_reload_or_a_death_means_a_full_clip() {
+        assert!(refills_the_clip("stand_garand_reload"));
+        assert!(refills_the_clip("prone_garand_reload"));
+        assert!(refills_the_clip("die_headshot"));
+        assert!(refills_the_clip("deadback"));
+        assert!(!refills_the_clip("stand_k43_reload"));
+        assert!(!refills_the_clip("stand_pistol_reload"));
+        assert!(!refills_the_clip("stand_rifle_shoot"));
+        assert!(!refills_the_clip(""));
     }
 
     #[test]

@@ -17,9 +17,13 @@
 //! - **restarts** of the body animation: `frame` going backwards, or the
 //!   sequence changing.
 //!
-//! A sequence in which restarts coincide with fire events is a firing
-//! sequence, learned from the demo itself. A restart in one of those with no
-//! event beside it is a round the recording dropped.
+//! A restart in a bullet weapon's `*_shoot` sequence with no event beside it
+//! is a round the recording dropped. The kill feed checks that: a kill by
+//! gunfire is a shot that certainly happened.
+//!
+//! It also prints what a stand-in for a lost event would have to carry: the
+//! integer and bool arguments recorded events have, per weapon, and whether
+//! counting rounds since a Garand's reload says which one pings.
 //!
 //!     cargo run --release -p analysis --example hltv_shot_evidence_probe -- <demo>
 //!     cargo run --release -p analysis --example hltv_shot_evidence_probe -- <demo> <from> <to> [entity]
@@ -87,6 +91,13 @@ struct Player {
     restarts: Vec<(f32, u32, bool)>,
     /// (time, weapon)
     events: Vec<(f32, String)>,
+    /// Rifle rounds since the body last started a Garand reload, or `None`
+    /// before the first one seen.
+    since_reload: Option<u32>,
+    /// (time, which round of the clip) for each rifle round after a reload.
+    clip_rounds: Vec<(f32, u32)>,
+    /// (time, bparam1) of this player's Garand shots that have an event.
+    garand_events: Vec<(f32, u32)>,
 }
 
 impl Player {
@@ -107,6 +118,16 @@ impl Player {
         }
         if changed || rewound {
             self.restarts.push((time, self.sequence, changed));
+            // stand/crouch/prone_garand_reload, or a death (19-29, 341-344:
+            // the respawn brings a full clip); then the rifle `*_shoot` five.
+            if changed && matches!(self.sequence, 239 | 266 | 315 | 19..=29 | 341..=344) {
+                self.since_reload = Some(0);
+            } else if matches!(self.sequence, 30..=32 | 36..=37)
+                && let Some(n) = &mut self.since_reload
+            {
+                *n += 1;
+                self.clip_rounds.push((time, *n));
+            }
         }
     }
 }
@@ -160,6 +181,9 @@ fn main() {
 
     // (time, killer's entity index): a kill by gunfire needs a shot just before it.
     let mut kills: Vec<(f32, u16)> = Vec::new();
+    // weapon -> (iparam1, iparam2, bparam1, bparam2) -> how many events: what
+    // a stand-in for a lost event has to pass to look like a recorded one.
+    let mut event_args: BTreeMap<String, BTreeMap<[u32; 4], usize>> = BTreeMap::new();
 
     let note = |entity: u16, delta: &Delta, time: f32, players: &mut BTreeMap<u16, Player>| {
         if entity == 0 || entity > MAX_PLAYERS {
@@ -274,6 +298,38 @@ fn main() {
                                     short_weapon(name),
                                     e.packet_index.as_ref().map(|b| b.to_u32()),
                                 );
+                            }
+                            let small = |field_name: &str| {
+                                e.delta
+                                    .as_ref()
+                                    .and_then(|d| d.iter().find(|(k, _)| clean(k) == field_name))
+                                    .map(|(_, v)| {
+                                        v.iter()
+                                            .take(4)
+                                            .enumerate()
+                                            .fold(0u32, |n, (i, b)| n | (*b as u32) << (8 * i))
+                                    })
+                                    .unwrap_or(0)
+                            };
+                            *event_args
+                                .entry(short_weapon(name))
+                                .or_default()
+                                .entry([
+                                    small("iparam1"),
+                                    small("iparam2"),
+                                    small("bparam1"),
+                                    small("bparam2"),
+                                ])
+                                .or_insert(0) += 1;
+                            if let Some(s) = shooter.filter(|s| *s <= MAX_PLAYERS)
+                                && short_weapon(name) == "garand"
+                                && small("iparam1") == 0
+                            {
+                                players
+                                    .entry(s)
+                                    .or_default()
+                                    .garand_events
+                                    .push((frame.time, small("bparam1")));
                             }
                             if let Some(s) = shooter.filter(|s| *s <= MAX_PLAYERS) {
                                 players
@@ -441,6 +497,35 @@ fn main() {
         "\nkills ({}): the killer's shot in the 0.25s before -- event and restart {both}, event only {event_only}, restart only {restart_only}, neither {neither} (grenades, and anything missed)",
         kills.len()
     );
+
+    println!("\nevent arguments by weapon (iparam1, iparam2, bparam1, bparam2): events");
+    for (weapon, combos) in &event_args {
+        let shown: Vec<String> = combos
+            .iter()
+            .map(|(k, n)| format!("({}, {}, {}, {}): {n}", k[0], k[1], k[2], k[3]))
+            .collect();
+        println!("  {weapon:<14} {}", shown.join("   "));
+    }
+
+    // Can a Garand's last round be told without its event? bparam1 is 0 on
+    // the round that pings and 1 on the rest; if the clip is always eight
+    // after a reload, counting rounds since the body's reload says which.
+    let mut by_round: BTreeMap<u32, [usize; 2]> = BTreeMap::new();
+    for p in players.values() {
+        for (time, bparam1) in &p.garand_events {
+            if let Some((_, round)) = p
+                .clip_rounds
+                .iter()
+                .find(|(t, _)| (t - time).abs() <= SAME_SHOT)
+            {
+                by_round.entry(*round).or_default()[usize::from(*bparam1 != 0)] += 1;
+            }
+        }
+    }
+    println!("\nGarand events by round since the reload: round -> pings (bparam1 0) / no ping");
+    for (round, [ping, quiet]) in &by_round {
+        println!("  round {round:>2}: {ping:>4} / {quiet}");
+    }
 
     orphans.sort_by(|a, b| a.0.total_cmp(&b.0));
     println!("\nevents with no restart beside them: {}", orphans.len());

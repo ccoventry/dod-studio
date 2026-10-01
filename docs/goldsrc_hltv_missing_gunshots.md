@@ -40,10 +40,19 @@ More kills have no gunshot than have one.
 narrower: gaps *inside* a burst that still had events either side. Most of the
 loss is whole bursts, which leave no gap to find.
 
-Why the proxy's recording loses them was not established. The loss is not
+How much is lost depends on the recording. Across every HLTV half on hand:
+
+| recordings | halves | events | rounds with none | lost |
+| --- | --- | --- | --- | --- |
+| `wsod25_*` | 28 | 30,568 | 47,185 | 61% (59–63% per half) |
+| `ktps9qf-*` | 4 | 8,477 | 1,541 | 15% (14–16%) |
+| a `forcehltv` conversion | 1 | 1,536 | 495 | 24% |
+
+Why a proxy's recording loses them was not established. The loss is not
 random per round (whole engagements go missing while others are complete),
-which fits the server deciding per event whether the proxy can hear it, but
-that is an inference.
+and it is steady within one event's recordings and very different between
+two, which fits how each server or proxy was set up deciding it, but that is
+an inference.
 
 ## 2. What still says the round was fired
 
@@ -112,8 +121,41 @@ and `curstate.frame` with the frame before. A restart in a bullet weapon's
    with the argument block the engine would have built from the player's
    state: `entindex`, `origin`, `angles` (pitch turned back from the negated
    third a player's state carries, as `CL_ParseEvent` does), `ducking` from
-   `usehull`, and a small random spread. Everything else zero, which is an
-   ordinary shot for every one of the 22.
+   `usehull`, a small random spread, and the integer and bool arguments an
+   ordinary recorded round of that weapon carries (below).
+
+### What an ordinary round carries
+
+All-zero arguments are not an ordinary shot for every weapon, and the handlers
+act on the difference. The first version passed zeros throughout, and every
+restored Garand round played the clip ping. From every fire event in the 33
+halves above (`hltv_shot_evidence_probe` prints the table per demo):
+
+| weapon | `iparam1` | `bparam1` | `bparam2` |
+| --- | --- | --- | --- |
+| Garand, K43, M1 carbine | 0 (1 = butt or bayonet) | **1** on every round but the clip's last | 0 |
+| scoped K98 | 0 | 0 | 1 on three shots in four |
+| BAR | rounds left in the magazine, 19 down to 0 | 0 | 0 |
+| Colt, Luger, K98, Springfield, MP40, MP44, Thompson | 0 (1 = bayonet on the K98) | 0; 1 on the last round | 0 |
+
+The Garand's handler plays `weapons/garand_reload_clipding.wav` when `bparam1`
+is **0** (`client.dll+0x7c2e`: `test ebp, ebp; jne` past the sample). The
+reconstructed source has this the other way round.
+
+No recorded event was available for the MG42, MG34, .30 cal, Bren, FG42, Sten,
+grease gun, Enfield or Webley. The MG42 and .30 cal read `iparam1` as belt
+rounds left, so theirs follows the BAR's; the rest get zeros.
+
+### The Garand's ping
+
+A restored Garand round pings only when it is the clip's last, and the event
+that said so is the thing that was lost. So the hook counts: every Garand
+round a player fires, recorded or restored, since the body last started a
+`*_garand_reload` sequence or the player died (the respawn brings a full
+clip). The eighth pings. Against the recorded events of all 33 halves, the
+eighth round since a reload or death was the pinging one 377 times of 409
+(92%), and an earlier round pinged 14 times of 5736. Until a player's first
+reload or death is seen, none of their restored rounds ping.
 
 Because it is the game's own handler, a restored round gets the same sound,
 flash, tracer and impact as a recorded one, goes through
@@ -136,8 +178,10 @@ for each weapon script and forwards the call. The log says how many it got:
 
 - **Know the spread.** The lost event carried it. A restored round's impact is
   near where the real one landed, not on it.
-- **Tell a Garand's last round**, so a restored one has no clip ping, or a
-  pistol's last, so no slide-lock (that one is first-person only anyway).
+- **Be sure of a Garand's last round.** The count above is right about nine
+  times in ten; the misses are clips whose start was not seen (a Garand picked
+  up off the ground, a class change). A pistol's last round is not attempted
+  (its slide-lock is first-person only).
 - **Restore melee, grenades or rockets.** Their events carry arguments the
   body does not show (hit or miss, which swing). A grenade's sounds are
   `svc_sound`, not events, and were never part of this loss.
