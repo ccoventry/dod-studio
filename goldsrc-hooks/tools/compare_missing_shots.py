@@ -40,21 +40,31 @@ game = [g for g in game if g[0] >= start_at]
 if not game:
     sys.exit("no stand-in rounds in the last session")
 
-# The game's clock is the file's plus a per-session constant: take it from
-# the first round each side has for the same player.
-first_player = game[0][1]
-offset = game[0][0] - next(t for t, e in offline if e == first_player and t > game[0][0] - 10)
-last = game[-1][0] - offset
-window = [(t, e) for t, e in offline if game[0][0] - offset - 0.05 <= t <= last + 0.05]
+def pair_off(offset):
+    """The offline rounds inside the played stretch, those of them the hook
+    did not play, and the rounds it played that are not among them."""
+    first, last = game[0][0] - offset, game[-1][0] - offset
+    window = [(t, e) for t, e in offline if first - 0.05 <= t <= last + 0.05]
+    left = list(window)
+    extra = []
+    for t, p, w in game:
+        hit = next((o for o in left if o[1] == p and abs(o[0] + offset - t) <= 0.08), None)
+        if hit:
+            left.remove(hit)
+        else:
+            extra.append((t, p, w))
+    return window, left, extra
 
-unmatched_offline = list(window)
-extra = []
-for t, p, w in game:
-    hit = next((o for o in unmatched_offline if o[1] == p and abs(o[0] + offset - t) <= 0.08), None)
-    if hit:
-        unmatched_offline.remove(hit)
-    else:
-        extra.append((t, p, w))
+
+# The game's clock is the file's plus a per-session constant. Every offline
+# round by the first player near the first played one is a candidate for it;
+# the right one is the constant that pairs the most rounds.
+first_time, first_player = game[0][0], game[0][1]
+candidates = [first_time - t for t, e in offline if e == first_player and abs(first_time - t) <= 15]
+if not candidates:
+    sys.exit(f"the offline list has nothing from player {first_player} near {first_time}s")
+offset = min(candidates, key=lambda c: len(pair_off(c)[2]))
+window, unmatched_offline, extra = pair_off(offset)
 
 print(f"clock offset {offset:.3f}s; file window {window[0][0]:.1f}s to {window[-1][0]:.1f}s")
 print(f"offline rounds with no event in that window: {len(window)}")

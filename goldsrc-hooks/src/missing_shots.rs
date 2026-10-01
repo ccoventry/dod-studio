@@ -458,19 +458,29 @@ pub fn poll() {
 
 /// Calls the weapon's own fire handler for a round whose event was lost.
 fn stand_in(slot: usize, entity: &ClEntityS, held: *mut ModelSPartial) {
-    let weapon = (!held.is_null())
+    let held_name = (!held.is_null())
         // Safety: a non-null model from the engine's own lookup.
-        .then(|| unsafe { (*held).name_str() })
-        .and_then(|name| weapon_for_held_model(&name));
-    let Some(weapon) = weapon else {
-        UNKNOWN_WEAPON.fetch_add(1, Ordering::Relaxed);
+        .then(|| unsafe { (*held).name_str() });
+    let handler = held_name
+        .as_deref()
+        .and_then(weapon_for_held_model)
+        .map(|weapon| (weapon, HANDLERS[weapon].load(Ordering::Acquire)))
+        .filter(|(_, handler)| !handler.is_null());
+    let Some((weapon, handler)) = handler else {
+        // Usually a round fired just before a weapon switch: by the frame the
+        // wait is over, the model in hand is the next one.
+        if UNKNOWN_WEAPON.fetch_add(1, Ordering::Relaxed) < 10 {
+            unsafe {
+                crate::debug::report(&format!(
+                    "missing_shots: player {slot} fired a round with no fire event, but holds {} -- no fire handler for that, nothing played",
+                    held_name
+                        .as_deref()
+                        .unwrap_or("nothing the engine can name")
+                ))
+            };
+        }
         return;
     };
-    let handler = HANDLERS[weapon].load(Ordering::Acquire);
-    if handler.is_null() {
-        UNKNOWN_WEAPON.fetch_add(1, Ordering::Relaxed);
-        return;
-    }
     let state = &entity.curstate;
     let mut args = EventArgs {
         entindex: slot as i32,
