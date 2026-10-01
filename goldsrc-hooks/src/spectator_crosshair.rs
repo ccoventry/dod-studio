@@ -103,9 +103,9 @@
 //!
 //! ## Hidden when the player's own view would have none
 //!
-//! POV does not always draw a crosshair: not while sprinting, going prone,
-//! crawling or on a ladder, nor with a sniper rifle, a knife or a machine gun
-//! that is not deployed. `anim_fix::crosshair_rule` works that out for the
+//! POV does not always draw a crosshair: not while sprinting, jumping, going
+//! prone, crawling, reloading, just after a weapon switch or on a ladder, nor
+//! with a sniper rifle, a knife or a machine gun that is not deployed. `anim_fix::crosshair_rule` works that out for the
 //! spectated player each frame (issue #310) and hands the answer to
 //! [`set_pov_hides`]. While it says hidden, the draw is skipped at the
 //! function's own gate, which sits in the 13 bytes just before the span:

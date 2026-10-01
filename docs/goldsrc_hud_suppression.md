@@ -322,35 +322,45 @@ hides it while the gun is lowered and for weapons that have none. With
 `dodstudio_spec_match_pov 1` the spectated view hides it in the same states
 (#310).
 
-**The reference is a POV demo, not the game being played.** The two differ.
+**The reference is the game being played, not a POV demo.** The two differ.
 Recording POV demos to frames and looking for the crosshair in each one
 (about 13,000 frames, six demos) gives:
 
 | state | playing live | in a POV demo | spectated, with the switch |
 | --- | --- | --- | --- |
 | sprint key held and moving | hidden | hidden, to the frame | hidden |
+| in the air after a jump (not a plain fall) | hidden | **shown** (2 of 35) | hidden |
 | going prone, getting up | hidden | hidden 1.53s from the start | hidden 1.5s |
 | prone and moving | hidden | hidden, to the frame | hidden |
 | on a ladder | hidden | hidden | hidden |
 | knife, spade, Springfield, scoped K98, scoped Enfield | hidden | hidden | hidden |
 | MG42, MG34, .30 cal not deployed | hidden | hidden, back the instant it deploys | hidden |
 | dead | hidden | hidden | hidden |
-| 0.5s after drawing a weapon | hidden | **shown** (4 of 706 frames hidden) | shown |
-| reloading | hidden | **shown** (0 of 75) | shown |
-| 1.6s after a bolt rifle's shot | hidden | **shown** (0 of 132) | shown |
-| in the air after a jump | hidden | **shown** (2 of 35) | shown |
+| 0.5s after drawing a weapon (0.8s K43, 0.68s Colt, 1s Webley and rockets) | hidden | **shown** (4 of 706 frames hidden) | hidden |
+| switching to or from a grenade | shown | shown | shown |
+| reloading | hidden | **shown** (0 of 75) | hidden |
+| 1.6s after a bolt rifle's shot | hidden | **shown** (0 of 132) | hidden |
 
-The last four are driven by the player's own client predicting his weapon and
-his jump (`flBoltHideXHair`, `g_iinjump`), and none of that runs while a demo
-plays. Footage from an HLTV demo is cut beside footage from POV demos, so it
-is the POV demo this matches.
+The four that differ are driven by the player's own client predicting his
+weapon and his jump (`flBoltHideXHair`, `g_iinjump`), and none of that runs
+while a demo plays. Shown both, the user chose live play (2026-10-01). Until
+then this matched the POV demo; that version is #556's second commit.
+
+The switch times come from dod13-client's `dlls/wpn_shared/*.cpp`: most
+weapons deploy through `DefaultDeploy` (0.5s), and the `TimedDeploy` ones set
+their own. Switching *from* a grenade would start the timer by the code, but
+the user saw no hide either way when playing, so neither direction starts it.
 
 Every state it does hide is read from what an HLTV demo carries for each
 player (`anim_fix/crosshair_rule.rs`):
 
 | POV's test | read from |
 | --- | --- |
-| sprint key and a move key | gait `dod_sprint`, which follows the keys within a frame or two |
+| sprint key and a move key | gait `dod_sprint`. On the same player in his POV demo and the HLTV demo of that half, the HLTV gait matched his sprint key 99.7% of the time |
+| jump | body `jump`, from take-off until landing |
+| weapon switch | the viewmodel changing, plus the weapon's switch time |
+| reload | the body playing a `*_reload` sequence |
+| bolt cycle | a shot from the K98 or Enfield, then 1.6s |
 | prone transition | 1.5s from the body entering `get_down` / `get_up` (those run 1.3s and 2.0s, so neither length is the answer) |
 | prone and a move key | gait `prone_forward`. Gait `dod_crawl` is the *crouched* walk and hides nothing |
 | ladder | `movetype` 5 |
