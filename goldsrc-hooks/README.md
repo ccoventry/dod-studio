@@ -24,8 +24,11 @@ joins this switch rather than adding a command:
   `docs/goldsrc_hltv_missing_gunshots.md`.
 - **Spectator crosshair**: drawn from `sprites/customXHair.spr`, using the same
   tile `cl_xhair_style` gives the POV view, instead of DoD's hardcoded 24x24
-  tile of `crosshairs.spr`. Loses to `dodstudio_hide_crosshair`, which stubs
-  the whole function. See `docs/goldsrc_hud_suppression.md` section 6.
+  tile of `crosshairs.spr`, and hidden in the states where a POV demo hides
+  the player's own: sprinting, going prone or getting up, crawling, on a
+  ladder, holding a knife, spade or sniper rifle, or a machine gun that is not
+  deployed. Loses to `dodstudio_hide_crosshair`, which stubs the whole
+  function. See `docs/goldsrc_hud_suppression.md` section 6.
 
 Plus sixteen control surfaces, always available and doing nothing until used:
 

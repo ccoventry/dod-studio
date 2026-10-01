@@ -259,7 +259,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
 | `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
 | `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
-| `dodstudio_spec_match_pov` | cvar | 0 | Makes a spectated first-person view match the player's own recording: weapon animations (grenades and priming included), the gunshots an HLTV demo lost, and the POV-style crosshair | both |
+| `dodstudio_spec_match_pov` | cvar | 0 | Makes a spectated first-person view match the player's own recording: weapon animations (grenades and priming included), the gunshots an HLTV demo lost, and the POV-style crosshair, hidden when the player's own would be (sprinting, prone transitions, crawling, ladders, knives, snipers, undeployed machine guns) | both |
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |
 | `dodstudio_objectives` | command | — | Moves the objective icons and timer (`offset`, `xoffset`, `timer`) | both |
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |

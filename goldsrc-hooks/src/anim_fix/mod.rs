@@ -420,12 +420,9 @@ pub fn on_weapon_fired(entity_index: i32) {
     if viewmodel.is_null() {
         return;
     }
-    let now = engine::client_time();
-    if !claim_fire(now) {
+    if !claim_fire(engine::client_time()) {
         return;
     }
-    // Safety: non-null, and the pointer `apply()` published this frame.
-    crosshair_rule::note_shot(now, model_stem(&unsafe { (*viewmodel).name_str() }));
 
     let state = i32_to_deploy_state(CURRENT_DEPLOY_STATE.load(Ordering::Relaxed));
     let sequence = animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel);
@@ -600,7 +597,7 @@ pub fn apply() {
     if switched_players {
         // A throw the previous player wound up must not empty this one's hand.
         grenade::forget("spectated player changed");
-        // Nor do his draw and bolt timers hide this one's crosshair.
+        // Nor does his going prone hide this one's crosshair.
         crosshair_rule::forget();
         // Snap the new viewmodel straight to the right family's idle so it
         // doesn't sit on whatever sequence the previously-spectated player
@@ -652,7 +649,6 @@ pub fn apply() {
                         if is_grenade_viewmodel(&viewmodel_name) {
                             grenade::wind_up(now, state, viewmodel_model);
                         } else {
-                            crosshair_rule::note_shot(now, model_stem(&viewmodel_name));
                             play_viewmodel_animation(
                                 animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
                                 "spectated player fired",
@@ -693,8 +689,6 @@ pub fn apply() {
                 viewmodel_model,
                 is_grenade_viewmodel(&viewmodel_name),
             );
-            // A grenade has its own deploy, which starts no crosshair timer.
-            crosshair_rule::note_deploy(now, !is_grenade_viewmodel(&viewmodel_name));
             if !caught {
                 play_viewmodel_animation(
                     animation_lookup_sequence("draw", state, viewmodel_model),
