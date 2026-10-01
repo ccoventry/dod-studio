@@ -7,7 +7,7 @@
 clock, for a session that fast-forwarded to the stretch being checked.
 
 The session to check is the last one in the hook log (today's by default),
-played with dodstudio_fix_spectator_pov 2. See
+played with dodstudio_spec_match_pov 2. See
 docs/goldsrc_hltv_missing_gunshots.md.
 """
 import re

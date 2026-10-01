@@ -7,8 +7,8 @@ reverse-engineering. For every `dodstudio_*` cvar/command in one scannable
 table, see [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
 instead of the list below.
 
-**Spectator POV fix** (`dodstudio_fix_spectator_pov 1`, off by default;
-`GOLDSRC_HOOKS_FIX_SPECTATOR_POV=1` starts a session with it on): one switch for
+**Match POV** (`dodstudio_spec_match_pov 1`, off by default;
+`GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own
 recording. Three things come on together, and anything else of that kind
 joins this switch rather than adding a command:

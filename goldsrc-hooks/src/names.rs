@@ -40,4 +40,9 @@ pub(crate) use console_name;
 /// animations (`anim_fix`), the gunshots an HLTV demo lost (`missing_shots`)
 /// and the crosshair (`spectator_crosshair`). It lives here because all three
 /// modules name it in their own messages.
-pub(crate) const FIX_SPECTATOR_POV: &str = console_name!("fix_spectator_pov");
+///
+/// `spec_` is the first name to follow the layout the rest are moving to:
+/// the word after the prefix is the area a command belongs to, as HLAE's
+/// `mirv_movie_*` and `mirv_fx_*` are, and the action comes after it. `spec`
+/// is the game's own word for the spectator (`spec_mode`, `spec_menu`).
+pub(crate) const SPEC_MATCH_POV: &str = console_name!("spec_match_pov");

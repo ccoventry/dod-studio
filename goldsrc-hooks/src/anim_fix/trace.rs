@@ -100,7 +100,7 @@ pub(super) const STAGE_VIEWMODEL_MISMATCH: i32 = 8;
 
 fn stage_name(stage: i32) -> &'static str {
     match stage {
-        STAGE_DISABLED => "disabled (dodstudio_fix_spectator_pov is 0)",
+        STAGE_DISABLED => "disabled (dodstudio_spec_match_pov is 0)",
         STAGE_NO_ENGFUNCS => "waiting for engfuncs",
         STAGE_NOT_SPECTATING => {
             "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view"

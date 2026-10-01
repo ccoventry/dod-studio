@@ -1,4 +1,4 @@
-//! The crosshair part of `dodstudio_fix_spectator_pov`: draw the spectator crosshair
+//! The crosshair part of `dodstudio_spec_match_pov`: draw the spectator crosshair
 //! from the same sprite and the same tile the player's own `cl_xhair_style`
 //! picks. (It had a cvar of its own, `dodstudio_match_pov_crosshair`, until
 //! the three match-POV settings became one.)
@@ -116,7 +116,7 @@ use crate::scan;
 
 /// The cvar this follows, for status and error text. Registered in
 /// `commands.rs`.
-pub const NAME: &str = crate::names::FIX_SPECTATOR_POV;
+pub const NAME: &str = crate::names::SPEC_MATCH_POV;
 
 /// DoD's own cvar, read here rather than mirrored: whatever the player sets for
 /// their POV crosshair is what the spectator view should show.

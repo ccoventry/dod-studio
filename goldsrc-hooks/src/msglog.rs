@@ -294,7 +294,7 @@ fn status() -> String {
 
 /// Folded into `dodstudio_debug_status`. `None` while logging is off, so that
 /// command's gate on the other opt-in report (`anim_fix`'s, under
-/// `dodstudio_fix_spectator_pov`) can treat this the same way -- see `commands.rs`.
+/// `dodstudio_spec_match_pov`) can treat this the same way -- see `commands.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;

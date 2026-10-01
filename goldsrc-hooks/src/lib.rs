@@ -13,7 +13,7 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `dodstudio_fix_spectator_pov`, one cvar over three modules, for making a
+//! - `dodstudio_spec_match_pov`, one cvar over three modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -90,13 +90,13 @@
 //! See each module's docs for the full R&D reasoning.
 //!
 //! The settings are `dodstudio_*` **cvars**, so they behave like any other
-//! engine setting: `dodstudio_fix_spectator_pov 1` from the console,
-//! `+dodstudio_fix_spectator_pov 1` on the launch line, or a line in any `.cfg` the
+//! engine setting: `dodstudio_spec_match_pov 1` from the console,
+//! `+dodstudio_spec_match_pov 1` on the launch line, or a line in any `.cfg` the
 //! user execs. `commands.rs` copies them into the runtime flags once per
 //! frame, and `dodstudio_debug_status` reports what each part is actually
 //! doing rather than only what it is set to.
 //!
-//! The `GOLDSRC_HOOKS_FIX_SPECTATOR_POV` environment variable sets that cvar's
+//! The `GOLDSRC_HOOKS_SPEC_MATCH_POV` environment variable sets that cvar's
 //! starting value, but the launch line is the better route: it is visible in
 //! the command that started the session.
 
@@ -169,11 +169,11 @@ fn env_level(name: &str, default: i32) -> i32 {
 
 /// Matching POV starts **off**: a capture pipeline should not silently alter
 /// what a spectated view shows for anyone who happens to have the DLL loaded.
-/// Turn it on per session with `dodstudio_fix_spectator_pov 1`, or set
-/// `GOLDSRC_HOOKS_FIX_SPECTATOR_POV` to have it start on. The value lands in
+/// Turn it on per session with `dodstudio_spec_match_pov 1`, or set
+/// `GOLDSRC_HOOKS_SPEC_MATCH_POV` to have it start on. The value lands in
 /// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
 /// default, and the cvar then drives all three parts.
-const FIX_SPECTATOR_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
+const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
 /// Whether to install `texture_hires` at startup: see
 /// `texture_hires::starts_on`. Off, `dodstudio_hd_enabled 1` can still install it
@@ -182,7 +182,7 @@ static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
     anim_fix::LEVEL.store(
-        env_level("GOLDSRC_HOOKS_FIX_SPECTATOR_POV", FIX_SPECTATOR_POV_DEFAULT),
+        env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
         Ordering::Relaxed,
     );
     // A crash fix rather than a capture setting, so on unless asked not to.
@@ -227,8 +227,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // from the log rather than mistaken for a broken hook.
     unsafe {
         debug::report(&format!(
-            "goldsrc-hooks: starting state -- {}: {} ({}) (GOLDSRC_HOOKS_FIX_SPECTATOR_POV sets the default; the cvar toggles it live)",
-            names::FIX_SPECTATOR_POV,
+            "goldsrc-hooks: starting state -- {}: {} ({}) (GOLDSRC_HOOKS_SPEC_MATCH_POV sets the default; the cvar toggles it live)",
+            names::SPEC_MATCH_POV,
             anim_fix::level(),
             anim_fix::level_description(anim_fix::level()),
         ))
@@ -282,7 +282,7 @@ fn install_fixes() {
     // it's safe to install even if that capture hasn't landed yet.
     anim_fix::install();
 
-    // The dodstudio_* console surface. dodstudio_fix_spectator_pov drives the same
+    // The dodstudio_* console surface. dodstudio_spec_match_pov drives the same
     // flag the env var above set as its starting value.
     commands::install();
 
