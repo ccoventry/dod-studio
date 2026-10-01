@@ -14,12 +14,6 @@ Two independent fixes, each off by default and toggled by its own env var:
   spectating, instead of fading out based on camera distance.
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
-  Its one sub-option, `dodstudio_hltv_grenade_pinpull` (default `1`), plays a
-  grenade's pin pull when the spectated player's body starts its throw and
-  the throw itself 0.5 s later, when the grenade actually leaves the hand --
-  the real pin pull is never networked, so this is a stand-in. `0` is the
-  previous behaviour, the throw at the body change. See
-  `docs/goldsrc_hltv_animation_fix.md` section 8.
 
 Plus eighteen control surfaces, always available and doing nothing until used:
 
@@ -71,7 +65,7 @@ Plus eighteen control surfaces, always available and doing nothing until used:
   sequence with that player's last ordinary one, for everyone in view, not just
   the spectated player. `dodstudio_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
-  entity state. See `docs/goldsrc_hltv_animation_fix.md` section 13.
+  entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
 - **Overview map** (`dodstudio_overviewmap <full|mini> <x> <y> <w> <h>`): places
   and sizes DoD's overview map, so the big one can be a corner inset instead of
   something that has to be off. The rects are cached in `gHUD` rather than

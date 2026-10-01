@@ -140,53 +140,14 @@ pub(super) fn deploy_state_from_body_sequence(label: &str) -> Option<DeployState
 /// every grenade, and "slash1" the knife and spade.
 pub(super) const ATTACK_SEQUENCES: &[&str] = &["shoot", "launch", "fire", "throw", "slash1"];
 
-// Why the grenade pin pull plays on the wind-up, and not when the pin comes out.
-//
-// A grenade's viewmodel animates `idle -> pinpull -> (cook) -> throw`, and the
-// real pin pull is unobservable for a spectated player. `dod.dll`'s
-// `StartThrow` (hand `0x9ac0`, stick `0x150f0`) sends `svc_weaponanim` to the
-// owner alone and writes nothing into `entity_state_player_t`; `p_grenade`,
-// `p_stick` and `p_mills` carry a single `idle` sequence each; and
-// `weapons/grenpinpull.wav` appears in no demo's `svc_sound`, POV included. A
-// probe over 107 pulls in three POV halves found no HLTV-visible field, sound,
-// event or message that moves at the pull above its no-pull baseline -- the
-// only marker is `clientdata_t::weaponanim`, which never reaches an HLTV
-// recording (`analysis/examples/grenade_pinpull_tell_probe.rs`).
-//
-// What is observable is the body sequence entering its grenade attack
-// (`stand_gren_shoot`, `crouch_stick_roll`, ...), and that is the **release**
-// of the button, not the pull. The server's `WeaponIdle` sets the body
-// sequence there and `m_flStartThrow = time + 0.5` (double constant at
-// `dod.dll+0xcf5c8`); the grenade entity and `weapons/grenthrow.wav` arrive on
-// the first idle call after that. Two measurements agree:
-//
-// - body sequence to `weapons/grenthrow.wav`: 846 throws across three HLTV
-//   halves, 0.461s to 0.566s, median 0.494s, one-to-one with no orphans in
-//   either direction. Far too tight to be a player holding a button.
-// - the real cook time, taken from a POV demo's own viewmodel animations
-//   (`pinpull` to `throw`): 0.065s to 4.852s, medians 0.64s and 1.46s across
-//   two demos. That is the button being held -- and DoD players also "prime"
-//   grenades, rolling one out and picking it back up to shorten the remaining
-//   fuse, which widens the spread further still.
-//
-// So the steady 0.49s is the server's wind-up between the release and the
-// grenade leaving the hand. `GRENADE_WINDUP_SECONDS` in `mod.rs` plays
-// `pinpull` at the body change, as the nearest stand-in for a pull that cannot
-// be seen, and schedules `throw` for 0.5s later, when the grenade actually
-// leaves. Playing `throw` at the body change itself -- the previous behaviour,
-// still available with `dodstudio_hltv_grenade_pinpull 0` -- emptied the hand
-// half a second before the grenade was thrown. An earlier attempt deferred
-// the throw by this same gap but read it as the pull, which is why it was
-// reverted; the timing was right, the reason was not.
-//
-// The `exploding_` family (a primed grenade picked back up, a second weapon
-// class on the server) cannot be told apart from the plain one in an HLTV
-// stream, so it gets the plain `pinpull`/`throw` pair; the primed wind-up is
-// 0.3s, so its throw lands 0.2s late. Unverified: the primed class asks for
-// `*_primgren_shoot`, which no player model has, so its release may show no
-// attack body sequence at all -- then nothing plays, as before this change. See
-// `analysis/examples/grenade_timing_probe.rs` and
-// `docs/goldsrc_hltv_animation_fix.md` section 8.
+// A grenade's firing body sequence (`stand_gren_shoot`, `crouch_stick_roll`,
+// ...) is the **release** of the button, not the pin pull, and not the throw:
+// the server sets it in the same call as `m_flStartThrow = time + 0.5`, and
+// the grenade leaves the hand half a second later. The pull itself is never
+// networked -- `StartThrow` sends `svc_weaponanim` to the owner alone, and a
+// probe over 107 pulls found nothing an HLTV demo carries that moves at one
+// (`analysis/examples/grenade_pinpull_tell_probe.rs`). What follows from
+// that, and everything else a grenade does in the hand, is in `grenade.rs`.
 
 /// Whether a viewmodel is one of the three grenades, which are the only
 /// weapons whose attack is a wind-up followed by a throw rather than a shot.
@@ -273,14 +234,6 @@ pub(super) fn swap_family_prefix(label: &str, target: DeployState) -> String {
         }
         _ => label.to_string(),
     }
-}
-
-/// Whether a viewmodel sequence is the one that ends with the hand empty.
-///
-/// Only the grenade families have this shape: every other attack animation
-/// returns the weapon to a pose that still holds it.
-pub(super) fn is_throw_label(label: &str) -> bool {
-    label.eq_ignore_ascii_case("throw") || label.eq_ignore_ascii_case("exploding_throw")
 }
 
 #[cfg(test)]
@@ -448,33 +401,6 @@ mod tests {
         assert_eq!(model_stem("models/p_mg42bd.mdl"), "mg42bd");
         assert_eq!(model_stem("models\\w_luger.mdl"), "luger");
         assert_eq!(model_stem("models/player/us-inf/us-inf.mdl"), "us-inf");
-    }
-
-    /// Only the grenade families end with an empty hand. Getting this wrong in
-    /// the permissive direction would queue a re-draw after every gunshot,
-    /// restarting the weapon animation mid-burst.
-    #[test]
-    fn only_a_grenade_throw_counts_as_emptying_the_hand() {
-        for label in ["throw", "exploding_throw", "THROW"] {
-            assert!(is_throw_label(label), "{label}");
-        }
-        for label in [
-            "shoot",
-            "shoot1",
-            "up_shoot",
-            "launch",
-            "fire",
-            "slash1",
-            "draw",
-            "reload",
-            "idle",
-            // Near misses that must not match.
-            "throw_empty",
-            "pinpull",
-            "holster",
-        ] {
-            assert!(!is_throw_label(label), "{label}");
-        }
     }
 
     /// The three grenade viewmodels, and nothing else: the pin pull must not
