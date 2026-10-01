@@ -15,7 +15,7 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus fourteen control surfaces, always available and doing nothing until used:
+Plus eighteen control surfaces, always available and doing nothing until used:
 
 - **Missing gunshots** (`dodstudio_hltv_play_missing_gunshots 1`): an HLTV demo
   has no fire event for about 60% of the rounds fired, so they play with no
@@ -54,6 +54,12 @@ Plus fourteen control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodstudio_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
+- **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
+  bands across the top and bottom of the screen while spectating, and the
+  text and menu row on them, on screen and with no capture running, which
+  HLAE's `mirv_movie_hidepanels` cannot do. A filter on vgui2's
+  `IPanel::PaintTraverse`; see
+  `src/spectator_bars.rs` and `docs/goldsrc_spectator_bars.md`.
 - **Hand signals** (`dodstudio_hide_hand_signals 1`): stops players miming their
   voice commands -- the nod, the point, the wave. Replaces any `hs_*` body
   sequence with that player's last ordinary one, for everyone in view, not just

@@ -525,6 +525,7 @@ pub fn poll() {
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
     crate::missing_shots::poll();
+    crate::spectator_bars::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -683,6 +684,9 @@ fn status_text() -> String {
     }
     if let Some(shots) = crate::missing_shots::status_line() {
         lines.push(shots);
+    }
+    if let Some(bars) = crate::spectator_bars::status_line() {
+        lines.push(bars);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1393,6 +1397,10 @@ pub fn install() {
     // And this one: off until asked for, and nothing else depends on it.
     if let Some(shots) = register(crate::missing_shots::NAME, "0") {
         crate::missing_shots::set_cvar(shots);
+    }
+    // The same: a switch of its own, off until asked for.
+    if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
+        crate::spectator_bars::set_cvar(bars);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
