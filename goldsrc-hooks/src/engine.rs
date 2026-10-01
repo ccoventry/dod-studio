@@ -87,6 +87,12 @@ pub struct EventApiPartial {
         f_flags: i32,
         pitch: i32,
     ),
+    /// `EV_StopSound` .. `EV_PlayerTrace`, untouched.
+    _slots_before_weapon_animation: [*mut c_void; 14],
+    /// `EV_WeaponAnimation(int sequence, int body)`: what a fire handler
+    /// plays on the first-person gun. At `+0x40`, confirmed by the Garand
+    /// handler's `call [ecx+0x40]` at `client+0x7b34`.
+    pub ev_weapon_animation: unsafe extern "C" fn(sequence: i32, body: i32),
 }
 
 /// Partial mirror of `demo_api_s` (`common/demo_api.h`): `IsRecording`, then

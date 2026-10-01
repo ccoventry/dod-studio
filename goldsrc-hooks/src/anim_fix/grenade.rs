@@ -79,6 +79,15 @@ const STALE_THROW_SECONDS: f64 = 1.0;
 /// world. It appears in the same update as the sound, but the throw here is
 /// booked off the body change and can be a few frames early.
 const FIND_WITHIN_SECONDS: f64 = 0.35;
+/// A thrown grenade never seen in the world by this long after the throw was
+/// caught before the next update could carry it. A thrown one flies for
+/// seconds and appears in the same update as the throw's sound; the booked
+/// throw lands within a frame or two of that. Seen on Gorilla, who primes
+/// nearly every stick and catches it 0.0-0.2s after the throw in his own POV
+/// demo (`wsod25_ply2_m1_h1_gorilla`): in the HLTV demo of that half
+/// (`monday-wsod25_r07_m1_h1_hltv`, 873.7s) the grenade never appears, and
+/// a fresh stick was drawn where his own view held the lit one.
+const UNSEEN_MEANS_CAUGHT_SECONDS: f64 = 0.2;
 /// A thrown grenade that leaves the world this soon was caught. The shortest
 /// one left to its fuse lived 1.53s; the longest catch took 1.5s.
 const CAUGHT_WITHIN_SECONDS: f64 = 1.5;
@@ -306,7 +315,11 @@ fn next_step(t: Throw) -> Step {
             }
         }
         None => {
-            if t.found && !t.present && t.since_throw <= CAUGHT_WITHIN_SECONDS {
+            // Caught: seen leaving the world soon after the throw, or never in
+            // it at all.
+            let left_soon = t.found && !t.present && t.since_throw <= CAUGHT_WITHIN_SECONDS;
+            let never_seen = !t.found && t.since_throw >= UNSEEN_MEANS_CAUGHT_SECONDS;
+            if left_soon || never_seen {
                 Step::Catch
             } else if !t.drew_next && t.since_throw >= NEXT_GRENADE_SECONDS {
                 Step::DrawNext
@@ -471,9 +484,15 @@ pub(super) fn each_frame(
             CAUGHT_AT.store(now.to_bits(), Ordering::Relaxed);
             play_viewmodel_animation(
                 animation_lookup_sequence("exploding_idle", state, viewmodel),
-                &format!(
-                    "the thrown grenade left the world {since_throw:.3}s after the throw -- caught, so it is primed"
-                ),
+                &if WATCHED.load(Ordering::Relaxed) >= 0 {
+                    format!(
+                        "the thrown grenade left the world {since_throw:.3}s after the throw -- caught, so it is primed"
+                    )
+                } else {
+                    format!(
+                        "no thrown grenade appeared in the world by {since_throw:.3}s after the throw -- caught before the next update, so it is primed"
+                    )
+                },
                 state,
                 viewmodel,
             );
@@ -622,13 +641,18 @@ mod tests {
     }
 
     #[test]
-    fn a_grenade_never_found_is_never_called_caught() {
-        let t = Throw {
+    fn a_grenade_never_seen_in_the_world_was_caught_at_once() {
+        let unseen = |since: f64| Throw {
             found: false,
             present: false,
-            ..out(0.2)
+            ..out(since)
         };
-        assert_eq!(next_step(t), Step::Nothing);
+        // Not yet: it can still turn up an update or two after the throw.
+        assert_eq!(next_step(unseen(0.1)), Step::Nothing);
+        // Caught before the next update -- the lit grenade is held, not a
+        // fresh one drawn.
+        assert_eq!(next_step(unseen(0.2)), Step::Catch);
+        assert_ne!(next_step(unseen(0.5)), Step::DrawNext);
     }
 
     #[test]

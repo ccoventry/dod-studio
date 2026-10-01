@@ -132,6 +132,52 @@ const WEAPONS: &[(&str, &[&str])] = &[
     ("webley", &["webley"]),
 ];
 
+/// The body-animation token each of [`WEAPONS`] fires with
+/// (`<stance>_<token>_shoot`), from the `szAnimExt` column of the game's
+/// weapon table (dod13-client `dlls/dod_shared.cpp`, `WpnInfo`). Not the
+/// script name: the Garand, K43, BAR and M1 carbine all fire as `rifle`, the
+/// folding carbine as `fcarb`, the FG42 as `tommy`, the bolt rifles as `bolt`.
+fn fires_as(event: &str) -> &'static [&'static str] {
+    match event {
+        "30cal" => &["30cal"],
+        "bar" | "garand" | "k43" => &["rifle"],
+        "m1carbine" => &["rifle", "fcarb"],
+        "bren" => &["bren"],
+        "colt" | "luger" | "webley" => &["pistol"],
+        "enfield" | "scopedenfield" | "kar" | "scopedkar" | "spring" => &["bolt"],
+        "fg42" | "thompson" => &["tommy"],
+        "greasegun" => &["grease"],
+        "mg34" | "mg42" => &["mg"],
+        "mp40" => &["mp40"],
+        "mp44" => &["stg44"],
+        "sten" => &["sten"],
+        _ => &[],
+    }
+}
+
+/// The token of a `<stance>_<token>_shoot` body sequence.
+fn shoot_token(label: &str) -> Option<&str> {
+    label
+        .strip_suffix("_shoot")?
+        .split_once('_')
+        .map(|(_, token)| token)
+}
+
+/// Which weapon fired a round, from the body sequence that fired it and the
+/// last two weapons the player held (as [`WEAPONS`] indices, newest first).
+///
+/// The newest isn't always it: a player who fires and switches at once (the
+/// K98's quick switch to the pistol, to skip the bolt) can have the next
+/// weapon in hand by the update the shot arrives in, or the one after.
+/// Falls back to the newest when neither fires that way.
+fn fired_with(label: &str, held: [Option<usize>; 2]) -> Option<usize> {
+    let token = shoot_token(label);
+    held.into_iter()
+        .flatten()
+        .find(|&weapon| token.is_some_and(|t| fires_as(WEAPONS[weapon].0).contains(&t)))
+        .or(held[0])
+}
+
 /// The handler `client.dll` registered for each of [`WEAPONS`], or null.
 static HANDLERS: [AtomicPtr<c_void>; WEAPONS.len()] =
     [const { AtomicPtr::new(std::ptr::null_mut()) }; WEAPONS.len()];
@@ -211,6 +257,12 @@ static PENDING: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
 /// The frame number a real shot was heard on and not yet paired with a
 /// restart. Zero for none.
 static HEARD: [AtomicU32; SLOTS] = [const { AtomicU32::new(0) }; SLOTS];
+/// The weapon each player holds, and the one before it, as [`WEAPONS`]
+/// indices, or -1.
+static HELD_NOW: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
+static HELD_BEFORE: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
+/// The weapon a pending restart fired with, chosen when it was seen.
+static PENDING_WEAPON: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
 /// How many Garand rounds each player has fired since the clip was last
 /// known full, or -1 while that is not known.
 static CLIP_ROUND: [AtomicI32; SLOTS] = [const { AtomicI32::new(-1) }; SLOTS];
@@ -393,6 +445,9 @@ fn forget(slot: usize) {
     PENDING[slot].store(0, Ordering::Relaxed);
     HEARD[slot].store(0, Ordering::Relaxed);
     CLIP_ROUND[slot].store(-1, Ordering::Relaxed);
+    HELD_NOW[slot].store(-1, Ordering::Relaxed);
+    HELD_BEFORE[slot].store(-1, Ordering::Relaxed);
+    PENDING_WEAPON[slot].store(-1, Ordering::Relaxed);
 }
 
 fn forget_everyone() {
@@ -473,6 +528,18 @@ pub fn poll() {
         SEQUENCE[slot].store(now_body.0, Ordering::Relaxed);
         FRAME[slot].store(now_body.1.to_bits(), Ordering::Relaxed);
 
+        // Safety: null for an index the engine has not precached.
+        let held_model = unsafe { (studio.get_model_by_index)(state.weaponmodel) };
+        let held_weapon = (!held_model.is_null())
+            // Safety: a non-null model from the engine's own lookup.
+            .then(|| weapon_for_held_model(&unsafe { (*held_model).name_str() }))
+            .flatten()
+            .map_or(-1, |weapon| weapon as i32);
+        let previous = HELD_NOW[slot].swap(held_weapon, Ordering::Relaxed);
+        if previous != held_weapon && previous >= 0 {
+            HELD_BEFORE[slot].store(previous, Ordering::Relaxed);
+        }
+
         if before.is_some() && state.msg_time < earlier {
             // The demo went backwards: a seek. Nothing follows from before it.
             PENDING[slot].store(0, Ordering::Relaxed);
@@ -486,9 +553,8 @@ pub fn poll() {
         // cannot take the place of one still waiting.
         // Anything pending here was set by an earlier frame's pass.
         if PENDING[slot].swap(0, Ordering::Relaxed) != 0 {
-            // Safety: null for an index the engine has not precached.
-            let held = unsafe { (studio.get_model_by_index)(state.weaponmodel) };
-            stand_in(slot, entity, held);
+            let weapon = usize::try_from(PENDING_WEAPON[slot].swap(-1, Ordering::Relaxed)).ok();
+            stand_in(slot, entity, weapon, held_model);
         }
 
         if let Some(before) = before
@@ -517,6 +583,13 @@ pub fn poll() {
                 if heard_with(HEARD[slot].swap(0, Ordering::Relaxed), frame_number) {
                     HAD_EVENT.fetch_add(1, Ordering::Relaxed);
                 } else {
+                    let held = [
+                        HELD_NOW[slot].load(Ordering::Relaxed),
+                        HELD_BEFORE[slot].load(Ordering::Relaxed),
+                    ]
+                    .map(|weapon| usize::try_from(weapon).ok());
+                    let weapon = fired_with(label, held).map_or(-1, |weapon| weapon as i32);
+                    PENDING_WEAPON[slot].store(weapon, Ordering::Relaxed);
                     PENDING[slot].store(frame_number, Ordering::Relaxed);
                 }
             }
@@ -532,14 +605,14 @@ fn holds(held: *mut ModelSPartial, event: &str) -> bool {
             .is_some_and(|weapon| WEAPONS[weapon].0 == event)
 }
 
-/// Calls the weapon's own fire handler for a round whose event was lost.
-fn stand_in(slot: usize, entity: &ClEntityS, held: *mut ModelSPartial) {
+/// Calls the weapon's own fire handler for a round whose event was lost:
+/// `weapon` if the shot named one, else whatever `held` is.
+fn stand_in(slot: usize, entity: &ClEntityS, weapon: Option<usize>, held: *mut ModelSPartial) {
     let held_name = (!held.is_null())
         // Safety: a non-null model from the engine's own lookup.
         .then(|| unsafe { (*held).name_str() });
-    let handler = held_name
-        .as_deref()
-        .and_then(weapon_for_held_model)
+    let handler = weapon
+        .or_else(|| held_name.as_deref().and_then(weapon_for_held_model))
         .map(|weapon| (weapon, HANDLERS[weapon].load(Ordering::Acquire)))
         .filter(|(_, handler)| !handler.is_null());
     let Some((weapon, handler)) = handler else {
@@ -661,6 +734,47 @@ mod tests {
         ];
         for (event, _) in WEAPONS {
             assert!(SHIPPED.contains(event), "{event} is not a shipped script");
+        }
+    }
+
+    /// element's quick switch in `monday-wsod25_r07_m1_h1_hltv`: a K98 round
+    /// whose update already has the Luger in hand plays the K98, not the
+    /// Luger.
+    #[test]
+    fn a_round_fired_just_before_a_switch_is_the_old_weapons() {
+        let index = |event: &str| WEAPONS.iter().position(|(e, _)| *e == event);
+        let (kar, luger) = (index("kar"), index("luger"));
+        assert_eq!(fired_with("stand_bolt_shoot", [luger, kar]), kar);
+        assert_eq!(fired_with("stand_bolt_shoot", [kar, luger]), kar);
+        assert_eq!(fired_with("crouch_pistol_shoot", [luger, kar]), luger);
+        // Nothing fires as `rifle` here: the weapon in hand it is.
+        assert_eq!(fired_with("stand_rifle_shoot", [luger, kar]), luger);
+        // The M1 carbine fires as `rifle` held one way and `fcarb` the other.
+        let carbine = index("m1carbine");
+        assert_eq!(fired_with("prone_fcarb_shoot", [luger, carbine]), carbine);
+        assert_eq!(
+            fired_with("bipod_tommy_shoot", [luger, index("fg42")]),
+            index("fg42")
+        );
+    }
+
+    /// Every weapon fires as some body token, and every token the player
+    /// model has for a bullet weapon belongs to one.
+    #[test]
+    fn every_weapon_has_its_body_token() {
+        for (event, _) in WEAPONS {
+            assert!(!fires_as(event).is_empty(), "{event}");
+        }
+        for token in [
+            "rifle", "bolt", "tommy", "fcarb", "mp40", "stg44", "sten", "grease", "pistol", "mg",
+            "bren", "30cal",
+        ] {
+            assert!(
+                WEAPONS
+                    .iter()
+                    .any(|(event, _)| fires_as(event).contains(&token)),
+                "{token}"
+            );
         }
     }
 
