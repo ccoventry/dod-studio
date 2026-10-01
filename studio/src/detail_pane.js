@@ -7,6 +7,7 @@ import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus 
 import { STRINGS } from './strings.js';
 import { numberField } from './number_field.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 
 let currentDemo = null;
@@ -614,10 +615,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       streak.notes = e.target.value;
     });
     // Master Queue's tracked badge (master_pane.js) depends on whether this
-    // streak has a note — 'change' (fires on blur/Enter, not per keystroke)
-    // rather than 'input' so typing a note doesn't rebuild the whole Master
-    // Queue table on every character, matching the Kill Range inputs above.
-    notesInput.addEventListener('change', () => {
+    // streak has a note. Refreshed shortly after typing stops, not per
+    // keystroke, so typing doesn't rebuild the whole Master Queue table on
+    // every character -- and not only on 'change', which an undo (Ctrl+Z)
+    // never fires until blur, leaving the badge stale (#535).
+    refreshAfterTyping(notesInput, () => {
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
     });
