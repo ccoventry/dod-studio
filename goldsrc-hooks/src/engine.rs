@@ -106,6 +106,15 @@ pub struct DemoApiPartial {
 pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
 
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
+/// A client event handler, `void (*)(struct event_args_s *args)`.
+pub type EventHandlerFn = unsafe extern "C" fn(args: *mut c_void);
+/// `gEngfuncs.pfnHookEvent` (slot 69): registers the handler for one event
+/// script. DoD's `client.dll` calls it once per script from inside
+/// `Initialize` (`push handler; push "events/weapons/colt.sc"; call
+/// [gEngfuncs+0x114]` at `client.dll+0x106e5`), 52 slots after the
+/// `pfnAddCommand` slot its console commands go through -- the same in both
+/// builds.
+pub type HookEventFn = unsafe extern "C" fn(name: *const c_char, handler: EventHandlerFn);
 pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char);
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
 pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
@@ -130,6 +139,70 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// dereferences the result -- so the engine is expected to return something
 /// readable, and `client.dll` does not check.
 pub type GetLocalPlayerFn = unsafe extern "C" fn() -> *mut c_void;
+
+/// `gEngfuncs.pfnGetPlayerInfo` (slot 21): fills a [`HudPlayerInfo`] for a
+/// 1-based player slot. Confirmed by DoD's own scoreboard call at
+/// `client.dll+0xb4ae`, which passes `(slot, &g_PlayerInfoList[slot])` with a
+/// 0x20-byte stride -- the `hud_player_info_t` that carries `m_nSteamID`.
+pub type GetPlayerInfoFn = unsafe extern "C" fn(slot: i32, info: *mut HudPlayerInfo);
+
+/// `hud_player_info_t` (`cdll_int.h`), the Steam-era layout: 0x20 bytes, with
+/// `m_nSteamID` at +0x18. The size is what DoD's `client.dll` strides its
+/// own array by, so this is the layout the engine writes into.
+///
+/// What the engine actually fills in, read from both `hw.dll` builds
+/// (pre-Anniversary +0xab70, 25th Anniversary +0x195620): an empty slot gets
+/// `name = null` and `thisplayer = 0` and nothing else. Otherwise every field
+/// is written, except `steam_id`, which is copied from the player's record
+/// **only when the game is Counter-Strike or Condition Zero**: the two flags
+/// tested (PRE `hw.dll+0xac5f`, Anniversary `+0x1956e4`) are the ones the
+/// engine sets for `cstrike`/`czero` (their other readers test `cl_autobuy`,
+/// `cl_rebuy`, `czero`). In DoD it is never filled; a 2026-09-30 live check
+/// listed every player of an HLTV demo with 0. An earlier note here said the
+/// gate was demo playback, which was wrong. Callers zero the struct first and
+/// treat 0 as "unknown"; `deathmsg` reads `*sid` from the userinfo instead.
+#[repr(C)]
+pub struct HudPlayerInfo {
+    pub name: *const c_char,
+    pub ping: i16,
+    /// 1 for `cl.playernum`: the recording player in a POV demo.
+    pub thisplayer: u8,
+    pub spectator: u8,
+    pub packetloss: u8,
+    pub model: *const c_char,
+    pub topcolor: i16,
+    pub bottomcolor: i16,
+    /// SteamID64, or 0.
+    pub steam_id: u64,
+}
+
+impl HudPlayerInfo {
+    /// All zero: an empty slot as the engine reports it, and a `steam_id` of
+    /// "unknown" until the engine overwrites it.
+    pub fn empty() -> Self {
+        Self {
+            name: std::ptr::null(),
+            ping: 0,
+            thisplayer: 0,
+            spectator: 0,
+            packetloss: 0,
+            model: std::ptr::null(),
+            topcolor: 0,
+            bottomcolor: 0,
+            steam_id: 0,
+        }
+    }
+}
+
+// The layout the analysis above describes, on the only target this crate
+// builds for. A 32-bit field order drift would read the model pointer as a
+// SteamID rather than fail.
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(size_of::<HudPlayerInfo>() == 0x20);
+    assert!(std::mem::offset_of!(HudPlayerInfo, thisplayer) == 6);
+    assert!(std::mem::offset_of!(HudPlayerInfo, steam_id) == 0x18);
+};
 
 /// `gEngfuncs.pfnGetCvarFloat` (slot 15). Reads a console variable's numeric
 /// value by name, returning 0 for one that does not exist.
@@ -428,7 +501,7 @@ pub struct EngineStudioApiPartial {
 /// lists every field of the real struct in declaration order -- confirmed
 /// against it field-by-field. Every field up through `IsSpectateOnly` is
 /// present, in order, so the ones we actually use (`pfn_add_command`,
-/// `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
+/// `pfn_get_player_info`, `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
 /// `pfn_get_game_directory`, `pfn_get_level_name`, `p_event_api`,
 /// `is_spectate_only`) land at the
 /// correct byte offsets; everything else is kept as an opaque, untyped slot
@@ -448,7 +521,10 @@ pub struct ClEngineFuncsPartial {
     _slots_before_add_command: [*mut c_void; 1], // pfnGetCvarString
     pub pfn_add_command: AddCommandFn,
     pub pfn_hook_user_msg: HookUserMsgFn,
-    _slots_before_console_print: [*mut c_void; 11], // pfnServerCmd .. pfnDrawConsoleStringLen
+    _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
+    /// Slot 21. See [`GetPlayerInfoFn`].
+    pub pfn_get_player_info: GetPlayerInfoFn,
+    _slots_before_console_print: [*mut c_void; 8], // pfnPlaySoundByName .. pfnDrawConsoleStringLen
     pub pfn_console_print: ConsolePrintFn,
     _slots_before_cmd_argc: [*mut c_void; 7], // pfnCenterPrint .. Cvar_SetValue
     pub cmd_argc: CmdArgcFn,
@@ -459,7 +535,10 @@ pub struct ClEngineFuncsPartial {
     pub get_entity_by_index: GetEntityByIndexFn,
     _slots_before_weapon_anim: [*mut c_void; 12], // GetClientTime .. pfnPlaybackEvent
     pub pfn_weapon_anim: WeaponAnimFn,
-    _slots_between: [*mut c_void; 4], // pfnRandomFloat, pfnRandomLong, pfnHookEvent, Con_IsVisible
+    _slots_before_hook_event: [*mut c_void; 2], // pfnRandomFloat, pfnRandomLong
+    /// Slot 69. See [`HookEventFn`].
+    pub pfn_hook_event: HookEventFn,
+    _slot_con_is_visible: *mut c_void,
     pub pfn_get_game_directory: GetGameDirectoryFn,
     /// Slot 72. See [`GetCvarPointerFn`].
     pub pfn_get_cvar_pointer: GetCvarPointerFn,
@@ -680,7 +759,7 @@ static ON_ENGINE_READY: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 /// This exists so that work runs **on the engine thread, at a deterministic
 /// point**, rather than from our worker thread whenever it happens to notice.
 /// It matters because that work mutates engine-owned global state --
-/// `pfnAddCommand` prepends to the engine's command list, and `sound_fix`
+/// `pfnAddCommand` prepends to the engine's command list, and `fire_sounds`
 /// overwrites a function pointer inside the live `event_api_s` -- none of
 /// which is thread-safe against an engine that may be running concurrently.
 /// Registering right after `Initialize` also matches where DoD's own client
@@ -718,7 +797,13 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
         return 0;
     }
     let real: InitializeFn = unsafe { std::mem::transmute(real) };
-    let result = unsafe { real(engfuncs, version) };
+    let result = if engfuncs.is_null() {
+        unsafe { real(engfuncs, version) }
+    } else {
+        // The client registers its event handlers from inside Initialize;
+        // missing_shots notes the weapon ones as they go past.
+        unsafe { crate::missing_shots::noting_event_handlers(engfuncs, || real(engfuncs, version)) }
+    };
 
     // Only once the client is genuinely initialised, and only if we actually
     // captured the table -- installing against a null pEngfuncs would crash
