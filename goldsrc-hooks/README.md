@@ -15,8 +15,13 @@ Two independent fixes, each off by default and toggled by its own env var:
 - **Animation fix** (`GOLDSRC_HOOKS_ANIM_FIX=1`): corrects MG42/MG34/BAR/Bren
   viewmodel deploy (bipod up/down) animations while spectating in-eye.
 
-Plus thirteen control surfaces, always available and doing nothing until used:
+Plus fourteen control surfaces, always available and doing nothing until used:
 
+- **Missing gunshots** (`dodstudio_hltv_play_missing_gunshots 1`): an HLTV demo
+  has no fire event for about 60% of the rounds fired, so they play with no
+  sound, flash or impact. Each one still restarts the shooter's body
+  animation; this finds them there and calls the weapon's own event handler.
+  See `docs/goldsrc_hltv_missing_gunshots.md`.
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
   players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only

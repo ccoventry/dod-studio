@@ -73,6 +73,10 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `missing_shots`: the `dodstudio_hltv_play_missing_gunshots` cvar -- an
+//!   HLTV demo carries the fire event for well under half the rounds fired;
+//!   the rest are found from the shooter's body animation restarting and get
+//!   the weapon's own event handler called for them (sound, flash, impact).
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -114,6 +118,7 @@ mod hand_signals;
 mod hide_sprite;
 mod hudelement;
 mod hull_trace_guard;
+mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
