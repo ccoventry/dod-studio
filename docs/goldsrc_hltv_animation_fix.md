@@ -4,7 +4,7 @@
 > Lives in `goldsrc-hooks/src/anim_fix/`, on branch
 > `feat/goldsrc-hooks-companion-dll`. Tracked by
 > [#204](https://github.com/ccoventry/dod-studio/issues/204).
-> Defaults **off**. It is one of the three things `dodstudio_spec_match_pov` turns
+> Defaults **off**. It is one of the things `dodstudio_spec_match_pov` turns
 > on (with the lost gunshots and the POV crosshair): `dodstudio_spec_match_pov 1` in
 > the console, `+dodstudio_spec_match_pov 1` on the launch line, or from any `.cfg`
 > the session execs. It had a cvar of its own,

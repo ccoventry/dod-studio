@@ -71,6 +71,8 @@ WHITE_THRESHOLD = 100
 
 IN_MOVE = 8 | 16 | 512 | 1024  # forward, back, moveleft, moveright
 IN_RUN = 4096
+# Printed by the probe, but not what a crosshair run is read against.
+QUIET_FIELDS = ("weaponanim", "flags", "health", "onground", "eye", "camera_z", "origin_z", "view_ofs[2]")
 BUTTONS = {1: "attack", 2: "jump", 4: "duck", 8: "fwd", 16: "back", 32: "use", 128: "left",
            256: "right", 512: "mvleft", 1024: "mvright", 2048: "attack2", 4096: "RUN", 8192: "reload"}
 
@@ -199,7 +201,7 @@ def cmd_pov(args):
               f" keys={show('buttons', value_at('buttons', t0, '0'))}"
               f" prone={value_at('iuser3', t0, '0')} held={value_at('weaponmodel', t0, '?')}")
         for at, field, value in rows:
-            if t0 <= at < t1 and field not in ("weaponanim", "flags", "health", "onground"):
+            if t0 <= at < t1 and field not in QUIET_FIELDS:
                 print(f"           {at:8.2f} {field} -> {show(field, value)}")
 
 

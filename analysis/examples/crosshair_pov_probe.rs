@@ -15,6 +15,12 @@
 //! frame's own header it prints `buttons` (the keys held, which is what POV's
 //! sprint and crawl tests read, and which playback replays) and `onground`.
 //!
+//! It also prints where the camera was, for the in-eye camera's height
+//! (#329): `view_ofs[2]` and `usehull` as the server sent them, and from each
+//! frame `eye` (camera above the origin), `camera_z` and `origin_z`. Those
+//! three change nearly every frame while the player moves; filter them out
+//! when reading the rest.
+//!
 //! Output is tab-separated: `time  field  value`. Model fields print the
 //! model's name; everything else the number.
 //!
@@ -28,9 +34,16 @@ use dem::types::{Delta, EngineMessage, FrameData, MessageData, NetMessage};
 use std::collections::HashMap;
 
 /// Replicated for every player, so a spectator has them too.
-const ENTITY_FIELDS: [&str; 4] = ["sequence", "gaitsequence", "movetype", "weaponmodel"];
+const ENTITY_FIELDS: [&str; 5] = [
+    "sequence",
+    "gaitsequence",
+    "movetype",
+    "weaponmodel",
+    "usehull",
+];
 /// Sent to the player alone.
-const CLIENT_FIELDS: [&str; 7] = [
+const CLIENT_FIELDS: [&str; 8] = [
+    "view_ofs[2]",
     "viewmodel",
     "m_iId",
     "flags",
@@ -54,7 +67,7 @@ fn field(delta: &Delta, name: &str) -> Option<f64> {
         v.get(2).copied().unwrap_or(0),
         v.get(3).copied().unwrap_or(0),
     ]);
-    Some(if matches!(name, "fov" | "health") {
+    Some(if matches!(name, "fov" | "health" | "view_ofs[2]") {
         f64::from(f32::from_bits(raw))
     } else {
         f64::from(raw)
@@ -112,9 +125,29 @@ fn main() {
             }
             // What the player's own client had each frame, and what playback
             // hands back to the client: the keys held and whether on the ground.
+            // `eye` is where the camera really was above the player's origin
+            // (to a tenth of a unit), view bob and stance changes included.
+            let params = &bt.1.info.refparams;
+            let eye = match (params.view_origin.get(2), params.sim_org.get(2)) {
+                (Some(view), Some(origin)) => f64::from(((view - origin) * 10.0).round() / 10.0),
+                _ => 0.0,
+            };
             for (name, value) in [
                 ("buttons", f64::from(bt.1.info.usercmd.buttons)),
-                ("onground", f64::from(bt.1.info.refparams.on_ground)),
+                ("onground", f64::from(params.on_ground)),
+                ("eye", eye),
+                (
+                    "camera_z",
+                    f64::from(
+                        (params.view_origin.get(2).copied().unwrap_or(0.0) * 10.0).round() / 10.0,
+                    ),
+                ),
+                (
+                    "origin_z",
+                    f64::from(
+                        (params.sim_org.get(2).copied().unwrap_or(0.0) * 10.0).round() / 10.0,
+                    ),
+                ),
             ] {
                 if frame_last.insert(name, value) != Some(value)
                     && frame.time >= from
