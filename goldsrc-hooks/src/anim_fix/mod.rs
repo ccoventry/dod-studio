@@ -441,6 +441,7 @@ pub fn apply() {
     let no_view = || {
         crate::spectator_crosshair::set_pov_hides(None);
         crate::spectator_eye::set_prone(false);
+        crate::spectator_gun::set_lowered(false);
     };
     // In a player's eyes with no viewmodel to show: he is dead (his weapon
     // goes with him), or holds nothing. POV has no crosshair for either, so
@@ -465,6 +466,7 @@ pub fn apply() {
         });
         crate::spectator_crosshair::set_pov_hides(reason);
         crate::spectator_eye::set_prone(false);
+        crate::spectator_gun::set_lowered(false);
     };
     if !enabled() {
         stage(STAGE_DISABLED);
@@ -629,6 +631,8 @@ pub fn apply() {
         grenade::forget("spectated player changed");
         // Nor do his draw and bolt timers hide this one's crosshair.
         crosshair_rule::forget();
+        // His gun starts up, as the game's own does.
+        crate::spectator_gun::reset();
         // Snap the new viewmodel straight to the right family's idle so it
         // doesn't sit on whatever sequence the previously-spectated player
         // left it on -- and adopt it as the weapon in hand, so the change of
@@ -758,15 +762,15 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
-    crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(
-        &crosshair_rule::View {
-            body: body_label.as_deref().unwrap_or(""),
-            gait: gait_label.as_deref().unwrap_or(""),
-            movetype: spectated.curstate.movetype,
-            held_stem: model_stem(&held_name),
-        },
-        now,
-    ));
+    let pov_view = crosshair_rule::View {
+        body: body_label.as_deref().unwrap_or(""),
+        gait: gait_label.as_deref().unwrap_or(""),
+        movetype: spectated.curstate.movetype,
+        held_stem: model_stem(&held_name),
+    };
+    crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
+    // After hidden_because, which keeps the prone timer current.
+    crate::spectator_gun::set_lowered(crosshair_rule::gun_lowered(&pov_view, now));
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);

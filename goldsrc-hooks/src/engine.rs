@@ -396,11 +396,27 @@ pub struct ClEntityS {
     mouth: MouthT,
     latched: LatchedVarsT,
     lastmove: f32,
-    origin: Vec3,
+    /// Where the entity is drawn this frame. For the viewmodel,
+    /// `V_CalcRefdef` sets it and the renderer reads it next.
+    pub origin: Vec3,
     angles: Vec3,
     attachment: [Vec3; 4],
     trivial_accept: i32,
     pub model: *mut ModelSPartial,
+}
+
+/// Partial mirror of `ref_params_s` (`common/ref_params.h`) up through the
+/// fields read here: the view's vectors and the frame's time. Its layout is
+/// the same as a demo frame's `refparams` block, which `dem-patch` reads.
+#[repr(C)]
+pub struct RefParamsPartial {
+    pub vieworg: [f32; 3],
+    pub viewangles: [f32; 3],
+    pub forward: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub frametime: f32,
+    pub time: f32,
 }
 
 /// Partial mirror of `model_s` (`common/com_model.h`) -- `name` is its first
@@ -711,6 +727,9 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
+/// `V_CalcRefdef`, the slot before `HUD_AddEntity` in `cldll_func_t`
+/// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
+const SLOT_CALC_REFDEF: usize = 19;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
 const SLOT_HUD_FRAME: usize = 33;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
@@ -720,6 +739,7 @@ const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
+        && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
@@ -729,6 +749,8 @@ const _: () = assert!(
 
 type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
+/// `void V_CalcRefdef(struct ref_params_s *pparams)`.
+type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
     unsafe extern "C" fn(i32, *mut *mut c_void, *mut EngineStudioApiPartial) -> i32;
 /// `int (*pHudAddEntity)(int type, cl_entity_t *ent, const char *modelname)`.
@@ -746,6 +768,7 @@ type ClientApiFn = unsafe extern "C" fn(*mut *mut c_void);
 static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -1059,6 +1082,18 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     unsafe { real(version, ppinterface, pstudio) }
 }
 
+/// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
+/// adjust the viewmodel it just placed (`spectator_gun`).
+unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
+    let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(pparams) };
+    unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+}
+
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_sprite.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
@@ -1170,6 +1205,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_HUD_FRAME,
             tramp_hud_frame as *mut c_void,
             "HUD_Frame",
+        );
+        swap_slot(
+            table,
+            SLOT_CALC_REFDEF,
+            &REAL_CALC_REFDEF,
+            tramp_calc_refdef as *mut c_void,
+            "V_CalcRefdef",
         );
         swap_slot(
             table,
@@ -1292,6 +1334,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_Frame" => {
             REAL_HUD_FRAME.store(result, Ordering::Release);
             tramp_hud_frame as *mut c_void
+        }
+        "V_CalcRefdef" => {
+            REAL_CALC_REFDEF.store(result, Ordering::Release);
+            tramp_calc_refdef as *mut c_void
         }
         "HUD_AddEntity" => {
             REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
