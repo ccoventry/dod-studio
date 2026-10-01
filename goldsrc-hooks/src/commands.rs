@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, ex_interp, fire_sounds, hand_signals, hudelement, missing_shots,
-    overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target, texture_hires,
-    voice,
+    anim_fix, crosshair, decals, demo_seek, ex_interp, fire_sounds, hand_signals, hudelement,
+    missing_shots, overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target,
+    texture_hires, voice,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -688,6 +688,9 @@ fn status_text() -> String {
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
     }
+    if let Some(hltv_messages) = crate::hltv_messages::status_line() {
+        lines.push(hltv_messages);
+    }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
         // trace to count, so silence here would read as a broken command.
@@ -1091,6 +1094,15 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when `dodstudio_seek_skip_between` could not be a cvar.
+unsafe extern "C" fn cmd_seek_skip_between() {
+    handle_toggle(
+        demo_seek::SKIP_BETWEEN_NAME,
+        &demo_seek::SKIP_BETWEEN,
+        demo_seek::status,
+    );
+}
+
 /// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
@@ -1286,6 +1298,16 @@ pub fn install() {
     crate::demo_reload::install();
     crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
+    add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
+    add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+
+    // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
+    // so it needs no poll, and a failed registration costs only this one
+    // setting's type-ahead -- a plain toggle stands in for it.
+    match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
+        Some(cvar) => demo_seek::set_skip_between_cvar(cvar),
+        None => add_command(demo_seek::SKIP_BETWEEN_NAME, cmd_seek_skip_between),
+    }
     add_command(
         crate::spectator_follow::TARGET_NAME,
         crate::spectator_follow::target_command,
@@ -1332,6 +1354,11 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // Same again: read by the HUD_DirectorMessage trampoline itself, not
+    // polled.
+    if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
+        crate::hltv_messages::set_cvar(hltv_messages);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {

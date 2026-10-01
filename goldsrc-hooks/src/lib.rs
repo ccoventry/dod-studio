@@ -65,6 +65,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_seek`: the `dodstudio_seek_to` / `dodstudio_seek_by` commands --
+//!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
+//!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
+//!   yet; they are there for a live test.
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
@@ -84,6 +88,9 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
+//!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
+//!   instead of patching it out of the demo (issue #30).
 //! - `spectator_bars`: the `dodstudio_hide_spectator_bars` cvar -- hide the
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
@@ -114,6 +121,7 @@ mod deathmsg;
 mod debug;
 mod decals;
 mod demo_reload;
+mod demo_seek;
 mod detour;
 mod engine;
 mod events;
@@ -121,6 +129,7 @@ mod ex_interp;
 mod fire_sounds;
 mod hand_signals;
 mod hide_sprite;
+mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
 mod missing_shots;
