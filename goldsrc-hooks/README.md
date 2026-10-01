@@ -228,7 +228,9 @@ off. `dodstudio_debug_status` shows how many effects it has skipped.
 player-movement trace a previous map's collision data, and it recurses until
 the stack runs out. The guard refuses any clip node the hull can't have, and
 stops a trace that is about to run out of stack. On by default for the same
-reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off. It knows both the
+pre-Anniversary and the 25th Anniversary `hw.dll`
+(`tools/verify_hull_trace_offsets.py [--anniversary]` checks either).
 
 `src/pmove_guard.rs` stops a crash (`hw.dll+0x3a77c`, issue #546) when the
 session's first demo sends DoD's `InitHUD` in its very first packets: the
