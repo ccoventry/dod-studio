@@ -77,6 +77,19 @@ fn read_i32(base: usize, rva: usize) -> Option<i32> {
     Some(unsafe { *((base + rva) as *const i32) })
 }
 
+/// `g_iUser1`'s value for the in-eye camera (`OBS_IN_EYE`).
+const OBS_IN_EYE: i32 = 4;
+
+/// The player the in-eye camera is on, or `None` when the spectator camera is
+/// in any other mode (or not up at all).
+pub fn in_eye_target() -> Option<i32> {
+    let base = engine::client_module_base()?;
+    if read_i32(base, MODE_RVA)? != OBS_IN_EYE {
+        return None;
+    }
+    read_i32(base, TARGET_RVA).filter(|target| *target > 0)
+}
+
 /// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two
 /// pointer reads and three atomic loads when off, which is the common case.
 pub fn poll() {

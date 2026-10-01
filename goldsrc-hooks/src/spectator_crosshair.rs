@@ -101,6 +101,37 @@
 //! negative style, rather than replicating the specific out-of-range
 //! arithmetic that happens to produce it.
 //!
+//! ## Hidden when the player's own view would have none
+//!
+//! POV does not always draw a crosshair: not while sprinting, jumping, going
+//! prone, crawling, reloading, just after a weapon switch or on a ladder, nor
+//! with a sniper rifle, a knife or a machine gun that is not deployed. `anim_fix::crosshair_rule` works that out for the
+//! spectated player each frame (issue #310) and hands the answer to
+//! [`set_pov_hides`]. While it says hidden, the draw is skipped at the
+//! function's own gate, which sits in the 13 bytes just before the span:
+//!
+//! ```text
+//!     +0x2d1f0  mov eax, [fov]
+//!     +0x2d1f5  sub esp, 0x10
+//!     +0x2d1f8  test eax, eax        ; <- the gate: 13 bytes
+//!     +0x2d1fa  jle  +0x2d205        ;    fov <= 0: draw
+//!     +0x2d1fc  cmp  eax, 90
+//!     +0x2d1ff  jl   +0x2d29e        ;    0 < fov < 90 (zoomed): skip
+//!     +0x2d205  ...                  ; the span above: rect, then the draw
+//!     +0x2d29e  add esp, 0x10
+//!     +0x2d2a1  ret
+//! ```
+//!
+//! DoD already skips this crosshair while the view is zoomed. Hidden, the
+//! gate becomes `jmp +0x2d29e` and padding, the same exit the game's own skip
+//! takes; shown, the 13 stock bytes go back. It works for every style, since
+//! nothing after the gate runs.
+//!
+//! An empty rect (`0, 0, 0, 0`) does **not** hide it. That was the first
+//! attempt: the engine takes a rect with no size to mean the whole sprite,
+//! and drew all sixteen tiles of `customXHair.spr` below and right of the
+//! screen centre.
+//!
 //! ## It loses to `dodstudio_hide_crosshair`
 //!
 //! That setting stubs `CHudDoDCrossHair::Draw`'s prologue, so neither branch
@@ -108,7 +139,7 @@
 //! needed here: this patches instructions inside a function that is no longer
 //! reached. #291 asked for that ordering and this is why it holds.
 
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 use crate::crosshair;
 use crate::engine;
@@ -147,6 +178,17 @@ const CUSTOM_HANDLE: u8 = 0x74;
 /// The stock 24x24 rect, in the span's own field order.
 const STOCK_RECT: [i32; 4] = [24, 0, 48, 24];
 
+/// How far before the span the function's gate starts, and how long it is.
+const GATE: usize = 13;
+/// `test eax, eax; jle +9; cmp eax, 90; jl +0x99`: draw unless zoomed.
+const GATE_STOCK: [u8; GATE] = [
+    0x85, 0xC0, 0x7E, 0x09, 0x83, 0xF8, 0x5A, 0x0F, 0x8C, 0x99, 0x00, 0x00, 0x00,
+];
+/// `jmp +0xA1` to the same exit the zoomed skip takes, then padding.
+const GATE_SKIP: [u8; GATE] = [
+    0xE9, 0xA1, 0x00, 0x00, 0x00, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90, 0x90,
+];
+
 /// `customXHair.spr` is a 4x4 grid of 64x64 tiles. Both numbers are DoD's --
 /// see the module docs -- and the sprite measures 256x256, which is 4 x 64.
 const TILE: i32 = 64;
@@ -176,6 +218,33 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The style currently written into the code, or 0 for the stock rect. Read by
 /// [`status`] and by `dodstudio_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
+
+/// Why the player's own view would have no crosshair this frame, as
+/// `anim_fix::CrosshairHidden`'s code, or 0 while it would have one.
+static POV_HIDES: AtomicU8 = AtomicU8::new(0);
+/// Whether the gate skips the draw now.
+static SKIPPED: AtomicBool = AtomicBool::new(false);
+
+/// Says whether POV would hide the crosshair now, and why. Called every frame
+/// by `anim_fix::apply()`; the next [`set_matching`] acts on it.
+pub fn set_pov_hides(reason: Option<crate::anim_fix::CrosshairHidden>) {
+    let code = reason.map_or(0, |r| r as u8);
+    // It changes many times a minute, so the trail is behind the same switch
+    // as the body-sequence one it reads beside.
+    if POV_HIDES.swap(code, Ordering::Relaxed) != code
+        && crate::anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)
+    {
+        unsafe {
+            crate::debug::report(&format!(
+                "spectator_crosshair: POV would {}",
+                reason.map_or("draw the crosshair".to_string(), |r| format!(
+                    "hide it -- {}",
+                    r.text()
+                ))
+            ))
+        };
+    }
+}
 
 /// The rect DoD's POV path would use for `style`, as `[left, top, right,
 /// bottom]` in the order the patched span writes them.
@@ -318,6 +387,9 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
             "{STYLE_CVAR} resolved to {style}, which is not a tile"
         ));
     };
+    // Only while matching POV: with the switch off the spectator crosshair is
+    // the game's own, drawn whenever the game draws it.
+    set_gate(address, matching && POV_HIDES.load(Ordering::Relaxed) != 0)?;
 
     // Compared by bytes, not by `style` against `read_state`'s canonical
     // value: every negative style writes the identical whole-sheet rect (see
@@ -335,6 +407,33 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     }
     ACTIVE_STYLE.store(style, Ordering::Release);
     Ok(true)
+}
+
+/// What the gate should hold: the skip while POV would have no crosshair,
+/// the game's own test otherwise.
+fn gate_for(skip: bool) -> &'static [u8; GATE] {
+    if skip { &GATE_SKIP } else { &GATE_STOCK }
+}
+
+/// Writes the gate just before the span at `span`, if it is not already what
+/// `skip` asks for. Quiet: this changes many times a minute.
+fn set_gate(span: usize, skip: bool) -> Result<(), String> {
+    let at = span - GATE;
+    // Safety: the span is inside the function, whose first 8 bytes and this
+    // gate precede it; all of it is mapped code.
+    let present = unsafe { std::slice::from_raw_parts(at as *const u8, GATE) };
+    if present != GATE_STOCK && present != GATE_SKIP {
+        return Err(
+            "the spectator crosshair's zoom test is neither DoD's nor this module's skip -- something else has patched it"
+                .to_string(),
+        );
+    }
+    let want = gate_for(skip);
+    if present != want && !unsafe { crate::patch::write_code_bytes(at, want) } {
+        return Err("could not make the spectator crosshair's zoom test writable".to_string());
+    }
+    SKIPPED.store(skip, Ordering::Release);
+    Ok(())
 }
 
 /// Whether the spectator crosshair is currently drawn from `customXHair.spr`.
@@ -362,12 +461,17 @@ pub fn status() -> String {
         ),
     };
     if crosshair::hidden() {
-        format!(
+        return format!(
             "{text} (moot right now -- {} is 1, so nothing is drawn)",
             crosshair::NAME
-        )
-    } else {
-        text
+        );
+    }
+    match crate::anim_fix::CrosshairHidden::from_code(POV_HIDES.load(Ordering::Relaxed)) {
+        Some(reason) if SKIPPED.load(Ordering::Relaxed) => format!(
+            "{text}; hidden right now, as the player's own view would be: {}",
+            reason.text()
+        ),
+        _ => text,
     }
 }
 
@@ -522,6 +626,33 @@ mod tests {
             let written = wanted(&stock, style).expect("a writable state");
             assert_eq!(read_state(&written), Some(WHOLE_SHEET), "style {style}");
         }
+    }
+
+    /// The skip has to leave by the game's own exit: `jmp rel32` from the
+    /// gate's first byte to `add esp, 0x10; ret`, which is where the stock
+    /// `jl` at the gate's end also goes.
+    #[test]
+    fn the_skip_jumps_where_the_zoomed_test_already_does() {
+        // Stock: `jl rel32` is the last 6 bytes, so it is relative to the
+        // gate's end.
+        assert_eq!(&GATE_STOCK[7..9], &[0x0F, 0x8C]);
+        let stock_rel = i32::from_le_bytes(GATE_STOCK[9..13].try_into().unwrap());
+        let stock_target = GATE as i32 + stock_rel;
+        // Skip: `jmp rel32` is the first 5 bytes.
+        assert_eq!(GATE_SKIP[0], 0xE9);
+        let skip_rel = i32::from_le_bytes(GATE_SKIP[1..5].try_into().unwrap());
+        assert_eq!(5 + skip_rel, stock_target);
+        assert!(GATE_SKIP[5..].iter().all(|byte| *byte == 0x90));
+        // And the stock `jle` lands exactly on the span, past the gate.
+        assert_eq!(&GATE_STOCK[2..4], &[0x7E, 0x09]);
+        assert_eq!(4 + 9, GATE);
+    }
+
+    #[test]
+    fn the_gate_is_the_skip_only_while_pov_would_hide() {
+        assert_eq!(gate_for(true), &GATE_SKIP);
+        assert_eq!(gate_for(false), &GATE_STOCK);
+        assert_ne!(GATE_SKIP, GATE_STOCK);
     }
 
     /// Only the five fields move. Anything else changing would mean rewriting
