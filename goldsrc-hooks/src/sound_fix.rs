@@ -4,16 +4,20 @@
 //!
 //! ## What the problem actually is
 //!
-//! Not missing sounds. Comparing an HLTV demo against a POV demo of the same
-//! match half (`analysis/examples/hltv_sound_probe.rs`) shows the HLTV demo
-//! carrying *more* weapon-fire events than the POV one -- 1391 vs 1248, with
-//! every weapon represented. Every shot is already being requested, so there
-//! is nothing to synthesise and no event to re-fire.
+//! Two things, and this module handles the first.
 //!
-//! What actually happens is ordinary GoldSrc distance falloff. Shots arrive at
-//! `ATTN_NORM` (0.8), which goes inaudible at roughly 1250 units, and DoD's
-//! maps are far larger than that -- so gunfire across the map is requested,
-//! spatialised, and then attenuated to silence.
+//! Ordinary GoldSrc distance falloff. Shots arrive at `ATTN_NORM` (0.8), which
+//! goes inaudible at roughly 1250 units, and DoD's maps are far larger than
+//! that -- so gunfire across the map is requested, spatialised, and then
+//! attenuated to silence.
+//!
+//! And missing fire events: an HLTV demo has none for about 60% of the rounds
+//! fired. This comment used to say otherwise ("every shot is already being
+//! requested"), from an HLTV demo carrying more fire events than a POV demo
+//! of the same half, 1391 against 1248 (`analysis/examples/hltv_sound_probe.rs`).
+//! A POV recording only holds what one player could hear, so that comparison
+//! said nothing about what the HLTV one lost. `missing_shots.rs` puts those
+//! rounds back; see `docs/goldsrc_hltv_missing_gunshots.md`.
 //!
 //! ## What this does
 //!
@@ -138,6 +142,9 @@ unsafe extern "C" fn hook_ev_play_sound(
         // `anim_fix::on_weapon_fired`. Independent of this fix's own on/off
         // state; the two are toggled separately.
         crate::anim_fix::on_weapon_fired(ent);
+        // And the one signal missing_shots needs to tell a round that came
+        // with its fire event from one that lost it.
+        crate::missing_shots::on_shot_sound(ent);
     }
     let spectating = engine::engfuncs()
         .map(|e| unsafe { (e.is_spectate_only)() } != 0)
