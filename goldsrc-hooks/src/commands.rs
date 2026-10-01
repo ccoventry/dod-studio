@@ -40,9 +40,10 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `dodstudio_spec_match_pov` drives three modules at once: the viewmodel's
-//! animations, the gunshots an HLTV demo lost, and the spectator crosshair.
-//! Each used to have a cvar of its own
+//! `dodstudio_spec_match_pov` drives four modules at once: the viewmodel's
+//! animations, the gunshots an HLTV demo lost, the spectator crosshair, and
+//! the in-eye camera's height for a prone player. The first three used to
+//! have a cvar of their own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
 //! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
 //! They all answer one question -- should a spectated first-person view look
@@ -64,7 +65,8 @@ use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
     anim_fix, crosshair, decals, ex_interp, fire_sounds, hand_signals, hudelement, missing_shots,
-    overview_map, scoreboard, spectator_crosshair, spectator_target, texture_hires, voice,
+    overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target, texture_hires,
+    voice,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -202,6 +204,7 @@ static SCOREBOARD_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static VOICE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static SPECTATOR_CROSSHAIR_COMPLAINED: AtomicBool = AtomicBool::new(false);
+static SPECTATOR_EYE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static HUDELEMENT_COMPLAINED: AtomicBool = AtomicBool::new(false);
 static EX_INTERP_COMPLAINED: AtomicI32 = AtomicI32::new(0);
 static OVERVIEWMAP_COMPLAINED: AtomicBool = AtomicBool::new(false);
@@ -399,6 +402,14 @@ fn poll_hudelements() {
     }
 }
 
+fn describe_spectator_eye(on: bool) -> &'static str {
+    if on {
+        "on: the in-eye camera drops to the ground for a prone player"
+    } else {
+        "off: the in-eye camera uses the game's own heights"
+    }
+}
+
 fn describe_spectator_crosshair(on: bool) -> &'static str {
     if on {
         "on: the spectator crosshair follows cl_xhair_style"
@@ -462,6 +473,13 @@ pub fn poll() {
             &SPECTATOR_CROSSHAIR_COMPLAINED,
             spectator_crosshair::set_matching,
             describe_spectator_crosshair,
+        );
+        poll_code_patch(
+            SPEC_MATCH_POV_NAME,
+            &CVAR_SPEC_MATCH_POV,
+            &SPECTATOR_EYE_COMPLAINED,
+            spectator_eye::set_matching,
+            describe_spectator_eye,
         );
         poll_hand_signals();
         poll_ex_interp();
@@ -568,7 +586,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots and the spectator crosshair, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair and the prone eye height, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -587,6 +605,7 @@ fn status_text() -> String {
             "spectator crosshair: {}",
             spectator_crosshair::status()
         ));
+        lines.push(format!("spectator eye height: {}", spectator_eye::status()));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
@@ -756,7 +775,7 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
 }
 
 /// `dodstudio_spec_match_pov` as a plain command. With no cvar for `poll` to copy
-/// from, the handler sets all three parts itself.
+/// from, the handler sets every part itself.
 unsafe extern "C" fn cmd_spec_match_pov() {
     handle_level(SPEC_MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
     let on = anim_fix::enabled();
@@ -764,6 +783,11 @@ unsafe extern "C" fn cmd_spec_match_pov() {
     if let Err(why) = spectator_crosshair::set_matching(on) {
         console_print(&format!(
             "{SPEC_MATCH_POV_NAME}: the spectator crosshair was not changed -- {why}\n"
+        ));
+    }
+    if let Err(why) = spectator_eye::set_matching(on) {
+        console_print(&format!(
+            "{SPEC_MATCH_POV_NAME}: the in-eye camera's height was not changed -- {why}\n"
         ));
     }
 }

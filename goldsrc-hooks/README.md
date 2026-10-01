@@ -10,7 +10,7 @@ instead of the list below.
 **Match POV** (`dodstudio_spec_match_pov 1`, off by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own
-recording. Three things come on together, and anything else of that kind
+recording. Four things come on together, and anything else of that kind
 joins this switch rather than adding a command:
 
 - **Viewmodel animations**: the first-person weapon fires, reloads and draws,
@@ -30,6 +30,9 @@ joins this switch rather than adding a command:
   rifle, holding a knife, spade or sniper rifle, or a machine gun that is not
   deployed. Loses to `dodstudio_hide_crosshair`, which stubs the whole
   function. See `docs/goldsrc_hud_suppression.md` section 6.
+- **Prone eye height**: the camera drops to the ground when the spectated
+  player goes prone. The game's in-eye camera has no prone case and leaves it
+  at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
 
 Plus sixteen control surfaces, always available and doing nothing until used:
 

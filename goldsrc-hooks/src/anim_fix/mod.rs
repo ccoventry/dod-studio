@@ -438,7 +438,10 @@ pub fn apply() {
     // is no POV to say the crosshair should be hidden. The one early return
     // that leaves the last answer standing is the viewmodel mismatch below,
     // which is a flicker inside such a view, not the end of one.
-    let no_view = || crate::spectator_crosshair::set_pov_hides(None);
+    let no_view = || {
+        crate::spectator_crosshair::set_pov_hides(None);
+        crate::spectator_eye::set_prone(false);
+    };
     // In a player's eyes with no viewmodel to show: he is dead (his weapon
     // goes with him), or holds nothing. POV has no crosshair for either, so
     // this hides it rather than handing the view back to the stock draw.
@@ -461,6 +464,7 @@ pub fn apply() {
             }
         });
         crate::spectator_crosshair::set_pov_hides(reason);
+        crate::spectator_eye::set_prone(false);
     };
     if !enabled() {
         stage(STAGE_DISABLED);
@@ -749,6 +753,11 @@ pub fn apply() {
         .filter(|held| !held.is_null())
         .map(|held| unsafe { (*held).name_str() }.into_owned())
         .unwrap_or_default();
+    crate::spectator_eye::set_prone(crate::spectator_eye::is_prone(
+        spectated.curstate.usehull,
+        body_label.as_deref().unwrap_or(""),
+        gait_label.as_deref().unwrap_or(""),
+    ));
     crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(
         &crosshair_rule::View {
             body: body_label.as_deref().unwrap_or(""),

@@ -13,7 +13,7 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `dodstudio_spec_match_pov`, one cvar over three modules, for making a
+//! - `dodstudio_spec_match_pov`, one cvar over four modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -26,6 +26,8 @@
 //!   - `spectator_crosshair`: draw the spectator crosshair from the same
 //!     sprite and tile a player's own `cl_xhair_style` picks, since the two
 //!     are drawn by different code paths and do not otherwise share a look.
+//!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
+//!     player, where the game leaves it at crouch height.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
 //! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
@@ -131,6 +133,7 @@ mod scan;
 mod scoreboard;
 mod spectator_bars;
 mod spectator_crosshair;
+mod spectator_eye;
 mod spectator_target;
 mod sprite_blend;
 mod tempent_fix;
@@ -172,7 +175,7 @@ fn env_level(name: &str, default: i32) -> i32 {
 /// Turn it on per session with `dodstudio_spec_match_pov 1`, or set
 /// `GOLDSRC_HOOKS_SPEC_MATCH_POV` to have it start on. The value lands in
 /// `anim_fix::LEVEL`, which `commands.rs` hands the engine as the cvar's
-/// default, and the cvar then drives all three parts.
+/// default, and the cvar then drives every part.
 const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 
 /// Whether to install `texture_hires` at startup: see
