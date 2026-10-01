@@ -67,6 +67,7 @@
 //! the engine interfaces this crate captures itself.
 
 mod classify;
+mod crosshair_rule;
 mod grenade;
 mod sequences;
 mod trace;
@@ -78,6 +79,7 @@ use classify::{
     deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
     third_person_stem,
 };
+pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
 use sequences::{animation_lookup_any, animation_lookup_sequence};
 pub use trace::{LOG_HELD_MODELS, status};
@@ -418,9 +420,12 @@ pub fn on_weapon_fired(entity_index: i32) {
     if viewmodel.is_null() {
         return;
     }
-    if !claim_fire(engine::client_time()) {
+    let now = engine::client_time();
+    if !claim_fire(now) {
         return;
     }
+    // Safety: non-null, and the pointer `apply()` published this frame.
+    crosshair_rule::note_shot(now, model_stem(&unsafe { (*viewmodel).name_str() }));
 
     let state = i32_to_deploy_state(CURRENT_DEPLOY_STATE.load(Ordering::Relaxed));
     let sequence = animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel);
@@ -429,16 +434,24 @@ pub fn on_weapon_fired(entity_index: i32) {
 
 /// Runs once per client frame (see `engine::set_per_frame_callback`).
 pub fn apply() {
+    // Until a frame gets as far as a spectated player in first person, there
+    // is no POV to say the crosshair should be hidden. The one early return
+    // that leaves the last answer standing is the viewmodel mismatch below,
+    // which is a flicker inside such a view, not the end of one.
+    let no_view = || crate::spectator_crosshair::set_pov_hides(None);
     if !enabled() {
         stage(STAGE_DISABLED);
+        no_view();
         return;
     }
     let Some(engfuncs) = engine::engfuncs() else {
         stage(STAGE_NO_ENGFUNCS);
+        no_view();
         return;
     };
     if unsafe { (engfuncs.is_spectate_only)() } == 0 {
         stage(STAGE_NOT_SPECTATING);
+        no_view();
         return;
     }
 
@@ -450,6 +463,7 @@ pub fn apply() {
             std::ptr::null_mut::<u8>(),
             -1,
         );
+        no_view();
         return;
     }
     let viewmodel_model = unsafe { (*viewmodel_entity).model };
@@ -460,6 +474,7 @@ pub fn apply() {
             viewmodel_model,
             unsafe { (*viewmodel_entity).index },
         );
+        no_view();
         return;
     }
     let viewmodel_name = unsafe { (*viewmodel_model).name_str() }.into_owned();
@@ -478,6 +493,7 @@ pub fn apply() {
             viewmodel_model,
             viewmodel_index,
         );
+        no_view();
         return;
     }
     let spectated = unsafe { &*spectated };
@@ -584,6 +600,8 @@ pub fn apply() {
     if switched_players {
         // A throw the previous player wound up must not empty this one's hand.
         grenade::forget("spectated player changed");
+        // Nor do his draw and bolt timers hide this one's crosshair.
+        crosshair_rule::forget();
         // Snap the new viewmodel straight to the right family's idle so it
         // doesn't sit on whatever sequence the previously-spectated player
         // left it on -- and adopt it as the weapon in hand, so the change of
@@ -634,6 +652,7 @@ pub fn apply() {
                         if is_grenade_viewmodel(&viewmodel_name) {
                             grenade::wind_up(now, state, viewmodel_model);
                         } else {
+                            crosshair_rule::note_shot(now, model_stem(&viewmodel_name));
                             play_viewmodel_animation(
                                 animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
                                 "spectated player fired",
@@ -674,6 +693,8 @@ pub fn apply() {
                 viewmodel_model,
                 is_grenade_viewmodel(&viewmodel_name),
             );
+            // A grenade has its own deploy, which starts no crosshair timer.
+            crosshair_rule::note_deploy(now, !is_grenade_viewmodel(&viewmodel_name));
             if !caught {
                 play_viewmodel_animation(
                     animation_lookup_sequence("draw", state, viewmodel_model),
@@ -690,6 +711,30 @@ pub fn apply() {
     if is_grenade_viewmodel(&viewmodel_name) {
         grenade::each_frame(now, state, viewmodel_model, &viewmodel_name, spectated);
     }
+
+    // Whether the player's own view would have a crosshair right now.
+    let gait_label = if spectated.model.is_null() {
+        None
+    } else {
+        sequence_label(
+            spectated.model,
+            spectated.curstate.gaitsequence.max(0) as usize,
+        )
+    };
+    let held_name = engine::engine_studio()
+        .map(|studio| unsafe { (studio.get_model_by_index)(spectated.curstate.weaponmodel) })
+        .filter(|held| !held.is_null())
+        .map(|held| unsafe { (*held).name_str() }.into_owned())
+        .unwrap_or_default();
+    crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(
+        &crosshair_rule::View {
+            body: body_label.as_deref().unwrap_or(""),
+            gait: gait_label.as_deref().unwrap_or(""),
+            movetype: spectated.curstate.movetype,
+            held_stem: model_stem(&held_name),
+        },
+        now,
+    ));
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);

@@ -101,6 +101,17 @@
 //! negative style, rather than replicating the specific out-of-range
 //! arithmetic that happens to produce it.
 //!
+//! ## Hidden when the player's own view would have none
+//!
+//! POV does not always draw a crosshair: not while sprinting, in the air,
+//! reloading, for half a second after a weapon comes up, with a sniper rifle
+//! or a knife, and so on. `anim_fix::crosshair_rule` works that out for the
+//! spectated player each frame (issue #310) and hands the answer to
+//! [`set_pov_hides`]. While it says hidden, the four rect immediates are
+//! written as an empty rect, `0, 0, 0, 0`, with whichever sprite handle the
+//! style wants: the draw call still runs and blits nothing. It works for
+//! style 0 too, since the stock sprite goes through the same rect.
+//!
 //! ## It loses to `dodstudio_hide_crosshair`
 //!
 //! That setting stubs `CHudDoDCrossHair::Draw`'s prologue, so neither branch
@@ -108,7 +119,7 @@
 //! needed here: this patches instructions inside a function that is no longer
 //! reached. #291 asked for that ordering and this is why it holds.
 
-use std::sync::atomic::{AtomicI32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 use crate::crosshair;
 use crate::engine;
@@ -146,6 +157,8 @@ const CUSTOM_HANDLE: u8 = 0x74;
 
 /// The stock 24x24 rect, in the span's own field order.
 const STOCK_RECT: [i32; 4] = [24, 0, 48, 24];
+/// Nothing: what the rect is while POV would have no crosshair.
+const EMPTY_RECT: [i32; 4] = [0, 0, 0, 0];
 
 /// `customXHair.spr` is a 4x4 grid of 64x64 tiles. Both numbers are DoD's --
 /// see the module docs -- and the sprite measures 256x256, which is 4 x 64.
@@ -176,6 +189,33 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 /// The style currently written into the code, or 0 for the stock rect. Read by
 /// [`status`] and by `dodstudio_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
+
+/// Why the player's own view would have no crosshair this frame, as
+/// `anim_fix::CrosshairHidden`'s code, or 0 while it would have one.
+static POV_HIDES: AtomicU8 = AtomicU8::new(0);
+/// Whether the empty rect is what the code holds now.
+static EMPTIED: AtomicBool = AtomicBool::new(false);
+
+/// Says whether POV would hide the crosshair now, and why. Called every frame
+/// by `anim_fix::apply()`; the next [`set_matching`] acts on it.
+pub fn set_pov_hides(reason: Option<crate::anim_fix::CrosshairHidden>) {
+    let code = reason.map_or(0, |r| r as u8);
+    // It changes many times a minute, so the trail is behind the same switch
+    // as the body-sequence one it reads beside.
+    if POV_HIDES.swap(code, Ordering::Relaxed) != code
+        && crate::anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)
+    {
+        unsafe {
+            crate::debug::report(&format!(
+                "spectator_crosshair: POV would {}",
+                reason.map_or("draw the crosshair".to_string(), |r| format!(
+                    "hide it -- {}",
+                    r.text()
+                ))
+            ))
+        };
+    }
+}
 
 /// The rect DoD's POV path would use for `style`, as `[left, top, right,
 /// bottom]` in the order the patched span writes them.
@@ -245,6 +285,10 @@ fn read_state(present: &[u8]) -> Option<i32> {
         i32::from_le_bytes(present[BOTTOM_AT..BOTTOM_AT + 4].try_into().ok()?),
     ];
     match present[HANDLE_AT] {
+        // The empty rect is this module's too, with either handle. Which
+        // style it stands in for is not in the bytes; 0 is as good as any,
+        // since the caller only asks whether the span is recognised.
+        STOCK_HANDLE | CUSTOM_HANDLE if rect == EMPTY_RECT => Some(0),
         STOCK_HANDLE if rect == STOCK_RECT => Some(0),
         CUSTOM_HANDLE if rect == WHOLE_SHEET_RECT => Some(WHOLE_SHEET),
         CUSTOM_HANDLE => (1..=MAX_STYLE).find(|style| tile_rect(*style) == Some(rect)),
@@ -255,11 +299,12 @@ fn read_state(present: &[u8]) -> Option<i32> {
 /// The 57 bytes the span should hold for `style` (0 meaning the stock rect),
 /// built by editing what is there rather than from a literal, so nothing
 /// between the five patched fields is ever rewritten.
-fn wanted(present: &[u8], style: i32) -> Option<Vec<u8>> {
+fn wanted(present: &[u8], style: i32, emptied: bool) -> Option<Vec<u8>> {
     let (handle, rect) = match style {
         0 => (STOCK_HANDLE, STOCK_RECT),
         _ => (CUSTOM_HANDLE, tile_rect(style)?),
     };
+    let rect = if emptied { EMPTY_RECT } else { rect };
     let mut want = present.to_vec();
     for (at, value) in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT].iter().zip(rect) {
         want[*at..*at + 4].copy_from_slice(&value.to_le_bytes());
@@ -313,7 +358,10 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     }
 
     let style = if matching { requested_style() } else { 0 };
-    let Some(want) = wanted(present, style) else {
+    // Only while matching POV: with the switch off the spectator crosshair is
+    // the game's own, drawn whenever the game draws it.
+    let emptied = matching && POV_HIDES.load(Ordering::Relaxed) != 0;
+    let Some(want) = wanted(present, style, emptied) else {
         return Err(format!(
             "{STYLE_CVAR} resolved to {style}, which is not a tile"
         ));
@@ -325,6 +373,7 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
     // count as a change needing a write, even though the two numbers differ.
     if present == want.as_slice() {
         ACTIVE_STYLE.store(style, Ordering::Release);
+        EMPTIED.store(emptied, Ordering::Release);
         return Ok(false);
     }
 
@@ -334,7 +383,10 @@ pub fn set_matching(matching: bool) -> Result<bool, String> {
         return Err("could not make the spectator crosshair rect writable".to_string());
     }
     ACTIVE_STYLE.store(style, Ordering::Release);
-    Ok(true)
+    // Hiding and showing happen many times a minute; only a change of style
+    // is worth the caller's log line.
+    let style_changed = EMPTIED.swap(emptied, Ordering::Release) == emptied;
+    Ok(style_changed)
 }
 
 /// Whether the spectator crosshair is currently drawn from `customXHair.spr`.
@@ -362,12 +414,17 @@ pub fn status() -> String {
         ),
     };
     if crosshair::hidden() {
-        format!(
+        return format!(
             "{text} (moot right now -- {} is 1, so nothing is drawn)",
             crosshair::NAME
-        )
-    } else {
-        text
+        );
+    }
+    match crate::anim_fix::CrosshairHidden::from_code(POV_HIDES.load(Ordering::Relaxed)) {
+        Some(reason) if EMPTIED.load(Ordering::Relaxed) => format!(
+            "{text}; hidden right now, as the player's own view would be: {}",
+            reason.text()
+        ),
+        _ => text,
     }
 }
 
@@ -504,7 +561,7 @@ mod tests {
         assert_eq!(read_state(&stock), Some(0), "the shipped bytes are style 0");
 
         for style in 0..=MAX_STYLE {
-            let written = wanted(&stock, style).expect("a writable state");
+            let written = wanted(&stock, style, false).expect("a writable state");
             assert_eq!(written.len(), SPAN);
             assert_eq!(read_state(&written), Some(style), "style {style}");
         }
@@ -519,8 +576,42 @@ mod tests {
     fn negative_styles_all_read_back_as_whole_sheet() {
         let stock = stock_span();
         for style in [-1, -2, -16, -1000] {
-            let written = wanted(&stock, style).expect("a writable state");
+            let written = wanted(&stock, style, false).expect("a writable state");
             assert_eq!(read_state(&written), Some(WHOLE_SHEET), "style {style}");
+        }
+    }
+
+    /// While POV would have no crosshair the rect is emptied, with either
+    /// sprite. Those bytes have to be recognised as this module's own, or the
+    /// next frame would refuse to put the crosshair back.
+    #[test]
+    fn an_emptied_rect_is_recognised_and_can_be_filled_again() {
+        let stock = stock_span();
+        for style in [0, 1, 9, MAX_STYLE, -1] {
+            let emptied = wanted(&stock, style, true).expect("a writable state");
+            assert!(read_state(&emptied).is_some(), "style {style}, emptied");
+            for at in [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT] {
+                assert_eq!(&emptied[at..at + 4], &[0, 0, 0, 0], "style {style}");
+            }
+            // The handle still follows the style, so only the rect has to
+            // come back.
+            let handle = if style == 0 {
+                STOCK_HANDLE
+            } else {
+                CUSTOM_HANDLE
+            };
+            assert_eq!(emptied[HANDLE_AT], handle);
+
+            let shown = wanted(&emptied, style, false).expect("a writable state");
+            assert_eq!(
+                shown,
+                wanted(&stock, style, false).unwrap(),
+                "style {style}"
+            );
+        }
+        // No tile is the empty rect, so the two cannot be confused.
+        for style in 1..=MAX_STYLE {
+            assert_ne!(tile_rect(style), Some(EMPTY_RECT));
         }
     }
 
@@ -529,7 +620,7 @@ mod tests {
     #[test]
     fn nothing_outside_the_five_fields_is_touched() {
         let stock = stock_span();
-        let written = wanted(&stock, 9).unwrap();
+        let written = wanted(&stock, 9, false).unwrap();
         let patched: Vec<usize> = [LEFT_AT, TOP_AT, RIGHT_AT, BOTTOM_AT]
             .iter()
             .flat_map(|at| *at..*at + 4)
