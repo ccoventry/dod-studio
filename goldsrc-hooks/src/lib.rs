@@ -41,6 +41,9 @@
 //!   suppress specific map-placed `env_sprite` entities by model path, an
 //!   allow-list rather than a blanket toggle. Full design write-up in the
 //!   module doc itself (issue #315).
+//! - `spectator_follow`: `dodstudio_spec_lock`, which keeps the camera on a
+//!   player through his death in an HLTV demo, and `dodstudio_spec_target`,
+//!   which puts it on a player by number (issue #206).
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -134,6 +137,7 @@ mod scoreboard;
 mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_eye;
+mod spectator_follow;
 mod spectator_target;
 mod sprite_blend;
 mod tempent_fix;
