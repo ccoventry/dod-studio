@@ -97,10 +97,7 @@ fn is_hand_signal(model: *mut engine::ModelSPartial, sequence: i32) -> Option<bo
     if sequence < 0 {
         return Some(false);
     }
-    let labels = crate::anim_fix::sequence_labels(model);
-    labels
-        .get(sequence as usize)
-        .map(|label| label.starts_with(PREFIX))
+    crate::anim_fix::sequence_label(model, sequence as usize).map(|label| label.starts_with(PREFIX))
 }
 
 /// Replaces every visible player's hand-signal animation with the last ordinary
@@ -139,7 +136,7 @@ pub fn apply() -> usize {
 
         let sequence = entity.curstate.sequence;
         // Safety: `get_model_by_index` returns null for an index the engine has
-        // not precached, which `sequence_labels` handles.
+        // not precached, which `sequence_label` handles.
         let model = unsafe { (studio.get_model_by_index)(entity.curstate.modelindex) };
         match is_hand_signal(model, sequence) {
             Some(true) => {}
