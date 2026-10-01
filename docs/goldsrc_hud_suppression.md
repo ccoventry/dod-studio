@@ -209,7 +209,13 @@ For §6 the same loop earns its keep twice over: polling is also how it notices
 
 ---
 
-## 5. Not done: the spectator bars
+## 5. The spectator bars
+
+> **Done since (2026-09-30):** `dodstudio_hide_spectator_bars` and
+> `dodstudio_hide_spectator_gui`, by the route the last paragraph of this
+> section guessed at, one level down: vgui2's own `IPanel::PaintTraverse`
+> rather than the panel's vtable. See `docs/goldsrc_spectator_bars.md`. The
+> rest of this section is the state before that.
 
 `mirv_disable_specmenu` is HLAE's equivalent, and it fails on DoD with
 `"Error: Hook not installed."` — its per-game

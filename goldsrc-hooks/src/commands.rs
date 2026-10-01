@@ -524,6 +524,7 @@ pub fn poll() {
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
+    crate::spectator_bars::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -679,6 +680,9 @@ fn status_text() -> String {
     // the permanent, noisy default state for everyone who hasn't opted in.
     if texture_hires::has_observed() {
         lines.push(texture_hires::status());
+    }
+    if let Some(bars) = crate::spectator_bars::status_line() {
+        lines.push(bars);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1385,6 +1389,13 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // The same: two switches of their own, both off until asked for.
+    if let (Some(bars), Some(gui)) = (
+        register(crate::spectator_bars::BARS_NAME, "0"),
+        register(crate::spectator_bars::GUI_NAME, "0"),
+    ) {
+        crate::spectator_bars::set_cvars(bars, gui);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,

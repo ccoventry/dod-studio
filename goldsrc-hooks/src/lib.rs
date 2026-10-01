@@ -73,15 +73,14 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `spectator_bars`: the `dodstudio_hide_spectator_bars` and
+//!   `dodstudio_hide_spectator_gui` cvars -- hide the two dark bands a
+//!   spectator sees, or the whole spectator panel, on screen and without a
+//!   capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
+//!   see `docs/goldsrc_spectator_bars.md`.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
-//!
-//! `spectator_bars.rs` is R&D, not wired in here: two live-tested attempts
-//! at a `dodstudio_hide_spectator_bars` cvar (a `SetVisible` vtable redirect,
-//! then tracing what it itself calls) both turned out to be dead ends --
-//! see `docs/goldsrc_spectator_bars.md` for what's been ruled out and what
-//! the real next step is (a live memory watch, not more static analysis).
 //!
 //! See each module's docs for the full R&D reasoning.
 //!
@@ -125,6 +124,7 @@ mod remote;
 mod scan;
 mod scoreboard;
 mod sound_fix;
+mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_target;
 mod sprite_blend;
