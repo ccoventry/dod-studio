@@ -521,6 +521,7 @@ pub fn poll() {
     crate::world_shaders::poll();
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
+    crate::spectator_follow::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -678,6 +679,9 @@ fn status_text() -> String {
     }
     if let Some(bars) = crate::spectator_bars::status_line() {
         lines.push(bars);
+    }
+    if let Some(lock) = crate::spectator_follow::status_line() {
+        lines.push(lock);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1280,6 +1284,10 @@ pub fn install() {
     crate::demo_reload::install();
     crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
+    add_command(
+        crate::spectator_follow::TARGET_NAME,
+        crate::spectator_follow::target_command,
+    );
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
     let spec_match_pov = register(SPEC_MATCH_POV_NAME, &anim_fix::level().to_string());
@@ -1326,6 +1334,9 @@ pub fn install() {
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
         crate::spectator_bars::set_cvar(bars);
+    }
+    if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
+        crate::spectator_follow::set_cvar(lock);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
@@ -1474,6 +1485,8 @@ mod tests {
             TEXTURE_HIRES_LOG_NAME,
             crate::spectator_bars::NAME,
             crate::world_shaders::NAME,
+            crate::spectator_follow::LOCK_NAME,
+            crate::spectator_follow::TARGET_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

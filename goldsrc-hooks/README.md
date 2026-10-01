@@ -34,7 +34,7 @@ joins this switch rather than adding a command:
   player goes prone. The game's in-eye camera has no prone case and leaves it
   at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
 
-Plus sixteen control surfaces, always available and doing nothing until used:
+Plus eighteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -68,6 +68,12 @@ Plus sixteen control surfaces, always available and doing nothing until used:
 - **Crosshair** (`dodstudio_hide_crosshair 1`): hides the crosshair and makes it stay
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
+- **Spectator lock** (`dodstudio_spec_lock 1`): in an HLTV demo the camera
+  stays on the player being watched when he dies; the game otherwise moves to
+  the next player four seconds later. One byte in `client.dll`'s own death
+  switch. See `docs/goldsrc_spectator_follow.md`.
+- **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
+  a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
   bands across the top and bottom of the screen while spectating, and the
   text and menu row on them, on screen and with no capture running, which
