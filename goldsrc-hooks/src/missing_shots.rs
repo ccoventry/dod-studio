@@ -35,13 +35,13 @@
 //!   forwards the call. No address is hardcoded.
 //! - **Which weapon.** The third-person model the player holds
 //!   (`curstate.weaponmodel`), through [`WEAPONS`].
-//! - **Not twice.** `sound_fix`'s `EV_PlaySound` hook reports every real
+//! - **Not twice.** `fire_sounds`' `EV_PlaySound` hook reports every real
 //!   `_shoot` sample with its entity. A restart waits one frame for its own
 //!   event; one that arrives, either side of it, cancels the stand-in.
 //!
 //! Only while an HLTV demo plays (`IsSpectateOnly()`), and only with
-//! `dodstudio_hltv_play_missing_gunshots 1`. Off by default. `2` also logs
-//! every round it plays, not only the first twenty.
+//! `dodstudio_match_pov 1`. Off by default. `2` also logs every round it
+//! plays, not only the first twenty.
 //!
 //! ## What it cannot do
 //!
@@ -64,9 +64,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, AtomicU64, 
 use crate::engine::{
     self, ClEngineFuncsPartial, ClEntityS, CvarSPartial, EventHandlerFn, ModelSPartial,
 };
-use crate::names::console_name;
 
-pub const NAME: &str = console_name!("hltv_play_missing_gunshots");
+/// The cvar this follows, for its own messages. Registered in `commands.rs`.
+const NAME: &str = crate::names::MATCH_POV;
 
 /// `event_args_t` (`common/event_args.h`), what a fire handler is passed.
 #[repr(C)]
@@ -188,9 +188,17 @@ const TRACKING_GAP_SECONDS: f64 = 0.5;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
-/// `dodstudio_hltv_play_missing_gunshots 2`: a log line for every round, not
-/// only the first few. For checking a session against the offline probe.
+/// `dodstudio_match_pov 2`: a log line for every round, not only the first
+/// few. For checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
+/// What to do when there is no cvar to read: the fallback command's value.
+static WITHOUT_A_CVAR: AtomicBool = AtomicBool::new(false);
+
+/// Sets the switch on the path where cvar registration failed and the
+/// command handler holds the value instead.
+pub fn set_without_a_cvar(wanted: bool) {
+    WITHOUT_A_CVAR.store(wanted, Ordering::Relaxed);
+}
 
 // What each player's body was last seen doing.
 static SEEN: [AtomicBool; SLOTS] = [const { AtomicBool::new(false) }; SLOTS];
@@ -361,7 +369,7 @@ pub unsafe fn noting_event_handlers<R>(
 }
 
 /// A real `_shoot` sample was just played for `entity`. Called from
-/// `sound_fix`'s `EV_PlaySound` hook, on the engine thread.
+/// `fire_sounds`' `EV_PlaySound` hook, on the engine thread.
 pub fn on_shot_sound(entity: i32) {
     if STANDING_IN.load(Ordering::Relaxed) || !WANTED.load(Ordering::Relaxed) {
         return;
@@ -403,17 +411,22 @@ fn playing_hltv_demo(engfuncs: &ClEngineFuncsPartial) -> bool {
 /// Called every frame from `commands::poll`.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
-    if cvar.is_null() {
-        return;
-    }
-    let value = unsafe { (*cvar).value };
+    let value = if cvar.is_null() {
+        f32::from(u8::from(WITHOUT_A_CVAR.load(Ordering::Relaxed)))
+    } else {
+        unsafe { (*cvar).value }
+    };
     let wanted = value != 0.0;
     EVERY_ROUND.store(value >= 2.0, Ordering::Relaxed);
     if WANTED.swap(wanted, Ordering::Relaxed) != wanted {
         unsafe {
             crate::debug::report(&format!(
-                "missing_shots: {NAME} = {}",
-                if wanted { "1 (on)" } else { "0 (off)" }
+                "missing_shots: {} ({NAME})",
+                if wanted {
+                    "restoring lost gunshots"
+                } else {
+                    "off"
+                }
             ))
         };
         forget_everyone();
@@ -591,10 +604,9 @@ pub fn status_line() -> Option<String> {
     let played = PLAYED.load(Ordering::Relaxed);
     (WANTED.load(Ordering::Relaxed) || played != 0).then(|| {
         format!(
-            "missing gunshots: {played} played, {} rounds had their own event, {} skipped (weapon not known); {NAME} = {}",
+            "missing gunshots: {played} played, {} rounds had their own event, {} skipped (weapon not known)",
             HAD_EVENT.load(Ordering::Relaxed),
             UNKNOWN_WEAPON.load(Ordering::Relaxed),
-            u8::from(WANTED.load(Ordering::Relaxed))
         )
     })
 }

@@ -6,15 +6,15 @@
 //! These were four `pfnAddCommand` commands, and the difference is not
 //! cosmetic. A command is a function the engine calls and forgets; the state
 //! lives in this DLL's own atomics, where the console cannot see it. So
-//! `dodstudio_hltv_show_viewmodel_animations` printed nothing in the type-ahead, could not
-//! be queried with a bare name the way `sensitivity` can, and — the part that
+//! the animation setting printed nothing in the type-ahead, could not be
+//! queried with a bare name the way `sensitivity` can, and — the part that
 //! actually mattered — could not be set from a config file or the launch line.
-//! That last gap is the entire reason `GOLDSRC_HOOKS_ANIM_FIX` and
-//! `ANIM_FIX_DEFAULT` existed.
+//! That last gap is the entire reason the `GOLDSRC_HOOKS_*` environment
+//! variables existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodstudio_hltv_show_viewmodel_animations` on its own, takes
-//! `+dodstudio_hltv_show_viewmodel_animations 1` on the launch line, and can be set from any
+//! its value, answers `dodstudio_match_pov` on its own, takes
+//! `+dodstudio_match_pov 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -38,6 +38,21 @@
 //! would be garbage. That case registers the old commands instead and says so
 //! loudly, so a bad assumption costs the type-ahead rather than the session.
 //!
+//! ## One switch for matching POV
+//!
+//! `dodstudio_match_pov` drives three modules at once: the viewmodel's
+//! animations, the gunshots an HLTV demo lost, and the spectator crosshair.
+//! Each used to have a cvar of its own
+//! (`dodstudio_hltv_show_viewmodel_animations`,
+//! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
+//! They all answer one question -- should a spectated first-person view look
+//! and sound like the player's own recording -- and nobody wanted one without
+//! the others, so a fix of that kind now joins this cvar instead of adding a
+//! name. `dodstudio_hltv_gunshots_fix` and
+//! `dodstudio_hltv_gunshot_attenuation` went at the same time, for the
+//! opposite reason: making gunfire carry further than POV hears it is not
+//! matching POV (`fire_sounds.rs`).
+//!
 //! Registration must happen after `engine::engfuncs()` is captured (i.e. after
 //! `client.dll`'s real `Initialize` has run), since both `pfnRegisterVariable`
 //! and `pfnAddCommand` live on that same table.
@@ -48,13 +63,12 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, ex_interp, hand_signals, hudelement, overview_map, scoreboard,
-    sound_fix, spectator_crosshair, spectator_target, texture_hires, voice,
+    anim_fix, crosshair, decals, ex_interp, fire_sounds, hand_signals, hudelement, missing_shots,
+    overview_map, scoreboard, spectator_crosshair, spectator_target, texture_hires, voice,
 };
 
-const GUNSHOTS_FIX_NAME: &str = console_name!("hltv_gunshots_fix");
-const ANIMATION_FIX_NAME: &str = console_name!("hltv_show_viewmodel_animations");
-const ATTENUATION_NAME: &str = console_name!("hltv_gunshot_attenuation");
+/// Viewmodel animations, lost gunshots and the spectator crosshair together.
+const MATCH_POV_NAME: &str = crate::names::MATCH_POV;
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("debug_log_weapon_model");
@@ -65,7 +79,6 @@ const STATUS_NAME: &str = console_name!("debug_status");
 const SCOREBOARD_NAME: &str = scoreboard::NAME;
 const VOICE_NAME: &str = voice::NAME;
 const CROSSHAIR_NAME: &str = crosshair::NAME;
-const SPECTATOR_CROSSHAIR_NAME: &str = spectator_crosshair::NAME;
 const HUDELEMENT_NAME: &str = hudelement::NAME;
 const CLEAR_DECALS_NAME: &str = decals::NAME;
 const HAND_SIGNALS_NAME: &str = hand_signals::NAME;
@@ -77,15 +90,12 @@ const TEXTURE_HIRES_LOG_NAME: &str = texture_hires::NAME;
 const CVAR_FLAGS: i32 = 0;
 
 /// The cvars the engine handed back, read once per frame by `poll`.
-static CVAR_GUNSHOTS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_ANIMATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_ATTENUATION: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_MATCH_POV: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_TARGET_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_VOICE: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
-static CVAR_SPECTATOR_CROSSHAIR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HAND_SIGNALS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_EX_INTERP: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_TEXTURE_HIRES_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
@@ -160,10 +170,10 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
     }
 }
 
-/// Like `poll_flag`, but the animation fix carries an iteration number rather
-/// than a flag -- see `anim_fix::LEVEL`. Out-of-range values are clamped
-/// rather than refused, so `dodstudio_hltv_show_viewmodel_animations 99` is a usable way to
-/// ask for the newest behaviour without remembering what the newest is.
+/// Like `poll_flag`, but into the level `anim_fix` reads -- see
+/// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
+/// `dodstudio_match_pov 2` (which also asks `missing_shots` to log every
+/// round) still means on here.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
     if ptr.is_null() {
@@ -181,40 +191,6 @@ fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
                 anim_fix::level_description(wanted)
             ))
         };
-    }
-}
-
-/// The last attenuation value rejected, so a bad setting is reported once
-/// rather than sixty times a second.
-static REJECTED_ATTENUATION: AtomicU32 = AtomicU32::new(0);
-
-fn poll_attenuation() {
-    let ptr = CVAR_ATTENUATION.load(Ordering::Relaxed);
-    if ptr.is_null() {
-        return;
-    }
-    let wanted = unsafe { (*ptr).value };
-    if wanted == sound_fix::carry_attenuation() {
-        return;
-    }
-    match sound_fix::set_carry_attenuation(wanted) {
-        Ok(()) => {
-            REJECTED_ATTENUATION.store(0, Ordering::Relaxed);
-            unsafe { crate::debug::report(&format!("commands: {ATTENUATION_NAME} = {wanted}")) };
-        }
-        Err(why) => {
-            // Out-of-range values sit in the cvar until the user changes them,
-            // so this would repeat every frame without the guard. The previous
-            // good value stays in effect.
-            if REJECTED_ATTENUATION.swap(wanted.to_bits(), Ordering::Relaxed) != wanted.to_bits() {
-                unsafe {
-                    crate::debug::report(&format!(
-                        "commands: {ATTENUATION_NAME} = {wanted} rejected -- {why}; still using {}",
-                        sound_fix::carry_attenuation()
-                    ))
-                };
-            }
-        }
     }
 }
 
@@ -425,9 +401,9 @@ fn poll_hudelements() {
 
 fn describe_spectator_crosshair(on: bool) -> &'static str {
     if on {
-        "1 (spectator crosshair follows cl_xhair_style)"
+        "on: the spectator crosshair follows cl_xhair_style"
     } else {
-        "0 (normal)"
+        "off: the spectator crosshair is the game's own"
     }
 }
 
@@ -443,8 +419,10 @@ pub fn poll() {
     // null-checks it individually -- this outer guard is purely the fast
     // path that skips all nine checks at once when cvars never registered.
     if CVARS_LIVE.load(Ordering::Relaxed) {
-        poll_flag(GUNSHOTS_FIX_NAME, &CVAR_GUNSHOTS, &sound_fix::ENABLED);
-        poll_level(ANIMATION_FIX_NAME, &CVAR_ANIMATION, &anim_fix::LEVEL);
+        // One cvar, three readers: the viewmodel's animations here, the
+        // spectator crosshair below, and `missing_shots::poll` further down,
+        // which holds the cvar itself.
+        poll_level(MATCH_POV_NAME, &CVAR_MATCH_POV, &anim_fix::LEVEL);
         poll_flag(
             HELD_MODELS_NAME,
             &CVAR_HELD_MODELS,
@@ -455,7 +433,6 @@ pub fn poll() {
             &CVAR_SPECTATOR_TARGET_LOG,
             &spectator_target::LOG,
         );
-        poll_attenuation();
         poll_code_patch(
             SCOREBOARD_NAME,
             &CVAR_SCOREBOARD,
@@ -480,8 +457,8 @@ pub fn poll() {
         // Polled every frame like the rest, and for one extra reason: this is
         // also how it notices `cl_xhair_style` changing under it.
         poll_code_patch(
-            SPECTATOR_CROSSHAIR_NAME,
-            &CVAR_SPECTATOR_CROSSHAIR,
+            MATCH_POV_NAME,
+            &CVAR_MATCH_POV,
             &SPECTATOR_CROSSHAIR_COMPLAINED,
             spectator_crosshair::set_matching,
             describe_spectator_crosshair,
@@ -571,9 +548,7 @@ fn log_level_changes() {
 /// on says nothing about whether the preconditions are being met in the
 /// current view, and "the fix isn't working" has twice turned out to be "the
 /// log budget ran out" -- their counters are the honest number, and are
-/// noise when off. `dodstudio_hltv_gunshot_attenuation`'s value is folded
-/// into the gunshots line rather than given its own, since it does nothing
-/// while the fix is off.
+/// noise when off.
 fn status_text() -> String {
     let bit = |on: bool| if on { "1" } else { "0" };
     let mut lines: Vec<String> = vec![
@@ -593,9 +568,8 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPECTATOR_CROSSHAIR_NAME} = {} -- {}",
-            bit(spectator_crosshair::matching()),
-            spectator_crosshair::status()
+            "{MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots and the spectator crosshair, as the player's own recording has them",
+            bit(anim_fix::enabled())
         ),
         format!(
             "{HELD_MODELS_NAME} = {} -- logs the third-person model the spectated player holds, each time it changes",
@@ -608,12 +582,10 @@ fn status_text() -> String {
     ];
     if anim_fix::enabled() {
         lines.push(format!("viewmodel animations: {}", anim_fix::status()));
-    }
-    if sound_fix::ENABLED.load(Ordering::Relaxed) {
+        lines.push(format!("gunshot sounds: {}", fire_sounds::status()));
         lines.push(format!(
-            "gunshots: {} ({ATTENUATION_NAME} = {})",
-            sound_fix::status(),
-            sound_fix::carry_attenuation()
+            "spectator crosshair: {}",
+            spectator_crosshair::status()
         ));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
@@ -682,7 +654,7 @@ fn status_text() -> String {
     if texture_hires::has_observed() {
         lines.push(texture_hires::status());
     }
-    if let Some(shots) = crate::missing_shots::status_line() {
+    if let Some(shots) = missing_shots::status_line() {
         lines.push(shots);
     }
     if let Some(bars) = crate::spectator_bars::status_line() {
@@ -783,16 +755,21 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
     };
 }
 
-unsafe extern "C" fn cmd_gunshots_fix() {
-    handle_toggle(GUNSHOTS_FIX_NAME, &sound_fix::ENABLED, sound_fix::status);
+/// `dodstudio_match_pov` as a plain command. With no cvar for `poll` to copy
+/// from, the handler sets all three parts itself.
+unsafe extern "C" fn cmd_match_pov() {
+    handle_level(MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
+    let on = anim_fix::enabled();
+    missing_shots::set_without_a_cvar(on);
+    if let Err(why) = spectator_crosshair::set_matching(on) {
+        console_print(&format!(
+            "{MATCH_POV_NAME}: the spectator crosshair was not changed -- {why}\n"
+        ));
+    }
 }
 
-unsafe extern "C" fn cmd_animation_fix() {
-    handle_level(ANIMATION_FIX_NAME, &anim_fix::LEVEL, anim_fix::status);
-}
-
-/// `handle_toggle` for the animation fix, which takes an iteration number
-/// instead of a flag. Only reached on the fallback path, when cvar
+/// `handle_toggle` for a setting `anim_fix::LEVEL` holds, which is a number
+/// rather than a flag. Only reached on the fallback path, when cvar
 /// registration failed -- the cvar itself is what normally carries this.
 fn handle_level(name: &str, level: &AtomicI32, status: fn() -> String) {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -933,16 +910,6 @@ unsafe extern "C" fn cmd_crosshair() {
         crosshair::set_hidden,
         crosshair::hidden,
         crosshair::status,
-    );
-}
-
-unsafe extern "C" fn cmd_spectator_crosshair() {
-    handle_code_patch(
-        SPECTATOR_CROSSHAIR_NAME,
-        "1 draws the spectator crosshair from customXHair.spr, like the POV one",
-        spectator_crosshair::set_matching,
-        spectator_crosshair::matching,
-        spectator_crosshair::status,
     );
 }
 
@@ -1202,56 +1169,6 @@ unsafe extern "C" fn cmd_log_spectator_target() {
     });
 }
 
-/// How far boosted gunshots carry. Separate from the on/off toggle because it
-/// is the value you actually want to sweep while listening.
-unsafe extern "C" fn cmd_gunshot_attenuation() {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return;
-    };
-
-    if unsafe { (engfuncs.cmd_argc)() } >= 2 {
-        let arg1 = unsafe { (engfuncs.cmd_argv)(1) };
-        if !arg1.is_null() {
-            let raw = unsafe { CStr::from_ptr(arg1 as *const c_char) }
-                .to_string_lossy()
-                .into_owned();
-            match raw.trim().parse::<f32>() {
-                Ok(value) => match sound_fix::set_carry_attenuation(value) {
-                    Ok(()) => {
-                        console_print(&format!("{ATTENUATION_NAME} = {value}\n"));
-                        unsafe {
-                            crate::debug::report(&format!(
-                                "commands: {ATTENUATION_NAME} = {value} (set)"
-                            ))
-                        };
-                        return;
-                    }
-                    Err(why) => {
-                        console_print(&format!("{ATTENUATION_NAME}: {why}\n"));
-                        unsafe {
-                            crate::debug::report(&format!(
-                                "commands: {ATTENUATION_NAME} rejected \"{raw}\" -- {why}"
-                            ))
-                        };
-                        return;
-                    }
-                },
-                Err(_) => {
-                    console_print(&format!(
-                        "{ATTENUATION_NAME}: expected a number, got \"{raw}\"\n"
-                    ));
-                    return;
-                }
-            }
-        }
-    }
-
-    console_print(&format!(
-        "{ATTENUATION_NAME} = {}\nusage: {ATTENUATION_NAME} <value above 0 and below 0.8>  (lower carries further; the game's own default is 0.8)\n",
-        sound_fix::carry_attenuation()
-    ));
-}
-
 /// Registers one command under several names at once.
 ///
 /// The engine keeps each name independently, so every entry becomes a working
@@ -1278,26 +1195,23 @@ fn add_command(name: &str, function: engine::ConsoleCommandFn) {
 }
 
 fn install_fallback_commands() {
-    add_command(GUNSHOTS_FIX_NAME, cmd_gunshots_fix);
-    add_command(ANIMATION_FIX_NAME, cmd_animation_fix);
-    add_command(ATTENUATION_NAME, cmd_gunshot_attenuation);
+    add_command(MATCH_POV_NAME, cmd_match_pov);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
     add_command(SPECTATOR_TARGET_LOG_NAME, cmd_log_spectator_target);
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
     add_command(VOICE_NAME, cmd_voice);
     add_command(CROSSHAIR_NAME, cmd_crosshair);
-    add_command(SPECTATOR_CROSSHAIR_NAME, cmd_spectator_crosshair);
     add_command(HAND_SIGNALS_NAME, cmd_hand_signals);
     add_command(TEXTURE_HIRES_LOG_NAME, cmd_texture_hires_log);
     // Without this, `poll`'s cvar-independent half (hudelement, deathmsg,
     // spectator_target, msglog) never ran on the fallback path either --
-    // see issue #324. `poll` itself stays a no-op for the nine cvar-backed
+    // see issue #324. `poll` itself stays a no-op for the cvar-backed
     // commands above, since `CVARS_LIVE` is never set on this path; they
     // apply synchronously from their own command handler instead.
     engine::set_per_frame_prologue(poll);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {MATCH_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -1306,9 +1220,9 @@ fn install_fallback_commands() {
 /// returns `Some`.
 ///
 /// The defaults handed to the engine are whatever the environment variables
-/// already put in the flags, so `GOLDSRC_HOOKS_ANIM_FIX=1` keeps working
-/// exactly as before — and a value in a `.cfg` or on the launch line, applied
-/// after registration, wins over it.
+/// already put in the flags, so `GOLDSRC_HOOKS_MATCH_POV=1` starts the session
+/// with it on — and a value in a `.cfg` or on the launch line, applied after
+/// registration, wins over it.
 pub fn install() {
     if engine::engfuncs().is_none() {
         unsafe {
@@ -1344,15 +1258,7 @@ pub fn install() {
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
-    let gunshots = register(
-        GUNSHOTS_FIX_NAME,
-        bit(sound_fix::ENABLED.load(Ordering::Relaxed)),
-    );
-    let animation = register(ANIMATION_FIX_NAME, &anim_fix::level().to_string());
-    let attenuation = register(
-        ATTENUATION_NAME,
-        &sound_fix::carry_attenuation().to_string(),
-    );
+    let match_pov = register(MATCH_POV_NAME, &anim_fix::level().to_string());
     let held_models = register(
         HELD_MODELS_NAME,
         bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
@@ -1367,7 +1273,6 @@ pub fn install() {
     let scoreboard_cvar = register(SCOREBOARD_NAME, "0");
     let voice_cvar = register(VOICE_NAME, "0");
     let crosshair_cvar = register(CROSSHAIR_NAME, "0");
-    let spectator_crosshair_cvar = register(SPECTATOR_CROSSHAIR_NAME, "0");
     let hand_signals_cvar = register(HAND_SIGNALS_NAME, "0");
     // Defaults to the engine's own ceiling, so registering it changes nothing
     // until someone asks for more.
@@ -1394,10 +1299,6 @@ pub fn install() {
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
     }
-    // And this one: off until asked for, and nothing else depends on it.
-    if let Some(shots) = register(crate::missing_shots::NAME, "0") {
-        crate::missing_shots::set_cvar(shots);
-    }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
         crate::spectator_bars::set_cvar(bars);
@@ -1408,28 +1309,22 @@ pub fn install() {
     );
 
     let (
-        Some(gunshots),
-        Some(animation),
-        Some(attenuation),
+        Some(match_pov),
         Some(held_models),
         Some(spectator_target_log),
         Some(scoreboard_cvar),
         Some(voice_cvar),
         Some(crosshair_cvar),
-        Some(spectator_crosshair_cvar),
         Some(hand_signals_cvar),
         Some(ex_interp_cvar),
         Some(texture_hires_log_cvar),
     ) = (
-        gunshots,
-        animation,
-        attenuation,
+        match_pov,
         held_models,
         spectator_target_log,
         scoreboard_cvar,
         voice_cvar,
         crosshair_cvar,
-        spectator_crosshair_cvar,
         hand_signals_cvar,
         ex_interp_cvar,
         texture_hires_log_cvar,
@@ -1439,15 +1334,14 @@ pub fn install() {
         return;
     };
 
-    CVAR_GUNSHOTS.store(gunshots, Ordering::Relaxed);
-    CVAR_ANIMATION.store(animation, Ordering::Relaxed);
-    CVAR_ATTENUATION.store(attenuation, Ordering::Relaxed);
+    CVAR_MATCH_POV.store(match_pov, Ordering::Relaxed);
+    // `missing_shots` reads the value itself: 2 asks it to log every round.
+    missing_shots::set_cvar(match_pov);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
     CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
     CVAR_VOICE.store(voice_cvar, Ordering::Relaxed);
     CVAR_CROSSHAIR.store(crosshair_cvar, Ordering::Relaxed);
-    CVAR_SPECTATOR_CROSSHAIR.store(spectator_crosshair_cvar, Ordering::Relaxed);
     CVAR_HAND_SIGNALS.store(hand_signals_cvar, Ordering::Relaxed);
     CVAR_EX_INTERP.store(ex_interp_cvar, Ordering::Relaxed);
     CVAR_TEXTURE_HIRES_LOG.store(texture_hires_log_cvar, Ordering::Relaxed);
@@ -1456,7 +1350,7 @@ pub fn install() {
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {GUNSHOTS_FIX_NAME}, {ANIMATION_FIX_NAME}, {ATTENUATION_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {SPECTATOR_CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {MATCH_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -1476,27 +1370,20 @@ mod tests {
         assert_eq!(CVAR_FLAGS & FCVAR_ARCHIVE, 0);
     }
 
-    /// The status reply deliberately no longer lists the settings -- the
-    /// console's own type-ahead shows each cvar and its value as you type it,
-    /// so repeating them here was duplicated output that wrapped badly in a
-    /// narrow console. What it must still do is report the two fixes that have
-    /// preconditions, and say *something* when neither is on rather than
-    /// returning an empty reply that reads as a broken command.
+    /// The settings are listed on or off; what each part of matching POV is
+    /// actually doing is only reported while it is on, because its counters
+    /// are noise otherwise.
     #[test]
     fn status_reports_suppression_cvars_always_and_fixes_only_with_progress() {
         // anim_fix::LEVEL is also mutated by anim_fix's own tests, and
         // cargo runs a crate's tests in parallel by default -- without this,
         // one of those can flip LEVEL mid-assertion here (issue #321).
-        // anim_fix's tests already take the same lock for the same
-        // reason; sound_fix::ENABLED has no other test touching it, so it
-        // does not need one of its own.
+        // anim_fix's tests already take the same lock for the same reason.
         let _statics = anim_fix::tests::lock_statics();
 
         let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
-        let sound = sound_fix::ENABLED.load(Ordering::Relaxed);
 
         anim_fix::LEVEL.store(0, Ordering::Relaxed);
-        sound_fix::ENABLED.store(false, Ordering::Relaxed);
         let idle = status_text();
         // The suppression cvars and log_weapon_model are always listed, on
         // or off -- that is the whole point of `debug_status` over the
@@ -1505,27 +1392,31 @@ mod tests {
             SCOREBOARD_NAME,
             VOICE_NAME,
             CROSSHAIR_NAME,
-            SPECTATOR_CROSSHAIR_NAME,
+            MATCH_POV_NAME,
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
         assert!(idle.contains("dodstudio_deathmsg"), "{idle}");
-        assert!(!idle.contains("viewmodel animations"), "{idle}");
-        assert!(!idle.contains("gunshots"), "{idle}");
+        for part in [
+            "viewmodel animations:",
+            "gunshot sounds:",
+            "spectator crosshair:",
+        ] {
+            assert!(!idle.contains(part), "{part} reported while off:\n{idle}");
+        }
 
-        sound_fix::ENABLED.store(true, Ordering::Relaxed);
-        let gunshots_on = status_text();
-        assert!(gunshots_on.contains("gunshots"), "{gunshots_on}");
-        // The attenuation value is folded into the gunshots line rather than
-        // given its own, since it does nothing while the fix is off.
-        assert!(gunshots_on.contains(ATTENUATION_NAME), "{gunshots_on}");
-
+        // One switch turns all three on, and each then says what it is doing.
         anim_fix::LEVEL.store(1, Ordering::Relaxed);
-        let both = status_text();
-        assert!(both.contains("viewmodel animations"), "{both}");
-        assert!(both.contains("gunshots"), "{both}");
+        let on = status_text();
+        for part in [
+            "viewmodel animations:",
+            "gunshot sounds:",
+            "spectator crosshair:",
+        ] {
+            assert!(on.contains(part), "{part} missing while on:\n{on}");
+        }
 
         // A command has no type-ahead value to read, so this is the only
         // place that says which elements are hidden.
@@ -1536,7 +1427,32 @@ mod tests {
         hudelement::show_all();
 
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
-        sound_fix::ENABLED.store(sound, Ordering::Relaxed);
+    }
+
+    /// The names this cvar replaced must not come back beside it: the
+    /// console's type-ahead completes to the longest match, so a name that
+    /// starts with `dodstudio_match_pov` would be offered in its place.
+    #[test]
+    fn nothing_else_starts_with_the_match_pov_name() {
+        assert_eq!(MATCH_POV_NAME, "dodstudio_match_pov");
+        for other in [
+            HELD_MODELS_NAME,
+            SPECTATOR_TARGET_LOG_NAME,
+            STATUS_NAME,
+            SCOREBOARD_NAME,
+            VOICE_NAME,
+            CROSSHAIR_NAME,
+            HUDELEMENT_NAME,
+            CLEAR_DECALS_NAME,
+            HAND_SIGNALS_NAME,
+            EX_INTERP_NAME,
+            OVERVIEWMAP_NAME,
+            TEXTURE_HIRES_LOG_NAME,
+            crate::spectator_bars::NAME,
+            crate::world_shaders::NAME,
+        ] {
+            assert!(!other.starts_with(MATCH_POV_NAME), "{other}");
+        }
     }
 
     /// Every suppression cvar reads the same way: **1 does the thing the name
@@ -1603,12 +1519,12 @@ mod tests {
         }
     }
 
-    /// Issue #324: `install_fallback_commands()` used to add its nine plain
+    /// Issue #324: `install_fallback_commands()` used to add its plain
     /// commands and stop, never registering `poll` as the per-frame prologue
     /// -- so `poll`'s cvar-independent half (hudelement, deathmsg,
     /// spectator_target, msglog) silently never ran on a build where cvar
     /// registration fails. `engine::engfuncs()` is `None` in this test
-    /// process, so the nine `add_command` calls are themselves no-ops, but
+    /// process, so the `add_command` calls are themselves no-ops, but
     /// `set_per_frame_prologue` has no such dependency -- this is the one
     /// piece of `install_fallback_commands()` a unit test can observe.
     #[test]

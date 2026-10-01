@@ -34,3 +34,10 @@ macro_rules! console_name {
 }
 
 pub(crate) use console_name;
+
+/// The one switch for everything whose job is making a spectated first-person
+/// view look and sound like the player's own recording: the viewmodel's
+/// animations (`anim_fix`), the gunshots an HLTV demo lost (`missing_shots`)
+/// and the crosshair (`spectator_crosshair`). It lives here because all three
+/// modules name it in their own messages.
+pub(crate) const MATCH_POV: &str = console_name!("match_pov");

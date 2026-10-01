@@ -39,8 +39,8 @@
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodstudio_hltv_show_viewmodel_animations` is
-//! on (any level). Turn that on too when using this to investigate #206 --
+//! only has fresh data while `dodstudio_match_pov` is on. Turn that on too
+//! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!
 //! This module's `poll` runs from `commands.rs`'s per-frame *prologue*,

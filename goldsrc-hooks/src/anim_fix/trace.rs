@@ -100,7 +100,7 @@ pub(super) const STAGE_VIEWMODEL_MISMATCH: i32 = 8;
 
 fn stage_name(stage: i32) -> &'static str {
     match stage {
-        STAGE_DISABLED => "disabled (dodstudio_hltv_show_viewmodel_animations is 0)",
+        STAGE_DISABLED => "disabled (dodstudio_match_pov is 0)",
         STAGE_NO_ENGFUNCS => "waiting for engfuncs",
         STAGE_NOT_SPECTATING => {
             "not spectating (IsSpectateOnly() is false) -- the fix only acts in a spectated view"
@@ -160,7 +160,7 @@ pub(super) fn stage_with<A, B>(stage: i32, entity: *mut A, model: *mut B, index:
     };
 }
 
-/// One-line summary for the `dodstudio_hltv_show_viewmodel_animations` status reply.
+/// One-line summary for `dodstudio_debug_status`.
 pub fn status() -> String {
     let seen = SEEN_VIEWMODELS.lock().unwrap();
     let count = seen.as_ref().map(|s| s.len()).unwrap_or(0);
