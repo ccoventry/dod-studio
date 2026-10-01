@@ -36,7 +36,7 @@ joins this switch rather than adding a command:
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
   ladder, as his own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
-  while spectating). Same speed as the game: 55 frames down, 18 back. See
+  while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
 Plus twenty control surfaces, always available and doing nothing until used:

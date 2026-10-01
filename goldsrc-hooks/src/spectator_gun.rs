@@ -11,14 +11,18 @@
 //! called from `V_CalcRefdef` (`cl_dll/view.cpp`) once a frame:
 //!
 //! ```text
-//!     lowered:     if (offscreen <= 54) offscreen += 1;
+//!     lowered:     if ((int)offscreen < 55) offscreen += 1;
 //!     otherwise:   if (offscreen >= 3)  offscreen -= 3;
+//!                  else                 offscreen = 0;
 //!     delta = up + forward + up;
 //!     viewmodel.origin += delta * offscreen * -0.7;
 //! ```
 //!
-//! So it takes 55 frames to go down and 18 to come back, at whatever frame
-//! rate the game runs. A deployed machine gun never lowers.
+//! So it takes 55 frames to go down and 19 to come back, at whatever frame
+//! rate the game runs. A deployed machine gun never lowers. Those numbers
+//! are read from `client.dll` (`+0x2c99e`..`+0x2ca0a`), not the
+//! reconstruction: dod13-client leaves out the `else offscreen = 0`, and a
+//! gun left 1 unit down and back for good looks held at another angle.
 //!
 //! The function returns 0 at once while spectating, which is why an HLTV
 //! view keeps the gun up. #204 had concluded that sprint does nothing to the
@@ -80,7 +84,7 @@ fn step(offscreen: f32, lowered: bool) -> f32 {
     } else if offscreen >= STEP_UP {
         offscreen - STEP_UP
     } else {
-        offscreen
+        0.0
     }
 }
 
@@ -147,7 +151,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_takes_55_frames_down_and_18_back_up() {
+    fn it_takes_55_frames_down_and_19_back_up() {
         let mut offscreen = 0.0;
         for _ in 0..55 {
             offscreen = step(offscreen, true);
@@ -158,9 +162,9 @@ mod tests {
         for _ in 0..18 {
             offscreen = step(offscreen, false);
         }
-        // DoD stops once it is under 3, so a unit is left over.
         assert_eq!(offscreen, 1.0);
-        assert_eq!(step(offscreen, false), 1.0);
+        // Under 3, the binary snaps it home: no unit is left over.
+        assert_eq!(step(offscreen, false), 0.0);
     }
 
     #[test]
