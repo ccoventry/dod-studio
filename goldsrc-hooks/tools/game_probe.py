@@ -26,6 +26,10 @@ always ends the game it started, and only that one.
     cmd <console command>       send it over the remote pipe
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
     window                      note the game window's size, minimised and foreground state
+    clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
+                                and a contact sheet <run>/<name>.png (default 2 s, 30 fps)
+    grab <name>                 screen capture of the game window (VGUI panels included);
+                                needs focus first
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
     expect <regex>              check the regex appears in either log (or in
@@ -320,6 +324,74 @@ def focus_window(pid):
     return "foreground" if fg == hwnd else f"not foreground (the foreground window is {fg:#x})"
 
 
+def record_clip(pid, folder, seconds, fps):
+    """Records `seconds` of HLAE frames at `fps` into `folder/` (PNGs) and
+    writes `folder.png`, a contact sheet of up to 24 evenly spaced frames, for
+    checking an animation rather than one instant."""
+    try:
+        from PIL import Image
+    except ImportError:
+        return "Pillow is not installed"
+    import shutil
+    rec = folder.parent / f"_rec_{folder.name}"
+    err = send_commands(pid, [f"mirv_movie_fps {fps}", f'mirv_movie_filename "{rec}"', "mirv_recordmovie_start"])
+    if err:
+        return err
+    time.sleep(seconds)
+    err = send_commands(pid, ["mirv_recordmovie_stop", "mirv_movie_fps 30"])
+    if err:
+        return err
+    time.sleep(1.5)
+    frames = sorted(rec.glob("take*/**/*.bmp")) + sorted(rec.glob("take*/**/*.tga"))
+    if not frames:
+        return "HLAE recorded no frames"
+    folder.mkdir(parents=True, exist_ok=True)
+    images = []
+    for i, f in enumerate(frames):
+        try:
+            im = Image.open(f).convert("RGB")
+        except OSError:
+            continue
+        im.save(folder / f"{i:04d}.png")
+        images.append(im)
+    shutil.rmtree(rec, ignore_errors=True)
+    if not images:
+        return "no readable frames"
+    picks = images if len(images) <= 24 else [images[int(i * (len(images) - 1) / 23)] for i in range(24)]
+    w, h = picks[0].size
+    tw = 320
+    th = int(h * tw / w)
+    cols = 6
+    rows = (len(picks) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * tw, rows * th), (40, 40, 40))
+    for i, im in enumerate(picks):
+        sheet.paste(im.resize((tw, th)), ((i % cols) * tw, (i // cols) * th))
+    sheet.save(folder.parent / f"{folder.name}.png")
+    return None
+
+
+def screen_grab(pid, path):
+    """A capture of the game window's client area as it is on screen. Unlike
+    `shot`, this includes the VGUI panels HLAE leaves out of its frames, and
+    it needs the window in front (`focus` first)."""
+    try:
+        from PIL import ImageGrab
+    except ImportError:
+        return "Pillow is not installed"
+    hwnd = game_hwnd(pid)
+    if not hwnd:
+        return "no visible window"
+    if user32.GetForegroundWindow() != hwnd:
+        return "the game window is not in front (use focus first)"
+    rect = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rect))
+    origin = wintypes.POINT(0, 0)
+    user32.ClientToScreen(hwnd, ctypes.byref(origin))
+    box = (origin.x, origin.y, origin.x + rect.right, origin.y + rect.bottom)
+    ImageGrab.grab(bbox=box).save(path)
+    return None
+
+
 def window_state(pid):
     """The game's biggest window: size, minimised, foreground. For telling a
     black capture from a game that isn't drawing."""
@@ -466,6 +538,23 @@ def run(args):
                     time.sleep(0.5)
                 else:
                     result["ok"] = False
+            elif kind == "clip":
+                parts = rest.split()
+                name = parts[0] if parts else "clip"
+                seconds = float(parts[1]) if len(parts) > 1 else 2.0
+                fps = int(parts[2]) if len(parts) > 2 else 30
+                err = record_clip(pid, out / name, seconds, fps)
+                result["ok"] = err is None
+                result["note"] = err or str(out / f"{name}.png")
+                if err is None:
+                    report["shots"].append(str(out / f"{name}.png"))
+            elif kind == "grab":
+                path = out / f"{rest}.png"
+                result["note"] = screen_grab(pid, path)
+                result["ok"] = result["note"] is None
+                if result["note"] is None:
+                    result["note"] = str(path)
+                    report["shots"].append(str(path))
             elif kind == "focus":
                 result["note"] = focus_window(pid)
                 result["ok"] = result["note"].startswith("foreground")
