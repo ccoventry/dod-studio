@@ -88,6 +88,9 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
+//!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
+//!   instead of patching it out of the demo (issue #30).
 //! - `spectator_bars`: the `dodstudio_hide_spectator_bars` cvar -- hide the
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
@@ -126,6 +129,7 @@ mod ex_interp;
 mod fire_sounds;
 mod hand_signals;
 mod hide_sprite;
+mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
 mod missing_shots;

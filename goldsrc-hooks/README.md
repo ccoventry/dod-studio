@@ -34,7 +34,7 @@ joins this switch rather than adding a command:
   player goes prone. The game's in-eye camera has no prone case and leaves it
   at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
 
-Plus nineteen control surfaces, always available and doing nothing until used:
+Plus twenty control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -86,6 +86,13 @@ Plus nineteen control surfaces, always available and doing nothing until used:
   the spectated player. `dodstudio_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **HLTV text** (`dodstudio_hide_hltv_messages 1`): drops the text an HLTV
+  proxy puts on screen during playback -- "You're watching HLTV. Visit
+  www.valvesoftware.com", about once a minute, and a proxy operator's own
+  `msg` lines -- so an HLTV demo needs no patched copy. Hooks
+  `HUD_DirectorMessage` (`cldll_func_t` slot 38) and drops only
+  `DRC_CMD_MESSAGE` (6); the pipeline's highlight labels (`DRC_CMD_STUFFTEXT`)
+  and the camera commands pass through. Both builds. See `src/hltv_messages.rs`.
 - **Overview map** (`dodstudio_overviewmap <full|mini> <x> <y> <w> <h>`): places
   and sizes DoD's overview map, so the big one can be a corner inset instead of
   something that has to be off. The rects are cached in `gHUD` rather than
@@ -234,7 +241,9 @@ off. `dodstudio_debug_status` shows how many effects it has skipped.
 player-movement trace a previous map's collision data, and it recurses until
 the stack runs out. The guard refuses any clip node the hull can't have, and
 stops a trace that is about to run out of stack. On by default for the same
-reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off. It knows both the
+pre-Anniversary and the 25th Anniversary `hw.dll`
+(`tools/verify_hull_trace_offsets.py [--anniversary]` checks either).
 
 `src/pmove_guard.rs` stops a crash (`hw.dll+0x3a77c`, issue #546) when the
 session's first demo sends DoD's `InitHUD` in its very first packets: the

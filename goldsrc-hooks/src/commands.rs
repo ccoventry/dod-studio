@@ -686,6 +686,9 @@ fn status_text() -> String {
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
     }
+    if let Some(hltv_messages) = crate::hltv_messages::status_line() {
+        lines.push(hltv_messages);
+    }
     if lines.is_empty() {
         // Not an error, and worth saying out loud: the suppressions leave no
         // trace to count, so silence here would read as a broken command.
@@ -1349,6 +1352,11 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // Same again: read by the HUD_DirectorMessage trampoline itself, not
+    // polled.
+    if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
+        crate::hltv_messages::set_cvar(hltv_messages);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
