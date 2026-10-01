@@ -13,7 +13,7 @@
 //!
 //! Implements two fixes and eight control surfaces, each independent of the
 //! others and each safe to inject without them:
-//! - `dodstudio_spec_match_pov`, one cvar over four modules, for making a
+//! - `dodstudio_spec_match_pov`, one cvar over five modules, for making a
 //!   spectated first-person view look and sound like the player's own
 //!   recording:
 //!   - `anim_fix`: drive the first-person viewmodel's animations -- shoot,
@@ -138,6 +138,7 @@ mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_eye;
 mod spectator_follow;
+mod spectator_gun;
 mod spectator_target;
 mod sprite_blend;
 mod tempent_fix;

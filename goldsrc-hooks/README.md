@@ -10,7 +10,7 @@ instead of the list below.
 **Match POV** (`dodstudio_spec_match_pov 1`, off by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own
-recording. Four things come on together, and anything else of that kind
+recording. Five things come on together, and anything else of that kind
 joins this switch rather than adding a command:
 
 - **Viewmodel animations**: the first-person weapon fires, reloads and draws,
@@ -33,6 +33,11 @@ joins this switch rather than adding a command:
 - **Prone eye height**: the camera drops to the ground when the spectated
   player goes prone. The game's in-eye camera has no prone case and leaves it
   at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
+- **Gun lowering**: the gun drops off the bottom of the screen while the
+  spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
+  ladder, as his own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
+  while spectating). Same speed as the game: 55 frames down, 18 back. See
+  `src/spectator_gun.rs`.
 
 Plus eighteen control surfaces, always available and doing nothing until used:
 

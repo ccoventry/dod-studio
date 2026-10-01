@@ -278,10 +278,7 @@ impl Hidden {
 /// transition.
 pub(super) fn hidden_because(view: &View, now: f64) -> Option<Hidden> {
     let View {
-        body,
-        gait,
-        movetype,
-        held_stem,
+        body, held_stem, ..
     } = *view;
     note_body(now, body);
     if body.starts_with("die_") || body.starts_with("dead") {
@@ -304,8 +301,27 @@ pub(super) fn hidden_because(view: &View, now: f64) -> Option<Hidden> {
     if since(&BOLT_SHOT_AT, now).is_some_and(|s| s < BOLT_CYCLE_SECONDS) {
         return Some(Hidden::CyclingBolt);
     }
-    // The gun-lowered states, none of which apply on a deployed gun.
-    if !deployed {
+    lowered_because(view, now)
+}
+
+/// Whether the player's own gun would be lowered off screen now
+/// (`DoDGunGoOnOffScreen`, issue #559): the same states as the crosshair's
+/// lowered ones, whatever the weapon. Call after [`hidden_because`] in the
+/// same frame, which keeps the prone timer up to date.
+pub(super) fn gun_lowered(view: &View, now: f64) -> bool {
+    lowered_because(view, now).is_some()
+}
+
+/// The gun-lowered states (`g_ihidexhair`), none of which apply on a deployed
+/// gun.
+fn lowered_because(view: &View, now: f64) -> Option<Hidden> {
+    let View {
+        body,
+        gait,
+        movetype,
+        ..
+    } = *view;
+    if !is_deployed(body) {
         if gait == "dod_sprint" {
             return Some(Hidden::Sprinting);
         }
@@ -532,6 +548,36 @@ mod tests {
             None
         );
         forget();
+    }
+
+    #[test]
+    fn the_gun_lowers_in_the_lowered_states_whatever_the_weapon() {
+        let _statics = lock_statics();
+        forget();
+        // A sniper rifle has no crosshair, but the gun still lowers.
+        assert!(gun_lowered(
+            &view("sprint_bolt_aim", "dod_sprint", "spring"),
+            10.0
+        ));
+        assert!(gun_lowered(&view("jump", "look_idle", "garand"), 10.0));
+        assert!(gun_lowered(
+            &view("prone_rifle_aim", "prone_forward", "garand"),
+            10.0
+        ));
+        // Reloading and switching hide the crosshair, not the gun.
+        assert!(!gun_lowered(
+            &view("stand_garand_reload", "dod_idle1", "garand"),
+            10.0
+        ));
+        assert!(!gun_lowered(
+            &view("stand_rifle_aim", "dod_idle1", "garand"),
+            10.0
+        ));
+        // A deployed machine gun stays up.
+        assert!(!gun_lowered(
+            &view("bipod_mg_aim", "prone_forward", "mg42bd"),
+            10.0
+        ));
     }
 
     #[test]

@@ -40,9 +40,10 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `dodstudio_spec_match_pov` drives four modules at once: the viewmodel's
-//! animations, the gunshots an HLTV demo lost, the spectator crosshair, and
-//! the in-eye camera's height for a prone player. The first three used to
+//! `dodstudio_spec_match_pov` drives five modules at once: the viewmodel's
+//! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
+//! in-eye camera's height for a prone player, and the gun lowering off screen
+//! (`spectator_gun`). The first three used to
 //! have a cvar of their own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
 //! `dodstudio_hltv_play_missing_gunshots`, `dodstudio_match_pov_crosshair`).
@@ -607,6 +608,7 @@ fn status_text() -> String {
             spectator_crosshair::status()
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
+        lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
