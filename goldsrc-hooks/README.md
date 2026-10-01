@@ -34,7 +34,7 @@ joins this switch rather than adding a command:
   player goes prone. The game's in-eye camera has no prone case and leaves it
   at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
 
-Plus eighteen control surfaces, always available and doing nothing until used:
+Plus nineteen control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -86,6 +86,13 @@ Plus eighteen control surfaces, always available and doing nothing until used:
   the spectated player. `dodstudio_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **HLTV text** (`dodstudio_hide_hltv_messages 1`): drops the text an HLTV
+  proxy puts on screen during playback -- "You're watching HLTV. Visit
+  www.valvesoftware.com", about once a minute, and a proxy operator's own
+  `msg` lines -- so an HLTV demo needs no patched copy. Hooks
+  `HUD_DirectorMessage` (`cldll_func_t` slot 38) and drops only
+  `DRC_CMD_MESSAGE` (6); the pipeline's highlight labels (`DRC_CMD_STUFFTEXT`)
+  and the camera commands pass through. Both builds. See `src/hltv_messages.rs`.
 - **Overview map** (`dodstudio_overviewmap <full|mini> <x> <y> <w> <h>`): places
   and sizes DoD's overview map, so the big one can be a corner inset instead of
   something that has to be off. The rects are cached in `gHUD` rather than

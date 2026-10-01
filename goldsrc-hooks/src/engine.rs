@@ -42,18 +42,20 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps four of its 43 slots for our
+//!   `cldll_func_t` table, then swaps five of its 43 slots for our
 //!   trampolines before handing it back to the engine.
 //! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` /
-//!   `"HUD_GetStudioModelInterface"` (classic non-secured builds) -- we
-//!   return the trampoline directly.
+//!   `"HUD_DirectorMessage"` / `"HUD_GetStudioModelInterface"` (classic
+//!   non-secured builds) -- we return the trampoline directly.
 //!
 //! Either way the trampolines receive what we need as ordinary arguments:
 //! `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface` hands
 //! us `pstudio`, `HUD_Frame` gives a real per-frame tick, and `HUD_AddEntity`
 //! hands us the model path of every entity about to be added to the render
-//! list -- the only one of the four that isn't a one-time capture, since it
-//! runs the suppress/forward decision itself, once per entity.
+//! list -- the first of two that aren't a one-time capture, since it runs the
+//! suppress/forward decision itself, once per entity. `HUD_DirectorMessage`
+//! is the second: it hands us every HLTV director message, so
+//! `hltv_messages.rs` can drop the proxy's on-screen text.
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -711,12 +713,16 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 const SLOT_INITIALIZE: usize = 0;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
 const SLOT_HUD_FRAME: usize = 33;
+/// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
+/// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
+const SLOT_HUD_DIRECTOR_MESSAGE: usize = 38;
 const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
     "a cldll_func_t slot index is outside the table F actually writes"
 );
@@ -729,6 +735,9 @@ type GetStudioModelInterfaceFn =
 /// `ent` is passed through opaquely -- nothing here reads its fields, only
 /// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
+/// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
+/// message, with the opcode and length byte already stripped.
+type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
 /// The secured single-callback export: fills the caller-provided buffer with
 /// `CLDLL_FUNC_SLOTS` function pointers. `__cdecl`, one pointer argument --
 /// confirmed from `hw.dll`'s call site (`push edx; call eax; add esp, 4`).
@@ -738,6 +747,7 @@ static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Runs once, on the engine's own thread, immediately after `client.dll`'s
@@ -1074,6 +1084,25 @@ unsafe extern "C" fn tramp_hud_add_entity(
     unsafe { real(entity_type, ent, modelname) }
 }
 
+/// Called once per `svc_director` message. Drops the ones
+/// `hltv_messages::should_drop` asks for and forwards the rest unchanged.
+unsafe extern "C" fn tramp_hud_director_message(size: i32, buf: *mut c_void) {
+    if size > 0 && !buf.is_null() {
+        // Safety: the engine's own buffer of `size` bytes, alive for the call.
+        let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) };
+        if crate::hltv_messages::should_drop(bytes) {
+            return;
+        }
+    }
+
+    let real = REAL_HUD_DIRECTOR_MESSAGE.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    let real: HudDirectorMessageFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(size, buf) }
+}
+
 /// Swaps one slot of the `cldll_func_t` table `F` just filled for our own
 /// trampoline, stashing the real pointer so the trampoline can chain to it.
 ///
@@ -1108,7 +1137,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the four slots we care about before the engine ever reads them.
+/// replaces the five slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {
@@ -1148,6 +1177,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_HUD_ADD_ENTITY,
             tramp_hud_add_entity as *mut c_void,
             "HUD_AddEntity",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_DIRECTOR_MESSAGE,
+            &REAL_HUD_DIRECTOR_MESSAGE,
+            tramp_hud_director_message as *mut c_void,
+            "HUD_DirectorMessage",
         );
         swap_slot(
             table,
@@ -1237,7 +1273,7 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     };
 
     // "F" is the secured single-callback export, and is what DoD 1.3 actually
-    // uses; the four named entries below are the classic convention, kept so
+    // uses; the five named entries below are the classic convention, kept so
     // this works unchanged on a non-secured client.dll too.
     match requested {
         "F" => {
@@ -1260,6 +1296,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_AddEntity" => {
             REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
             tramp_hud_add_entity as *mut c_void
+        }
+        "HUD_DirectorMessage" => {
+            REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);
+            tramp_hud_director_message as *mut c_void
         }
         "HUD_GetStudioModelInterface" => {
             REAL_GET_STUDIO_MODEL_INTERFACE.store(result, Ordering::Release);

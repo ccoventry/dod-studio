@@ -237,7 +237,7 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (14 cvars, 11 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 11 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
@@ -255,6 +255,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
+| `dodstudio_hide_hltv_messages` | cvar | 0 | Hides the HLTV proxy's on-screen text ("You're watching HLTV...") during playback | both |
 | `dodstudio_hide_hudelement` | command | — | Hides one of ten HUD elements: `crosshair`, `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
 | `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
@@ -379,7 +380,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 
 | On `dev` | Modules |
 |---|---|
-| Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
+| Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, HLTV text, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | PRE only | decal clear, HD textures, hull-trace guard |
 | Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
