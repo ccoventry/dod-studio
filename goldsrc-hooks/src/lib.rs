@@ -168,9 +168,9 @@ fn env_level(name: &str, default: i32) -> i32 {
 
 /// The animation fix starts **off**, like the sound fix: a capture pipeline
 /// should not silently alter viewmodel animations for anyone who happens to
-/// have the DLL loaded. Pick an iteration per session with
-/// `dodstudio_hltv_show_viewmodel_animations <0-4>`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
-/// have it start on one -- see `anim_fix::LEVEL` for what each is.
+/// have the DLL loaded. Turn it on per session with
+/// `dodstudio_hltv_show_viewmodel_animations 1`, or set `GOLDSRC_HOOKS_ANIM_FIX` to
+/// have it start on -- see `anim_fix::LEVEL`.
 ///
 /// It was on through live testing, because a session that begins by
 /// forgetting to type the command produces a log with nothing in it and looks

@@ -16,6 +16,9 @@
 //! there is nothing to drive it with and only the throw can be reproduced.
 //!
 //!     cargo run --release -p analysis --example grenade_timing_probe -- <demo>
+//!
+//! Add `--list` to print every throw (demo time, thrower's entity index,
+//! wind-up) -- the places to seek to when checking a throw in the game.
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
@@ -62,6 +65,7 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .expect("usage: grenade_timing_probe <demo>");
+    let list = std::env::args().any(|a| a == "--list");
     let bytes = std::fs::read(&path).expect("read demo");
     let demo = open_demo_from_bytes(&bytes).expect("parse demo");
 
@@ -190,6 +194,12 @@ fn main() {
                             if (0.0..=6.0).contains(&gap) {
                                 throws_with_windup += 1;
                                 gaps.push(gap);
+                                if list {
+                                    println!(
+                                        "throw at {:8.3}s  entity {entity:2}  wind-up {gap:.3}s",
+                                        frame.time
+                                    );
+                                }
                             }
                         }
                     }

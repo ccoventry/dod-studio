@@ -262,7 +262,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hltv_gunshot_attenuation` | cvar | 0.3 | How far gunshots carry while the gunshots fix is on | both |
 | `dodstudio_hltv_gunshots_fix` | cvar | 0 | Makes distant gunshots audible while spectating | both |
 | `dodstudio_hltv_play_missing_gunshots` | cvar | 0 | Plays the gunshots an HLTV demo has no fire event for (about 60% of rounds): sound, flash, tracer, impact | both |
-| `dodstudio_hltv_show_viewmodel_animations` | cvar | 0 | Animates the spectated player's first-person gun (levels 0–4) | both |
+| `dodstudio_hltv_show_viewmodel_animations` | cvar | 0 | Animates the spectated player's first-person weapon, grenades included (on/off) | both |
 | `dodstudio_match_pov_crosshair` | cvar | 0 | Draws the spectator crosshair in the POV style from `cl_xhair_style` | both |
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |
 | `dodstudio_objectives` | command | — | Moves the objective icons and timer (`offset`, `xoffset`, `timer`) | both |
