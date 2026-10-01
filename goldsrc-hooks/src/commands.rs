@@ -524,6 +524,7 @@ pub fn poll() {
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
+    crate::missing_shots::poll();
     crate::spectator_bars::poll();
 }
 
@@ -680,6 +681,9 @@ fn status_text() -> String {
     // the permanent, noisy default state for everyone who hasn't opted in.
     if texture_hires::has_observed() {
         lines.push(texture_hires::status());
+    }
+    if let Some(shots) = crate::missing_shots::status_line() {
+        lines.push(shots);
     }
     if let Some(bars) = crate::spectator_bars::status_line() {
         lines.push(bars);
@@ -1389,6 +1393,10 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // And this one: off until asked for, and nothing else depends on it.
+    if let Some(shots) = register(crate::missing_shots::NAME, "0") {
+        crate::missing_shots::set_cvar(shots);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {
