@@ -90,6 +90,21 @@ unsafe extern "C" fn hook_ev_play_sound(
     };
 }
 
+type EvWeaponAnimationFn = unsafe extern "C" fn(i32, i32);
+static REAL_EV_WEAPON_ANIMATION: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+
+/// A fire handler asking for the first-person gun's fire animation. Passed
+/// on unless `anim_fix` says the gun in hand can't be the one that fired.
+unsafe extern "C" fn hook_ev_weapon_animation(sequence: i32, body: i32) {
+    if !crate::anim_fix::allow_event_weapon_animation(sequence) {
+        return;
+    }
+    let real = REAL_EV_WEAPON_ANIMATION.load(Ordering::Acquire);
+    // Safety: the engine's own function, captured at install.
+    let real: EvWeaponAnimationFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(sequence, body) };
+}
+
 /// Installs the `EV_PlaySound` hook. Must be called after `engine::engfuncs()`
 /// returns `Some` (i.e. after `client.dll` has finished loading), since it
 /// needs a valid `p_event_api` pointer to patch.
@@ -113,6 +128,9 @@ pub fn install() {
         let real = (*event_api).ev_play_sound;
         REAL_EV_PLAY_SOUND.store(real as *mut c_void, Ordering::Release);
         (*event_api).ev_play_sound = hook_ev_play_sound;
+        let real = (*event_api).ev_weapon_animation;
+        REAL_EV_WEAPON_ANIMATION.store(real as *mut c_void, Ordering::Release);
+        (*event_api).ev_weapon_animation = hook_ev_weapon_animation;
     }
 }
 

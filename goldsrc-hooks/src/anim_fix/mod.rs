@@ -277,6 +277,38 @@ const FIRE_DEDUP_SECONDS: f64 = 0.03;
 
 /// Returns whether a firing animation should play now, or whether the other
 /// trigger already played one for this same shot.
+/// How long after a switch the new gun can't fire: `m_flNextAttack` is 0.5s
+/// after `DefaultDeploy` (longer for the `TimedDeploy` weapons). A shot in
+/// that window is the previous gun's, fired just before the switch.
+const JUST_DREW_SECONDS: f64 = 0.5;
+
+/// Whether the spectated player switched weapons less than
+/// [`JUST_DREW_SECONDS`] ago.
+fn just_drew(now: f64) -> bool {
+    let at = f64::from_bits(LAST_DRAW_TRIGGERED.load(Ordering::Relaxed));
+    at != 0.0 && now >= at && now - at < JUST_DREW_SECONDS
+}
+
+/// Whether a fire handler may play its fire animation on the first-person
+/// gun (`EV_WeaponAnimation`, see `fire_sounds`). Not while spectating a
+/// player who has just switched: the round belongs to the gun he put away,
+/// and its animation index means nothing on the new one -- a K98's fire
+/// played on the Luger he quick-switched to looks like the Luger firing.
+pub fn allow_event_weapon_animation(sequence: i32) -> bool {
+    if !enabled() || crate::spectator_target::in_eye_target().is_none() {
+        return true;
+    }
+    if !just_drew(engine::client_time()) {
+        return true;
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "anim_fix: a fire handler asked for sequence {sequence} on a gun drawn under {JUST_DREW_SECONDS}s ago -- the round was the previous gun's, not played"
+        ))
+    };
+    false
+}
+
 fn claim_fire(now: f64) -> bool {
     let last = f64::from_bits(LAST_FIRE_PLAYED.load(Ordering::Relaxed));
     // `now < last` means the clock went backwards -- a demo restarting -- so
@@ -421,6 +453,10 @@ pub fn on_weapon_fired(entity_index: i32) {
         return;
     }
     let now = engine::client_time();
+    if just_drew(now) {
+        // The sound is the previous gun's (a quick switch); the draw plays on.
+        return;
+    }
     if !claim_fire(now) {
         return;
     }
@@ -674,6 +710,17 @@ pub fn apply() {
                 };
             }
             match body_label.as_deref().map(classify_body_sequence) {
+                Some(BodyAction::Shoot)
+                    if just_drew(now) && !is_grenade_viewmodel(&viewmodel_name) =>
+                {
+                    // Fired and switched in one update: the new gun can't
+                    // have fired, and its draw plays below.
+                    unsafe {
+                        crate::debug::report(
+                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                        )
+                    };
+                }
                 Some(BodyAction::Shoot) => {
                     if claim_fire(now) {
                         // A grenade's firing sequence is the *release*, and
