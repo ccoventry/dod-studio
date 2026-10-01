@@ -522,6 +522,8 @@ pub fn poll() {
     crate::world_shaders::poll();
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
+    // After spectator_bars::poll, so it lays out by this frame's bar state.
+    crate::spectator_hud::poll();
     crate::spectator_follow::poll();
 }
 

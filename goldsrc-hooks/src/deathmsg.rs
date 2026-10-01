@@ -791,9 +791,9 @@ fn apply_max(max: i32) -> Result<(), String> {
 // ── The y detour ─────────────────────────────────────────────────────────────
 //
 // `Draw` picks the feed's y down three paths -- a plain 20, a screen-scaled
-// term plus 20 when the spectator-HUD flag is set, and the overview map's own
-// layout numbers while it's up at full size ("mode 2" -- not a spectator
-// mode, see docs/goldsrc_death_notices.md's corrigendum) -- and all three
+// term plus 20 when the spectator-HUD flag is set, and just under the minimap
+// while it's up ("mode 2", `_cl_minimap 2` -- not a spectator mode, see
+// docs/goldsrc_death_notices.md's corrigendum) -- and all three
 // converge with y in `[esp+4]` just before the function saves its registers.
 // Detouring that convergence sets the *result*, so one value means the same
 // thing on every path, including mode 2, which holds no immediate to patch
@@ -826,6 +826,13 @@ static OFFSET_VALUE: AtomicI32 = AtomicI32::new(STOCK_OFFSET);
 static OFFSET_RESUME: AtomicUsize = AtomicUsize::new(0);
 /// Installed once per process; see [`detour::Detour`] on why it is never undone.
 static OFFSET_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
+/// Where `spectator_hud` puts the feed while no `offset` has been typed, or
+/// [`OFFSET_UNSET`] while it has no opinion: not spectating, or the minimap is
+/// up and the game already places the feed under it.
+static AUTO_OFFSET: AtomicI32 = AtomicI32::new(OFFSET_UNSET);
+/// Set once the automatic layout has failed to install the detour, so it is
+/// logged once.
+static AUTO_FAILED: AtomicBool = AtomicBool::new(false);
 
 /// The stub, hand-assembled.
 ///
@@ -915,21 +922,63 @@ fn apply_offset(y: i32) -> Result<(), String> {
         return Err(format!("expected {MIN_OFFSET}..={MAX_OFFSET}, got {y}"));
     }
     ensure_offset_detour(base)?;
-    OFFSET_VALUE.store(y, Ordering::Release);
-    OFFSET_ACTIVE.store(1, Ordering::Release);
     PATCHED_OFFSET.store(y, Ordering::Release);
-    Ok(())
+    refresh_offset()
 }
 
-/// Hands the y back to the game, the way `offset default` always meant.
+/// Hands the y back: to the spectator layout while it has one, otherwise to
+/// the game.
 ///
 /// Nothing is unpatched: the detour stays, and simply stops substituting. That
 /// is strictly safer than restoring bytes under a thread that might be
 /// executing them, and it is what HLAE does too.
 fn clear_offset() -> Result<(), String> {
-    OFFSET_ACTIVE.store(0, Ordering::Release);
     PATCHED_OFFSET.store(OFFSET_UNSET, Ordering::Release);
+    refresh_offset().inspect_err(|_| OFFSET_ACTIVE.store(0, Ordering::Release))
+}
+
+/// The y in force now: the typed `offset`, else the spectator layout's, else
+/// [`OFFSET_UNSET`] (the game's own).
+fn effective_offset() -> i32 {
+    match PATCHED_OFFSET.load(Ordering::Acquire) {
+        OFFSET_UNSET => AUTO_OFFSET.load(Ordering::Acquire),
+        typed => typed,
+    }
+}
+
+/// Points the stub at [`effective_offset`], installing the detour if needed.
+fn refresh_offset() -> Result<(), String> {
+    let y = effective_offset();
+    if y == OFFSET_UNSET {
+        OFFSET_ACTIVE.store(0, Ordering::Release);
+        return Ok(());
+    }
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    ensure_offset_detour(base)?;
+    OFFSET_VALUE.store(y, Ordering::Release);
+    OFFSET_ACTIVE.store(1, Ordering::Release);
     Ok(())
+}
+
+/// Sets the spectator layout's feed y (`None`: the game's own). A typed
+/// `offset` still wins over it. Called by `spectator_hud` every frame; does
+/// nothing unless the value changed.
+pub fn set_auto_offset(y: Option<i32>) {
+    let y = y.unwrap_or(OFFSET_UNSET);
+    if AUTO_OFFSET.swap(y, Ordering::AcqRel) == y {
+        return;
+    }
+    if let Err(why) = refresh_offset()
+        && !AUTO_FAILED.swap(true, Ordering::Relaxed)
+    {
+        unsafe {
+            crate::debug::report(&format!(
+                "deathmsg: the spectator layout could not move the kill feed -- {why}"
+            ))
+        };
+    }
 }
 
 // ── The DeathMsg hook ────────────────────────────────────────────────────────
@@ -1147,7 +1196,10 @@ fn usage() -> String {
         "usage:\n\
          \x20 {COMMAND} max <{STOCK_MAX}..{MAX_LINES}>      lines of kill feed shown at once (default {STOCK_MAX})\n\
          \x20 {COMMAND} offset <0..{MAX_OFFSET}>     y the feed starts at (default {STOCK_OFFSET})\n\
-         \x20 {COMMAND} offset default      hand y back to the game\n\
+         \x20 {COMMAND} offset default      hand y back to the default layout: while\n\
+         \x20                               spectating, just below the spectator bar (at the\n\
+         \x20                               top while it is hidden; under the minimap\n\
+         \x20                               while _cl_minimap 2 shows it)\n\
          \x20 {COMMAND} block <id>...       hide frags involving these players\n\
          \x20 {COMMAND} block !<id>...      hide everything EXCEPT these players\n\
          \x20                               id: a slot, a SteamID (7656119..., STEAM_0:x:y, [U:1:n]),\n\
@@ -1162,7 +1214,11 @@ fn usage() -> String {
 /// `pub(crate)`: also folded into `dodstudio_debug_status`'s combined report.
 pub(crate) fn status() -> String {
     let max = PATCHED_MAX.load(Ordering::Acquire);
-    let offset = PATCHED_OFFSET.load(Ordering::Acquire);
+    let offset = match (PATCHED_OFFSET.load(Ordering::Acquire), effective_offset()) {
+        (OFFSET_UNSET, OFFSET_UNSET) => "the game's".to_string(),
+        (OFFSET_UNSET, auto) => format!("y {auto} (spectator layout)"),
+        (typed, _) => format!("y {typed}"),
+    };
     // Copied out, so the lock isn't held across the engine lookups.
     let list = BLOCK.lock().map(|l| l.clone());
     let block = match list {
@@ -1170,13 +1226,8 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = y {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, blocking {block}\n",
         if max == 0 { STOCK_MAX } else { max },
-        if offset == OFFSET_UNSET {
-            STOCK_OFFSET
-        } else {
-            offset
-        },
     )
 }
 
@@ -1255,7 +1306,7 @@ fn dispatch(argv: &[String]) -> String {
             };
             if value.eq_ignore_ascii_case("default") {
                 return match clear_offset() {
-                    Ok(()) => format!("{COMMAND}: offset back to whatever the game computes\n"),
+                    Ok(()) => format!("{COMMAND}: offset back to the default layout\n"),
                     Err(why) => format!("{COMMAND} offset: {why}\n"),
                 };
             }
