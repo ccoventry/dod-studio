@@ -40,7 +40,7 @@
 //!   event; one that arrives, either side of it, cancels the stand-in.
 //!
 //! Only while an HLTV demo plays (`IsSpectateOnly()`), and only with
-//! `dodstudio_match_pov 1`. Off by default. `2` also logs every round it
+//! `dodstudio_fix_spectator_pov 1`. Off by default. `2` also logs every round it
 //! plays, not only the first twenty.
 //!
 //! ## What it cannot do
@@ -66,7 +66,7 @@ use crate::engine::{
 };
 
 /// The cvar this follows, for its own messages. Registered in `commands.rs`.
-const NAME: &str = crate::names::MATCH_POV;
+const NAME: &str = crate::names::FIX_SPECTATOR_POV;
 
 /// `event_args_t` (`common/event_args.h`), what a fire handler is passed.
 #[repr(C)]
@@ -188,7 +188,7 @@ const TRACKING_GAP_SECONDS: f64 = 0.5;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
-/// `dodstudio_match_pov 2`: a log line for every round, not only the first
+/// `dodstudio_fix_spectator_pov 2`: a log line for every round, not only the first
 /// few. For checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
 /// What to do when there is no cvar to read: the fallback command's value.

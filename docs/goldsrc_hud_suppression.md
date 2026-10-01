@@ -241,12 +241,12 @@ already have a working `.res` workaround.
 
 ---
 
-## 6. The spectator crosshair (`dodstudio_match_pov`)
+## 6. The spectator crosshair (`dodstudio_fix_spectator_pov`)
 
 > This had a cvar of its own, `dodstudio_match_pov_crosshair`, until
-> 2026-10-01. It is now one of the three things `dodstudio_match_pov` turns
+> 2026-10-01. It is now one of the three things `dodstudio_fix_spectator_pov` turns
 > on. Where the text below says `dodstudio_match_pov_crosshair`, read
-> `dodstudio_match_pov`.
+> `dodstudio_fix_spectator_pov`.
 
 The other half of §3's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:

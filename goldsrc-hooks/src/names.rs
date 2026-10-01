@@ -40,4 +40,4 @@ pub(crate) use console_name;
 /// animations (`anim_fix`), the gunshots an HLTV demo lost (`missing_shots`)
 /// and the crosshair (`spectator_crosshair`). It lives here because all three
 /// modules name it in their own messages.
-pub(crate) const MATCH_POV: &str = console_name!("match_pov");
+pub(crate) const FIX_SPECTATOR_POV: &str = console_name!("fix_spectator_pov");

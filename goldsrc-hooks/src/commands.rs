@@ -13,8 +13,8 @@
 //! variables existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodstudio_match_pov` on its own, takes
-//! `+dodstudio_match_pov 1` on the launch line, and can be set from any
+//! its value, answers `dodstudio_fix_spectator_pov` on its own, takes
+//! `+dodstudio_fix_spectator_pov 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -38,9 +38,9 @@
 //! would be garbage. That case registers the old commands instead and says so
 //! loudly, so a bad assumption costs the type-ahead rather than the session.
 //!
-//! ## One switch for matching POV
+//! ## One switch for the spectator's first-person view
 //!
-//! `dodstudio_match_pov` drives three modules at once: the viewmodel's
+//! `dodstudio_fix_spectator_pov` drives three modules at once: the viewmodel's
 //! animations, the gunshots an HLTV demo lost, and the spectator crosshair.
 //! Each used to have a cvar of its own
 //! (`dodstudio_hltv_show_viewmodel_animations`,
@@ -68,7 +68,7 @@ use crate::{
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
-const MATCH_POV_NAME: &str = crate::names::MATCH_POV;
+const FIX_SPECTATOR_POV_NAME: &str = crate::names::FIX_SPECTATOR_POV;
 // Not "..._weapon_switch": it fires on stance changes too (p_mg42pr,
 // p_mg42sr), and those are the reason it exists.
 const HELD_MODELS_NAME: &str = console_name!("debug_log_weapon_model");
@@ -90,7 +90,7 @@ const TEXTURE_HIRES_LOG_NAME: &str = texture_hires::NAME;
 const CVAR_FLAGS: i32 = 0;
 
 /// The cvars the engine handed back, read once per frame by `poll`.
-static CVAR_MATCH_POV: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static CVAR_FIX_SPECTATOR_POV: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_HELD_MODELS: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SPECTATOR_TARGET_LOG: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static CVAR_SCOREBOARD: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
@@ -172,7 +172,7 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but into the level `anim_fix` reads -- see
 /// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
-/// `dodstudio_match_pov 2` (which also asks `missing_shots` to log every
+/// `dodstudio_fix_spectator_pov 2` (which also asks `missing_shots` to log every
 /// round) still means on here.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
@@ -422,7 +422,11 @@ pub fn poll() {
         // One cvar, three readers: the viewmodel's animations here, the
         // spectator crosshair below, and `missing_shots::poll` further down,
         // which holds the cvar itself.
-        poll_level(MATCH_POV_NAME, &CVAR_MATCH_POV, &anim_fix::LEVEL);
+        poll_level(
+            FIX_SPECTATOR_POV_NAME,
+            &CVAR_FIX_SPECTATOR_POV,
+            &anim_fix::LEVEL,
+        );
         poll_flag(
             HELD_MODELS_NAME,
             &CVAR_HELD_MODELS,
@@ -457,8 +461,8 @@ pub fn poll() {
         // Polled every frame like the rest, and for one extra reason: this is
         // also how it notices `cl_xhair_style` changing under it.
         poll_code_patch(
-            MATCH_POV_NAME,
-            &CVAR_MATCH_POV,
+            FIX_SPECTATOR_POV_NAME,
+            &CVAR_FIX_SPECTATOR_POV,
             &SPECTATOR_CROSSHAIR_COMPLAINED,
             spectator_crosshair::set_matching,
             describe_spectator_crosshair,
@@ -568,7 +572,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots and the spectator crosshair, as the player's own recording has them",
+            "{FIX_SPECTATOR_POV_NAME} = {} -- viewmodel animations, lost gunshots and the spectator crosshair, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -755,15 +759,15 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
     };
 }
 
-/// `dodstudio_match_pov` as a plain command. With no cvar for `poll` to copy
+/// `dodstudio_fix_spectator_pov` as a plain command. With no cvar for `poll` to copy
 /// from, the handler sets all three parts itself.
-unsafe extern "C" fn cmd_match_pov() {
-    handle_level(MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
+unsafe extern "C" fn cmd_fix_spectator_pov() {
+    handle_level(FIX_SPECTATOR_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
     let on = anim_fix::enabled();
     missing_shots::set_without_a_cvar(on);
     if let Err(why) = spectator_crosshair::set_matching(on) {
         console_print(&format!(
-            "{MATCH_POV_NAME}: the spectator crosshair was not changed -- {why}\n"
+            "{FIX_SPECTATOR_POV_NAME}: the spectator crosshair was not changed -- {why}\n"
         ));
     }
 }
@@ -1195,7 +1199,7 @@ fn add_command(name: &str, function: engine::ConsoleCommandFn) {
 }
 
 fn install_fallback_commands() {
-    add_command(MATCH_POV_NAME, cmd_match_pov);
+    add_command(FIX_SPECTATOR_POV_NAME, cmd_fix_spectator_pov);
     add_command(HELD_MODELS_NAME, cmd_log_held_models);
     add_command(SPECTATOR_TARGET_LOG_NAME, cmd_log_spectator_target);
     add_command(SCOREBOARD_NAME, cmd_scoreboard);
@@ -1211,7 +1215,7 @@ fn install_fallback_commands() {
     engine::set_per_frame_prologue(poll);
     unsafe {
         crate::debug::report(&format!(
-            "commands: fell back to plain commands -- {MATCH_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
+            "commands: fell back to plain commands -- {FIX_SPECTATOR_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME} (no type-ahead value, no .cfg or launch-line setting)"
         ))
     };
 }
@@ -1220,7 +1224,7 @@ fn install_fallback_commands() {
 /// returns `Some`.
 ///
 /// The defaults handed to the engine are whatever the environment variables
-/// already put in the flags, so `GOLDSRC_HOOKS_MATCH_POV=1` starts the session
+/// already put in the flags, so `GOLDSRC_HOOKS_FIX_SPECTATOR_POV=1` starts the session
 /// with it on — and a value in a `.cfg` or on the launch line, applied after
 /// registration, wins over it.
 pub fn install() {
@@ -1258,7 +1262,7 @@ pub fn install() {
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
-    let match_pov = register(MATCH_POV_NAME, &anim_fix::level().to_string());
+    let fix_spectator_pov = register(FIX_SPECTATOR_POV_NAME, &anim_fix::level().to_string());
     let held_models = register(
         HELD_MODELS_NAME,
         bit(anim_fix::LOG_HELD_MODELS.load(Ordering::Relaxed)),
@@ -1309,7 +1313,7 @@ pub fn install() {
     );
 
     let (
-        Some(match_pov),
+        Some(fix_spectator_pov),
         Some(held_models),
         Some(spectator_target_log),
         Some(scoreboard_cvar),
@@ -1319,7 +1323,7 @@ pub fn install() {
         Some(ex_interp_cvar),
         Some(texture_hires_log_cvar),
     ) = (
-        match_pov,
+        fix_spectator_pov,
         held_models,
         spectator_target_log,
         scoreboard_cvar,
@@ -1334,9 +1338,9 @@ pub fn install() {
         return;
     };
 
-    CVAR_MATCH_POV.store(match_pov, Ordering::Relaxed);
+    CVAR_FIX_SPECTATOR_POV.store(fix_spectator_pov, Ordering::Relaxed);
     // `missing_shots` reads the value itself: 2 asks it to log every round.
-    missing_shots::set_cvar(match_pov);
+    missing_shots::set_cvar(fix_spectator_pov);
     CVAR_HELD_MODELS.store(held_models, Ordering::Relaxed);
     CVAR_SPECTATOR_TARGET_LOG.store(spectator_target_log, Ordering::Relaxed);
     CVAR_SCOREBOARD.store(scoreboard_cvar, Ordering::Relaxed);
@@ -1350,7 +1354,7 @@ pub fn install() {
 
     unsafe {
         crate::debug::report(&format!(
-            "commands: registered cvars {MATCH_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
+            "commands: registered cvars {FIX_SPECTATOR_POV_NAME}, {HELD_MODELS_NAME}, {SPECTATOR_TARGET_LOG_NAME}, {SCOREBOARD_NAME}, {VOICE_NAME}, {CROSSHAIR_NAME}, {HAND_SIGNALS_NAME}, {EX_INTERP_NAME}, {TEXTURE_HIRES_LOG_NAME} and command {STATUS_NAME}"
         ))
     };
 }
@@ -1392,7 +1396,7 @@ mod tests {
             SCOREBOARD_NAME,
             VOICE_NAME,
             CROSSHAIR_NAME,
-            MATCH_POV_NAME,
+            FIX_SPECTATOR_POV_NAME,
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
         ] {
@@ -1429,12 +1433,12 @@ mod tests {
         anim_fix::LEVEL.store(anim, Ordering::Relaxed);
     }
 
-    /// The names this cvar replaced must not come back beside it: the
-    /// console's type-ahead completes to the longest match, so a name that
-    /// starts with `dodstudio_match_pov` would be offered in its place.
+    /// The console's type-ahead completes to the longest match, so a name
+    /// that starts with `dodstudio_fix_spectator_pov` would be offered in its
+    /// place. A fix that joins this switch must not bring a name like that.
     #[test]
-    fn nothing_else_starts_with_the_match_pov_name() {
-        assert_eq!(MATCH_POV_NAME, "dodstudio_match_pov");
+    fn nothing_else_starts_with_the_fix_spectator_pov_name() {
+        assert_eq!(FIX_SPECTATOR_POV_NAME, "dodstudio_fix_spectator_pov");
         for other in [
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
@@ -1451,7 +1455,7 @@ mod tests {
             crate::spectator_bars::NAME,
             crate::world_shaders::NAME,
         ] {
-            assert!(!other.starts_with(MATCH_POV_NAME), "{other}");
+            assert!(!other.starts_with(FIX_SPECTATOR_POV_NAME), "{other}");
         }
     }
 

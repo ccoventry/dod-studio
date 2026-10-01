@@ -89,7 +89,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// The animation part of `dodstudio_match_pov`: 0 is off, 1 is on.
+/// The animation part of `dodstudio_fix_spectator_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),

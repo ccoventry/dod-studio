@@ -2,7 +2,7 @@
 
 An HLTV demo is quieter than the match was. Whole bursts play with no sound,
 no muzzle flash and no bullet impact, while the player's model stands there
-firing. `dodstudio_match_pov 1` puts those rounds back (it also turns on the
+firing. `dodstudio_fix_spectator_pov 1` puts those rounds back (it also turns on the
 viewmodel animations and the POV crosshair; until 2026-10-01 this part had a
 cvar of its own, `dodstudio_hltv_play_missing_gunshots`).
 
@@ -195,7 +195,7 @@ for each weapon script and forwards the call. The log says how many it got:
 
 ## 5. Checking it
 
-`dodstudio_match_pov 2` logs every round it plays (1 logs the
+`dodstudio_fix_spectator_pov 2` logs every round it plays (1 logs the
 first twenty, then every 200th):
 
 ```

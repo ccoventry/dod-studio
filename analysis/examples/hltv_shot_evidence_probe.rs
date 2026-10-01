@@ -32,7 +32,7 @@
 //!
 //! The second form prints the raw timeline for a window instead; the third
 //! lists every round with no event (time, player), to hold a session of the
-//! hook's `dodstudio_match_pov 2` log against.
+//! hook's `dodstudio_fix_spectator_pov 2` log against.
 
 use dem::bit::BitSliceCast;
 use dem::open_demo_from_bytes;
