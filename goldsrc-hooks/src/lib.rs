@@ -95,6 +95,9 @@
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
 //!   see `docs/goldsrc_spectator_bars.md`.
+//! - `spectator_hud`: no command of its own -- while spectating, keeps the
+//!   objectives, the objective timer, the kill feed and the minimap just below
+//!   the spectator bar, or at the top as in a POV demo while the bar is hidden.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -148,6 +151,7 @@ mod spectator_crosshair;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
+mod spectator_hud;
 mod spectator_target;
 mod sprite_blend;
 mod tempent_fix;
