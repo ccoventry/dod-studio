@@ -47,7 +47,8 @@
 //! | ladder | `movetype` 5 |
 //! | weapon | the third-person model held |
 //! | MG deployed | body `sandbag_*` / `bipod_*` |
-//! | dead | body `die_*` / `dead*` |
+//! | dead | body `die_*` / `dead*` (also checked when there is no viewmodel) |
+//! | no weapon | no viewmodel while in his eyes |
 //!
 //! ## Left out, deliberately
 //!
@@ -219,6 +220,7 @@ pub(super) struct View<'a> {
 #[repr(u8)]
 pub(crate) enum Hidden {
     Dead = 1,
+    NoWeapon,
     NoCrosshairWeapon,
     UndeployedMachineGun,
     JustDrew,
@@ -232,8 +234,9 @@ pub(crate) enum Hidden {
 }
 
 impl Hidden {
-    const ALL: [Hidden; 11] = [
+    const ALL: [Hidden; 12] = [
         Hidden::Dead,
+        Hidden::NoWeapon,
         Hidden::NoCrosshairWeapon,
         Hidden::UndeployedMachineGun,
         Hidden::JustDrew,
@@ -255,6 +258,7 @@ impl Hidden {
     pub(crate) fn text(self) -> &'static str {
         match self {
             Hidden::Dead => "dead",
+            Hidden::NoWeapon => "no weapon in hand",
             Hidden::NoCrosshairWeapon => "this weapon has no crosshair",
             Hidden::UndeployedMachineGun => "machine gun not deployed",
             Hidden::JustDrew => "just drew the weapon",

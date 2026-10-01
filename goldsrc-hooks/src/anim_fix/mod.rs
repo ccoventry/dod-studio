@@ -439,6 +439,29 @@ pub fn apply() {
     // that leaves the last answer standing is the viewmodel mismatch below,
     // which is a flicker inside such a view, not the end of one.
     let no_view = || crate::spectator_crosshair::set_pov_hides(None);
+    // In a player's eyes with no viewmodel to show: he is dead (his weapon
+    // goes with him), or holds nothing. POV has no crosshair for either, so
+    // this hides it rather than handing the view back to the stock draw.
+    let no_weapon = |engfuncs: &engine::ClEngineFuncsPartial| {
+        let reason = crate::spectator_target::in_eye_target().map(|target| {
+            let player = unsafe { (engfuncs.get_entity_by_index)(target) };
+            // The body playing a death animation. Not `solid` (V_GetInEyePos's
+            // test): an HLTV demo doesn't send it at a death. Not `health`:
+            // it arrives as an unsigned byte, so -30 reads 226.
+            let dying = !player.is_null()
+                && unsafe { !(*player).model.is_null() }
+                && sequence_label(unsafe { (*player).model }, unsafe {
+                    (*player).curstate.sequence.max(0) as usize
+                })
+                .is_some_and(|label| label.starts_with("die") || label.starts_with("dead"));
+            if dying {
+                crosshair_rule::Hidden::Dead
+            } else {
+                crosshair_rule::Hidden::NoWeapon
+            }
+        });
+        crate::spectator_crosshair::set_pov_hides(reason);
+    };
     if !enabled() {
         stage(STAGE_DISABLED);
         no_view();
@@ -463,7 +486,7 @@ pub fn apply() {
             std::ptr::null_mut::<u8>(),
             -1,
         );
-        no_view();
+        no_weapon(engfuncs);
         return;
     }
     let viewmodel_model = unsafe { (*viewmodel_entity).model };
@@ -474,7 +497,7 @@ pub fn apply() {
             viewmodel_model,
             unsafe { (*viewmodel_entity).index },
         );
-        no_view();
+        no_weapon(engfuncs);
         return;
     }
     let viewmodel_name = unsafe { (*viewmodel_model).name_str() }.into_owned();
@@ -493,7 +516,7 @@ pub fn apply() {
             viewmodel_model,
             viewmodel_index,
         );
-        no_view();
+        no_weapon(engfuncs);
         return;
     }
     let spectated = unsafe { &*spectated };
