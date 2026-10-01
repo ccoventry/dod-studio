@@ -27,7 +27,8 @@ always ends the game it started, and only that one.
     shot <name>                 a frame recorded by HLAE, saved as <run>/<name>.png
     window                      note the game window's size, minimised and foreground state
     clip <name> [secs] [fps]    record HLAE frames for a few seconds into <run>/<name>/
-                                and a contact sheet <run>/<name>.png (default 2 s, 30 fps)
+                                and a contact sheet <run>/<name>.png (default 2 s, 30 fps);
+                                demo seconds while a demo plays
     grab <name>                 screen capture of the game window (VGUI panels included);
                                 needs focus first
     focus                       bring the game window to the front (25th Anniversary
@@ -39,6 +40,11 @@ always ends the game it started, and only that one.
                                 Studio does during a batch (#434)
     expect_exit <seconds>       check the game exits on its own within the
                                 time; only expect/expect_not may follow
+    ffwd <demo seconds> [secs]  fast-forward the demo to that demo time, then
+                                back to normal speed (gives up after `secs`, default 300)
+    spectate <index> [tries]    step the in-eye camera (+attack) to the player
+                                with that entity index; reads the animation fix's
+                                log, so it needs dodstudio_hltv_show_viewmodel_animations 1
 
 Examples:
 
@@ -213,6 +219,53 @@ def send_commands(pid, commands, timeout=30):
             time.sleep(0.5)
 
 
+DEMO_TIME = re.compile(r"\[demo\s+(\d+\.\d+)\]")
+SPECTATING = re.compile(r"now spectating idx (\d+)")
+
+
+def demo_time(pid, hooklog):
+    """The demo's clock now. The hook stamps its log lines with it and logs
+    every pipe command, so any command asks the question; `wait` does nothing
+    else."""
+    if send_commands(pid, ["wait"], timeout=5):
+        return None
+    time.sleep(0.1)
+    stamps = DEMO_TIME.findall(hooklog.text()[-4000:])
+    return float(stamps[-1]) if stamps else None
+
+
+def fast_forward(pid, hooklog, target, timeout):
+    """Runs the demo at `host_framerate 0.05` until its clock reaches
+    `target`, then back to real time. Returns an error or None."""
+    err = send_commands(pid, ["host_framerate 0.05"])
+    if err:
+        return err
+    end = time.time() + timeout
+    try:
+        while time.time() < end and alive(pid):
+            now = demo_time(pid, hooklog)
+            if now is not None and now >= target:
+                return None
+        return f"the demo never reached {target}s"
+    finally:
+        send_commands(pid, ["host_framerate 0"], timeout=5)
+
+
+def spectate(pid, hooklog, index, tries):
+    """Steps the spectator camera with +attack until the animation fix logs
+    that it is in-eye on `index`. Returns an error or None."""
+    for _ in range(tries):
+        seen_now = SPECTATING.findall(hooklog.text())
+        if seen_now and int(seen_now[-1]) == index:
+            return None
+        send_commands(pid, ["+attack"], timeout=5)
+        time.sleep(0.1)
+        send_commands(pid, ["-attack"], timeout=5)
+        time.sleep(0.5)
+    seen_now = SPECTATING.findall(hooklog.text())
+    return f"never reached player {index} (last seen: {seen_now[-1] if seen_now else 'none'})"
+
+
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
@@ -324,10 +377,14 @@ def focus_window(pid):
     return "foreground" if fg == hwnd else f"not foreground (the foreground window is {fg:#x})"
 
 
-def record_clip(pid, folder, seconds, fps):
+def record_clip(pid, folder, seconds, fps, hooklog=None):
     """Records `seconds` of HLAE frames at `fps` into `folder/` (PNGs) and
     writes `folder.png`, a contact sheet of up to 24 evenly spaced frames, for
-    checking an animation rather than one instant."""
+    checking an animation rather than one instant.
+
+    The seconds are demo seconds when a demo is playing: a recording runs as
+    fast as frames can be written, which on a quick machine is several times
+    real time, so a wall-clock wait records far more than was asked for."""
     try:
         from PIL import Image
     except ImportError:
@@ -337,7 +394,15 @@ def record_clip(pid, folder, seconds, fps):
     err = send_commands(pid, [f"mirv_movie_fps {fps}", f'mirv_movie_filename "{rec}"', "mirv_recordmovie_start"])
     if err:
         return err
-    time.sleep(seconds)
+    started = demo_time(pid, hooklog) if hooklog else None
+    if started is None:
+        time.sleep(seconds)
+    else:
+        give_up = time.time() + seconds * 4 + 10
+        while time.time() < give_up and alive(pid):
+            now = demo_time(pid, hooklog)
+            if now is not None and now - started >= seconds:
+                break
     err = send_commands(pid, ["mirv_recordmovie_stop", "mirv_movie_fps 30"])
     if err:
         return err
@@ -538,12 +603,26 @@ def run(args):
                     time.sleep(0.5)
                 else:
                     result["ok"] = False
+            elif kind == "ffwd":
+                parts = rest.split()
+                err = fast_forward(pid, hooklog, float(parts[0]),
+                                   float(parts[1]) if len(parts) > 1 else 300)
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
+            elif kind == "spectate":
+                parts = rest.split()
+                err = spectate(pid, hooklog, int(parts[0]),
+                               int(parts[1]) if len(parts) > 1 else 40)
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
             elif kind == "clip":
                 parts = rest.split()
                 name = parts[0] if parts else "clip"
                 seconds = float(parts[1]) if len(parts) > 1 else 2.0
                 fps = int(parts[2]) if len(parts) > 2 else 30
-                err = record_clip(pid, out / name, seconds, fps)
+                err = record_clip(pid, out / name, seconds, fps, hooklog)
                 result["ok"] = err is None
                 result["note"] = err or str(out / f"{name}.png")
                 if err is None:
