@@ -50,6 +50,9 @@ pub async fn spawn_blocking_result<T>(handle: tokio::task::JoinHandle<T>) -> Res
 
 // ── lib.rs ───────────────────────────────────────────────────────────────
 
+/// `default_projects_dir` when Windows reports no Documents folder.
+pub const NO_DOCUMENTS_FOLDER: &str = "Could not find the Documents folder";
+
 /// Generic "Failed to write <path>: <err>" — same shape independently
 /// authored at least twice (lib.rs's project session save, plus whatever
 /// else reads a user-given path); reused rather than re-typed per call site.
