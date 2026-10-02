@@ -45,6 +45,10 @@ pub struct RenderBatchPayload {
     /// the first entry with 20 GiB+ free.
     pub export_directories: Vec<String>,
     pub max_concurrent_renders: usize,
+    /// Clip names by take key (#441), from the loaded project: the finished
+    /// file of each of those takes is named after its highlight.
+    #[serde(default)]
+    pub clip_names: std::collections::HashMap<String, String>,
 }
 
 /// Resolve the FFmpeg binary path using the same fallback chain as the
@@ -161,7 +165,11 @@ impl RenderJobRuntime {
         };
         RenderJobView {
             id: self.id.clone(),
-            name: self.clip.base_name.clone(),
+            name: self
+                .clip
+                .clip_name
+                .clone()
+                .unwrap_or_else(|| self.clip.base_name.clone()),
             stream: if self.clip.clip_type == "hud_only" {
                 "HUD ONLY".to_string()
             } else {
@@ -617,6 +625,11 @@ pub async fn queue_render_batch(
 
     let jobs: Vec<RenderJobRuntime> = scan_result
         .into_iter()
+        .map(|mut clip| {
+            clip.clip_name = take_key(std::path::Path::new(&clip.take_folder))
+                .and_then(|key| payload.clip_names.get(&key).cloned());
+            clip
+        })
         .enumerate()
         .map(|(i, clip)| RenderJobRuntime {
             id: i.to_string(),
@@ -1085,6 +1098,7 @@ pub fn recover_render_batch(
             RenderJobRuntime {
                 id: i.to_string(),
                 clip: ClipData {
+                    clip_name: None,
                     take_folder: rj.take_folder.clone(),
                     clip_type: "single".to_string(),
                     img_folder: String::new(),
