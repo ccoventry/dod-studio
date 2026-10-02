@@ -206,6 +206,12 @@ def verify(game, src):
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
 
+    # 16: the Playback tab's time box.
+    text_vt = ui.vftable("TextEntry@vgui2")
+    get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
+    got = ui.last_ret(ui.u32(text_vt + 4 * get_text) - ui.base)
+    check(got == "ret 8", f"TextEntry's slot {get_text} (GetText(buf, len)) returns with {got!r}")
+
     # 15: the Settings tab's check boxes.
     check_vt = ui.vftable("CheckButton@vgui2")
     check(check_vt == build["check_button_vftable"], f"CheckButton's vftable is check_button_vftable +{(check_vt or 0):#x}")

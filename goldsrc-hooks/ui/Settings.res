@@ -208,4 +208,18 @@
 		"labelText"		"Draw the gun"
 		"textAlignment"		"west"
 	}
+	"ResetSettingsButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"ResetSettingsButton"
+		"xpos"		"272"
+		"ypos"		"198"
+		"wide"		"200"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Reset to defaults"
+		"textAlignment"		"center"
+		"Command"		"reset_settings"
+	}
 }

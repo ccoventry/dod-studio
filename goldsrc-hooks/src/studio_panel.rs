@@ -418,7 +418,55 @@ const CVAR_BOX_PREFIX: &str = "cvar_";
 /// `Button::SetSelected(bool)` (CheckButton's override posts
 /// `CheckButtonChecked`) and `Button::IsSelected()`.
 const BUTTON_SLOT_SET_SELECTED: usize = 173;
+/// `TextEntry::GetText(char *buf, int bufLen)`, as the console reads its own
+/// input line (`call [vftable+0x224]`).
+const TEXT_ENTRY_SLOT_GET_TEXT: usize = 137;
 const BUTTON_SLOT_IS_SELECTED: usize = 174;
+
+/// The Playback tab's time box.
+const GOTO_BOX: &str = "GotoTime";
+
+/// A time typed into the time box, in seconds of world time -- the clock the
+/// VCR bar shows. `75` or `75.5` are seconds; `1:15` is minutes and seconds;
+/// `1:15:50` is minutes, seconds and hundredths, as the bar writes it.
+fn parse_time(text: &str) -> Result<f64, String> {
+    let text = text.trim();
+    let bad = || format!("\"{text}\" is not a time -- try 20:33, 20:33:50 or 1233");
+    let fields: Vec<&str> = text.split(':').map(str::trim).collect();
+    let number = |f: &str| -> Result<f64, String> {
+        f.parse::<f64>()
+            .ok()
+            .filter(|v| v.is_finite() && *v >= 0.0)
+            .ok_or_else(bad)
+    };
+    let seconds = match fields.as_slice() {
+        [s] => number(s)?,
+        [m, s] => number(m)? * 60.0 + number(s)?,
+        [m, s, c] => number(m)? * 60.0 + number(s)? + number(c)? / 100.0,
+        _ => return Err(bad()),
+    };
+    Ok(seconds)
+}
+
+/// One line of the saved settings file: `name value`, `name` a plain cvar
+/// name and `value` a number, so the file can never run anything else.
+fn settings_line(line: &str) -> Option<(&str, &str)> {
+    let (name, value) = line.trim().split_once(' ')?;
+    let value = value.trim();
+    (bound_cvar(&format!("{CVAR_BOX_PREFIX}{name}")).is_some() && value.parse::<f64>().is_ok())
+        .then_some((name, value))
+}
+
+/// The saved settings, `name value` per line, with `name` set to `value`.
+fn settings_with(text: &str, name: &str, value: &str) -> String {
+    let mut lines: Vec<String> = text
+        .lines()
+        .filter(|l| settings_line(l).is_some_and(|(n, _)| n != name))
+        .map(str::to_string)
+        .collect();
+    lines.push(format!("{name} {value}"));
+    lines.join("\n") + "\n"
+}
 
 /// The cvar a Settings check box is bound to, from its name.
 fn bound_cvar(control: &str) -> Option<&str> {
@@ -677,6 +725,10 @@ fn minimum_size(tabs_right: i32, frame_wide: i32, client_wide: i32) -> (i32, i32
 enum Action<'a> {
     Vcr(&'a str),
     Engine(&'a str),
+    /// Jump to the time typed in the Playback tab's time box.
+    Goto,
+    /// Put every setting saved from the Settings tab back to its default.
+    ResetSettings,
     /// Anything else, for the class's own `OnCommand`.
     Own,
 }
@@ -684,6 +736,12 @@ enum Action<'a> {
 fn action(command: &str) -> Action<'_> {
     if let Some(line) = command.strip_prefix("engine ") {
         return Action::Engine(line.trim());
+    }
+    if command.eq_ignore_ascii_case("goto") {
+        return Action::Goto;
+    }
+    if command.eq_ignore_ascii_case("reset_settings") {
+        return Action::ResetSettings;
     }
     match VCR_COMMANDS
         .iter()
@@ -713,6 +771,95 @@ fn res_dir() -> std::path::PathBuf {
         .unwrap_or_default()
         .join("dod")
         .join(RES_DIR)
+}
+
+/// Where Settings-tab changes are kept between launches: our own file, never
+/// the user's `config.cfg`.
+fn settings_path() -> std::path::PathBuf {
+    res_dir().join("settings.cfg")
+}
+
+/// Each cvar's value before the saved settings were applied, so Reset can
+/// put it back.
+static DEFAULTS: std::sync::Mutex<Vec<(String, String)>> = std::sync::Mutex::new(Vec::new());
+static SETTINGS_APPLIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Applies the saved settings once, as soon as the engine can run commands
+/// and our cvars exist, noting each cvar's value first.
+fn apply_saved_settings() {
+    if SETTINGS_APPLIED.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(engfuncs) = crate::engine::engfuncs() else {
+        return;
+    };
+    // The cvars are registered with the rest of the hook's surface; wait
+    // until ours is there.
+    let Ok(probe) = std::ffi::CString::new(VIEWDEMO_NAME) else {
+        return;
+    };
+    if unsafe { (engfuncs.pfn_get_cvar_pointer)(probe.as_ptr()) }.is_null() {
+        return;
+    }
+    SETTINGS_APPLIED.store(true, Ordering::Relaxed);
+    let Ok(text) = std::fs::read_to_string(settings_path()) else {
+        return;
+    };
+    let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
+    let mut applied = Vec::new();
+    for (name, value) in text.lines().filter_map(settings_line) {
+        let Ok(c_name) = std::ffi::CString::new(name) else {
+            continue;
+        };
+        let before = unsafe { (engfuncs.pfn_get_cvar_float)(c_name.as_ptr()) };
+        if !defaults.iter().any(|(n, _)| n == name) {
+            defaults.push((name.to_string(), format!("{before}")));
+        }
+        if let Ok(line) = std::ffi::CString::new(format!("{name} {value}\n")) {
+            crate::engine::client_cmd(&line);
+        }
+        applied.push(format!("{name} {value}"));
+    }
+    if !applied.is_empty() {
+        unsafe {
+            crate::debug::report(&format!(
+                "studio_panel: applied saved settings from {}: {}",
+                settings_path().display(),
+                applied.join(", ")
+            ))
+        };
+    }
+}
+
+/// Remembers a Settings-tab change for the next launch.
+fn save_setting(name: &str, value: &str, default_before: f32) {
+    {
+        let mut defaults = DEFAULTS.lock().unwrap_or_else(|e| e.into_inner());
+        if !defaults.iter().any(|(n, _)| n == name) {
+            defaults.push((name.to_string(), format!("{default_before}")));
+        }
+    }
+    let path = settings_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let _ = std::fs::create_dir_all(res_dir());
+    if std::fs::write(&path, settings_with(&text, name, value)).is_err() {
+        unsafe {
+            crate::debug::report(&format!("studio_panel: could not save {}", path.display()))
+        };
+    }
+}
+
+/// Puts every saved setting back to its value before DoD Studio changed it,
+/// and forgets them.
+fn reset_settings() -> String {
+    let defaults = std::mem::take(&mut *DEFAULTS.lock().unwrap_or_else(|e| e.into_inner()));
+    for (name, value) in &defaults {
+        if let Ok(line) = std::ffi::CString::new(format!("{name} {value}\n")) {
+            crate::engine::client_cmd(&line);
+        }
+    }
+    let _ = std::fs::remove_file(settings_path());
+    format!("{} setting(s) back to their defaults", defaults.len())
 }
 
 /// Writes each default layout that is missing (or all of them on `reset`),
@@ -776,6 +923,7 @@ mod hook {
     type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
     type ListIntFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> u32;
     type IsSelectedFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
+    type GetTextFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_char, i32);
     type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type GetStringFn =
@@ -1626,6 +1774,8 @@ mod hook {
                         {
                             crate::engine::client_cmd(&line);
                         }
+                        let before = (engfuncs.pfn_get_cvar_float)(c_name.as_ptr());
+                        save_setting(cvar, if value { "1" } else { "0" }, before);
                         value
                     }
                     None if redraw => {
@@ -1881,6 +2031,11 @@ mod hook {
                 Ok(())
             }
             Action::Vcr(c) => Vgui::get().and_then(|vgui| unsafe { to_vcr_bar(&vgui, c) }),
+            Action::Goto => unsafe { goto_typed_time() },
+            Action::ResetSettings => {
+                crate::commands::console_print(&format!("{NAME}: {}\n", reset_settings()));
+                Ok(())
+            }
             Action::Engine(line) => {
                 let ran = std::ffi::CString::new(format!("{line}\n"))
                     .is_ok_and(|l| crate::engine::client_cmd(&l));
@@ -1953,11 +2108,50 @@ mod hook {
         }
     }
 
+    /// Reads the Playback tab's time box and jumps there.
+    unsafe fn goto_typed_time() -> Result<(), String> {
+        let vgui = Vgui::get()?;
+        unsafe {
+            let page =
+                vpanel_of(PAGE_OBJECTS[PLAYBACK_PAGE].load(Ordering::Acquire) as *mut c_void);
+            let entry = vgui
+                .child_named(page, GOTO_BOX)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null())
+                .ok_or("this Playback layout has no GotoTime box")?;
+            let get_text: GetTextFn = slot(entry, TEXT_ENTRY_SLOT_GET_TEXT);
+            let mut buf = [0u8; 64];
+            get_text(entry, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
+            let typed = CStr::from_bytes_until_nul(&buf)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let seconds = parse_time(&typed)?;
+            let line = std::ffi::CString::new(format!(
+                "{} {seconds:.2}\n",
+                crate::demo_seek::SEEK_TO_NAME
+            ))
+            .map_err(|e| e.to_string())?;
+            if crate::engine::client_cmd(&line) {
+                Ok(())
+            } else {
+                Err("could not run the seek".to_string())
+            }
+        }
+    }
+
     /// Each page's `OnKeyCodeTyped`: a key a control on the tab didn't use
     /// comes here. On the Console tab, Enter submits the borrowed input line,
     /// as it does in the console window -- where the dialog's own Submit
     /// button is the window's default, which our window knows nothing of.
     unsafe extern "thiscall" fn page_on_key(this: *mut c_void, code: i32) {
+        // Enter in the Playback tab's time box jumps, as Go does.
+        let playback_page = PAGE_OBJECTS[PLAYBACK_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == playback_page && (code == KEY_ENTER || code == KEY_PAD_ENTER) {
+            if let Err(why) = unsafe { goto_typed_time() } {
+                crate::commands::console_print(&format!("{NAME}: {why}\n"));
+            }
+            return;
+        }
         let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
         if this == console_page
             && (code == KEY_ENTER || code == KEY_PAD_ENTER)
@@ -2093,6 +2287,7 @@ mod hook {
 /// the window has been opened.
 pub fn poll() {
     wrap_toggleconsole();
+    apply_saved_settings();
     #[cfg(target_arch = "x86")]
     hook::poll();
 }
@@ -2214,6 +2409,27 @@ mod tests {
     }
 
     #[test]
+    fn a_typed_time_reads_as_the_vcr_bar_writes_it() {
+        assert_eq!(parse_time("75"), Ok(75.0));
+        assert_eq!(parse_time("20:33"), Ok(20.0 * 60.0 + 33.0));
+        assert_eq!(parse_time(" 20:33:50 "), Ok(20.0 * 60.0 + 33.5));
+        assert_eq!(parse_time("1:2.5"), Ok(62.5));
+        assert!(parse_time("").is_err());
+        assert!(parse_time("1:2:3:4").is_err());
+        assert!(parse_time("-5").is_err());
+        assert!(parse_time("abc").is_err());
+    }
+
+    #[test]
+    fn the_settings_file_only_holds_cvar_number_lines() {
+        assert_eq!(settings_line("hud_draw 0"), Some(("hud_draw", "0")));
+        assert_eq!(settings_line("hud_draw 0;quit"), None);
+        assert_eq!(settings_line("quit"), None);
+        let text = settings_with("hud_draw 0\njunk\nr_drawviewmodel 1\n", "hud_draw", "1");
+        assert_eq!(text, "r_drawviewmodel 1\nhud_draw 1\n");
+    }
+
+    #[test]
     fn the_command_takes_1_0_or_reset() {
         assert_eq!(request(None), Ok(Request::Toggle));
         assert_eq!(request(Some("1")), Ok(Request::Open));
@@ -2231,6 +2447,8 @@ mod tests {
             Action::Engine("dodstudio_debug_status")
         );
         assert_eq!(action("Close"), Action::Own);
+        assert_eq!(action("goto"), Action::Goto);
+        assert_eq!(action("reset_settings"), Action::ResetSettings);
     }
 
     #[test]
