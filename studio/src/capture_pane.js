@@ -15,6 +15,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { syncCommandProfileRow } from './command_profiles_ui.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -543,6 +544,15 @@ export function hydrateCommandsState(persistedInitCommands, persistedCustomComma
   customCommandsEditor?.render();
 }
 
+/** Replaces both lists with a command profile's (#442). Unlike boot-time
+ *  hydration, this is a change the user made, so everything that reads the
+ *  lists hears about it; the caller saves settings. */
+export function applyCommandsState(lists) {
+  hydrateCommandsState(lists?.init_commands, lists?.custom_commands);
+  refreshInitCommandWarnings();
+  refreshRollFloors();
+}
+
 // ── Clear Previews audit modal ─────────────────────────────────────────────
 //
 // Audits `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (see the
@@ -802,6 +812,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     getItems: () => initCommands,
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER }],
     onChange: () => {
+      // Before the save, so a profile this list now matches is saved as the
+      // active one.
+      syncCommandProfileRow();
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
       // this is the moment they can still see both.
@@ -818,6 +831,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],
     onChange: () => {
+      syncCommandProfileRow();
       notifySettingsChange();
       // These run last of all — after the configs and after the init commands —
       // and are the only place a cvar changes partway through a capture.

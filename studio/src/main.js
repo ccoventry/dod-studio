@@ -21,7 +21,7 @@ import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_war
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
@@ -40,6 +40,7 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
@@ -550,6 +551,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       target_drives: targetDrives,
       init_commands,
       custom_commands,
+      command_profiles: getCommandProfiles(),
+      command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
@@ -752,6 +755,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirsEditor.render();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -1536,6 +1540,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.

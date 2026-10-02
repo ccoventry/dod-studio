@@ -4,6 +4,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// A named set of Initial and Scheduled Commands (#442). Same shape as
+/// `AppSettings`' two lists; the frontend (`command_profiles.js`) trims them
+/// and drops blank rows before saving.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandProfile {
+    pub name: String,
+    #[serde(default)]
+    pub init_commands: Vec<String>,
+    #[serde(default)]
+    pub custom_commands: Vec<CustomCommandPayload>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub hlae_path: String,
@@ -119,6 +131,15 @@ pub struct AppSettings {
     pub init_commands: Vec<String>,
     #[serde(default)]
     pub custom_commands: Vec<CustomCommandPayload>,
+    /// Named sets of both command lists (#442), applied from Configuration >
+    /// Commands. Applying one only fills the two lists above, so the commands
+    /// are checked exactly like typed ones.
+    #[serde(default)]
+    pub command_profiles: Vec<CommandProfile>,
+    /// The profile the lists were last applied from or saved to, so the
+    /// "(edited)" mark survives a restart. Empty when there is none.
+    #[serde(default)]
+    pub command_profile_active: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
     #[serde(default = "default_render_codec")]
@@ -285,6 +306,8 @@ impl Default for AppSettings {
             // flush follows.
             init_commands: vec!["r_decals 256".to_string(), "mirv_fov 90".to_string()],
             custom_commands: Vec::new(),
+            command_profiles: Vec::new(),
+            command_profile_active: String::new(),
             save_local_patched_copy: false,
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
@@ -397,6 +420,48 @@ mod tests {
         let json = serde_json::to_string(&original).expect("settings must serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
         assert_eq!(restored.scan_workers, 5);
+    }
+
+    /// Settings saved before #442 load with no profiles; saved ones round-trip.
+    #[test]
+    fn test_command_profiles_roundtrip() {
+        let legacy_json = r#"{
+            "hlae_path": "C:/hlae/hlae.exe",
+            "hl_path": "C:/dod/hl.exe",
+            "ffmpeg_path": null,
+            "pinned_folders": [],
+            "language": "en",
+            "capture_fps": 300,
+            "pre_roll_seconds": 2.0,
+            "post_roll_seconds": 0.6
+        }"#;
+        let legacy: AppSettings =
+            serde_json::from_str(legacy_json).expect("settings without profiles must deserialize");
+        assert!(legacy.command_profiles.is_empty());
+        assert_eq!(legacy.command_profile_active, "");
+
+        let original = AppSettings {
+            command_profiles: vec![CommandProfile {
+                name: "FOTW".to_string(),
+                init_commands: vec!["mirv_fov 90".to_string()],
+                custom_commands: vec![CustomCommandPayload {
+                    command: "host_timescale 0.5".to_string(),
+                    relation: "Before".to_string(),
+                    offset_seconds: 1.5,
+                }],
+            }],
+            command_profile_active: "FOTW".to_string(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.command_profile_active, "FOTW");
+        assert_eq!(restored.command_profiles.len(), 1);
+        assert_eq!(restored.command_profiles[0].init_commands, ["mirv_fov 90"]);
+        assert_eq!(
+            restored.command_profiles[0].custom_commands[0].offset_seconds,
+            1.5
+        );
     }
 
     #[test]
