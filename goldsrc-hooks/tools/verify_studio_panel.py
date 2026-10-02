@@ -194,7 +194,8 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(page_vt + 4 * key) - ui.base)
     check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodeTyped) returns with {got!r}")
     for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8"),
-                       ("IPANEL_REQUEST_FOCUS", "ret 8")):
+                       ("IPANEL_REQUEST_FOCUS", "ret 8"), ("IPANEL_GET_ABS_POS", "ret 0xc"),
+                       ("IPANEL_SET_KEYBOARD_INPUT_ENABLED", "ret 8")):
         index = vwl.rust_usize(src, name)
         got = vg.last_ret(vg.u32(wrapper + 4 * index) - vg.base)
         check(got == want, f"IPanel slot {index} ({name}) returns with {got!r}")

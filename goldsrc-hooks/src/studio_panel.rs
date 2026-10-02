@@ -239,6 +239,8 @@ const SURFACE_GET_POPUP_COUNT: usize = 69;
 const SURFACE_GET_POPUP: usize = 70;
 
 const IPANEL_SET_MINIMUM_SIZE: usize = 6;
+const IPANEL_GET_ABS_POS: usize = 10;
+const IPANEL_SET_KEYBOARD_INPUT_ENABLED: usize = 31;
 const IPANEL_SET_PARENT: usize = 16;
 /// `PropertySheet::SetActivePage(Panel *page)`, the slot after `AddPage`: it
 /// looks the page up in the sheet's list and switches to it.
@@ -295,7 +297,7 @@ pub const LOANS: &[Loan] = &[
     },
     Loan {
         source: CONSOLE,
-        control: "ConsoleEntry",
+        control: CONSOLE_ENTRY,
         slot: "ConsoleEntrySlot",
         page: CONSOLE_PAGE,
     },
@@ -305,9 +307,20 @@ pub const LOANS: &[Loan] = &[
         slot: "ConsoleSubmitSlot",
         page: CONSOLE_PAGE,
     },
+    // The type-ahead list under the input line: a popup the console places
+    // itself, next to its input line wherever that is. It only needs a
+    // parent that is showing (the console window is hidden), so no slot.
+    Loan {
+        source: CONSOLE,
+        control: TYPE_AHEAD,
+        slot: "",
+        page: CONSOLE_PAGE,
+    },
 ];
-/// The console's panel name.
+/// The console's panel name, its input line and its type-ahead list.
 const CONSOLE: &str = "GameConsole";
+const CONSOLE_ENTRY: &str = "ConsoleEntry";
+const TYPE_AHEAD: &str = "CompletionList";
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const CONSOLE_PAGE: usize = 2;
@@ -571,6 +584,10 @@ mod hook {
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
     type GetXyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, *mut i32, *mut i32);
 
+    /// The window's size as its `.res` laid it out, read straight after
+    /// loading it: what the tabs' designs are worked back to.
+    static WINDOW_DESIGN: std::sync::Mutex<Option<(i32, i32)>> = std::sync::Mutex::new(None);
+
     /// Frames left to keep giving the borrowed console input line the
     /// keyboard after the console key opened the Console tab.
     static FOCUS_ENTRY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -709,6 +726,16 @@ mod hook {
             }
         }
 
+        /// A panel's position on screen.
+        unsafe fn abs_pos(&self, vp: Vpanel) -> (i32, i32) {
+            unsafe {
+                let get: GetXyFn = slot(self.panel, IPANEL_GET_ABS_POS);
+                let (mut x, mut y) = (0, 0);
+                get(self.panel, vp, &mut x, &mut y);
+                (x, y)
+            }
+        }
+
         unsafe fn set_parent(&self, vp: Vpanel, parent: Vpanel) {
             let set: SetParentFn = unsafe { slot(self.panel, IPANEL_SET_PARENT) };
             unsafe { set(self.panel, vp, parent) };
@@ -755,6 +782,19 @@ mod hook {
         minimum: (i32, i32),
         /// Loans already reported missing, so each is logged once.
         reported: Vec<&'static str>,
+        /// Each tab's size and its controls' places as its `.res` laid them
+        /// out, read the first time the tab has a size.
+        designs: Vec<PageDesign>,
+    }
+
+    struct PageDesign {
+        page: Vpanel,
+        /// The tab's size the `.res` was laid out for: unknown until the
+        /// sheet has laid the tab out, then worked back to the window's own
+        /// `.res` size (#410 may have resized the window already).
+        size: Option<(i32, i32)>,
+        /// Each control where the `.res` put it, read straight after loading.
+        controls: Vec<(Vpanel, (i32, i32, i32, i32))>,
     }
 
     thread_local! {
@@ -765,6 +805,7 @@ mod hook {
                 parked_from: None,
                 minimum: (0, 0),
                 reported: Vec::new(),
+                designs: Vec::new(),
             })
         };
     }
@@ -896,6 +937,10 @@ mod hook {
                 Ordering::Release,
             );
             load(frame, WINDOW_RES.0.as_ptr(), std::ptr::null());
+            let vgui = Vgui::get()?;
+            let (_, _, fw, fh) = vgui.rect(vpanel_of(frame));
+            *WINDOW_DESIGN.lock().unwrap_or_else(|e| e.into_inner()) = Some((fw, fh));
+            let mut designs = Vec::new();
 
             let sheet = allocate(base, build, build.sheet_size)?;
             let sheet_ctor: SheetCtor = std::mem::transmute(base + build.sheet_ctor);
@@ -919,9 +964,25 @@ mod hook {
                 PAGE_ON_COMMAND.store(own[0], Ordering::Release);
                 PAGE_ON_KEY.store(own[1], Ordering::Release);
                 load(object, page.res.0.as_ptr(), std::ptr::null());
+                // Where the .res put each control, before anything resizes it.
+                let page_vp = vpanel_of(object);
+                designs.push(PageDesign {
+                    page: page_vp,
+                    size: None,
+                    controls: vgui
+                        .child_list(page_vp)
+                        .into_iter()
+                        .map(|c| (c, vgui.rect(c)))
+                        .collect(),
+                });
                 add_page(sheet, object, page.title.as_ptr());
                 stored.store(object as usize, Ordering::Release);
             }
+            LENT.with(|cell| {
+                if let Ok(mut lent) = cell.try_borrow_mut() {
+                    lent.designs = designs;
+                }
+            });
             Ok((frame, sheet))
         }
     }
@@ -1024,13 +1085,28 @@ mod hook {
                 if page == 0 {
                     continue;
                 }
-                let Some(slot_vp) = vgui.child_named(page, loan.slot) else {
-                    continue; // a layout without this slot: nothing borrowed
+                // No slot: the control only needs our window as its parent.
+                let slot_vp = if loan.slot.is_empty() {
+                    None
+                } else {
+                    match vgui.child_named(page, loan.slot) {
+                        Some(vp) => Some(vp),
+                        None => continue, // a layout without this slot: nothing borrowed
+                    }
                 };
-                if vgui.visible(slot_vp) {
+                if let Some(slot_vp) = slot_vp
+                    && vgui.visible(slot_vp)
+                {
                     vgui.set_visible(slot_vp, false);
                 }
-                let at = vgui.rect(slot_vp);
+                let at = slot_vp.map(|v| vgui.rect(v));
+                let parent = match slot_vp {
+                    Some(_) => page,
+                    None => match window(vgui) {
+                        Some((_, frame_vp)) => frame_vp,
+                        None => continue,
+                    },
+                };
                 let known = lent
                     .borrowed
                     .iter()
@@ -1062,10 +1138,81 @@ mod hook {
                         home: vgui.rect(vp),
                     });
                 }
-                if vgui.parent_of(vp) != page {
-                    vgui.set_parent(vp, page);
+                if vgui.parent_of(vp) != parent {
+                    vgui.set_parent(vp, parent);
                 }
-                vgui.place(vp, at);
+                if let Some(at) = at {
+                    vgui.place(vp, at);
+                } else if loan.control == TYPE_AHEAD {
+                    // The console places its list under its own window's
+                    // input line; put it under ours instead (screen
+                    // coordinates: it is a popup).
+                    let entry = lent
+                        .borrowed
+                        .iter()
+                        .find(|b| b.source == source && vgui.name(b.control) == CONSOLE_ENTRY)
+                        .map(|b| b.control);
+                    if let Some(entry) = entry {
+                        let (ex, ey) = vgui.abs_pos(entry);
+                        let (_, _, _, eh) = vgui.rect(entry);
+                        let (_, _, w, h) = vgui.rect(vp);
+                        vgui.place(vp, (ex, ey + eh, w, h));
+                        // Showing, the list takes the keyboard (a popup of
+                        // ours now, not of the console's window), so typing
+                        // stopped after one letter: hand it back to the
+                        // input line while the list is up.
+                        if vgui.visible(vp) {
+                            let keyboard: PanelSetBoolFn =
+                                slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
+                            keyboard(vgui.panel, vp, 0);
+                            let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
+                            focus(vgui.panel, entry, 0);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Keeps each tab's controls fitted to the tab's size, by #410's rule: a
+    /// control spanning at least half the tab stretches with it, one near the
+    /// right or bottom edge keeps its distance from it, the rest stay. The
+    /// empty slots follow too, so what is borrowed into them does -- the
+    /// console's history grows with the window.
+    unsafe fn fit_pages(vgui: &Vgui, lent: &mut Lent) {
+        unsafe {
+            for stored in &PAGE_OBJECTS {
+                let page = vpanel_of(stored.load(Ordering::Acquire) as *mut c_void);
+                if page == 0 {
+                    continue;
+                }
+                let (_, _, w, h) = vgui.rect(page);
+                if w <= 0 || h <= 0 {
+                    continue;
+                }
+                let sheet = vpanel_of(SHEET.load(Ordering::Acquire) as *mut c_void);
+                let window_now = window(vgui).map(|(_, vp)| vgui.rect(vp));
+                let window_design = *WINDOW_DESIGN.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(design) = lent.designs.iter_mut().find(|d| d.page == page) else {
+                    continue;
+                };
+                if design.size.is_none() {
+                    // Laid out by the sheet: nearly as wide as it, and as tall
+                    // as it less the tab row.
+                    let (_, _, sw, sh) = vgui.rect(sheet);
+                    let (Some((_, _, fw, fh)), Some((dw, dh))) = (window_now, window_design) else {
+                        continue;
+                    };
+                    if w < sw - 24 || h < sh - 64 {
+                        continue;
+                    }
+                    design.size = Some((w - (fw - dw), h - (fh - dh)));
+                }
+                let Some(size) = design.size else { continue };
+                for &(control, at) in &design.controls {
+                    let want = crate::window_layout::fit_rect(at, size, (w, h));
+                    vgui.place(control, want);
+                }
             }
         }
     }
@@ -1195,6 +1342,9 @@ mod hook {
                     return;
                 };
                 hold_minimum(&vgui, frame, vp, &mut lent);
+                if vgui.visible(vp) {
+                    fit_pages(&vgui, &mut lent);
+                }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);
                     unpark(&vgui, &mut lent);
@@ -1360,6 +1510,7 @@ mod hook {
                         give_back(vgui, &mut lent, None);
                         unpark(vgui, &mut lent);
                         lent.minimum = (0, 0);
+                        lent.designs.clear();
                     }
                 });
                 vgui.set_visible(vp, false);
@@ -1518,7 +1669,7 @@ mod tests {
 
     #[test]
     fn every_loan_has_its_slot_on_its_tab() {
-        for loan in LOANS {
+        for loan in LOANS.iter().filter(|l| !l.slot.is_empty()) {
             let res = PAGES[loan.page].res.2;
             assert!(res.contains(&format!("\"{}\"", loan.slot)), "{}", loan.slot);
         }

@@ -241,6 +241,18 @@ fn fit(child: Rect, design: (i32, i32), now: (i32, i32)) -> Rect {
     Rect { x, y, w, h }
 }
 
+/// [`fit`] for a control given as `(x, y, wide, tall)`, for the DoD Studio
+/// window's tabs, which follow their size by the same rule.
+pub(crate) fn fit_rect(
+    child: (i32, i32, i32, i32),
+    design: (i32, i32),
+    now: (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = child;
+    let r = fit(Rect { x, y, w, h }, design, now);
+    (r.x, r.y, r.w, r.h)
+}
+
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
 /// `Frame::PerformLayout` places itself. In GameUI they have no name at all
 /// (listed live on both builds, 2026-10-01), while every control a `.res`
