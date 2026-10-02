@@ -29,6 +29,11 @@ HUD
       Move the objective icons and the objective timer.
   dodstudio_overviewmap
       Move or resize the overview map.
+  dodstudio_hud_map_players 0-4
+      Which players the overview map shows: 0 the game's own,
+      1 everyone, 2 the other team, 3 only who you watch, 4 none.
+  dodstudio_hud_map_team_marker 0/1
+      HLTV: mark who you watch on the map with his team's icon.
 
 DEMO PLAYBACK
   dodstudio_seek_to <time>
