@@ -31,6 +31,10 @@ const CONSUMED_ENGINE: &[&str] = &[
     "SvcStuffText",
     "SvcTime",
     "SvcUpdateUserInfo",
+    // The entity replay behind kill positions (#448).
+    "SvcSpawnBaseline",
+    "SvcPacketEntities",
+    "SvcDeltaPacketEntities",
 ];
 
 /// UserMessage names the analyzer accepts.

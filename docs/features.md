@@ -107,11 +107,12 @@ Finds byte-identical duplicate demos under one folder. Files are keyed by size p
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column here is a filename guess ("hltv" in the name).
-- **Report**, seven sub-tabs:
+- **Report**, eight sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
   - **Player Details:** Steam links, score, kills, deaths, lifespans, weapon breakdown, kill streaks with weapon filters.
   - **Team Details**, **Timeline** (team score chart), **Rounds**, **Chat Log** (with team, alive/dead and system-message filters).
+  - **Kill Map** (#448): every death placed on the map's overview picture (from the game's `dod\overviews` folder), with the players, weapon and distance on hover, and an engagement-distance table per weapon.
 
 There is no export from the page. The CLI can export Markdown or JSON (section 8).
 
@@ -321,8 +322,9 @@ Command-line only: `compare.py` (a side-by-side sheet of styles), `setup_tools.p
 | British | Allies become British the first time anyone plays a British class. |
 | Map change | Once there is gameplay, a new level ends the analysis, even the same map loaded again; before that, the warm-up is discarded. |
 | Demo type | "HLTV" if any HLTV or director message appears, else "POV". PR #395 stops patched previews counting as HLTV. |
+| Kill positions | Where both players stood at each kill, and the distance between them, from a replay of the entity snapshots (#448). The recording player's own position comes from its client data. On a POV demo, enemies out of the recorder's view have no position. |
 
-Analyses are cached as JSON in `%APPDATA%\dod-studio\analyzer_cache\v2\`, keyed by path and invalidated by size and modified time.
+Analyses are cached as JSON in `%APPDATA%\dod-studio\analyzer_cache\v4\`, keyed by path and invalidated by size and modified time.
 
 ### 7.3 Highlights
 
@@ -359,7 +361,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Settings | `%APPDATA%\dod-studio\settings.json`. The OBS password is stored in plain text. |
 | Activity log | `%APPDATA%\dod-studio\logs\activity_YYYYMMDD.md`, 30 days kept |
 | Hook DLL log | `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, 30 days kept |
-| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v2\` (no eviction) |
+| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v4\` (no eviction) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
 | Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |

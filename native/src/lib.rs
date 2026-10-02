@@ -36,6 +36,10 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
+
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]
@@ -115,7 +119,7 @@ fn build_file_info(demo_path: &PathBuf) -> Result<FileInfo, String> {
 // caches written by an older schema are treated as a miss instead of
 // silently deserializing with new fields missing/defaulted.
 #[cfg(not(target_arch = "wasm32"))]
-const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 4;
+const ANALYZER_CACHE_SCHEMA_VERSION: u32 = 5;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(serde::Deserialize)]

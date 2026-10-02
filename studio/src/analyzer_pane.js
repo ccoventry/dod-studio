@@ -1,13 +1,15 @@
 // analyzer_pane.js
 // Standalone "Demo Analyzer" tab — a JS port of the egui report_ui views
 // (Summary / Scoreboard / Player Details / Team Details / Timeline / Rounds /
-// Chat Log) from the `dev` branch. Reads the full analysis::{DemoInfo,
+// Chat Log) from the `dev` branch, plus a Kill Map tab of its own (#448).
+// Reads the full analysis::{DemoInfo,
 // AnalyzerState} payload from `analyze_demo_full` rather than the flattened
 // generic JSON used by the compact inline telemetry summary.
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview } from './ipc_bridge.js';
+import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { STRINGS } from './strings.js';
 import { escapeHtml as esc } from './html.js';
 
@@ -1013,6 +1015,7 @@ function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'kill-map': renderKillMapTab(container); break;
     case 'chat': renderChatTab(container); break;
   }
 }
@@ -1639,6 +1642,134 @@ function initTimelineTooltip(canvas, tooltip, points) {
     }
   });
   canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+}
+
+// ── Kill Map (#448) ───────────────────────────────────────────────────────────
+
+// One overview lookup per demo, shared by every visit to the tab: it reads and
+// base64-encodes an image, so it is not redone on each render.
+let overviewLookup = { key: null, promise: null };
+
+function overviewForReport(r) {
+  const key = `${r.file_path}|${r.demo_info.map_name}`;
+  if (overviewLookup.key !== key) {
+    const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
+    overviewLookup = { key, promise: loadMapOverview(gamePath, r.file_path, r.demo_info.map_name) };
+  }
+  return overviewLookup.promise;
+}
+
+function renderKillMapTab(container) {
+  const r = report;
+  const st = r.state;
+  const kills = st.kill_positions || [];
+  const isPov = r.demo_info.demo_type !== 'HLTV';
+
+  container.innerHTML = `
+    <h3 class="analyzer-heading">${esc(STRINGS.ANALYZER.KILL_MAP_TITLE)}</h3>
+    ${isPov ? `<p class="analyzer-note">${esc(STRINGS.ANALYZER.KILL_MAP_POV_NOTE)}</p>` : ''}
+    <div id="analyzer-killmap-area"><p class="analyzer-empty">${esc(STRINGS.ANALYZER.KILL_MAP_LOADING)}</p></div>
+    <h3 class="analyzer-heading">${esc(STRINGS.ANALYZER.ENGAGEMENT_TITLE)}</h3>
+    <p class="analyzer-note">${esc(STRINGS.ANALYZER.ENGAGEMENT_EXPLAINER)}</p>
+    ${engagementTable(kills)}`;
+
+  if (kills.length === 0) {
+    container.querySelector('#analyzer-killmap-area').innerHTML = `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.KILL_MAP_NO_KILLS)}</p>`;
+    return;
+  }
+
+  overviewForReport(r).then((overview) => {
+    // The user may have moved on while the image loaded.
+    if (report !== r || activeSubTab !== 'kill-map') return;
+    const area = container.querySelector('#analyzer-killmap-area');
+    if (!area) return;
+    if (!overview) {
+      area.innerHTML = `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.killMapNoOverview(r.demo_info.map_name))}</p>`;
+      return;
+    }
+    drawKillMap(area, overview, kills, st);
+  });
+}
+
+function drawKillMap(area, overview, kills, st) {
+  const names = new Map((st.players || []).map((p) => [p.id, p.name]));
+  const nameOf = (id) => (id && names.get(id)) || STRINGS.ANALYZER.KILL_MAP_UNKNOWN_PLAYER;
+  const alliesTeam = st.allies_are_british ? 'British' : 'Allies';
+  const placed = kills.filter((k) => k.victim_origin);
+
+  area.innerHTML = `
+    <div class="analyzer-timeline-legend">
+      <span><span class="legend-swatch" style="background:${teamColor(alliesTeam)};"></span>${esc(STRINGS.ANALYZER.killMapDiedLegend(teamLabel(alliesTeam, st.allies_are_british)))}</span>
+      <span><span class="legend-swatch" style="background:${teamColor('Axis')};"></span>${esc(STRINGS.ANALYZER.killMapDiedLegend(STRINGS.ANALYZER.AXIS_LABEL))}</span>
+      <span>${esc(STRINGS.ANALYZER.killMapCoverage(placed.length, kills.length))}</span>
+    </div>
+    <div class="analyzer-killmap">
+      <img alt="${esc(STRINGS.ANALYZER.KILL_MAP_TITLE)}" />
+      <div class="analyzer-timeline-tooltip" style="display:none;"></div>
+    </div>`;
+
+  const wrap = area.querySelector('.analyzer-killmap');
+  const img = wrap.querySelector('img');
+  const tooltip = wrap.querySelector('.analyzer-timeline-tooltip');
+  img.addEventListener('load', () => {
+    // The SVG uses the image's own pixels as its coordinates, so markers stay
+    // on their spot at any size the image is shown.
+    const w = img.naturalWidth || 1024;
+    const h = img.naturalHeight || 768;
+    const radius = Math.max(4, w / 180);
+    const circles = placed.map((k, i) => {
+      const { u, v } = worldToOverview(k.victim_origin, overview.placement);
+      return `<circle data-i="${i}" cx="${(u * w).toFixed(1)}" cy="${(v * h).toFixed(1)}" r="${radius.toFixed(1)}" fill="${teamColor(k.victim_team)}" />`;
+    }).join('');
+    wrap.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 ${w} ${h}">${circles}</svg>`);
+
+    const svg = wrap.querySelector('svg');
+    svg.addEventListener('mouseover', (e) => {
+      const i = e.target?.dataset?.i;
+      if (i === undefined) return;
+      const k = placed[Number(i)];
+      const killer = k.killer ? nameOf(k.killer) : null;
+      const rows = [`<strong>${esc(STRINGS.ANALYZER.killMapTooltip(nameOf(k.victim), killer, weaponName(k.weapon)))}</strong>${k.teamkill ? ` (${esc(STRINGS.ANALYZER.KILL_MAP_TEAMKILL_TAG)})` : ''}`];
+      if (typeof k.distance === 'number') {
+        rows.push(`${esc(STRINGS.ANALYZER.KILL_MAP_TOOLTIP_DISTANCE_LABEL)} ${esc(STRINGS.ANALYZER.metres(unitsToMetres(k.distance)))}`);
+      }
+      rows.push(`${esc(STRINGS.ANALYZER.KILL_MAP_TOOLTIP_TIME_LABEL)} ${esc(formatGameTime(durSecs(k.time.viewdemo_offset)))}`);
+      tooltip.innerHTML = rows.join('<br>');
+      const box = wrap.getBoundingClientRect();
+      const dot = e.target.getBoundingClientRect();
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${Math.min(dot.right - box.left + 8, box.width - 220)}px`;
+      tooltip.style.top = `${Math.max(dot.top - box.top - 10, 0)}px`;
+    });
+    svg.addEventListener('mouseout', (e) => {
+      if (e.target?.dataset?.i !== undefined) tooltip.style.display = 'none';
+    });
+  }, { once: true });
+  img.src = overview.image_data_url;
+}
+
+function engagementTable(kills) {
+  const rows = engagementByWeapon(kills);
+  const overall = engagementOverall(kills);
+  if (!overall) return `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.NO_ENGAGEMENT_DATA)}</p>`;
+  const m = (units) => esc(STRINGS.ANALYZER.metres(unitsToMetres(units)));
+  const row = (label, r, bold) => `
+    <tr${bold ? ' style="font-weight:600;"' : ''}>
+      <td>${esc(label)}</td>
+      <td style="text-align:right;">${r.count}</td>
+      <td style="text-align:right;">${m(r.average)}</td>
+      <td style="text-align:right;">${m(r.longest)}</td>
+    </tr>`;
+  return `
+    <div class="table-wrapper">
+      <table class="analyzer-table">
+        <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS_MEASURED}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_AVERAGE_DISTANCE}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_LONGEST_DISTANCE}</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => row(weaponName(r.weapon), r, false)).join('')}
+          ${row(STRINGS.ANALYZER.ALL_WEAPONS_LABEL, overall, true)}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // ── 6. Rounds ─────────────────────────────────────────────────────────────────

@@ -1,10 +1,12 @@
 mod chat;
 mod clan_match;
+pub mod entity_replay;
 mod kill;
 mod localization;
 mod mortality;
 mod objective;
 mod player;
+mod position;
 mod round;
 mod scoreboard;
 mod time;
@@ -21,6 +23,7 @@ use crate::{
     mortality::with_mortality_detection,
     objective::use_objective_updates,
     player::use_player_updates,
+    position::use_position_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
@@ -41,6 +44,7 @@ pub use crate::{
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
+    position::{KillPosition, PlayerPose},
     round::Round,
 };
 pub use dod::{Team, Weapon};
@@ -113,6 +117,13 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Every kill, with where both players stood (#448). Defaulted so a
+    /// cache entry written before it existed still loads.
+    #[serde(default)]
+    pub kill_positions: Vec<KillPosition>,
+    /// Working state for `kill_positions`; never serialized.
+    #[serde(skip)]
+    positions: position::PositionTracker,
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
@@ -361,6 +372,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         state.players.clear();
         state.rounds.clear();
         state.team_scores.reset();
+        state.kill_positions.clear();
         state.objectives = Objectives::default();
         state.clan_match_detected = false;
         state.clan_match_detection = ClanMatchDetection::WaitingForReset;
@@ -593,6 +605,13 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                     chat.sender_team = Some(Team::British);
                 }
             }
+            for kill in &mut state.kill_positions {
+                for team in [&mut kill.killer_team, &mut kill.victim_team] {
+                    if *team == Some(Team::Allies) {
+                        *team = Some(Team::British);
+                    }
+                }
+            }
         }
     }
 }
@@ -638,6 +657,7 @@ impl Analysis {
             }
             use_timing_updates(state, event);
             use_player_updates(state, event);
+            use_position_updates(state, event);
             with_mortality_detection(state, event);
             use_scoreboard_updates(state, event);
             use_kill_streak_updates(state, event);
