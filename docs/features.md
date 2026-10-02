@@ -231,6 +231,8 @@ At load the DLL hooks two imports of `hw.dll` (`GetProcAddress`, `LoadLibraryA`)
 
 It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and a crash handler records any crash as `module+offset` with a stack trail.
 
+**Refuses to join a server.** While the DLL is loaded, the engine's `connect`, `retry`, `reconnect` and `listen` are refused, with a console message and a hook-log line (issue #451): joining a VAC-secured server with it loaded is a ban risk. `connect local` (what `map` runs) still works. `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off. See `docs/vac_safety.md`.
+
 **Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off.
 
 **Events to Studio.** A second pipe, `\\.\pipe\dodstudio-hl-<pid>-events`, carries the pipeline's `[dod-studio]` markers from the game as the engine runs each `echo` (the DLL wraps `echo` through the engine's command list, with no per-build address). Markers from before Studio connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off; Studio then reads `qconsole.log` as before (issue #434, step 1).

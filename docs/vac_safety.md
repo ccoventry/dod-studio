@@ -28,10 +28,10 @@ rules below are deliberately cautious.
 
 | Route | What starts `hl.exe` | What loads into it | Protection today |
 | --- | --- | --- | --- |
-| Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | HLAE's connect warning; `-insecure` |
+| Capture batch | `capture_engine` → `PatcherConfig::build_hlae_process` | HLAE's hook, plus ours if found | the hook DLL's connect refusal (when ours is found); HLAE's connect warning; `-insecure` |
 | Launch Preview | `launch_demo_preview` → `build_hlae_process` | same | same |
 | Launch Game (HLAE) | `launch_standalone_game` → `build_hlae_process` | same | same. This one opens at the main menu with no demo, so the server browser is one click away |
-| `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | none: no HLAE, so no connect warning |
+| `inject.exe` (manual testing, `goldsrc-hooks/README.md`) | the user, any way they like | ours only, into any running `hl.exe` | the hook DLL's connect refusal, once the DLL has hooked the engine (its log says `connect_guard: wrapped`). No HLAE, so no connect warning |
 
 Every DoD Studio launch goes through the one function,
 `native/src/patch/types.rs`'s `build_hlae_process`. It always starts the game
@@ -73,9 +73,42 @@ line of defence, not a guarantee.
 ### The hook DLL loaded without HLAE
 
 `inject.exe` loads `dodstudio_goldsrc_hooks.dll` into whatever process ID it is
-given. There is no HLAE in that session, so no connect warning, and the DLL
-itself does not check where it is. That is the one route with no protection at
-all. Its README and the tool itself now say so.
+given. There is no HLAE in that session, so no connect warning. Until #451
+that was the one route with no protection at all; the DLL's own refusal
+(below) now covers it too. Its README and the tool itself still warn.
+
+## The hook DLL refuses to join a server (#451)
+
+Built from option 1 of the proposals below (decided in the 2026-09-28 review,
+D2). While `dodstudio_goldsrc_hooks.dll` is loaded it wraps the engine's own
+`connect`, `listen`, `retry` and `reconnect` commands, through the SDK's
+command-list functions (no per-build address, both builds), and refuses them.
+The console says why, and the hook log gets a `connect_guard: refused ...`
+line. It is a stop, not a question, and it doesn't depend on HLAE's hook.
+
+Read from both `hw.dll`s: every way the game joins a server ends in the
+`connect` command. `retry` queues `connect <last server>` (or `listen`), and
+so do a server's redirect and a Steam join request; the server browser's Join
+button queues `connect <address>` (`ServerBrowser.dll`). So refusing `connect`
+covers the server browser too, though that hasn't been tried live.
+
+What is still allowed:
+
+- **`connect local`**, which is how `map` joins the game's own listen server.
+  No one else can be on it.
+- **`retry` and `reconnect` after `connect local`.** A `changelevel` on your
+  own map sends `reconnect`.
+- **`reconnect` while a demo plays.** There it joins nothing, so it is left as
+  the engine has it.
+
+Limits:
+
+- A `+connect` on the game's launch line runs before the DLL has wrapped
+  anything. DoD Studio never puts one there.
+- If the DLL can't find `connect` in the engine's command list, nothing is
+  refused, and it says so in the console and the log.
+- `GOLDSRC_HOOKS_ALLOW_CONNECT=1`, set before the game starts, turns it off,
+  for someone who knowingly tests on their own server. The log says so.
 
 ## Warnings added (#373)
 
@@ -89,16 +122,12 @@ all. Its README and the tool itself now say so.
 - **`goldsrc-hooks/tools/hd/README.md`:** the HD images are plain files, but
   the hook that loads them is the ban risk, so build them into the movie copy.
 
-## Proposed, not built: a hard stop
+## Proposed: a hard stop
 
-These change behaviour, so they are for review before anyone builds them.
+These change behaviour, so they were for review before anyone built them.
+Option 1 is built (see above); 2 to 4 are not.
 
-1. **The hook DLL refuses `connect`.** `goldsrc-hooks` already registers
-   console commands. It could wrap the engine's own `connect` handler the way
-   HLAE does and refuse outright, with a console message, rather than asking.
-   This covers `inject.exe` sessions and a failed HLAE hook. The cost: a
-   deliberate connect to a local test server would need an opt-out, for
-   example a `GOLDSRC_HOOKS_ALLOW_CONNECT=1` environment variable.
+1. **The hook DLL refuses `connect`.** Built in #451.
 2. **The hook DLL only activates when DoD Studio started the game.**
    `build_hlae_process` would set an environment variable (say
    `DODSTUDIO_LAUNCHED=1`) and the DLL would install nothing without it. This
@@ -111,6 +140,3 @@ These change behaviour, so they are for review before anyone builds them.
    demo work and never plays online.
 4. **A one-time notice on first launch** explaining the separate-copy rule,
    stored in settings once acknowledged.
-
-Option 1 is the one that closes the only unprotected route (`inject.exe`) and
-the silent-failure case, without getting in the way of normal use.
