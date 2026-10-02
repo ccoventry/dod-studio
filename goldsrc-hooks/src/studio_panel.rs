@@ -212,6 +212,9 @@ pub struct Build {
     /// `ProgressBar`'s vftable: only a control with exactly this one gets the
     /// Highlights tab's progress.
     pub progress_bar_vftable: usize,
+    /// `ComboBox`'s vftable: only a control with exactly this one is filled
+    /// as the Demos tab's Type dropdown.
+    pub combo_box_vftable: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -234,6 +237,7 @@ pub const BUILDS: [Build; 2] = [
         keyvalues_new: 0x5_3bc0,
         keyvalues_ctor: 0x5_2510,
         progress_bar_vftable: 0xa_1dcc,
+        combo_box_vftable: 0x9_fbbc,
     },
     Build {
         name: "25th Anniversary",
@@ -254,6 +258,7 @@ pub const BUILDS: [Build; 2] = [
         keyvalues_new: 0x4_4330,
         keyvalues_ctor: 0x4_4010,
         progress_bar_vftable: 0xa_bbd4,
+        combo_box_vftable: 0xa_8f10,
     },
 ];
 
@@ -536,8 +541,13 @@ fn matches_filter(row: &str, filter: &str) -> bool {
 
 /// The Demos tab's other filters: map, HLTV / POV, and age.
 const MAP_FILTER: &str = "MapFilter";
-const SHOW_HLTV: &str = "ShowHltv";
-const SHOW_POV: &str = "ShowPov";
+/// The Type dropdown (All / POV / HLTV), as Studio's Demo Analyzer has it.
+const DEMO_TYPE: &str = "DemoType";
+const DEMO_TYPES: [&CStr; 3] = [c"All", c"POV", c"HLTV"];
+/// `ComboBox::AddItem(const char *text, const KeyValues *userData)` and
+/// `ActivateItemByRow(int row)`.
+const COMBO_SLOT_ADD_ITEM: usize = 196;
+const COMBO_SLOT_ACTIVATE_ITEM_BY_ROW: usize = 208;
 const DAYS_FILTER: &str = "DaysFilter";
 /// The Player filter: a name or SteamID, "they recorded it", and the note on
 /// how many demos it can see, shown in place of the hint while it is in use.
@@ -598,6 +608,16 @@ fn civil(secs: u64) -> (u64, u64, u64, u64, u64) {
 /// The Date column's text: sorts as text in date order.
 fn date_text((year, month, day, hour, minute): (u64, u64, u64, u64, u64)) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
+}
+
+/// Whether the Type dropdown's text lets HLTV demos (`hltv`) or POV demos
+/// (`!hltv`) through: "All", or anything else, lets both.
+fn shows_type(chosen: &str, hltv: bool) -> bool {
+    match chosen.trim() {
+        t if t.eq_ignore_ascii_case("HLTV") => hltv,
+        t if t.eq_ignore_ascii_case("POV") => !hltv,
+        _ => true,
+    }
 }
 
 /// Everything the Demos tab filters by at once.
@@ -1218,6 +1238,8 @@ mod hook {
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type ListFirstFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
     type ListVoidFn = unsafe extern "thiscall" fn(*mut c_void);
+    type ComboAddItemFn =
+        unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_void) -> i32;
     type ListItemIdFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> i32;
     type ListSetVisibleFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type AddColumnFn =
@@ -1344,12 +1366,6 @@ mod hook {
         }
     }
 
-    /// Whether a check box on `page` is ticked; `true` when the layout has
-    /// none, so a layout without it filters nothing out.
-    unsafe fn box_ticked(vgui: &Vgui, page: Vpanel, name: &str) -> bool {
-        unsafe { box_ticked_or(vgui, page, name, true) }
-    }
-
     /// Whether a check box on `page` is ticked, or `missing` when the layout
     /// has none.
     unsafe fn box_ticked_or(vgui: &Vgui, page: Vpanel, name: &str, missing: bool) -> bool {
@@ -1424,8 +1440,8 @@ mod hook {
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
-                hltv: box_ticked(vgui, page, SHOW_HLTV),
-                pov: box_ticked(vgui, page, SHOW_POV),
+                hltv: shows_type(&box_text(vgui, page, DEMO_TYPE), true),
+                pov: shows_type(&box_text(vgui, page, DEMO_TYPE), false),
                 days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
             let player = box_text(vgui, page, PLAYER_FILTER).trim().to_string();
@@ -2102,20 +2118,20 @@ mod hook {
                 }
             }
 
-            // The Demos tab's HLTV / POV boxes start ticked: show everything.
+            // The Demos tab's Type dropdown: All, POV, HLTV, starting on All.
             let demos_page =
                 vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
-            for name in [SHOW_HLTV, SHOW_POV] {
-                if let Some(o) = vgui
-                    .child_named(demos_page, name)
-                    .map(|vp| vgui.object(vp))
-                    .filter(|o| {
-                        !o.is_null() && *(*o as *const usize) == base + build.check_button_vftable
-                    })
-                {
-                    let set_selected: SetSelectedFn = slot(o, BUTTON_SLOT_SET_SELECTED);
-                    set_selected(o, 1);
+            if let Some(o) = vgui
+                .child_named(demos_page, DEMO_TYPE)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null() && *(*o as *const usize) == base + build.combo_box_vftable)
+            {
+                let add_item: ComboAddItemFn = slot(o, COMBO_SLOT_ADD_ITEM);
+                for item in DEMO_TYPES {
+                    add_item(o, item.as_ptr(), std::ptr::null());
                 }
+                let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
+                activate_row(o, 0);
             }
 
             // Our own Load Demo window, never shown: the Demos tab borrows its
@@ -3325,6 +3341,14 @@ mod tests {
         // 2026-09-29 21:52:30 UTC; 2024-02-29, a leap day.
         assert_eq!(date_text(civil(1_790_718_750)), "2026-09-29 21:52");
         assert_eq!(date_text(civil(1_709_164_800)), "2024-02-29 00:00");
+    }
+
+    #[test]
+    fn the_type_dropdown_picks_one_kind_or_both() {
+        assert!(shows_type("All", true) && shows_type("All", false));
+        assert!(shows_type("", true) && shows_type("", false));
+        assert!(shows_type("HLTV", true) && !shows_type("HLTV", false));
+        assert!(!shows_type("POV", true) && shows_type("pov", false));
     }
 
     #[test]

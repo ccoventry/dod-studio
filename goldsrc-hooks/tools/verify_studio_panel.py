@@ -278,6 +278,39 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(list_vt + add_item) - ui.base)
     check(got == "ret 0x10", f"which returns with {got!r} (data, userData, scrollTo, sortOnAdd)")
 
+    # 22: the Demos tab's Type dropdown. The labeled combo box in the
+    # Options dialog adds its items through slot COMBO_SLOT_ADD_ITEM's
+    # function on PRE; on both builds that function makes the "SetText"
+    # KeyValues each item carries.
+    combo_vt = ui.vftable("ComboBox@vgui2")
+    check(combo_vt == build["combo_box_vftable"],
+          f"ComboBox's vftable is combo_box_vftable +{(combo_vt or 0):#x}")
+    add_slot = vwl.rust_usize(src, "COMBO_SLOT_ADD_ITEM")
+    add_fn = ui.u32(combo_vt + 4 * add_slot) - ui.base if combo_vt else 0
+    pushed = [ui.img[int(x.split()[1], 16) - ui.base:][:16].split(b"\0")[0]
+              for x in ui.body(add_fn, 0x80) if re.fullmatch(r"push 0x1[0-9a-f]{7}", x)]
+    check(b"SetText" in pushed and b"text" in pushed,
+          f"ComboBox slot {add_slot} (AddItem(const char *, KeyValues *)) makes a SetText item: {pushed}")
+    row_slot = vwl.rust_usize(src, "COMBO_SLOT_ACTIVATE_ITEM_BY_ROW")
+    row_fn = ui.u32(combo_vt + 4 * row_slot) - ui.base if combo_vt else 0
+    body = ui.body(row_fn, 0x20)
+    jumps = [x for x in body if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
+    menu_vt = ui.vftable("Menu@vgui2")
+    ok = False
+    if jumps and menu_vt:
+        menu_slot = int(jumps[0].split("+ ")[1].rstrip("]"), 16)
+        menu_fn = ui.u32(menu_vt + menu_slot) - ui.base
+        menu_body = ui.body(menu_fn, 0x80)
+        # The menu's ActivateItemByRow turns the row into an item id and hands
+        # it to ActivateItem, the slot before it.
+        before = hex(menu_slot - 4)
+        ok = any(x.endswith(f"+ {before}]") and x.split()[0] in ("jmp", "call") for x in menu_body)
+    check(ok, f"ComboBox slot {row_slot} forwards to the menu's ActivateItemByRow, which calls ActivateItem: {jumps}")
+    text_vt = ui.vftable("TextEntry@vgui2")
+    get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
+    check(combo_vt and ui.u32(combo_vt + 4 * get_text) == ui.u32(text_vt + 4 * get_text),
+          f"ComboBox reads its text through TextEntry's slot {get_text}")
+
     # 21: the Killstreaks tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
     check(bar_vt == build["progress_bar_vftable"],
