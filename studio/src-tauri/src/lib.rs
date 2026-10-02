@@ -5,6 +5,7 @@ mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
+mod preview_in_place;
 mod render_manager;
 mod settings_manager;
 mod updater_manager;

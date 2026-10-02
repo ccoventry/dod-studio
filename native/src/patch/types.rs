@@ -514,6 +514,25 @@ impl PatcherConfig {
         self.ffmpeg_capture = self.capture_mode == CaptureMode::DirectToVideo;
     }
 
+    /// The goldsrc-hooks DLL a launch injects, if one is found: the user's
+    /// configured override (Studio -> Configuration -> Paths), then the
+    /// bundled default beside this app's own install, then (for anyone who
+    /// manually dropped it beside hlae.exe before that setting existed) that
+    /// legacy spot.
+    pub fn goldsrc_hooks_dll(&self) -> Option<std::path::PathBuf> {
+        let hlae_dir = std::path::Path::new(&self.hlae_path).parent();
+        self.goldsrc_hooks_dll_path
+            .as_ref()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.exists())
+            .or_else(|| default_goldsrc_hooks_dll_path().filter(|p| p.exists()))
+            .or_else(|| {
+                hlae_dir
+                    .map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))
+                    .filter(|p| p.exists())
+            })
+    }
+
     pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
         let hlae_exe = &self.hlae_path;
         let hl_exe = &self.game_path;
@@ -536,21 +555,8 @@ impl PatcherConfig {
         // env vars (GOLDSRC_HOOKS_*) are set, which nothing here sets yet --
         // see the crate's README for what it needs to do anything.
         //
-        // Resolution order: the user's configured override (Studio ->
-        // Configuration -> Paths), then the bundled default beside this
-        // app's own install, then (for anyone who manually dropped it beside
-        // hlae.exe before this setting existed) that legacy spot.
-        let goldsrc_hooks_dll = self
-            .goldsrc_hooks_dll_path
-            .as_ref()
-            .map(std::path::PathBuf::from)
-            .filter(|p| p.exists())
-            .or_else(|| default_goldsrc_hooks_dll_path().filter(|p| p.exists()))
-            .or_else(|| {
-                hlae_dir
-                    .map(|parent| parent.join("dodstudio_goldsrc_hooks.dll"))
-                    .filter(|p| p.exists())
-            });
+        // Resolution order: see `goldsrc_hooks_dll`.
+        let goldsrc_hooks_dll = self.goldsrc_hooks_dll();
         let goldsrc_hooks_dll_str =
             goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
 
