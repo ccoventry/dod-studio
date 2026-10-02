@@ -2049,9 +2049,23 @@ pub async fn launch_demo_preview(
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
+    // The saved resolution, as Launch Game uses it (#358): the preview
+    // config otherwise keeps PatcherConfig's 1280x720 default.
+    let resolution = {
+        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings_state
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (guard.resolution_width, guard.resolution_height)
+    };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) =
+        let (mut patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        (
+            patcher_config.resolution_width,
+            patcher_config.resolution_height,
+        ) = resolution;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()
