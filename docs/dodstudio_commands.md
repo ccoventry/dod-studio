@@ -197,13 +197,23 @@ no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
 
 Opens DoD Studio's own window in the game, or closes it if it's open. It sits
 with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
-Options and Find Servers windows (Playback, Demos, Console, Studio), and never
+Options and Find Servers windows (Playback, Demos, Console, Settings, Studio), and never
 narrower than its tabs. The Playback buttons do what the VCR bar's do, so a
 demo has to be playing under `viewdemo`; the tab also shows the bar's own time
 slider and time label. The Console tab holds the real console's history, input
 line and Submit button (Enter submits). Both are the original controls, lent
 by their windows while ours is open and handed back when it closes.
-`dodstudio_panel reset` writes the default layouts back and rebuilds the window.
+The Demos tab lists the demos and loads one with no demo playing. On the
+Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
+shows the value and sets it when clicked (add more in build mode).
+`dodstudio_panel [1|0|reset]`: bare opens or closes it, `1` opens, `0` closes,
+`reset` writes the default layouts back and rebuilds the window. With
+`dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Demos tab.
+
+The hook also writes DoD Studio's main menu to `dod_addonesource\GameMenu.res`
+(DoD Studio, Resume/Disconnect in a demo, Options, Quit), shown when the game
+is launched with `-addons` (#412); `dodesource`'s menu is never written, and a
+`dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
 one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written

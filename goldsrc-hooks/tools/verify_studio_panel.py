@@ -206,6 +206,23 @@ def verify(game, src):
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
 
+    # 15: the Settings tab's check boxes.
+    check_vt = ui.vftable("CheckButton@vgui2")
+    check(check_vt == build["check_button_vftable"], f"CheckButton's vftable is check_button_vftable +{(check_vt or 0):#x}")
+    set_sel = vwl.rust_usize(src, "BUTTON_SLOT_SET_SELECTED")
+    is_sel = vwl.rust_usize(src, "BUTTON_SLOT_IS_SELECTED")
+    setter = ui.u32(check_vt + 4 * set_sel) - ui.base
+    msg = ui.base + ui.img.find(b"CheckButtonChecked\0")
+    body = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[setter:setter + 0x100], ui.base + setter)]
+    check(f"push {hex(msg)}" in body and ui.last_ret(setter) == "ret 4",
+          f"CheckButton's slot {set_sel} (SetSelected) posts CheckButtonChecked and pops one argument")
+    getter = ui.body(ui.u32(check_vt + 4 * is_sel) - ui.base, 0x10)
+    field = re.fullmatch(r"mov al, byte ptr \[ecx \+ (0x[0-9a-f]+)\]", getter[0]) if getter else None
+    base_set = next((int(t.split()[1], 16) - ui.base for t in body if re.fullmatch(r"call 0x[0-9a-f]+", t)
+                     and any(f"byte ptr [esi + {field.group(1)}], al" in x for x in ui.body(int(t.split()[1], 16) - ui.base, 0x30))), None) if field else None
+    check(field and getter[1] == "ret" and base_set is not None,
+          f"slot {is_sel} (IsSelected) reads the byte Button::SetSelected writes (this+{field.group(1) if field else '?'})")
+
     # 13: the two IPanel slots only this window uses (the rest are #410's).
     vg = vwl.Image(game / "vgui2.dll")
     wrapper = vg.vftable("VPanelWrapper")

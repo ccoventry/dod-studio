@@ -93,7 +93,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 4] = [
+pub const PAGES: [Page; 5] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -119,6 +119,15 @@ pub const PAGES: [Page; 4] = [
             c"dodstudio_ui/Console.res",
             "Console.res",
             include_str!("../ui/Console.res"),
+        ),
+    },
+    Page {
+        name: c"Settings",
+        title: c"Settings",
+        res: (
+            c"dodstudio_ui/Settings.res",
+            "Settings.res",
+            include_str!("../ui/Settings.res"),
         ),
     },
     Page {
@@ -162,6 +171,9 @@ pub struct Build {
     pub sheet_size: usize,
     /// `PropertyPage::PropertyPage(Panel *parent, const char *name, bool)`.
     pub page_ctor: usize,
+    /// `CheckButton`'s vftable: only a control with exactly this one is
+    /// treated as a bound check box.
+    pub check_button_vftable: usize,
     /// `CDemoPlayerFileDialog::CDemoPlayerFileDialog(Panel *parent, const char
     /// *name)`: the Load Demo window, which the Demos tab borrows its list and
     /// Load button from. Allocated `frame_size + 4` bytes, as GameUI does.
@@ -184,6 +196,7 @@ pub const BUILDS: [Build; 2] = [
         sheet_ctor: 0x7_74f0,
         sheet_size: 0xac,
         page_ctor: 0x6_55f0,
+        check_button_vftable: 0xa_12f4,
         file_dialog_ctor: 0x2_06a0,
         file_dialog_fill: 0x2_0910,
     },
@@ -199,6 +212,7 @@ pub const BUILDS: [Build; 2] = [
         sheet_ctor: 0x8_54f0,
         sheet_size: 0xb4,
         page_ctor: 0x7_1cd0,
+        check_button_vftable: 0xa_aa48,
         file_dialog_ctor: 0x2_6f00,
         file_dialog_fill: 0x2_7210,
     },
@@ -396,6 +410,32 @@ fn lends(source: &str) -> bool {
 const PLAYBACK_PAGE: usize = 0;
 const DEMOS_PAGE: usize = 1;
 const CONSOLE_PAGE: usize = 2;
+const SETTINGS_PAGE: usize = 3;
+/// A check box named `cvar_<name>` on the Settings tab is bound to cvar
+/// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
+/// layout can add more in build mode.
+const CVAR_BOX_PREFIX: &str = "cvar_";
+/// `Button::SetSelected(bool)` (CheckButton's override posts
+/// `CheckButtonChecked`) and `Button::IsSelected()`.
+const BUTTON_SLOT_SET_SELECTED: usize = 173;
+const BUTTON_SLOT_IS_SELECTED: usize = 174;
+
+/// The cvar a Settings check box is bound to, from its name.
+fn bound_cvar(control: &str) -> Option<&str> {
+    control.strip_prefix(CVAR_BOX_PREFIX).filter(|name| {
+        !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    })
+}
+
+/// What a bound check box needs: `Some(value)` to set the cvar to (the user
+/// clicked it), or `None`, where `show` says whether the box must be redrawn
+/// to the cvar's value instead.
+fn settle(checked: bool, last: Option<bool>, cvar_on: bool) -> (Option<bool>, bool) {
+    match last {
+        Some(was) if was != checked => (Some(checked), false),
+        _ => (None, checked != cvar_on),
+    }
+}
 /// Where the VCR bar waits, off screen, while `dodstudio_viewdemo_in_panel` has
 /// our window stand in for it. Off screen rather than hidden: a hidden panel
 /// stops thinking, and the bar's think is what updates the time and slider.
@@ -735,6 +775,8 @@ mod hook {
     type SetParentFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, Vpanel);
     type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
     type ListIntFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> u32;
+    type IsSelectedFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
+    type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
@@ -1030,6 +1072,9 @@ mod hook {
         /// and where we last put the list.
         list_offset: Option<(i32, i32)>,
         list_set: Option<(i32, i32)>,
+        /// Each bound check box's state as last seen, so a click is told
+        /// apart from the cvar changing under it.
+        boxes: Vec<(Vpanel, bool)>,
         /// Each tab's size and its controls' places as its `.res` laid them
         /// out, read the first time the tab has a size.
         designs: Vec<PageDesign>,
@@ -1056,6 +1101,7 @@ mod hook {
                 console_home: None,
                 list_offset: None,
                 list_set: None,
+                boxes: Vec::new(),
                 designs: Vec::new(),
             })
         };
@@ -1529,6 +1575,67 @@ mod hook {
         }
     }
 
+    /// Keeps every `cvar_<name>` check box on the Settings tab and its cvar
+    /// in step: a click sets the cvar, and a cvar set elsewhere (the console,
+    /// a config) moves the box.
+    unsafe fn sync_settings(vgui: &Vgui, lent: &mut Lent) {
+        let Ok((base, build)) = gameui() else { return };
+        let Some(engfuncs) = crate::engine::engfuncs() else {
+            return;
+        };
+        unsafe {
+            let page =
+                vpanel_of(PAGE_OBJECTS[SETTINGS_PAGE].load(Ordering::Acquire) as *mut c_void);
+            if page == 0 {
+                return;
+            }
+            for control in vgui.child_list(page) {
+                let name = vgui.name(control);
+                let Some(cvar) = bound_cvar(&name) else {
+                    continue;
+                };
+                let object = vgui.object(control);
+                if object.is_null()
+                    || *(object as *const usize) != base + build.check_button_vftable
+                {
+                    continue;
+                }
+                let is_selected: IsSelectedFn = slot(object, BUTTON_SLOT_IS_SELECTED);
+                let set_selected: SetSelectedFn = slot(object, BUTTON_SLOT_SET_SELECTED);
+                let checked = is_selected(object) & 0xff != 0;
+                let Ok(c_name) = std::ffi::CString::new(cvar) else {
+                    continue;
+                };
+                let cvar_on = (engfuncs.pfn_get_cvar_float)(c_name.as_ptr()) != 0.0;
+                let last = lent
+                    .boxes
+                    .iter()
+                    .find(|(c, _)| *c == control)
+                    .map(|(_, v)| *v);
+                let (set, redraw) = settle(checked, last, cvar_on);
+                let now = match set {
+                    Some(value) => {
+                        if let Ok(line) =
+                            std::ffi::CString::new(format!("{cvar} {}\n", value as u8))
+                        {
+                            crate::engine::client_cmd(&line);
+                        }
+                        value
+                    }
+                    None if redraw => {
+                        set_selected(object, cvar_on as u32);
+                        cvar_on
+                    }
+                    None => checked,
+                };
+                match lent.boxes.iter_mut().find(|(c, _)| *c == control) {
+                    Some(entry) => entry.1 = now,
+                    None => lent.boxes.push((control, now)),
+                }
+            }
+        }
+    }
+
     /// Hands borrowed controls back to the windows they came from, where they
     /// were: all of them, or only those from `only`.
     unsafe fn give_back(vgui: &Vgui, lent: &mut Lent, only: Option<&str>) {
@@ -1666,6 +1773,7 @@ mod hook {
                 hold_minimum(&vgui, frame, vp, &mut lent);
                 if vgui.visible(vp) {
                     fit_pages(&vgui, &mut lent);
+                    sync_settings(&vgui, &mut lent);
                 }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);
@@ -2068,6 +2176,35 @@ mod tests {
         assert_eq!(game_menu_action(Some("\"GameMenu\" { }")), None);
         assert!(GAME_MENU.contains(GAME_MENU_MARK));
         assert!(GAME_MENU.contains("engine dodstudio_panel 1"));
+    }
+
+    #[test]
+    fn a_check_box_is_bound_by_its_name() {
+        assert_eq!(bound_cvar("cvar_hud_draw"), Some("hud_draw"));
+        assert_eq!(bound_cvar("cvar_"), None);
+        assert_eq!(bound_cvar("cvar_x;quit"), None);
+        assert_eq!(bound_cvar("Hint"), None);
+    }
+
+    #[test]
+    fn a_click_sets_the_cvar_and_the_cvar_moves_the_box() {
+        // First sight: the box follows the cvar.
+        assert_eq!(settle(false, None, true), (None, true));
+        // The user clicked it: the cvar follows the box.
+        assert_eq!(settle(true, Some(false), false), (Some(true), false));
+        // The cvar changed elsewhere: the box follows.
+        assert_eq!(settle(false, Some(false), true), (None, true));
+        // Nothing changed.
+        assert_eq!(settle(true, Some(true), true), (None, false));
+    }
+
+    #[test]
+    fn every_settings_box_names_a_known_cvar() {
+        let res = PAGES[SETTINGS_PAGE].res.2;
+        let boxes: Vec<&str> = res.split('"').filter_map(bound_cvar).collect();
+        assert!(boxes.len() >= 10, "{boxes:?}");
+        assert!(boxes.contains(&"dodstudio_viewdemo_in_panel"));
+        assert!(boxes.contains(&"dodstudio_console_in_panel"));
     }
 
     #[test]
