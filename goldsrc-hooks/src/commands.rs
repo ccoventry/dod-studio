@@ -526,6 +526,7 @@ pub fn poll() {
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
     crate::spectator_follow::poll();
+    crate::overview_players::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -687,6 +688,9 @@ fn status_text() -> String {
     }
     if let Some(lock) = crate::spectator_follow::status_line() {
         lines.push(lock);
+    }
+    if let Some(icons) = crate::overview_players::status_line() {
+        lines.push(icons);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1401,6 +1405,9 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(icons) = register(crate::overview_players::NAME, "0") {
+        crate::overview_players::set_cvar(icons);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1550,6 +1557,7 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::overview_players::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }
