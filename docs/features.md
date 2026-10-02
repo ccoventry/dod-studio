@@ -266,6 +266,8 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_seek_to` | command | — | `viewdemo` only: jumps playback to a demo time | both |
 | `dodstudio_spec_lock` | cvar | 0 | HLTV demos: keeps the camera on the player being watched when he dies, where the game moves on four seconds later | both |
 | `dodstudio_spec_target` | command | — | HLTV demos: puts the camera on a player by number (`dodstudio_deathmsg players` lists them) | both |
+| `dodstudio_hud_map_players` | cvar | 0 | Which players the overview map shows: the game's own team, everyone, the other team, only the player being watched, or nobody (`0`-`4`) | both |
+| `dodstudio_hud_map_team_marker` | cvar | 0 | HLTV: marks the watched player on the overview map with his team's camera icon | both |
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |
 | `dodstudio_objectives` | command | — | Moves the objective icons and timer (`offset`, `xoffset`, `timer`) | both |
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |

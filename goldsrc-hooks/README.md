@@ -77,6 +77,10 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   stays on the player being watched when he dies; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_follow.md`.
+- **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
+  overview map shows -- the game's own (the watched player's team), everyone,
+  the other team, only the player being watched, or nobody. A detour on the
+  map's one team test in `client.dll`; see `src/overview_players.rs`.
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
