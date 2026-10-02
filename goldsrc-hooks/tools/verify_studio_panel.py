@@ -128,7 +128,77 @@ def verify(game, src):
     bar = ui.vftable("CDemoPlayerDialog")
     check(ui.u32(bar + 4 * on_command) != ui.u32(frame + 4 * on_command),
           f"and the VCR bar overrides slot {on_command}, as it must for its buttons")
+
+    # 8-12: the tabs, read off how PropertyDialog and the Options pages are built.
+    client_area = vwl.rust_usize(src, "FRAME_SLOT_GET_CLIENT_AREA")
+    add_page = vwl.rust_usize(src, "SHEET_SLOT_ADD_PAGE")
+    got = ui.last_ret(ui.u32(frame + 4 * client_area) - ui.base)
+    check(got == "ret 0x10", f"Frame's slot {client_area} (GetClientArea, four out-params) returns with {got!r}")
+
+    dialog = constructor_of(ui, "PropertyDialog@vgui2")
+    sheet_new = None
+    if dialog:
+        lines = [(i.mnemonic, i.op_str) for i in ui.md.disasm(ui.img[dialog:dialog + 0x300], ui.base + dialog)]
+        def is_sheet(op):
+            if not op.startswith("0x"):
+                return False
+            at = int(op, 16) - ui.base
+            return 0 < at < len(ui.img) and ui.img[at:at + 6] == b"Sheet\0"
+
+        for k, (m, op) in enumerate(lines):
+            if m == "push" and is_sheet(op):
+                size = next((int(o, 16) for mm, o in reversed(lines[max(0, k - 8):k])
+                             if mm == "push" and o.startswith("0x") and int(o, 16) < 0x1000), None)
+                ctor = next((int(o, 16) - ui.base for mm, o in lines[k:k + 6] if mm == "call"), None)
+                sheet_new = (size, ctor)
+                break
+    check(sheet_new and sheet_new[1] == build["sheet_ctor"],
+          f"PropertyDialog builds its sheet with PropertySheet::PropertySheet +{(sheet_new or (0, 0))[1] or 0:#x}")
+    check(sheet_new and sheet_new[0] == build["sheet_size"],
+          f"allocating {(sheet_new or (0, 0))[0] or 0:#x} bytes (BUILDS: {build['sheet_size']:#x})")
+    got = ui.last_ret(build["sheet_ctor"])
+    check(got == "ret 8", f"PropertySheet::PropertySheet returns with {got!r} (parent, name)")
+
+    sheet_vt = ui.vftable("PropertySheet@vgui2")
+    got = ui.last_ret(ui.u32(sheet_vt + 4 * add_page) - ui.base)
+    check(got == "ret 8", f"PropertySheet's slot {add_page} (AddPage) returns with {got!r} (page, title)")
+    forward = re.compile(rb"\x8b\x89(....)\x8b\x01(?:\x5d)?\xff\xa0" + struct.pack("<I", add_page * 4), re.S)
+    check(forward.search(ui.img, *ui.code), f"and PropertyDialog::AddPage jumps there (jmp [eax+{add_page * 4:#x}])")
+
+    options_page = constructor_of(ui, "COptionsSubAudio")
+    first_call = None
+    if options_page:
+        for i in ui.md.disasm(ui.img[options_page:options_page + 0x80], ui.base + options_page):
+            if i.mnemonic == "call":
+                first_call = int(i.op_str, 16) - ui.base
+                break
+    check(first_call == build["page_ctor"],
+          f"an Options page's constructor starts with PropertyPage::PropertyPage +{first_call or 0:#x}")
+    got = ui.last_ret(build["page_ctor"])
+    check(got == "ret 0xc", f"which returns with {got!r} (parent, name, bool)")
+    page_vt = ui.vftable("PropertyPage@vgui2")
+    body = ui.body(ui.u32(page_vt + 4 * on_command) - ui.base, 0x10)
+    check(body[:1] == ["ret 4"], f"PropertyPage's own OnCommand is an empty {body[:1]} -- why pages get ours")
     return ok
+
+
+def constructor_of(ui, cls):
+    """The function that stores `cls`'s vftable and has callers: its constructor."""
+    vt = ui.vftable(cls)
+    if vt is None:
+        return None
+    needle = struct.pack("<I", ui.base + vt)
+    for m in re.finditer(re.escape(needle), ui.img):
+        at = m.start()
+        if at >= ui.code[1]:
+            continue
+        for start in range(at, at - 0x600, -1):
+            if ui.img[start - 1] in (0xCC, 0x90, 0xC3) and ui.img[start] in (0x55, 0x53, 0x56, 0x57, 0x6A, 0x8B, 0x51, 0x83, 0x64):
+                # A byte pair inside an instruction can look like a function
+                # start; only one with callers is taken.
+                if ui.calls_to(start):
+                    return start
+    return None
 
 
 def main():

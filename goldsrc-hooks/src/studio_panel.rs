@@ -1,55 +1,70 @@
 //! `dodstudio_panel`: DoD Studio's own window inside the game (issue #408,
-//! plan item 4). The first slice: a window with tabs, whose Playback tab
-//! drives the demo player the way the VCR bar's buttons do.
+//! plan item 4). A window with real tabs, like the Options and Find Servers
+//! windows; its Playback tab drives the demo player the way the VCR bar's
+//! buttons do.
 //!
 //! ## What it is
 //!
-//! A plain vgui2 `Frame` from `GameUI.dll`, built the way GameUI builds its
-//! own dialogs: allocated with GameUI's `operator new` (so vgui's delete at
-//! shutdown frees it with the matching allocator), constructed by
-//! `Frame::Frame` with GameUI's base panel as its parent (so it shows and hides
-//! with the menu, like the VCR bar), and laid out by
-//! `EditablePanel::LoadControlSettings` from our own `.res`. Being GameUI's
-//! `Frame`, it gets the ESC fix (#396, the shared `Frame::OnKeyCodeTyped`),
-//! resizing with controls that follow its size (#410) and build mode
-//! (Ctrl+Shift+Alt+B on the window, then Save) for free.
+//! Three kinds of GameUI vgui2 panel, built the way GameUI builds its own
+//! Options dialog (`COptionsDialog`, a `PropertyDialog`):
 //!
-//! The one behaviour of its own is `OnCommand` (vftable slot
-//! [`FRAME_SLOT_ON_COMMAND`]): the object gets a copy of `Frame`'s vftable with
-//! that slot pointing at [`hook::on_command`]. Anything it doesn't handle goes
-//! to `Frame::OnCommand`, which closes the window on `Close`.
+//! - **The window**, a `Frame`: allocated with GameUI's `operator new` (so
+//!   vgui's delete at shutdown frees it with the matching allocator),
+//!   constructed by `Frame::Frame` with `TaskBar` as its parent (the panel the
+//!   main menu and the VCR bar hang from, so it shows and hides with the menu),
+//!   laid out by `EditablePanel::LoadControlSettings` from `DodStudio.res`, and
+//!   shown by `Frame::Activate`.
+//! - **The tab strip**, a `PropertySheet` (`PropertySheet::PropertySheet`, the
+//!   object a `PropertyDialog` keeps for its pages), sized to the window's
+//!   client area every frame by [`poll`] -- what `PropertyDialog::PerformLayout`
+//!   does for its own sheet.
+//! - **One `PropertyPage` per tab** in [`PAGES`], each laid out by its own
+//!   `.res` and added with `PropertySheet::AddPage(page, title)`, as
+//!   `COptionsDialog` adds Keyboard, Mouse and the rest. The sheet draws the
+//!   tabs and switches pages itself.
 //!
-//! ## Commands its buttons can send
+//! Being GameUI's `Frame`, the window gets the ESC fix (#396, the shared
+//! `Frame::OnKeyCodeTyped`), resizing and remembered placement (#410) and build
+//! mode (Ctrl+Shift+Alt+B on a tab, then Save, which writes that tab's `.res`).
 //!
-//! - `tab <name>`: shows the controls whose name starts `<name>_` and hides
-//!   the other tabs' (a tab is any `tab_<name>` control in the `.res`).
-//!   Controls with no tab prefix stay as they are, on every tab.
-//! - The VCR bar's own commands -- `play`, `pause`, `faster`, `slower`,
+//! ## Buttons
+//!
+//! A button sends its `Command` to the panel it sits on. `PropertyPage`'s own
+//! `OnCommand` is an empty `ret 4` on both builds, so the window and its pages
+//! each get a copy of their class's vftable with `OnCommand` (slot
+//! [`FRAME_SLOT_ON_COMMAND`]) pointing at our handler. A command can be:
+//!
+//! - one of the VCR bar's own -- `play`, `pause`, `faster`, `slower`,
 //!   `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save` --
-//!   are handed to the open VCR bar (`CDemoPlayerDialog::OnCommand`), so they
-//!   do exactly what its buttons do. With no demo in the demo player there is
-//!   no bar, and the console says so.
-//! - `engine <command>`: runs a console command.
+//!   handed to the open VCR bar (`CDemoPlayerDialog::OnCommand`), so it does
+//!   exactly what the bar's button does. With no demo in the demo player
+//!   there is no bar, and the console says so;
+//! - `engine <command>`, run as a console command;
+//! - anything else, passed to the class's own `OnCommand` (`Close` on the
+//!   window).
 //!
-//! ## The layout file
+//! ## The layout files
 //!
-//! `<game>\dod\dodstudio_ui\DodStudioPanel.res`, our own folder beside
-//! `dodstudio_hd` -- never `dod\resource`, which is the user's. The default
-//! (`goldsrc-hooks/ui/DodStudioPanel.res`, built into the DLL) is written there
-//! the first time the window opens and never again, so build-mode edits stay.
-//! `dodstudio_panel reset` puts the default back.
+//! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
+//! tab (`Playback.res`, `Demos.res`, `Studio.res`). Our own folder beside
+//! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
+//! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time and
+//! never again, so build-mode edits stay. `dodstudio_panel reset` puts the
+//! defaults back and rebuilds the window.
 //!
 //! ## Per build
 //!
-//! Five `GameUI.dll` addresses differ between the pre-Anniversary and 25th
-//! Anniversary builds, and the Anniversary `Frame::Frame` takes a fourth
-//! argument. [`BUILDS`] names each build by PE timestamp and image size, and
-//! anything else is refused. `tools/verify_studio_panel.py` checks every
-//! address against both movie installs.
+//! Eight `GameUI.dll` addresses and sizes differ between the pre-Anniversary
+//! and 25th Anniversary builds, and the Anniversary `Frame::Frame` takes a
+//! fourth argument. [`BUILDS`] names each build by PE timestamp and image
+//! size, and anything else is refused. `tools/verify_studio_panel.py` checks
+//! every one against how GameUI builds its own Load Demo and Options windows,
+//! on both movie installs.
 
 // The window is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
+use std::ffi::CStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::names::console_name;
@@ -57,21 +72,56 @@ use crate::names::console_name;
 pub const NAME: &str = console_name!("panel");
 
 /// The window's panel name, which its `.res` entry and #410's saved layout
-/// (`GameUI/DodStudioPanel`) are keyed by.
-const PANEL_NAME: &std::ffi::CStr = c"DodStudioPanel";
-/// Where the layout lives, relative to the game directory -- the path the
-/// engine's file system resolves it by, and the one build mode saves to.
-const RES_PATH: &std::ffi::CStr = c"dodstudio_ui/DodStudioPanel.res";
+/// (`GameUI/DodStudio`) are keyed by.
+const PANEL_NAME: &CStr = c"DodStudio";
+const SHEET_NAME: &CStr = c"Sheet";
+/// Our folder under the game directory, as the engine's file system resolves
+/// a `.res` path and build mode saves one.
 const RES_DIR: &str = "dodstudio_ui";
-const RES_FILE: &str = "DodStudioPanel.res";
-const DEFAULT_RES: &str = include_str!("../ui/DodStudioPanel.res");
+const WINDOW_RES: (&CStr, &str, &str) = (
+    c"dodstudio_ui/DodStudio.res",
+    "DodStudio.res",
+    include_str!("../ui/DodStudio.res"),
+);
 
-/// The GameUI panel the window is parented to, as the VCR bar and the main
-/// menu are.
-const TASKBAR: &str = "TaskBar";
+/// One tab: its panel name, its title on the tab strip, and its layout file
+/// (path for the engine, file name, built-in default).
+pub struct Page {
+    pub name: &'static CStr,
+    pub title: &'static CStr,
+    pub res: (&'static CStr, &'static str, &'static str),
+}
 
-/// The tab shown when the window first opens.
-const FIRST_TAB: &str = "playback";
+/// The tabs, in strip order.
+pub const PAGES: [Page; 3] = [
+    Page {
+        name: c"Playback",
+        title: c"Playback",
+        res: (
+            c"dodstudio_ui/Playback.res",
+            "Playback.res",
+            include_str!("../ui/Playback.res"),
+        ),
+    },
+    Page {
+        name: c"Demos",
+        title: c"Demos",
+        res: (
+            c"dodstudio_ui/Demos.res",
+            "Demos.res",
+            include_str!("../ui/Demos.res"),
+        ),
+    },
+    Page {
+        name: c"Studio",
+        title: c"Studio",
+        res: (
+            c"dodstudio_ui/Studio.res",
+            "Studio.res",
+            include_str!("../ui/Studio.res"),
+        ),
+    },
+];
 
 /// What the VCR bar's `OnCommand` handles, from the strings it compares
 /// against (both builds' `GameUI.dll`).
@@ -80,7 +130,7 @@ const VCR_COMMANDS: &[&str] = &[
     "events", "save",
 ];
 
-/// One `GameUI.dll` build: its identity and what building a `Frame` takes.
+/// One `GameUI.dll` build: its identity and what building the window takes.
 pub struct Build {
     pub name: &'static str,
     pub time_date_stamp: u32,
@@ -97,6 +147,12 @@ pub struct Build {
     pub load_control_settings: usize,
     /// `sizeof(Frame)`: the first field of a subclass sits here.
     pub frame_size: usize,
+    /// `PropertySheet::PropertySheet(Panel *parent, const char *name)`.
+    pub sheet_ctor: usize,
+    /// `sizeof(PropertySheet)`, what `PropertyDialog` allocates for its own.
+    pub sheet_size: usize,
+    /// `PropertyPage::PropertyPage(Panel *parent, const char *name, bool)`.
+    pub page_ctor: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -109,6 +165,9 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor_fourth_arg: false,
         load_control_settings: 0x4_d6b0,
         frame_size: 0x110,
+        sheet_ctor: 0x7_74f0,
+        sheet_size: 0xac,
+        page_ctor: 0x6_55f0,
     },
     Build {
         name: "25th Anniversary",
@@ -119,22 +178,38 @@ pub const BUILDS: [Build; 2] = [
         frame_ctor_fourth_arg: true,
         load_control_settings: 0x5_4620,
         frame_size: 0x118,
+        sheet_ctor: 0x8_54f0,
+        sheet_size: 0xb4,
+        page_ctor: 0x7_1cd0,
     },
 ];
 
-/// `Panel::OnCommand(const char *)`, the slot the VCR bar overrides too.
+/// What each page is allocated, comfortably more than `PropertyPage` (the
+/// smallest Options page, a subclass with its own fields, is 0xc0 on
+/// pre-Anniversary and 0xcc on Anniversary). Extra room is never touched.
+const PAGE_ALLOC: usize = 0x400;
+
+/// `Panel::OnCommand(const char *)`; the VCR bar overrides the same slot.
 const FRAME_SLOT_ON_COMMAND: usize = 87;
-/// How many of `Frame`'s vftable slots the copy carries. `Frame` has about
-/// 190; the rest are never called through a `Frame` pointer.
-const VFTABLE_SLOTS: usize = 240;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
+/// `Frame::GetClientArea(int &x, int &y, int &wide, int &tall)`, which
+/// `PropertyDialog::PerformLayout` sizes its sheet by.
+const FRAME_SLOT_GET_CLIENT_AREA: usize = 186;
+/// `PropertySheet::AddPage(Panel *page, const char *title)`, what
+/// `PropertyDialog::AddPage` jumps to.
+const SHEET_SLOT_ADD_PAGE: usize = 134;
+/// How many vftable slots a copy carries. `Frame` has about 190; the rest are
+/// never called through these objects.
+const VFTABLE_SLOTS: usize = 240;
 /// `Panel::GetVPanel()`, the first virtual.
 const PANEL_SLOT_GET_VPANEL: usize = 0;
 
 /// `IPanel` (`VGUI_Panel007`) slots, the same table #410 checks.
+const IPANEL_SET_POS: usize = 2;
 const IPANEL_GET_POS: usize = 3;
+const IPANEL_SET_SIZE: usize = 4;
 const IPANEL_GET_SIZE: usize = 5;
 const IPANEL_SET_VISIBLE: usize = 14;
 const IPANEL_IS_VISIBLE: usize = 15;
@@ -148,36 +223,33 @@ const IPANEL_GET_MODULE_NAME: usize = 59;
 const SURFACE_GET_POPUP_COUNT: usize = 69;
 const SURFACE_GET_POPUP: usize = 70;
 
+/// The GameUI panel the window is parented to, as the VCR bar and the main
+/// menu are.
+const TASKBAR: &str = "TaskBar";
+/// The gap between the window's client area and the tab strip.
+const SHEET_MARGIN: i32 = 4;
+
 /// Our window's object, or 0 before it is built. #410 accepts it as a GameUI
 /// window although its vftable is our copy.
 static OBJECT: AtomicUsize = AtomicUsize::new(0);
+/// Its tab strip.
+static SHEET: AtomicUsize = AtomicUsize::new(0);
 
 /// The window's `Frame` object, for #410's walk.
 pub fn object() -> usize {
     OBJECT.load(Ordering::Acquire)
 }
 
-/// The tab a control belongs to: the part of its name before the first `_`,
-/// when that names one of `tabs`.
-fn tab_of<'a>(control: &'a str, tabs: &[String]) -> Option<&'a str> {
-    let (prefix, _) = control.split_once('_')?;
-    tabs.iter().any(|t| t == prefix).then_some(prefix)
-}
-
 /// What a button's command asks for.
 #[derive(Debug, PartialEq, Eq)]
 enum Action<'a> {
-    Tab(&'a str),
     Vcr(&'a str),
     Engine(&'a str),
-    /// Anything else, for `Frame::OnCommand`.
-    Frame,
+    /// Anything else, for the class's own `OnCommand`.
+    Own,
 }
 
 fn action(command: &str) -> Action<'_> {
-    if let Some(tab) = command.strip_prefix("tab ") {
-        return Action::Tab(tab.trim());
-    }
     if let Some(line) = command.strip_prefix("engine ") {
         return Action::Engine(line.trim());
     }
@@ -186,44 +258,54 @@ fn action(command: &str) -> Action<'_> {
         .find(|c| c.eq_ignore_ascii_case(command))
     {
         Some(c) => Action::Vcr(c),
-        None => Action::Frame,
+        None => Action::Own,
     }
 }
 
-fn res_path() -> std::path::PathBuf {
+/// Where the tab strip goes in a window whose client area is `client`
+/// (x, y, wide, tall): all of it, inset by [`SHEET_MARGIN`].
+fn sheet_bounds(client: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = client;
+    (
+        x + SHEET_MARGIN,
+        y + SHEET_MARGIN,
+        (w - 2 * SHEET_MARGIN).max(1),
+        (h - 2 * SHEET_MARGIN).max(1),
+    )
+}
+
+fn res_dir() -> std::path::PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
         .unwrap_or_default()
         .join("dod")
         .join(RES_DIR)
-        .join(RES_FILE)
 }
 
-/// Writes the default layout when there is none (or when `reset`), and says
-/// what it did. Never touches an existing file otherwise: build-mode edits are
-/// the user's.
+/// Writes each default layout that is missing (or all of them on `reset`),
+/// and says what it wrote. Never touches an existing file otherwise:
+/// build-mode edits are the user's.
 fn ensure_res(reset: bool) -> Result<Option<String>, String> {
-    let path = res_path();
-    if path.exists() && !reset {
-        return Ok(None);
+    let dir = res_dir();
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    let mut written = Vec::new();
+    for (_, file, default) in std::iter::once(WINDOW_RES).chain(PAGES.iter().map(|p| p.res)) {
+        let path = dir.join(file);
+        if path.exists() && !reset {
+            continue;
+        }
+        std::fs::write(&path, default)
+            .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+        written.push(file);
     }
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir)
-            .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
-    }
-    std::fs::write(&path, DEFAULT_RES)
-        .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-    Ok(Some(format!(
-        "wrote the default layout to {}",
-        path.display()
-    )))
+    Ok((!written.is_empty()).then(|| format!("wrote {} to {}", written.join(", "), dir.display())))
 }
 
 #[cfg(target_arch = "x86")]
 mod hook {
-    use std::ffi::{CStr, c_char, c_void};
-    use std::sync::Mutex;
+    use std::ffi::{c_char, c_void};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
@@ -236,8 +318,14 @@ mod hook {
     type FrameCtor3 = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *const c_char, u32);
     type FrameCtor4 =
         unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *const c_char, u32, u32);
+    type SheetCtor = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *const c_char);
+    type PageCtor = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *const c_char, u32);
+    type AddPageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, *const c_char);
     type LoadSettingsFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
     type OnCommandFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char);
+    type ActivateFn = unsafe extern "thiscall" fn(*mut c_void);
+    type ClientAreaFn =
+        unsafe extern "thiscall" fn(*mut c_void, *mut i32, *mut i32, *mut i32, *mut i32);
     type GetVpanelFn = unsafe extern "thiscall" fn(*mut c_void) -> Vpanel;
     type PanelBoolFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel) -> u32;
     type PanelSetBoolFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, u32);
@@ -249,13 +337,12 @@ mod hook {
         unsafe extern "thiscall" fn(*mut c_void, Vpanel, *const c_char) -> *mut c_void;
     type CountFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
     type PopupFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> Vpanel;
-    type ActivateFn = unsafe extern "thiscall" fn(*mut c_void);
+    type XyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, i32, i32);
     type GetXyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, *mut i32, *mut i32);
 
-    /// `Frame::OnCommand`, for whatever our handler passes on.
+    /// Each class's own `OnCommand`, for whatever our handler passes on.
     static FRAME_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
-    /// The tab on show.
-    static TAB: Mutex<String> = Mutex::new(String::new());
+    static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
 
     unsafe fn slot<F: Copy>(object: *mut c_void, index: usize) -> F {
         unsafe {
@@ -332,40 +419,40 @@ mod hook {
             }
         }
 
-        /// Where a panel is and what holds it, for the log.
-        unsafe fn describe(&self, vp: Vpanel) -> String {
-            unsafe {
-                let get_pos: GetXyFn = slot(self.panel, IPANEL_GET_POS);
-                let get_size: GetXyFn = slot(self.panel, IPANEL_GET_SIZE);
-                let visible: PanelBoolFn = slot(self.panel, IPANEL_IS_VISIBLE);
-                let parent: ParentFn = slot(self.panel, IPANEL_GET_PARENT);
-                let (mut x, mut y, mut w, mut h) = (0, 0, 0, 0);
-                get_pos(self.panel, vp, &mut x, &mut y);
-                get_size(self.panel, vp, &mut w, &mut h);
-                let p = parent(self.panel, vp);
-                format!(
-                    "at {x},{y} {w}x{h}, visible {}, {} control(s), parent {:?} (visible {})",
-                    visible(self.panel, vp) & 0xff,
-                    self.children(vp).len(),
-                    self.name(p),
-                    if p == 0 {
-                        0
-                    } else {
-                        visible(self.panel, p) & 0xff
-                    }
-                )
-            }
-        }
-
-        unsafe fn children(&self, vp: Vpanel) -> Vec<(Vpanel, String)> {
+        unsafe fn children(&self, vp: Vpanel) -> usize {
             unsafe {
                 let count: PanelIntFn = slot(self.panel, IPANEL_GET_CHILD_COUNT);
                 let child: ChildFn = slot(self.panel, IPANEL_GET_CHILD);
                 (0..count(self.panel, vp).clamp(0, 512))
-                    .map(|i| child(self.panel, vp, i))
-                    .filter(|&c| c != 0)
-                    .map(|c| (c, self.name(c)))
-                    .collect()
+                    .filter(|&i| child(self.panel, vp, i) != 0)
+                    .count()
+            }
+        }
+
+        unsafe fn rect(&self, vp: Vpanel) -> (i32, i32, i32, i32) {
+            unsafe {
+                let get_pos: GetXyFn = slot(self.panel, IPANEL_GET_POS);
+                let get_size: GetXyFn = slot(self.panel, IPANEL_GET_SIZE);
+                let (mut x, mut y, mut w, mut h) = (0, 0, 0, 0);
+                get_pos(self.panel, vp, &mut x, &mut y);
+                get_size(self.panel, vp, &mut w, &mut h);
+                (x, y, w, h)
+            }
+        }
+
+        /// Where a panel is and what holds it, for the log.
+        unsafe fn describe(&self, vp: Vpanel) -> String {
+            unsafe {
+                let visible: PanelBoolFn = slot(self.panel, IPANEL_IS_VISIBLE);
+                let parent: ParentFn = slot(self.panel, IPANEL_GET_PARENT);
+                let (x, y, w, h) = self.rect(vp);
+                let p = parent(self.panel, vp);
+                format!(
+                    "at {x},{y} {w}x{h}, visible {}, {} child panel(s), parent {:?}",
+                    visible(self.panel, vp) & 0xff,
+                    self.children(vp),
+                    self.name(p),
+                )
             }
         }
     }
@@ -402,40 +489,76 @@ mod hook {
         Err("GameUI's menu isn't up yet -- open it (ESC) once, then try again".to_string())
     }
 
-    unsafe fn build() -> Result<*mut c_void, String> {
-        let (base, build) = gameui()?;
-        let vgui = Vgui::get()?;
-        let parent = unsafe { base_panel(&vgui) }?;
+    /// Gives `object` a copy of its vftable with `OnCommand` pointing at
+    /// `handler`, and returns the class's own `OnCommand`. The copy (RTTI
+    /// locator at [-1] included) is leaked: it lives as long as the object.
+    unsafe fn own_on_command(object: *mut c_void, handler: usize) -> usize {
         unsafe {
-            let new: OperatorNewFn = std::mem::transmute(base + build.operator_new);
-            let object = new(build.frame_size);
-            if object.is_null() {
-                return Err("GameUI's operator new returned null".to_string());
-            }
-            std::ptr::write_bytes(object as *mut u8, 0, build.frame_size);
-            if build.frame_ctor_fourth_arg {
-                let ctor: FrameCtor4 = std::mem::transmute(base + build.frame_ctor);
-                ctor(object, parent, PANEL_NAME.as_ptr(), 1, 0);
-            } else {
-                let ctor: FrameCtor3 = std::mem::transmute(base + build.frame_ctor);
-                ctor(object, parent, PANEL_NAME.as_ptr(), 1);
-            }
-
-            // Our copy of Frame's vftable, RTTI locator ([-1]) included, with
-            // OnCommand ours. Leaked: it lives as long as the window.
             let original = *(object as *const *const usize);
             let mut copy = vec![0usize; VFTABLE_SLOTS + 1];
             for (i, entry) in copy.iter_mut().enumerate() {
                 *entry = *original.offset(i as isize - 1);
             }
-            FRAME_ON_COMMAND.store(copy[FRAME_SLOT_ON_COMMAND + 1], Ordering::Release);
-            copy[FRAME_SLOT_ON_COMMAND + 1] = on_command as *const () as usize;
+            let own = copy[FRAME_SLOT_ON_COMMAND + 1];
+            copy[FRAME_SLOT_ON_COMMAND + 1] = handler;
             let copy: &'static mut [usize] = Box::leak(copy.into_boxed_slice());
             *(object as *mut *const usize) = copy.as_ptr().add(1);
+            own
+        }
+    }
 
-            let load: LoadSettingsFn = std::mem::transmute(base + build.load_control_settings);
-            load(object, RES_PATH.as_ptr(), std::ptr::null());
+    /// GameUI's `operator new`, zeroed.
+    unsafe fn allocate(base: usize, build: &Build, size: usize) -> Result<*mut c_void, String> {
+        unsafe {
+            let new: OperatorNewFn = std::mem::transmute(base + build.operator_new);
+            let object = new(size);
+            if object.is_null() {
+                return Err("GameUI's operator new returned null".to_string());
+            }
+            std::ptr::write_bytes(object as *mut u8, 0, size);
             Ok(object)
+        }
+    }
+
+    /// Builds the window, its tab strip and its pages.
+    unsafe fn build() -> Result<(*mut c_void, *mut c_void), String> {
+        let (base, build) = gameui()?;
+        let vgui = Vgui::get()?;
+        let parent = unsafe { base_panel(&vgui) }?;
+        unsafe {
+            let load: LoadSettingsFn = std::mem::transmute(base + build.load_control_settings);
+
+            let frame = allocate(base, build, build.frame_size)?;
+            if build.frame_ctor_fourth_arg {
+                let ctor: FrameCtor4 = std::mem::transmute(base + build.frame_ctor);
+                ctor(frame, parent, PANEL_NAME.as_ptr(), 1, 0);
+            } else {
+                let ctor: FrameCtor3 = std::mem::transmute(base + build.frame_ctor);
+                ctor(frame, parent, PANEL_NAME.as_ptr(), 1);
+            }
+            FRAME_ON_COMMAND.store(
+                own_on_command(frame, frame_on_command as *const () as usize),
+                Ordering::Release,
+            );
+            load(frame, WINDOW_RES.0.as_ptr(), std::ptr::null());
+
+            let sheet = allocate(base, build, build.sheet_size)?;
+            let sheet_ctor: SheetCtor = std::mem::transmute(base + build.sheet_ctor);
+            sheet_ctor(sheet, frame, SHEET_NAME.as_ptr());
+
+            let page_ctor: PageCtor = std::mem::transmute(base + build.page_ctor);
+            let add_page: AddPageFn = slot(sheet, SHEET_SLOT_ADD_PAGE);
+            for page in &PAGES {
+                let object = allocate(base, build, PAGE_ALLOC)?;
+                page_ctor(object, frame, page.name.as_ptr(), 1);
+                PAGE_ON_COMMAND.store(
+                    own_on_command(object, page_on_command as *const () as usize),
+                    Ordering::Release,
+                );
+                load(object, page.res.0.as_ptr(), std::ptr::null());
+                add_page(sheet, object, page.title.as_ptr());
+            }
+            Ok((frame, sheet))
         }
     }
 
@@ -452,25 +575,45 @@ mod hook {
         }
     }
 
-    /// Shows `tab`'s controls and hides the other tabs'.
-    unsafe fn show_tab(vgui: &Vgui, vp: Vpanel, tab: &str) {
+    /// Sizes the tab strip to the window's client area, as
+    /// `PropertyDialog::PerformLayout` does for its own. Writes only when it
+    /// differs.
+    unsafe fn fit_sheet(vgui: &Vgui, frame: *mut c_void) {
+        let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
+        if sheet.is_null() {
+            return;
+        }
         unsafe {
-            let set_visible: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_VISIBLE);
-            let children = vgui.children(vp);
-            let tabs: Vec<String> = children
-                .iter()
-                .filter_map(|(_, n)| n.strip_prefix("tab_").map(str::to_string))
-                .collect();
-            for (child, name) in &children {
-                if let Some(owner) = tab_of(name, &tabs)
-                    && owner != "tab"
-                {
-                    set_visible(vgui.panel, *child, (owner == tab) as u32);
-                }
+            let client_area: ClientAreaFn = slot(frame, FRAME_SLOT_GET_CLIENT_AREA);
+            let (mut x, mut y, mut w, mut h) = (0, 0, 0, 0);
+            client_area(frame, &mut x, &mut y, &mut w, &mut h);
+            let get_vpanel: GetVpanelFn = slot(sheet, PANEL_SLOT_GET_VPANEL);
+            let vp = get_vpanel(sheet);
+            if vp == 0 {
+                return;
+            }
+            let want = sheet_bounds((x, y, w, h));
+            let now = vgui.rect(vp);
+            if (now.0, now.1) != (want.0, want.1) {
+                let set_pos: XyFn = slot(vgui.panel, IPANEL_SET_POS);
+                set_pos(vgui.panel, vp, want.0, want.1);
+            }
+            if (now.2, now.3) != (want.2, want.3) {
+                let set_size: XyFn = slot(vgui.panel, IPANEL_SET_SIZE);
+                set_size(vgui.panel, vp, want.2, want.3);
             }
         }
-        if let Ok(mut current) = TAB.lock() {
-            *current = tab.to_string();
+    }
+
+    pub(super) fn poll() {
+        if OBJECT.load(Ordering::Relaxed) == 0 {
+            return;
+        }
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            if let Some((frame, _)) = window(&vgui) {
+                fit_sheet(&vgui, frame);
+            }
         }
     }
 
@@ -493,18 +636,11 @@ mod hook {
         Ok(())
     }
 
-    /// Our `OnCommand`: vgui2 calls it for every button the window holds.
-    pub(super) unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
+    unsafe fn handle(this: *mut c_void, raw: *const c_char, own: &AtomicUsize) {
         let command = text(raw);
-        let result = match (action(&command), Vgui::get()) {
-            (_, Err(why)) => Err(why),
-            (Action::Tab(tab), Ok(vgui)) => unsafe {
-                let get_vpanel: GetVpanelFn = slot(this, PANEL_SLOT_GET_VPANEL);
-                show_tab(&vgui, get_vpanel(this), tab);
-                Ok(())
-            },
-            (Action::Vcr(c), Ok(vgui)) => unsafe { to_vcr_bar(&vgui, c) },
-            (Action::Engine(line), Ok(_)) => {
+        let result = match action(&command) {
+            Action::Vcr(c) => Vgui::get().and_then(|vgui| unsafe { to_vcr_bar(&vgui, c) }),
+            Action::Engine(line) => {
                 let ran = std::ffi::CString::new(format!("{line}\n"))
                     .is_ok_and(|l| crate::engine::client_cmd(&l));
                 if ran {
@@ -513,10 +649,10 @@ mod hook {
                     Err(format!("could not run \"{line}\""))
                 }
             }
-            (Action::Frame, Ok(_)) => {
-                let original = FRAME_ON_COMMAND.load(Ordering::Acquire);
+            Action::Own => {
+                let original = own.load(Ordering::Acquire);
                 if original != 0 {
-                    // Safety: Frame's own OnCommand, from its vftable.
+                    // Safety: the class's own OnCommand, from its vftable.
                     let original: OnCommandFn = unsafe { std::mem::transmute(original) };
                     unsafe { original(this, raw) };
                 }
@@ -538,6 +674,16 @@ mod hook {
         };
     }
 
+    /// The window's `OnCommand`.
+    unsafe extern "thiscall" fn frame_on_command(this: *mut c_void, raw: *const c_char) {
+        unsafe { handle(this, raw, &FRAME_ON_COMMAND) }
+    }
+
+    /// Each page's `OnCommand`: the buttons on a tab send their commands here.
+    unsafe extern "thiscall" fn page_on_command(this: *mut c_void, raw: *const c_char) {
+        unsafe { handle(this, raw, &PAGE_ON_COMMAND) }
+    }
+
     /// Opens the window (building it the first time), or closes it when open.
     pub(super) fn toggle(reset: bool) -> Result<String, String> {
         let mut notes = Vec::new();
@@ -549,12 +695,21 @@ mod hook {
             let (object, vp) = match window(&vgui) {
                 Some(found) if !reset => found,
                 _ => {
-                    let object = build()?;
-                    OBJECT.store(object as usize, Ordering::Release);
-                    let (base, b) = gameui()?;
+                    if let Some((old, old_vp)) = window(&vgui) {
+                        // Rebuilt on reset: the old one is hidden and left
+                        // for GameUI to delete with its parent.
+                        let set_visible: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_VISIBLE);
+                        set_visible(vgui.panel, old_vp, 0);
+                        let _ = old;
+                    }
+                    let (frame, sheet) = build()?;
+                    OBJECT.store(frame as usize, Ordering::Release);
+                    SHEET.store(sheet as usize, Ordering::Release);
+                    let (_, b) = gameui()?;
                     notes.push(format!(
-                        "built the window ({} GameUI, object {:#x}, GameUI at {base:#x})",
-                        b.name, object as usize
+                        "built the window with {} tab(s) ({} GameUI)",
+                        PAGES.len(),
+                        b.name
                     ));
                     window(&vgui).ok_or("the new window has no panel")?
                 }
@@ -565,25 +720,26 @@ mod hook {
                 set_visible(vgui.panel, vp, 0);
                 notes.push("closed".to_string());
             } else {
-                let tab = TAB
-                    .lock()
-                    .ok()
-                    .map(|t| t.clone())
-                    .filter(|t| !t.is_empty())
-                    .unwrap_or_else(|| FIRST_TAB.to_string());
-                show_tab(&vgui, vp, &tab);
+                fit_sheet(&vgui, object);
                 // Frame::Activate, as GameUI opens its own dialogs: shows it,
                 // brings it to the front and gives it focus.
                 let activate: ActivateFn = slot(object, FRAME_SLOT_ACTIVATE);
                 activate(object);
-                notes.push(vgui.describe(vp));
                 notes.push(format!(
-                    "open on the {tab} tab (press ESC for the menu if you can't see it)"
+                    "open (press ESC for the menu if you can't see it); {}",
+                    vgui.describe(vp)
                 ));
             }
         }
         Ok(notes.join("; "))
     }
+}
+
+/// Keeps the tab strip sized to the window. Called every frame from
+/// `commands::poll`; one atomic load until the window has been opened.
+pub fn poll() {
+    #[cfg(target_arch = "x86")]
+    hook::poll();
 }
 
 fn argument() -> Option<String> {
@@ -594,16 +750,12 @@ fn argument() -> Option<String> {
             return None;
         }
         let raw = (engfuncs.cmd_argv)(1);
-        (!raw.is_null()).then(|| {
-            std::ffi::CStr::from_ptr(raw)
-                .to_string_lossy()
-                .to_ascii_lowercase()
-        })
+        (!raw.is_null()).then(|| CStr::from_ptr(raw).to_string_lossy().to_ascii_lowercase())
     }
 }
 
 /// `dodstudio_panel [reset]`: opens or closes the window; `reset` writes the
-/// default layout back and rebuilds it.
+/// default layouts back and rebuilds it.
 pub unsafe extern "C" fn command() {
     let reset = argument().as_deref() == Some("reset");
     #[cfg(target_arch = "x86")]
@@ -626,36 +778,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_control_belongs_to_the_tab_its_name_starts_with() {
-        let tabs = vec!["playback".to_string(), "demos".to_string()];
-        assert_eq!(tab_of("playback_play", &tabs), Some("playback"));
-        assert_eq!(tab_of("demos_load", &tabs), Some("demos"));
-        // Not a tab: shown on every tab.
-        assert_eq!(tab_of("footer_label", &tabs), None);
-        assert_eq!(tab_of("Title", &tabs), None);
-    }
-
-    #[test]
     fn button_commands_are_sorted_into_what_they_do() {
-        assert_eq!(action("tab demos"), Action::Tab("demos"));
         assert_eq!(action("play"), Action::Vcr("play"));
         assert_eq!(action("Faster"), Action::Vcr("faster"));
         assert_eq!(
             action("engine dodstudio_debug_status"),
             Action::Engine("dodstudio_debug_status")
         );
-        assert_eq!(action("Close"), Action::Frame);
+        assert_eq!(action("Close"), Action::Own);
     }
 
     #[test]
-    fn the_default_layout_names_every_tab_button_and_control_it_switches() {
-        for tab in ["playback", "demos", "studio"] {
-            assert!(DEFAULT_RES.contains(&format!("\"tab_{tab}\"")));
-            assert!(DEFAULT_RES.contains(&format!("\"tab {tab}\"")));
-            assert!(DEFAULT_RES.contains(&format!("\"{tab}_")));
+    fn the_tab_strip_fills_the_client_area_inside_a_margin() {
+        assert_eq!(sheet_bounds((2, 28, 516, 210)), (6, 32, 508, 202));
+        // Never inverted, however small the window gets.
+        let tiny = sheet_bounds((0, 0, 3, 3));
+        assert!(tiny.2 >= 1 && tiny.3 >= 1);
+    }
+
+    #[test]
+    fn every_default_layout_is_built_in_and_names_its_own_file() {
+        assert!(WINDOW_RES.2.contains("\"DodStudio\""));
+        assert!(WINDOW_RES.2.contains("dodstudio_ui/DodStudio.res"));
+        for page in &PAGES {
+            let path = page.res.0.to_str().unwrap();
+            assert_eq!(path, format!("{RES_DIR}/{}", page.res.1));
+            assert!(page.res.2.starts_with(&format!("\"{path}\"")), "{path}");
         }
-        assert!(DEFAULT_RES.contains("\"DodStudioPanel\""));
-        assert!(DEFAULT_RES.contains(FIRST_TAB));
+        // The Playback tab carries every VCR button.
+        for command in [
+            "start", "slower", "stepb", "pause", "play", "stepf", "faster", "end", "stop",
+        ] {
+            assert!(
+                PAGES[0]
+                    .res
+                    .2
+                    .contains(&format!("\"Command\"\t\t\"{command}\"")),
+                "{command}"
+            );
+        }
     }
 
     #[test]

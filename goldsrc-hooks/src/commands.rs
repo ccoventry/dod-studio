@@ -526,6 +526,7 @@ pub fn poll() {
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
     crate::spectator_follow::poll();
+    crate::studio_panel::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level

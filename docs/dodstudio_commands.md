@@ -194,17 +194,17 @@ no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
 ### `dodstudio_panel`
 
 Opens DoD Studio's own window in the game, or closes it if it's open. It sits
-with GameUI's windows, so press ESC for the menu to see it. Tabs along the top
-(Playback, Demos, Studio); the Playback buttons do what the VCR bar's do, so a
-demo has to be playing under `viewdemo`. `dodstudio_panel reset` writes the
-default layout back and rebuilds the window.
+with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
+Options and Find Servers windows (Playback, Demos, Studio); the Playback buttons
+do what the VCR bar's do, so a demo has to be playing under `viewdemo`.
+`dodstudio_panel reset` writes the default layouts back and rebuilds the window.
 
-The layout is `dod\dodstudio_ui\DodStudioPanel.res`, written the first time
-and never overwritten: edit it in-game with Ctrl+Shift+Alt+B on the window,
-then Save. A control named `<tab>_...` belongs to the `tab_<tab>` button's tab;
-a button's `Command` can be a VCR command (`play`, `pause`, `faster`, `slower`,
-`stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`),
-`tab <name>`, or `engine <console command>`. See `src/studio_panel.rs` (#408).
+The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
+one per tab (`Playback.res`, `Demos.res`, `Studio.res`), written the first time
+and never overwritten. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
+Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
+`slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
+or `engine <console command>`. See `src/studio_panel.rs` (#408).
 
 ## Keeping this in sync
 
