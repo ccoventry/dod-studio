@@ -404,9 +404,12 @@ def press_key(pid, name):
     if not state.startswith("foreground"):
         return f"not pressed: {state}"
     scan = user32.MapVirtualKeyW(vk, 0)
-    user32.keybd_event(vk, scan, 0, 0)
+    # The arrow keys are extended keys: without the flag Windows reports the
+    # numeric keypad's 8/2/4/6 scan codes, and the game may read those.
+    extended = 1 if vk in (0x25, 0x26, 0x27, 0x28) else 0
+    user32.keybd_event(vk, scan, extended, 0)
     time.sleep(0.05)
-    user32.keybd_event(vk, scan, 2, 0)
+    user32.keybd_event(vk, scan, extended | 2, 0)
     return None
 
 
