@@ -38,7 +38,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Every streak of 2 or more kills in one life. Click a heading to sort. Double-click a streak to jump to it."
+		"tooltiptext"		"Every life with a kill: who, how many, with what, and when. Click a heading to sort. Double-click one to jump to it."
 	}
 	"StreakGoSlot"
 	{
@@ -66,5 +66,57 @@
 		"enabled"		"1"
 		"labelText"		"Double-click a streak, or pick one and Go. Play the demo with viewdemo."
 		"textAlignment"		"west"
+	}
+	"StreakPlayerLabel"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"StreakPlayerLabel"
+		"xpos"		"8"
+		"ypos"		"27"
+		"wide"		"44"
+		"tall"		"20"
+		"visible"		"0"
+		"enabled"		"1"
+		"labelText"		"Player"
+		"textAlignment"		"west"
+		"tooltiptext"		"Only this player's streaks: part of a name, or several words."
+	}
+	"StreakPlayer"
+	{
+		"ControlName"		"TextEntry"
+		"fieldName"		"StreakPlayer"
+		"xpos"		"56"
+		"ypos"		"27"
+		"wide"		"180"
+		"tall"		"20"
+		"visible"		"0"
+		"enabled"		"1"
+		"tooltiptext"		"Only this player's streaks: part of a name, or several words."
+	}
+	"StreakMinKillsLabel"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"StreakMinKillsLabel"
+		"xpos"		"248"
+		"ypos"		"27"
+		"wide"		"56"
+		"tall"		"20"
+		"visible"		"0"
+		"enabled"		"1"
+		"labelText"		"Min kills"
+		"textAlignment"		"west"
+		"tooltiptext"		"Only highlights with at least this many kills. Empty shows every one."
+	}
+	"StreakMinKills"
+	{
+		"ControlName"		"TextEntry"
+		"fieldName"		"StreakMinKills"
+		"xpos"		"308"
+		"ypos"		"27"
+		"wide"		"40"
+		"tall"		"20"
+		"visible"		"0"
+		"enabled"		"1"
+		"tooltiptext"		"Only highlights with at least this many kills. Empty shows every one."
 	}
 }

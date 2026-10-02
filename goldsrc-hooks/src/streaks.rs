@@ -25,8 +25,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-/// Fewer kills than this in one life is not a streak worth listing.
-pub const MIN_KILLS: usize = 2;
+/// Every life with a kill is listed; the tab's Min kills box narrows the
+/// list, so nothing is hidden by a number fixed here.
+pub const MIN_KILLS: usize = 1;
 /// Go jumps this long before a streak's first kill.
 pub const LEAD_IN_SECS: f32 = 5.0;
 
@@ -39,6 +40,9 @@ pub struct Streak {
     pub weapons: String,
     /// The first kill's time on the `viewdemo` bar, in seconds.
     pub first_kill: f32,
+    /// The player's number (entity index, what `dodstudio_spec_target`
+    /// takes), when they were still in the game at the demo's end.
+    pub player_number: Option<u8>,
 }
 
 impl Streak {
@@ -59,6 +63,7 @@ impl Streak {
             kills: kills.len(),
             weapons: weapons.join(", "),
             first_kill: kills.iter().map(|(t, _)| *t).fold(f32::INFINITY, f32::min),
+            player_number: None,
         })
     }
 
@@ -68,27 +73,88 @@ impl Streak {
     }
 }
 
-/// Every listable streak in `analysis`, earliest first.
-pub fn streaks_of(analysis: &analysis::Analysis) -> Vec<Streak> {
-    let mut streaks: Vec<Streak> = analysis
-        .state
-        .players
+/// A demo's streaks, and what kind of demo it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Found {
+    pub streaks: Vec<Streak>,
+    /// An HLTV demo: every player's streaks, and Go puts the camera on the
+    /// player.
+    pub hltv: bool,
+    /// A POV demo's recording player, whose streaks alone are listed.
+    pub recorder: Option<String>,
+}
+
+/// One player's kills, as [`select`] takes them.
+pub struct PlayerKills {
+    pub name: String,
+    pub number: Option<u8>,
+    pub recorder: bool,
+    /// Each streak's kills: (bar time, weapon).
+    pub streaks: Vec<Vec<(f32, String)>>,
+}
+
+/// The streaks to list, earliest first: in a POV demo only the recording
+/// player's (the only ones its footage follows), in an HLTV demo
+/// everyone's. A POV demo whose recorder can't be told lists everyone's.
+pub fn select(players: Vec<PlayerKills>, hltv: bool) -> Found {
+    let recorder = (!hltv)
+        .then(|| players.iter().find(|p| p.recorder).map(|p| p.name.clone()))
+        .flatten();
+    let mut streaks: Vec<Streak> = players
         .iter()
-        .flat_map(|player| {
-            player.kill_streaks.iter().filter_map(|streak| {
-                let kills: Vec<(f32, String)> = streak
-                    .kills
-                    .iter()
-                    .map(|(time, weapon, _)| {
-                        (time.viewdemo_offset.as_secs_f32(), weapon_name(weapon))
-                    })
-                    .collect();
-                Streak::new(&player.name, &kills)
+        .filter(|p| recorder.is_none() || p.recorder)
+        .flat_map(|p| {
+            p.streaks.iter().filter_map(|kills| {
+                Streak::new(&p.name, kills).map(|s| Streak {
+                    player_number: p.number,
+                    ..s
+                })
             })
         })
         .collect();
     streaks.sort_by(|a, b| a.first_kill.total_cmp(&b.first_kill));
-    streaks
+    Found {
+        streaks,
+        hltv,
+        recorder,
+    }
+}
+
+/// Every listable streak in `analysis` ([`select`]).
+pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
+    let hltv = analysis.demo_info.demo_type == "HLTV";
+    let recorder_slot = analysis.state.pov_player_index;
+    let players = analysis
+        .state
+        .players
+        .iter()
+        .map(|player| {
+            let slot = match player.connection {
+                analysis::Connection::Connected { client_id } => Some(client_id),
+                _ => None,
+            };
+            PlayerKills {
+                name: player.name.clone(),
+                // The analysis counts slots from 0, entity numbers from 1.
+                number: slot.and_then(|s| s.checked_add(1)),
+                recorder: !hltv && slot.is_some() && slot == recorder_slot,
+                streaks: player
+                    .kill_streaks
+                    .iter()
+                    .map(|streak| {
+                        streak
+                            .kills
+                            .iter()
+                            .map(|(time, weapon, _)| {
+                                (time.viewdemo_offset.as_secs_f32(), weapon_name(weapon))
+                            })
+                            .collect()
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    select(players, hltv)
 }
 
 /// Studio's English weapon names. `analysis::weapon_display_name` reads them
@@ -143,7 +209,7 @@ pub fn demo_path(game_dir: &Path, name: &str) -> PathBuf {
 pub enum Status {
     /// Being read; how far is [`progress`].
     Loading,
-    Ready(Vec<Streak>),
+    Ready(Found),
     Failed(String),
 }
 
@@ -181,14 +247,14 @@ pub fn request(path: &Path) {
             lower_priority();
             let started = std::time::Instant::now();
             let status = match find(&path, generation) {
-                Ok((streaks, how)) => {
+                Ok((found, how)) => {
                     log(&format!(
                         "{} streaks in {} ({how}, {:.1} s)",
-                        streaks.len(),
+                        found.streaks.len(),
                         path.display(),
                         started.elapsed().as_secs_f32()
                     ));
-                    Status::Ready(streaks)
+                    Status::Ready(found)
                 }
                 Err(why) => {
                     log(&format!("{}: {why}", path.display()));
@@ -221,7 +287,7 @@ pub fn status() -> Option<(u64, Status, u32)> {
 }
 
 /// The streaks, and where they came from (for the log).
-fn find(path: &Path, generation: u64) -> Result<(Vec<Streak>, &'static str), String> {
+fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     let root = cache_root();
     if let Some((_, analysis)) = root
         .as_deref()
@@ -401,6 +467,61 @@ mod tests {
         list.iter().map(|(t, w)| (*t, w.to_string())).collect()
     }
 
+    fn player(name: &str, number: u8, recorder: bool, first: f32) -> PlayerKills {
+        PlayerKills {
+            name: name.to_string(),
+            number: Some(number),
+            recorder,
+            streaks: vec![kills(&[(first, "K98"), (first + 2.0, "K98")])],
+        }
+    }
+
+    #[test]
+    fn a_pov_demo_lists_only_the_recorders_streaks() {
+        let found = select(
+            vec![
+                player("milo", 3, false, 10.0),
+                player("brain", 5, true, 20.0),
+            ],
+            false,
+        );
+        assert_eq!(found.recorder.as_deref(), Some("brain"));
+        assert_eq!(found.streaks.len(), 1);
+        assert_eq!(found.streaks[0].player, "brain");
+        assert!(!found.hltv);
+    }
+
+    #[test]
+    fn an_hltv_demo_lists_everyone_with_their_numbers() {
+        let found = select(
+            vec![
+                player("milo", 3, false, 30.0),
+                player("brain", 5, false, 20.0),
+            ],
+            true,
+        );
+        assert!(found.hltv && found.recorder.is_none());
+        let names: Vec<_> = found
+            .streaks
+            .iter()
+            .map(|s| (s.player.as_str(), s.player_number))
+            .collect();
+        assert_eq!(names, [("brain", Some(5)), ("milo", Some(3))]);
+    }
+
+    #[test]
+    fn a_pov_demo_without_a_known_recorder_lists_everyone() {
+        let found = select(
+            vec![
+                player("milo", 3, false, 10.0),
+                player("brain", 5, false, 20.0),
+            ],
+            false,
+        );
+        assert_eq!(found.streaks.len(), 2);
+        assert!(found.recorder.is_none());
+    }
+
     #[test]
     fn a_streak_lists_each_weapon_once_and_starts_at_its_first_kill() {
         let streak = Streak::new(
@@ -412,7 +533,11 @@ mod tests {
         assert_eq!(streak.weapons, "K98, Grenade");
         assert_eq!(streak.first_kill, 71.5);
         assert_eq!(streak.seek_secs(), 66.5);
-        assert_eq!(Streak::new("milo", &kills(&[(3.0, "K98")])), None);
+        assert_eq!(
+            Streak::new("milo", &kills(&[(3.0, "K98")])).unwrap().kills,
+            1
+        );
+        assert_eq!(Streak::new("milo", &[]), None);
         // Never before the demo's start.
         assert_eq!(
             Streak::new("a", &kills(&[(2.0, "K98"), (3.0, "K98")]))
@@ -473,8 +598,13 @@ mod tests {
         let bytes = std::fs::read(&path).unwrap();
         let analysis = analysis::Analysis::try_from_bytes(&bytes).unwrap();
         let streaks = streaks_of(&analysis);
-        println!("{} streaks", streaks.len());
-        for streak in streaks.iter().take(5) {
+        println!(
+            "{} streaks, hltv {}, recorder {:?}",
+            streaks.streaks.len(),
+            streaks.hltv,
+            streaks.recorder
+        );
+        for streak in streaks.streaks.iter().take(5) {
             println!("{streak:?}");
         }
     }

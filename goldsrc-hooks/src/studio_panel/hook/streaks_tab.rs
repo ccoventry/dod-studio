@@ -4,12 +4,17 @@
 //! button ([`LOANS`]); its demo rows are cleared, its columns become Player,
 //! Kills, Weapons and Time, its Load button is Go, and its `OnCommand` is
 //! ours: Go, or a double-click, seeks to just before the streak.
+//!
+//! Every life with a kill is listed; a Min kills box narrows the list. A POV
+//! demo lists only the recording player's (the footage follows no one else).
+//! An HLTV demo lists everyone's, a Player box narrows them, and Go also puts
+//! the camera on the streak's player (`dodstudio_spec_target`).
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::*;
-use crate::streaks::{self, Status, Streak};
+use crate::streaks::{self, Found, Status, Streak};
 
 static DIALOG: AtomicUsize = AtomicUsize::new(0);
 static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
@@ -17,9 +22,14 @@ static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
 /// it changes.
 static SHOWN_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 static SHOWN_ROWS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// The Player and Min kills boxes' text the list was last narrowed by;
+/// `None` after a refill.
+static FILTERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-/// The row key Go reads: the bar time to seek to.
+/// The row keys Go reads: the bar time to seek to, and in an HLTV demo the
+/// player's number to put the camera on.
 const SEEK_KEY: &CStr = c"seek";
+const TARGET_KEY: &CStr = c"target";
 /// The columns past the player's name (which is the window's own `demoname`
 /// column, retitled): key, heading, width.
 const COLUMNS: [(&CStr, &CStr, i32); 3] = [
@@ -30,6 +40,12 @@ const COLUMNS: [(&CStr, &CStr, i32); 3] = [
 const PLAYER_COLUMN_WIDE: i32 = 150;
 const STATUS_LABEL: &str = "StreakStatus";
 const PROGRESS: &str = "StreakProgress";
+/// The Player box, and its label: shown for an HLTV demo only.
+const PLAYER_BOX: &str = "StreakPlayer";
+const PLAYER_LABEL: &str = "StreakPlayerLabel";
+/// The Min kills box, and its label: shown once the streaks are found.
+const MIN_KILLS_BOX: &str = "StreakMinKills";
+const MIN_KILLS_LABEL: &str = "StreakMinKillsLabel";
 
 type KeyValuesCtor = unsafe extern "thiscall" fn(
     *mut c_void,
@@ -127,7 +143,8 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 ),
                 None,
             );
-            fill(list, base, build, "none", &[]);
+            fill(list, base, build, "none", &[], false);
+            show_filters(vgui, page, None);
             return;
         };
         let Some(game_dir) = res_dir().parent().map(std::path::Path::to_path_buf) else {
@@ -145,28 +162,132 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             Status::Loading => {
                 let text = format!("Finding the killstreaks in {file}... {percent}%");
                 show(vgui, page, build, (&text, &text), Some(percent));
-                fill(list, base, build, &format!("{generation}:loading"), &[]);
+                fill(
+                    list,
+                    base,
+                    build,
+                    &format!("{generation}:loading"),
+                    &[],
+                    false,
+                );
+                show_filters(vgui, page, None);
             }
-            Status::Ready(streaks) => {
-                let text = if streaks.is_empty() {
-                    format!("No streaks of {}+ kills in {file}.", streaks::MIN_KILLS)
-                } else {
-                    format!(
-                        "{} streaks of {}+ kills in {file}. Go jumps to {} s before the first kill.",
-                        streaks.len(),
-                        streaks::MIN_KILLS,
-                        streaks::LEAD_IN_SECS
-                    )
-                };
+            Status::Ready(found) => {
+                let text = ready_text(&found, &file);
                 show(vgui, page, build, (&text, &text), None);
-                fill(list, base, build, &format!("{generation}:ready"), &streaks);
+                fill(
+                    list,
+                    base,
+                    build,
+                    &format!("{generation}:ready"),
+                    &found.streaks,
+                    found.hltv,
+                );
+                show_filters(vgui, page, Some(found.hltv));
+                narrow(vgui, page, list, found.hltv);
             }
             Status::Failed(why) => {
                 let text = format!("Could not find the killstreaks in {file}: {why}");
                 show(vgui, page, build, (&text, &text), None);
-                fill(list, base, build, &format!("{generation}:failed"), &[]);
+                fill(
+                    list,
+                    base,
+                    build,
+                    &format!("{generation}:failed"),
+                    &[],
+                    false,
+                );
+                show_filters(vgui, page, None);
             }
         }
+    }
+}
+
+/// The status line once the streaks are found.
+fn ready_text(found: &Found, file: &str) -> String {
+    let n = found.streaks.len();
+    let lead = streaks::LEAD_IN_SECS;
+    match (&found.recorder, n) {
+        (Some(recorder), 0) => format!("No kills by {recorder} in {file}."),
+        (Some(recorder), _) => format!(
+            "{n} highlights by {recorder} in {file}. Go jumps to {lead} s before the first kill."
+        ),
+        (None, 0) => format!("No kills in {file}."),
+        (None, _) if found.hltv => {
+            format!("{n} highlights in {file}. Go jumps to {lead} s before and watches the player.")
+        }
+        (None, _) => {
+            format!("{n} highlights in {file}. Go jumps to {lead} s before the first kill.")
+        }
+    }
+}
+
+/// The filter boxes: none while nothing is listed (`None`), Min kills once
+/// the streaks are found, and Player too for an HLTV demo (`Some(true)`).
+unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {
+    unsafe {
+        let shown = [
+            (PLAYER_BOX, hltv == Some(true)),
+            (PLAYER_LABEL, hltv == Some(true)),
+            (MIN_KILLS_BOX, hltv.is_some()),
+            (MIN_KILLS_LABEL, hltv.is_some()),
+        ];
+        for (name, on) in shown {
+            if let Some(vp) = vgui.child_named(page, name)
+                && vgui.visible(vp) != on
+            {
+                vgui.set_visible(vp, on);
+            }
+        }
+    }
+}
+
+/// Shows only the rows whose player matches the Player box (every word, case
+/// ignored) with at least the Min kills box's kills, when either box changed
+/// or the list was refilled.
+unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
+    unsafe {
+        let player = if hltv {
+            box_text(vgui, page, PLAYER_BOX).trim().to_string()
+        } else {
+            String::new()
+        };
+        let min_kills: usize = box_text(vgui, page, MIN_KILLS_BOX)
+            .trim()
+            .parse()
+            .unwrap_or(0);
+        let wanted = format!("{player}|{min_kills}");
+        let mut filtered = FILTERED.lock().unwrap_or_else(|e| e.into_inner());
+        if filtered.as_deref() == Some(wanted.as_str()) {
+            return;
+        }
+        let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
+        let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
+        let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
+        let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+        let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
+        let mut id = first(list);
+        let mut guard = 0;
+        while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
+            guard += 1;
+            let row = get_item(list, id);
+            if !row.is_null() {
+                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+                let get = |key: &CStr| {
+                    let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                    if raw.is_null() {
+                        String::new()
+                    } else {
+                        text(raw)
+                    }
+                };
+                let kills: usize = get(COLUMNS[0].0).trim().parse().unwrap_or(0);
+                let shown = matches_filter(&get(ROW_KEY), &player) && kills >= min_kills;
+                set_visible(list, id, shown as u32);
+            }
+            id = next(list, id);
+        }
+        *filtered = Some(wanted);
     }
 }
 
@@ -204,24 +325,38 @@ unsafe fn show(
 }
 
 /// Lists `streaks`, when `key` (which list it is) changed.
-unsafe fn fill(list: *mut c_void, base: usize, build: &Build, key: &str, streaks: &[Streak]) {
+unsafe fn fill(
+    list: *mut c_void,
+    base: usize,
+    build: &Build,
+    key: &str,
+    streaks: &[Streak],
+    hltv: bool,
+) {
     unsafe {
         let mut shown = SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner());
         if *shown == key {
             return;
         }
         *shown = key.to_string();
+        // Every row shows again: narrow it afresh.
+        *FILTERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
         delete_all(list);
         let new: OperatorNewFn = std::mem::transmute(base + build.keyvalues_new);
         let ctor: KeyValuesCtor = std::mem::transmute(base + build.keyvalues_ctor);
         let add_item: AddItemFn = slot(list, LIST_SLOT_ADD_ITEM);
         for streak in streaks {
+            let target = match (hltv, streak.player_number) {
+                (true, Some(number)) => number.to_string(),
+                _ => String::new(),
+            };
             let cells = [
                 (COLUMNS[0].0, streaks::kills_text(streak.kills)),
                 (COLUMNS[1].0, streak.weapons.clone()),
                 (COLUMNS[2].0, streaks::time_text(streak.first_kill)),
                 (SEEK_KEY, format!("{:.2}", streak.seek_secs())),
+                (TARGET_KEY, target),
             ];
             let Ok(player) = CString::new(streak.player.replace('\0', "")) else {
                 continue;
@@ -273,12 +408,14 @@ unsafe fn set_label(object: *mut c_void, text: &str) {
 }
 
 /// The hidden window's `OnCommand`: Load (the Go button, or a double-click)
-/// seeks to the selected streak.
+/// seeks to the selected streak, and in an HLTV demo puts the camera on its
+/// player.
 unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
     if text(raw).eq_ignore_ascii_case("load") {
         match unsafe { selected_value(this, SEEK_KEY) } {
             Some(secs) => {
-                let line = format!("{} {secs}\n", crate::demo_seek::SEEK_TO_NAME);
+                let target = unsafe { selected_value(this, TARGET_KEY) };
+                let line = go_line(&secs, target.as_deref());
                 if !CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l)) {
                     crate::commands::console_print(&format!("{NAME}: could not run the seek\n"));
                 }
@@ -294,5 +431,18 @@ unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
         // Safety: the window's own OnCommand, from its vftable.
         let original: OnCommandFn = unsafe { std::mem::transmute(original) };
         unsafe { original(this, raw) };
+    }
+}
+
+/// What Go runs: the seek, then the camera onto the streak's player when the
+/// row names one.
+fn go_line(secs: &str, target: Option<&str>) -> String {
+    match target.filter(|t| !t.is_empty()) {
+        Some(number) => format!(
+            "{} {secs};{} {number}\n",
+            crate::demo_seek::SEEK_TO_NAME,
+            crate::spectator_follow::TARGET_NAME
+        ),
+        None => format!("{} {secs}\n", crate::demo_seek::SEEK_TO_NAME),
     }
 }
