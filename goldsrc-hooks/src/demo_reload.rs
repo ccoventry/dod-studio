@@ -116,6 +116,11 @@ unsafe extern "C" fn wrapped_playdemo() {
 }
 
 unsafe extern "C" fn wrapped_viewdemo() {
+    // A bare viewdemo only prints its usage; with
+    // dodstudio_viewdemo_in_panel it opens the DoD Studio window's demo list.
+    if crate::cmd_list::args().is_empty() && crate::studio_panel::bare_viewdemo() {
+        return;
+    }
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
     // dodstudio_viewdemo_in_panel: the DoD Studio window stands in for the bar.

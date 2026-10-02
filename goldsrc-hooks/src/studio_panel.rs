@@ -534,6 +534,86 @@ pub fn viewdemo_status() -> String {
     }
 }
 
+/// Called by `demo_reload`'s `viewdemo` wrapper for a bare `viewdemo`, which
+/// on its own only prints its usage. With `dodstudio_viewdemo_in_panel 1` it
+/// opens our window on the Demos tab instead, and returns whether it did.
+pub fn bare_viewdemo() -> bool {
+    if !viewdemo_in_panel() {
+        return false;
+    }
+    #[cfg(target_arch = "x86")]
+    {
+        let line = match hook::open_on(DEMOS_PAGE) {
+            Ok(state) => format!("{NAME}: viewdemo opened the demo list -- {state}"),
+            Err(why) => format!("{NAME}: viewdemo could not open the demo list -- {why}"),
+        };
+        crate::commands::console_print(&format!("{line}\n"));
+        true
+    }
+    #[cfg(not(target_arch = "x86"))]
+    false
+}
+
+/// The main menu DoD Studio writes, in `dod_addon` (read only with
+/// `-addons`, #412, and over the game's own `dod\resource` one, which is the
+/// user's and never written). "DoD Studio" opens our window; in a game or a
+/// demo the menu also has Resume and Disconnect; Options and Quit stay.
+const GAME_MENU: &str = include_str!("../ui/GameMenu.res");
+/// What marks a `dod_addon` menu as DoD Studio's own, to be kept up to date;
+/// any other file there is left alone.
+const GAME_MENU_MARK: &str = "DoD Studio";
+
+/// What to do with `dod_addon\resource\GameMenu.res`, given what is there.
+fn game_menu_action(existing: Option<&str>) -> Option<&'static str> {
+    match existing {
+        None => Some("wrote"),
+        Some(text) if text == GAME_MENU => None,
+        Some(text) if text.contains(GAME_MENU_MARK) => Some("updated"),
+        Some(_) => None,
+    }
+}
+
+/// Writes DoD Studio's main menu into `dod_addon`, unless a menu that isn't
+/// ours is already there. Runs at load, before GameUI reads the menu.
+/// `GOLDSRC_HOOKS_GAME_MENU=0` turns it off.
+pub fn write_game_menu() {
+    let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
+    else {
+        return;
+    };
+    let path = dir.join("dod_addon").join("resource").join("GameMenu.res");
+    let existing = std::fs::read_to_string(&path).ok();
+    let Some(verb) = game_menu_action(existing.as_deref()) else {
+        if existing.is_some_and(|t| !t.contains(GAME_MENU_MARK)) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "studio_panel: {} is not DoD Studio's, left alone",
+                    path.display()
+                ))
+            };
+        }
+        return;
+    };
+    let written = path
+        .parent()
+        .is_some_and(|p| std::fs::create_dir_all(p).is_ok())
+        && std::fs::write(&path, GAME_MENU).is_ok();
+    unsafe {
+        crate::debug::report(&format!(
+            "studio_panel: {} the DoD Studio main menu at {}{}",
+            if written { verb } else { "could not write" },
+            path.display(),
+            if written {
+                " (shown when the game is launched with -addons)"
+            } else {
+                ""
+            }
+        ))
+    };
+}
+
 /// Called by `demo_reload`'s `viewdemo` wrapper after the engine's own
 /// `viewdemo` ran: the bar appears a few frames later, and [`poll`] opens our
 /// window then.
@@ -1859,6 +1939,18 @@ mod hook {
         }
     }
 
+    /// Opens the window on tab `page`, building it if needed.
+    pub(super) fn open_on(page: usize) -> Result<String, String> {
+        let vgui = Vgui::get()?;
+        unsafe {
+            let (object, vp, _) = ensure_window(&vgui, false)?;
+            if page == DEMOS_PAGE {
+                refill_demo_list();
+            }
+            show(&vgui, object, vp, Some(page))
+        }
+    }
+
     /// Opens the window (building it the first time), or closes it when open.
     pub(super) fn toggle(request: Request) -> Result<String, String> {
         let vgui = Vgui::get()?;
@@ -1963,6 +2055,19 @@ mod tests {
             };
             assert!(res.contains(&format!("engine {setting} 1")), "{button}");
         }
+    }
+
+    #[test]
+    fn the_main_menu_is_written_only_over_our_own() {
+        assert_eq!(game_menu_action(None), Some("wrote"));
+        assert_eq!(game_menu_action(Some(GAME_MENU)), None);
+        assert_eq!(
+            game_menu_action(Some("// DoD Studio old menu")),
+            Some("updated")
+        );
+        assert_eq!(game_menu_action(Some("\"GameMenu\" { }")), None);
+        assert!(GAME_MENU.contains(GAME_MENU_MARK));
+        assert!(GAME_MENU.contains("engine dodstudio_panel 1"));
     }
 
     #[test]

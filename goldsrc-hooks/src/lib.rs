@@ -206,6 +206,10 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // First, so the file is there before GameUI reads the main menu.
+    if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
+        studio_panel::write_game_menu();
+    }
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
         Ordering::Relaxed,
