@@ -72,6 +72,9 @@
 //! - `window_layout`: the `dodstudio_resizable_windows` and
 //!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
+//! - `studio_panel`: `dodstudio_panel` -- DoD Studio's own window in the game,
+//!   a GameUI `Frame` with tabs and VCR buttons, laid out by our own `.res`
+//!   (#408, plan item 4).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
@@ -153,6 +156,7 @@ mod spectator_follow;
 mod spectator_gun;
 mod spectator_target;
 mod sprite_blend;
+mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;

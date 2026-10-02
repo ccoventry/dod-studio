@@ -39,7 +39,7 @@ joins this switch rather than adding a command:
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
-Plus twenty control surfaces, always available and doing nothing until used:
+Plus twenty-one control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -129,6 +129,10 @@ Plus twenty control surfaces, always available and doing nothing until used:
   the engine surface's popups through vgui2's own interfaces; only
   `Frame::SetSizeable`/`IsSizeable` are per-build addresses. See
   `src/window_layout.rs`.
+- **DoD Studio window** (`dodstudio_panel`): our own window in the game, a
+  GameUI `Frame` with tabs; its Playback buttons drive the demo player like the
+  VCR bar's. Laid out by `dod\dodstudio_ui\DodStudioPanel.res`, editable in
+  build mode. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when

@@ -484,6 +484,11 @@ mod hook {
                 if object.is_null() {
                     return None;
                 }
+                // DoD Studio's own window is a GameUI Frame with a copied
+                // vftable, so the range check below would turn it away.
+                if object as usize == crate::studio_panel::object() {
+                    return Some(object);
+                }
                 let vftable = *(object as *const usize);
                 if vftable < self.gameui.0
                     || vftable + (FRAME_SLOT_IS_SIZEABLE + 1) * 4 > self.gameui.1
