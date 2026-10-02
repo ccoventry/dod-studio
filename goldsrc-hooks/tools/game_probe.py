@@ -37,6 +37,9 @@ always ends the game it started, and only that one.
                                 enter, tab, space, backquote, f1..f12, or a letter
                                 or digit. Focuses the game first, and refuses unless
                                 the game's window really is in front
+    click <x> <y>               left-click at a point in the game window, in the same
+                                pixels as a `grab` image (client area, top left 0 0).
+                                Same focus check as `key`
     expect <regex>              check the regex appears in either log (or in
                                 the events pipe's lines, once listening)
     expect_not <regex>          check it doesn't
@@ -403,6 +406,28 @@ def press_key(pid, name):
     return None
 
 
+def click(pid, x, y):
+    """Left-clicks at client-area point (x, y) of the game's window, the
+    same pixels a `grab` image has. Refuses unless the game is in front, and
+    unless the point is inside its window."""
+    state = focus_window(pid)
+    if not state.startswith("foreground"):
+        return f"not clicked: {state}"
+    hwnd = game_hwnd(pid)
+    rect = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rect))
+    if not (0 <= x < rect.right and 0 <= y < rect.bottom):
+        return f"({x}, {y}) is outside the {rect.right}x{rect.bottom} window"
+    point = wintypes.POINT(x, y)
+    user32.ClientToScreen(hwnd, ctypes.byref(point))
+    user32.SetCursorPos(point.x, point.y)
+    time.sleep(0.1)
+    user32.mouse_event(0x0002, 0, 0, 0, 0)  # left down
+    time.sleep(0.05)
+    user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
+    return None
+
+
 def record_clip(pid, folder, seconds, fps, hooklog=None):
     """Records `seconds` of HLAE frames at `fps` into `folder/` (PNGs) and
     writes `folder.png`, a contact sheet of up to 24 evenly spaced frames, for
@@ -663,6 +688,12 @@ def run(args):
             elif kind == "focus":
                 result["note"] = focus_window(pid)
                 result["ok"] = result["note"].startswith("foreground")
+            elif kind == "click":
+                parts = rest.split()
+                err = click(pid, int(parts[0]), int(parts[1]))
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
             elif kind == "key":
                 err = press_key(pid, rest)
                 result["ok"] = err is None
