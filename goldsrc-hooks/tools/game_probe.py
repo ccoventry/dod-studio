@@ -41,6 +41,7 @@ always ends the game it started, and only that one.
     click <x> <y> [2]           left-click at a point in the game window, in the same
                                 pixels as a `grab` image (client area, top left 0 0);
                                 a trailing 2 double-clicks. Same focus check as `key`
+    move <x> <y>                put the mouse over a point (hover), same pixels
     drag <x1> <y1> <x2> <y2>    hold the left button at one point and release it at
                                 another (moving or resizing a window), same pixels
     expect <regex>              check the regex appears in either log (or in
@@ -437,6 +438,23 @@ def click(pid, x, y, count=1):
     return None
 
 
+def move_cursor(pid, x, y):
+    """Puts the mouse over a point in the game window (hover, for tooltips)."""
+    state = focus_window(pid)
+    if not state.startswith("foreground"):
+        return f"not moved: {state}"
+    hwnd = game_hwnd(pid)
+    point = wintypes.POINT(x, y)
+    user32.ClientToScreen(hwnd, ctypes.byref(point))
+    user32.SetCursorPos(point.x - 3, point.y - 3)
+    # Real motion, in small steps: SetCursorPos alone does not count as the
+    # mouse moving for every input path.
+    for _ in range(3):
+        time.sleep(0.03)
+        user32.mouse_event(0x0001, 1, 1, 0, 0)  # MOUSEEVENTF_MOVE
+    return None
+
+
 def drag(pid, x1, y1, x2, y2):
     """Presses the left button at (x1, y1) and releases it at (x2, y2), in
     steps, so vgui2 sees the cursor move while the button is down."""
@@ -732,6 +750,12 @@ def run(args):
                 parts = rest.split()
                 err = click(pid, int(parts[0]), int(parts[1]),
                             int(parts[2]) if len(parts) > 2 else 1)
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
+            elif kind == "move":
+                x, y = (int(v) for v in rest.split())
+                err = move_cursor(pid, x, y)
                 result["ok"] = err is None
                 if err:
                     result["note"] = err
