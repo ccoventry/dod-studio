@@ -186,7 +186,15 @@ def verify(game, src):
     # 13: the two IPanel slots only this window uses (the rest are #410's).
     vg = vwl.Image(game / "vgui2.dll")
     wrapper = vg.vftable("VPanelWrapper")
-    for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8")):
+    get_active = vwl.rust_usize(src, "SHEET_SLOT_GET_ACTIVE_PAGE")
+    body = ui.body(ui.u32(sheet_vt + 4 * get_active) - ui.base, 0x10)
+    check(len(body) == 2 and body[0].startswith("mov eax, dword ptr [ecx +") and body[1] == "ret",
+          f"PropertySheet's slot {get_active} (GetActivePage) just returns a field: {body}")
+    key = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_TYPED")
+    got = ui.last_ret(ui.u32(page_vt + 4 * key) - ui.base)
+    check(got == "ret 4", f"PropertyPage's slot {key} (OnKeyCodeTyped) returns with {got!r}")
+    for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8"),
+                       ("IPANEL_REQUEST_FOCUS", "ret 8")):
         index = vwl.rust_usize(src, name)
         got = vg.last_ret(vg.u32(wrapper + 4 * index) - vg.base)
         check(got == want, f"IPanel slot {index} ({name}) returns with {got!r}")

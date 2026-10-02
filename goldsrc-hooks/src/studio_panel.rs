@@ -93,7 +93,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 3] = [
+pub const PAGES: [Page; 4] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -110,6 +110,15 @@ pub const PAGES: [Page; 3] = [
             c"dodstudio_ui/Demos.res",
             "Demos.res",
             include_str!("../ui/Demos.res"),
+        ),
+    },
+    Page {
+        name: c"Console",
+        title: c"Console",
+        res: (
+            c"dodstudio_ui/Console.res",
+            "Console.res",
+            include_str!("../ui/Console.res"),
         ),
     },
     Page {
@@ -191,6 +200,12 @@ const PAGE_ALLOC: usize = 0x400;
 
 /// `Panel::OnCommand(const char *)`; the VCR bar overrides the same slot.
 const FRAME_SLOT_ON_COMMAND: usize = 87;
+/// `Panel::OnKeyCodeTyped(KeyCode)`, the slot #396's `Frame` patch is in.
+const PANEL_SLOT_ON_KEY_CODE_TYPED: usize = 100;
+/// vgui2's `KEY_ENTER` and `KEY_PAD_ENTER` (the console's input line maps the
+/// second to the first, `cmp 0x33` / `mov 0x40`).
+const KEY_ENTER: i32 = 0x40;
+const KEY_PAD_ENTER: i32 = 0x33;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
@@ -228,6 +243,10 @@ const IPANEL_SET_PARENT: usize = 16;
 /// `PropertySheet::SetActivePage(Panel *page)`, the slot after `AddPage`: it
 /// looks the page up in the sheet's list and switches to it.
 const SHEET_SLOT_SET_ACTIVE_PAGE: usize = 135;
+/// `PropertySheet::GetActivePage()`, two slots on: returns the page field.
+const SHEET_SLOT_GET_ACTIVE_PAGE: usize = 137;
+/// `IPanel::RequestFocus(VPANEL, int direction)`.
+const IPANEL_REQUEST_FOCUS: usize = 48;
 
 /// The GameUI panel the window is parented to, as the VCR bar and the main
 /// menu are.
@@ -239,14 +258,59 @@ const SHEET_MARGIN: i32 = 4;
 /// The smallest the window's height may go: the tab strip plus a row.
 const MIN_TALL: i32 = 120;
 
-/// The VCR bar's live controls the Playback tab borrows, each into the slot
-/// (an empty control in `Playback.res`) whose place it takes. The bar keeps
-/// updating its own time label and slider through its own pointers, and the
-/// slider keeps seeking through the bar, wherever they are drawn.
-const BORROWED: &[(&str, &str)] = &[
-    ("TimeSlider", "TimeSliderSlot"),
-    ("TimeLabel", "TimeLabelSlot"),
+/// A control another GameUI window lends one of our tabs: it is moved onto
+/// the tab, into the slot (an empty control in that tab's `.res`) whose place
+/// it takes, and handed back when our window closes. It keeps working for its
+/// own window: the VCR bar keeps updating its time label and slider through
+/// its own pointers, and the slider keeps seeking through the bar; the
+/// console keeps printing into its history and running what its input line
+/// submits, wherever they are drawn.
+pub struct Loan {
+    /// The lending window's panel name.
+    pub source: &'static str,
+    pub control: &'static str,
+    pub slot: &'static str,
+    /// Which of [`PAGES`] it goes on.
+    pub page: usize,
+}
+
+pub const LOANS: &[Loan] = &[
+    Loan {
+        source: VCR_BAR,
+        control: "TimeSlider",
+        slot: "TimeSliderSlot",
+        page: PLAYBACK_PAGE,
+    },
+    Loan {
+        source: VCR_BAR,
+        control: "TimeLabel",
+        slot: "TimeLabelSlot",
+        page: PLAYBACK_PAGE,
+    },
+    Loan {
+        source: CONSOLE,
+        control: "ConsoleHistory",
+        slot: "ConsoleHistorySlot",
+        page: CONSOLE_PAGE,
+    },
+    Loan {
+        source: CONSOLE,
+        control: "ConsoleEntry",
+        slot: "ConsoleEntrySlot",
+        page: CONSOLE_PAGE,
+    },
+    Loan {
+        source: CONSOLE,
+        control: "ConsoleSubmit",
+        slot: "ConsoleSubmitSlot",
+        page: CONSOLE_PAGE,
+    },
 ];
+/// The console's panel name.
+const CONSOLE: &str = "GameConsole";
+/// The Playback and Console tabs' places in [`PAGES`].
+const PLAYBACK_PAGE: usize = 0;
+const CONSOLE_PAGE: usize = 2;
 /// Where the VCR bar waits, off screen, while `dodstudio_viewdemo_in_panel` has
 /// our window stand in for it. Off screen rather than hidden: a hidden panel
 /// stops thinking, and the bar's think is what updates the time and slider.
@@ -272,7 +336,7 @@ static OBJECT: AtomicUsize = AtomicUsize::new(0);
 /// Its tab strip.
 static SHEET: AtomicUsize = AtomicUsize::new(0);
 /// Its pages, in [`PAGES`] order.
-static PAGE_OBJECTS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+static PAGE_OBJECTS: [AtomicUsize; PAGES.len()] = [const { AtomicUsize::new(0) }; PAGES.len()];
 /// The VCR bar's panel while it is parked off screen, or 0.
 static PARKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
@@ -285,6 +349,80 @@ pub fn object() -> usize {
 /// must not save or restore a position we put it at.
 pub fn parked_bar() -> u32 {
     PARKED.load(Ordering::Acquire)
+}
+
+/// `dodstudio_console_in_panel 1`: the console key (`toggleconsole`) opens our
+/// window on its Console tab instead of the console window.
+pub const CONSOLE_NAME: &str = console_name!("console_in_panel");
+/// The fallback toggle, when the cvar could not be registered.
+pub static CONSOLE_IN_PANEL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static CONSOLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// Frames left to wait for the console window after `toggleconsole`, or 0.
+static CONSOLE_PENDING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// The engine's own `toggleconsole`, once wrapped.
+static REAL_TOGGLECONSOLE: AtomicUsize = AtomicUsize::new(0);
+static TOGGLECONSOLE_WRAPPED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_console_cvar(cvar: *mut crate::engine::CvarSPartial) {
+    CONSOLE_CVAR.store(cvar, Ordering::Release);
+}
+
+fn console_in_panel() -> bool {
+    let cvar = CONSOLE_CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        CONSOLE_IN_PANEL.load(Ordering::Relaxed)
+    } else {
+        // Safety: the engine owns the cvar for the session.
+        unsafe { (*cvar).value != 0.0 }
+    }
+}
+
+/// For the fallback toggle's bare-name query.
+pub fn console_status() -> String {
+    if console_in_panel() {
+        "the console key opens the DoD Studio window on its Console tab".to_string()
+    } else {
+        "the console key opens the console window".to_string()
+    }
+}
+
+/// Wraps `toggleconsole` (the console key's binding), once the engine has it.
+fn wrap_toggleconsole() {
+    if TOGGLECONSOLE_WRAPPED.load(Ordering::Relaxed) {
+        return;
+    }
+    let mut found = false;
+    crate::cmd_list::for_each(|name, entry| {
+        if name.eq_ignore_ascii_case(b"toggleconsole") {
+            found |= crate::cmd_list::wrap(entry, &REAL_TOGGLECONSOLE, wrapped_toggleconsole);
+        }
+    });
+    if found {
+        TOGGLECONSOLE_WRAPPED.store(true, Ordering::Relaxed);
+        unsafe {
+            crate::debug::report(
+                "studio_panel: wrapped toggleconsole for dodstudio_console_in_panel",
+            )
+        };
+    }
+}
+
+/// The console key. With `dodstudio_console_in_panel 1` it closes our window
+/// when the Console tab is showing; otherwise it runs the engine's own
+/// `toggleconsole` (which also brings up the menu when in game) and [`poll`]
+/// then swaps the console window for our Console tab.
+unsafe extern "C" fn wrapped_toggleconsole() {
+    if console_in_panel() {
+        #[cfg(target_arch = "x86")]
+        if hook::close_if_on_console() {
+            return;
+        }
+        CONSOLE_PENDING.store(VIEWDEMO_WAIT_FRAMES, Ordering::Release);
+    }
+    unsafe { crate::cmd_list::call_real(&REAL_TOGGLECONSOLE) };
 }
 
 /// Called by `commands.rs` once the cvar is registered.
@@ -413,6 +551,7 @@ mod hook {
     type LoadSettingsFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
     type OnCommandFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char);
     type ActivateFn = unsafe extern "thiscall" fn(*mut c_void);
+    type KeyFn = unsafe extern "thiscall" fn(*mut c_void, i32);
     type ClientAreaFn =
         unsafe extern "thiscall" fn(*mut c_void, *mut i32, *mut i32, *mut i32, *mut i32);
     type GetVpanelFn = unsafe extern "thiscall" fn(*mut c_void) -> Vpanel;
@@ -429,11 +568,18 @@ mod hook {
     type XyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, i32, i32);
     type SetParentFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, Vpanel);
     type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
+    type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
     type GetXyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, *mut i32, *mut i32);
+
+    /// Frames left to keep giving the borrowed console input line the
+    /// keyboard after the console key opened the Console tab.
+    static FOCUS_ENTRY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    const FOCUS_ENTRY_FRAMES: u32 = 5;
 
     /// Each class's own `OnCommand`, for whatever our handler passes on.
     static FRAME_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
+    static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
 
     unsafe fn slot<F: Copy>(object: *mut c_void, index: usize) -> F {
         unsafe {
@@ -568,13 +714,17 @@ mod hook {
             unsafe { set(self.panel, vp, parent) };
         }
 
-        unsafe fn bar(&self) -> Option<Vpanel> {
+        unsafe fn popup(&self, wanted: &str) -> Option<Vpanel> {
             unsafe {
                 self.gameui_popups()
                     .into_iter()
-                    .find(|(_, name)| name == VCR_BAR)
+                    .find(|(_, name)| name == wanted)
                     .map(|(vp, _)| vp)
             }
+        }
+
+        unsafe fn bar(&self) -> Option<Vpanel> {
+            unsafe { self.popup(VCR_BAR) }
         }
     }
 
@@ -588,11 +738,12 @@ mod hook {
         }
     }
 
-    /// One of the VCR bar's controls, moved onto the Playback tab.
+    /// One of another window's controls, moved onto one of our tabs.
     struct Borrowed {
         control: Vpanel,
-        /// The bar it came from, and where it sat there.
-        bar: Vpanel,
+        /// The window it came from (by name and panel), and where it sat there.
+        source_name: &'static str,
+        source: Vpanel,
         home: (i32, i32, i32, i32),
     }
 
@@ -602,6 +753,8 @@ mod hook {
         parked_from: Option<(Vpanel, i32, i32)>,
         /// The minimum size last set on the window.
         minimum: (i32, i32),
+        /// Loans already reported missing, so each is logged once.
+        reported: Vec<&'static str>,
     }
 
     thread_local! {
@@ -611,6 +764,7 @@ mod hook {
                 borrowed: Vec::new(),
                 parked_from: None,
                 minimum: (0, 0),
+                reported: Vec::new(),
             })
         };
     }
@@ -680,14 +834,28 @@ mod hook {
     /// `handler`, and returns the class's own `OnCommand`. The copy (RTTI
     /// locator at [-1] included) is leaked: it lives as long as the object.
     unsafe fn own_on_command(object: *mut c_void, handler: usize) -> usize {
+        unsafe { own_slots(object, &[(FRAME_SLOT_ON_COMMAND, handler)])[0] }
+    }
+
+    /// Gives `object` a copy of its vftable with each `(slot, handler)`
+    /// replaced, and returns the class's own functions for those slots, in
+    /// order. The copy (RTTI locator at [-1] included) is leaked: it lives as
+    /// long as the object.
+    unsafe fn own_slots(object: *mut c_void, replace: &[(usize, usize)]) -> Vec<usize> {
         unsafe {
             let original = *(object as *const *const usize);
             let mut copy = vec![0usize; VFTABLE_SLOTS + 1];
             for (i, entry) in copy.iter_mut().enumerate() {
                 *entry = *original.offset(i as isize - 1);
             }
-            let own = copy[FRAME_SLOT_ON_COMMAND + 1];
-            copy[FRAME_SLOT_ON_COMMAND + 1] = handler;
+            let own = replace
+                .iter()
+                .map(|&(index, handler)| {
+                    let own = copy[index + 1];
+                    copy[index + 1] = handler;
+                    own
+                })
+                .collect();
             let copy: &'static mut [usize] = Box::leak(copy.into_boxed_slice());
             *(object as *mut *const usize) = copy.as_ptr().add(1);
             own
@@ -738,10 +906,18 @@ mod hook {
             for (page, stored) in PAGES.iter().zip(&PAGE_OBJECTS) {
                 let object = allocate(base, build, PAGE_ALLOC)?;
                 page_ctor(object, frame, page.name.as_ptr(), 1);
-                PAGE_ON_COMMAND.store(
-                    own_on_command(object, page_on_command as *const () as usize),
-                    Ordering::Release,
+                let own = own_slots(
+                    object,
+                    &[
+                        (FRAME_SLOT_ON_COMMAND, page_on_command as *const () as usize),
+                        (
+                            PANEL_SLOT_ON_KEY_CODE_TYPED,
+                            page_on_key as *const () as usize,
+                        ),
+                    ],
                 );
+                PAGE_ON_COMMAND.store(own[0], Ordering::Release);
+                PAGE_ON_KEY.store(own[1], Ordering::Release);
                 load(object, page.res.0.as_ptr(), std::ptr::null());
                 add_page(sheet, object, page.title.as_ptr());
                 stored.store(object as usize, Ordering::Release);
@@ -838,16 +1014,17 @@ mod hook {
         }
     }
 
-    /// Moves the bar's time slider and label onto the Playback tab, into
-    /// their slots. Re-asserted every frame: the bar may lay them out again.
-    unsafe fn borrow(vgui: &Vgui, bar: Vpanel, lent: &mut Lent) {
+    /// Moves `source_name`'s controls in [`LOANS`] onto their tabs, into
+    /// their slots. Re-asserted every frame: the source may lay them out again.
+    unsafe fn borrow(vgui: &Vgui, source_name: &'static str, source: Vpanel, lent: &mut Lent) {
         unsafe {
-            let page = vpanel_of(PAGE_OBJECTS[0].load(Ordering::Acquire) as *mut c_void);
-            if page == 0 {
-                return;
-            }
-            for (control, slot_name) in BORROWED {
-                let Some(slot_vp) = vgui.child_named(page, slot_name) else {
+            for loan in LOANS.iter().filter(|l| l.source == source_name) {
+                let page =
+                    vpanel_of(PAGE_OBJECTS[loan.page].load(Ordering::Acquire) as *mut c_void);
+                if page == 0 {
+                    continue;
+                }
+                let Some(slot_vp) = vgui.child_named(page, loan.slot) else {
                     continue; // a layout without this slot: nothing borrowed
                 };
                 if vgui.visible(slot_vp) {
@@ -857,16 +1034,31 @@ mod hook {
                 let known = lent
                     .borrowed
                     .iter()
-                    .find(|b| b.bar == bar && vgui.name(b.control) == *control)
+                    .find(|b| b.source == source && vgui.name(b.control) == loan.control)
                     .map(|b| b.control);
-                let vp = match known.or_else(|| vgui.child_named(bar, control)) {
+                let vp = match known.or_else(|| vgui.child_named(source, loan.control)) {
                     Some(vp) => vp,
-                    None => continue,
+                    None => {
+                        if !lent.reported.contains(&loan.control) {
+                            lent.reported.push(loan.control);
+                            let names: Vec<String> = vgui
+                                .child_list(source)
+                                .into_iter()
+                                .map(|c| vgui.name(c))
+                                .collect();
+                            crate::debug::report(&format!(
+                                "studio_panel: {source_name} has no control {:?} to lend; it has {names:?}",
+                                loan.control
+                            ));
+                        }
+                        continue;
+                    }
                 };
                 if known.is_none() {
                     lent.borrowed.push(Borrowed {
                         control: vp,
-                        bar,
+                        source_name,
+                        source,
                         home: vgui.rect(vp),
                     });
                 }
@@ -878,14 +1070,20 @@ mod hook {
         }
     }
 
-    /// Hands every borrowed control back to its bar, where it was.
-    unsafe fn give_back(vgui: &Vgui, lent: &mut Lent) {
-        for b in lent.borrowed.drain(..) {
+    /// Hands borrowed controls back to the windows they came from, where they
+    /// were: all of them, or only those from `only`.
+    unsafe fn give_back(vgui: &Vgui, lent: &mut Lent, only: Option<&str>) {
+        let (back, keep): (Vec<Borrowed>, Vec<Borrowed>) = lent
+            .borrowed
+            .drain(..)
+            .partition(|b| only.is_none_or(|name| b.source_name == name));
+        lent.borrowed = keep;
+        for b in back {
             unsafe {
-                if vgui.object(b.bar).is_null() {
-                    continue; // that bar is gone
+                if vgui.object(b.source).is_null() {
+                    continue; // that window is gone
                 }
-                vgui.set_parent(b.control, b.bar);
+                vgui.set_parent(b.control, b.source);
                 vgui.place(b.control, b.home);
             }
         }
@@ -915,20 +1113,72 @@ mod hook {
         }
     }
 
+    /// Whether our window is showing its Console tab; if so, closes it.
+    pub(super) fn close_if_on_console() -> bool {
+        let Ok(vgui) = Vgui::get() else { return false };
+        unsafe {
+            let Some((_, vp)) = window(&vgui) else {
+                return false;
+            };
+            let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
+            if !vgui.visible(vp) || sheet.is_null() {
+                return false;
+            }
+            let active: GetActivePageFn = slot(sheet, SHEET_SLOT_GET_ACTIVE_PAGE);
+            let console = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
+            if active(sheet) != console {
+                return false;
+            }
+            vgui.set_visible(vp, false);
+            true
+        }
+    }
+
+    /// After the console key: once the console window is up, hides it and
+    /// opens our window on the Console tab, its input line focused.
+    unsafe fn console_to_tab(vgui: &Vgui) {
+        let pending = CONSOLE_PENDING.load(Ordering::Relaxed);
+        if pending == 0 {
+            return;
+        }
+        CONSOLE_PENDING.store(pending - 1, Ordering::Relaxed);
+        unsafe {
+            let Some(console) = vgui.popup(CONSOLE).filter(|&c| vgui.visible(c)) else {
+                return;
+            };
+            CONSOLE_PENDING.store(0, Ordering::Relaxed);
+            vgui.set_visible(console, false);
+            let line = match ensure_window(vgui, false)
+                .and_then(|(object, vp, _)| show(vgui, object, vp, Some(CONSOLE_PAGE)))
+            {
+                Ok(state) => format!("the console key opened the Console tab -- {state}"),
+                Err(why) => format!("the console key could not open the Console tab -- {why}"),
+            };
+            // The input line gets the keyboard once it is on the tab and the
+            // window's own Activate has run: a few frames from now.
+            FOCUS_ENTRY.store(FOCUS_ENTRY_FRAMES, Ordering::Relaxed);
+            crate::debug::report(&format!("studio_panel: {line}"));
+        }
+    }
+
     pub(super) fn poll() {
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
-        if OBJECT.load(Ordering::Relaxed) == 0 && pending == 0 {
+        if OBJECT.load(Ordering::Relaxed) == 0
+            && pending == 0
+            && CONSOLE_PENDING.load(Ordering::Relaxed) == 0
+        {
             return;
         }
         let Ok(vgui) = Vgui::get() else { return };
         unsafe {
+            console_to_tab(&vgui);
             // After a viewdemo, open on Playback once the bar has appeared.
             if pending > 0 {
                 VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);
                 if vgui.bar().is_some_and(|bar| vgui.visible(bar)) {
                     VIEWDEMO_PENDING.store(0, Ordering::Relaxed);
                     let line = match ensure_window(&vgui, false)
-                        .and_then(|(object, vp, _)| show(&vgui, object, vp, Some(0)))
+                        .and_then(|(object, vp, _)| show(&vgui, object, vp, Some(PLAYBACK_PAGE)))
                     {
                         Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
                         Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
@@ -945,22 +1195,45 @@ mod hook {
                     return;
                 };
                 hold_minimum(&vgui, frame, vp, &mut lent);
-                let bar = vgui.bar();
-                match bar {
-                    Some(bar) if vgui.visible(vp) => {
-                        if lent.borrowed.iter().any(|b| b.bar != bar) {
-                            give_back(&vgui, &mut lent); // a new bar
+                if !vgui.visible(vp) {
+                    give_back(&vgui, &mut lent, None);
+                    unpark(&vgui, &mut lent);
+                    return;
+                }
+                let mut sources: Vec<&'static str> = LOANS.iter().map(|l| l.source).collect();
+                sources.dedup();
+                for name in sources {
+                    match vgui.popup(name) {
+                        Some(source) => {
+                            if lent
+                                .borrowed
+                                .iter()
+                                .any(|b| b.source_name == name && b.source != source)
+                            {
+                                give_back(&vgui, &mut lent, Some(name)); // a new window
+                            }
+                            borrow(&vgui, name, source, &mut lent);
                         }
-                        borrow(&vgui, bar, &mut lent);
-                        if viewdemo_in_panel() {
-                            park(&vgui, bar, &mut lent);
-                        } else {
-                            unpark(&vgui, &mut lent);
-                        }
+                        None => give_back(&vgui, &mut lent, Some(name)),
                     }
-                    _ => {
-                        give_back(&vgui, &mut lent);
-                        unpark(&vgui, &mut lent);
+                }
+                match vgui.bar() {
+                    Some(bar) if viewdemo_in_panel() => park(&vgui, bar, &mut lent),
+                    _ => unpark(&vgui, &mut lent),
+                }
+                let focus_left = FOCUS_ENTRY.load(Ordering::Relaxed);
+                if focus_left > 0 {
+                    FOCUS_ENTRY.store(focus_left - 1, Ordering::Relaxed);
+                    let entry = lent
+                        .borrowed
+                        .iter()
+                        .find(|b| {
+                            b.source_name == CONSOLE && vgui.name(b.control) == "ConsoleEntry"
+                        })
+                        .map(|b| b.control);
+                    if let Some(entry) = entry {
+                        let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
+                        focus(vgui.panel, entry, 0);
                     }
                 }
             });
@@ -1034,6 +1307,36 @@ mod hook {
         unsafe { handle(this, raw, &PAGE_ON_COMMAND) }
     }
 
+    /// Each page's `OnKeyCodeTyped`: a key a control on the tab didn't use
+    /// comes here. On the Console tab, Enter submits the borrowed input line,
+    /// as it does in the console window -- where the dialog's own Submit
+    /// button is the window's default, which our window knows nothing of.
+    unsafe extern "thiscall" fn page_on_key(this: *mut c_void, code: i32) {
+        let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == console_page
+            && (code == KEY_ENTER || code == KEY_PAD_ENTER)
+            && let Ok(vgui) = Vgui::get()
+        {
+            unsafe {
+                let object = vgui
+                    .popup(CONSOLE)
+                    .map(|console| vgui.object(console))
+                    .filter(|o| !o.is_null());
+                if let Some(object) = object {
+                    let on_command: OnCommandFn = slot(object, FRAME_SLOT_ON_COMMAND);
+                    on_command(object, c"Submit".as_ptr());
+                    return;
+                }
+            }
+        }
+        let original = PAGE_ON_KEY.load(Ordering::Acquire);
+        if original != 0 {
+            // Safety: the class's own OnKeyCodeTyped, from its vftable.
+            let original: KeyFn = unsafe { std::mem::transmute(original) };
+            unsafe { original(this, code) };
+        }
+    }
+
     /// The window, built the first time (or rebuilt on `reset`), with what
     /// was done to get it.
     unsafe fn ensure_window(
@@ -1054,7 +1357,7 @@ mod hook {
                 // parent.
                 LENT.with(|cell| {
                     if let Ok(mut lent) = cell.try_borrow_mut() {
-                        give_back(vgui, &mut lent);
+                        give_back(vgui, &mut lent, None);
                         unpark(vgui, &mut lent);
                         lent.minimum = (0, 0);
                     }
@@ -1119,9 +1422,12 @@ mod hook {
     }
 }
 
-/// Keeps the tab strip sized to the window. Called every frame from
-/// `commands::poll`; one atomic load until the window has been opened.
+/// Keeps the tab strip sized to the window, swaps in our window after
+/// `viewdemo` or the console key, and wraps `toggleconsole` once the engine
+/// has it. Called every frame from `commands::poll`; a few atomic loads until
+/// the window has been opened.
 pub fn poll() {
+    wrap_toggleconsole();
     #[cfg(target_arch = "x86")]
     hook::poll();
 }
@@ -1211,16 +1517,23 @@ mod tests {
     }
 
     #[test]
-    fn the_playback_layout_has_a_slot_for_every_borrowed_control() {
-        for (_, slot) in BORROWED {
-            assert!(PAGES[0].res.2.contains(&format!("\"{slot}\"")), "{slot}");
+    fn every_loan_has_its_slot_on_its_tab() {
+        for loan in LOANS {
+            let res = PAGES[loan.page].res.2;
+            assert!(res.contains(&format!("\"{}\"", loan.slot)), "{}", loan.slot);
         }
+        assert_eq!(PAGES[PLAYBACK_PAGE].name, c"Playback");
+        assert_eq!(PAGES[CONSOLE_PAGE].name, c"Console");
     }
 
     #[test]
     fn no_name_is_the_start_of_another() {
-        assert!(!VIEWDEMO_NAME.starts_with(NAME));
-        assert!(!NAME.starts_with(VIEWDEMO_NAME));
+        let names = [NAME, VIEWDEMO_NAME, CONSOLE_NAME];
+        for a in names {
+            for b in names {
+                assert!(a == b || !a.starts_with(b), "{b} starts {a}");
+            }
+        }
     }
 
     #[test]

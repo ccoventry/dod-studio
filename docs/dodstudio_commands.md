@@ -48,6 +48,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 | `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 | `dodstudio_viewdemo_in_panel` | `0` | `viewdemo` opens the DoD Studio window (`dodstudio_panel`) on its Playback tab, which takes the VCR bar's time slider and time label; the bar waits off screen until the window is closed | `goldsrc-hooks/src/studio_panel.rs`, #408 |
+| `dodstudio_console_in_panel` | `0` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again closes it | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `dodstudio_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `dodstudio_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
 
@@ -196,13 +197,18 @@ no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
 
 Opens DoD Studio's own window in the game, or closes it if it's open. It sits
 with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
-Options and Find Servers windows (Playback, Demos, Studio); the Playback buttons
-do what the VCR bar's do, so a demo has to be playing under `viewdemo`.
+Options and Find Servers windows (Playback, Demos, Console, Studio), and never
+narrower than its tabs. The Playback buttons do what the VCR bar's do, so a
+demo has to be playing under `viewdemo`; the tab also shows the bar's own time
+slider and time label. The Console tab holds the real console's history, input
+line and Submit button (Enter submits). Both are the original controls, lent
+by their windows while ours is open and handed back when it closes.
 `dodstudio_panel reset` writes the default layouts back and rebuilds the window.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Studio.res`), written the first time
-and never overwritten. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written
+the first time and never overwritten. The empty `...Slot` controls in
+`Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).

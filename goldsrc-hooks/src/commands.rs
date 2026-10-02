@@ -1108,6 +1108,15 @@ unsafe extern "C" fn cmd_viewdemo_in_panel() {
     );
 }
 
+/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_console_in_panel() {
+    handle_toggle(
+        crate::studio_panel::CONSOLE_NAME,
+        &crate::studio_panel::CONSOLE_IN_PANEL,
+        crate::studio_panel::console_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1361,6 +1370,10 @@ pub fn install() {
     match register(crate::studio_panel::VIEWDEMO_NAME, "0") {
         Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
         None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
+    }
+    match register(crate::studio_panel::CONSOLE_NAME, "0") {
+        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };

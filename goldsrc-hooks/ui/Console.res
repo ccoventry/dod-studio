@@ -1,0 +1,42 @@
+"dodstudio_ui/Console.res"
+{
+	"ConsoleHistorySlot"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"ConsoleHistorySlot"
+		"xpos"		"8"
+		"ypos"		"6"
+		"wide"		"520"
+		"tall"		"196"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+	}
+	"ConsoleEntrySlot"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"ConsoleEntrySlot"
+		"xpos"		"8"
+		"ypos"		"208"
+		"wide"		"436"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+	}
+	"ConsoleSubmitSlot"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"ConsoleSubmitSlot"
+		"xpos"		"452"
+		"ypos"		"208"
+		"wide"		"76"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+	}
+}
