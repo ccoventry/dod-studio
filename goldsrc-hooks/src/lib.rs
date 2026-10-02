@@ -127,6 +127,7 @@ mod deathmsg;
 mod debug;
 mod decals;
 mod demo_reload;
+mod demo_rosters;
 mod demo_seek;
 mod detour;
 mod engine;

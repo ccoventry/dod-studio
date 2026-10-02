@@ -536,6 +536,12 @@ const MAP_FILTER: &str = "MapFilter";
 const SHOW_HLTV: &str = "ShowHltv";
 const SHOW_POV: &str = "ShowPov";
 const DAYS_FILTER: &str = "DaysFilter";
+/// The Player filter: a name or SteamID, "they recorded it", and the note on
+/// how many demos it can see, shown in place of the hint while it is in use.
+const PLAYER_FILTER: &str = "PlayerFilter";
+const PLAYER_RECORDED: &str = "PlayerRecorded";
+const PLAYER_NOTE: &str = "PlayerNote";
+const DEMOS_HINT: &str = "Hint";
 
 /// What the start of a demo says about it: the map (header offset 16, 260
 /// bytes), and whether an HLTV proxy recorded it. The proxy's connect message
@@ -1335,9 +1341,15 @@ mod hook {
     /// Whether a check box on `page` is ticked; `true` when the layout has
     /// none, so a layout without it filters nothing out.
     unsafe fn box_ticked(vgui: &Vgui, page: Vpanel, name: &str) -> bool {
+        unsafe { box_ticked_or(vgui, page, name, true) }
+    }
+
+    /// Whether a check box on `page` is ticked, or `missing` when the layout
+    /// has none.
+    unsafe fn box_ticked_or(vgui: &Vgui, page: Vpanel, name: &str, missing: bool) -> bool {
         unsafe {
             let Ok((base, build)) = gameui() else {
-                return true;
+                return missing;
             };
             match vgui.child_named(page, name).map(|vp| vgui.object(vp)) {
                 Some(o)
@@ -1347,7 +1359,7 @@ mod hook {
                     let is_selected: IsSelectedFn = slot(o, BUTTON_SLOT_IS_SELECTED);
                     is_selected(o) & 0xff != 0
                 }
-                _ => true,
+                _ => missing,
             }
         }
     }
@@ -1359,13 +1371,20 @@ mod hook {
     /// How much of a demo `demo_info` reads.
     const DEMO_START: usize = 4096;
 
-    /// The header facts of the demo a row names (a path from `dod/`).
-    fn info_for(row: &str) -> Option<DemoInfo> {
+    /// The demo file a row names (a path from `dod/`), or `None` for a
+    /// folder row.
+    fn row_path(row: &str) -> Option<std::path::PathBuf> {
         let name = row.trim().trim_matches('"');
         if name.ends_with('/') || name.is_empty() {
             return None;
         }
-        let path = res_dir().parent()?.join(name);
+        Some(res_dir().parent()?.join(name))
+    }
+
+    /// The header facts of the demo a row names (a path from `dod/`).
+    fn info_for(row: &str) -> Option<DemoInfo> {
+        let name = row.trim().trim_matches('"');
+        let path = row_path(row)?;
         let meta = std::fs::metadata(&path).ok()?;
         let modified = meta
             .modified()
@@ -1403,7 +1422,16 @@ mod hook {
                 pov: box_ticked(vgui, page, SHOW_POV),
                 days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
-            let filter = format!("{filters:?}");
+            let player = box_text(vgui, page, PLAYER_FILTER).trim().to_string();
+            let recorded = box_ticked_or(vgui, page, PLAYER_RECORDED, false);
+            if !player.is_empty() {
+                crate::demo_rosters::ensure_filled();
+            }
+            // Rosters written in the background filter the list again.
+            let filter = format!(
+                "{filters:?} {player:?} {recorded} {}",
+                crate::demo_rosters::generation()
+            );
             let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
             let Ok((_, build)) = gameui() else { return };
             if dialog.is_null() {
@@ -1444,6 +1472,7 @@ mod hook {
                 || !filters.pov
                 || filters.days.is_some()
                 || !filters.search.trim().is_empty();
+            let (mut demos, mut with_roster, mut matched) = (0, 0, 0);
             let mut id = first(list);
             let mut guard = 0;
             while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
@@ -1452,11 +1481,59 @@ mod hook {
                 if !row.is_null() {
                     let name = get_string_of(row);
                     let info = if need_info { info_for(&name) } else { None };
-                    set_visible(list, id, passes(&name, info.as_ref(), &filters, now) as u32);
+                    let mut shown = passes(&name, info.as_ref(), &filters, now);
+                    // A folder row stays; a demo needs its roster to match.
+                    if !player.is_empty()
+                        && let Some(path) = row_path(&name)
+                    {
+                        demos += 1;
+                        let roster = crate::demo_rosters::roster_for(&path);
+                        with_roster += roster.is_some() as usize;
+                        shown &= roster.is_some_and(|r| {
+                            crate::demo_rosters::has_player(&r, &player, recorded)
+                        });
+                        matched += shown as usize;
+                    }
+                    set_visible(list, id, shown as u32);
                 }
                 id = next(list, id);
             }
+            show_player_note(
+                vgui,
+                page,
+                (!player.is_empty()).then_some((with_roster, demos)),
+            );
+            if !player.is_empty() {
+                crate::debug::report(&format!(
+                    "studio_panel: Demos tab Player {player:?}{}: {matched} shown, {with_roster} of {demos} demos analysed",
+                    if recorded { " (recorded it)" } else { "" }
+                ));
+            }
             *last = Some(filter);
+        }
+    }
+
+    /// While the Player filter is in use, says how many demos it could look
+    /// in, in place of the hint; `None` puts the hint back.
+    unsafe fn show_player_note(vgui: &Vgui, page: Vpanel, counts: Option<(usize, usize)>) {
+        unsafe {
+            if let Some(hint) = vgui.child_named(page, DEMOS_HINT) {
+                vgui.set_visible(hint, counts.is_none());
+            }
+            let Some(note) = vgui.child_named(page, PLAYER_NOTE) else {
+                return;
+            };
+            vgui.set_visible(note, counts.is_some());
+            if let Some((analysed, demos)) = counts {
+                let text = format!(
+                    "Player looks in the {analysed} of {demos} demos analysed so far (Studio, or the Killstreaks tab)."
+                );
+                let object = vgui.object(note);
+                if let (false, Ok(text)) = (object.is_null(), std::ffi::CString::new(text)) {
+                    let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                    set_text(object, text.as_ptr());
+                }
+            }
         }
     }
 

@@ -278,7 +278,7 @@ fn log(message: &str) {
 
 /// `%APPDATA%\dod-studio\analyzer_cache`, where Studio keeps it
 /// (`native::shared::paths::get_appdata_dir`, `dirs::config_dir()`).
-fn cache_root() -> Option<PathBuf> {
+pub fn cache_root() -> Option<PathBuf> {
     std::env::var_os("APPDATA")
         .map(|dir| PathBuf::from(dir).join("dod-studio").join("analyzer_cache"))
 }
