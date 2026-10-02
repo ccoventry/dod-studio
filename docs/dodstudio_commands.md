@@ -210,9 +210,9 @@ shows the value and sets it when clicked (add more in build mode).
 `reset` writes the default layouts back and rebuilds the window. With
 `dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Demos tab.
 
-The hook also writes DoD Studio's main menu to `dod_addonesource\GameMenu.res`
+The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`
 (DoD Studio, Resume/Disconnect in a demo, Options, Quit), shown when the game
-is launched with `-addons` (#412); `dodesource`'s menu is never written, and a
+is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
