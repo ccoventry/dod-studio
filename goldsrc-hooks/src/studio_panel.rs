@@ -1472,7 +1472,7 @@ mod hook {
                 || !filters.pov
                 || filters.days.is_some()
                 || !filters.search.trim().is_empty();
-            let (mut demos, mut with_roster, mut matched) = (0, 0, 0);
+            let (mut demos, mut with_players, mut matched) = (0, 0, 0);
             let mut id = first(list);
             let mut guard = 0;
             while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
@@ -1482,14 +1482,14 @@ mod hook {
                     let name = get_string_of(row);
                     let info = if need_info { info_for(&name) } else { None };
                     let mut shown = passes(&name, info.as_ref(), &filters, now);
-                    // A folder row stays; a demo needs its roster to match.
+                    // A folder row stays; a demo needs its players file to match.
                     if !player.is_empty()
                         && let Some(path) = row_path(&name)
                     {
                         demos += 1;
-                        let roster = crate::demo_rosters::roster_for(&path);
-                        with_roster += roster.is_some() as usize;
-                        shown &= roster.is_some_and(|r| {
+                        let players = crate::demo_rosters::players_for(&path);
+                        with_players += players.is_some() as usize;
+                        shown &= players.is_some_and(|r| {
                             crate::demo_rosters::has_player(&r, &player, recorded)
                         });
                         matched += shown as usize;
@@ -1501,11 +1501,11 @@ mod hook {
             show_player_note(
                 vgui,
                 page,
-                (!player.is_empty()).then_some((with_roster, demos)),
+                (!player.is_empty()).then_some((with_players, demos)),
             );
             if !player.is_empty() {
                 crate::debug::report(&format!(
-                    "studio_panel: Demos tab Player {player:?}{}: {matched} shown, {with_roster} of {demos} demos analysed",
+                    "studio_panel: Demos tab Player {player:?}{}: {matched} shown, {with_players} of {demos} demos analysed",
                     if recorded { " (recorded it)" } else { "" }
                 ));
             }

@@ -6,9 +6,10 @@
 //! `%APPDATA%\dod-studio\analyzer_cache`; callers pass it in, so this crate
 //! needs no app-data lookup of its own.
 //!
-//! Beside each entry, `<hash>.players.json` holds its [`Roster`]: who is in the
-//! demo, a few hundred bytes, so a list of hundreds of demos can be filtered
-//! by player without loading whole analyses (#437, #174).
+//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`]: who is
+//! in the demo and who recorded it, a few hundred bytes, so a list of
+//! hundreds of demos can be filtered by player without loading whole analyses
+//! (#437, #174).
 //!
 //! Studio and the DLL can be built from different commits. A schema bump puts
 //! each in its own `v<N>` folder, so a mismatch costs a re-analysis, never a
@@ -131,7 +132,7 @@ pub fn store(
     })
     .ok()?;
     write_whole(&path, &json)?;
-    let _ = write_roster(&path, size_bytes, modified_unix_secs, analysis);
+    let _ = write_players(&path, size_bytes, modified_unix_secs, analysis);
     Some(path)
 }
 
@@ -148,109 +149,104 @@ fn write_whole(path: &Path, bytes: &[u8]) -> Option<()> {
     Some(())
 }
 
-/// What a player did in a demo.
-#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role {
-    /// Recorded it: the player whose view a POV demo is.
-    Recorded,
-    /// Played in it, on a team or with kills.
-    Played,
-    /// Only watched (spectator, or never joined a team).
-    Watched,
-}
-
-/// One player in a demo.
+/// One player seen in a demo.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct RosterPlayer {
-    /// The analysis' player id: the SteamID (`*sid`) when the demo has one.
+pub struct DemoPlayer {
+    /// The analyzer's global id: a SteamID64 when the demo has `*sid`,
+    /// otherwise `PLAYER_<fid>` or a per-demo `CONNECTION_<n>`.
     pub id: String,
+    /// The SteamID64, when `id` is one.
+    pub steam_id: Option<String>,
+    /// The last name the player had in this demo.
     pub name: String,
-    pub role: Role,
-    /// Kills counted in kill streaks (team kills are not).
-    pub kills: u32,
+    /// The player who recorded this POV demo. Never set in an HLTV demo.
+    pub recorder: bool,
 }
 
-/// Who is in a demo, valid while the demo's size and modified time match.
+/// A demo's players and type, as the index stores them.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Roster {
-    pub size_bytes: u64,
-    pub modified_unix_secs: u64,
-    /// "POV" or "HLTV", the analysis' own answer.
+pub struct DemoPlayers {
+    /// "POV" or "HLTV".
     pub demo_type: String,
-    pub players: Vec<RosterPlayer>,
+    pub players: Vec<DemoPlayer>,
 }
 
-/// Every player in `analysis`, with what they did.
-pub fn roster_of(analysis: &Analysis) -> Vec<RosterPlayer> {
-    let recorder = analysis.state.pov_player_index;
-    analysis
+/// The players file's layout. The same file and layout as PR #486's
+/// `native::player_index` (Studio's Demo Analyzer and Master Queue player
+/// filters), so the game and Studio share one index.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct PlayersEntry {
+    size_bytes: u64,
+    modified_unix_secs: u64,
+    demo: DemoPlayers,
+}
+
+fn steam_id_of(id: &str) -> Option<String> {
+    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
+}
+
+/// The players an analysis saw, recorder first, then by name.
+pub fn players_in(analysis: &Analysis) -> DemoPlayers {
+    let demo_type = analysis.demo_info.demo_type.clone();
+    let pov = demo_type == "POV";
+    let recorder_slot = analysis.state.pov_player_index;
+    let mut players: Vec<DemoPlayer> = analysis
         .state
         .players
         .iter()
-        .map(|player| {
-            let kills: u32 = player
-                .kill_streaks
-                .iter()
-                .map(|streak| streak.kills.len() as u32)
-                .sum();
-            let on_a_team = matches!(
-                player.team,
-                Some(crate::Team::Allies | crate::Team::Axis | crate::Team::British)
-            );
-            let recorded = analysis.demo_info.demo_type == "POV"
-                && recorder.is_some_and(|slot| {
-                    matches!(player.connection, crate::Connection::Connected { client_id } if client_id == slot)
-                });
-            let role = if recorded {
-                Role::Recorded
-            } else if on_a_team || kills > 0 {
-                Role::Played
-            } else {
-                Role::Watched
-            };
-            RosterPlayer {
-                id: player.id.to_string(),
-                name: player.name.clone(),
-                role,
-                kills,
+        .map(|p| {
+            let id = p.id.to_string();
+            let recorder = pov
+                && matches!(p.connection, crate::Connection::Connected { client_id }
+                    if Some(client_id) == recorder_slot);
+            DemoPlayer {
+                steam_id: steam_id_of(&id),
+                id,
+                name: p.name.clone(),
+                recorder,
             }
         })
-        .collect()
+        .collect();
+    players.sort_by(|a, b| {
+        b.recorder
+            .cmp(&a.recorder)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+    DemoPlayers { demo_type, players }
 }
 
-/// Where `entry`'s roster lives: beside it.
-fn roster_path_of(entry: &Path) -> PathBuf {
+/// Where `entry`'s players file lives: beside it.
+fn players_path_of(entry: &Path) -> PathBuf {
     entry.with_extension("players.json")
 }
 
-fn write_roster(
+fn write_players(
     entry: &Path,
     size_bytes: u64,
     modified_unix_secs: u64,
     analysis: &Analysis,
 ) -> Option<()> {
-    let roster = Roster {
+    let players = PlayersEntry {
         size_bytes,
         modified_unix_secs,
-        demo_type: analysis.demo_info.demo_type.clone(),
-        players: roster_of(analysis),
+        demo: players_in(analysis),
     };
-    write_whole(&roster_path_of(entry), &serde_json::to_vec(&roster).ok()?)
+    write_whole(&players_path_of(entry), &serde_json::to_vec(&players).ok()?)
 }
 
-/// `demo_path`'s roster, if there is one for the file as it is now.
-pub fn load_roster(root: &Path, demo_path: &Path) -> Option<Roster> {
+/// `demo_path`'s players, if its players file is current.
+pub fn load_players(root: &Path, demo_path: &Path) -> Option<DemoPlayers> {
     let (size_bytes, modified_unix_secs) = stamp(demo_path)?;
-    let bytes = std::fs::read(roster_path_of(&entry_path(root, demo_path)?)).ok()?;
-    let roster: Roster = serde_json::from_slice(&bytes).ok()?;
-    (roster.size_bytes == size_bytes && roster.modified_unix_secs == modified_unix_secs)
-        .then_some(roster)
+    let bytes = std::fs::read(players_path_of(&entry_path(root, demo_path)?)).ok()?;
+    let entry: PlayersEntry = serde_json::from_slice(&bytes).ok()?;
+    (entry.size_bytes == size_bytes && entry.modified_unix_secs == modified_unix_secs)
+        .then_some(entry.demo)
 }
 
-/// Writes the roster of every entry under `root` that has none yet (entries
-/// saved before rosters existed), and returns how many it wrote. Reads each
-/// such entry whole, once.
-pub fn fill_missing_rosters(root: &Path) -> usize {
+/// Writes the players file of every entry under `root` that has none yet
+/// (entries saved before players files existed), and returns how many it
+/// wrote. Reads each such entry whole, once.
+pub fn fill_missing_players(root: &Path) -> usize {
     let Ok(entries) = std::fs::read_dir(root.join(format!("v{SCHEMA_VERSION}"))) else {
         return 0;
     };
@@ -261,7 +257,11 @@ pub fn fill_missing_rosters(root: &Path) -> usize {
             .file_name()
             .and_then(|n| n.to_str())
             .is_some_and(|n| n.ends_with(".json") && n.matches('.').count() == 1);
-        if !is_entry || roster_path_of(&path).exists() {
+        // Skip one already current; rewrite one in an older layout.
+        let current = std::fs::read(players_path_of(&path))
+            .ok()
+            .is_some_and(|bytes| serde_json::from_slice::<PlayersEntry>(&bytes).is_ok());
+        if !is_entry || current {
             continue;
         }
         let Some(cached) = std::fs::read(&path)
@@ -270,7 +270,7 @@ pub fn fill_missing_rosters(root: &Path) -> usize {
         else {
             continue;
         };
-        if write_roster(
+        if write_players(
             &path,
             cached.size_bytes,
             cached.modified_unix_secs,
@@ -319,28 +319,46 @@ mod tests {
         let (read, _) = load(&root, &demo).unwrap();
         assert_eq!(read.size_bytes, 17);
         assert_eq!(read.name, "x.dem");
-        // Its roster beside it, and no partial file.
+        // Its players file beside it, and no partial file.
         assert_eq!(
             std::fs::read_dir(written.parent().unwrap())
                 .unwrap()
                 .count(),
             2
         );
-        let roster = load_roster(&root, &demo).unwrap();
-        assert_eq!(roster.size_bytes, 17);
-        assert!(roster.players.is_empty());
+        let players = load_players(&root, &demo).unwrap();
+        assert!(players.players.is_empty());
 
-        // An entry saved before rosters existed gets one.
+        // An entry saved before players files existed gets one.
         std::fs::remove_file(written.with_extension("players.json")).unwrap();
-        assert!(load_roster(&root, &demo).is_none());
-        assert_eq!(fill_missing_rosters(&root), 1);
-        assert!(load_roster(&root, &demo).is_some());
-        assert_eq!(fill_missing_rosters(&root), 0);
+        assert!(load_players(&root, &demo).is_none());
+        assert_eq!(fill_missing_players(&root), 1);
+        assert!(load_players(&root, &demo).is_some());
+        assert_eq!(fill_missing_players(&root), 0);
 
         // A different size: the entry no longer describes the file.
         std::fs::write(&demo, b"a longer demo than before").unwrap();
         assert!(load(&root, &demo).is_none());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn only_a_17_digit_id_is_a_steam_id() {
+        assert_eq!(
+            steam_id_of("76561197977930126"),
+            Some("76561197977930126".to_string())
+        );
+        assert_eq!(steam_id_of("PLAYER_2761379"), None);
+        assert_eq!(steam_id_of("CONNECTION_4"), None);
+    }
+
+    /// The layout PR #486's `native::player_index` reads and writes.
+    #[test]
+    fn the_players_file_is_486s_layout() {
+        let json = r#"{"size_bytes":1,"modified_unix_secs":2,"demo":{"demo_type":"POV","players":[{"id":"76561197977930126","steam_id":"76561197977930126","name":"chris","recorder":true}]}}"#;
+        let entry: PlayersEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.demo.players[0].recorder);
+        assert_eq!(serde_json::to_string(&entry).unwrap(), json);
     }
 
     #[test]
