@@ -20,8 +20,8 @@ build in the module's tables:
   4. Its identity is in `VGUI2_BUILDS`; "VGUI_Panel007"'s factory returns one
      static object; `VPanelWrapper`'s vftable (RTTI) has the slot shapes the
      module calls: SetPos/GetPos/SetSize/GetSize take three arguments
-     (`ret 0xc`), IsVisible/GetName/GetModuleName one (`ret 4`), GetPanel two
-     (`ret 8`).
+     (`ret 0xc`), IsVisible/GetChildCount/GetName/GetModuleName one
+     (`ret 4`), GetChild/GetPanel two (`ret 8`).
 
   hw.dll
   5. Its identity is in `HW_BUILDS`; "VGUI_Surface026"'s factory returns one
@@ -149,9 +149,11 @@ class Image:
 def verify(game, src):
     slot = rust_usize(src, "FRAME_SLOT_IS_SIZEABLE")
     panel_slots = {n: rust_usize(src, f"PANEL_SLOT_{n}") for n in
-                   ("SET_POS", "GET_POS", "SET_SIZE", "GET_SIZE", "IS_VISIBLE", "GET_NAME", "GET_PANEL", "GET_MODULE_NAME")}
+                   ("SET_POS", "GET_POS", "SET_SIZE", "GET_SIZE", "IS_VISIBLE", "GET_CHILD_COUNT", "GET_CHILD",
+                    "GET_NAME", "GET_PANEL", "GET_MODULE_NAME")}
     panel_rets = {"SET_POS": "ret 0xc", "GET_POS": "ret 0xc", "SET_SIZE": "ret 0xc", "GET_SIZE": "ret 0xc",
-                  "IS_VISIBLE": "ret 4", "GET_NAME": "ret 4", "GET_PANEL": "ret 8", "GET_MODULE_NAME": "ret 4"}
+                  "IS_VISIBLE": "ret 4", "GET_CHILD_COUNT": "ret 4", "GET_CHILD": "ret 8",
+                  "GET_NAME": "ret 4", "GET_PANEL": "ret 8", "GET_MODULE_NAME": "ret 4"}
     surface_slots = {n: rust_usize(src, f"SURFACE_SLOT_{n}") for n in ("GET_SCREEN_SIZE", "GET_POPUP_COUNT", "GET_POPUP")}
     surface_rets = {"GET_SCREEN_SIZE": "ret 8", "GET_POPUP_COUNT": "ret", "GET_POPUP": "ret 4"}
     ok = True

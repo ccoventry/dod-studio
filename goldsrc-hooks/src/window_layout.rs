@@ -32,8 +32,14 @@
 //!
 //! - **Resizable:** `Frame::SetSizeable(true)` on each one that isn't already,
 //!   remembering which it changed, so turning the setting off puts them back.
-//!   A window's controls stretch with it only as far as their `.res`
-//!   `autoResize`/`pinCorner` allow, and those can be set in build mode.
+//!   The controls inside a window made resizable this way follow its size
+//!   (see [`fit`]): one that spans most of the window grows with it, as the
+//!   Load Demo list does, and one nearer the right or bottom edge keeps its
+//!   distance from that edge, as the buttons under the list do. Their `.res`
+//!   positions are the starting point, read when the window first appears.
+//!   The frame's own title bar, close button and grips (`frame_*`) are left
+//!   to `Frame`, and a window that was resizable already, like the console,
+//!   lays itself out.
 //! - **Remembered:** each time a window becomes visible, it is moved to where
 //!   it was saved under its module and panel name (and resized, when it is
 //!   resizable) -- every time, not just the first, because the VCR bar comes
@@ -179,6 +185,8 @@ const PANEL_SLOT_GET_POS: usize = 3;
 const PANEL_SLOT_SET_SIZE: usize = 4;
 const PANEL_SLOT_GET_SIZE: usize = 5;
 const PANEL_SLOT_IS_VISIBLE: usize = 15;
+const PANEL_SLOT_GET_CHILD_COUNT: usize = 17;
+const PANEL_SLOT_GET_CHILD: usize = 18;
 const PANEL_SLOT_GET_NAME: usize = 36;
 const PANEL_SLOT_GET_PANEL: usize = 55;
 const PANEL_SLOT_GET_MODULE_NAME: usize = 59;
@@ -200,6 +208,36 @@ struct Rect {
     y: i32,
     w: i32,
     h: i32,
+}
+
+/// Where a control goes along one axis when its window is `now` long instead
+/// of the `design` length its `.res` laid it out for. One that spans at least
+/// half the window stretches, keeping both margins; one centred past the
+/// middle keeps its distance from the far edge; the rest stay put. Never
+/// shorter than one pixel.
+fn fit_axis(start: i32, len: i32, design: i32, now: i32) -> (i32, i32) {
+    let grow = now - design;
+    if len * 2 >= design {
+        (start, (len + grow).max(1))
+    } else if start * 2 + len > design {
+        (start + grow, len)
+    } else {
+        (start, len)
+    }
+}
+
+/// [`fit_axis`] on both axes: `child`, laid out for a `design` window, in a
+/// window now `now` in size. Positions are relative to the window.
+fn fit(child: Rect, design: (i32, i32), now: (i32, i32)) -> Rect {
+    let (x, w) = fit_axis(child.x, child.w, design.0, now.0);
+    let (y, h) = fit_axis(child.y, child.h, design.1, now.1);
+    Rect { x, y, w, h }
+}
+
+/// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
+/// `Frame::PerformLayout` places itself.
+fn frame_part(name: &str) -> bool {
+    name.starts_with("frame_")
 }
 
 /// `module/name<TAB>x y w h`, one window per line.
@@ -271,6 +309,8 @@ mod hook {
     type GetPanelFn =
         unsafe extern "thiscall" fn(*mut c_void, Vpanel, *const c_char) -> *mut c_void;
     type CountFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
+    type CountOfPanelFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel) -> i32;
+    type ChildFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, i32) -> Vpanel;
     type PopupFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> Vpanel;
     type ScreenFn = unsafe extern "thiscall" fn(*mut c_void, *mut i32, *mut i32);
     type SetSizeableFn = unsafe extern "thiscall" fn(*mut c_void, u32);
@@ -295,6 +335,15 @@ mod hook {
         /// Set when this module made it resizable, so turning the setting off
         /// can put it back.
         made_sizeable: bool,
+        /// The window's size and its controls' places as its `.res` laid them
+        /// out, read the first time it is seen open after being made
+        /// resizable, before anything resizes it.
+        design: Option<Design>,
+    }
+
+    struct Design {
+        size: (i32, i32),
+        children: Vec<(Vpanel, Rect)>,
     }
 
     enum Install {
@@ -466,6 +515,46 @@ mod hook {
             }
             Rect { w, h, ..r }
         }
+
+        /// The window's own controls and where they are now, `Frame`'s
+        /// pieces left out.
+        unsafe fn design(&self, vp: Vpanel) -> Design {
+            unsafe {
+                let count: CountOfPanelFn = slot(self.panel, PANEL_SLOT_GET_CHILD_COUNT);
+                let child: ChildFn = slot(self.panel, PANEL_SLOT_GET_CHILD);
+                let name: StrOfPanelFn = slot(self.panel, PANEL_SLOT_GET_NAME);
+                let frame = self.rect(vp);
+                let children = (0..count(self.panel, vp).clamp(0, 256))
+                    .map(|i| child(self.panel, vp, i))
+                    .filter(|&c| c != 0 && !frame_part(&text(name(self.panel, c))))
+                    .map(|c| (c, self.rect(c)))
+                    .collect();
+                Design {
+                    size: (frame.w, frame.h),
+                    children,
+                }
+            }
+        }
+
+        /// Moves and sizes the controls in `design` for the window's size now.
+        /// Writes only what differs, so a window left alone costs reads.
+        unsafe fn fit_children(&self, vp: Vpanel, design: &Design) {
+            unsafe {
+                let set_pos: XyFn = slot(self.panel, PANEL_SLOT_SET_POS);
+                let set_size: XyFn = slot(self.panel, PANEL_SLOT_SET_SIZE);
+                let frame = self.rect(vp);
+                for &(child, was) in &design.children {
+                    let want = fit(was, design.size, (frame.w, frame.h));
+                    let now = self.rect(child);
+                    if (now.x, now.y) != (want.x, want.y) {
+                        set_pos(self.panel, child, want.x, want.y);
+                    }
+                    if (now.w, now.h) != (want.w, want.h) {
+                        set_size(self.panel, child, want.w, want.h);
+                    }
+                }
+            }
+        }
     }
 
     fn walk(state: &mut State, api: &Api) {
@@ -510,6 +599,7 @@ mod hook {
                     ),
                     restored: false,
                     made_sizeable: false,
+                    design: None,
                 });
 
                 if resizable && !api.sizeable(frame) {
@@ -523,6 +613,20 @@ mod hook {
                 if visible(api.panel, vp) & 0xff == 0 {
                     window.restored = false;
                     continue;
+                }
+                if window.made_sizeable {
+                    match &window.design {
+                        None => {
+                            let design = api.design(vp);
+                            crate::debug::report(&format!(
+                                "window_layout: {} -- {} control(s) follow its size",
+                                window.key,
+                                design.children.len()
+                            ));
+                            window.design = Some(design);
+                        }
+                        Some(design) => api.fit_children(vp, design),
+                    }
                 }
                 if !remember {
                     continue;
@@ -538,6 +642,9 @@ mod hook {
                         let at = on_screen(want, sw, sh);
                         if api.sizeable(frame) {
                             set_size(api.panel, vp, at.w, at.h);
+                            if let Some(design) = &window.design {
+                                api.fit_children(vp, design);
+                            }
                         }
                         set_pos(api.panel, vp, at.x, at.y);
                         crate::debug::report(&format!(
@@ -681,6 +788,83 @@ mod tests {
         // Title bar above the top, or below the bottom: pulled back.
         assert_eq!(on_screen(r(100, -30), 1920, 1080), r(100, 0));
         assert_eq!(on_screen(r(100, 5000), 1920, 1080), r(100, 1080 - 48));
+    }
+
+    #[test]
+    fn a_control_spanning_the_window_grows_with_it() {
+        // The Load Demo list: 5..665 of a 692-wide, 380-tall window.
+        let list = Rect {
+            x: 5,
+            y: 40,
+            w: 660,
+            h: 300,
+        };
+        assert_eq!(
+            fit(list, (692, 380), (900, 520)),
+            Rect {
+                x: 5,
+                y: 40,
+                w: 868,
+                h: 440
+            }
+        );
+    }
+
+    #[test]
+    fn a_control_near_the_far_edge_keeps_its_distance_from_it() {
+        // The Load button: bottom left. It follows the bottom, not the right.
+        let load = Rect {
+            x: 15,
+            y: 350,
+            w: 60,
+            h: 24,
+        };
+        assert_eq!(
+            fit(load, (692, 380), (900, 520)),
+            Rect {
+                x: 15,
+                y: 490,
+                w: 60,
+                h: 24
+            }
+        );
+        // A button in the top right follows the right edge only.
+        let corner = Rect {
+            x: 600,
+            y: 30,
+            w: 60,
+            h: 24,
+        };
+        assert_eq!(
+            fit(corner, (692, 380), (900, 520)),
+            Rect {
+                x: 808,
+                y: 30,
+                w: 60,
+                h: 24
+            }
+        );
+    }
+
+    #[test]
+    fn the_design_size_changes_nothing_and_shrinking_never_inverts() {
+        let list = Rect {
+            x: 5,
+            y: 40,
+            w: 660,
+            h: 300,
+        };
+        assert_eq!(fit(list, (692, 380), (692, 380)), list);
+        let tiny = fit(list, (692, 380), (10, 10));
+        assert!(tiny.w >= 1 && tiny.h >= 1);
+    }
+
+    #[test]
+    fn only_the_frame_s_own_pieces_are_left_to_it() {
+        assert!(frame_part("frame_close"));
+        assert!(frame_part("frame_brGrip"));
+        assert!(!frame_part("Load"));
+        assert!(!frame_part("FileList"));
     }
 
     #[test]
