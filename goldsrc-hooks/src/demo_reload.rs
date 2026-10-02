@@ -183,17 +183,28 @@ fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static
     found
 }
 
-/// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
-pub unsafe extern "C" fn command() {
-    let last = LAST
-        .with(|last| last.borrow().clone())
+/// The last `playdemo`/`viewdemo` and its demo name, from this session or
+/// the game's command line. Main thread only (where commands run).
+fn last_played() -> Option<(&'static str, String)> {
+    LAST.with(|last| last.borrow().clone())
         // `args_os`, not `args`: `std::env::args()` panics on any argument
         // that isn't valid Unicode, and a panic in a console command handler
         // is a game crash under `panic = "abort"`. A lossy name just fails to
         // match and falls through to the "no demo" message.
         .or_else(|| {
             from_command_line(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
-        });
+        })
+}
+
+/// The name the demo last played was given (relative to the game folder,
+/// maybe without `.dem`), for the DoD Studio window's Killstreaks tab.
+pub fn current_demo() -> Option<String> {
+    last_played().map(|(_, name)| name)
+}
+
+/// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
+pub unsafe extern "C" fn command() {
+    let last = last_played();
     let Some((command, name)) = last else {
         let why = if WRAPPED.load(Ordering::Relaxed) {
             "no demo has been played this session yet -- start one with playdemo or viewdemo first"

@@ -93,7 +93,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 6] = [
+pub const PAGES: [Page; 7] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -110,6 +110,15 @@ pub const PAGES: [Page; 6] = [
             c"dodstudio_ui/Demos.res",
             "Demos.res",
             include_str!("../ui/Demos.res"),
+        ),
+    },
+    Page {
+        name: c"Killstreaks",
+        title: c"Killstreaks",
+        res: (
+            c"dodstudio_ui/Killstreaks.res",
+            "Killstreaks.res",
+            include_str!("../ui/Killstreaks.res"),
         ),
     },
     Page {
@@ -195,6 +204,14 @@ pub struct Build {
     /// The Load Demo window's fill: empties its list and lists the demos
     /// again (`FindFirst("*.dem")`), `thiscall`, no arguments.
     pub file_dialog_fill: usize,
+    /// `KeyValues::operator new(size_t)` (cdecl) and `KeyValues::KeyValues(
+    /// const char *name, const char *firstKey, const char *firstValue)`: how
+    /// the fill makes each row, and how the Killstreaks tab makes its own.
+    pub keyvalues_new: usize,
+    pub keyvalues_ctor: usize,
+    /// `ProgressBar`'s vftable: only a control with exactly this one gets the
+    /// Killstreaks tab's progress.
+    pub progress_bar_vftable: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -214,6 +231,9 @@ pub const BUILDS: [Build; 2] = [
         rich_text_set_text_wide: 0x5_4460,
         file_dialog_ctor: 0x2_06a0,
         file_dialog_fill: 0x2_0910,
+        keyvalues_new: 0x5_3bc0,
+        keyvalues_ctor: 0x5_2510,
+        progress_bar_vftable: 0xa_1dcc,
     },
     Build {
         name: "25th Anniversary",
@@ -231,12 +251,18 @@ pub const BUILDS: [Build; 2] = [
         rich_text_set_text_wide: 0x5_fab0,
         file_dialog_ctor: 0x2_6f00,
         file_dialog_fill: 0x2_7210,
+        keyvalues_new: 0x4_4330,
+        keyvalues_ctor: 0x4_4010,
+        progress_bar_vftable: 0xa_bbd4,
     },
 ];
 
 /// Our own Load Demo window's panel name: not the stock one's, so a VCR bar's
 /// own Load Demo window is never mistaken for it.
 const DEMO_LIST: &str = "DodStudioDemoList";
+/// The Killstreaks tab's own hidden Load Demo window, lending its list and
+/// Load button the same way (`studio_panel/hook/streaks_tab.rs`).
+const STREAK_LIST: &str = "DodStudioStreakList";
 /// `ListPanel::GetSelectedItem(int)`, `IsValidItemID(int)`, `GetItem(int)`
 /// (the same slots #409 reads the selected row through).
 const LIST_SLOT_GET_SELECTED_ITEM: usize = 176;
@@ -391,6 +417,18 @@ pub const LOANS: &[Loan] = &[
         slot: "DemoLoadSlot",
         page: DEMOS_PAGE,
     },
+    Loan {
+        source: STREAK_LIST,
+        control: "DemoList",
+        slot: "StreakListSlot",
+        page: STREAKS_PAGE,
+    },
+    Loan {
+        source: STREAK_LIST,
+        control: "LoadButton",
+        slot: "StreakGoSlot",
+        page: STREAKS_PAGE,
+    },
     // The type-ahead list under the input line: a popup the console places
     // itself, next to its input line wherever that is. It only needs a
     // parent that is showing (the console window is hidden), so no slot.
@@ -425,8 +463,9 @@ fn lends(source: &str) -> bool {
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const DEMOS_PAGE: usize = 1;
-const CONSOLE_PAGE: usize = 2;
-const SETTINGS_PAGE: usize = 3;
+const STREAKS_PAGE: usize = 2;
+const CONSOLE_PAGE: usize = 3;
+const SETTINGS_PAGE: usize = 4;
 /// A check box named `cvar_<name>` on the Settings tab is bound to cvar
 /// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
 /// layout can add more in build mode.
@@ -446,7 +485,7 @@ const BUTTON_SLOT_IS_SELECTED: usize = 174;
 const COMMANDS_TEXT: &str = include_str!("../ui/Commands.txt");
 /// The Commands tab's text box, in `Commands.res`.
 const COMMAND_LIST: &str = "CommandList";
-const COMMANDS_PAGE: usize = 4;
+const COMMANDS_PAGE: usize = 5;
 
 /// The Demos tab's search box.
 const DEMO_FILTER: &str = "DemoFilter";
@@ -465,6 +504,13 @@ const LIST_SLOT_SET_COLUMN_SORTABLE: usize = 148;
 const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
 /// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
 const LIST_SLOT_DELETE_ALL_ITEMS: usize = 165;
+/// `AddItem(const KeyValues *data, int userData, bool scrollToItem, bool
+/// sortOnAdd)`, which keeps a copy of `data` (`MakeCopy`).
+const LIST_SLOT_ADD_ITEM: usize = 151;
+/// `sizeof(KeyValues)`, what the fill allocates for each row.
+const KEYVALUES_SIZE: usize = 0x18;
+/// `ProgressBar::SetProgress(float)`, 0 to 1.
+const PROGRESS_BAR_SLOT_SET_PROGRESS: usize = 134;
 /// `KeyValues::SetString(const char *key, const char *value)`: the 3-argument
 /// `KeyValues` constructor the demo list's rows are made with calls it.
 const KEYVALUES_SLOT_SET_STRING: usize = 17;
@@ -1118,6 +1164,9 @@ mod hook {
 
     use super::*;
 
+    /// The Killstreaks tab (#565).
+    mod streaks_tab;
+
     type Vpanel = u32;
     type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;
     type OperatorNewFn = unsafe extern "C" fn(usize) -> *mut c_void;
@@ -1189,6 +1238,11 @@ mod hook {
 
     /// The selected row's `demoname` in our Load Demo window's list.
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
+        unsafe { selected_value(dialog, ROW_KEY) }
+    }
+
+    /// The selected row's `key` in a hidden Load Demo window's list.
+    unsafe fn selected_value(dialog: *mut c_void, key: &CStr) -> Option<String> {
         unsafe {
             let (_, build) = gameui().ok()?;
             let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
@@ -1207,7 +1261,7 @@ mod hook {
                 return None;
             }
             let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-            let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
+            let raw = get_string(row, key.as_ptr(), c"".as_ptr());
             (!raw.is_null())
                 .then(|| text(raw))
                 .filter(|t| !t.is_empty())
@@ -1994,6 +2048,7 @@ mod hook {
             DEMO_DIALOG.store(dialog as usize, Ordering::Release);
             add_demo_columns(&vgui, dialog);
             refill_demo_list();
+            streaks_tab::build(&vgui, base, build, frame)?;
             Ok((frame, sheet))
         }
     }
@@ -2566,6 +2621,7 @@ mod hook {
                     sync_settings(&vgui, &mut lent);
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
+                    streaks_tab::update(&vgui);
                 }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);
@@ -2904,7 +2960,7 @@ mod hook {
             let close = match request {
                 Request::Toggle => vgui.visible(vp),
                 Request::Close => true,
-                Request::Open | Request::Reset => false,
+                Request::Open | Request::Reset | Request::Tab(_) => false,
             };
             if close {
                 vgui.set_visible(vp, false);
@@ -2949,6 +3005,8 @@ enum Request {
     Close,
     /// Write the default layouts back and rebuild it, open.
     Reset,
+    /// Open it on this tab (its place in [`PAGES`]).
+    Tab(usize),
 }
 
 fn request(argument: Option<&str>) -> Result<Request, String> {
@@ -2957,17 +3015,27 @@ fn request(argument: Option<&str>) -> Result<Request, String> {
         Some("1") | Some("open") => Ok(Request::Open),
         Some("0") | Some("close") => Ok(Request::Close),
         Some("reset") => Ok(Request::Reset),
-        Some(other) => Err(format!(
-            "unknown argument {other:?} -- dodstudio_panel [1|0|reset]: bare opens or closes it, 1 opens, 0 closes, reset restores the default layouts"
-        )),
+        Some(other) => PAGES
+            .iter()
+            .position(|page| page.name.to_string_lossy().eq_ignore_ascii_case(other))
+            .map(Request::Tab)
+            .ok_or_else(|| {
+                format!(
+                    "unknown argument {other:?} -- dodstudio_panel [1|0|reset|<tab>]: bare opens or closes it, 1 opens, 0 closes, reset restores the default layouts, a tab's name opens it on that tab"
+                )
+            }),
     }
 }
 
-/// `dodstudio_panel [1|0|reset]`: bare opens the window or closes it, `1`
-/// opens it, `0` closes it, `reset` writes the default layouts back and
-/// rebuilds it.
+/// `dodstudio_panel [1|0|reset|<tab>]`: bare opens the window or closes it,
+/// `1` opens it, `0` closes it, `reset` writes the default layouts back and
+/// rebuilds it, a tab's name (`killstreaks`) opens it on that tab.
 pub unsafe extern "C" fn command() {
     let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
+        #[cfg(target_arch = "x86")]
+        if let Request::Tab(page) = request {
+            return hook::open_on(page);
+        }
         #[cfg(target_arch = "x86")]
         return hook::toggle(request);
         #[cfg(not(target_arch = "x86"))]
@@ -3256,6 +3324,8 @@ mod tests {
         assert_eq!(request(Some("1")), Ok(Request::Open));
         assert_eq!(request(Some("0")), Ok(Request::Close));
         assert_eq!(request(Some("reset")), Ok(Request::Reset));
+        assert_eq!(request(Some("killstreaks")), Ok(Request::Tab(STREAKS_PAGE)));
+        assert_eq!(request(Some("demos")), Ok(Request::Tab(DEMOS_PAGE)));
         assert!(request(Some("2")).is_err());
     }
 
@@ -3320,7 +3390,11 @@ mod tests {
             assert!(res.contains(&format!("\"{}\"", loan.slot)), "{}", loan.slot);
         }
         assert_eq!(PAGES[PLAYBACK_PAGE].name, c"Playback");
+        assert_eq!(PAGES[DEMOS_PAGE].name, c"Demos");
+        assert_eq!(PAGES[STREAKS_PAGE].name, c"Killstreaks");
         assert_eq!(PAGES[CONSOLE_PAGE].name, c"Console");
+        assert_eq!(PAGES[SETTINGS_PAGE].name, c"Settings");
+        assert_eq!(PAGES[COMMANDS_PAGE].name, c"Commands");
     }
 
     #[test]

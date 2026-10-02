@@ -1,0 +1,359 @@
+//! The DoD Studio window's Killstreaks tab (#565): every kill streak in the
+//! demo that is playing, found by the same analysis Studio runs.
+//!
+//! ## Where the analysis comes from
+//!
+//! The analyzer cache Studio shares (`analysis::cache`, under
+//! `%APPDATA%\dod-studio\analyzer_cache`): a demo Studio's Demo Analyzer or
+//! Master Queue scan already read, or one shown here before, is there and
+//! takes a few milliseconds. Anything else is analysed here, on a thread of its
+//! own at below-normal priority, and saved there, for Studio and the next time.
+//!
+//! Only on request (the tab asks while it is showing), never because a demo
+//! started: captures play demos too, and an analysis would take CPU from the
+//! recording.
+//!
+//! ## Times
+//!
+//! A streak's time is its first kill's on the `viewdemo` bar, the units
+//! `dodstudio_seek_to` takes (`analysis`' `viewdemo_offset`).
+
+// Only the 32-bit build has the window; a host check still compiles this.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+/// Fewer kills than this in one life is not a streak worth listing.
+pub const MIN_KILLS: usize = 2;
+/// Go jumps this long before a streak's first kill.
+pub const LEAD_IN_SECS: f32 = 5.0;
+
+/// One row of the Killstreaks tab.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Streak {
+    pub player: String,
+    pub kills: usize,
+    /// The weapons used, each once, in the order first used.
+    pub weapons: String,
+    /// The first kill's time on the `viewdemo` bar, in seconds.
+    pub first_kill: f32,
+}
+
+impl Streak {
+    /// A streak from its player and kills (bar time, weapon), or `None` when
+    /// it is too short to list.
+    pub fn new(player: &str, kills: &[(f32, String)]) -> Option<Self> {
+        if kills.len() < MIN_KILLS {
+            return None;
+        }
+        let mut weapons: Vec<&str> = Vec::new();
+        for (_, weapon) in kills {
+            if !weapons.contains(&weapon.as_str()) {
+                weapons.push(weapon);
+            }
+        }
+        Some(Self {
+            player: player.to_string(),
+            kills: kills.len(),
+            weapons: weapons.join(", "),
+            first_kill: kills.iter().map(|(t, _)| *t).fold(f32::INFINITY, f32::min),
+        })
+    }
+
+    /// Where Go jumps to: a little before the first kill.
+    pub fn seek_secs(&self) -> f32 {
+        (self.first_kill - LEAD_IN_SECS).max(0.0)
+    }
+}
+
+/// Every listable streak in `analysis`, earliest first.
+pub fn streaks_of(analysis: &analysis::Analysis) -> Vec<Streak> {
+    let mut streaks: Vec<Streak> = analysis
+        .state
+        .players
+        .iter()
+        .flat_map(|player| {
+            player.kill_streaks.iter().filter_map(|streak| {
+                let kills: Vec<(f32, String)> = streak
+                    .kills
+                    .iter()
+                    .map(|(time, weapon, _)| {
+                        (
+                            time.viewdemo_offset.as_secs_f32(),
+                            analysis::weapon_display_name(weapon),
+                        )
+                    })
+                    .collect();
+                Streak::new(&player.name, &kills)
+            })
+        })
+        .collect();
+    streaks.sort_by(|a, b| a.first_kill.total_cmp(&b.first_kill));
+    streaks
+}
+
+/// A bar time as the tab shows it, `mm:ss`: sorts as text in time order for
+/// any demo under 100 minutes.
+pub fn time_text(secs: f32) -> String {
+    let secs = secs.max(0.0) as u64;
+    format!("{:02}:{:02}", secs / 60, secs % 60)
+}
+
+/// A kill count as the tab shows it: right-aligned, so it sorts as text in
+/// number order.
+pub fn kills_text(kills: usize) -> String {
+    format!("{kills:>3}")
+}
+
+/// Where the game finds a demo it was given by name: relative to the game
+/// folder, `.dem` added when missing.
+pub fn demo_path(game_dir: &Path, name: &str) -> PathBuf {
+    let name = name.trim().trim_matches('"');
+    let has_extension = Path::new(name)
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("dem"));
+    if has_extension {
+        game_dir.join(name)
+    } else {
+        game_dir.join(format!("{name}.dem"))
+    }
+}
+
+/// What the tab shows.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Status {
+    /// Being read; how far is [`progress`].
+    Loading,
+    Ready(Vec<Streak>),
+    Failed(String),
+}
+
+struct Job {
+    path: PathBuf,
+    generation: u64,
+    status: Status,
+}
+
+static JOB: Mutex<Option<Job>> = Mutex::new(None);
+/// Bumped for every new demo, so a slower analysis of an older one never
+/// replaces a newer one's result.
+static GENERATION: AtomicU64 = AtomicU64::new(0);
+/// The current analysis' progress, 0 to 100.
+static PERCENT: AtomicU32 = AtomicU32::new(0);
+
+/// Starts finding `path`'s streaks, unless they are being found or were
+/// found already.
+pub fn request(path: &Path) {
+    let mut job = JOB.lock().unwrap_or_else(|e| e.into_inner());
+    if job.as_ref().is_some_and(|j| j.path == path) {
+        return;
+    }
+    let generation = GENERATION.fetch_add(1, Ordering::AcqRel) + 1;
+    PERCENT.store(0, Ordering::Release);
+    *job = Some(Job {
+        path: path.to_path_buf(),
+        generation,
+        status: Status::Loading,
+    });
+    let path = path.to_path_buf();
+    let spawned = std::thread::Builder::new()
+        .name("dodstudio-streaks".into())
+        .spawn(move || {
+            lower_priority();
+            let started = std::time::Instant::now();
+            let status = match find(&path, generation) {
+                Ok((streaks, how)) => {
+                    log(&format!(
+                        "{} streaks in {} ({how}, {:.1} s)",
+                        streaks.len(),
+                        path.display(),
+                        started.elapsed().as_secs_f32()
+                    ));
+                    Status::Ready(streaks)
+                }
+                Err(why) => {
+                    log(&format!("{}: {why}", path.display()));
+                    Status::Failed(why)
+                }
+            };
+            let mut job = JOB.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(job) = job.as_mut().filter(|j| j.generation == generation) {
+                job.status = status;
+            }
+        });
+    if let Err(why) = spawned
+        && let Some(job) = job.as_mut()
+    {
+        job.status = Status::Failed(format!("could not start the analysis: {why}"));
+    }
+}
+
+/// The current request's generation, status and progress (0 to 100), or
+/// `None` with nothing requested or while the worker is saving its result
+/// (never waits: this runs every frame).
+pub fn status() -> Option<(u64, Status, u32)> {
+    let job = JOB.try_lock().ok()?;
+    let job = job.as_ref()?;
+    Some((
+        job.generation,
+        job.status.clone(),
+        PERCENT.load(Ordering::Acquire),
+    ))
+}
+
+/// The streaks, and where they came from (for the log).
+fn find(path: &Path, generation: u64) -> Result<(Vec<Streak>, &'static str), String> {
+    let root = cache_root();
+    if let Some((_, analysis)) = root
+        .as_deref()
+        .and_then(|root| analysis::cache::load(root, path))
+    {
+        return Ok((streaks_of(&analysis), "from the analyzer cache"));
+    }
+    let size = std::fs::metadata(path)
+        .map_err(|e| format!("could not read the demo: {e}"))?
+        .len();
+    let need = memory_needed(size);
+    if let Some(free) = free_address_space()
+        && free < need
+    {
+        log(&format!(
+            "{}: not analysed in the game -- it needs about {} MB, the game has {} MB of address space free",
+            path.display(),
+            need >> 20,
+            free >> 20
+        ));
+        return Err(
+            "too big to read inside the game. Open it once in DoD Studio's Demo Analyzer, and it shows here"
+                .to_string(),
+        );
+    }
+    log(&format!("analysing {}", path.display()));
+    let bytes = std::fs::read(path).map_err(|e| format!("could not read the demo: {e}"))?;
+    let analysis = analysis::Analysis::try_from_bytes_with_progress(&bytes, |done, total| {
+        if total > 0 && GENERATION.load(Ordering::Acquire) == generation {
+            // u64: `done * 100` passes 2^32 on this 32-bit build.
+            let percent = (done as u64 * 100 / total as u64).min(100);
+            PERCENT.store(percent as u32, Ordering::Release);
+        }
+    })?;
+    drop(bytes);
+    let saved = root.as_deref().and_then(|root| {
+        let info = analysis::cache::FileInfo::of(path).ok()?;
+        analysis::cache::store(root, path, &info, &analysis)
+    });
+    Ok((
+        streaks_of(&analysis),
+        if saved.is_some() {
+            "analysed, saved to the analyzer cache"
+        } else {
+            "analysed, not saved"
+        },
+    ))
+}
+
+/// What analysing a demo of `size` bytes takes at its peak: measured 831 MB
+/// for a 72 MB demo in a 32-bit process (11.5 times), plus room for the
+/// game's own allocations meanwhile. The game is a 32-bit process with 2 GB
+/// of address space (pre-Anniversary `hl.exe` is not large-address-aware) and
+/// uses over 1 GB of it, so running out kills it outright (an allocation
+/// failure aborts): a demo that does not fit is refused, not tried.
+fn memory_needed(size: u64) -> u64 {
+    size.saturating_mul(12).saturating_add(256 << 20)
+}
+
+/// The address space this process has left.
+fn free_address_space() -> Option<u64> {
+    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
+    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
+    (unsafe { GlobalMemoryStatusEx(&mut status) } != 0).then_some(status.ullAvailVirtual)
+}
+
+fn log(message: &str) {
+    unsafe { crate::debug::report(&format!("streaks: {message}")) };
+}
+
+/// `%APPDATA%\dod-studio\analyzer_cache`, where Studio keeps it
+/// (`native::shared::paths::get_appdata_dir`, `dirs::config_dir()`).
+fn cache_root() -> Option<PathBuf> {
+    std::env::var_os("APPDATA")
+        .map(|dir| PathBuf::from(dir).join("dod-studio").join("analyzer_cache"))
+}
+
+/// The analysis must not take frames from the game.
+fn lower_priority() {
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentThread, SetThreadPriority, THREAD_PRIORITY_BELOW_NORMAL,
+    };
+    unsafe { SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL) };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn kills(list: &[(f32, &str)]) -> Vec<(f32, String)> {
+        list.iter().map(|(t, w)| (*t, w.to_string())).collect()
+    }
+
+    #[test]
+    fn a_streak_lists_each_weapon_once_and_starts_at_its_first_kill() {
+        let streak = Streak::new(
+            "milo",
+            &kills(&[(75.0, "K98"), (71.5, "Grenade"), (80.0, "K98")]),
+        )
+        .unwrap();
+        assert_eq!(streak.kills, 3);
+        assert_eq!(streak.weapons, "K98, Grenade");
+        assert_eq!(streak.first_kill, 71.5);
+        assert_eq!(streak.seek_secs(), 66.5);
+        assert_eq!(Streak::new("milo", &kills(&[(3.0, "K98")])), None);
+        // Never before the demo's start.
+        assert_eq!(
+            Streak::new("a", &kills(&[(2.0, "K98"), (3.0, "K98")]))
+                .unwrap()
+                .seek_secs(),
+            0.0
+        );
+    }
+
+    #[test]
+    fn times_and_counts_sort_as_text_in_order() {
+        assert_eq!(time_text(754.9), "12:34");
+        assert_eq!(time_text(-1.0), "00:00");
+        assert!(time_text(65.0) < time_text(600.0));
+        assert!(kills_text(9) < kills_text(10));
+        assert_eq!(kills_text(4), "  4");
+    }
+
+    #[test]
+    fn a_demo_name_is_found_where_the_game_finds_it() {
+        let game = Path::new(r"C:\hl\dod");
+        assert_eq!(demo_path(game, "match1"), game.join("match1.dem"));
+        assert_eq!(demo_path(game, "match1.DEM"), game.join("match1.DEM"));
+        assert_eq!(
+            demo_path(game, "\"../other/x.dem\""),
+            game.join("../other/x.dem")
+        );
+    }
+
+    /// A real demo, analysed the way the game does it: run with
+    /// `DODSTUDIO_STREAKS_DEMO=<path> cargo test -p goldsrc-hooks --target
+    /// i686-pc-windows-msvc -- --ignored --nocapture` to see it fits a 32-bit
+    /// process.
+    #[test]
+    #[ignore]
+    fn a_real_demo_is_analysed() {
+        let path = std::env::var_os("DODSTUDIO_STREAKS_DEMO").expect("DODSTUDIO_STREAKS_DEMO");
+        let bytes = std::fs::read(&path).unwrap();
+        let analysis = analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let streaks = streaks_of(&analysis);
+        println!("{} streaks", streaks.len());
+        for streak in streaks.iter().take(5) {
+            println!("{streak:?}");
+        }
+    }
+}

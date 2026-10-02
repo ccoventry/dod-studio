@@ -252,6 +252,35 @@ def verify(game, src):
     got = ui.last_ret(set_string)
     check(got == "ret 8", f"which returns with {got!r} (key, value)")
 
+    # 20: the Killstreaks tab makes its rows as the fill does: KEYVALUES_SIZE
+    # bytes from keyvalues_new, keyvalues_ctor, then AddItem.
+    check(kv_ctor == build["keyvalues_ctor"],
+          f"the fill's row constructor is keyvalues_ctor +{build['keyvalues_ctor']:#x} (+{kv_ctor:#x})")
+    got = ui.last_ret(kv_ctor)
+    check(got == "ret 0xc", f"which returns with {got!r} (name, key, value)")
+    size = vwl.rust_usize(src, "KEYVALUES_SIZE")
+    before = rows[max(0, (k or 0) - 30):(k or 0)]
+    new_at = [n for n, x in enumerate(before) if x == f"call {hex(ui.base + build['keyvalues_new'])}"]
+    check(bool(new_at) and before[new_at[-1] - 1] == f"push {hex(size)}",
+          f"the fill allocates each row's {size:#x} bytes through keyvalues_new +{build['keyvalues_new']:#x}")
+    add_item = 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_ITEM")
+    check(any(re.fullmatch(rf"call dword ptr \[e[a-z]{{2}} \+ {hex(add_item)}\]", x) for x in rows[k:k + 16]),
+          f"and hands it to AddItem, ListPanel slot {add_item // 4}")
+    got = ui.last_ret(ui.u32(list_vt + add_item) - ui.base)
+    check(got == "ret 0x10", f"which returns with {got!r} (data, userData, scrollTo, sortOnAdd)")
+
+    # 21: the Killstreaks tab's progress bar.
+    bar_vt = ui.vftable("ProgressBar@vgui2")
+    check(bar_vt == build["progress_bar_vftable"],
+          f"ProgressBar's vftable is progress_bar_vftable +{(bar_vt or 0):#x}")
+    set_progress = vwl.rust_usize(src, "PROGRESS_BAR_SLOT_SET_PROGRESS")
+    func = ui.u32(bar_vt + 4 * set_progress) - ui.base if bar_vt else 0
+    body = ui.body(func, 0x20)
+    loads_float = any(x in ("fld dword ptr [esp + 4]", "movss xmm1, dword ptr [ebp + 8]") for x in body[:3])
+    check(loads_float and ui.last_ret(func) == "ret 4",
+          f"ProgressBar slot {set_progress} (SetProgress(float)) takes a float: {body[:3]}")
+    check(ui.img.find(b"ProgressBar\0") > 0, "a .res can name the ProgressBar control")
+
     # 16: the Playback tab's time box.
     text_vt = ui.vftable("TextEntry@vgui2")
     get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")

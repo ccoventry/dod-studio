@@ -45,8 +45,8 @@ DEMO PLAYBACK
       Raise the engine's 100 ms ceiling on ex_interp.
 
 DOD STUDIO WINDOW
-  dodstudio_panel [1|0|reset]
-      Open (1) or close (0) this window; bare toggles it; reset restores the default layouts.
+  dodstudio_panel [1|0|reset|<tab>]
+      Open (1) or close (0) this window; bare toggles it; reset restores the default layouts; a tab's name (killstreaks) opens that tab.
   dodstudio_viewdemo_in_panel 0/1
       viewdemo opens this window on Playback instead of the VCR bar.
   dodstudio_console_in_panel 0/1

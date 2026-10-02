@@ -156,6 +156,7 @@ mod spectator_follow;
 mod spectator_gun;
 mod spectator_target;
 mod sprite_blend;
+mod streaks;
 mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
