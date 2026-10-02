@@ -47,6 +47,8 @@
 //! - `overview_players`: `dodstudio_hud_map_players`, which players get an
 //!   icon on the overview map -- the game's own team, everyone, the other
 //!   team, only the player being watched, or nobody (issue #304).
+//! - `overview_marker`: `dodstudio_hud_map_team_marker`, which marks the
+//!   player being watched in HLTV with his team's camera icon (#304).
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -143,6 +145,7 @@ mod msglog;
 mod names;
 mod objicons;
 mod overview_map;
+mod overview_marker;
 mod overview_players;
 mod patch;
 mod pe;
