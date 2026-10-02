@@ -162,6 +162,9 @@ def verify(game, src):
     sheet_vt = ui.vftable("PropertySheet@vgui2")
     got = ui.last_ret(ui.u32(sheet_vt + 4 * add_page) - ui.base)
     check(got == "ret 8", f"PropertySheet's slot {add_page} (AddPage) returns with {got!r} (page, title)")
+    set_active = vwl.rust_usize(src, "SHEET_SLOT_SET_ACTIVE_PAGE")
+    got = ui.last_ret(ui.u32(sheet_vt + 4 * set_active) - ui.base)
+    check(got == "ret 4", f"PropertySheet's slot {set_active} (SetActivePage) returns with {got!r} (page)")
     forward = re.compile(rb"\x8b\x89(....)\x8b\x01(?:\x5d)?\xff\xa0" + struct.pack("<I", add_page * 4), re.S)
     check(forward.search(ui.img, *ui.code), f"and PropertyDialog::AddPage jumps there (jmp [eax+{add_page * 4:#x}])")
 
@@ -179,6 +182,14 @@ def verify(game, src):
     page_vt = ui.vftable("PropertyPage@vgui2")
     body = ui.body(ui.u32(page_vt + 4 * on_command) - ui.base, 0x10)
     check(body[:1] == ["ret 4"], f"PropertyPage's own OnCommand is an empty {body[:1]} -- why pages get ours")
+
+    # 13: the two IPanel slots only this window uses (the rest are #410's).
+    vg = vwl.Image(game / "vgui2.dll")
+    wrapper = vg.vftable("VPanelWrapper")
+    for name, want in (("IPANEL_SET_MINIMUM_SIZE", "ret 0xc"), ("IPANEL_SET_PARENT", "ret 8")):
+        index = vwl.rust_usize(src, name)
+        got = vg.last_ret(vg.u32(wrapper + 4 * index) - vg.base)
+        check(got == want, f"IPanel slot {index} ({name}) returns with {got!r}")
     return ok
 
 

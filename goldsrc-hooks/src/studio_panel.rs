@@ -223,21 +223,110 @@ const IPANEL_GET_MODULE_NAME: usize = 59;
 const SURFACE_GET_POPUP_COUNT: usize = 69;
 const SURFACE_GET_POPUP: usize = 70;
 
+const IPANEL_SET_MINIMUM_SIZE: usize = 6;
+const IPANEL_SET_PARENT: usize = 16;
+/// `PropertySheet::SetActivePage(Panel *page)`, the slot after `AddPage`: it
+/// looks the page up in the sheet's list and switches to it.
+const SHEET_SLOT_SET_ACTIVE_PAGE: usize = 135;
+
 /// The GameUI panel the window is parented to, as the VCR bar and the main
 /// menu are.
 const TASKBAR: &str = "TaskBar";
+/// The VCR bar's panel name.
+const VCR_BAR: &str = "DemoPlayerDialog";
 /// The gap between the window's client area and the tab strip.
 const SHEET_MARGIN: i32 = 4;
+/// The smallest the window's height may go: the tab strip plus a row.
+const MIN_TALL: i32 = 120;
+
+/// The VCR bar's live controls the Playback tab borrows, each into the slot
+/// (an empty control in `Playback.res`) whose place it takes. The bar keeps
+/// updating its own time label and slider through its own pointers, and the
+/// slider keeps seeking through the bar, wherever they are drawn.
+const BORROWED: &[(&str, &str)] = &[
+    ("TimeSlider", "TimeSliderSlot"),
+    ("TimeLabel", "TimeLabelSlot"),
+];
+/// Where the VCR bar waits, off screen, while `dodstudio_viewdemo_in_panel` has
+/// our window stand in for it. Off screen rather than hidden: a hidden panel
+/// stops thinking, and the bar's think is what updates the time and slider.
+const PARKED_AT: i32 = -20_000;
+/// How many frames after `viewdemo` to wait for the VCR bar to appear.
+const VIEWDEMO_WAIT_FRAMES: u32 = 600;
+
+/// `dodstudio_viewdemo_in_panel 1`: `viewdemo` opens our window on the
+/// Playback tab and parks the VCR bar off screen. Not `dodstudio_panel_...`:
+/// no name may be the start of another (the console's autocomplete).
+pub const VIEWDEMO_NAME: &str = console_name!("viewdemo_in_panel");
+/// The fallback toggle, when the cvar could not be registered.
+pub static VIEWDEMO_IN_PANEL: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+static VIEWDEMO_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
+    std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
+/// Frames left to wait for the VCR bar after a `viewdemo`, or 0.
+static VIEWDEMO_PENDING: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// Our window's object, or 0 before it is built. #410 accepts it as a GameUI
 /// window although its vftable is our copy.
 static OBJECT: AtomicUsize = AtomicUsize::new(0);
 /// Its tab strip.
 static SHEET: AtomicUsize = AtomicUsize::new(0);
+/// Its pages, in [`PAGES`] order.
+static PAGE_OBJECTS: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+/// The VCR bar's panel while it is parked off screen, or 0.
+static PARKED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The window's `Frame` object, for #410's walk.
 pub fn object() -> usize {
     OBJECT.load(Ordering::Acquire)
+}
+
+/// The VCR bar's panel while our window stands in for it, for #410, which
+/// must not save or restore a position we put it at.
+pub fn parked_bar() -> u32 {
+    PARKED.load(Ordering::Acquire)
+}
+
+/// Called by `commands.rs` once the cvar is registered.
+pub fn set_viewdemo_cvar(cvar: *mut crate::engine::CvarSPartial) {
+    VIEWDEMO_CVAR.store(cvar, Ordering::Release);
+}
+
+fn viewdemo_in_panel() -> bool {
+    let cvar = VIEWDEMO_CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        VIEWDEMO_IN_PANEL.load(Ordering::Relaxed)
+    } else {
+        // Safety: the engine owns the cvar for the session.
+        unsafe { (*cvar).value != 0.0 }
+    }
+}
+
+/// For the fallback toggle's bare-name query.
+pub fn viewdemo_status() -> String {
+    if viewdemo_in_panel() {
+        "viewdemo opens the DoD Studio window on its Playback tab".to_string()
+    } else {
+        "viewdemo opens the stock demo bar".to_string()
+    }
+}
+
+/// Called by `demo_reload`'s `viewdemo` wrapper after the engine's own
+/// `viewdemo` ran: the bar appears a few frames later, and [`poll`] opens our
+/// window then.
+pub fn after_viewdemo() {
+    if viewdemo_in_panel() {
+        VIEWDEMO_PENDING.store(VIEWDEMO_WAIT_FRAMES, Ordering::Release);
+    }
+}
+
+/// The smallest the window may be: wide enough for every tab, plus the frame's
+/// own border, and [`MIN_TALL`] high.
+fn minimum_size(tabs_right: i32, frame_wide: i32, client_wide: i32) -> (i32, i32) {
+    (
+        tabs_right + 2 * SHEET_MARGIN + (frame_wide - client_wide).max(0) + 8,
+        MIN_TALL,
+    )
 }
 
 /// What a button's command asks for.
@@ -338,6 +427,8 @@ mod hook {
     type CountFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
     type PopupFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> Vpanel;
     type XyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, i32, i32);
+    type SetParentFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, Vpanel);
+    type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
     type GetXyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, *mut i32, *mut i32);
 
     /// Each class's own `OnCommand`, for whatever our handler passes on.
@@ -419,16 +510,112 @@ mod hook {
             }
         }
 
-        unsafe fn children(&self, vp: Vpanel) -> usize {
+        unsafe fn child_list(&self, vp: Vpanel) -> Vec<Vpanel> {
             unsafe {
                 let count: PanelIntFn = slot(self.panel, IPANEL_GET_CHILD_COUNT);
                 let child: ChildFn = slot(self.panel, IPANEL_GET_CHILD);
                 (0..count(self.panel, vp).clamp(0, 512))
-                    .filter(|&i| child(self.panel, vp, i) != 0)
-                    .count()
+                    .map(|i| child(self.panel, vp, i))
+                    .filter(|&c| c != 0)
+                    .collect()
             }
         }
 
+        unsafe fn children(&self, vp: Vpanel) -> usize {
+            unsafe { self.child_list(vp).len() }
+        }
+
+        unsafe fn child_named(&self, vp: Vpanel, name: &str) -> Option<Vpanel> {
+            unsafe {
+                self.child_list(vp)
+                    .into_iter()
+                    .find(|&c| self.name(c) == name)
+            }
+        }
+
+        unsafe fn parent_of(&self, vp: Vpanel) -> Vpanel {
+            let parent: ParentFn = unsafe { slot(self.panel, IPANEL_GET_PARENT) };
+            unsafe { parent(self.panel, vp) }
+        }
+
+        unsafe fn visible(&self, vp: Vpanel) -> bool {
+            let visible: PanelBoolFn = unsafe { slot(self.panel, IPANEL_IS_VISIBLE) };
+            unsafe { visible(self.panel, vp) & 0xff != 0 }
+        }
+
+        unsafe fn set_visible(&self, vp: Vpanel, on: bool) {
+            let set: PanelSetBoolFn = unsafe { slot(self.panel, IPANEL_SET_VISIBLE) };
+            unsafe { set(self.panel, vp, on as u32) };
+        }
+
+        /// Moves and sizes `vp`, writing only what differs.
+        unsafe fn place(&self, vp: Vpanel, want: (i32, i32, i32, i32)) {
+            unsafe {
+                let now = self.rect(vp);
+                if (now.0, now.1) != (want.0, want.1) {
+                    let set_pos: XyFn = slot(self.panel, IPANEL_SET_POS);
+                    set_pos(self.panel, vp, want.0, want.1);
+                }
+                if (now.2, now.3) != (want.2, want.3) {
+                    let set_size: XyFn = slot(self.panel, IPANEL_SET_SIZE);
+                    set_size(self.panel, vp, want.2, want.3);
+                }
+            }
+        }
+
+        unsafe fn set_parent(&self, vp: Vpanel, parent: Vpanel) {
+            let set: SetParentFn = unsafe { slot(self.panel, IPANEL_SET_PARENT) };
+            unsafe { set(self.panel, vp, parent) };
+        }
+
+        unsafe fn bar(&self) -> Option<Vpanel> {
+            unsafe {
+                self.gameui_popups()
+                    .into_iter()
+                    .find(|(_, name)| name == VCR_BAR)
+                    .map(|(vp, _)| vp)
+            }
+        }
+    }
+
+    unsafe fn vpanel_of(object: *mut c_void) -> Vpanel {
+        if object.is_null() {
+            return 0;
+        }
+        unsafe {
+            let get_vpanel: GetVpanelFn = slot(object, PANEL_SLOT_GET_VPANEL);
+            get_vpanel(object)
+        }
+    }
+
+    /// One of the VCR bar's controls, moved onto the Playback tab.
+    struct Borrowed {
+        control: Vpanel,
+        /// The bar it came from, and where it sat there.
+        bar: Vpanel,
+        home: (i32, i32, i32, i32),
+    }
+
+    struct Lent {
+        borrowed: Vec<Borrowed>,
+        /// The bar's own place while it is parked off screen.
+        parked_from: Option<(Vpanel, i32, i32)>,
+        /// The minimum size last set on the window.
+        minimum: (i32, i32),
+    }
+
+    thread_local! {
+        // Only the engine's main thread polls, so no lock is needed.
+        static LENT: std::cell::RefCell<Lent> = const {
+            std::cell::RefCell::new(Lent {
+                borrowed: Vec::new(),
+                parked_from: None,
+                minimum: (0, 0),
+            })
+        };
+    }
+
+    impl Vgui {
         unsafe fn rect(&self, vp: Vpanel) -> (i32, i32, i32, i32) {
             unsafe {
                 let get_pos: GetXyFn = slot(self.panel, IPANEL_GET_POS);
@@ -548,7 +735,7 @@ mod hook {
 
             let page_ctor: PageCtor = std::mem::transmute(base + build.page_ctor);
             let add_page: AddPageFn = slot(sheet, SHEET_SLOT_ADD_PAGE);
-            for page in &PAGES {
+            for (page, stored) in PAGES.iter().zip(&PAGE_OBJECTS) {
                 let object = allocate(base, build, PAGE_ALLOC)?;
                 page_ctor(object, frame, page.name.as_ptr(), 1);
                 PAGE_ON_COMMAND.store(
@@ -557,6 +744,7 @@ mod hook {
                 );
                 load(object, page.res.0.as_ptr(), std::ptr::null());
                 add_page(sheet, object, page.title.as_ptr());
+                stored.store(object as usize, Ordering::Release);
             }
             Ok((frame, sheet))
         }
@@ -605,15 +793,177 @@ mod hook {
         }
     }
 
+    /// Keeps the window no narrower than its tabs: the tab strip neither
+    /// squeezes nor wraps them, it cuts off whatever passes its right edge.
+    unsafe fn hold_minimum(vgui: &Vgui, frame: *mut c_void, vp: Vpanel, lent: &mut Lent) {
+        unsafe {
+            let sheet_vp = vpanel_of(SHEET.load(Ordering::Acquire) as *mut c_void);
+            if sheet_vp == 0 {
+                return;
+            }
+            let pages: Vec<Vpanel> = PAGE_OBJECTS
+                .iter()
+                .map(|p| vpanel_of(p.load(Ordering::Acquire) as *mut c_void))
+                .collect();
+            // The sheet's children other than the pages are its tabs.
+            let tabs_right = vgui
+                .child_list(sheet_vp)
+                .into_iter()
+                .filter(|c| !pages.contains(c))
+                .map(|c| {
+                    let (x, _, w, _) = vgui.rect(c);
+                    x + w
+                })
+                .max()
+                .unwrap_or(0);
+            if tabs_right <= 0 {
+                return;
+            }
+            let client_area: ClientAreaFn = slot(frame, FRAME_SLOT_GET_CLIENT_AREA);
+            let (mut x, mut y, mut w, mut h) = (0, 0, 0, 0);
+            client_area(frame, &mut x, &mut y, &mut w, &mut h);
+            let _ = (x, y, h);
+            let want = minimum_size(tabs_right, vgui.rect(vp).2, w);
+            if want != lent.minimum {
+                let set_min: XyFn = slot(vgui.panel, IPANEL_SET_MINIMUM_SIZE);
+                set_min(vgui.panel, vp, want.0, want.1);
+                lent.minimum = want;
+            }
+            // Already narrower than that (it was resized before this ran):
+            // widen it once.
+            let now = vgui.rect(vp);
+            if now.2 < want.0 {
+                vgui.place(vp, (now.0, now.1, want.0, now.3.max(want.1)));
+            }
+        }
+    }
+
+    /// Moves the bar's time slider and label onto the Playback tab, into
+    /// their slots. Re-asserted every frame: the bar may lay them out again.
+    unsafe fn borrow(vgui: &Vgui, bar: Vpanel, lent: &mut Lent) {
+        unsafe {
+            let page = vpanel_of(PAGE_OBJECTS[0].load(Ordering::Acquire) as *mut c_void);
+            if page == 0 {
+                return;
+            }
+            for (control, slot_name) in BORROWED {
+                let Some(slot_vp) = vgui.child_named(page, slot_name) else {
+                    continue; // a layout without this slot: nothing borrowed
+                };
+                if vgui.visible(slot_vp) {
+                    vgui.set_visible(slot_vp, false);
+                }
+                let at = vgui.rect(slot_vp);
+                let known = lent
+                    .borrowed
+                    .iter()
+                    .find(|b| b.bar == bar && vgui.name(b.control) == *control)
+                    .map(|b| b.control);
+                let vp = match known.or_else(|| vgui.child_named(bar, control)) {
+                    Some(vp) => vp,
+                    None => continue,
+                };
+                if known.is_none() {
+                    lent.borrowed.push(Borrowed {
+                        control: vp,
+                        bar,
+                        home: vgui.rect(vp),
+                    });
+                }
+                if vgui.parent_of(vp) != page {
+                    vgui.set_parent(vp, page);
+                }
+                vgui.place(vp, at);
+            }
+        }
+    }
+
+    /// Hands every borrowed control back to its bar, where it was.
+    unsafe fn give_back(vgui: &Vgui, lent: &mut Lent) {
+        for b in lent.borrowed.drain(..) {
+            unsafe {
+                if vgui.object(b.bar).is_null() {
+                    continue; // that bar is gone
+                }
+                vgui.set_parent(b.control, b.bar);
+                vgui.place(b.control, b.home);
+            }
+        }
+    }
+
+    unsafe fn park(vgui: &Vgui, bar: Vpanel, lent: &mut Lent) {
+        unsafe {
+            let (x, y, w, h) = vgui.rect(bar);
+            if lent.parked_from.is_none() && x != PARKED_AT {
+                lent.parked_from = Some((bar, x, y));
+            }
+            vgui.place(bar, (PARKED_AT, PARKED_AT, w, h));
+        }
+        PARKED.store(bar, Ordering::Release);
+    }
+
+    unsafe fn unpark(vgui: &Vgui, lent: &mut Lent) {
+        PARKED.store(0, Ordering::Release);
+        if let Some((bar, x, y)) = lent.parked_from.take() {
+            unsafe {
+                if vgui.object(bar).is_null() {
+                    return;
+                }
+                let (_, _, w, h) = vgui.rect(bar);
+                vgui.place(bar, (x, y, w, h));
+            }
+        }
+    }
+
     pub(super) fn poll() {
-        if OBJECT.load(Ordering::Relaxed) == 0 {
+        let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
+        if OBJECT.load(Ordering::Relaxed) == 0 && pending == 0 {
             return;
         }
         let Ok(vgui) = Vgui::get() else { return };
         unsafe {
-            if let Some((frame, _)) = window(&vgui) {
-                fit_sheet(&vgui, frame);
+            // After a viewdemo, open on Playback once the bar has appeared.
+            if pending > 0 {
+                VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);
+                if vgui.bar().is_some_and(|bar| vgui.visible(bar)) {
+                    VIEWDEMO_PENDING.store(0, Ordering::Relaxed);
+                    let line = match ensure_window(&vgui, false)
+                        .and_then(|(object, vp, _)| show(&vgui, object, vp, Some(0)))
+                    {
+                        Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
+                        Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
+                    };
+                    crate::debug::report(&format!("studio_panel: {line}"));
+                }
             }
+            let Some((frame, vp)) = window(&vgui) else {
+                return;
+            };
+            fit_sheet(&vgui, frame);
+            LENT.with(|cell| {
+                let Ok(mut lent) = cell.try_borrow_mut() else {
+                    return;
+                };
+                hold_minimum(&vgui, frame, vp, &mut lent);
+                let bar = vgui.bar();
+                match bar {
+                    Some(bar) if vgui.visible(vp) => {
+                        if lent.borrowed.iter().any(|b| b.bar != bar) {
+                            give_back(&vgui, &mut lent); // a new bar
+                        }
+                        borrow(&vgui, bar, &mut lent);
+                        if viewdemo_in_panel() {
+                            park(&vgui, bar, &mut lent);
+                        } else {
+                            unpark(&vgui, &mut lent);
+                        }
+                    }
+                    _ => {
+                        give_back(&vgui, &mut lent);
+                        unpark(&vgui, &mut lent);
+                    }
+                }
+            });
         }
     }
 
@@ -684,54 +1034,88 @@ mod hook {
         unsafe { handle(this, raw, &PAGE_ON_COMMAND) }
     }
 
-    /// Opens the window (building it the first time), or closes it when open.
-    pub(super) fn toggle(reset: bool) -> Result<String, String> {
+    /// The window, built the first time (or rebuilt on `reset`), with what
+    /// was done to get it.
+    unsafe fn ensure_window(
+        vgui: &Vgui,
+        reset: bool,
+    ) -> Result<(*mut c_void, Vpanel, Vec<String>), String> {
         let mut notes = Vec::new();
         if let Some(note) = ensure_res(reset)? {
             notes.push(note);
         }
+        unsafe {
+            if let Some((object, vp)) = window(vgui) {
+                if !reset {
+                    return Ok((object, vp, notes));
+                }
+                // Rebuilt on reset: what it borrowed goes back first, and the
+                // old window is hidden and left for GameUI to delete with its
+                // parent.
+                LENT.with(|cell| {
+                    if let Ok(mut lent) = cell.try_borrow_mut() {
+                        give_back(vgui, &mut lent);
+                        unpark(vgui, &mut lent);
+                        lent.minimum = (0, 0);
+                    }
+                });
+                vgui.set_visible(vp, false);
+            }
+            let (frame, sheet) = build()?;
+            OBJECT.store(frame as usize, Ordering::Release);
+            SHEET.store(sheet as usize, Ordering::Release);
+            let (_, b) = gameui()?;
+            notes.push(format!(
+                "built the window with {} tab(s) ({} GameUI)",
+                PAGES.len(),
+                b.name
+            ));
+            let (object, vp) = window(vgui).ok_or("the new window has no panel")?;
+            Ok((object, vp, notes))
+        }
+    }
+
+    /// Shows the window, on tab `page` (an index into [`PAGES`]) when given.
+    unsafe fn show(
+        vgui: &Vgui,
+        object: *mut c_void,
+        vp: Vpanel,
+        page: Option<usize>,
+    ) -> Result<String, String> {
+        unsafe {
+            fit_sheet(vgui, object);
+            if let Some(index) = page {
+                let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
+                let target = PAGE_OBJECTS[index].load(Ordering::Acquire) as *mut c_void;
+                if !sheet.is_null() && !target.is_null() {
+                    let set_active: SetActivePageFn = slot(sheet, SHEET_SLOT_SET_ACTIVE_PAGE);
+                    set_active(sheet, target);
+                }
+            }
+            // Frame::Activate, as GameUI opens its own dialogs: shows it,
+            // brings it to the front and gives it focus.
+            let activate: ActivateFn = slot(object, FRAME_SLOT_ACTIVATE);
+            activate(object);
+            Ok(format!(
+                "open (press ESC for the menu if you can't see it); {}",
+                vgui.describe(vp)
+            ))
+        }
+    }
+
+    /// Opens the window (building it the first time), or closes it when open.
+    pub(super) fn toggle(reset: bool) -> Result<String, String> {
         let vgui = Vgui::get()?;
         unsafe {
-            let (object, vp) = match window(&vgui) {
-                Some(found) if !reset => found,
-                _ => {
-                    if let Some((old, old_vp)) = window(&vgui) {
-                        // Rebuilt on reset: the old one is hidden and left
-                        // for GameUI to delete with its parent.
-                        let set_visible: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_VISIBLE);
-                        set_visible(vgui.panel, old_vp, 0);
-                        let _ = old;
-                    }
-                    let (frame, sheet) = build()?;
-                    OBJECT.store(frame as usize, Ordering::Release);
-                    SHEET.store(sheet as usize, Ordering::Release);
-                    let (_, b) = gameui()?;
-                    notes.push(format!(
-                        "built the window with {} tab(s) ({} GameUI)",
-                        PAGES.len(),
-                        b.name
-                    ));
-                    window(&vgui).ok_or("the new window has no panel")?
-                }
-            };
-            let is_visible: PanelBoolFn = slot(vgui.panel, IPANEL_IS_VISIBLE);
-            let set_visible: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_VISIBLE);
-            if is_visible(vgui.panel, vp) & 0xff != 0 && !reset {
-                set_visible(vgui.panel, vp, 0);
+            let (object, vp, mut notes) = ensure_window(&vgui, reset)?;
+            if vgui.visible(vp) && !reset {
+                vgui.set_visible(vp, false);
                 notes.push("closed".to_string());
             } else {
-                fit_sheet(&vgui, object);
-                // Frame::Activate, as GameUI opens its own dialogs: shows it,
-                // brings it to the front and gives it focus.
-                let activate: ActivateFn = slot(object, FRAME_SLOT_ACTIVATE);
-                activate(object);
-                notes.push(format!(
-                    "open (press ESC for the menu if you can't see it); {}",
-                    vgui.describe(vp)
-                ));
+                notes.push(show(&vgui, object, vp, None)?);
             }
+            Ok(notes.join("; "))
         }
-        Ok(notes.join("; "))
     }
 }
 
@@ -817,6 +1201,26 @@ mod tests {
                 "{command}"
             );
         }
+    }
+
+    #[test]
+    fn the_window_is_never_narrower_than_its_tabs() {
+        // Tabs ending at 200 inside a sheet, in a frame 8 px wider than its
+        // client area: the tabs, both margins, the border and a little slack.
+        assert_eq!(minimum_size(200, 528, 520), (200 + 8 + 8 + 8, MIN_TALL));
+    }
+
+    #[test]
+    fn the_playback_layout_has_a_slot_for_every_borrowed_control() {
+        for (_, slot) in BORROWED {
+            assert!(PAGES[0].res.2.contains(&format!("\"{slot}\"")), "{slot}");
+        }
+    }
+
+    #[test]
+    fn no_name_is_the_start_of_another() {
+        assert!(!VIEWDEMO_NAME.starts_with(NAME));
+        assert!(!NAME.starts_with(VIEWDEMO_NAME));
     }
 
     #[test]

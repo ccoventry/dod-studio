@@ -118,6 +118,8 @@ unsafe extern "C" fn wrapped_playdemo() {
 unsafe extern "C" fn wrapped_viewdemo() {
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // dodstudio_viewdemo_in_panel: the DoD Studio window stands in for the bar.
+    crate::studio_panel::after_viewdemo();
 }
 
 /// Notes the name the command was given. A bare `playdemo` (it prints its

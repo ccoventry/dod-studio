@@ -605,6 +605,11 @@ mod hook {
                     continue;
                 };
                 present.insert(vp);
+                // Parked off screen while the DoD Studio window stands in for
+                // it: that place is not one to save or restore.
+                if vp == crate::studio_panel::parked_bar() {
+                    continue;
+                }
                 let window = state.windows.entry(vp).or_insert_with(|| Window {
                     key: format!(
                         "{}/{}",

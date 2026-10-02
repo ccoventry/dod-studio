@@ -1099,6 +1099,15 @@ unsafe extern "C" fn cmd_texture_hires_log() {
 }
 
 /// Only registered when the window-layout cvars could not be registered.
+/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_viewdemo_in_panel() {
+    handle_toggle(
+        crate::studio_panel::VIEWDEMO_NAME,
+        &crate::studio_panel::VIEWDEMO_IN_PANEL,
+        crate::studio_panel::viewdemo_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1347,6 +1356,11 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    match register(crate::studio_panel::VIEWDEMO_NAME, "0") {
+        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };

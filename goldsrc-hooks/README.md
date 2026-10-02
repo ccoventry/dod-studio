@@ -131,9 +131,11 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   `src/window_layout.rs`.
 - **DoD Studio window** (`dodstudio_panel`): our own window in the game, a
   GameUI `Frame` with a `PropertySheet` of tabs, like the Options window; its
-  Playback buttons drive the demo player like the VCR bar's. One `.res` per
-  tab in `dod\dodstudio_ui\`, editable in build mode. See
-  `src/studio_panel.rs`.
+  Playback buttons drive the demo player like the VCR bar's, and the tab
+  borrows the bar's own time slider and label. With
+  `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens it on Playback and parks
+  the bar off screen. One `.res` per tab in `dod\dodstudio_ui\`, editable in
+  build mode; never narrower than its tabs. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when
