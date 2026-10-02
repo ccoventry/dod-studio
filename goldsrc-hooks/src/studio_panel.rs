@@ -183,6 +183,11 @@ pub struct Build {
     /// `CheckButton`'s vftable: only a control with exactly this one is
     /// treated as a bound check box.
     pub check_button_vftable: usize,
+    /// `RichText::SetText(const wchar_t *)`, not virtual. A `.res` "text" is
+    /// cut at 511 characters, and the `const char *` overload at 1023 (it
+    /// converts through a 0x800-byte buffer), so the Commands tab's text is
+    /// set from code through this one, which has no limit.
+    pub rich_text_set_text_wide: usize,
     /// `CDemoPlayerFileDialog::CDemoPlayerFileDialog(Panel *parent, const char
     /// *name)`: the Load Demo window, which the Demos tab borrows its list and
     /// Load button from. Allocated `frame_size + 4` bytes, as GameUI does.
@@ -206,6 +211,7 @@ pub const BUILDS: [Build; 2] = [
         sheet_size: 0xac,
         page_ctor: 0x6_55f0,
         check_button_vftable: 0xa_12f4,
+        rich_text_set_text_wide: 0x5_4460,
         file_dialog_ctor: 0x2_06a0,
         file_dialog_fill: 0x2_0910,
     },
@@ -222,6 +228,7 @@ pub const BUILDS: [Build; 2] = [
         sheet_size: 0xb4,
         page_ctor: 0x7_1cd0,
         check_button_vftable: 0xa_aa48,
+        rich_text_set_text_wide: 0x5_fab0,
         file_dialog_ctor: 0x2_6f00,
         file_dialog_fill: 0x2_7210,
     },
@@ -434,6 +441,12 @@ const TEXT_ENTRY_SLOT_GET_TEXT: usize = 137;
 /// strings (`call [vftable+0x21c]`).
 const LABEL_SLOT_SET_TEXT: usize = 135;
 const BUTTON_SLOT_IS_SELECTED: usize = 174;
+
+/// The Commands tab's text: every console setting and command, grouped.
+const COMMANDS_TEXT: &str = include_str!("../ui/Commands.txt");
+/// The Commands tab's text box, in `Commands.res`.
+const COMMAND_LIST: &str = "CommandList";
+const COMMANDS_PAGE: usize = 4;
 
 /// The Playback tab's time box.
 const GOTO_BOX: &str = "GotoTime";
@@ -1005,6 +1018,7 @@ mod hook {
     type IsSelectedFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
     type GetTextFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_char, i32);
     type SetTextFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char);
+    type SetWideTextFn = unsafe extern "thiscall" fn(*mut c_void, *const u16);
     type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type GetStringFn =
@@ -1517,6 +1531,19 @@ mod hook {
                     lent.designs = designs;
                 }
             });
+
+            // The Commands tab's text, longer than a .res value may be.
+            let commands_page =
+                vpanel_of(PAGE_OBJECTS[COMMANDS_PAGE].load(Ordering::Acquire) as *mut c_void);
+            if let Some(list) = vgui.child_named(commands_page, COMMAND_LIST) {
+                let object = vgui.object(list);
+                if !object.is_null() {
+                    let wide: Vec<u16> = COMMANDS_TEXT.encode_utf16().chain([0]).collect();
+                    let set_text: SetWideTextFn =
+                        std::mem::transmute(base + build.rich_text_set_text_wide);
+                    set_text(object, wide.as_ptr());
+                }
+            }
 
             // Our own Load Demo window, never shown: the Demos tab borrows its
             // list and Load button. It fills its list as it is built.
@@ -2631,12 +2658,9 @@ mod tests {
         // Every console_name!("...") in the crate, but the doc example and
         // the kill feed's second name.
         let mut missing = Vec::new();
-        let commands = PAGES
-            .iter()
-            .find(|p| p.res.1 == "Commands.res")
-            .unwrap()
-            .res
-            .2;
+        let commands = COMMANDS_TEXT;
+        assert_eq!(PAGES[COMMANDS_PAGE].res.1, "Commands.res");
+        assert!(PAGES[COMMANDS_PAGE].res.2.contains(COMMAND_LIST));
         for entry in std::fs::read_dir("src")
             .unwrap()
             .chain(std::fs::read_dir("src/anim_fix").unwrap())

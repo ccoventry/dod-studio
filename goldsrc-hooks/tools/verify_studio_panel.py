@@ -212,6 +212,41 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(text_vt + 4 * get_text) - ui.base)
     check(got == "ret 8", f"TextEntry's slot {get_text} (GetText(buf, len)) returns with {got!r}")
 
+    # 17: the help line's Label::SetText.
+    label_vt = ui.vftable("Label@vgui2")
+    set_text = vwl.rust_usize(src, "LABEL_SLOT_SET_TEXT")
+    got = ui.last_ret(ui.u32(label_vt + 4 * set_text) - ui.base)
+    check(got == "ret 4", f"Label's slot {set_text} (SetText(const char *)) returns with {got!r}")
+
+    # 18: the Commands tab's RichText::SetText, which RichText's own
+    # ApplySettings (slot 80) calls with a .res "text".
+    rich_vt = ui.vftable("RichText@vgui2")
+    apply = ui.u32(rich_vt + 4 * 80) - ui.base
+    lines = list(ui.md.disasm(ui.img[apply:apply + 0x300], ui.base + apply))
+    after_text = False
+    found = None
+    for k, i in enumerate(lines):
+        if i.mnemonic == "push" and i.op_str.startswith("0x"):
+            at = int(i.op_str, 16) - ui.base
+            if 0 < at < len(ui.img) and ui.img[at:at + 5] == b"text\0":
+                after_text = True
+        if (after_text and i.mnemonic == "call" and i.op_str.startswith("0x") and k >= 2
+                and lines[k - 1].op_str in ("ecx, esi", "ecx, edi") and lines[k - 2].mnemonic == "push"):
+            found = int(i.op_str, 16) - ui.base
+            break
+    # ApplySettings converts the text and calls SetText(const wchar_t *)
+    # (Anniversary), or calls SetText(const char *), which converts through a
+    # 0x800-byte buffer and calls it (pre-Anniversary).
+    wide = build["rich_text_set_text_wide"]
+    via = found
+    if found is not None and found != wide:
+        body = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[found:found + 0x80], ui.base + found)]
+        if "push 0x800" in body and f"call {hex(ui.base + wide)}" in body:
+            via = wide
+    check(via == wide, f"RichText's ApplySettings reaches rich_text_set_text_wide +{wide:#x} (via +{(found or 0):#x})")
+    got = ui.last_ret(wide)
+    check(got == "ret 4", f"which returns with {got!r} (const wchar_t *)")
+
     # 15: the Settings tab's check boxes.
     check_vt = ui.vftable("CheckButton@vgui2")
     check(check_vt == build["check_button_vftable"], f"CheckButton's vftable is check_button_vftable +{(check_vt or 0):#x}")
