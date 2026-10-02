@@ -448,6 +448,24 @@ const COMMANDS_TEXT: &str = include_str!("../ui/Commands.txt");
 const COMMAND_LIST: &str = "CommandList";
 const COMMANDS_PAGE: usize = 4;
 
+/// The Demos tab's search box.
+const DEMO_FILTER: &str = "DemoFilter";
+/// `ListPanel::FirstItem()`, `NextItem(int)`, `SetItemVisible(int, bool)`
+/// (the Source `ListPanel` order, which GoldSrc's matches from `GetItem(int)`
+/// at 153 to `GetSelectedItem` at 176).
+const LIST_SLOT_FIRST_ITEM: usize = 167;
+const LIST_SLOT_NEXT_ITEM: usize = 168;
+const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
+
+/// Whether a demo row matches what was typed in the search box: every word,
+/// anywhere in the name, case ignored. An empty search matches everything.
+fn matches_filter(row: &str, filter: &str) -> bool {
+    let row = row.to_ascii_lowercase();
+    filter
+        .split_whitespace()
+        .all(|word| row.contains(&word.to_ascii_lowercase()))
+}
+
 /// The Playback tab's time box.
 const GOTO_BOX: &str = "GotoTime";
 
@@ -649,16 +667,17 @@ pub fn viewdemo_status() -> String {
 
 /// Called by `demo_reload`'s `viewdemo` wrapper for a bare `viewdemo`, which
 /// on its own only prints its usage. With `dodstudio_viewdemo_in_panel 1` it
-/// opens our window on the Demos tab instead, and returns whether it did.
+/// opens our window on the Playback tab instead, as `viewdemo` opens the VCR
+/// bar, and returns whether it did.
 pub fn bare_viewdemo() -> bool {
     if !viewdemo_in_panel() {
         return false;
     }
     #[cfg(target_arch = "x86")]
     {
-        let line = match hook::open_on(DEMOS_PAGE) {
-            Ok(state) => format!("{NAME}: viewdemo opened the demo list -- {state}"),
-            Err(why) => format!("{NAME}: viewdemo could not open the demo list -- {why}"),
+        let line = match hook::open_on(PLAYBACK_PAGE) {
+            Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
+            Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
         };
         crate::commands::console_print(&format!("{line}\n"));
         true
@@ -1021,6 +1040,9 @@ mod hook {
     type SetWideTextFn = unsafe extern "thiscall" fn(*mut c_void, *const u16);
     type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
+    type ListFirstFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
+    type ListItemIdFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> i32;
+    type ListSetVisibleFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
@@ -1110,6 +1132,73 @@ mod hook {
         }
     }
 
+    /// What the search box held when the list was last filtered, and
+    /// whether the list has been refilled since (every row shows again).
+    static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    /// Shows only the demos matching the Demos tab's search box. Runs every
+    /// frame; does work only when the text (or the list) changed.
+    unsafe fn filter_demo_list(vgui: &Vgui) {
+        unsafe {
+            let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
+            if page == 0 || !vgui.visible(page) {
+                return;
+            }
+            let Some(entry) = vgui
+                .child_named(page, DEMO_FILTER)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null())
+            else {
+                return;
+            };
+            let get_text: GetTextFn = slot(entry, TEXT_ENTRY_SLOT_GET_TEXT);
+            let mut buf = [0u8; 128];
+            get_text(entry, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
+            let filter = CStr::from_bytes_until_nul(&buf)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+            if last.as_deref() == Some(filter.as_str()) {
+                return;
+            }
+            let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
+            let Ok((_, build)) = gameui() else { return };
+            if dialog.is_null() {
+                return;
+            }
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
+            let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
+            let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
+            let get_string_of = |row: *mut c_void| -> String {
+                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
+                if raw.is_null() {
+                    String::new()
+                } else {
+                    text(raw)
+                }
+            };
+            let mut id = first(list);
+            let mut guard = 0;
+            while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
+                guard += 1;
+                let row = get_item(list, id);
+                if !row.is_null() {
+                    let name = get_string_of(row);
+                    set_visible(list, id, matches_filter(&name, &filter) as u32);
+                }
+                id = next(list, id);
+            }
+            *last = Some(filter);
+        }
+    }
+
     /// Lists the demos again in our Load Demo window (new recordings, or a
     /// folder change), with the window's own fill.
     unsafe fn refill_demo_list() {
@@ -1122,6 +1211,8 @@ mod hook {
                 let fill: ActivateFn = std::mem::transmute(base + build.file_dialog_fill);
                 fill(dialog);
             }
+            // Every row shows again: filter afresh.
+            *FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
         }
     }
 
@@ -2127,6 +2218,7 @@ mod hook {
                     fit_pages(&vgui, &mut lent);
                     sync_settings(&vgui, &mut lent);
                     update_help(&vgui, vp, &mut lent);
+                    filter_demo_list(&vgui);
                 }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);
@@ -2689,6 +2781,16 @@ mod tests {
         missing.sort();
         missing.dedup();
         assert!(missing.is_empty(), "missing from Commands.res: {missing:?}");
+    }
+
+    #[test]
+    fn the_demo_search_matches_every_word_anywhere() {
+        let row = "monday-wsod25_r07_m1_h1_hltv.dem";
+        assert!(matches_filter(row, ""));
+        assert!(matches_filter(row, "MONDAY"));
+        assert!(matches_filter(row, "hltv monday"));
+        assert!(matches_filter(row, "  r07  "));
+        assert!(!matches_filter(row, "monday anzio"));
     }
 
     #[test]

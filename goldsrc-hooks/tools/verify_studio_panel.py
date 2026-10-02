@@ -194,7 +194,8 @@ def verify(game, src):
     check(build["file_dialog_fill"] in calls, "and the constructor calls it")
     list_vt = ui.vftable("ListPanel@vgui2")
     for name, want in (("LIST_SLOT_GET_SELECTED_ITEM", "ret 4"), ("LIST_SLOT_IS_VALID_ITEM_ID", "ret 4"),
-                       ("LIST_SLOT_GET_ITEM", "ret 4")):
+                       ("LIST_SLOT_GET_ITEM", "ret 4"), ("LIST_SLOT_FIRST_ITEM", "ret"),
+                       ("LIST_SLOT_NEXT_ITEM", "ret 4"), ("LIST_SLOT_SET_ITEM_VISIBLE", "ret 8")):
         index = vwl.rust_usize(src, name)
         func = ui.u32(list_vt + 4 * index) - ui.base
         # A forwarder (Anniversary IsValidItemID: `add ecx, ...; jmp`) returns
@@ -263,6 +264,10 @@ def verify(game, src):
                      and any(f"byte ptr [esi + {field.group(1)}], al" in x for x in ui.body(int(t.split()[1], 16) - ui.base, 0x30))), None) if field else None
     check(field and getter[1] == "ret" and base_set is not None,
           f"slot {is_sel} (IsSelected) reads the byte Button::SetSelected writes (this+{field.group(1) if field else '?'})")
+
+    # InvalidItemID (one past NextItem) returns -1, which pins the order.
+    invalid = ui.body(ui.u32(list_vt + 4 * (vwl.rust_usize(src, "LIST_SLOT_NEXT_ITEM") + 1)) - ui.base, 0x10)
+    check(invalid[:2] == ["or eax, 0xffffffff", "ret"], f"ListPanel's InvalidItemID sits after NextItem: {invalid[:2]}")
 
     # 13: the two IPanel slots only this window uses (the rest are #410's).
     vg = vwl.Image(game / "vgui2.dll")
