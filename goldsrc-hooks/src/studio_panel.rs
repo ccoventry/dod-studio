@@ -466,6 +466,80 @@ fn matches_filter(row: &str, filter: &str) -> bool {
         .all(|word| row.contains(&word.to_ascii_lowercase()))
 }
 
+/// The Demos tab's other filters: map, HLTV / POV, and age.
+const MAP_FILTER: &str = "MapFilter";
+const SHOW_HLTV: &str = "ShowHltv";
+const SHOW_POV: &str = "ShowPov";
+const DAYS_FILTER: &str = "DaysFilter";
+
+/// What the start of a demo says about it: the map (header offset 16, 260
+/// bytes), and whether an HLTV proxy recorded it. The proxy's connect message
+/// ends "Spawn count N (HLTV)", about 1,060 bytes in: true of all 113 HLTV
+/// demos among 984 surveyed, and of none of the POV ones. (`HLTV Proxy`, what
+/// Studio's `is_hltv_demo` looks for in the first 512 bytes, is in none.)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DemoInfo {
+    map: String,
+    hltv: bool,
+    /// Seconds since the Unix epoch the file was last written.
+    modified: u64,
+}
+
+fn demo_info(header: &[u8], modified: u64) -> Option<DemoInfo> {
+    if header.len() < 16 + 260 || !header.starts_with(b"HLDEMO") {
+        return None;
+    }
+    let map = &header[16..16 + 260];
+    let map = &map[..map.iter().position(|&b| b == 0).unwrap_or(map.len())];
+    let map = String::from_utf8_lossy(map);
+    let map = map
+        .trim_start_matches("maps/")
+        .trim_end_matches(".bsp")
+        .to_string();
+    let hltv = header.windows(6).any(|w| w == b"(HLTV)");
+    Some(DemoInfo {
+        map,
+        hltv,
+        modified,
+    })
+}
+
+/// Everything the Demos tab filters by at once.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DemoFilters {
+    search: String,
+    map: String,
+    hltv: bool,
+    pov: bool,
+    /// Newer than this many days, or none.
+    days: Option<u64>,
+}
+
+/// Whether a row passes every filter. `info` is `None` for a row whose
+/// header couldn't be read (or a folder): only the search applies to it.
+fn passes(row: &str, info: Option<&DemoInfo>, f: &DemoFilters, now: u64) -> bool {
+    let haystack = match info {
+        Some(i) => format!("{row} {}", i.map),
+        None => row.to_string(),
+    };
+    if !matches_filter(&haystack, &f.search) {
+        return false;
+    }
+    let Some(info) = info else { return true };
+    if !f.map.trim().is_empty() && !matches_filter(&info.map, &f.map) {
+        return false;
+    }
+    if (info.hltv && !f.hltv) || (!info.hltv && !f.pov) {
+        return false;
+    }
+    if let Some(days) = f.days
+        && now.saturating_sub(info.modified) > days * 86_400
+    {
+        return false;
+    }
+    true
+}
+
 /// The Playback tab's time box.
 const GOTO_BOX: &str = "GotoTime";
 
@@ -1138,25 +1212,97 @@ mod hook {
 
     /// Shows only the demos matching the Demos tab's search box. Runs every
     /// frame; does work only when the text (or the list) changed.
+    /// A text box's text on `page`, or "" when the layout has none.
+    unsafe fn box_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
+        unsafe {
+            let Some(entry) = vgui
+                .child_named(page, name)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null())
+            else {
+                return String::new();
+            };
+            let get_text: GetTextFn = slot(entry, TEXT_ENTRY_SLOT_GET_TEXT);
+            let mut buf = [0u8; 128];
+            get_text(entry, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
+            CStr::from_bytes_until_nul(&buf)
+                .map(|c| c.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        }
+    }
+
+    /// Whether a check box on `page` is ticked; `true` when the layout has
+    /// none, so a layout without it filters nothing out.
+    unsafe fn box_ticked(vgui: &Vgui, page: Vpanel, name: &str) -> bool {
+        unsafe {
+            let Ok((base, build)) = gameui() else {
+                return true;
+            };
+            match vgui.child_named(page, name).map(|vp| vgui.object(vp)) {
+                Some(o)
+                    if !o.is_null()
+                        && *(o as *const usize) == base + build.check_button_vftable =>
+                {
+                    let is_selected: IsSelectedFn = slot(o, BUTTON_SLOT_IS_SELECTED);
+                    is_selected(o) & 0xff != 0
+                }
+                _ => true,
+            }
+        }
+    }
+
+    /// Each demo's header facts, by its path, kept while the file is unchanged.
+    static DEMO_INFO: std::sync::Mutex<Vec<(String, u64, Option<DemoInfo>)>> =
+        std::sync::Mutex::new(Vec::new());
+
+    /// How much of a demo `demo_info` reads.
+    const DEMO_START: usize = 4096;
+
+    /// The header facts of the demo a row names (a path from `dod/`).
+    fn info_for(row: &str) -> Option<DemoInfo> {
+        let name = row.trim().trim_matches('"');
+        if name.ends_with('/') || name.is_empty() {
+            return None;
+        }
+        let path = res_dir().parent()?.join(name);
+        let meta = std::fs::metadata(&path).ok()?;
+        let modified = meta
+            .modified()
+            .ok()?
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        let mut cache = DEMO_INFO.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, m, info)) = cache.iter().find(|(p, _, _)| p == name)
+            && *m == modified
+        {
+            return info.clone();
+        }
+        use std::io::Read;
+        let mut header = Vec::with_capacity(DEMO_START);
+        let info = std::fs::File::open(&path)
+            .and_then(|f| f.take(DEMO_START as u64).read_to_end(&mut header))
+            .ok()
+            .and_then(|_| demo_info(&header, modified));
+        cache.retain(|(p, _, _)| p != name);
+        cache.push((name.to_string(), modified, info.clone()));
+        info
+    }
+
     unsafe fn filter_demo_list(vgui: &Vgui) {
         unsafe {
             let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
             if page == 0 || !vgui.visible(page) {
                 return;
             }
-            let Some(entry) = vgui
-                .child_named(page, DEMO_FILTER)
-                .map(|vp| vgui.object(vp))
-                .filter(|o| !o.is_null())
-            else {
-                return;
+            let filters = DemoFilters {
+                search: box_text(vgui, page, DEMO_FILTER),
+                map: box_text(vgui, page, MAP_FILTER),
+                hltv: box_ticked(vgui, page, SHOW_HLTV),
+                pov: box_ticked(vgui, page, SHOW_POV),
+                days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
-            let get_text: GetTextFn = slot(entry, TEXT_ENTRY_SLOT_GET_TEXT);
-            let mut buf = [0u8; 128];
-            get_text(entry, buf.as_mut_ptr() as *mut c_char, buf.len() as i32);
-            let filter = CStr::from_bytes_until_nul(&buf)
-                .map(|c| c.to_string_lossy().into_owned())
-                .unwrap_or_default();
+            let filter = format!("{filters:?}");
             let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             if last.as_deref() == Some(filter.as_str()) {
                 return;
@@ -1184,6 +1330,15 @@ mod hook {
                     text(raw)
                 }
             };
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_secs());
+            // Header reads only when a filter needs them.
+            let need_info = !filters.map.trim().is_empty()
+                || !filters.hltv
+                || !filters.pov
+                || filters.days.is_some()
+                || !filters.search.trim().is_empty();
             let mut id = first(list);
             let mut guard = 0;
             while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
@@ -1191,7 +1346,8 @@ mod hook {
                 let row = get_item(list, id);
                 if !row.is_null() {
                     let name = get_string_of(row);
-                    set_visible(list, id, matches_filter(&name, &filter) as u32);
+                    let info = if need_info { info_for(&name) } else { None };
+                    set_visible(list, id, passes(&name, info.as_ref(), &filters, now) as u32);
                 }
                 id = next(list, id);
             }
@@ -1633,6 +1789,22 @@ mod hook {
                     let set_text: SetWideTextFn =
                         std::mem::transmute(base + build.rich_text_set_text_wide);
                     set_text(object, wide.as_ptr());
+                }
+            }
+
+            // The Demos tab's HLTV / POV boxes start ticked: show everything.
+            let demos_page =
+                vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
+            for name in [SHOW_HLTV, SHOW_POV] {
+                if let Some(o) = vgui
+                    .child_named(demos_page, name)
+                    .map(|vp| vgui.object(vp))
+                    .filter(|o| {
+                        !o.is_null() && *(*o as *const usize) == base + build.check_button_vftable
+                    })
+                {
+                    let set_selected: SetSelectedFn = slot(o, BUTTON_SLOT_SET_SELECTED);
+                    set_selected(o, 1);
                 }
             }
 
@@ -2791,6 +2963,108 @@ mod tests {
         assert!(matches_filter(row, "hltv monday"));
         assert!(matches_filter(row, "  r07  "));
         assert!(!matches_filter(row, "monday anzio"));
+    }
+
+    #[test]
+    fn a_demo_header_gives_its_map_and_whether_hltv_recorded_it() {
+        let mut header = vec![0u8; 544];
+        header[..8].copy_from_slice(b"HLDEMO\0\0");
+        header[16..16 + 13].copy_from_slice(b"dod_anzio\0xyz");
+        let pov = demo_info(&header, 7).unwrap();
+        assert_eq!(
+            pov,
+            DemoInfo {
+                map: "dod_anzio".to_string(),
+                hltv: false,
+                modified: 7
+            }
+        );
+        header.extend_from_slice(b"Spawn count 19 (HLTV)\n");
+        assert!(demo_info(&header, 7).unwrap().hltv);
+        assert_eq!(demo_info(b"not a demo", 0), None);
+    }
+
+    #[test]
+    fn every_filter_has_to_pass() {
+        let anzio = DemoInfo {
+            map: "dod_anzio".to_string(),
+            hltv: true,
+            modified: 1_000_000,
+        };
+        let all = DemoFilters {
+            search: String::new(),
+            map: String::new(),
+            hltv: true,
+            pov: true,
+            days: None,
+        };
+        let now = 1_000_000 + 3 * 86_400;
+        assert!(passes("x.dem", Some(&anzio), &all, now));
+        // The search also sees the map.
+        assert!(passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                search: "anzio".into(),
+                ..all.clone()
+            },
+            now
+        ));
+        assert!(!passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                map: "flash".into(),
+                ..all.clone()
+            },
+            now
+        ));
+        assert!(!passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                hltv: false,
+                ..all.clone()
+            },
+            now
+        ));
+        assert!(passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                pov: false,
+                ..all.clone()
+            },
+            now
+        ));
+        assert!(!passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                days: Some(2),
+                ..all.clone()
+            },
+            now
+        ));
+        assert!(passes(
+            "x.dem",
+            Some(&anzio),
+            &DemoFilters {
+                days: Some(3),
+                ..all.clone()
+            },
+            now
+        ));
+        // A folder (no header) only answers to the search.
+        assert!(passes(
+            "maps/",
+            None,
+            &DemoFilters {
+                map: "flash".into(),
+                ..all.clone()
+            },
+            now
+        ));
     }
 
     #[test]
