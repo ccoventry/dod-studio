@@ -2,9 +2,10 @@
 
 Reads the game's gfx/detail/*.tga (never writes there), and for each:
 
-  wrap-pad half a tile each side -> 4x in the style -> Lanczos to 2x the
-  power-of-two target (capped at 1024/side) -> crop the centre tile -> match
-  each channel's mean and spread to the original
+  wrap-pad half a tile (at most PAD px) each side -> 4x in the style ->
+  Lanczos the tile's own part to the power-of-two target (capped at
+  1024/side), the padding feeding the filter at its edges -> match each
+  channel's mean and spread to the original
 
 Wrap padding matters even more here than for walls: a detail texture is
 tiled many times across every surface it's on. Matching mean and spread
@@ -23,6 +24,20 @@ from PIL import Image
 
 import hdcommon as C
 import styles as S
+
+# Wrap padding each side, in source pixels: half a tile, up to PAD, as in
+# world_hd.py (#383). Half a tile of a 512 px detail texture made the
+# upscaler work on a 1024 px image. Measured on 32 of the movie install's
+# detail textures (16 at 512 px, 8 at 256, 8 at 128): 2.2x faster with
+# ultrasharp and with x4plus; the 128 px ones come out byte-identical; of the
+# 20 whose source tiles cleanly, none has a worse seam than before with
+# ultrasharp (within 1%) and none is worse by 10% with x4plus.
+PAD = 64
+
+
+def margins(w, h):
+    """(rows, columns) of wrap padding for a w x h texture."""
+    return min(PAD, h // 2), min(PAD, w // 2)
 
 
 def main():
@@ -44,7 +59,8 @@ def main():
         if C.pot(w * 4) <= w and C.pot(h * 4) <= h:
             continue  # already at the cap: nothing to gain
         jobs[name] = a
-        pad = np.pad(a, ((h // 2, h // 2), (w // 2, w // 2), (0, 0)), mode="wrap")
+        py, px = margins(w, h)
+        pad = np.pad(a, ((py, py), (px, px), (0, 0)), mode="wrap")
         Image.fromarray(pad).save(os.path.join(work, "in", name[:-4] + ".png"))
     print(f"{len(jobs)} detail textures to build")
 
@@ -57,8 +73,11 @@ def main():
             continue
         h, w = a.shape[:2]
         tw, th = C.pot(w * 4), C.pot(h * 4)
-        centre = (tw // 2, th // 2, tw // 2 + tw, th // 2 + th)
-        up = np.asarray(Image.open(src).convert("RGB").resize((tw * 2, th * 2), Image.LANCZOS).crop(centre)).astype(np.float32)
+        # The upscaled image is the tile plus 4x the padding each side: resize
+        # just the tile's part, the padding feeding the filter at its edges.
+        py, px = margins(w, h)
+        box = (px * 4, py * 4, (px + w) * 4, (py + h) * 4)
+        up = np.asarray(Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS, box=box)).astype(np.float32)
         o = a.astype(np.float32)
         for c in range(3):
             um, us = up[..., c].mean(), up[..., c].std()

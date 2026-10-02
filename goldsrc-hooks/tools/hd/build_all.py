@@ -17,6 +17,10 @@ Blend styles (`blend`, and any in my_styles.txt) aren't upscaled at all:
 they're two built styles mixed file by file, so they're built after every
 other style in the run, and need their two source styles built already.
 
+Plain styles (`plain`, and my_styles.txt's `plain <n>` ones) use only the
+CPU, so when the run also has an AI style they're built alongside it, while
+the upscaler has the GPU (#383): the same files, sooner.
+
 usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
                            [--types world,models,...] [style ...]
   --game          the Half-Life folder DoD Studio launches (else HD_GAME, else
@@ -29,7 +33,7 @@ usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
   style ...       which styles (default: the 7 built-in ones and any in
                   my_styles.txt)
 """
-import argparse, datetime, glob, os, subprocess, sys, time
+import argparse, atexit, datetime, glob, os, subprocess, sys, threading, time
 from PIL import Image
 
 import hdcommon as C
@@ -57,11 +61,15 @@ def main():
     os.makedirs(hd, exist_ok=True)
     log_path = os.path.join(hd, "build_all.log")
 
+    log_lock = threading.Lock()
+
     def log(msg):
         line = f"[{datetime.datetime.now():%H:%M:%S}] {msg}"
-        print(line, flush=True)
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
+        # Two steps can run at once (see run_steps): one line at a time.
+        with log_lock:
+            print(line, flush=True)
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
 
     # A list still in this folder from before #385: said once, in the log.
     for name, env in ((C.MAP_LIST, "HD_MAPS"), (C.MY_STYLES, "HD_MY_STYLES")):
@@ -88,11 +96,17 @@ def main():
         if t not in TYPES:
             sys.exit(f"unknown type {t!r}; one of {TYPES}")
 
-    def step(style, kind):
+    def step(style, kind, alongside=False):
+        """Builds one style's one type with its script. Returns the script's
+        exit code. `alongside`: another step is running at the same time."""
         out = os.path.join(hd, kind, style)
         os.makedirs(out, exist_ok=True)
         C.clear_partial(out)
         env = dict(os.environ, HD_STYLE=style)
+        if alongside:
+            # Both steps hash the same textures; one writing the hash cache
+            # is enough, and two appending at once could interleave.
+            env[C.FNV_CACHE_READONLY] = "1"
         if kind == "world":
             cmd = ["world_hd.py", out, "--all"]
         elif kind == "models":
@@ -107,13 +121,17 @@ def main():
             cmd = ["sky_hd.py", out, "--all"]
         before = len(os.listdir(out))
         t = time.time()
-        r = subprocess.run([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env, capture_output=True, text=True)
-        tail = [l for l in r.stdout.splitlines() if "not found in any wad" not in l][-3:]
-        log(f"{style:10s} {kind:7s} exit {r.returncode}, {len(os.listdir(out)) - before} new, "
+        p = subprocess.Popen([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        running.add(p)
+        stdout, stderr = p.communicate()
+        running.discard(p)
+        tail = [l for l in stdout.splitlines() if "not found in any wad" not in l][-3:]
+        log(f"{style:10s} {kind:7s} exit {p.returncode}, {len(os.listdir(out)) - before} new, "
             f"{len(os.listdir(out))} total, {time.time() - t:.0f}s :: {' | '.join(tail)}")
-        if r.returncode != 0:
-            log(f"  {(r.stderr or r.stdout)[-1500:]}")
-            sys.exit(r.returncode)
+        if p.returncode != 0:
+            log(f"  {(stderr or stdout)[-1500:]}")
+        return p.returncode
 
     def blend(style, kind):
         """<style>/<file> = <a>/<file> and <b>/<file> mixed, pct% of a."""
@@ -147,16 +165,51 @@ def main():
             made += 1
         log(f"{style:10s} {kind:7s} {made} new, {len(os.listdir(out))} total, {time.time() - t:.0f}s")
 
+    # Scripts still running if this exits early (a failed step), so they
+    # don't carry on without it.
+    running = set()
+    failed = threading.Event()
+    atexit.register(lambda: [p.kill() for p in list(running)])
+
+    def run_steps(numbered, alongside=False):
+        """Runs `numbered` [(number, style, kind)] in order; the first
+        failing script's exit code, or 0."""
+        for number, style, kind in numbered:
+            if failed.is_set():
+                return 0  # the other thread's step failed: stop here too
+            # For DoD Studio's progress line; not written to build_all.log.
+            print(f"@@step {number} {len(steps)} {style} {kind}", flush=True)
+            if S.DEFS[style][0] == "blend":
+                blend(style, kind)
+            else:
+                code = step(style, kind, alongside)
+                if code:
+                    failed.set()
+                    return code
+        return 0
+
     keep_awake(log)
     log(f"=== build_all: {game}; styles {styles}; types {types}")
     steps = [(style, kind) for style in styles for kind in types]
-    for number, (style, kind) in enumerate(steps, 1):
-        # For DoD Studio's progress line; not written to build_all.log.
-        print(f"@@step {number} {len(steps)} {style} {kind}", flush=True)
-        if S.DEFS[style][0] == "blend":
-            blend(style, kind)
-        else:
-            step(style, kind)
+    numbered = [(n, style, kind) for n, (style, kind) in enumerate(steps, 1)]
+    kinds = {S.DEFS[style][0] for style in styles}
+    # Plain steps run on a second thread while the AI ones have the GPU;
+    # blends wait for both, since they mix what the others made.
+    side = [s for s in numbered if S.DEFS[s[1]][0] == "plain"] if {"ai", "plain"} <= kinds else []
+    main_steps = [s for s in numbered if s not in side and S.DEFS[s[1]][0] != "blend"]
+    blends = [s for s in numbered if S.DEFS[s[1]][0] == "blend"]
+    side_code = []
+    worker = threading.Thread(target=lambda: side_code.append(run_steps(side, alongside=True)), daemon=True)
+    if side:
+        log(f"=== {', '.join(sorted({s[1] for s in side}))} built alongside the AI styles")
+        worker.start()
+    code = run_steps(main_steps)
+    if side:
+        worker.join()
+    code = code or (side_code[0] if side_code else 0)
+    if code:
+        sys.exit(code)
+    run_steps(blends)
     log("=== build_all done")
 
 

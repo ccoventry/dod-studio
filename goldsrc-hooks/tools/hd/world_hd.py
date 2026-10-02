@@ -5,9 +5,10 @@ wad), keyed by (name, FNV-1a-32 of mip-0 indices + 768-byte palette) exactly
 as texture_hires.rs computes it at runtime:
 
   extract -> (masked `{` textures: fill the cut-outs with their nearest
-  colour) -> wrap-pad half a tile each side -> 4x in the style -> Lanczos to
-  2x the power-of-two target (capped at 1024/side) -> crop the centre tile ->
-  (masked: alpha from the original mask, bilinear + threshold)
+  colour) -> wrap-pad half a tile (at most PAD px) each side -> 4x in the style -> Lanczos the
+  tile's own part to the power-of-two target (capped at 1024/side), the
+  padding feeding the filter at the edges -> (masked: alpha from the
+  original mask, bilinear + threshold)
 
 The wrap padding matters: without it the upscaler treats each edge as a
 border, and every place the texture repeats on a wall shows a seam.
@@ -26,6 +27,22 @@ from scipy.ndimage import distance_transform_edt
 import hdcommon as C
 import styles as S
 from goldsrc import map_textures
+
+# Wrap padding each side, in source pixels: half a tile, up to PAD. Half a
+# tile makes the upscaler work on 4x each texture's area, so capping it pays
+# off on the big textures (#383). Measured on dod_anzio + dod_harrington's
+# 186 textures: textures up to 128 px are unchanged (half a tile is 64 px or
+# less), and the build's upscaler step is 1.5x faster with the cap at 64.
+# A seam -- the step across a tile's own edge against the steps inside it --
+# stays within 4% of half-tile padding's for every texture with ultrasharp,
+# and x4plus has no more tiles with a visible seam than before. A 32 px cap
+# was 2.1x faster but gave x4plus a clear seam on a 128 px glass texture.
+PAD = 64
+
+
+def margins(w, h):
+    """(rows, columns) of wrap padding for a w x h texture."""
+    return min(PAD, h // 2), min(PAD, w // 2)
 
 
 def main():
@@ -66,7 +83,8 @@ def main():
                 _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
                 rgb = rgb[iy, ix]
             masks[key] = ~mask
-        rgb = np.pad(rgb, ((h // 2, h // 2), (w // 2, w // 2), (0, 0)), mode="wrap")
+        py, px = margins(w, h)
+        rgb = np.pad(rgb, ((py, py), (px, px), (0, 0)), mode="wrap")
         Image.fromarray(rgb, "RGB").save(os.path.join(work, "in", key + ".png"))
 
     S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
@@ -77,13 +95,17 @@ def main():
         if not os.path.exists(src):
             continue
         tw, th = C.pot(w * 4), C.pot(h * 4)
-        # The upscaled image is 2x2 tiles (half a tile of padding each side):
-        # resize all of it to twice the target, then keep the centre tile.
-        centre = (tw // 2, th // 2, tw // 2 + tw, th // 2 + th)
-        img = Image.open(src).convert("RGB").resize((tw * 2, th * 2), Image.LANCZOS).crop(centre)
+        # The upscaled image is the tile plus 4x the padding each side: resize
+        # just the tile's part to the target. Pillow reads past a resize box
+        # for the filter's support, so the edges are filtered from the
+        # wrapped-around padding, as they would be across a wall.
+        py, px = margins(w, h)
+        box = (px * 4, py * 4, (px + w) * 4, (py + h) * 4)
+        img = Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS, box=box)
         if key in masks:
-            m = np.pad(masks[key], ((h // 2, h // 2), (w // 2, w // 2)), mode="wrap")
-            alpha = Image.fromarray(m.astype(np.uint8) * 255, "L").resize((tw * 2, th * 2), Image.BILINEAR).crop(centre)
+            m = np.pad(masks[key], ((py, py), (px, px)), mode="wrap")
+            alpha = Image.fromarray(m.astype(np.uint8) * 255, "L").resize(
+                (tw, th), Image.BILINEAR, box=(px, py, px + w, py + h))
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
         C.save_output(img, os.path.join(out_dir, key + ".tga"))
