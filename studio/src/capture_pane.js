@@ -10,7 +10,7 @@ import { createListEditor } from './list_editor.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
@@ -1115,7 +1115,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (demo.streaks) {
           demo.streaks.forEach(streak => {
             // Opt-in model (detail_pane.js) — see computeRequiredCaptureBytes above.
-            if (streak.selected === true) {
+            // A Skip highlight is locked out even if something ticked it (#44).
+            if (streak.selected === true && !isSkipped(streak)) {
               selectedStreaks.push(streak);
               selectedDemoPaths.push(demo.path);
             }
