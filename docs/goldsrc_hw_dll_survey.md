@@ -505,9 +505,10 @@ unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
 renderer still walks. The engine's own remove functions unlink first, and
 `dodstudio_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
 
-Note this is the one finding here that is **pre-Anniversary only**: the
-Anniversary engine compiles the remove loop differently, so `R_DecalUnlink`
-cannot be recovered from it this way. `R_DecalInit`'s signature matches both.
+The Anniversary engine inlines `R_DecalUnlink` into its remove loops, so it
+can't be recovered from the loop there. `decals.rs` finds that build's
+standalone copy by its own signature instead (`goldsrc_decals.md` §5).
+`R_DecalInit`'s signature matches both.
 
 ---
 
