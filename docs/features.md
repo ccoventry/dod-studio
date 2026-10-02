@@ -107,6 +107,7 @@ Finds byte-identical duplicate demos under one folder. Files are keyed by size p
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column here is a filename guess ("hltv" in the name).
+- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Killstreaks tab and the player filters read the same cache. The button turns into Stop while it runs.
 - **Report**, seven sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
