@@ -13,6 +13,7 @@
 		"labelText"		"Hook status (console)"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_debug_status"
+		"tooltiptext"		"Print what DoD Studio's hook is doing to the console (dodstudio_debug_status)."
 	}
 	"Hint"
 	{

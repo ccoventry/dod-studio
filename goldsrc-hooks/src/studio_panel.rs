@@ -93,7 +93,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 5] = [
+pub const PAGES: [Page; 6] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -128,6 +128,15 @@ pub const PAGES: [Page; 5] = [
             c"dodstudio_ui/Settings.res",
             "Settings.res",
             include_str!("../ui/Settings.res"),
+        ),
+    },
+    Page {
+        name: c"Commands",
+        title: c"Commands",
+        res: (
+            c"dodstudio_ui/Commands.res",
+            "Commands.res",
+            include_str!("../ui/Commands.res"),
         ),
     },
     Page {
@@ -421,6 +430,9 @@ const BUTTON_SLOT_SET_SELECTED: usize = 173;
 /// `TextEntry::GetText(char *buf, int bufLen)`, as the console reads its own
 /// input line (`call [vftable+0x224]`).
 const TEXT_ENTRY_SLOT_GET_TEXT: usize = 137;
+/// `Label::SetText(const char *)`, as GameUI calls it with its `#GameUI_`
+/// strings (`call [vftable+0x21c]`).
+const LABEL_SLOT_SET_TEXT: usize = 135;
 const BUTTON_SLOT_IS_SELECTED: usize = 174;
 
 /// The Playback tab's time box.
@@ -753,15 +765,83 @@ fn action(command: &str) -> Action<'_> {
 }
 
 /// Where the tab strip goes in a window whose client area is `client`
-/// (x, y, wide, tall): all of it, inset by [`SHEET_MARGIN`].
+/// (x, y, wide, tall): all of it, inset by [`SHEET_MARGIN`], less the help
+/// line along the bottom.
 fn sheet_bounds(client: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
     let (x, y, w, h) = client;
     (
         x + SHEET_MARGIN,
         y + SHEET_MARGIN,
         (w - 2 * SHEET_MARGIN).max(1),
-        (h - 2 * SHEET_MARGIN).max(1),
+        (h - 2 * SHEET_MARGIN - HELP_TALL).max(1),
     )
+}
+
+/// The help line under the tab strip: what the control under the mouse does.
+fn help_bounds(sheet: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = sheet;
+    (x + 2, y + h + 2, (w - 4).max(1), HELP_TALL - 2)
+}
+
+/// The help line's panel name, in `DodStudio.res`.
+const HELP_LINE: &str = "HelpLine";
+const HELP_TALL: i32 = 22;
+
+/// Every control's `"tooltiptext"` in a `.res` file, by its name: what the
+/// help line shows for it. (GameUI reads the key but shows no tooltip, so
+/// the window shows it itself.)
+fn tooltips(res: &str) -> Vec<(String, String)> {
+    #[derive(Clone, PartialEq)]
+    enum Token {
+        Text(String),
+        Open,
+        Close,
+    }
+    // Quoted strings and braces; // comments run to the end of the line.
+    let mut tokens = Vec::new();
+    let mut chars = res.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' => tokens.push(Token::Text(
+                chars.by_ref().take_while(|&c| c != '"').collect(),
+            )),
+            '{' => tokens.push(Token::Open),
+            '}' => tokens.push(Token::Close),
+            '/' if chars.peek() == Some(&'/') => {
+                chars.by_ref().take_while(|&c| c != '\n').for_each(drop);
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    let mut depth = 0;
+    let mut control: Option<String> = None;
+    let mut i = 0;
+    while i < tokens.len() {
+        match &tokens[i] {
+            Token::Open => depth += 1,
+            Token::Close => {
+                depth -= 1;
+                if depth < 2 {
+                    control = None;
+                }
+            }
+            Token::Text(name) if depth == 1 && tokens.get(i + 1) == Some(&Token::Open) => {
+                control = Some(name.clone());
+            }
+            Token::Text(key) if depth == 2 => {
+                if key.eq_ignore_ascii_case("tooltiptext")
+                    && let (Some(name), Some(Token::Text(tip))) = (&control, tokens.get(i + 1))
+                {
+                    out.push((name.clone(), tip.clone()));
+                }
+                i += 1; // the key's value
+            }
+            Token::Text(_) => {}
+        }
+        i += 1;
+    }
+    out
 }
 
 fn res_dir() -> std::path::PathBuf {
@@ -924,6 +1004,7 @@ mod hook {
     type ListIntFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> u32;
     type IsSelectedFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
     type GetTextFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_char, i32);
+    type SetTextFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char);
     type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type GetStringFn =
@@ -1220,6 +1301,8 @@ mod hook {
         /// and where we last put the list.
         list_offset: Option<(i32, i32)>,
         list_set: Option<(i32, i32)>,
+        /// The help line's text, as last set.
+        help_shown: Option<String>,
         /// Each bound check box's state as last seen, so a click is told
         /// apart from the cvar changing under it.
         boxes: Vec<(Vpanel, bool)>,
@@ -1250,6 +1333,7 @@ mod hook {
                 list_offset: None,
                 list_set: None,
                 boxes: Vec::new(),
+                help_shown: None,
                 designs: Vec::new(),
             })
         };
@@ -1488,6 +1572,10 @@ mod hook {
             if (now.2, now.3) != (want.2, want.3) {
                 let set_size: XyFn = slot(vgui.panel, IPANEL_SET_SIZE);
                 set_size(vgui.panel, vp, want.2, want.3);
+            }
+            let frame_vp = vpanel_of(frame);
+            if let Some(line) = vgui.child_named(frame_vp, HELP_LINE) {
+                vgui.place(line, help_bounds(want));
             }
         }
     }
@@ -1729,6 +1817,87 @@ mod hook {
         }
     }
 
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn GetCursorPos(point: *mut [i32; 2]) -> i32;
+        fn ScreenToClient(hwnd: *mut c_void, point: *mut [i32; 2]) -> i32;
+        fn GetForegroundWindow() -> *mut c_void;
+        fn GetWindowThreadProcessId(hwnd: *mut c_void, pid: *mut u32) -> u32;
+    }
+
+    /// The mouse, in the game window's own pixels (vgui's screen), while the
+    /// game window is the one in front.
+    fn cursor() -> Option<(i32, i32)> {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            let mut pid = 0;
+            GetWindowThreadProcessId(hwnd, &mut pid);
+            if hwnd.is_null() || pid != std::process::id() {
+                return None;
+            }
+            let mut point = [0i32; 2];
+            (GetCursorPos(&mut point) != 0 && ScreenToClient(hwnd, &mut point) != 0)
+                .then_some((point[0], point[1]))
+        }
+    }
+
+    /// Shows, along the bottom of the window, the help text of the control
+    /// under the mouse.
+    unsafe fn update_help(vgui: &Vgui, frame_vp: Vpanel, lent: &mut Lent) {
+        unsafe {
+            let Some(line) = vgui.child_named(frame_vp, HELP_LINE) else {
+                return;
+            };
+            let mut text = String::new();
+            if let Some((mx, my)) = cursor() {
+                let shown = PAGES.iter().enumerate().find_map(|(i, page)| {
+                    let vp = vpanel_of(PAGE_OBJECTS[i].load(Ordering::Acquire) as *mut c_void);
+                    (vp != 0 && vgui.visible(vp)).then_some((i, page, vp))
+                });
+                if let Some((index, page, page_vp)) = shown {
+                    let over = vgui
+                        .child_list(page_vp)
+                        .into_iter()
+                        .filter(|&c| vgui.visible(c))
+                        .filter(|&c| {
+                            let (ax, ay) = vgui.abs_pos(c);
+                            let (_, _, w, h) = vgui.rect(c);
+                            mx >= ax && mx < ax + w && my >= ay && my < ay + h
+                        })
+                        .min_by_key(|&c| {
+                            let (_, _, w, h) = vgui.rect(c);
+                            w * h
+                        });
+                    if let Some(over) = over {
+                        let name = vgui.name(over);
+                        // A lent control's help is its slot's.
+                        let key = LOANS
+                            .iter()
+                            .find(|l| l.page == index && l.control == name && !l.slot.is_empty())
+                            .map_or(name.clone(), |l| l.slot.to_string());
+                        let path = res_dir().join(page.res.1);
+                        let res = std::fs::read_to_string(path).unwrap_or_default();
+                        text = tooltips(&res)
+                            .into_iter()
+                            .find(|(n, _)| n.eq_ignore_ascii_case(&key))
+                            .map(|(_, t)| t)
+                            .unwrap_or_default();
+                    }
+                }
+            }
+            if lent.help_shown.as_deref() != Some(text.as_str()) {
+                let object = vgui.object(line);
+                if !object.is_null() {
+                    let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                    if let Ok(c_text) = std::ffi::CString::new(text.clone()) {
+                        set_text(object, c_text.as_ptr());
+                    }
+                }
+                lent.help_shown = Some(text);
+            }
+        }
+    }
+
     /// Keeps every `cvar_<name>` check box on the Settings tab and its cvar
     /// in step: a click sets the cvar, and a cvar set elsewhere (the console,
     /// a config) moves the box.
@@ -1930,6 +2099,7 @@ mod hook {
                 if vgui.visible(vp) {
                     fit_pages(&vgui, &mut lent);
                     sync_settings(&vgui, &mut lent);
+                    update_help(&vgui, vp, &mut lent);
                 }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);
@@ -2430,6 +2600,74 @@ mod tests {
     }
 
     #[test]
+    fn help_text_is_read_from_a_res_file() {
+        let res = "\"x.res\"
+{
+	\"A\"
+	{
+		\"labelText\"	\"{not a brace}\"
+		\"tooltiptext\"	\"help A\"
+	}
+// \"B\" { \"tooltiptext\" \"commented\" }
+	\"B\"
+	{
+		\"wide\"	\"5\"
+	}
+}
+";
+        assert_eq!(tooltips(res), vec![("A".to_string(), "help A".to_string())]);
+    }
+
+    #[test]
+    fn every_default_control_has_help() {
+        for page in &PAGES {
+            let tips = tooltips(page.res.2);
+            assert!(!tips.is_empty(), "{} has no help text", page.res.1);
+        }
+    }
+
+    #[test]
+    fn the_commands_tab_lists_every_console_name() {
+        // Every console_name!("...") in the crate, but the doc example and
+        // the kill feed's second name.
+        let mut missing = Vec::new();
+        let commands = PAGES
+            .iter()
+            .find(|p| p.res.1 == "Commands.res")
+            .unwrap()
+            .res
+            .2;
+        for entry in std::fs::read_dir("src")
+            .unwrap()
+            .chain(std::fs::read_dir("src/anim_fix").unwrap())
+        {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for part in text.split("console_name!(\"").skip(1) {
+                let name = part.split('"').next().unwrap();
+                if name == "status"
+                    || name == "killfeed"
+                    || !name
+                        .bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_')
+                {
+                    continue;
+                }
+                let full = format!("dodstudio_{name}");
+                if !commands.contains(&full) {
+                    missing.push(full);
+                }
+            }
+        }
+        missing.sort();
+        missing.dedup();
+        assert!(missing.is_empty(), "missing from Commands.res: {missing:?}");
+    }
+
+    #[test]
     fn the_command_takes_1_0_or_reset() {
         assert_eq!(request(None), Ok(Request::Toggle));
         assert_eq!(request(Some("1")), Ok(Request::Open));
@@ -2453,7 +2691,10 @@ mod tests {
 
     #[test]
     fn the_tab_strip_fills_the_client_area_inside_a_margin() {
-        assert_eq!(sheet_bounds((2, 28, 516, 210)), (6, 32, 508, 202));
+        assert_eq!(
+            sheet_bounds((2, 28, 516, 210)),
+            (6, 32, 508, 202 - HELP_TALL)
+        );
         // Never inverted, however small the window gets.
         let tiny = sheet_bounds((0, 0, 3, 3));
         assert!(tiny.2 >= 1 && tiny.3 >= 1);

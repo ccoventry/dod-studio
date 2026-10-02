@@ -12,6 +12,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
+		"tooltiptext"		"Your demos. Double-click one to play it."
 	}
 	"DemoLoadSlot"
 	{
@@ -25,6 +26,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
+		"tooltiptext"		"Play the selected demo."
 	}
 	"Hint"
 	{
