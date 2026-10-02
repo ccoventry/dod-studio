@@ -244,6 +244,7 @@ const SURFACE_GET_POPUP: usize = 70;
 
 const IPANEL_SET_MINIMUM_SIZE: usize = 6;
 const IPANEL_GET_ABS_POS: usize = 10;
+const IPANEL_MOVE_TO_FRONT: usize = 20;
 const IPANEL_SET_KEYBOARD_INPUT_ENABLED: usize = 31;
 const IPANEL_SET_PARENT: usize = 16;
 /// `PropertySheet::SetActivePage(Panel *page)`, the slot after `AddPage`: it
@@ -325,6 +326,23 @@ pub const LOANS: &[Loan] = &[
 const CONSOLE: &str = "GameConsole";
 const CONSOLE_ENTRY: &str = "ConsoleEntry";
 const TYPE_AHEAD: &str = "CompletionList";
+/// Each tab's "use this tab" button, the tab it is on, and the window whose
+/// controls it brings over: shown while that window's setting is off.
+const ENABLE_BUTTONS: &[(&str, usize, &str)] = &[
+    ("EnablePlaybackButton", PLAYBACK_PAGE, VCR_BAR),
+    ("EnableConsoleButton", CONSOLE_PAGE, CONSOLE),
+];
+
+/// Whether `source`'s controls are lent to our tabs: only while its setting
+/// is on.
+fn lends(source: &str) -> bool {
+    match source {
+        VCR_BAR => viewdemo_in_panel(),
+        CONSOLE => console_in_panel(),
+        _ => true,
+    }
+}
+
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const CONSOLE_PAGE: usize = 2;
@@ -583,6 +601,7 @@ mod hook {
     type CountFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
     type PopupFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> Vpanel;
     type XyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, i32, i32);
+    type PanelFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel);
     type SetParentFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, Vpanel);
     type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
@@ -787,6 +806,12 @@ mod hook {
         minimum: (i32, i32),
         /// Loans already reported missing, so each is logged once.
         reported: Vec<&'static str>,
+        /// Where the console window was before we moved it (see `borrow`).
+        console_home: Option<(Vpanel, i32, i32)>,
+        /// The console's own offset for its type-ahead list, once measured,
+        /// and where we last put the list.
+        list_offset: Option<(i32, i32)>,
+        list_set: Option<(i32, i32)>,
         /// Each tab's size and its controls' places as its `.res` laid them
         /// out, read the first time the tab has a size.
         designs: Vec<PageDesign>,
@@ -810,6 +835,9 @@ mod hook {
                 parked_from: None,
                 minimum: (0, 0),
                 reported: Vec::new(),
+                console_home: None,
+                list_offset: None,
+                list_set: None,
                 designs: Vec::new(),
             })
         };
@@ -1164,14 +1192,39 @@ mod hook {
                         .map(|b| b.control);
                     if let Some(entry) = entry {
                         let (ex, ey) = vgui.abs_pos(entry);
-                        let (_, _, _, eh) = vgui.rect(entry);
-                        let (_, _, w, h) = vgui.rect(vp);
-                        vgui.place(vp, (ex, ey + eh, w, h));
+                        let (lx, ly, _, eh) = vgui.rect(entry);
+                        let (px, py, w, h) = vgui.rect(vp);
+                        let want = (ex, ey + eh);
+                        // The console puts its list at its own window's place
+                        // plus the input line's place in its parent, plus an
+                        // offset of its own (0, 0x20 on pre-Anniversary).
+                        // Whenever the list is somewhere we didn't put it,
+                        // that was the console: measure the offset then.
+                        let (sx, sy) = vgui.abs_pos(source);
+                        if lent.list_set != Some((px, py)) && (px, py) != want {
+                            lent.list_offset = Some((px - sx - lx, py - sy - ly));
+                        }
+                        // Then move the (hidden) console window so its own
+                        // placement lands under our input line: the list stops
+                        // jumping to the old place for a frame on every key.
+                        if let Some((ox, oy)) = lent.list_offset {
+                            if lent.console_home.is_none() {
+                                let (hx, hy, _, _) = vgui.rect(source);
+                                lent.console_home = Some((source, hx, hy));
+                            }
+                            let (_, _, cw, ch) = vgui.rect(source);
+                            vgui.place(source, (want.0 - lx - ox, want.1 - ly - oy, cw, ch));
+                        }
+                        vgui.place(vp, (want.0, want.1, w, h));
+                        lent.list_set = Some(want);
                         // Showing, the list takes the keyboard (a popup of
                         // ours now, not of the console's window), so typing
                         // stopped after one letter: hand it back to the
                         // input line while the list is up.
                         if vgui.visible(vp) {
+                            // Above our window, which a click brings forward.
+                            let front: PanelFn = slot(vgui.panel, IPANEL_MOVE_TO_FRONT);
+                            front(vgui.panel, vp);
                             let keyboard: PanelSetBoolFn =
                                 slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
                             keyboard(vgui.panel, vp, 0);
@@ -1227,6 +1280,25 @@ mod hook {
         }
     }
 
+    /// Shows each tab's "use this tab" button while its setting is off, and
+    /// hides it while on.
+    unsafe fn show_enable_buttons(vgui: &Vgui) {
+        unsafe {
+            for (button, page, source) in ENABLE_BUTTONS {
+                let page = vpanel_of(PAGE_OBJECTS[*page].load(Ordering::Acquire) as *mut c_void);
+                if page == 0 {
+                    continue;
+                }
+                if let Some(vp) = vgui.child_named(page, button) {
+                    let want = !lends(source);
+                    if vgui.visible(vp) != want {
+                        vgui.set_visible(vp, want);
+                    }
+                }
+            }
+        }
+    }
+
     /// Hands borrowed controls back to the windows they came from, where they
     /// were: all of them, or only those from `only`.
     unsafe fn give_back(vgui: &Vgui, lent: &mut Lent, only: Option<&str>) {
@@ -1235,6 +1307,16 @@ mod hook {
             .drain(..)
             .partition(|b| only.is_none_or(|name| b.source_name == name));
         lent.borrowed = keep;
+        if only.is_none_or(|name| name == CONSOLE)
+            && let Some((console, x, y)) = lent.console_home.take()
+        {
+            unsafe {
+                if !vgui.object(console).is_null() {
+                    let (_, _, w, h) = vgui.rect(console);
+                    vgui.place(console, (x, y, w, h));
+                }
+            }
+        }
         for b in back {
             unsafe {
                 if vgui.object(b.source).is_null() {
@@ -1360,22 +1442,23 @@ mod hook {
                     unpark(&vgui, &mut lent);
                     return;
                 }
+                show_enable_buttons(&vgui);
                 let mut sources: Vec<&'static str> = LOANS.iter().map(|l| l.source).collect();
                 sources.dedup();
                 for name in sources {
+                    // Only while its setting is on: otherwise the stock window
+                    // is the one in use, and it keeps its own pieces.
+                    if !lends(name) {
+                        give_back(&vgui, &mut lent, Some(name));
+                        continue;
+                    }
                     match vgui.popup(name) {
                         // The console window came up (the engine shows it
                         // itself at times): its pieces are ours, so it would
-                        // be blank. With dodstudio_console_in_panel it goes
-                        // away again; without, it gets its pieces back while
-                        // it is open, and our Console tab waits.
+                        // be blank. It goes away again.
                         Some(source) if name == CONSOLE && vgui.visible(source) => {
-                            if console_in_panel() {
-                                vgui.set_visible(source, false);
-                                borrow(&vgui, name, source, &mut lent);
-                            } else {
-                                give_back(&vgui, &mut lent, Some(name));
-                            }
+                            vgui.set_visible(source, false);
+                            borrow(&vgui, name, source, &mut lent);
                         }
                         Some(source) => {
                             if lent
@@ -1699,6 +1782,20 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_enable_button_is_in_its_tab_and_runs_its_setting() {
+        for (button, page, source) in ENABLE_BUTTONS {
+            let res = PAGES[*page].res.2;
+            assert!(res.contains(&format!("\"{button}\"")), "{button}");
+            let setting = if *source == VCR_BAR {
+                VIEWDEMO_NAME
+            } else {
+                CONSOLE_NAME
+            };
+            assert!(res.contains(&format!("engine {setting} 1")), "{button}");
+        }
+    }
 
     #[test]
     fn the_command_takes_1_0_or_reset() {

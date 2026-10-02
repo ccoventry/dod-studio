@@ -39,4 +39,18 @@
 		"labelText"		""
 		"textAlignment"		"west"
 	}
+	"EnableConsoleButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"EnableConsoleButton"
+		"xpos"		"8"
+		"ypos"		"6"
+		"wide"		"400"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Use this tab as the console (the console key opens it)"
+		"textAlignment"		"center"
+		"Command"		"engine dodstudio_console_in_panel 1"
+	}
 }

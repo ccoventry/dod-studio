@@ -193,4 +193,18 @@
 		"labelText"		"Drives the demo player: start a demo with viewdemo first."
 		"textAlignment"		"west"
 	}
+	"EnablePlaybackButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"EnablePlaybackButton"
+		"xpos"		"8"
+		"ypos"		"146"
+		"wide"		"400"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Show the time and slider here (hides the VCR bar)"
+		"textAlignment"		"center"
+		"Command"		"engine dodstudio_viewdemo_in_panel 1"
+	}
 }
