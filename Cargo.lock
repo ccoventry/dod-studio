@@ -39,6 +39,7 @@ dependencies = [
  "dem",
  "dod",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
