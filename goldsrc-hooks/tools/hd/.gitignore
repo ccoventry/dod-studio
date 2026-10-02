@@ -1,5 +1,7 @@
 # The upscaler and its models: downloaded per README.md, never committed.
 realesrgan/
+# The second backend: its venv and models, from setup_tools.py --spandrel.
+spandrel/
 __pycache__/
 # Your own styles and map list. They belong in the game's dod\dodstudio_hd
 # now (see README.md), but a copy left here from before still works.

@@ -81,6 +81,15 @@ def main():
     for s in styles:
         if s not in S.DEFS:
             sys.exit(f"unknown style {s!r}; one of {S.STYLES}")
+    # "Everything" means everything that can build: a spandrel style without
+    # its backend or model is left out and said so, rather than stopping the
+    # run. Asked for by name, it stops with the same message.
+    if not args.styles:
+        for s in [s for s in styles if S.DEFS[s][0] == "spandrel"]:
+            why = S.spandrel_ready(s)
+            if why:
+                log(f"=== skipping {s}: {why}")
+                styles.remove(s)
     # Blends last: they mix files the other styles make.
     styles = [s for s in styles if S.DEFS[s][0] != "blend"] + [s for s in styles if S.DEFS[s][0] == "blend"]
     types = [t for t in args.types.split(",") if t]

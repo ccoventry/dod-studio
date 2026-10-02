@@ -1209,6 +1209,9 @@ export const STRINGS = {
     buildDone: (steps, elapsed, log) => `Done: ${steps} step${steps === 1 ? '' : 's'} in ${elapsed}. Every step's counts are in ${log}.`,
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
+    STYLE_NEEDS_SPANDREL: ' (needs setup_tools.py --spandrel)',
+    spandrelReady: (have, all) => `Second upscaler (spandrel, for the newer models): set up, with ${have.length ? have.join(', ') : 'none'} of ${all.join(', ')}.`,
+    spandrelMissing: (all) => `Second upscaler (spandrel, for ${all.join(', ')}): not set up. In the scripts folder, run python setup_tools.py --spandrel (about 3 GB).`,
     // Asset types, as the hook's folder names.
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
