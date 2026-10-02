@@ -45,11 +45,15 @@ def main():
     ap.add_argument("--also", action="append", default=[])
     ap.add_argument("--extra-models", action="append", default=[])
     ap.add_argument("--types", default=",".join(TYPES))
+    ap.add_argument("--cap", type=int, choices=C.CAPS, help="largest side to build (default 1024; see README)")
     ap.add_argument("styles", nargs="*")
     args = ap.parse_args()
 
     if args.game:
         os.environ["HD_GAME"] = args.game
+    if args.cap:
+        os.environ["HD_CAP"] = str(args.cap)
+        C.CAP = args.cap
     if args.also:
         os.environ["HD_ALSO"] = os.pathsep.join(args.also)
     game = C.game_root()

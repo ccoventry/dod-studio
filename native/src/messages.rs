@@ -123,6 +123,10 @@ pub fn hd_build_bad_type(kind: &str) -> String {
     format!("{kind:?} is not something the build makes")
 }
 
+pub fn hd_build_bad_cap(cap: u32) -> String {
+    format!("{cap} is not a size the build makes: 1024, 2048 or 4096")
+}
+
 pub fn hd_build_needs_upscaler(style: &str) -> String {
     format!("The {style} style needs the upscaler and its model: use Download first")
 }

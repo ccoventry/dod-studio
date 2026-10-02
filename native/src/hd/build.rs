@@ -37,6 +37,18 @@ const ERROR_TAIL: usize = 12;
 pub struct BuildRequest {
     pub styles: Vec<String>,
     pub types: Vec<String>,
+    /// The largest side to build, one of [`CAPS`] (`hdcommon.CAPS`). Files
+    /// already built smaller than the cap makes them are built again.
+    #[serde(default = "default_cap")]
+    pub cap: u32,
+}
+
+/// The sizes a build can cap at, and the one everything was built at before
+/// there was a choice.
+pub const CAPS: [u32; 3] = [1024, 2048, 4096];
+
+fn default_cap() -> u32 {
+    CAPS[0]
 }
 
 /// Where a running build is, for the progress line.
@@ -124,6 +136,9 @@ pub fn check(request: &BuildRequest, realesrgan: &Path) -> Result<(), String> {
         .find(|t| !ASSET_TYPES.contains(&t.as_str()))
     {
         return Err(crate::messages::hd_build_bad_type(bad));
+    }
+    if !CAPS.contains(&request.cap) {
+        return Err(crate::messages::hd_build_bad_cap(request.cap));
     }
     for style in &request.styles {
         let model = BUILT_IN_STYLES
@@ -214,6 +229,7 @@ pub fn run(
         .arg(request.types.join(","))
         .args(&request.styles)
         .current_dir(scripts)
+        .env("HD_CAP", request.cap.to_string())
         .env("REALESRGAN", setup::upscaler_exe(realesrgan))
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
@@ -431,7 +447,20 @@ mod tests {
         let request = |styles: &[&str], types: &[&str]| BuildRequest {
             styles: styles.iter().map(|s| s.to_string()).collect(),
             types: types.iter().map(|s| s.to_string()).collect(),
+            cap: 1024,
         };
+        // The cap is one of the scripts' sizes.
+        let sized = |cap| BuildRequest {
+            cap,
+            ..request(&["plain"], &["world"])
+        };
+        assert!(check(&sized(2048), &realesrgan).is_ok());
+        assert!(check(&sized(4096), &realesrgan).is_ok());
+        assert!(check(&sized(512), &realesrgan).is_err());
+        assert!(check(&sized(1536), &realesrgan).is_err());
+        let common = include_str!("../../../goldsrc-hooks/tools/hd/hdcommon.py");
+        assert!(common.contains(&format!("CAPS = ({}, {}, {})", CAPS[0], CAPS[1], CAPS[2])));
+        assert!(common.contains(r#"os.environ.get("HD_CAP", "1024")"#));
         assert!(check(&request(&[], &["world"]), &realesrgan).is_err());
         assert!(check(&request(&["plain"], &[]), &realesrgan).is_err());
         assert!(check(&request(&["../evil"], &["world"]), &realesrgan).is_err());
@@ -485,6 +514,7 @@ mod tests {
         let request = BuildRequest {
             styles: vec!["plain".into()],
             types: vec!["world".into()],
+            cap: 1024,
         };
         let mut seen = Vec::new();
         let outcome = run(

@@ -9,7 +9,8 @@ palette) exactly as texture_hires.rs computes it:
   indexalpha         the palette index *is* the alpha: upscaled as a greyscale
                      image; RGB is palette[255], all the engine ever draws
 
-then Lanczos to the power-of-two target (4x, capped at 1024/side). Fully
+then Lanczos to the power-of-two target (4x, capped at HD_CAP a side, 1024
+by default). Fully
 transparent frames (blanked-out sprites) are skipped: nothing to upscale.
 
 HUD sprites (crosshairs, weapon icons, scopes...) are skipped too: the game
@@ -103,7 +104,7 @@ def main():
             if spr.tex_format == SPR_ALPHTEST and idx.count(255) == len(idx):
                 continue  # a blanked-out frame: nothing to upscale
             key = f"{base}_{n}_{C.fnv1a32(idx, spr.palette):08x}"
-            if not os.path.exists(os.path.join(out_dir, key + ".tga")):
+            if not C.built(os.path.join(out_dir, key + ".tga"), C.pot(w * 4), C.pot(h * 4)):
                 jobs.setdefault(key, (spr.tex_format, w, h, idx, spr.palette))
     print(f"{len(jobs)} sprite frames to build")
 

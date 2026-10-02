@@ -183,6 +183,35 @@ def main():
     check(img[tail + TAIL_BRANCH: tail + TAIL_BRANCH + 6] == BRANCH_STOLEN, "branch span bytes")
     check(img[up32 + SIZE_CHECK: up32 + SIZE_CHECK + 10] == SIZE_CHECK_STOLEN, "size-check span bytes")
 
+    # What the replacement size check assumes about GL_Upload32's registers
+    # (texture_hires.rs's PRE_SIZE_REGS): esi/edi hold the rounded width and
+    # height, ebx and [ebp+0x10] the original ones, [ebp-0xc] the product.
+    md0 = Cs(CS_ARCH_X86, CS_MODE_32)
+    text = lambda a, b: [f"{i.mnemonic} {i.op_str}" for i in md0.disasm(bytes(img[a:b]), base + a)]
+    pre = text(up32 + SIZE_CHECK - 0x14, up32 + SIZE_CHECK)
+    check(all(t in pre for t in ("mov esi, dword ptr [ebp + 0xc]", "mov edi, dword ptr [ebp - 0xc]", "mov eax, esi", "imul eax, edi")),
+          f"size check: esi/edi are the rounded width/height and eax their product ({pre})")
+    check("mov ebx, dword ptr [ebp + 0xc]" in text(up32, up32 + 0x30)
+          and not any(t.startswith(("mov ebx", "pop ebx", "xor ebx")) for t in text(up32 + 0x30, up32 + SIZE_CHECK)),
+          "size check: ebx still holds the original width")
+    post = text(up32 + SIZE_OK, up32 + SIZE_OK + 0xa0)
+    check(all(t in post for t in ("mov ecx, dword ptr [ebp + 0x10]", "cmp esi, ebx", "cmp edi, ecx")),
+          "size check: the own-size test compares esi/edi with ebx/[ebp+0x10]")
+    check("mov eax, dword ptr [ebp - 0xc]" in text(up32 + SIZE_OK, up32 + 0x2a0),
+          "size check: [ebp-0xc] is the product read back after it (a shrink stores it again)")
+    check(text(up32 + BUFFER_PUSHES[1] - 2, up32 + BUFFER_PUSHES[1]) == ["push edi", "push esi"],
+          "size check: the resample call takes edi/esi as the output height/width")
+    helpers = []
+    for t in text(up32 + SIZE_OK, up32 + 0x230):
+        if t.startswith("call 0x"):
+            r = int(t[5:], 16) - base
+            body = text(r, r + 0x70)
+            arrays = [b for b in body if "- 0x1014]" in b or "- 0x414]" in b]
+            if arrays:
+                helpers.append((r, any("[ebp + 0x18]" in b for b in body)))
+    check(len(helpers) == 2 and all(bound for _, bound in helpers),
+          f"size check: both resample helpers index their 1024-entry arrays by the output width, their fifth argument ({[hex(r) for r, _ in helpers]})")
+
     pushes = [u32(up32 + off + 1) for off in BUFFER_PUSHES if img[up32 + off] == 0x68]
     check(len(pushes) == 5 and len(set(pushes)) == 1, f"5 identical buffer pushes ({[hex(p) for p in pushes]})")
     for name, (off, op) in (("gamma", U8_GAMMA), ("dither", U8_DITHER), ("expansion", U8_EXPANSION)):
@@ -503,16 +532,38 @@ def anniversary():
     check(into == sorted(up32 + off + 1 for off, _ in refs),
           f"ceiling: nothing else refers into the scratch buffer ({[hex(r) for r in into]})")
     resamplers = [int(t.split()[1], 16) - base for a, t in instructions(up32, up32 + 0x300) if t.startswith("call 0x")]
-    frames = []
+    frames, resample_fns = [], []
     for r in resamplers:
         body_r = [t for _, t in instructions(r, r + 0x10)]
         if body_r[2:3] == ["sub esp, 0x81c"]:
             frames.append(0x81c)
         elif body_r[2:3] == ["mov eax, 0x2018"]:
             frames.append(0x2018)
+        else:
+            continue
+        resample_fns.append(r)
     check(sorted(frames) == [0x81c, 0x2018],
           f"ceiling: the two resample helpers have the pre-Anniversary frames plus a stack cookie ({[hex(f) for f in frames]})")
     check(not branches_into(up32, up32 + 0x4c0, up32 + size_check, len(stolen_c)), "ceiling: nothing branches into the span")
+    # What the replacement size check assumes about the registers (SIZE_REGS):
+    # esi/ebx rounded, edi/[ebp+0x10] original, [ebp-0x10] the product and
+    # [ebp-4] a second copy of the rounded width the mipmap loop reads.
+    pre = [t for _, t in instructions(up32 + size_check - 0x14, up32 + size_check)]
+    check("mov edi, dword ptr [ebp + 0xc]" in pre and "mov dword ptr [ebp - 0x10], eax" in pre,
+          f"ceiling: edi is the original width and [ebp-0x10] the product at the check ({pre})")
+    post = [t for _, t in instructions(up32 + size_ok, up32 + size_ok + 0x90)]
+    check(all(t in post for t in ("mov eax, dword ptr [ebp + 0x10]", "cmp esi, edi", "cmp ebx, eax")),
+          "ceiling: the own-size test compares esi/ebx with edi/[ebp+0x10]")
+    body = [t for _, t in instructions(up32 + size_ok, up32 + 0x4c0)]
+    check("mov eax, dword ptr [ebp - 4]" in body and "mov dword ptr [ebp - 4], esi" in [t for _, t in instructions(up32, up32 + size_check)],
+          "ceiling: [ebp-4] is the rounded width the mipmap loop reads (a shrink stores it)")
+    site_r = [t for _, t in instructions(up32 + refs[1][0] - 2, up32 + refs[1][0])]
+    check(site_r == ["push ebx", "push esi"], f"ceiling: the resample call takes ebx/esi as the output height/width ({site_r})")
+    bounded = []
+    for r in resample_fns:
+        body_r = [t for _, t in instructions(r, r + 0x80)]
+        bounded.append(any("- 0x1004]" in t or "- 0x404]" in t for t in body_r) and any("[ebp + 0x18]" in t for t in body_r))
+    check(bounded == [True, True], f"ceiling: both resample helpers index their 1024-entry arrays by the output width, their fifth argument ({[hex(r) for r in resample_fns]})")
 
     # Detail textures.
     d = site("DETAIL")

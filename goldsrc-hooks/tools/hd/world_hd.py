@@ -6,7 +6,8 @@ as texture_hires.rs computes it at runtime:
 
   extract -> (masked `{` textures: fill the cut-outs with their nearest
   colour) -> wrap-pad half a tile each side -> 4x in the style -> Lanczos to
-  2x the power-of-two target (capped at 1024/side) -> crop the centre tile ->
+  2x the power-of-two target (capped at HD_CAP a side, 1024 by default) ->
+  crop the centre tile ->
   (masked: alpha from the original mask, bilinear + threshold)
 
 The wrap padding matters: without it the upscaler treats each edge as a
@@ -52,7 +53,8 @@ def main():
                 blank.add(key)
                 continue
             jobs.setdefault(key, (name, w, h, idx, pal))
-    todo = {k: v for k, v in jobs.items() if not os.path.exists(os.path.join(out_dir, k + ".tga"))}
+    todo = {k: v for k, v in jobs.items()
+            if not C.built(os.path.join(out_dir, k + ".tga"), C.pot(v[1] * 4), C.pot(v[2] * 4))}
     print(f"{len(jobs)} unique textures across {len(maps)} map(s), {len(todo)} still to build"
           + (f" ({len(blank)} blank placeholder(s) skipped)" if blank else ""))
 
