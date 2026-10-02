@@ -15,6 +15,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -444,6 +445,9 @@ export async function refreshLaunchGuard(state) {
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
   }
+  // Every change that can block Start comes through here, so the strip
+  // (#443) follows it: banned commands, destinations, commands edits.
+  renderCaptureSummary();
 
   if (warningEl) {
     // First of all, ahead of even the calm cases below: a banned command is
@@ -517,6 +521,24 @@ let customCommandsEditor = null;
 /** Scrapes the current Init/Custom Commands state for settings persistence
  *  (raw, untrimmed — mirrors in-progress edits rather than the filtered
  *  shape `buildCapturePayload` sends to `start_capture_batch`). */
+/** The live capture setup, for the summary strip (#443). */
+function currentCaptureSetup() {
+  const state = (currentGetState ? currentGetState() : null) || {};
+  const codecEl = document.querySelector('#config-capture-codec');
+  return {
+    mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
+    obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    scheduledCount: getCommandsState().custom_commands.length,
+    bannedCount: bannedCommandCount(),
+    decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+    destinations: (state.targetDrives || []).filter(Boolean).length > 0,
+  };
+}
+
 export function getCommandsState() {
   return {
     init_commands: [...initCommands],
@@ -792,6 +814,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   };
 
   currentGetState = getState;
+  initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
   currentGetTakeIndex = getTakeIndex || null;
