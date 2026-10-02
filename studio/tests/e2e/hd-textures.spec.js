@@ -4,7 +4,8 @@
 // picker and the movie.cfg lines built from the backend's cvar names), that a
 // missing game path reads as a message rather than a broken page, that the
 // download's progress and cancel land in the progress line, which Python the
-// page says it will use, and the build's choices, progress and cancel.
+// page says it will use, the build's choices, progress and cancel, and the
+// misses view read from the hook log.
 import { test, expect } from '@playwright/test';
 
 /** native::hd::HdStatus, as serde sends it (snake_case). */
@@ -64,6 +65,7 @@ async function loadHarness(page, handlers) {
     window.__mockInvokeHandlers.hd_build = () =>
       new Promise((resolve, reject) => { window.__finishBuild = { resolve, reject }; });
     if (h.picked !== undefined) window.__mockInvokeHandlers['plugin:dialog|open'] = () => h.picked;
+    if (h.misses !== undefined) window.__mockInvokeHandlers.hd_misses = () => h.misses;
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -357,4 +359,78 @@ test('Build is off until at least one style and one kind of file are ticked', as
 
   await page.uncheck('#hd-build-styles input[value="plain"]');
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
+});
+
+/** native::hd::misses::MissesView, as serde sends it. */
+const MISSES = {
+  command: 'dodstudio_debug_hd_misses',
+  report: {
+    log_file: 'C:/Users/me/AppData/Roaming/dod-studio/logs/dodstudio_goldsrc_hooks_20260924.log',
+    date: '2026-09-24',
+    time: '22:05:57',
+    summary: '4 miss(es) this session, 3 different texture(s) (style "plain"). A texture several maps use is listed under each of them.',
+    style: 'plain',
+    maps: [
+      {
+        map: 'dod_anzio', total: 3, on_purpose: 1,
+        groups: [
+          {
+            reason: 'no_file', heading: 'no HD file',
+            entries: [{ asset_type: 'model', name: 'models/v_garand.mdl garand.bmp', detail: '256x128, not built yet', loads: 2, also_on: [] }],
+          },
+          {
+            reason: 'wrong_version', heading: 'HD file is for a different version of the texture',
+            entries: [{ asset_type: 'world', name: 'bido_wall1', detail: '128x128', loads: 1, also_on: ['dod_caen', 'dod_flash'] }],
+          },
+          {
+            reason: 'on_purpose', heading: 'left alone on purpose',
+            entries: [{ asset_type: 'sprite', name: 'sprites/puff.spr', detail: 'blank', loads: 4, also_on: ['dod_caen'] }],
+          },
+        ],
+      },
+      {
+        map: 'dod_caen', total: 1, on_purpose: 1,
+        groups: [{
+          reason: 'on_purpose', heading: 'left alone on purpose',
+          entries: [{ asset_type: 'sprite', name: 'sprites/puff.spr', detail: 'blank', loads: 4, also_on: ['dod_anzio'] }],
+        }],
+      },
+    ],
+  },
+};
+
+test('misses: nothing in the log says how to get a list, and names the command', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, misses: { command: 'dodstudio_debug_hd_misses', report: null } });
+  await page.click('.nav-tab-btn[data-nav="hd-textures"]');
+  await expect(page.locator('#hd-misses-command')).toHaveText('dodstudio_debug_hd_misses');
+  await expect(page.locator('#hd-misses-text')).toContainText('No list in the game');
+  await expect(page.locator('#hd-misses-maps details')).toHaveCount(0);
+});
+
+test('misses: a list is shown map by map, on-purpose ones only when asked', async ({ page }) => {
+  await loadHarness(page, { status: STATUS, misses: MISSES });
+  await page.click('#hd-misses-btn');
+  await expect(page.locator('#hd-misses-text')).toHaveText(
+    `From 2026-09-24 at 22:05:57, style plain: ${MISSES.report.summary}`);
+
+  const maps = page.locator('#hd-misses-maps details');
+  await expect(maps).toHaveCount(2);
+  await expect(maps.nth(0).locator('summary')).toHaveText('dod_anzio: 3 kept their original, 1 of them on purpose');
+  // On-purpose groups are hidden by default; a map with nothing else says so.
+  await expect(maps.nth(0).locator('.hd-miss-heading')).toHaveText(
+    ['no HD file (1)', 'HD file is for a different version of the texture (1)']);
+  await expect(maps.nth(1)).toContainText('Only textures left alone on purpose.');
+
+  const skin = maps.nth(0).locator('li').nth(0);
+  await expect(skin.locator('.hd-miss-type')).toHaveText('Model skin');
+  await expect(skin).toContainText('models/v_garand.mdl garand.bmp');
+  await expect(skin).toContainText('256x128, not built yet, 2 loads');
+  const shared = maps.nth(0).locator('li').nth(1).locator('.hd-miss-detail').nth(1);
+  await expect(shared).toHaveText('also on 2 other maps');
+  await expect(shared).toHaveAttribute('title', 'dod_caen, dod_flash');
+
+  await page.check('#hd-misses-on-purpose');
+  await expect(maps.nth(0).locator('.hd-miss-heading')).toHaveCount(3);
+  await expect(maps.nth(1).locator('li')).toContainText(['Sprite']);
+  await expect(maps.nth(1).locator('li')).toContainText(['4 frames']);
 });

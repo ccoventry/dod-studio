@@ -14,6 +14,7 @@
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
 pub mod build;
+pub mod misses;
 pub mod python;
 pub mod setup;
 pub mod upscaler;
