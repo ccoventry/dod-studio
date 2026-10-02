@@ -1170,6 +1170,8 @@ mod hook {
 
     use super::*;
 
+    /// The Playback tab's loading progress (#465).
+    mod load_progress;
     /// The Killstreaks tab (#565).
     mod streaks_tab;
 
@@ -2699,6 +2701,7 @@ mod hook {
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
                     streaks_tab::update(&vgui);
+                    load_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {
                     give_back(&vgui, &mut lent, None);

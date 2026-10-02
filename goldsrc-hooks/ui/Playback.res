@@ -336,4 +336,30 @@
 		"Command"		"engine dodstudio_viewdemo_in_panel 1"
 		"tooltiptext"		"Turns on dodstudio_viewdemo_in_panel: this tab shows the time and slider, and the VCR bar hides."
 	}
+	"LoadLabel"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"LoadLabel"
+		"xpos"		"8"
+		"ypos"		"200"
+		"wide"		"180"
+		"tall"		"22"
+		"visible"		"0"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+		"tooltiptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
+	}
+	"LoadProgress"
+	{
+		"ControlName"		"ProgressBar"
+		"fieldName"		"LoadProgress"
+		"xpos"		"196"
+		"ypos"		"204"
+		"wide"		"300"
+		"tall"		"14"
+		"visible"		"0"
+		"enabled"		"1"
+		"tooltiptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
+	}
 }

@@ -201,7 +201,8 @@ Options and Find Servers windows (Playback, Demos, Killstreaks, Console,
 Settings, Commands, Studio), and never
 narrower than its tabs. The Playback buttons do what the VCR bar's do, so a
 demo has to be playing under `viewdemo`; the tab also shows the bar's own time
-slider and time label. The Console tab holds the real console's history, input
+slider and time label, and while the demo player is still reading the demo,
+how far it has got (#465). The Console tab holds the real console's history, input
 line and Submit button (Enter submits). Both are the original controls, lent
 by their windows while ours is open and handed back when it closes.
 The Demos tab lists the demos, with each one's map and date, and loads one
