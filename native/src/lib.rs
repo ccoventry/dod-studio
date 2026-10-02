@@ -36,6 +36,10 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// Map overviews made from the BSP, for the Overviews page (#371).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod overview;
+
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]

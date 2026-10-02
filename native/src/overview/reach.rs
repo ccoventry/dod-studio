@@ -1,0 +1,377 @@
+//! Where a player can get to: every floor a player can stand on, rasterised
+//! onto an 8-unit grid, kept where a crouching player fits, then flood-filled
+//! from the spawns over steps, jumps, drops and ladders.
+//!
+//! The rules that mattered, each found on a real map:
+//!
+//! - The crouch hull is tested with its bottom a step above the floor (plus
+//!   however far a slope rises under its corner). Tested on the floor itself,
+//!   every stair riser and curb beside a node reads as solid and the fill
+//!   stops at the first step.
+//! - Walking off an edge carries a player forward while he falls, up to four
+//!   cells, through open air only. Without it, dod_railroad2_s10a's spawns
+//!   are sealed in by the high end of a ramp.
+//! - A floor above that a player doesn't fit on (a sill, a fence top beside a
+//!   wall) isn't climbed onto, so it doesn't hide the floor under it.
+
+use std::collections::{HashMap, VecDeque};
+
+use super::level::{CONTENTS_SOLID, Face, Level};
+
+pub const GRID: f32 = 8.0;
+/// A stair step (18) plus slack for slopes.
+pub const STEP: f32 = 20.0;
+/// DoD's jump onto a ledge.
+pub const JUMP: f32 = 45.0;
+/// Hull 3, the crouching player: 32x32x36, origin in the middle.
+const CROUCH_HALF: f32 = 18.0;
+const CROUCH_HULL: usize = 3;
+/// How far a fall carries a player past the edge, in cells.
+const FALL_CELLS: i32 = 4;
+
+/// Textures no player stands on.
+const TOOL_TEXTURES: [&str; 8] = [
+    "aaatrigger",
+    "clip",
+    "null",
+    "sky",
+    "origin",
+    "hint",
+    "skip",
+    "bevel",
+];
+
+/// Brush entities whose upper faces are floors.
+const FLOOR_CLASSES: [&str; 7] = [
+    "worldspawn",
+    "func_wall",
+    "func_breakable",
+    "func_wall_toggle",
+    "func_door",
+    "func_door_rotating",
+    "func_detail",
+];
+
+/// Brush entities that block a player. Doors open, so they don't.
+const SOLID_CLASSES: [&str; 3] = ["func_wall", "func_breakable", "func_wall_toggle"];
+
+/// Whether `face` is ground a player could stand on.
+pub fn is_floor(level: &Level, face: &Face) -> bool {
+    face.normal_z > 0.7
+        && !face.texture.starts_with('!')
+        && !TOOL_TEXTURES.iter().any(|t| face.texture.starts_with(t))
+        && level
+            .models
+            .get(face.model)
+            .is_some_and(|m| FLOOR_CLASSES.contains(&m.class.as_str()))
+}
+
+/// The plane through a polygon (Newell's method): unit normal and distance.
+pub fn plane_of(points: &[[f32; 3]]) -> ([f32; 3], f32) {
+    let mut n = [0.0f32; 3];
+    let mut centre = [0.0f32; 3];
+    for (i, a) in points.iter().enumerate() {
+        let b = points[(i + 1) % points.len()];
+        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+        for k in 0..3 {
+            centre[k] += a[k] / points.len() as f32;
+        }
+    }
+    let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-9);
+    let n = [n[0] / len, n[1] / len, n[2] / len];
+    (n, n[0] * centre[0] + n[1] * centre[1] + n[2] * centre[2])
+}
+
+/// The grid and its nodes: one per floor per cell.
+pub struct Reach {
+    pub x0: f32,
+    pub y0: f32,
+    pub nx: i32,
+    pub ny: i32,
+    /// Index into `Level::faces` of every floor face, in `floors` order.
+    pub floors: Vec<usize>,
+    /// Per node, sorted by cell, then highest first.
+    pub cell: Vec<i32>,
+    pub z: Vec<f32>,
+    /// Index into `floors`.
+    pub floor: Vec<u32>,
+    /// A crouching player fits here.
+    pub fits: Vec<bool>,
+    pub reached: Vec<bool>,
+    starts: HashMap<i32, (usize, usize)>,
+}
+
+impl Reach {
+    pub fn centre(&self, cell: i32) -> [f32; 2] {
+        let (i, j) = (cell / self.ny, cell % self.ny);
+        [
+            self.x0 + (i as f32 + 0.5) * GRID,
+            self.y0 + (j as f32 + 0.5) * GRID,
+        ]
+    }
+
+    pub fn cell_at(&self, x: f32, y: f32) -> Option<i32> {
+        let i = ((x - self.x0) / GRID).floor() as i32;
+        let j = ((y - self.y0) / GRID).floor() as i32;
+        (0..self.nx)
+            .contains(&i)
+            .then_some(())
+            .filter(|_| (0..self.ny).contains(&j))
+            .map(|_| i * self.ny + j)
+    }
+
+    /// The nodes in `cell`, highest first.
+    pub fn nodes_in(&self, cell: i32) -> std::ops::Range<usize> {
+        self.starts.get(&cell).map(|&(a, b)| a..b).unwrap_or(0..0)
+    }
+}
+
+/// Whether a crouching player fits with his origin at `p`: hull 3 of the
+/// world and of every solid brush entity.
+fn fits(level: &Level, p: [f32; 3]) -> bool {
+    if level.hull_contents(0, CROUCH_HULL, p) == CONTENTS_SOLID {
+        return false;
+    }
+    for (index, model) in level.models.iter().enumerate().skip(1) {
+        if !SOLID_CLASSES.contains(&model.class.as_str()) {
+            continue;
+        }
+        let local = [
+            p[0] - model.offset[0],
+            p[1] - model.offset[1],
+            p[2] - model.offset[2],
+        ];
+        let near =
+            (0..3).all(|k| local[k] >= model.mins[k] - 20.0 && local[k] <= model.maxs[k] + 20.0);
+        if near && level.hull_contents(index, CROUCH_HULL, local) == CONTENTS_SOLID {
+            return false;
+        }
+    }
+    true
+}
+
+fn ladders(level: &Level, reach: &Reach) -> HashMap<i32, (f32, f32)> {
+    let mut out = HashMap::new();
+    for model in level.models.iter().filter(|m| m.class == "func_ladder") {
+        let o = model.offset;
+        let i0 = ((model.mins[0] + o[0] - 24.0 - reach.x0) / GRID).floor() as i32;
+        let i1 = ((model.maxs[0] + o[0] + 24.0 - reach.x0) / GRID).floor() as i32;
+        let j0 = ((model.mins[1] + o[1] - 24.0 - reach.y0) / GRID).floor() as i32;
+        let j1 = ((model.maxs[1] + o[1] + 24.0 - reach.y0) / GRID).floor() as i32;
+        let span = (model.mins[2] + o[2] - 40.0, model.maxs[2] + o[2] + 8.0);
+        for i in i0.max(0)..=i1.min(reach.nx - 1) {
+            for j in j0.max(0)..=j1.min(reach.ny - 1) {
+                out.insert(i * reach.ny + j, span);
+            }
+        }
+    }
+    out
+}
+
+/// Builds the grid, tests every node, and floods from the spawns.
+pub fn build(level: &Level) -> Result<Reach, String> {
+    let floors: Vec<usize> = (0..level.faces.len())
+        .filter(|&i| is_floor(level, &level.faces[i]) && level.faces[i].points.len() >= 3)
+        .collect();
+    if floors.is_empty() {
+        return Err("the map has no floors".to_string());
+    }
+    let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+    for &f in &floors {
+        for p in &level.faces[f].points {
+            x0 = x0.min(p[0]);
+            y0 = y0.min(p[1]);
+            x1 = x1.max(p[0]);
+            y1 = y1.max(p[1]);
+        }
+    }
+    let (x0, y0) = (x0 - GRID, y0 - GRID);
+    let nx = ((x1 - x0) / GRID) as i32 + 2;
+    let ny = ((y1 - y0) / GRID) as i32 + 2;
+
+    // Rasterise: every cell centre inside a floor's footprint.
+    let mut raw: Vec<(i32, f32, u32, f32)> = Vec::new();
+    for (fi, &f) in floors.iter().enumerate() {
+        let points = &level.faces[f].points;
+        let (n, d) = plane_of(points);
+        if n[2].abs() < 1e-3 {
+            continue;
+        }
+        let rise = 16.0 * (n[0].abs() + n[1].abs()) / n[2].abs().max(0.7);
+        let (mut a0, mut b0, mut a1, mut b1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+        for p in points {
+            a0 = a0.min(p[0]);
+            b0 = b0.min(p[1]);
+            a1 = a1.max(p[0]);
+            b1 = b1.max(p[1]);
+        }
+        let i0 = (((a0 - x0) / GRID) as i32).max(0);
+        let i1 = (((a1 - x0) / GRID) as i32 + 1).min(nx);
+        let j0 = (((b0 - y0) / GRID) as i32).max(0);
+        let j1 = (((b1 - y0) / GRID) as i32 + 1).min(ny);
+        for i in i0..i1 {
+            for j in j0..j1 {
+                let cx = x0 + (i as f32 + 0.5) * GRID;
+                let cy = y0 + (j as f32 + 0.5) * GRID;
+                let (mut pos, mut neg) = (true, true);
+                for k in 0..points.len() {
+                    let a = points[k];
+                    let b = points[(k + 1) % points.len()];
+                    let cross = (b[0] - a[0]) * (cy - a[1]) - (b[1] - a[1]) * (cx - a[0]);
+                    pos &= cross >= -1e-4;
+                    neg &= cross <= 1e-4;
+                }
+                if pos || neg {
+                    let z = (d - n[0] * cx - n[1] * cy) / n[2];
+                    raw.push((i * ny + j, z, fi as u32, rise));
+                }
+            }
+        }
+    }
+    raw.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
+    // One node per floor per cell: drop one within 4 units under the last.
+    let mut kept: Vec<(i32, f32, u32, f32)> = Vec::with_capacity(raw.len());
+    for node in raw {
+        if let Some(last) = kept.last()
+            && last.0 == node.0
+            && last.1 - node.1 < 4.0
+        {
+            continue;
+        }
+        kept.push(node);
+    }
+
+    let mut reach = Reach {
+        x0,
+        y0,
+        nx,
+        ny,
+        floors,
+        cell: kept.iter().map(|n| n.0).collect(),
+        z: kept.iter().map(|n| n.1).collect(),
+        floor: kept.iter().map(|n| n.2).collect(),
+        fits: Vec::new(),
+        reached: vec![false; kept.len()],
+        starts: HashMap::new(),
+    };
+    let mut start = 0;
+    for k in 1..=kept.len() {
+        if k == kept.len() || kept[k].0 != kept[start].0 {
+            reach.starts.insert(kept[start].0, (start, k));
+            start = k;
+        }
+    }
+    // A step above the floor first; a crouch resting on it for low passages.
+    reach.fits = kept
+        .iter()
+        .map(|&(cell, z, _, rise)| {
+            let [x, y] = reach.centre(cell);
+            fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF])
+                || fits(level, [x, y, z + 2.0 + rise + CROUCH_HALF])
+        })
+        .collect();
+
+    flood(level, &mut reach);
+    Ok(reach)
+}
+
+fn flood(level: &Level, reach: &mut Reach) {
+    let ladders = ladders(level, reach);
+    let mut queue = VecDeque::new();
+    for class in ["info_player_allies", "info_player_axis"] {
+        for (_, origin) in level.points(class) {
+            let Some(cell) = reach.cell_at(origin[0], origin[1]) else {
+                continue;
+            };
+            let below = reach
+                .nodes_in(cell)
+                .find(|&k| reach.z[k] <= origin[2] && reach.fits[k]);
+            if let Some(k) = below
+                && !reach.reached[k]
+            {
+                reach.reached[k] = true;
+                queue.push_back(k);
+            }
+        }
+    }
+    while let Some(k) = queue.pop_front() {
+        let cell = reach.cell[k];
+        let (i, j) = (cell / reach.ny, cell % reach.ny);
+        let z = reach.z[k];
+        let on_ladder = ladders.contains_key(&cell);
+        for (di, dj) in [(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)] {
+            let (ii, jj) = (i + di, j + dj);
+            if !(0..reach.nx).contains(&ii) || !(0..reach.ny).contains(&jj) {
+                continue;
+            }
+            let c2 = ii * reach.ny + jj;
+            if on_ladder && let Some(&(lo, hi)) = ladders.get(&c2) {
+                for k2 in reach.nodes_in(c2) {
+                    let z2 = reach.z[k2];
+                    if ((lo..=hi).contains(&z2) || z2 <= z + JUMP)
+                        && reach.fits[k2]
+                        && !reach.reached[k2]
+                    {
+                        reach.reached[k2] = true;
+                        queue.push_back(k2);
+                    }
+                }
+                continue;
+            }
+            if (di, dj) == (0, 0) {
+                continue;
+            }
+            for step in 1..=FALL_CELLS {
+                let (ii, jj) = (i + di * step, j + dj * step);
+                if !(0..reach.nx).contains(&ii) || !(0..reach.ny).contains(&jj) {
+                    break;
+                }
+                let c2 = ii * reach.ny + jj;
+                // The first floor at or below a jump's reach; one above this
+                // floor that a player doesn't fit on isn't climbed onto.
+                let land = reach.nodes_in(c2).find(|&k2| {
+                    let z2 = reach.z[k2];
+                    !(z2 > z + JUMP || (!reach.fits[k2] && z2 > z + 2.0))
+                });
+                if let Some(k2) = land
+                    && reach.fits[k2]
+                {
+                    if !reach.reached[k2] {
+                        reach.reached[k2] = true;
+                        queue.push_back(k2);
+                    }
+                    break;
+                }
+                let falling = land.is_none_or(|k2| reach.z[k2] < z - STEP);
+                if !falling {
+                    break;
+                }
+                // Only through open air, never through a wall.
+                let [x, y] = reach.centre(c2);
+                if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF]) {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn newell_finds_an_upward_floor() {
+        let square = [
+            [0.0, 0.0, 10.0],
+            [64.0, 0.0, 10.0],
+            [64.0, 64.0, 10.0],
+            [0.0, 64.0, 10.0],
+        ];
+        let (n, d) = plane_of(&square);
+        assert!((n[2] - 1.0).abs() < 1e-5, "{n:?}");
+        assert!((d - 10.0).abs() < 1e-3);
+    }
+}
