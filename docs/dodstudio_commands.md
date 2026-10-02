@@ -203,12 +203,14 @@ demo has to be playing under `viewdemo`; the tab also shows the bar's own time
 slider and time label. The Console tab holds the real console's history, input
 line and Submit button (Enter submits). Both are the original controls, lent
 by their windows while ours is open and handed back when it closes.
-The Demos tab lists the demos and loads one with no demo playing. On the
+The Demos tab lists the demos, with each one's map and date, and loads one
+with no demo playing. Click a column heading to sort by it; the boxes above
+filter by name or map (Search), map, HLTV or POV, and age in days. On the
 Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
 shows the value and sets it when clicked (add more in build mode).
 `dodstudio_panel [1|0|reset]`: bare opens or closes it, `1` opens, `0` closes,
 `reset` writes the default layouts back and rebuilds the window. With
-`dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Demos tab.
+`dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Playback tab.
 
 The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`
 (DoD Studio, Resume/Disconnect in a demo, Options, Quit), shown when the game

@@ -456,6 +456,25 @@ const DEMO_FILTER: &str = "DemoFilter";
 const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
+/// `AddColumnHeader(int index, const char *name, const char *text, int width,
+/// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
+/// and Date columns are built with.
+const LIST_SLOT_ADD_COLUMN_HEADER: usize = 134;
+const LIST_SLOT_SET_COLUMN_SORTABLE: usize = 148;
+/// `ApplyItemChanges(int itemID)`: re-sorts a row after its values changed.
+const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
+/// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
+const LIST_SLOT_DELETE_ALL_ITEMS: usize = 165;
+/// `KeyValues::SetString(const char *key, const char *value)`: the 3-argument
+/// `KeyValues` constructor the demo list's rows are made with calls it.
+const KEYVALUES_SLOT_SET_STRING: usize = 17;
+/// The width the Demos tab gives the demo name column.
+const NAME_COLUMN_WIDE: i32 = 250;
+/// The Demos tab's columns past the demo's own name: key, heading, width.
+const DEMO_COLUMNS: [(&CStr, &CStr, i32); 2] = [(c"map", c"Map", 130), (c"date", c"Date", 120)];
+/// Set on a row once its Map and Date are filled in, so a list the Load Demo
+/// window refilled on its own (opening a folder) is noticed.
+const STAMP_KEY: &CStr = c"dodstudio";
 
 /// Whether a demo row matches what was typed in the search box: every word,
 /// anywhere in the name, case ignored. An empty search matches everything.
@@ -502,6 +521,28 @@ fn demo_info(header: &[u8], modified: u64) -> Option<DemoInfo> {
         hltv,
         modified,
     })
+}
+
+/// `secs` (Unix time, UTC) as a calendar date and time:
+/// (year, month, day, hour, minute).
+fn civil(secs: u64) -> (u64, u64, u64, u64, u64) {
+    // Howard Hinnant's days-to-civil.
+    let days = secs / 86_400;
+    let z = days + 719_468;
+    let era = z / 146_097;
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + u64::from(month <= 2);
+    (year, month, day, secs % 86_400 / 3600, secs % 3600 / 60)
+}
+
+/// The Date column's text: sorts as text in date order.
+fn date_text((year, month, day, hour, minute): (u64, u64, u64, u64, u64)) -> String {
+    format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}")
 }
 
 /// Everything the Demos tab filters by at once.
@@ -1115,8 +1156,14 @@ mod hook {
     type SetSelectedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
     type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type ListFirstFn = unsafe extern "thiscall" fn(*mut c_void) -> i32;
+    type ListVoidFn = unsafe extern "thiscall" fn(*mut c_void);
     type ListItemIdFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> i32;
     type ListSetVisibleFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
+    type AddColumnFn =
+        unsafe extern "thiscall" fn(*mut c_void, i32, *const c_char, *const c_char, i32, i32);
+    type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
+    type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
+    type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
@@ -1303,10 +1350,6 @@ mod hook {
                 days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
             let filter = format!("{filters:?}");
-            let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
-            if last.as_deref() == Some(filter.as_str()) {
-                return;
-            }
             let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
             let Ok((_, build)) = gameui() else { return };
             if dialog.is_null() {
@@ -1314,6 +1357,14 @@ mod hook {
             }
             let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
             if list.is_null() {
+                return;
+            }
+            let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+            // A refilled list shows every row again: stamp it and filter afresh.
+            if stamp_demo_rows(list) {
+                *last = None;
+            }
+            if last.as_deref() == Some(filter.as_str()) {
                 return;
             }
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
@@ -1352,6 +1403,128 @@ mod hook {
                 id = next(list, id);
             }
             *last = Some(filter);
+        }
+    }
+
+    /// Gives our Load Demo window's list Map and Date columns after the
+    /// demo's name, every column sortable by a click on its heading. The name
+    /// column stays the window's own (as wide as its `.res` list, so it is
+    /// narrowed through its heading, which is a panel named after the column):
+    /// `RemoveColumn` marks the column's sort-history byte 0xff instead of
+    /// removing it, and `DeleteAllItems` then indexes column 0xff and crashes.
+    unsafe fn add_demo_columns(vgui: &Vgui, dialog: *mut c_void) {
+        unsafe {
+            let Ok((_, build)) = gameui() else { return };
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let add: AddColumnFn = slot(list, LIST_SLOT_ADD_COLUMN_HEADER);
+            let sortable: ListIntBoolFn = slot(list, LIST_SLOT_SET_COLUMN_SORTABLE);
+            let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
+            // A row remembers its place in each column's sort order by column
+            // position, so columns change only while the list is empty (the
+            // window filled it as it was built); `refill_demo_list` refills it.
+            delete_all(list);
+            for (index, (key, heading, width)) in DEMO_COLUMNS.iter().enumerate() {
+                add(
+                    list,
+                    index as i32 + 1,
+                    key.as_ptr(),
+                    heading.as_ptr(),
+                    *width,
+                    0,
+                );
+            }
+            if let Some(heading) = vgui.child_named(vpanel_of(list), "demoname") {
+                let (x, y, _, tall) = vgui.rect(heading);
+                vgui.place(heading, (x, y, NAME_COLUMN_WIDE, tall));
+            }
+            for index in 0..=DEMO_COLUMNS.len() as i32 {
+                sortable(list, index, 1);
+            }
+        }
+    }
+
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn SystemTimeToTzSpecificLocalTime(
+            zone: *const c_void,
+            utc: *const [u16; 8],
+            local: *mut [u16; 8],
+        ) -> i32;
+    }
+
+    /// A file time as the Date column shows it, in local time (with the
+    /// daylight saving of that date, as Explorer shows it).
+    fn local_date(secs: u64) -> String {
+        let (year, month, day, hour, minute) = civil(secs);
+        let utc = [
+            year as u16,
+            month as u16,
+            0,
+            day as u16,
+            hour as u16,
+            minute as u16,
+            0,
+            0,
+        ];
+        let mut local = [0u16; 8];
+        if unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) } == 0 {
+            return date_text((year, month, day, hour, minute));
+        }
+        let [year, month, _, day, hour, minute, ..] = local.map(u64::from);
+        date_text((year, month, day, hour, minute))
+    }
+
+    /// Fills in every row's Map and Date, when the list was (re)filled since
+    /// the last time. Returns whether it did.
+    unsafe fn stamp_demo_rows(list: *mut c_void) -> bool {
+        unsafe {
+            let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
+            let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
+            let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let apply_changes: ListIntVoidFn = slot(list, LIST_SLOT_APPLY_ITEM_CHANGES);
+            let get = |row: *mut c_void, key: &CStr| -> String {
+                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+                let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                if raw.is_null() {
+                    String::new()
+                } else {
+                    text(raw)
+                }
+            };
+            let id = first(list);
+            if is_valid(list, id) & 0xff == 0 {
+                return false;
+            }
+            let row = get_item(list, id);
+            if row.is_null() || !get(row, STAMP_KEY).is_empty() {
+                return false;
+            }
+            let mut id = id;
+            let mut guard = 0;
+            while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
+                guard += 1;
+                let row = get_item(list, id);
+                if !row.is_null() {
+                    let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
+                    if let Some(info) = info_for(&get(row, ROW_KEY))
+                        && let Ok(map) = std::ffi::CString::new(info.map.clone())
+                        && let Ok(date) = std::ffi::CString::new(local_date(info.modified))
+                    {
+                        set_string(row, DEMO_COLUMNS[0].0.as_ptr(), map.as_ptr());
+                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), date.as_ptr());
+                    }
+                    set_string(row, STAMP_KEY.as_ptr(), c"1".as_ptr());
+                    // Each column keeps its rows sorted as they were added;
+                    // re-sort this one into the new columns.
+                    apply_changes(list, id);
+                }
+                id = next(list, id);
+            }
+            true
         }
     }
 
@@ -1819,6 +1992,8 @@ mod hook {
                 Ordering::Release,
             );
             DEMO_DIALOG.store(dialog as usize, Ordering::Release);
+            add_demo_columns(&vgui, dialog);
+            refill_demo_list();
             Ok((frame, sheet))
         }
     }
@@ -2982,6 +3157,14 @@ mod tests {
         header.extend_from_slice(b"Spawn count 19 (HLTV)\n");
         assert!(demo_info(&header, 7).unwrap().hltv);
         assert_eq!(demo_info(b"not a demo", 0), None);
+    }
+
+    #[test]
+    fn a_file_time_reads_as_a_date_that_sorts_as_text() {
+        assert_eq!(date_text(civil(0)), "1970-01-01 00:00");
+        // 2026-09-29 21:52:30 UTC; 2024-02-29, a leap day.
+        assert_eq!(date_text(civil(1_790_718_750)), "2026-09-29 21:52");
+        assert_eq!(date_text(civil(1_709_164_800)), "2024-02-29 00:00");
     }
 
     #[test]

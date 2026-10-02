@@ -207,6 +207,51 @@ def verify(game, src):
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
 
+    # 19: the Map and Date columns. The window's constructor makes its one
+    # column through AddColumnHeader, just after pushing "demoname".
+    for name, want in (("LIST_SLOT_ADD_COLUMN_HEADER", "ret 0x14"),
+                       ("LIST_SLOT_SET_COLUMN_SORTABLE", "ret 8"), ("LIST_SLOT_APPLY_ITEM_CHANGES", "ret 4")):
+        index = vwl.rust_usize(src, name)
+        got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base)
+        check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # ApplyItemChanges: re-index the row, then InvalidateLayout (slot 58).
+    body = ui.body(ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_APPLY_ITEM_CHANGES")) - ui.base, 0x40)
+    calls = [x for x in body if x.startswith("call")]
+    check(len(calls) == 2 and re.fullmatch(r"call 0x[0-9a-f]+", calls[0]) and calls[1].endswith("+ 0xe8]"),
+          f"ApplyItemChanges re-indexes the row and lays the list out again: {calls}")
+    # DeleteAllItems: the window's own fill empties the list through it.
+    delete_all = 4 * vwl.rust_usize(src, "LIST_SLOT_DELETE_ALL_ITEMS")
+    check(any(re.fullmatch(rf"call dword ptr \[e[a-z]{{2}} \+ {hex(delete_all)}\]", x) for x in fill),
+          f"file_dialog_fill empties the list through slot {delete_all // 4} (DeleteAllItems)")
+    got = ui.last_ret(ui.u32(list_vt + delete_all) - ui.base)
+    check(got == "ret", f"which returns with {got!r} (no arguments)")
+    demoname = ui.base + ui.img.find(b"demoname\0")
+    ctor = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[build["file_dialog_ctor"]:build["file_dialog_ctor"] + 0x400], ui.base + build["file_dialog_ctor"])]
+    add = 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER")
+    at = ctor.index(f"push {hex(demoname)}") if f"push {hex(demoname)}" in ctor else None
+    near = ctor[at:at + 4] if at is not None else []
+    check(any(re.fullmatch(rf"call dword ptr \[e[a-z]{{2}} \+ {hex(add)}\]", x) for x in near),
+          f"the constructor adds its \"demoname\" column through that slot: {near}")
+    sortable = ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_SET_COLUMN_SORTABLE")) - ui.base
+    pushed = [ui.img[int(x.split()[1], 16) - ui.base:][:16].split(b"\0")[0]
+              for x in ui.body(sortable, 0x60) if re.fullmatch(r"push 0x1[0-9a-f]{7}", x)]
+    check(b"SetSortColumn" in pushed, f"SetColumnSortable makes a SetSortColumn command: {pushed}")
+    # A row is `new KeyValues("data", "demoname", name)`, which calls SetString.
+    data = ui.base + ui.img.find(b"\0data\0") + 1
+    rows = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(
+        ui.img[build["file_dialog_fill"]:build["file_dialog_fill"] + 0x400], ui.base + build["file_dialog_fill"])]
+    k = next((n for n in range(len(rows) - 3) if rows[n] == f"push {hex(data)}"), None)
+    kv_ctor = int(next(x for x in rows[k:k + 4] if x.startswith("call ")).split()[1], 16) - ui.base if k else 0
+    body = ui.body(kv_ctor, 0x40)
+    kv_vt = next((int(x.split(", ")[1], 16) - ui.base for x in body if x.startswith("mov dword ptr [esi], 0x")), 0)
+    calls_in = [int(x.split()[1], 16) - ui.base for x in body if re.fullmatch(r"call 0x[0-9a-f]+", x)]
+    set_string = calls_in[-1] if calls_in else 0
+    index = vwl.rust_usize(src, "KEYVALUES_SLOT_SET_STRING")
+    check(kv_vt and ui.u32(kv_vt + 4 * index) - ui.base == set_string,
+          f"KeyValues slot {index} is the SetString the row constructor +{kv_ctor:#x} calls (+{set_string:#x})")
+    got = ui.last_ret(set_string)
+    check(got == "ret 8", f"which returns with {got!r} (key, value)")
+
     # 16: the Playback tab's time box.
     text_vt = ui.vftable("TextEntry@vgui2")
     get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
