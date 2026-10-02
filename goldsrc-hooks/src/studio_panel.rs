@@ -525,8 +525,13 @@ const KEYVALUES_SLOT_SET_STRING: usize = 17;
 /// The width the Demos tab gives the demo name column.
 const NAME_COLUMN_WIDE: i32 = 250;
 /// The Demos tab's columns past the demo's own name: key, heading, width.
-const DEMO_COLUMNS: [(&CStr, &CStr, i32); 2] = [(c"map", c"Map", 130), (c"date", c"Date", 120)];
-/// Set on a row once its Map and Date are filled in, so a list the Load Demo
+/// Type is POV or HLTV, read from the demo's header like the Type filter.
+const DEMO_COLUMNS: [(&CStr, &CStr, i32); 3] = [
+    (c"map", c"Map", 120),
+    (c"type", c"Type", 50),
+    (c"date", c"Date", 120),
+];
+/// Set on a row once its Map, Type and Date are filled in, so a list the Load Demo
 /// window refilled on its own (opening a folder) is noticed.
 const STAMP_KEY: &CStr = c"dodstudio";
 
@@ -1630,7 +1635,7 @@ mod hook {
         date_text((year, month, day, hour, minute))
     }
 
-    /// Fills in every row's Map and Date, when the list was (re)filled since
+    /// Fills in every row's Map, Type and Date, when the list was (re)filled since
     /// the last time. Returns whether it did.
     unsafe fn stamp_demo_rows(list: *mut c_void) -> bool {
         unsafe {
@@ -1668,7 +1673,9 @@ mod hook {
                         && let Ok(date) = std::ffi::CString::new(local_date(info.modified))
                     {
                         set_string(row, DEMO_COLUMNS[0].0.as_ptr(), map.as_ptr());
-                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), date.as_ptr());
+                        let kind = if info.hltv { c"HLTV" } else { c"POV" };
+                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), kind.as_ptr());
+                        set_string(row, DEMO_COLUMNS[2].0.as_ptr(), date.as_ptr());
                     }
                     set_string(row, STAMP_KEY.as_ptr(), c"1".as_ptr());
                     // Each column keeps its rows sorted as they were added;
