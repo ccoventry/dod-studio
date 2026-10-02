@@ -81,6 +81,10 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
   map's one team test in `client.dll`; see `src/overview_players.rs`.
+- **High-quality overviews:** when `overviews/<map>_hd.tga` sits beside the
+  overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
+  replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
+  Overviews page writes it. See `src/overview_hd.rs`.
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark

@@ -1848,3 +1848,181 @@ tr.keyboard-selected {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* ── Overviews page (#371) ─────────────────────────────────────────────── */
+#pane-overviews {
+  flex: 1;
+  min-height: 0;
+}
+
+.ov-layout {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.ov-side {
+  width: 250px;
+  flex: 0 0 250px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ov-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ov-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ov-canvas-wrap {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#ov-canvas {
+  image-rendering: auto;
+  cursor: crosshair;
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
+.ov-tools-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ov-mode.active,
+#ov-clear-colour-btn.active {
+  outline: 2px solid var(--primary-accent);
+}
+
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-field.ov-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-subtitle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.ov-map-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.ov-map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #282828;
+}
+
+.ov-map-row span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-map-row.active {
+  background: var(--bg-input);
+}
+
+.ov-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.ov-badge-ours {
+  color: #8ade75;
+  border-color: #8ade75;
+}
+
+.ov-badge-edited {
+  color: #d5e34f;
+  border-color: #d5e34f;
+}
+
+.ov-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.ov-swatch {
+  height: 24px;
+  padding: 0;
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.ov-swatch.active {
+  outline: 2px solid #fff;
+}
+
+.ov-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.ov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-label-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ov-label-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-label-row.active input {
+  outline: 1px dashed #ffdd00;
+}

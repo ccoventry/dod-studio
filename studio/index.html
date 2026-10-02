@@ -53,6 +53,7 @@
           <button class="nav-tab-btn" data-nav="demo-auditor" data-str="NAV.DEMO_AUDITOR_TAB">Demo Auditor</button>
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
           <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
+          <button class="nav-tab-btn" data-nav="overviews" data-str="NAV.OVERVIEWS_TAB">Overviews</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -802,6 +803,97 @@
           </div>
         </section>
 
+        <!-- The Overviews page (#371): map overviews made from the map, edited
+             here and written for the game. overviews_pane.js drives it. -->
+        <section id="pane-overviews" class="content-pane" style="display: none;">
+          <div class="ov-layout">
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.MAPS_TITLE">Maps</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.INSTALL_LABEL">Half-Life install</span>
+                  <select id="ov-install-select"></select>
+                </label>
+                <input id="ov-map-filter" type="search" data-str-placeholder="OVERVIEWS.FILTER_PLACEHOLDER" placeholder="Filter maps">
+                <div id="ov-map-list" class="ov-map-list"></div>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-main">
+              <div class="panel-header flex-between">
+                <h3 id="ov-map-title" data-str="OVERVIEWS.NO_MAP_TITLE">Pick a map</h3>
+                <div class="ov-tools-row" id="ov-mode-buttons">
+                  <button class="ov-mode active" data-mode="area" data-str="OVERVIEWS.MODE_AREA" data-str-title="OVERVIEWS.MODE_AREA_TIP" title="Click an area to give it the chosen colour">Colour area</button>
+                  <button class="ov-mode" data-mode="face" data-str="OVERVIEWS.MODE_FACE" data-str-title="OVERVIEWS.MODE_FACE_TIP" title="Click to colour one piece of floor only">Colour piece</button>
+                  <button class="ov-mode" data-mode="hide" data-str="OVERVIEWS.MODE_HIDE" data-str-title="OVERVIEWS.MODE_HIDE_TIP" title="Click an area to hide it or show it again">Hide area</button>
+                  <button class="ov-mode" data-mode="label" data-str="OVERVIEWS.MODE_LABEL" data-str-title="OVERVIEWS.MODE_LABEL_TIP" title="Click to put a text label there">Add label</button>
+                  <button id="ov-undo-btn" data-str="OVERVIEWS.UNDO_BUTTON" data-str-title="OVERVIEWS.UNDO_TIP" title="Undo (Ctrl+Z)">Undo</button>
+                </div>
+              </div>
+              <div class="panel-body ov-canvas-wrap" id="ov-canvas-wrap">
+                <canvas id="ov-canvas"></canvas>
+                <p id="ov-empty" class="hd-hint" data-str="OVERVIEWS.EMPTY_HINT">Pick a map on the left. Its overview is made from the map itself: every floor a player can reach from the spawns.</p>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.EDIT_TITLE">Edit</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <div class="ov-subtitle" data-str="OVERVIEWS.COLOUR_TITLE">Colour</div>
+                <div id="ov-palette" class="ov-palette"></div>
+                <label class="ov-field ov-inline">
+                  <span data-str="OVERVIEWS.CUSTOM_COLOUR_LABEL">Other colour</span>
+                  <input id="ov-custom-colour" type="color" value="#929bf7">
+                </label>
+                <button id="ov-clear-colour-btn" data-str="OVERVIEWS.CLEAR_COLOUR_BUTTON" data-str-title="OVERVIEWS.CLEAR_COLOUR_TIP" title="Pick this, then click an area to put its own colour back">Original colour</button>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SHOW_TITLE">Show</div>
+                <div class="ov-checks" id="ov-show">
+                  <label><input type="checkbox" data-show="flags"> <span data-str="OVERVIEWS.SHOW_FLAGS">Flags</span></label>
+                  <label><input type="checkbox" data-show="flagLabels"> <span data-str="OVERVIEWS.SHOW_FLAG_NAMES">Flag names</span></label>
+                  <label><input type="checkbox" data-show="capZones"> <span data-str="OVERVIEWS.SHOW_CAP_ZONES">Capture zones</span></label>
+                  <label><input type="checkbox" data-show="spawns"> <span data-str="OVERVIEWS.SHOW_SPAWNS">Spawn points</span></label>
+                  <label><input type="checkbox" data-show="spawnLabels"> <span data-str="OVERVIEWS.SHOW_SPAWN_NAMES">Spawn names</span></label>
+                  <label><input type="checkbox" data-show="stairs"> <span data-str="OVERVIEWS.SHOW_STAIRS">Stairs in white</span></label>
+                  <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.FLAGS_TITLE">Flag names</div>
+                <div id="ov-flag-names" class="ov-list"></div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.LABELS_TITLE">Labels</div>
+                <div id="ov-labels" class="ov-list"></div>
+                <p id="ov-labels-hint" class="hd-hint" data-str="OVERVIEWS.LABELS_HINT">Use Add label, then click the map. Drag a label to move it.</p>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SAVE_TITLE">Save for the game</div>
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.FORMAT_LABEL">Image</span>
+                  <select id="ov-format">
+                    <option value="tga" data-str="OVERVIEWS.FORMAT_TGA">TGA: full colour, smooth edges</option>
+                    <option value="bmp" data-str="OVERVIEWS.FORMAT_BMP">BMP: 256 colours, like the game's own</option>
+                  </select>
+                </label>
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.TARGET_LABEL">Where</span>
+                  <select id="ov-target">
+                    <option value="addon" data-str="OVERVIEWS.TARGET_ADDON">dod_addon (used when the game runs with -addons)</option>
+                    <option value="game" data-str="OVERVIEWS.TARGET_GAME">dod (your own is backed up first)</option>
+                  </select>
+                </label>
+                <label class="ov-checks"><span><input id="ov-hd" type="checkbox" checked> <span data-str="OVERVIEWS.HD_LABEL">Also save a high-quality copy</span></span></label>
+                <p class="hd-hint" data-str="OVERVIEWS.HD_HINT">Saved beside it as &lt;map&gt;_hd.tga, 4096x3072. The game alone shows at most 1024x768; with DoD Studio's in-game hook it uses this copy instead.</p>
+                <button id="ov-save-btn" class="primary" data-str="OVERVIEWS.SAVE_BUTTON">Save overview</button>
+                <button id="ov-reset-btn" data-str="OVERVIEWS.RESET_BUTTON">Start over</button>
+                <p id="ov-save-status" class="hd-hint"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Demo Analyzer: standalone per-demo report (Summary/Scoreboard/Player/Team/Timeline/Rounds/Chat) -->
         <section id="pane-demo-analyzer" class="content-pane" style="display: none;">
           <!-- Left: Explorer sidebar — 3-tier Quick Links (Pinned/Recent/Local) + a
@@ -956,6 +1048,9 @@
         </div>
         <div id="footer-hd-textures" class="pinned-footer-content" style="display: none;">
           <div id="footer-hd-summary"></div>
+        </div>
+        <div id="footer-overviews" class="pinned-footer-content" style="display: none;">
+          <div id="footer-overviews-summary"></div>
         </div>
       </footer>
 

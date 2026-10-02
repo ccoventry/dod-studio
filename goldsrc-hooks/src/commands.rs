@@ -697,6 +697,9 @@ fn status_text() -> String {
     if let Some(marker) = crate::overview_marker::status_line() {
         lines.push(marker);
     }
+    if let Some(hd) = crate::overview_hd::status_line() {
+        lines.push(hd);
+    }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
     }

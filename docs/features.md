@@ -119,6 +119,20 @@ There is no export from the page. The CLI can export Markdown or JSON (section 8
 
 Covered in section 6.
 
+### 2.8 Overviews
+
+Makes the image the game draws for its overview map (`overviews/<map>.tga` or `.bmp`, with its `.txt`) from the map itself (#371). `native::overview` works out every floor a player can reach from the spawns and groups it into areas. The page draws them in the colours of a hand-made overview and lets you:
+
+- recolour an area or a single piece of floor;
+- hide an area;
+- rename flags;
+- add labels and drag them;
+- turn flags, capture zones, spawns, white stairs and water on or off.
+
+Edits are saved per map as you go. **Save overview** writes a TGA (full colour, the background left transparent) or an 8-bit BMP at the game's 1024x768. It goes into `dod_addon/overviews` (read when the game runs with `-addons`) or `dod/overviews`. A user's own overview there is copied to `overviews/dodstudio_backup` first. The `.txt` uses the game's own placement maths, so the game's player icons land on the right spot.
+
+The game itself shows at most 1024x768 (its loader reads the image into a fixed 3 MB buffer and cuts it into 128-pixel tiles). Ticking **Also save a high-quality copy** writes `<map>_hd.tga` at 4096x3072 beside it. With DoD Studio's hook DLL in the game (`goldsrc-hooks/src/overview_hd.rs`), each tile is re-uploaded from that copy at 512x512.
+
 ---
 
 ## 3. How a capture batch works
@@ -370,6 +384,8 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod\dodstudio_hd\` |
+| Overview edits | `%APPDATA%\dod-studio\overviews\<map>.json` |
+| Saved overviews | `<install>\dod_addon\overviews\` or `<install>\dod\overviews\`; a user's own copied to `overviews\dodstudio_backup\` first |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |
 | OBS | a `[DoD-Studio]` profile and scene inside your OBS |
 

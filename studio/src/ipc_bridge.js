@@ -728,3 +728,80 @@ export async function hdSetPython(path) {
       throw err;
     });
 }
+
+// ── Overviews page (#371) ────────────────────────────────────────────────
+
+/** Half-Life installs with Day of Defeat; `gamePath` is Configuration's hl.exe. */
+export async function overviewInstalls(gamePath) {
+  return invoke("overview_installs", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_installs):", err);
+      throw err;
+    });
+}
+
+/** The maps in an install, and which overview each has. */
+export async function overviewMaps(install) {
+  return invoke("overview_maps", { install })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_maps):", err);
+      throw err;
+    });
+}
+
+/** What to draw for one map: floors, areas, water, capture zones, flags, spawns. */
+export async function overviewScene(install, map) {
+  return invoke("overview_scene", { install, map })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_scene):", err);
+      showToast(STRINGS.IPC.overviewFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function overviewLoadEdits(map) {
+  return invoke("overview_load_edits", { map })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_load_edits):", err);
+      throw err;
+    });
+}
+
+export async function overviewSaveEdits(map, edits) {
+  return invoke("overview_save_edits", { map, edits })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_save_edits):", err);
+      throw err;
+    });
+}
+
+export async function overviewResetEdits(map) {
+  return invoke("overview_reset_edits", { map })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_reset_edits):", err);
+      throw err;
+    });
+}
+
+/** Writes the finished overview; resolves with the files written and backed up. */
+export async function overviewExport(request) {
+  return invoke("overview_export", { request })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_export):", err);
+      showToast(STRINGS.IPC.overviewSaveFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Writes the high-quality copy (`<map>_hd.tga`) DoD Studio's hook tiles from.
+ *  The pixels go as the raw body: 48 MB at 4096x3072 is too big for JSON. */
+export async function overviewExportHd(meta, rgba) {
+  return invoke("overview_export_hd", rgba, {
+    headers: { 'x-overview': encodeURIComponent(JSON.stringify(meta)) },
+  })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_export_hd):", err);
+      showToast(STRINGS.IPC.overviewSaveFailed(err), 'error');
+      throw err;
+    });
+}
