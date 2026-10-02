@@ -202,6 +202,10 @@ const PAGE_ALLOC: usize = 0x400;
 const FRAME_SLOT_ON_COMMAND: usize = 87;
 /// `Panel::OnKeyCodeTyped(KeyCode)`, the slot #396's `Frame` patch is in.
 const PANEL_SLOT_ON_KEY_CODE_TYPED: usize = 100;
+/// `Panel::OnKeyCodePressed(KeyCode)`. The console dialog overrides it:
+/// Tab and the arrow keys (type-ahead and command history) are handled
+/// there, for keys its input line passes up to its parent.
+const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
 /// vgui2's `KEY_ENTER` and `KEY_PAD_ENTER` (the console's input line maps the
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
@@ -597,6 +601,7 @@ mod hook {
     static FRAME_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
+    static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
 
     unsafe fn slot<F: Copy>(object: *mut c_void, index: usize) -> F {
         unsafe {
@@ -959,10 +964,15 @@ mod hook {
                             PANEL_SLOT_ON_KEY_CODE_TYPED,
                             page_on_key as *const () as usize,
                         ),
+                        (
+                            PANEL_SLOT_ON_KEY_CODE_PRESSED,
+                            page_on_key_pressed as *const () as usize,
+                        ),
                     ],
                 );
                 PAGE_ON_COMMAND.store(own[0], Ordering::Release);
                 PAGE_ON_KEY.store(own[1], Ordering::Release);
+                PAGE_ON_KEY_PRESSED.store(own[2], Ordering::Release);
                 load(object, page.res.0.as_ptr(), std::ptr::null());
                 // Where the .res put each control, before anything resizes it.
                 let page_vp = vpanel_of(object);
@@ -1354,6 +1364,19 @@ mod hook {
                 sources.dedup();
                 for name in sources {
                     match vgui.popup(name) {
+                        // The console window came up (the engine shows it
+                        // itself at times): its pieces are ours, so it would
+                        // be blank. With dodstudio_console_in_panel it goes
+                        // away again; without, it gets its pieces back while
+                        // it is open, and our Console tab waits.
+                        Some(source) if name == CONSOLE && vgui.visible(source) => {
+                            if console_in_panel() {
+                                vgui.set_visible(source, false);
+                                borrow(&vgui, name, source, &mut lent);
+                            } else {
+                                give_back(&vgui, &mut lent, Some(name));
+                            }
+                        }
                         Some(source) => {
                             if lent
                                 .borrowed
@@ -1457,6 +1480,34 @@ mod hook {
         unsafe { handle(this, raw, &PAGE_ON_COMMAND) }
     }
 
+    /// Each page's `OnKeyCodePressed`. On the Console tab, a key the borrowed
+    /// input line passes up (Tab, the arrows) goes to the console dialog, its
+    /// usual parent, which does the type-ahead and the command history.
+    unsafe extern "thiscall" fn page_on_key_pressed(this: *mut c_void, code: i32) {
+        let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == console_page
+            && let Ok(vgui) = Vgui::get()
+        {
+            unsafe {
+                let object = vgui
+                    .popup(CONSOLE)
+                    .map(|console| vgui.object(console))
+                    .filter(|o| !o.is_null());
+                if let Some(object) = object {
+                    let pressed: KeyFn = slot(object, PANEL_SLOT_ON_KEY_CODE_PRESSED);
+                    pressed(object, code);
+                    return;
+                }
+            }
+        }
+        let original = PAGE_ON_KEY_PRESSED.load(Ordering::Acquire);
+        if original != 0 {
+            // Safety: the class's own OnKeyCodePressed, from its vftable.
+            let original: KeyFn = unsafe { std::mem::transmute(original) };
+            unsafe { original(this, code) };
+        }
+    }
+
     /// Each page's `OnKeyCodeTyped`: a key a control on the tab didn't use
     /// comes here. On the Console tab, Enter submits the borrowed input line,
     /// as it does in the console window -- where the dialog's own Submit
@@ -1558,11 +1609,17 @@ mod hook {
     }
 
     /// Opens the window (building it the first time), or closes it when open.
-    pub(super) fn toggle(reset: bool) -> Result<String, String> {
+    pub(super) fn toggle(request: Request) -> Result<String, String> {
         let vgui = Vgui::get()?;
         unsafe {
+            let reset = request == Request::Reset;
             let (object, vp, mut notes) = ensure_window(&vgui, reset)?;
-            if vgui.visible(vp) && !reset {
+            let close = match request {
+                Request::Toggle => vgui.visible(vp),
+                Request::Close => true,
+                Request::Open | Request::Reset => false,
+            };
+            if close {
                 vgui.set_visible(vp, false);
                 notes.push("closed".to_string());
             } else {
@@ -1595,17 +1652,42 @@ fn argument() -> Option<String> {
     }
 }
 
-/// `dodstudio_panel [reset]`: opens or closes the window; `reset` writes the
-/// default layouts back and rebuilds it.
+/// What `dodstudio_panel` was asked to do.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Request {
+    /// Bare: open it when closed, close it when open.
+    Toggle,
+    Open,
+    Close,
+    /// Write the default layouts back and rebuild it, open.
+    Reset,
+}
+
+fn request(argument: Option<&str>) -> Result<Request, String> {
+    match argument {
+        None => Ok(Request::Toggle),
+        Some("1") | Some("open") => Ok(Request::Open),
+        Some("0") | Some("close") => Ok(Request::Close),
+        Some("reset") => Ok(Request::Reset),
+        Some(other) => Err(format!(
+            "unknown argument {other:?} -- dodstudio_panel [1|0|reset]: bare opens or closes it, 1 opens, 0 closes, reset restores the default layouts"
+        )),
+    }
+}
+
+/// `dodstudio_panel [1|0|reset]`: bare opens the window or closes it, `1`
+/// opens it, `0` closes it, `reset` writes the default layouts back and
+/// rebuilds it.
 pub unsafe extern "C" fn command() {
-    let reset = argument().as_deref() == Some("reset");
-    #[cfg(target_arch = "x86")]
-    let result = hook::toggle(reset);
-    #[cfg(not(target_arch = "x86"))]
-    let result: Result<String, String> = {
-        let _ = reset;
-        Err("only the 32-bit build has a window".to_string())
-    };
+    let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
+        #[cfg(target_arch = "x86")]
+        return hook::toggle(request);
+        #[cfg(not(target_arch = "x86"))]
+        {
+            let _ = request;
+            Err("only the 32-bit build has a window".to_string())
+        }
+    });
     let line = match result {
         Ok(what) => format!("{NAME}: {what}"),
         Err(why) => format!("{NAME}: {why}"),
@@ -1617,6 +1699,15 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_command_takes_1_0_or_reset() {
+        assert_eq!(request(None), Ok(Request::Toggle));
+        assert_eq!(request(Some("1")), Ok(Request::Open));
+        assert_eq!(request(Some("0")), Ok(Request::Close));
+        assert_eq!(request(Some("reset")), Ok(Request::Reset));
+        assert!(request(Some("2")).is_err());
+    }
 
     #[test]
     fn button_commands_are_sorted_into_what_they_do() {
