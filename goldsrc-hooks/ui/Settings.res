@@ -12,7 +12,7 @@
 		"enabled"		"1"
 		"labelText"		"Match the player's own view"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_spec_match_pov: a spectated view looks like the player's own recording."
+		"helptext"		"dodstudio_spec_match_pov: a spectated view looks like the player's own recording."
 	}
 	"cvar_dodstudio_spec_lock"
 	{
@@ -26,7 +26,7 @@
 		"enabled"		"1"
 		"labelText"		"Keep the camera on one player"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_spec_lock: the camera stays on the player when he dies."
+		"helptext"		"dodstudio_spec_lock: the camera stays on the player when he dies."
 	}
 	"cvar_dodstudio_hide_spectator_bars"
 	{
@@ -40,7 +40,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide the spectator bars"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hide_spectator_bars: hide the spectator bars."
+		"helptext"		"dodstudio_hide_spectator_bars: hide the spectator bars."
 	}
 	"cvar_dodstudio_hide_hltv_messages"
 	{
@@ -54,7 +54,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide HLTV messages"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hide_hltv_messages: hide the HLTV proxy's messages."
+		"helptext"		"dodstudio_hide_hltv_messages: hide the HLTV proxy's messages."
 	}
 	"cvar_dodstudio_hide_scoreboard"
 	{
@@ -68,7 +68,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide the scoreboard"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hide_scoreboard: recorded TAB presses don't show the scoreboard."
+		"helptext"		"dodstudio_hide_scoreboard: recorded TAB presses don't show the scoreboard."
 	}
 	"cvar_dodstudio_hide_crosshair"
 	{
@@ -82,7 +82,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide the crosshair"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hide_crosshair: hide the crosshair."
+		"helptext"		"dodstudio_hide_crosshair: hide the crosshair."
 	}
 	"cvar_dodstudio_hide_hand_signals"
 	{
@@ -96,7 +96,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide hand signals"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hide_hand_signals: no hand-signal animations."
+		"helptext"		"dodstudio_hide_hand_signals: no hand-signal animations."
 	}
 	"cvar_dodstudio_mute_voice_commands"
 	{
@@ -110,7 +110,7 @@
 		"enabled"		"1"
 		"labelText"		"Mute voice commands"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_mute_voice_commands: silence voice commands."
+		"helptext"		"dodstudio_mute_voice_commands: silence voice commands."
 	}
 	"cvar_dodstudio_hd_enabled"
 	{
@@ -124,7 +124,7 @@
 		"enabled"		"1"
 		"labelText"		"HD textures"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_hd_enabled: HD textures (walls, detail and sky change from the next map)."
+		"helptext"		"dodstudio_hd_enabled: HD textures (walls, detail and sky change from the next map)."
 	}
 	"cvar_dodstudio_viewdemo_in_panel"
 	{
@@ -138,7 +138,7 @@
 		"enabled"		"1"
 		"labelText"		"viewdemo opens this window"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_viewdemo_in_panel: viewdemo opens this window instead of the VCR bar."
+		"helptext"		"dodstudio_viewdemo_in_panel: viewdemo opens this window instead of the VCR bar."
 	}
 	"cvar_dodstudio_console_in_panel"
 	{
@@ -152,7 +152,7 @@
 		"enabled"		"1"
 		"labelText"		"The console key opens this window"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_console_in_panel: the console key opens this window's Console tab."
+		"helptext"		"dodstudio_console_in_panel: the console key opens this window's Console tab."
 	}
 	"cvar_dodstudio_resizable_windows"
 	{
@@ -166,7 +166,7 @@
 		"enabled"		"1"
 		"labelText"		"Resizable windows"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_resizable_windows: every game window can be resized."
+		"helptext"		"dodstudio_resizable_windows: every game window can be resized."
 	}
 	"cvar_dodstudio_remember_window_layout"
 	{
@@ -180,7 +180,7 @@
 		"enabled"		"1"
 		"labelText"		"Remember where windows were"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_remember_window_layout: game windows come back where you left them."
+		"helptext"		"dodstudio_remember_window_layout: game windows come back where you left them."
 	}
 	"cvar_dodstudio_seek_skip_between"
 	{
@@ -194,7 +194,7 @@
 		"enabled"		"1"
 		"labelText"		"Seeking skips what it jumps over"
 		"textAlignment"		"west"
-		"tooltiptext"		"dodstudio_seek_skip_between: a jump skips the events it passes over."
+		"helptext"		"dodstudio_seek_skip_between: a jump skips the events it passes over."
 	}
 	"cvar_hud_draw"
 	{
@@ -208,7 +208,7 @@
 		"enabled"		"1"
 		"labelText"		"Draw the HUD"
 		"textAlignment"		"west"
-		"tooltiptext"		"hud_draw: the game's HUD."
+		"helptext"		"hud_draw: the game's HUD."
 	}
 	"cvar_r_drawviewmodel"
 	{
@@ -222,7 +222,7 @@
 		"enabled"		"1"
 		"labelText"		"Draw the gun"
 		"textAlignment"		"west"
-		"tooltiptext"		"r_drawviewmodel: the gun in first person."
+		"helptext"		"r_drawviewmodel: the gun in first person."
 	}
 	"ResetSettingsButton"
 	{
@@ -237,6 +237,6 @@
 		"labelText"		"Reset to defaults"
 		"textAlignment"		"center"
 		"Command"		"reset_settings"
-		"tooltiptext"		"Put every setting changed here back to its default, and forget the saved values."
+		"helptext"		"Put every setting changed here back to its default, and forget the saved values."
 	}
 }

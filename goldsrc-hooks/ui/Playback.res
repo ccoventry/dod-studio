@@ -12,7 +12,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Drag to move through the demo."
+		"helptext"		"Drag to move through the demo."
 	}
 	"startButton"
 	{
@@ -27,7 +27,7 @@
 		"labelText"		"|<"
 		"textAlignment"		"center"
 		"Command"		"start"
-		"tooltiptext"		"Jump to the start of the demo."
+		"helptext"		"Jump to the start of the demo."
 	}
 	"slowerButton"
 	{
@@ -42,7 +42,7 @@
 		"labelText"		"<<"
 		"textAlignment"		"center"
 		"Command"		"slower"
-		"tooltiptext"		"Play slower."
+		"helptext"		"Play slower."
 	}
 	"stepbButton"
 	{
@@ -57,7 +57,7 @@
 		"labelText"		"<|"
 		"textAlignment"		"center"
 		"Command"		"stepb"
-		"tooltiptext"		"Step back one frame."
+		"helptext"		"Step back one frame."
 	}
 	"pauseButton"
 	{
@@ -72,7 +72,7 @@
 		"labelText"		"||"
 		"textAlignment"		"center"
 		"Command"		"pause"
-		"tooltiptext"		"Pause."
+		"helptext"		"Pause."
 	}
 	"playButton"
 	{
@@ -87,7 +87,7 @@
 		"labelText"		">"
 		"textAlignment"		"center"
 		"Command"		"play"
-		"tooltiptext"		"Play."
+		"helptext"		"Play."
 	}
 	"stepfButton"
 	{
@@ -102,7 +102,7 @@
 		"labelText"		"|>"
 		"textAlignment"		"center"
 		"Command"		"stepf"
-		"tooltiptext"		"Step forward one frame."
+		"helptext"		"Step forward one frame."
 	}
 	"fasterButton"
 	{
@@ -117,7 +117,7 @@
 		"labelText"		">>"
 		"textAlignment"		"center"
 		"Command"		"faster"
-		"tooltiptext"		"Play faster."
+		"helptext"		"Play faster."
 	}
 	"endButton"
 	{
@@ -132,7 +132,7 @@
 		"labelText"		">|"
 		"textAlignment"		"center"
 		"Command"		"end"
-		"tooltiptext"		"Jump to the end of the demo."
+		"helptext"		"Jump to the end of the demo."
 	}
 	"stopButton"
 	{
@@ -147,7 +147,7 @@
 		"labelText"		"Stop"
 		"textAlignment"		"center"
 		"Command"		"stop"
-		"tooltiptext"		"Stop the demo."
+		"helptext"		"Stop the demo."
 	}
 	"LoadButton"
 	{
@@ -162,7 +162,7 @@
 		"labelText"		"Load demo..."
 		"textAlignment"		"center"
 		"Command"		"load"
-		"tooltiptext"		"Pick a demo to play (the Demos tab)."
+		"helptext"		"Pick a demo to play (the Demos tab)."
 	}
 	"EventsButton"
 	{
@@ -177,7 +177,7 @@
 		"labelText"		"Events..."
 		"textAlignment"		"center"
 		"Command"		"events"
-		"tooltiptext"		"The demo's events list."
+		"helptext"		"The demo's events list."
 	}
 	"TimeLabelSlot"
 	{
@@ -191,7 +191,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"The demo's time, its speed, and whether it is playing."
+		"helptext"		"The demo's time, its speed, and whether it is playing."
 	}
 	"Back10Button"
 	{
@@ -206,7 +206,7 @@
 		"labelText"		"-10 s"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_seek_by -10"
-		"tooltiptext"		"Jump back 10 seconds."
+		"helptext"		"Jump back 10 seconds."
 	}
 	"Forward10Button"
 	{
@@ -221,7 +221,7 @@
 		"labelText"		"+10 s"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_seek_by 10"
-		"tooltiptext"		"Jump forward 10 seconds."
+		"helptext"		"Jump forward 10 seconds."
 	}
 	"HalfSpeedButton"
 	{
@@ -236,7 +236,7 @@
 		"labelText"		"x0.5"
 		"textAlignment"		"center"
 		"Command"		"engine dem_speed 0.5"
-		"tooltiptext"		"Play at half speed."
+		"helptext"		"Play at half speed."
 	}
 	"NormalSpeedButton"
 	{
@@ -251,7 +251,7 @@
 		"labelText"		"x1"
 		"textAlignment"		"center"
 		"Command"		"engine dem_speed 1"
-		"tooltiptext"		"Play at normal speed."
+		"helptext"		"Play at normal speed."
 	}
 	"DecalsButton"
 	{
@@ -266,7 +266,7 @@
 		"labelText"		"Decals"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_clear_decals"
-		"tooltiptext"		"Clear every decal (bullet holes, blood, sprays)."
+		"helptext"		"Clear every decal (bullet holes, blood, sprays)."
 	}
 	"GotoLabel"
 	{
@@ -291,7 +291,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"A time to jump to: 20:33, 20:33:50 or seconds. Enter jumps."
+		"helptext"		"A time to jump to: 20:33, 20:33:50 or seconds. Enter jumps."
 	}
 	"GotoButton"
 	{
@@ -306,7 +306,7 @@
 		"labelText"		"Go"
 		"textAlignment"		"center"
 		"Command"		"goto"
-		"tooltiptext"		"Jump to the time in the box."
+		"helptext"		"Jump to the time in the box."
 	}
 	"Hint"
 	{
@@ -334,7 +334,7 @@
 		"labelText"		"Show the time and slider here (hides the VCR bar)"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_viewdemo_in_panel 1"
-		"tooltiptext"		"Turns on dodstudio_viewdemo_in_panel: this tab shows the time and slider, and the VCR bar hides."
+		"helptext"		"Turns on dodstudio_viewdemo_in_panel: this tab shows the time and slider, and the VCR bar hides."
 	}
 	"LoadLabel"
 	{
@@ -348,7 +348,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
+		"helptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
 	}
 	"LoadProgress"
 	{
@@ -360,6 +360,21 @@
 		"tall"		"14"
 		"visible"		"0"
 		"enabled"		"1"
-		"tooltiptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
+		"helptext"		"How much of the demo the demo player has read. It plays and seeks only as far as that."
+	}
+	"ReloadButton"
+	{
+		"ControlName"		"Button"
+		"fieldName"		"ReloadButton"
+		"xpos"		"424"
+		"ypos"		"40"
+		"wide"		"72"
+		"tall"		"24"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		"Reload"
+		"textAlignment"		"center"
+		"Command"		"engine dodstudio_reload_demo"
+		"helptext"		"Play this demo again from the start (dodstudio_reload_demo)."
 	}
 }

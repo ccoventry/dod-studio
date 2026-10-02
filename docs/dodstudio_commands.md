@@ -197,7 +197,7 @@ no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
 
 Opens DoD Studio's own window in the game, or closes it if it's open. It sits
 with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
-Options and Find Servers windows (Playback, Demos, Killstreaks, Console,
+Options and Find Servers windows (Playback, Demos, Highlights, Console,
 Settings, Commands, Studio), and never
 narrower than its tabs. The Playback buttons do what the VCR bar's do, so a
 demo has to be playing under `viewdemo`; the tab also shows the bar's own time
@@ -208,7 +208,7 @@ by their windows while ours is open and handed back when it closes.
 The Demos tab lists the demos, with each one's map and date, and loads one
 with no demo playing. Click a column heading to sort by it; the boxes above
 filter by name or map (Search), map, HLTV or POV, and age in days.
-The Killstreaks tab lists every life with a kill in the demo playing
+The Highlights tab lists every life with a kill in the demo playing
 (player, kills, weapons, time), narrowed by a Min kills box. A POV demo lists
 only the recording player's; an HLTV demo lists everyone's, with a Player box,
 and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
@@ -223,7 +223,7 @@ Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
 shows the value and sets it when clicked (add more in build mode).
 `dodstudio_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
 closes, `reset` writes the default layouts back and rebuilds the window, and a
-tab's name (`dodstudio_panel killstreaks`) opens it on that tab. With
+tab's name (`dodstudio_panel highlights`) opens it on that tab. With
 `dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Playback tab.
 
 The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`

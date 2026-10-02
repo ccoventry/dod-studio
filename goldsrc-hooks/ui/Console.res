@@ -12,7 +12,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"The game's console."
+		"helptext"		"The game's console."
 	}
 	"ConsoleEntrySlot"
 	{
@@ -26,7 +26,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Type a command and press Enter. Up and Down go through suggestions and history."
+		"helptext"		"Type a command and press Enter. Up and Down go through suggestions and history."
 	}
 	"ConsoleSubmitSlot"
 	{
@@ -40,7 +40,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Run the command."
+		"helptext"		"Run the command."
 	}
 	"EnableConsoleButton"
 	{
@@ -55,6 +55,6 @@
 		"labelText"		"Use this tab as the console (the console key opens it)"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_console_in_panel 1"
-		"tooltiptext"		"Turns on dodstudio_console_in_panel: the console key opens this tab."
+		"helptext"		"Turns on dodstudio_console_in_panel: the console key opens this tab."
 	}
 }

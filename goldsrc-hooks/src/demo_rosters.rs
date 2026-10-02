@@ -1,6 +1,6 @@
 //! Who is in each demo, for the Demos tab's Player filter (#565, toward #437):
 //! the players files `analysis::cache` keeps beside each analysis (written by
-//! Studio's Demo Analyzer, its Master Queue scan, and the Killstreaks tab).
+//! Studio's Demo Analyzer, its Master Queue scan, and the Highlights tab).
 //!
 //! A demo nobody has analysed has no players file, and a Player filter hides
 //! it: the tab says how many demos it could look in.

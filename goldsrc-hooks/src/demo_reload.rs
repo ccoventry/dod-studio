@@ -197,7 +197,7 @@ fn last_played() -> Option<(&'static str, String)> {
 }
 
 /// The name the demo last played was given (relative to the game folder,
-/// maybe without `.dem`), for the DoD Studio window's Killstreaks tab.
+/// maybe without `.dem`), for the DoD Studio window's Highlights tab.
 pub fn current_demo() -> Option<String> {
     last_played().map(|(_, name)| name)
 }

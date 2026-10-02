@@ -214,6 +214,15 @@ def verify(game, src):
         index = vwl.rust_usize(src, name)
         got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # SetColumnVisible(int, bool): writes the column's hidden byte (+0x1d)
+    # unless its unhidable byte (+0x1e) is set.
+    visible_slot = vwl.rust_usize(src, "LIST_SLOT_SET_COLUMN_VISIBLE")
+    func = ui.u32(list_vt + 4 * visible_slot) - ui.base
+    body = ui.body(func, 0x120)
+    check(ui.last_ret(func) == "ret 8"
+          and any(re.fullmatch(r"mov byte ptr \[e[a-z]{2} \+ 0x1d\], [a-d]l", x) for x in body)
+          and any("+ 0x1e]" in x for x in body),
+          f"ListPanel slot {visible_slot} is SetColumnVisible (hidden byte +0x1d, unhidable +0x1e)")
     # ApplyItemChanges: re-index the row, then InvalidateLayout (slot 58).
     body = ui.body(ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_APPLY_ITEM_CHANGES")) - ui.base, 0x40)
     calls = [x for x in body if x.startswith("call")]

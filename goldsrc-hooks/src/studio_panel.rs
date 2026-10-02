@@ -113,12 +113,12 @@ pub const PAGES: [Page; 7] = [
         ),
     },
     Page {
-        name: c"Killstreaks",
-        title: c"Killstreaks",
+        name: c"Highlights",
+        title: c"Highlights",
         res: (
-            c"dodstudio_ui/Killstreaks.res",
-            "Killstreaks.res",
-            include_str!("../ui/Killstreaks.res"),
+            c"dodstudio_ui/Highlights.res",
+            "Highlights.res",
+            include_str!("../ui/Highlights.res"),
         ),
     },
     Page {
@@ -206,11 +206,11 @@ pub struct Build {
     pub file_dialog_fill: usize,
     /// `KeyValues::operator new(size_t)` (cdecl) and `KeyValues::KeyValues(
     /// const char *name, const char *firstKey, const char *firstValue)`: how
-    /// the fill makes each row, and how the Killstreaks tab makes its own.
+    /// the fill makes each row, and how the Highlights tab makes its own.
     pub keyvalues_new: usize,
     pub keyvalues_ctor: usize,
     /// `ProgressBar`'s vftable: only a control with exactly this one gets the
-    /// Killstreaks tab's progress.
+    /// Highlights tab's progress.
     pub progress_bar_vftable: usize,
 }
 
@@ -260,7 +260,7 @@ pub const BUILDS: [Build; 2] = [
 /// Our own Load Demo window's panel name: not the stock one's, so a VCR bar's
 /// own Load Demo window is never mistaken for it.
 const DEMO_LIST: &str = "DodStudioDemoList";
-/// The Killstreaks tab's own hidden Load Demo window, lending its list and
+/// The Highlights tab's own hidden Load Demo window, lending its list and
 /// Load button the same way (`studio_panel/hook/streaks_tab.rs`).
 const STREAK_LIST: &str = "DodStudioStreakList";
 /// `ListPanel::GetSelectedItem(int)`, `IsValidItemID(int)`, `GetItem(int)`
@@ -500,6 +500,9 @@ const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
 /// and Date columns are built with.
 const LIST_SLOT_ADD_COLUMN_HEADER: usize = 134;
 const LIST_SLOT_SET_COLUMN_SORTABLE: usize = 148;
+/// `SetColumnVisible(int, bool)`: the Highlights tab hides its Player
+/// column for a POV demo (one player).
+const LIST_SLOT_SET_COLUMN_VISIBLE: usize = 149;
 /// `ApplyItemChanges(int itemID)`: re-sorts a row after its values changed.
 const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
 /// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
@@ -986,7 +989,8 @@ fn help_bounds(sheet: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
 const HELP_LINE: &str = "HelpLine";
 const HELP_TALL: i32 = 22;
 
-/// Every control's `"tooltiptext"` in a `.res` file, by its name: what the
+/// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
+/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box)
 /// help line shows for it. (GameUI reads the key but shows no tooltip, so
 /// the window shows it itself.)
 fn tooltips(res: &str) -> Vec<(String, String)> {
@@ -1029,7 +1033,7 @@ fn tooltips(res: &str) -> Vec<(String, String)> {
                 control = Some(name.clone());
             }
             Token::Text(key) if depth == 2 => {
-                if key.eq_ignore_ascii_case("tooltiptext")
+                if (key.eq_ignore_ascii_case("helptext") || key.eq_ignore_ascii_case("tooltiptext"))
                     && let (Some(name), Some(Token::Text(tip))) = (&control, tokens.get(i + 1))
                 {
                     out.push((name.clone(), tip.clone()));
@@ -1172,7 +1176,7 @@ mod hook {
 
     /// The Playback tab's loading progress (#465).
     mod load_progress;
-    /// The Killstreaks tab (#565).
+    /// The Highlights tab (#565).
     mod streaks_tab;
 
     type Vpanel = u32;
@@ -1528,7 +1532,7 @@ mod hook {
             vgui.set_visible(note, counts.is_some());
             if let Some((analysed, demos)) = counts {
                 let text = format!(
-                    "Player looks in the {analysed} of {demos} demos analysed so far (Studio, or the Killstreaks tab)."
+                    "Player looks in the {analysed} of {demos} demos analysed so far (Studio, or the Highlights tab)."
                 );
                 let object = vgui.object(note);
                 if let (false, Ok(text)) = (object.is_null(), std::ffi::CString::new(text)) {
@@ -2788,6 +2792,14 @@ mod hook {
     unsafe fn handle(this: *mut c_void, raw: *const c_char, own: &AtomicUsize) {
         let command = text(raw);
         let result = match action(&command) {
+            // The Demos and Highlights tabs' borrowed Load / Go buttons say
+            // "load" too, and their parent is the page now. Their own window
+            // has already acted on it; switching tabs here sent Go to Demos.
+            Action::Vcr("load")
+                if this != PAGE_OBJECTS[PLAYBACK_PAGE].load(Ordering::Acquire) as *mut c_void =>
+            {
+                Ok(())
+            }
             // Load demo... goes to our own list on the Demos tab, which works
             // with no demo playing (the VCR bar's needs a demo loaded).
             Action::Vcr("load") => {
@@ -3109,7 +3121,7 @@ fn request(argument: Option<&str>) -> Result<Request, String> {
 
 /// `dodstudio_panel [1|0|reset|<tab>]`: bare opens the window or closes it,
 /// `1` opens it, `0` closes it, `reset` writes the default layouts back and
-/// rebuilds it, a tab's name (`killstreaks`) opens it on that tab.
+/// rebuilds it, a tab's name (`highlights`) opens it on that tab.
 pub unsafe extern "C" fn command() {
     let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
         #[cfg(target_arch = "x86")]
@@ -3404,7 +3416,7 @@ mod tests {
         assert_eq!(request(Some("1")), Ok(Request::Open));
         assert_eq!(request(Some("0")), Ok(Request::Close));
         assert_eq!(request(Some("reset")), Ok(Request::Reset));
-        assert_eq!(request(Some("killstreaks")), Ok(Request::Tab(STREAKS_PAGE)));
+        assert_eq!(request(Some("highlights")), Ok(Request::Tab(STREAKS_PAGE)));
         assert_eq!(request(Some("demos")), Ok(Request::Tab(DEMOS_PAGE)));
         assert!(request(Some("2")).is_err());
     }
@@ -3471,7 +3483,7 @@ mod tests {
         }
         assert_eq!(PAGES[PLAYBACK_PAGE].name, c"Playback");
         assert_eq!(PAGES[DEMOS_PAGE].name, c"Demos");
-        assert_eq!(PAGES[STREAKS_PAGE].name, c"Killstreaks");
+        assert_eq!(PAGES[STREAKS_PAGE].name, c"Highlights");
         assert_eq!(PAGES[CONSOLE_PAGE].name, c"Console");
         assert_eq!(PAGES[SETTINGS_PAGE].name, c"Settings");
         assert_eq!(PAGES[COMMANDS_PAGE].name, c"Commands");

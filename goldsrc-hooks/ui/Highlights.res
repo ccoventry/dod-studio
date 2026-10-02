@@ -1,4 +1,4 @@
-"dodstudio_ui/Killstreaks.res"
+"dodstudio_ui/Highlights.res"
 {
 	"StreakStatus"
 	{
@@ -12,7 +12,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"The demo playing now, and how far along finding its killstreaks is."
+		"helptext"		"The demo playing now, and how far along finding its highlights is."
 	}
 	"StreakProgress"
 	{
@@ -24,7 +24,7 @@
 		"tall"		"14"
 		"visible"		"0"
 		"enabled"		"1"
-		"tooltiptext"		"Reading the demo. Studio's own analysis is reused when Studio already read it."
+		"helptext"		"Reading the demo. Studio's own analysis is reused when Studio already read it."
 	}
 	"StreakListSlot"
 	{
@@ -38,7 +38,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Every life with a kill: who, how many, with what, and when. Click a heading to sort. Double-click one to jump to it."
+		"helptext"		"Every life with a kill: who, how many, with what, and when. Click a heading to sort. Double-click one to jump to it."
 	}
 	"StreakGoSlot"
 	{
@@ -52,7 +52,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Jump to 5 seconds before the selected streak's first kill."
+		"helptext"		"Jump to 5 seconds before the selected streak's first kill."
 	}
 	"Hint"
 	{
@@ -79,7 +79,7 @@
 		"enabled"		"1"
 		"labelText"		"Player"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only this player's streaks: part of a name, or several words."
+		"helptext"		"Only this player's streaks: part of a name, or several words."
 	}
 	"StreakPlayer"
 	{
@@ -91,7 +91,7 @@
 		"tall"		"20"
 		"visible"		"0"
 		"enabled"		"1"
-		"tooltiptext"		"Only this player's streaks: part of a name, or several words."
+		"helptext"		"Only this player's streaks: part of a name, or several words."
 	}
 	"StreakMinKillsLabel"
 	{
@@ -105,7 +105,7 @@
 		"enabled"		"1"
 		"labelText"		"Min kills"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only highlights with at least this many kills. Empty shows every one."
+		"helptext"		"Only highlights with at least this many kills. Empty shows every one."
 	}
 	"StreakMinKills"
 	{
@@ -117,6 +117,6 @@
 		"tall"		"20"
 		"visible"		"0"
 		"enabled"		"1"
-		"tooltiptext"		"Only highlights with at least this many kills. Empty shows every one."
+		"helptext"		"Only highlights with at least this many kills. Empty shows every one."
 	}
 }

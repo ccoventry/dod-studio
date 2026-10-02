@@ -12,7 +12,7 @@
 		"enabled"		"1"
 		"labelText"		"Search"
 		"textAlignment"		"west"
-		"tooltiptext"		"Type part of a demo name or map: the list shows only the demos that match."
+		"helptext"		"Type part of a demo name or map: the list shows only the demos that match."
 	}
 	"DemoFilter"
 	{
@@ -24,7 +24,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"Part of a demo name or map, or several words: every word has to match."
+		"helptext"		"Part of a demo name or map, or several words: every word has to match."
 	}
 	"MapLabel"
 	{
@@ -38,7 +38,7 @@
 		"enabled"		"1"
 		"labelText"		"Map"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only demos on this map."
+		"helptext"		"Only demos on this map."
 	}
 	"MapFilter"
 	{
@@ -50,7 +50,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"Part of a map name, like anzio or flash."
+		"helptext"		"Part of a map name, like anzio or flash."
 	}
 	"DaysLabel"
 	{
@@ -64,7 +64,7 @@
 		"enabled"		"1"
 		"labelText"		"Days old <"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only demos newer than this many days."
+		"helptext"		"Only demos newer than this many days."
 	}
 	"DaysFilter"
 	{
@@ -76,7 +76,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"A number of days. Empty shows every age."
+		"helptext"		"A number of days. Empty shows every age."
 	}
 	"ShowHltv"
 	{
@@ -90,7 +90,7 @@
 		"enabled"		"1"
 		"labelText"		"HLTV"
 		"textAlignment"		"west"
-		"tooltiptext"		"Show demos an HLTV proxy recorded."
+		"helptext"		"Show demos an HLTV proxy recorded."
 	}
 	"ShowPov"
 	{
@@ -104,7 +104,7 @@
 		"enabled"		"1"
 		"labelText"		"POV"
 		"textAlignment"		"west"
-		"tooltiptext"		"Show demos a player recorded."
+		"helptext"		"Show demos a player recorded."
 	}
 	"PlayerLabel"
 	{
@@ -118,7 +118,7 @@
 		"enabled"		"1"
 		"labelText"		"Player"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only demos this player is in: part of a name or a SteamID. Only demos analysed so far are searched."
+		"helptext"		"Only demos this player is in: part of a name or a SteamID. Only demos analysed so far are searched."
 	}
 	"PlayerFilter"
 	{
@@ -130,7 +130,7 @@
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"Part of a player name or SteamID. Only demos Studio or the Killstreaks tab analysed are searched."
+		"helptext"		"Part of a player name or SteamID. Only demos Studio or the Highlights tab analysed are searched."
 	}
 	"PlayerRecorded"
 	{
@@ -144,7 +144,7 @@
 		"enabled"		"1"
 		"labelText"		"They recorded it"
 		"textAlignment"		"west"
-		"tooltiptext"		"Only POV demos this player recorded."
+		"helptext"		"Only POV demos this player recorded."
 	}
 	"DemoListSlot"
 	{
@@ -158,7 +158,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Your demos. Double-click one to play it."
+		"helptext"		"Your demos. Double-click one to play it."
 	}
 	"DemoLoadSlot"
 	{
@@ -172,7 +172,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Play the selected demo."
+		"helptext"		"Play the selected demo."
 	}
 	"Hint"
 	{
@@ -199,6 +199,6 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"tooltiptext"		"Open a demo in Studio's Demo Analyzer, or its Killstreaks tab here, to add it to the Player search."
+		"helptext"		"Open a demo in Studio's Demo Analyzer, or its Highlights tab here, to add it to the Player search."
 	}
 }

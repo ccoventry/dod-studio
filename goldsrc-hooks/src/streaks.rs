@@ -40,6 +40,12 @@ pub struct Streak {
     pub weapons: String,
     /// The first kill's time on the `viewdemo` bar, in seconds.
     pub first_kill: f32,
+    /// The last kill's, the same way.
+    pub last_kill: f32,
+    /// Each kill's weapon, and from the second on the time since the one
+    /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Capture page's
+    /// Details column (`CaptureStreak::update_visuals`).
+    pub details: String,
     /// The player's number (entity index, what `dodstudio_spec_target`
     /// takes), when they were still in the game at the demo's end.
     pub player_number: Option<u8>,
@@ -58,13 +64,32 @@ impl Streak {
                 weapons.push(weapon);
             }
         }
+        let mut in_order: Vec<&(f32, String)> = kills.iter().collect();
+        in_order.sort_by(|a, b| a.0.total_cmp(&b.0));
+        let details = in_order
+            .iter()
+            .enumerate()
+            .map(|(i, (time, weapon))| match i {
+                0 => weapon.clone(),
+                _ => format!("(+{}) {weapon}", gap_text(*time - in_order[i - 1].0)),
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         Some(Self {
             player: player.to_string(),
             kills: kills.len(),
             weapons: weapons.join(", "),
-            first_kill: kills.iter().map(|(t, _)| *t).fold(f32::INFINITY, f32::min),
+            first_kill: in_order[0].0,
+            last_kill: in_order[in_order.len() - 1].0,
+            details,
             player_number: None,
         })
+    }
+
+    /// From the first kill to the last, as the Capture page's Dur. column
+    /// shows it.
+    pub fn duration_text(&self) -> String {
+        gap_text(self.last_kill - self.first_kill)
     }
 
     /// Where Go jumps to: a little before the first kill.
@@ -175,6 +200,19 @@ fn weapon_name(weapon: &analysis::Weapon) -> String {
         })
         .filter(|name| !name.is_empty())
         .unwrap_or(own)
+}
+
+/// A span of time as `m:ss`, rounded to the second, as the Capture page
+/// shows its gaps and durations.
+fn gap_text(secs: f32) -> String {
+    let secs = secs.max(0.0).round() as u64;
+    format!("{}:{:02}", secs / 60, secs % 60)
+}
+
+/// A highlight's row number as the tab shows it: right-aligned, so it sorts
+/// as text in number order.
+pub fn row_text(row: usize) -> String {
+    format!("{row:>4}")
 }
 
 /// A bar time as the tab shows it, `mm:ss`: sorts as text in time order for
@@ -531,6 +569,8 @@ mod tests {
         .unwrap();
         assert_eq!(streak.kills, 3);
         assert_eq!(streak.weapons, "K98, Grenade");
+        assert_eq!(streak.details, "Grenade, (+0:04) K98, (+0:05) K98");
+        assert_eq!(streak.duration_text(), "0:09");
         assert_eq!(streak.first_kill, 71.5);
         assert_eq!(streak.seek_secs(), 66.5);
         assert_eq!(

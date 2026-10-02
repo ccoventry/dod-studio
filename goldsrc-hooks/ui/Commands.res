@@ -10,6 +10,6 @@
 		"tall"		"226"
 		"visible"		"1"
 		"enabled"		"1"
-		"tooltiptext"		"Every DoD Studio console setting and command. Type them in the Console tab."
+		"helptext"		"Every DoD Studio console setting and command. Type them in the Console tab."
 	}
 }

@@ -1,4 +1,4 @@
-//! The Killstreaks tab (#565): the playing demo's streaks, found by
+//! The Highlights tab (#565): the playing demo's streaks, found by
 //! [`crate::streaks`], in a list borrowed the way the Demos tab's is. A
 //! second hidden Load Demo window (`STREAK_LIST`) lends its list and Load
 //! button ([`LOANS`]); its demo rows are cleared, its columns become Player,
@@ -30,14 +30,18 @@ static FILTERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// player's number to put the camera on.
 const SEEK_KEY: &CStr = c"seek";
 const TARGET_KEY: &CStr = c"target";
-/// The columns past the player's name (which is the window's own `demoname`
-/// column, retitled): key, heading, width.
-const COLUMNS: [(&CStr, &CStr, i32); 3] = [
-    (c"kills", c"Kills", 50),
-    (c"weapons", c"Weapons", 240),
-    (c"time", c"Time", 60),
+/// The columns past the row number (which is the window's own `demoname`
+/// column, retitled), as the Capture page's Highlights table names them:
+/// key, heading, width. The Player column is hidden for a POV demo.
+const COLUMNS: [(&CStr, &CStr, i32); 5] = [
+    (c"player", c"Player", 140),
+    (c"kills", c"Kills", 40),
+    (c"time", c"Time", 50),
+    (c"dur", c"Dur.", 40),
+    (c"details", c"Details", 210),
 ];
-const PLAYER_COLUMN_WIDE: i32 = 150;
+const PLAYER_COLUMN: i32 = 1;
+const ROW_COLUMN_WIDE: i32 = 44;
 const STATUS_LABEL: &str = "StreakStatus";
 const PROGRESS: &str = "StreakProgress";
 /// The Player box, and its label: shown for an HLTV demo only.
@@ -105,8 +109,8 @@ pub(super) unsafe fn build(
         }
         if let Some(heading) = vgui.child_named(vpanel_of(list), "demoname") {
             let (x, y, _, tall) = vgui.rect(heading);
-            vgui.place(heading, (x, y, PLAYER_COLUMN_WIDE, tall));
-            set_label(vgui.object(heading), "Player");
+            vgui.place(heading, (x, y, ROW_COLUMN_WIDE, tall));
+            set_label(vgui.object(heading), "Row #");
         }
         if let Some(button) = vgui.child_named(dialog_vp, "LoadButton") {
             set_label(vgui.object(button), "Go");
@@ -160,7 +164,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             .map_or(name.clone(), |f| f.to_string_lossy().into_owned());
         match status {
             Status::Loading => {
-                let text = format!("Finding the killstreaks in {file}... {percent}%");
+                let text = format!("Finding the highlights in {file}... {percent}%");
                 show(vgui, page, build, (&text, &text), Some(percent));
                 fill(
                     list,
@@ -187,7 +191,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 narrow(vgui, page, list, found.hltv);
             }
             Status::Failed(why) => {
-                let text = format!("Could not find the killstreaks in {file}: {why}");
+                let text = format!("Could not find the highlights in {file}: {why}");
                 show(vgui, page, build, (&text, &text), None);
                 fill(
                     list,
@@ -281,8 +285,8 @@ unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
                         text(raw)
                     }
                 };
-                let kills: usize = get(COLUMNS[0].0).trim().parse().unwrap_or(0);
-                let shown = matches_filter(&get(ROW_KEY), &player) && kills >= min_kills;
+                let kills: usize = get(COLUMNS[1].0).trim().parse().unwrap_or(0);
+                let shown = matches_filter(&get(COLUMNS[0].0), &player) && kills >= min_kills;
                 set_visible(list, id, shown as u32);
             }
             id = next(list, id);
@@ -343,29 +347,34 @@ unsafe fn fill(
         *FILTERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
         delete_all(list);
+        // One player in a POV demo: no Player column.
+        let column_visible: ListIntBoolFn = slot(list, LIST_SLOT_SET_COLUMN_VISIBLE);
+        column_visible(list, PLAYER_COLUMN, hltv as u32);
         let new: OperatorNewFn = std::mem::transmute(base + build.keyvalues_new);
         let ctor: KeyValuesCtor = std::mem::transmute(base + build.keyvalues_ctor);
         let add_item: AddItemFn = slot(list, LIST_SLOT_ADD_ITEM);
-        for streak in streaks {
+        for (index, streak) in streaks.iter().enumerate() {
             let target = match (hltv, streak.player_number) {
                 (true, Some(number)) => number.to_string(),
                 _ => String::new(),
             };
             let cells = [
-                (COLUMNS[0].0, streaks::kills_text(streak.kills)),
-                (COLUMNS[1].0, streak.weapons.clone()),
+                (COLUMNS[0].0, streak.player.replace('\0', "")),
+                (COLUMNS[1].0, streaks::kills_text(streak.kills)),
                 (COLUMNS[2].0, streaks::time_text(streak.first_kill)),
+                (COLUMNS[3].0, streak.duration_text()),
+                (COLUMNS[4].0, streak.details.clone()),
                 (SEEK_KEY, format!("{:.2}", streak.seek_secs())),
                 (TARGET_KEY, target),
             ];
-            let Ok(player) = CString::new(streak.player.replace('\0', "")) else {
+            let Ok(row_number) = CString::new(streaks::row_text(index + 1)) else {
                 continue;
             };
             let row = new(KEYVALUES_SIZE);
             if row.is_null() {
                 continue;
             }
-            ctor(row, c"data".as_ptr(), ROW_KEY.as_ptr(), player.as_ptr());
+            ctor(row, c"data".as_ptr(), ROW_KEY.as_ptr(), row_number.as_ptr());
             let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
             for (cell, value) in cells {
                 if let Ok(value) = CString::new(value) {
@@ -388,7 +397,7 @@ unsafe fn fill(
                 id = next(list, id);
             }
             crate::debug::report(&format!(
-                "studio_panel: Killstreaks tab lists {rows} of {} streaks",
+                "studio_panel: Highlights tab lists {rows} of {} streaks",
                 streaks.len()
             ));
         }

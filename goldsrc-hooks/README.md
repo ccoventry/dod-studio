@@ -136,7 +136,7 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens it on Playback and parks
   the bar off screen. A Console tab holds the real console's history and
   input line; `dodstudio_console_in_panel 1` makes the console key open it.
-  A Killstreaks tab lists the playing demo's streaks, from Studio's analyzer
+  A Highlights tab lists the playing demo's streaks, from Studio's analyzer
   cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
   crate; a demo too big for the game's address space is refused, not tried).
   One `.res` per tab in `dod\dodstudio_ui\`, editable in
