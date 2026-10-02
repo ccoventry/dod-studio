@@ -247,14 +247,17 @@ fn find(path: &Path, generation: u64) -> Result<(Vec<Streak>, &'static str), Str
         .map_err(|e| format!("could not read the demo: {e}"))?
         .len();
     let need = memory_needed(size);
-    if let Some(free) = free_address_space()
-        && free < need
+    let block = block_needed(size);
+    if let Some((free, largest)) = free_address_space()
+        && (free < need || largest < block)
     {
         log(&format!(
-            "{}: not analysed in the game -- it needs about {} MB, the game has {} MB of address space free",
+            "{}: not analysed in the game -- it needs about {} MB with one {} MB block, the game has {} MB free, {} MB at most in one block",
             path.display(),
             need >> 20,
-            free >> 20
+            block >> 20,
+            free >> 20,
+            largest >> 20
         ));
         return Err(
             "too big to read inside the game. Open it once in DoD Studio's Demo Analyzer, and it shows here"
@@ -330,12 +333,45 @@ fn memory_needed(size: u64) -> u64 {
     size.saturating_mul(12).saturating_add(256 << 20)
 }
 
-/// The address space this process has left.
-fn free_address_space() -> Option<u64> {
-    use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
-    let mut status: MEMORYSTATUSEX = unsafe { std::mem::zeroed() };
-    status.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32;
-    (unsafe { GlobalMemoryStatusEx(&mut status) } != 0).then_some(status.ullAvailVirtual)
+/// The largest single allocation analysing a demo of `size` bytes makes,
+/// with room to spare: the whole file is read into one buffer, and the
+/// parser's own buffers grow by doubling. Measured live: the pre-Anniversary
+/// game had 587 MB free but no block over 102 MB, too fragmented for a 117 MB
+/// demo whatever the total.
+fn block_needed(size: u64) -> u64 {
+    size.saturating_mul(2).saturating_add(32 << 20)
+}
+
+/// The address space this process has left, and its largest free block.
+fn free_address_space() -> Option<(u64, u64)> {
+    use windows_sys::Win32::System::Memory::{MEM_FREE, MEMORY_BASIC_INFORMATION, VirtualQuery};
+    use windows_sys::Win32::System::SystemInformation::{GetSystemInfo, SYSTEM_INFO};
+    let mut info: SYSTEM_INFO = unsafe { std::mem::zeroed() };
+    unsafe { GetSystemInfo(&mut info) };
+    let (mut address, end) = (
+        info.lpMinimumApplicationAddress as usize,
+        info.lpMaximumApplicationAddress as usize,
+    );
+    let (mut free, mut largest) = (0u64, 0u64);
+    while address < end {
+        let mut region: MEMORY_BASIC_INFORMATION = unsafe { std::mem::zeroed() };
+        let got = unsafe {
+            VirtualQuery(
+                address as *const _,
+                &mut region,
+                std::mem::size_of::<MEMORY_BASIC_INFORMATION>(),
+            )
+        };
+        if got == 0 || region.RegionSize == 0 {
+            break;
+        }
+        if region.State == MEM_FREE {
+            free += region.RegionSize as u64;
+            largest = largest.max(region.RegionSize as u64);
+        }
+        address = (region.BaseAddress as usize).saturating_add(region.RegionSize);
+    }
+    (free > 0).then_some((free, largest))
 }
 
 fn log(message: &str) {
@@ -384,6 +420,13 @@ mod tests {
                 .seek_secs(),
             0.0
         );
+    }
+
+    #[test]
+    fn free_address_space_is_measured() {
+        let (free, largest) = free_address_space().unwrap();
+        assert!(largest > 0 && largest <= free);
+        assert_eq!(block_needed(100 << 20), 232 << 20);
     }
 
     #[test]
