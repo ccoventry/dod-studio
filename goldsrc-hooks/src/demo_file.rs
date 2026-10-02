@@ -47,7 +47,9 @@ fn read_i32(file: &mut std::fs::File) -> Option<i32> {
 
 fn sum_playback(entries: &[u8]) -> f32 {
     entries
-        .chunks_exact(ENTRY_SIZE)
+        .as_chunks::<ENTRY_SIZE>()
+        .0
+        .iter()
         .filter(|entry| i32::from_le_bytes(entry[..4].try_into().unwrap_or_default()) != 0)
         .map(|entry| {
             f32::from_le_bytes(
