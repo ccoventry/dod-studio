@@ -61,8 +61,9 @@ export function switchNavTab(navKey) {
   const auditorPane = document.querySelector('#pane-demo-auditor');
   const analyzerPane = document.querySelector('#pane-demo-analyzer');
   const hdPane = document.querySelector('#pane-hd-textures');
+  const blenderPane = document.querySelector('#pane-blender');
 
-  [workspacePane, detailsPane, captureSubtabsBar, detailPane, advancedPanel, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane]
+  [workspacePane, detailsPane, captureSubtabsBar, detailPane, advancedPanel, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane, blenderPane]
     .forEach((el) => { if (el) el.style.display = 'none'; });
 
   const footerCaptureStudio = document.querySelector('#footer-capture-studio');
@@ -92,6 +93,8 @@ export function switchNavTab(navKey) {
   } else if (navKey === 'hd-textures') {
     if (hdPane) hdPane.style.display = 'flex';
     if (footerHdTextures) footerHdTextures.style.display = 'flex';
+  } else if (navKey === 'blender') {
+    if (blenderPane) blenderPane.style.display = 'flex';
   }
 
   document.querySelectorAll('.nav-tab-btn').forEach((b) => {

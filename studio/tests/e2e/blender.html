@@ -1,0 +1,59 @@
+<!doctype html>
+<!--
+  Minimal harness for blender_pane.js (#403) -- see tests/e2e/README.md for the
+  general shape. Carries only the elements the pane reads and writes, plus the
+  Configuration page's hl.exe field it takes the game path from. A test
+  controls the backend by registering `blender_status` / `blender_run` /
+  `blender_set_exe` handlers on window.__mockInvokeHandlers; the file pickers
+  are `plugin:dialog|open`, which goes through the same mock.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>blender_pane.js test harness</title>
+</head>
+<body>
+  <input id="hl-path-input" value="C:/games/Half-Life/hl.exe" />
+  <button class="nav-tab-btn" data-nav="blender">Blender</button>
+
+  <section id="pane-blender">
+    <button id="blender-refresh-btn">Refresh</button>
+    <p id="blender-status-text"></p>
+    <p id="blender-addons-text"></p>
+    <button id="blender-pick-exe-btn">Choose blender.exe...</button>
+    <button id="blender-reset-exe-btn">Find it automatically</button>
+    <span id="blender-agr-text"></span>
+    <button id="blender-pick-agr-btn">Choose...</button>
+    <span id="blender-assets-text"></span>
+    <button id="blender-pick-assets-btn">Choose...</button>
+    <select id="blender-map-select"></select>
+    <select id="blender-style-select"></select>
+    <span id="blender-work-text"></span>
+    <button id="blender-open-work-btn">Open folder</button>
+    <button id="blender-import-btn">1. Import</button>
+    <select id="blender-engine-select">
+      <option value="eevee">EEVEE previews</option>
+      <option value="cycles">One Cycles frame</option>
+    </select>
+    <input id="blender-frames-input" type="text" />
+    <button id="blender-scene-btn">2. Build scene</button>
+    <select id="blender-quality-select">
+      <option value="quick">Quick</option>
+      <option value="final">Final</option>
+    </select>
+    <button id="blender-render-btn">3. Render</button>
+    <button id="blender-encode-btn">4. Encode MP4</button>
+    <button id="blender-cancel-btn" disabled>Cancel</button>
+    <p id="blender-progress"></p>
+    <p id="blender-line"></p>
+    <ul id="blender-results"></ul>
+  </section>
+  <div id="toast-container"></div>
+
+  <script type="module">
+    import { initBlenderPane } from '/src/blender_pane.js';
+    initBlenderPane();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

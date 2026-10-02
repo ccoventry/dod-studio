@@ -160,11 +160,12 @@ pub fn parse_line(line: &str) -> Option<Line> {
 }
 
 /// Ends `pid` and everything it started, if it is still running when this
-/// is dropped: the `kill_on_drop` of a process tree.
-struct TreeGuard(Option<u32>);
+/// is dropped: the `kill_on_drop` of a process tree. Also used by
+/// [`crate::blender`].
+pub(crate) struct TreeGuard(pub(crate) Option<u32>);
 
 impl TreeGuard {
-    fn kill(&mut self) {
+    pub(crate) fn kill(&mut self) {
         if let Some(pid) = self.0.take() {
             let mut cmd = Command::new("taskkill");
             cmd.args(["/PID", &pid.to_string(), "/T", "/F"])
