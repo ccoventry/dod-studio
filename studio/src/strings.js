@@ -14,6 +14,14 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
+function cacheCounts(already, failed) {
+  const parts = [];
+  if (already) parts.push(`${already} already cached`);
+  if (failed) parts.push(`${failed} failed`);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
 export const STRINGS = {
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
@@ -671,6 +679,16 @@ export const STRINGS = {
     ADD_PIN_BUTTON: '➕ Add Pin…',
     RESIZE_HANDLE_TITLE: 'Drag to resize',
     DEMOS_TITLE: 'Demos',
+    CACHE_ALL_BUTTON: 'Cache all',
+    CACHE_STOP_BUTTON: 'Stop',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Killstreaks tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_NOTHING: 'No demos in this folder to cache.',
+    CACHE_STOPPING: 'Stopping after the demos in progress…',
+    cacheProgress: ({ done, total, already, failed }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed),
+    cacheDone: ({ done, total, already, failed, cancelled }) =>
+      (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
+      cacheCounts(already, failed),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',

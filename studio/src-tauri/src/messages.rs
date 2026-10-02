@@ -75,6 +75,8 @@ pub fn demo_file_not_found(demo_path: &str) -> String {
 
 // Why a scan skipped a demo, in the user's words (#23). The scanner's own
 // error text ("failed to fill whole buffer") still goes to the log.
+/// The Demo Analyzer's Cache all, clicked while a run is going (#569).
+pub const DEMO_CACHE_ALREADY_RUNNING: &str = "Already caching demos; stop that run first.";
 pub const SCAN_FAIL_TOO_SHORT: &str = "File too short to be a demo";
 pub const SCAN_FAIL_NOT_A_DEMO: &str = "Not a Half-Life demo (bad header)";
 pub const SCAN_FAIL_CORRUPT: &str = "Demo is corrupt partway through";
