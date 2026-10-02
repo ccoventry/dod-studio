@@ -183,6 +183,29 @@ def verify(game, src):
     body = ui.body(ui.u32(page_vt + 4 * on_command) - ui.base, 0x10)
     check(body[:1] == ["ret 4"], f"PropertyPage's own OnCommand is an empty {body[:1]} -- why pages get ours")
 
+    # 14: the Load Demo window the Demos tab borrows from.
+    check(start == build["file_dialog_ctor"],
+          f"CDemoPlayerFileDialog's constructor is file_dialog_ctor +{build['file_dialog_ctor']:#x}")
+    got = ui.last_ret(build["file_dialog_ctor"])
+    check(got == "ret 8", f"which returns with {got!r} (parent, name)")
+    dem = ui.base + ui.img.find(b"*.dem\0")
+    fill = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[build["file_dialog_fill"]:build["file_dialog_fill"] + 0x200], ui.base + build["file_dialog_fill"])]
+    check(f"push {hex(dem)}" in fill, f"file_dialog_fill +{build['file_dialog_fill']:#x} passes the \"*.dem\" wildcard")
+    check(build["file_dialog_fill"] in calls, "and the constructor calls it")
+    list_vt = ui.vftable("ListPanel@vgui2")
+    for name, want in (("LIST_SLOT_GET_SELECTED_ITEM", "ret 4"), ("LIST_SLOT_IS_VALID_ITEM_ID", "ret 4"),
+                       ("LIST_SLOT_GET_ITEM", "ret 4")):
+        index = vwl.rust_usize(src, name)
+        func = ui.u32(list_vt + 4 * index) - ui.base
+        # A forwarder (Anniversary IsValidItemID: `add ecx, ...; jmp`) returns
+        # with whatever it jumps to.
+        head = ui.body(func, 0x20)
+        tail = next((t for t in head if re.fullmatch(r"jmp 0x[0-9a-f]+", t)), None)
+        if tail and not any(t.startswith("ret") for t in head[:head.index(tail)]):
+            func = int(tail.split()[1], 16) - ui.base
+        got = ui.last_ret(func)
+        check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+
     # 13: the two IPanel slots only this window uses (the rest are #410's).
     vg = vwl.Image(game / "vgui2.dll")
     wrapper = vg.vftable("VPanelWrapper")

@@ -162,6 +162,13 @@ pub struct Build {
     pub sheet_size: usize,
     /// `PropertyPage::PropertyPage(Panel *parent, const char *name, bool)`.
     pub page_ctor: usize,
+    /// `CDemoPlayerFileDialog::CDemoPlayerFileDialog(Panel *parent, const char
+    /// *name)`: the Load Demo window, which the Demos tab borrows its list and
+    /// Load button from. Allocated `frame_size + 4` bytes, as GameUI does.
+    pub file_dialog_ctor: usize,
+    /// The Load Demo window's fill: empties its list and lists the demos
+    /// again (`FindFirst("*.dem")`), `thiscall`, no arguments.
+    pub file_dialog_fill: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -177,6 +184,8 @@ pub const BUILDS: [Build; 2] = [
         sheet_ctor: 0x7_74f0,
         sheet_size: 0xac,
         page_ctor: 0x6_55f0,
+        file_dialog_ctor: 0x2_06a0,
+        file_dialog_fill: 0x2_0910,
     },
     Build {
         name: "25th Anniversary",
@@ -190,8 +199,34 @@ pub const BUILDS: [Build; 2] = [
         sheet_ctor: 0x8_54f0,
         sheet_size: 0xb4,
         page_ctor: 0x7_1cd0,
+        file_dialog_ctor: 0x2_6f00,
+        file_dialog_fill: 0x2_7210,
     },
 ];
+
+/// Our own Load Demo window's panel name: not the stock one's, so a VCR bar's
+/// own Load Demo window is never mistaken for it.
+const DEMO_LIST: &str = "DodStudioDemoList";
+/// `ListPanel::GetSelectedItem(int)`, `IsValidItemID(int)`, `GetItem(int)`
+/// (the same slots #409 reads the selected row through).
+const LIST_SLOT_GET_SELECTED_ITEM: usize = 176;
+const LIST_SLOT_IS_VALID_ITEM_ID: usize = 170;
+const LIST_SLOT_GET_ITEM: usize = 153;
+/// `KeyValues::GetString(const char *key, const char *default)`.
+const KEYVALUES_SLOT_GET_STRING: usize = 12;
+/// The key each row's demo name is stored under.
+const ROW_KEY: &CStr = c"demoname";
+
+/// The `viewdemo` line for a row of the Load Demo list: the row as is when it
+/// is already quoted or has no space, quoted otherwise.
+fn viewdemo_line(row: &str) -> String {
+    let row = row.trim();
+    if row.starts_with('"') || !row.contains(' ') {
+        format!("viewdemo {row}\n")
+    } else {
+        format!("viewdemo \"{row}\"\n")
+    }
+}
 
 /// What each page is allocated, comfortably more than `PropertyPage` (the
 /// smallest Options page, a subclass with its own fields, is 0xc0 on
@@ -312,6 +347,20 @@ pub const LOANS: &[Loan] = &[
         slot: "ConsoleSubmitSlot",
         page: CONSOLE_PAGE,
     },
+    // The Demos tab: our own (hidden) Load Demo window's list and Load
+    // button. Its own OnCommand is ours, so Load runs viewdemo itself.
+    Loan {
+        source: DEMO_LIST,
+        control: "DemoList",
+        slot: "DemoListSlot",
+        page: DEMOS_PAGE,
+    },
+    Loan {
+        source: DEMO_LIST,
+        control: "LoadButton",
+        slot: "DemoLoadSlot",
+        page: DEMOS_PAGE,
+    },
     // The type-ahead list under the input line: a popup the console places
     // itself, next to its input line wherever that is. It only needs a
     // parent that is showing (the console window is hidden), so no slot.
@@ -345,6 +394,7 @@ fn lends(source: &str) -> bool {
 
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
+const DEMOS_PAGE: usize = 1;
 const CONSOLE_PAGE: usize = 2;
 /// Where the VCR bar waits, off screen, while `dodstudio_viewdemo_in_panel` has
 /// our window stand in for it. Off screen rather than hidden: a hidden panel
@@ -604,6 +654,10 @@ mod hook {
     type PanelFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel);
     type SetParentFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, Vpanel);
     type SetActivePageFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void);
+    type ListIntFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> u32;
+    type ListItemFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
+    type GetStringFn =
+        unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
     type GetXyFn = unsafe extern "thiscall" fn(*mut c_void, Vpanel, *mut i32, *mut i32);
 
@@ -621,6 +675,90 @@ mod hook {
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
+    static DEMO_LIST_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
+    /// Our own Load Demo window, or 0.
+    static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
+
+    /// The selected row's `demoname` in our Load Demo window's list.
+    unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
+        unsafe {
+            let (_, build) = gameui().ok()?;
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return None;
+            }
+            let get_selected: ListIntFn = slot(list, LIST_SLOT_GET_SELECTED_ITEM);
+            let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let id = get_selected(list, 0) as i32;
+            if is_valid(list, id) & 0xff == 0 {
+                return None;
+            }
+            let row = get_item(list, id);
+            if row.is_null() {
+                return None;
+            }
+            let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+            let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
+            (!raw.is_null())
+                .then(|| text(raw))
+                .filter(|t| !t.is_empty())
+        }
+    }
+
+    /// Our Load Demo window's `OnCommand`. Load (and a double-click, which
+    /// sends the same command) on a demo runs `viewdemo` here: the stock
+    /// window would post it to its parent for the VCR bar to run, and our
+    /// window is no VCR bar. A folder row (#409) and everything else go to
+    /// the window's own handler.
+    unsafe extern "thiscall" fn demo_list_on_command(this: *mut c_void, raw: *const c_char) {
+        let command = text(raw);
+        if command.eq_ignore_ascii_case("load") {
+            match unsafe { selected_demo(this) } {
+                Some(row) if !row.trim_end_matches('"').ends_with('/') => {
+                    let line = viewdemo_line(&row);
+                    let ran = std::ffi::CString::new(line.clone())
+                        .is_ok_and(|l| crate::engine::client_cmd(&l));
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "studio_panel: Demos tab {} {}",
+                            if ran { "ran" } else { "could not run" },
+                            line.trim()
+                        ))
+                    };
+                    return;
+                }
+                Some(_) => {}
+                None => {
+                    crate::commands::console_print(&format!(
+                        "{NAME}: pick a demo in the list first\n"
+                    ));
+                    return;
+                }
+            }
+        }
+        let original = DEMO_LIST_ON_COMMAND.load(Ordering::Acquire);
+        if original != 0 {
+            // Safety: the window's own OnCommand, from its vftable.
+            let original: OnCommandFn = unsafe { std::mem::transmute(original) };
+            unsafe { original(this, raw) };
+        }
+    }
+
+    /// Lists the demos again in our Load Demo window (new recordings, or a
+    /// folder change), with the window's own fill.
+    unsafe fn refill_demo_list() {
+        let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
+        if dialog.is_null() {
+            return;
+        }
+        if let Ok((base, build)) = gameui() {
+            unsafe {
+                let fill: ActivateFn = std::mem::transmute(base + build.file_dialog_fill);
+                fill(dialog);
+            }
+        }
+    }
 
     unsafe fn slot<F: Copy>(object: *mut c_void, index: usize) -> F {
         unsafe {
@@ -1021,6 +1159,18 @@ mod hook {
                     lent.designs = designs;
                 }
             });
+
+            // Our own Load Demo window, never shown: the Demos tab borrows its
+            // list and Load button. It fills its list as it is built.
+            let dialog = allocate(base, build, build.frame_size + 4)?;
+            let dialog_ctor: SheetCtor = std::mem::transmute(base + build.file_dialog_ctor);
+            dialog_ctor(dialog, frame, c"DodStudioDemoList".as_ptr());
+            vgui.set_visible(vpanel_of(dialog), false);
+            DEMO_LIST_ON_COMMAND.store(
+                own_on_command(dialog, demo_list_on_command as *const () as usize),
+                Ordering::Release,
+            );
+            DEMO_DIALOG.store(dialog as usize, Ordering::Release);
             Ok((frame, sheet))
         }
     }
@@ -1456,6 +1606,10 @@ mod hook {
                         // The console window came up (the engine shows it
                         // itself at times): its pieces are ours, so it would
                         // be blank. It goes away again.
+                        Some(source) if name == DEMO_LIST && vgui.visible(source) => {
+                            vgui.set_visible(source, false);
+                            borrow(&vgui, name, source, &mut lent);
+                        }
                         Some(source) if name == CONSOLE && vgui.visible(source) => {
                             vgui.set_visible(source, false);
                             borrow(&vgui, name, source, &mut lent);
@@ -1518,6 +1672,20 @@ mod hook {
     unsafe fn handle(this: *mut c_void, raw: *const c_char, own: &AtomicUsize) {
         let command = text(raw);
         let result = match action(&command) {
+            // Load demo... goes to our own list on the Demos tab, which works
+            // with no demo playing (the VCR bar's needs a demo loaded).
+            Action::Vcr("load") => {
+                let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
+                let demos = PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void;
+                if !sheet.is_null() && !demos.is_null() {
+                    unsafe {
+                        refill_demo_list();
+                        let set_active: SetActivePageFn = slot(sheet, SHEET_SLOT_SET_ACTIVE_PAGE);
+                        set_active(sheet, demos);
+                    }
+                }
+                Ok(())
+            }
             Action::Vcr(c) => Vgui::get().and_then(|vgui| unsafe { to_vcr_bar(&vgui, c) }),
             Action::Engine(line) => {
                 let ran = std::ffi::CString::new(format!("{line}\n"))
