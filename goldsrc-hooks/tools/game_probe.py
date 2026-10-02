@@ -34,7 +34,8 @@ always ends the game it started, and only that one.
     focus                       bring the game window to the front (25th Anniversary
                                 frames are black while it's behind other windows)
     key <name>                  press and release one key in the game window: esc,
-                                enter, tab, space, backquote, f1..f12, or a letter
+                                enter, tab, space, backquote, backspace, up, down,
+                                left, right, f1..f12, or a letter
                                 or digit. Focuses the game first, and refuses unless
                                 the game's window really is in front
     click <x> <y> [2]           left-click at a point in the game window, in the same
@@ -388,6 +389,7 @@ def focus_window(pid):
 
 # Virtual-key codes for the `key` step. Letters and digits map to themselves.
 KEYS = {"esc": 0x1B, "enter": 0x0D, "tab": 0x09, "space": 0x20, "backquote": 0xC0,
+        "backspace": 0x08, "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
         **{f"f{n}": 0x6F + n for n in range(1, 13)}}
 
 
