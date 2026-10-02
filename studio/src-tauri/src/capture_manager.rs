@@ -733,6 +733,11 @@ fn emit_take_verification(
             "captured_count": captured_count,
             "renderable_count": renderable_count,
             "blocks": blocks,
+            // Both read by the frontend's automatic finish step (#440): it
+            // only finishes a batch that ran to completion, and a frame
+            // sequence has to be encoded at the rate it was captured at.
+            "outcome": outcome,
+            "capture_fps": manifest.capture_fps,
         }),
     );
 }

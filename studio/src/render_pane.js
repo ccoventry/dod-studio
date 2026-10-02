@@ -20,6 +20,7 @@ import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify } from './os_notifications.js';
+import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
@@ -493,7 +494,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     const failed = jobs.filter((j) => j.status === 'Error').length;
     const cancelled = jobs.filter((j) => j.status === 'Cancelled').length;
 
-    if (jobs.length > 0) {
+    // A batch the finish step (#440) queued has already said how it ended, in
+    // its own words ("12 clips ready") — a second toast would repeat it.
+    if (jobs.length > 0 && !finishClipsOwnsJobs(jobs)) {
       // Severity follows what actually happened rather than what is present:
       // a deliberate partial cancel where the rest rendered is a success, not
       // an "info" event. Only a real failure is an error.
