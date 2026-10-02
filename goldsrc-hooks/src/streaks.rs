@@ -80,10 +80,7 @@ pub fn streaks_of(analysis: &analysis::Analysis) -> Vec<Streak> {
                     .kills
                     .iter()
                     .map(|(time, weapon, _)| {
-                        (
-                            time.viewdemo_offset.as_secs_f32(),
-                            analysis::weapon_display_name(weapon),
-                        )
+                        (time.viewdemo_offset.as_secs_f32(), weapon_name(weapon))
                     })
                     .collect();
                 Streak::new(&player.name, &kills)
@@ -92,6 +89,26 @@ pub fn streaks_of(analysis: &analysis::Analysis) -> Vec<Streak> {
         .collect();
     streaks.sort_by(|a, b| a.first_kill.total_cmp(&b.first_kill));
     streaks
+}
+
+/// Studio's English weapon names. `analysis::weapon_display_name` reads them
+/// from a `localizations` folder it looks for beside the running program,
+/// which in the game is `hl.exe`'s: there is none there.
+const WEAPON_NAMES: &str = include_str!("../../localizations/dod_studio_english.txt");
+
+/// A weapon's name as Studio shows it (`"weapon.<name>"` keys are the
+/// weapon's own name in lower case), or that name itself.
+fn weapon_name(weapon: &analysis::Weapon) -> String {
+    let own = format!("{weapon:?}");
+    let key = format!("\"weapon.{}\"", own.to_ascii_lowercase());
+    WEAPON_NAMES
+        .lines()
+        .find_map(|line| {
+            let rest = line.trim().strip_prefix(&key)?;
+            Some(rest.trim().trim_matches('"').to_string())
+        })
+        .filter(|name| !name.is_empty())
+        .unwrap_or(own)
 }
 
 /// A bar time as the tab shows it, `mm:ss`: sorts as text in time order for
@@ -212,6 +229,20 @@ fn find(path: &Path, generation: u64) -> Result<(Vec<Streak>, &'static str), Str
     {
         return Ok((streaks_of(&analysis), "from the analyzer cache"));
     }
+    // DoD Studio, when it runs, analyses it in its own (64-bit) process.
+    match ask_studio(path, generation) {
+        Some(Ok(())) => {
+            return root
+                .as_deref()
+                .and_then(|root| analysis::cache::load(root, path))
+                .map(|(_, analysis)| (streaks_of(&analysis), "analysed by DoD Studio"))
+                .ok_or_else(|| {
+                    "DoD Studio read it, but its result is not in the cache".to_string()
+                });
+        }
+        Some(Err(why)) => return Err(format!("DoD Studio could not read it: {why}")),
+        None => {}
+    }
     let size = std::fs::metadata(path)
         .map_err(|e| format!("could not read the demo: {e}"))?
         .len();
@@ -252,6 +283,41 @@ fn find(path: &Path, generation: u64) -> Result<(Vec<Streak>, &'static str), Str
             "analysed, not saved"
         },
     ))
+}
+
+/// DoD Studio's analysis pipe; must match `native::sys::analysis_server::
+/// PIPE_NAME` to the character.
+const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
+
+/// Asks DoD Studio to analyse `path` into the analyzer cache, following its
+/// progress. `None` when Studio isn't running (nothing serves the pipe).
+fn ask_studio(path: &Path, generation: u64) -> Option<Result<(), String>> {
+    use std::io::{BufRead, BufReader, Write};
+    let mut pipe = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(STUDIO_PIPE)
+        .ok()?;
+    log(&format!("asking DoD Studio to analyse {}", path.display()));
+    let request = format!("analyze {}\n", path.to_string_lossy());
+    if let Err(e) = pipe.write_all(request.as_bytes()) {
+        return Some(Err(format!("could not ask: {e}")));
+    }
+    for line in BufReader::new(pipe).lines() {
+        let Ok(line) = line else { break };
+        if let Some(percent) = line.strip_prefix("progress ") {
+            if let Ok(percent) = percent.trim().parse::<u32>()
+                && GENERATION.load(Ordering::Acquire) == generation
+            {
+                PERCENT.store(percent.min(100), Ordering::Release);
+            }
+        } else if line == "done" {
+            return Some(Ok(()));
+        } else if let Some(why) = line.strip_prefix("failed ") {
+            return Some(Err(why.to_string()));
+        }
+    }
+    Some(Err("DoD Studio stopped answering".to_string()))
 }
 
 /// What analysing a demo of `size` bytes takes at its peak: measured 831 MB
@@ -318,6 +384,19 @@ mod tests {
                 .seek_secs(),
             0.0
         );
+    }
+
+    #[test]
+    fn the_studio_pipe_is_the_one_studio_serves() {
+        let server = include_str!("../../native/src/sys/analysis_server.rs");
+        assert!(server.contains(&format!("pub const PIPE_NAME: &str = r\"{STUDIO_PIPE}\";")));
+    }
+
+    #[test]
+    fn weapons_have_studios_names() {
+        assert_eq!(weapon_name(&analysis::Weapon::StickGrenade), "Stick");
+        assert_eq!(weapon_name(&analysis::Weapon::Mp40), "MP40");
+        assert_eq!(weapon_name(&analysis::Weapon::K98), "K98");
     }
 
     #[test]
