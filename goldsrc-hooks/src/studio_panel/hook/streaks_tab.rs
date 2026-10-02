@@ -242,6 +242,21 @@ unsafe fn fill(list: *mut c_void, base: usize, build: &Build, key: &str, streaks
             // through a slot nothing here has verified.
             add_item(list, row, 0, 0, 0);
         }
+        if !streaks.is_empty() {
+            // What the list holds now, counted back through it.
+            let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
+            let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
+            let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
+            let (mut id, mut rows) = (first(list), 0);
+            while is_valid(list, id) & 0xff != 0 && rows < 100_000 {
+                rows += 1;
+                id = next(list, id);
+            }
+            crate::debug::report(&format!(
+                "studio_panel: Killstreaks tab lists {rows} of {} streaks",
+                streaks.len()
+            ));
+        }
     }
 }
 
