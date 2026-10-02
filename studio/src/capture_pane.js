@@ -16,6 +16,8 @@ import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { setStatusLine, uiStatusText } from './status_line.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -831,10 +833,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initImportCfgButton();
 
   // The pipeline turns some settings into init commands, so the warnings go
-  // stale when one changes.
+  // stale when one changes -- including by undo, which fires no 'change'
+  // until blur (#535).
   FIELDS_THAT_BECOME_COMMANDS.forEach((sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("change", refreshInitCommandWarnings);
+    refreshAfterTyping(document.querySelector(sel), refreshInitCommandWarnings);
   });
 
   const addInitCommandBtn = document.querySelector('#add-init-command-btn');
@@ -924,7 +926,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           }
         }
         const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        if (statusEl) statusEl.textContent = statusText;
+        setStatusLine(statusEl, statusText);
         if (startBtn) startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
       } else {
@@ -935,18 +937,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (currentOnBatchFinished) currentOnBatchFinished();
 
         if (payload.error) {
-          const errorBody = STRINGS.CAPTURE.captureErrorToast(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
+          // Without the engine's pointers at the log (#534); the log has them.
+          const errorBody = STRINGS.CAPTURE.captureErrorToast(uiStatusText(payload.status) || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
           showToast(errorBody, "error");
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
+          setStatusLine(statusEl, STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT));
           notify('error', STRINGS.NOTIFICATIONS.CAPTURES_ERROR_TITLE, errorBody);
         } else if (payload.status === "Cancelled") {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
           if (progressBar) progressBar.style.width = '0%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.CANCELLED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.CANCELLED);
         } else {
           showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
           if (progressBar) progressBar.style.width = '100%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.COMPLETED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.COMPLETED);
           notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
         }
       }
@@ -1315,7 +1318,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       // Before any patching: without Steam the game can't start.
       if (!(await ensureSteamReady())) {
-        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        setStatusLine(statusEl, STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
         return;
       }
       runBatch();
