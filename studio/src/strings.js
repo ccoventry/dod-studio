@@ -488,6 +488,12 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #110: a CSV of every captured highlight, for an editor.
+    EXPORT_MARKERS_BUTTON: 'Export Marker List…',
+    EXPORT_MARKERS_TITLE: 'Save a CSV with one row per captured or rendered highlight: its demo, player, kills, where it is in the demo, its take and its label. For lining clips up in your editor.',
+    EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
+    exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
+    exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
