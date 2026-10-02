@@ -28,8 +28,12 @@ use std::path::{Path, PathBuf};
 
 /// Bump when the shape changes. A file with an unrecognised format is ignored
 /// rather than guessed at — an advisory check that mis-reads is worse than one
-/// that stays quiet.
-pub const FORMAT: u32 = 1;
+/// that stays quiet. 2 added `renders` (#438); a format-1 file still reads,
+/// with no history.
+pub const FORMAT: u32 = 2;
+
+/// The oldest format this build still reads.
+const OLDEST_FORMAT: u32 = 1;
 
 /// Lives in the **block** folder — `<capture_dir>/<session>/chain_JJ_bN/` —
 /// beside the take it describes, so it travels with the take when the folder is
@@ -65,8 +69,13 @@ const MAX_ANCESTOR_DEPTH: usize = 2;
 pub struct SessionMeta {
     pub format: u32,
     pub session_id: String,
-    /// The `mirv_movie_fps` the batch was captured at.
+    /// The `mirv_movie_fps` the batch was captured at. `0` when unknown: a
+    /// take captured before this file existed gets one the first time it is
+    /// rendered, to hold its history.
     pub capture_fps: i32,
+    /// Every render of this take, oldest first (#438).
+    #[serde(default)]
+    pub renders: Vec<RenderAttempt>,
 }
 
 impl SessionMeta {
@@ -75,8 +84,44 @@ impl SessionMeta {
             format: FORMAT,
             session_id: session_id.into(),
             capture_fps,
+            renders: Vec::new(),
         }
     }
+}
+
+/// How a render attempt ended. `Interrupted` is what an attempt says from the
+/// moment it starts until it ends, so a crash mid-render leaves that behind
+/// rather than nothing.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RenderOutcome {
+    Interrupted,
+    Finished,
+    Failed,
+    Cancelled,
+}
+
+/// One render of a take: when, with what, and what came of it (#438).
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone, PartialEq)]
+pub struct RenderAttempt {
+    /// When it started; with `stream`, what identifies it.
+    pub started_unix_ms: u64,
+    /// The stream folder rendered (`all`, the HUD pair's colour half, ...):
+    /// one take can be two jobs.
+    pub stream: String,
+    /// A `RenderCodec` id.
+    pub codec: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub custom_codec_args: String,
+    pub fps: u32,
+    pub outcome: RenderOutcome,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub output_path: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output_size_bytes: Option<u64>,
+    /// The first line of the error, for a failed attempt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
 }
 
 /// Writes a take's capture settings into its block folder.
@@ -104,11 +149,100 @@ pub fn read_for_take(take_folder: &Path) -> Option<SessionMeta> {
         let Ok(meta) = serde_json::from_slice::<SessionMeta>(&bytes) else {
             continue;
         };
-        if meta.format == FORMAT {
+        if (OLDEST_FORMAT..=FORMAT).contains(&meta.format) {
             return Some(meta);
         }
     }
     None
+}
+
+// ── Render history (#438) ────────────────────────────────────────────────────
+
+/// Serialises history writes: a take's colour and HUD streams render as two
+/// jobs at once, and both update the same file.
+static HISTORY_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Where a take's file is, or would go: the nearest existing one, else the
+/// block folder (the folder given, or its parent for HLAE's nested `take*`).
+/// `None` when the nearest file exists but can't be read, so it is never
+/// overwritten with a fresh one.
+fn history_file(take_folder: &Path) -> Option<(PathBuf, SessionMeta)> {
+    for dir in search_path(take_folder) {
+        let candidate = dir.join(TAKE_FILE);
+        let Ok(bytes) = std::fs::read(&candidate) else {
+            continue;
+        };
+        return match serde_json::from_slice::<SessionMeta>(&bytes) {
+            Ok(meta) if (OLDEST_FORMAT..=FORMAT).contains(&meta.format) => Some((candidate, meta)),
+            _ => None,
+        };
+    }
+    let is_take_number_folder = take_folder
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().to_lowercase().starts_with("take"));
+    let block = if is_take_number_folder {
+        take_folder.parent()?
+    } else {
+        take_folder
+    };
+    Some((block.join(TAKE_FILE), SessionMeta::new(String::new(), 0)))
+}
+
+/// A take's render history, oldest first; empty when there is none.
+pub fn read_history(take_folder: &Path) -> Vec<RenderAttempt> {
+    read_for_take(take_folder)
+        .map(|meta| meta.renders)
+        .unwrap_or_default()
+}
+
+/// Applies `change` to a take's history and saves it. Best-effort, like
+/// `write`: a render must never fail because its history couldn't be saved.
+fn update_history(
+    take_folder: &Path,
+    change: impl FnOnce(&mut Vec<RenderAttempt>),
+) -> std::io::Result<()> {
+    let _guard = HISTORY_WRITE.lock().unwrap_or_else(|p| p.into_inner());
+    let Some((path, mut meta)) = history_file(take_folder) else {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "the take's dodstudio_take.json is unreadable or from a newer build; left as it is",
+        ));
+    };
+    meta.format = FORMAT;
+    change(&mut meta.renders);
+    let json = serde_json::to_vec_pretty(&meta)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, json)
+}
+
+/// Records an attempt as it starts (outcome `Interrupted`).
+pub fn record_render_start(take_folder: &Path, attempt: &RenderAttempt) -> std::io::Result<()> {
+    update_history(take_folder, |renders| renders.push(attempt.clone()))
+}
+
+/// Records how the attempt that started at `started_unix_ms` on `stream`
+/// ended.
+pub fn record_render_end(
+    take_folder: &Path,
+    started_unix_ms: u64,
+    stream: &str,
+    outcome: RenderOutcome,
+    output_path: &str,
+    output_size_bytes: Option<u64>,
+    error: Option<String>,
+) -> std::io::Result<()> {
+    update_history(take_folder, |renders| {
+        if let Some(attempt) = renders
+            .iter_mut()
+            .rev()
+            .find(|a| a.started_unix_ms == started_unix_ms && a.stream == stream)
+        {
+            attempt.outcome = outcome;
+            attempt.output_path = output_path.to_string();
+            attempt.output_size_bytes = output_size_bytes;
+            attempt.error = error;
+        }
+    })
 }
 
 /// The folder itself first, then its parents — nearest wins, so a take carrying
@@ -249,6 +383,97 @@ mod tests {
         );
         std::fs::write(block.join(TAKE_FILE), ahead).expect("write");
         assert_eq!(read_for_take(&take), None, "a newer format was read anyway");
+        // Nor is it overwritten by a render's history.
+        let attempt = attempt_at(1, "all");
+        assert!(record_render_start(&take, &attempt).is_err());
+        assert!(
+            std::fs::read_to_string(block.join(TAKE_FILE))
+                .unwrap()
+                .contains(&format!("\"format\":{}", FORMAT + 1))
+        );
+    }
+
+    fn attempt_at(started_unix_ms: u64, stream: &str) -> RenderAttempt {
+        RenderAttempt {
+            started_unix_ms,
+            stream: stream.to_string(),
+            codec: "prores".to_string(),
+            custom_codec_args: String::new(),
+            fps: 300,
+            outcome: RenderOutcome::Interrupted,
+            output_path: String::new(),
+            output_size_bytes: None,
+            error: None,
+        }
+    }
+
+    /// #438: an attempt reads as interrupted until it ends, both streams of
+    /// a take keep their own entries, and capture settings survive.
+    #[test]
+    fn render_history_records_each_attempt_and_its_outcome() {
+        let (_root, block, take) = block_with_take("history", "session_x", "dodstudio_chain_01_b0");
+        write(&block, &SessionMeta::new("session_x", 120)).expect("write");
+
+        record_render_start(&take, &attempt_at(10, "all")).expect("start all");
+        record_render_start(&take, &attempt_at(10, "hudcolor")).expect("start hud");
+        assert_eq!(read_history(&take)[0].outcome, RenderOutcome::Interrupted);
+
+        record_render_end(
+            &take,
+            10,
+            "all",
+            RenderOutcome::Finished,
+            "D:/out/a.mov",
+            Some(42),
+            None,
+        )
+        .expect("end all");
+        record_render_end(
+            &take,
+            10,
+            "hudcolor",
+            RenderOutcome::Failed,
+            "",
+            None,
+            Some("ffmpeg exited 1".to_string()),
+        )
+        .expect("end hud");
+
+        let history = read_history(&take);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].outcome, RenderOutcome::Finished);
+        assert_eq!(history[0].output_size_bytes, Some(42));
+        assert_eq!(history[1].outcome, RenderOutcome::Failed);
+        assert_eq!(history[1].error.as_deref(), Some("ffmpeg exited 1"));
+        let meta = read_for_take(&take).expect("meta");
+        assert_eq!((meta.capture_fps, meta.format), (120, FORMAT));
+    }
+
+    /// A take captured before the file existed gets one, in its block folder,
+    /// and an older format-1 file keeps its capture rate.
+    #[test]
+    fn history_creates_the_file_and_reads_format_one() {
+        let (_root, block, take) =
+            block_with_take("history_new", "session_x", "dodstudio_chain_01_b0");
+        record_render_start(&take, &attempt_at(5, "all")).expect("start");
+        assert!(block.join(TAKE_FILE).is_file());
+        assert!(!take.join(TAKE_FILE).exists());
+        assert_eq!(read_history(&take).len(), 1);
+        assert_eq!(
+            fps_mismatch_warning(&take, 300),
+            None,
+            "an unknown rate scolded"
+        );
+
+        let (_root2, block2, take2) =
+            block_with_take("format_one", "session_y", "dodstudio_chain_01_b0");
+        std::fs::write(
+            block2.join(TAKE_FILE),
+            r#"{"format":1,"session_id":"session_y","capture_fps":120}"#,
+        )
+        .expect("write");
+        assert!(read_history(&take2).is_empty());
+        assert!(fps_mismatch_warning(&take2, 300).is_some());
     }
 
     #[test]

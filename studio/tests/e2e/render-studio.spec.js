@@ -426,3 +426,38 @@ test.describe('Skip (keep original) toggle', () => {
     await expect(page.locator('tr[data-job-id="0"] .rj-settings')).not.toContainText('fps');
   });
 });
+
+test.describe('issue #438 — render history per take', () => {
+  test('a new take says New; a rendered one counts and lists its attempts', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', history: [] }),
+      job({
+        id: '1',
+        history: [
+          { started_unix_ms: Date.UTC(2026, 8, 29, 10), stream: 'all', codec: 'prores', fps: 300, outcome: 'finished', output_path: 'D:/o/a.mov', output_size_bytes: 1048576, output_exists: true },
+          { started_unix_ms: Date.UTC(2026, 8, 29, 11), stream: 'all', codec: 'h264', fps: 120, outcome: 'finished', output_path: 'D:/o/b.mp4', output_size_bytes: 1048576, output_exists: true },
+        ],
+      }),
+    ]);
+    await expect(page.locator('tr[data-job-id="0"] .rj-history')).toHaveText('New');
+    const cell = page.locator('tr[data-job-id="1"] .rj-history');
+    await expect(cell).toContainText('Rendered ×2, 2 MB');
+    await expect(cell.locator('.rj-history-list')).toBeHidden();
+    await cell.locator('.rj-history-toggle').click();
+    await expect(cell.locator('.rj-history-list div')).toHaveCount(2);
+    await expect(cell.locator('.rj-history-list div').first()).toContainText('h264 @ 120fps · b.mp4');
+
+    // Still open after a snapshot that changes something else.
+    await emitSnapshot(page, [job({ id: '0', history: [], progress: 5 }), job({
+      id: '1',
+      history: [
+        { started_unix_ms: Date.UTC(2026, 8, 29, 10), stream: 'all', codec: 'prores', fps: 300, outcome: 'finished', output_path: 'D:/o/a.mov', output_size_bytes: 1048576, output_exists: true },
+        { started_unix_ms: Date.UTC(2026, 8, 29, 11), stream: 'all', codec: 'h264', fps: 120, outcome: 'finished', output_path: 'D:/o/b.mp4', output_size_bytes: 1048576, output_exists: true },
+        { started_unix_ms: Date.UTC(2026, 8, 29, 12), stream: 'all', codec: 'prores', fps: 300, outcome: 'interrupted', output_exists: false },
+      ],
+    })]);
+    await expect(cell).toContainText('Interrupted');
+    await expect(cell.locator('.rj-history-list')).toBeVisible();
+  });
+});
