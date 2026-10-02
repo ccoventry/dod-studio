@@ -37,9 +37,11 @@ always ends the game it started, and only that one.
                                 enter, tab, space, backquote, f1..f12, or a letter
                                 or digit. Focuses the game first, and refuses unless
                                 the game's window really is in front
-    click <x> <y>               left-click at a point in the game window, in the same
-                                pixels as a `grab` image (client area, top left 0 0).
-                                Same focus check as `key`
+    click <x> <y> [2]           left-click at a point in the game window, in the same
+                                pixels as a `grab` image (client area, top left 0 0);
+                                a trailing 2 double-clicks. Same focus check as `key`
+    drag <x1> <y1> <x2> <y2>    hold the left button at one point and release it at
+                                another (moving or resizing a window), same pixels
     expect <regex>              check the regex appears in either log (or in
                                 the events pipe's lines, once listening)
     expect_not <regex>          check it doesn't
@@ -406,7 +408,7 @@ def press_key(pid, name):
     return None
 
 
-def click(pid, x, y):
+def click(pid, x, y, count=1):
     """Left-clicks at client-area point (x, y) of the game's window, the
     same pixels a `grab` image has. Refuses unless the game is in front, and
     unless the point is inside its window."""
@@ -422,8 +424,40 @@ def click(pid, x, y):
     user32.ClientToScreen(hwnd, ctypes.byref(point))
     user32.SetCursorPos(point.x, point.y)
     time.sleep(0.1)
+    for _ in range(count):
+        user32.mouse_event(0x0002, 0, 0, 0, 0)  # left down
+        time.sleep(0.05)
+        user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
+        time.sleep(0.08)
+    return None
+
+
+def drag(pid, x1, y1, x2, y2):
+    """Presses the left button at (x1, y1) and releases it at (x2, y2), in
+    steps, so vgui2 sees the cursor move while the button is down."""
+    state = focus_window(pid)
+    if not state.startswith("foreground"):
+        return f"not dragged: {state}"
+    hwnd = game_hwnd(pid)
+    rect = wintypes.RECT()
+    user32.GetClientRect(hwnd, ctypes.byref(rect))
+    for x, y in ((x1, y1), (x2, y2)):
+        if not (0 <= x < rect.right and 0 <= y < rect.bottom):
+            return f"({x}, {y}) is outside the {rect.right}x{rect.bottom} window"
+
+    def move(x, y):
+        point = wintypes.POINT(x, y)
+        user32.ClientToScreen(hwnd, ctypes.byref(point))
+        user32.SetCursorPos(point.x, point.y)
+
+    move(x1, y1)
+    time.sleep(0.1)
     user32.mouse_event(0x0002, 0, 0, 0, 0)  # left down
-    time.sleep(0.05)
+    steps = 20
+    for i in range(1, steps + 1):
+        time.sleep(0.02)
+        move(x1 + (x2 - x1) * i // steps, y1 + (y2 - y1) * i // steps)
+    time.sleep(0.1)
     user32.mouse_event(0x0004, 0, 0, 0, 0)  # left up
     return None
 
@@ -690,7 +724,14 @@ def run(args):
                 result["ok"] = result["note"].startswith("foreground")
             elif kind == "click":
                 parts = rest.split()
-                err = click(pid, int(parts[0]), int(parts[1]))
+                err = click(pid, int(parts[0]), int(parts[1]),
+                            int(parts[2]) if len(parts) > 2 else 1)
+                result["ok"] = err is None
+                if err:
+                    result["note"] = err
+            elif kind == "drag":
+                x1, y1, x2, y2 = (int(v) for v in rest.split())
+                err = drag(pid, x1, y1, x2, y2)
                 result["ok"] = err is None
                 if err:
                     result["note"] = err
