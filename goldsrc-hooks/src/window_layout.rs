@@ -34,10 +34,11 @@
 //!   remembering which it changed, so turning the setting off puts them back.
 //!   The controls inside a window made resizable this way follow its size
 //!   (see [`fit`]): one that spans most of the window grows with it, as the
-//!   Load Demo list does, and one nearer the right or bottom edge keeps its
-//!   distance from that edge, as the buttons under the list do. Their `.res`
+//!   Load Demo list does, and one within [`NEAR_EDGE`] of the right or bottom
+//!   edge keeps its distance from that edge, as the buttons under the list
+//!   and the VCR bar's time and stop button do. Their `.res`
 //!   positions are the starting point, read when the window first appears.
-//!   The frame's own title bar, close button and grips (`frame_*`) are left
+//!   The frame's own title bar, close button and grips (unnamed) are left
 //!   to `Frame`, and a window that was resizable already, like the console,
 //!   lays itself out.
 //! - **Remembered:** each time a window becomes visible, it is moved to where
@@ -210,16 +211,22 @@ struct Rect {
     h: i32,
 }
 
+/// How close to the far edge a control has to sit to stay with that edge.
+/// Not "past the middle": that split the VCR bar's row of buttons in two,
+/// sending the last two to the right on their own (tested live, 2026-10-01).
+const NEAR_EDGE: i32 = 48;
+
 /// Where a control goes along one axis when its window is `now` long instead
 /// of the `design` length its `.res` laid it out for. One that spans at least
-/// half the window stretches, keeping both margins; one centred past the
-/// middle keeps its distance from the far edge; the rest stay put. Never
-/// shorter than one pixel.
+/// half the window stretches, keeping both margins; one within [`NEAR_EDGE`]
+/// of the far edge, and nearer it than the near one, keeps its distance from
+/// it; the rest stay put. Never shorter than one pixel.
 fn fit_axis(start: i32, len: i32, design: i32, now: i32) -> (i32, i32) {
     let grow = now - design;
+    let far = design - (start + len);
     if len * 2 >= design {
         (start, (len + grow).max(1))
-    } else if start * 2 + len > design {
+    } else if far <= NEAR_EDGE && far < start {
         (start + grow, len)
     } else {
         (start, len)
@@ -235,9 +242,11 @@ fn fit(child: Rect, design: (i32, i32), now: (i32, i32)) -> Rect {
 }
 
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
-/// `Frame::PerformLayout` places itself.
+/// `Frame::PerformLayout` places itself. In GameUI they have no name at all
+/// (listed live on both builds, 2026-10-01), while every control a `.res`
+/// creates is named; `frame_*` is what newer vgui2 calls them.
 fn frame_part(name: &str) -> bool {
-    name.starts_with("frame_")
+    name.is_empty() || name.starts_with("frame_")
 }
 
 /// `module/name<TAB>x y w h`, one window per line.
@@ -847,6 +856,19 @@ mod tests {
     }
 
     #[test]
+    fn a_row_of_buttons_stays_together() {
+        // The VCR bar (464 wide): the transport buttons run 12..276, the time
+        // label 284..426 and the stop button 426..450. Only the last two are
+        // near the right edge.
+        let at = |x, w| fit(Rect { x, y: 64, w, h: 24 }, (464, 128), (600, 128)).x;
+        for x in [12, 56, 84, 112, 140, 168, 196, 224, 252] {
+            assert_eq!(at(x, 24), x, "button at {x} moved");
+        }
+        assert_eq!(at(284, 142), 284 + 136);
+        assert_eq!(at(426, 24), 426 + 136);
+    }
+
+    #[test]
     fn the_design_size_changes_nothing_and_shrinking_never_inverts() {
         let list = Rect {
             x: 5,
@@ -861,6 +883,7 @@ mod tests {
 
     #[test]
     fn only_the_frame_s_own_pieces_are_left_to_it() {
+        assert!(frame_part(""));
         assert!(frame_part("frame_close"));
         assert!(frame_part("frame_brGrip"));
         assert!(!frame_part("Load"));
