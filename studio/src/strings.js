@@ -488,6 +488,9 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #40: sortable columns and the whole-batch bar.
+    SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
+    batchProgress: (pct) => `Batch ${pct}%`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
