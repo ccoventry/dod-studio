@@ -1497,6 +1497,12 @@ mod hook {
                         // ours now, not of the console's window), so typing
                         // stopped after one letter: hand it back to the
                         // input line while the list is up.
+                        // A popup, so it stays up when its tab is switched
+                        // away from: hide it whenever the Console tab isn't
+                        // the one showing (the sheet hides the other pages).
+                        if vgui.visible(vp) && !vgui.visible(page) {
+                            vgui.set_visible(vp, false);
+                        }
                         if vgui.visible(vp) {
                             // Above our window, which a click brings forward.
                             let front: PanelFn = slot(vgui.panel, IPANEL_MOVE_TO_FRONT);
