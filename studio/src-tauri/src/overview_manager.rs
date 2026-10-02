@@ -52,6 +52,47 @@ pub fn overview_reset_edits(map: String) -> Result<(), String> {
     files::remove_edits(&map)
 }
 
+/// Writes the high-quality copy (`<map>_hd.tga`). The pixels come as the raw
+/// request body -- 48 MB at 4096x3072, too big to send as JSON -- and where
+/// to put them in the `x-overview` header, URI-encoded JSON:
+/// `{install, map, target, width, height}`.
+#[tauri::command]
+pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<String, String> {
+    let tauri::ipc::InvokeBody::Raw(rgba) = request.body() else {
+        return Err("the high-quality image did not arrive as raw bytes".to_string());
+    };
+    let header = request
+        .headers()
+        .get("x-overview")
+        .and_then(|v| v.to_str().ok())
+        .ok_or("the high-quality image arrived without its details")?;
+    let decoded: String = url::form_urlencoded::parse(format!("m={header}").as_bytes())
+        .find(|(k, _)| k == "m")
+        .map(|(_, v)| v.into_owned())
+        .unwrap_or_default();
+    #[derive(serde::Deserialize)]
+    struct Meta {
+        install: String,
+        map: String,
+        target: files::Target,
+        width: u32,
+        height: u32,
+    }
+    let meta: Meta = serde_json::from_str(&decoded).map_err(|e| e.to_string())?;
+    let rgba = rgba.clone();
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        files::save_hd(
+            Path::new(&meta.install),
+            meta.target,
+            &meta.map,
+            meta.width,
+            meta.height,
+            &rgba,
+        )
+    }))
+    .await
+}
+
 /// Encodes the page's drawing and writes it beside a `.txt`, backing up a
 /// user's own overview first.
 #[tauri::command]

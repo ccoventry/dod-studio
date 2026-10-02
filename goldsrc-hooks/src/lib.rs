@@ -139,6 +139,7 @@ mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
+mod overview_hd;
 mod overview_map;
 mod patch;
 mod pe;

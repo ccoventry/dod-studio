@@ -792,3 +792,16 @@ export async function overviewExport(request) {
       throw err;
     });
 }
+
+/** Writes the high-quality copy (`<map>_hd.tga`) DoD Studio's hook tiles from.
+ *  The pixels go as the raw body: 48 MB at 4096x3072 is too big for JSON. */
+export async function overviewExportHd(meta, rgba) {
+  return invoke("overview_export_hd", rgba, {
+    headers: { 'x-overview': encodeURIComponent(JSON.stringify(meta)) },
+  })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_export_hd):", err);
+      showToast(STRINGS.IPC.overviewSaveFailed(err), 'error');
+      throw err;
+    });
+}

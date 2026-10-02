@@ -1301,6 +1301,8 @@ export const STRINGS = {
     TARGET_LABEL: 'Where',
     TARGET_ADDON: 'dod_addon (used when the game runs with -addons)',
     TARGET_GAME: 'dod (your own is backed up first)',
+    HD_LABEL: 'Also save a high-quality copy',
+    HD_HINT: "Saved beside it as <map>_hd.tga, 4096x3072. The game alone shows at most 1024x768; with DoD Studio's in-game hook it uses this copy instead.",
     SAVE_BUTTON: 'Save overview',
     RESET_BUTTON: 'Start over',
     resetConfirm: (map) => `Throw away every change made to ${map}'s overview here? The saved overview files are not touched.`,

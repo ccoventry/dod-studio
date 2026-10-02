@@ -669,6 +669,7 @@ pub fn run() {
             overview_manager::overview_save_edits,
             overview_manager::overview_reset_edits,
             overview_manager::overview_export,
+            overview_manager::overview_export_hd,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

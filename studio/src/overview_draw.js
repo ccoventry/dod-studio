@@ -26,6 +26,8 @@ export function emptyEdits() {
     },
     format: 'tga',
     target: 'addon',
+    // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.
+    hd: true,
   };
 }
 
@@ -409,6 +411,26 @@ export function renderExport(scene, edits) {
     }
   }
   return { width: scene.width, height: scene.height, rgba };
+}
+
+/**
+ * The high-quality copy for DoD Studio's hook: drawn `k` times the game's size
+ * (4096x3072 by default), background transparent and keyed green.
+ */
+export function renderHd(scene, edits, k = 4) {
+  const c = layer(scene.width * k, scene.height * k);
+  const ctx = c.getContext('2d');
+  drawOverview(ctx, scene, edits, k, { transparent: true });
+  const rgba = ctx.getImageData(0, 0, scene.width * k, scene.height * k).data;
+  for (let i = 0; i < rgba.length; i += 4) {
+    if (rgba[i + 3] < 8) {
+      rgba[i] = 0;
+      rgba[i + 1] = 255;
+      rgba[i + 2] = 0;
+      rgba[i + 3] = 0;
+    }
+  }
+  return { width: scene.width * k, height: scene.height * k, rgba };
 }
 
 /** Base64 of a byte array, in chunks (a 3 MB spread would overflow the stack). */

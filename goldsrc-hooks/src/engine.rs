@@ -826,6 +826,8 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
         return 0;
     }
     let real: InitializeFn = unsafe { std::mem::transmute(real) };
+    // Before the client copies the table: high-quality overview tiles.
+    unsafe { crate::overview_hd::wrap(engfuncs as *mut std::ffi::c_void) };
     let result = if engfuncs.is_null() {
         unsafe { real(engfuncs, version) }
     } else {

@@ -131,6 +131,8 @@ Makes the image the game draws for its overview map (`overviews/<map>.tga` or `.
 
 Edits are saved per map as you go. **Save overview** writes a TGA (full colour, the background left transparent) or an 8-bit BMP at the game's 1024x768. It goes into `dod_addon/overviews` (read when the game runs with `-addons`) or `dod/overviews`. A user's own overview there is copied to `overviews/dodstudio_backup` first. The `.txt` uses the game's own placement maths, so the game's player icons land on the right spot.
 
+The game itself shows at most 1024x768 (its loader reads the image into a fixed 3 MB buffer and cuts it into 128-pixel tiles). Ticking **Also save a high-quality copy** writes `<map>_hd.tga` at 4096x3072 beside it. With DoD Studio's hook DLL in the game (`goldsrc-hooks/src/overview_hd.rs`), each tile is re-uploaded from that copy at 512x512.
+
 ---
 
 ## 3. How a capture batch works

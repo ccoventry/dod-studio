@@ -31,6 +31,63 @@ pub fn tga(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
+/// The high-quality copy DoD Studio's hook tiles from (`goldsrc-hooks`
+/// `overview_hd`): a 32-bit run-length TGA, any size that cuts into the game's
+/// 8x6 grid of square tiles, 128 to 2048 pixels each. Run-length because an
+/// overview is mostly flat colour: 4096x3072 comes to a few MB, not 48.
+pub fn tga_hd(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
+    let tile = width / 8;
+    if !width.is_multiple_of(8) || height != tile * 6 || !(128..=2048).contains(&tile) {
+        return Err(format!(
+            "{width}x{height} doesn't cut into 8x6 square tiles of 128 to 2048 pixels"
+        ));
+    }
+    if rgba.len() != width as usize * height as usize * 4 {
+        return Err("the pixel data is not the image's size".to_string());
+    }
+    let mut out = Vec::with_capacity(rgba.len() / 8);
+    out.extend_from_slice(&[0, 0, 10, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    out.extend_from_slice(&(width as u16).to_le_bytes());
+    out.extend_from_slice(&(height as u16).to_le_bytes());
+    out.push(32);
+    out.push(8);
+    let w = width as usize;
+    for row in (0..height as usize).rev() {
+        let px: Vec<[u8; 4]> = rgba[row * w * 4..(row + 1) * w * 4]
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .map(|p| [p[2], p[1], p[0], p[3]])
+            .collect();
+        // Packets never cross a row, as the format asks.
+        let mut i = 0;
+        while i < px.len() {
+            let mut run = 1;
+            while i + run < px.len() && run < 128 && px[i + run] == px[i] {
+                run += 1;
+            }
+            if run > 1 {
+                out.push(0x80 | (run as u8 - 1));
+                out.extend_from_slice(&px[i]);
+                i += run;
+                continue;
+            }
+            let start = i;
+            while i < px.len() && i - start < 128 && !(i + 1 < px.len() && px[i + 1] == px[i]) {
+                i += 1;
+            }
+            if i == start {
+                i += 1;
+            }
+            out.push((i - start - 1) as u8);
+            for p in &px[start..i] {
+                out.extend_from_slice(p);
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// An 8-bit BMP. Pixels under half covered become the background green,
 /// which the game makes transparent; the rest are matched to at most 255
 /// colours (median cut), with green kept for the background alone.
@@ -207,6 +264,65 @@ mod tests {
             .flat_map(|y| (0..w).map(move |x| (x, y)))
             .flat_map(|(x, y)| f(x, y))
             .collect()
+    }
+
+    /// Reads a run-length TGA back, bottom-up rows flipped to top-first.
+    fn unrle(t: &[u8]) -> (u32, u32, Vec<u8>) {
+        let w = u16::from_le_bytes([t[12], t[13]]) as u32;
+        let h = u16::from_le_bytes([t[14], t[15]]) as u32;
+        let mut px = Vec::new();
+        let mut at = 18;
+        while px.len() < (w * h * 4) as usize {
+            let head = t[at];
+            at += 1;
+            let n = (head & 0x7f) as usize + 1;
+            if head & 0x80 != 0 {
+                for _ in 0..n {
+                    px.extend_from_slice(&[t[at + 2], t[at + 1], t[at], t[at + 3]]);
+                }
+                at += 4;
+            } else {
+                for k in 0..n {
+                    let q = at + k * 4;
+                    px.extend_from_slice(&[t[q + 2], t[q + 1], t[q], t[q + 3]]);
+                }
+                at += n * 4;
+            }
+        }
+        let row = (w * 4) as usize;
+        let flipped = (0..h as usize)
+            .rev()
+            .flat_map(|y| px[y * row..(y + 1) * row].to_vec())
+            .collect();
+        (w, h, flipped)
+    }
+
+    #[test]
+    fn the_hd_copy_round_trips_and_is_small() {
+        let px = image(1024, 768, |x, y| {
+            if (x / 100 + y / 100) % 2 == 0 {
+                [94, 94, 85, 255]
+            } else {
+                [x as u8, y as u8, 3, 255]
+            }
+        });
+        let t = tga_hd(1024, 768, &px).unwrap();
+        assert_eq!(t[2], 10, "run-length true colour");
+        let (w, h, back) = unrle(&t);
+        assert_eq!((w, h), (1024, 768));
+        assert_eq!(back, px);
+        let flat = image(1024, 768, |_, _| [1, 2, 3, 255]);
+        assert!(tga_hd(1024, 768, &flat).unwrap().len() < 1024 * 768 / 20);
+    }
+
+    #[test]
+    fn the_hd_copy_must_cut_into_square_tiles() {
+        assert!(tga_hd(4096, 3072, &vec![0; 4096 * 3072 * 4]).is_ok());
+        assert!(tga_hd(4096, 3000, &vec![0; 4096 * 3000 * 4]).is_err());
+        assert!(
+            tga_hd(512, 384, &vec![0; 512 * 384 * 4]).is_err(),
+            "64-pixel tiles"
+        );
     }
 
     #[test]

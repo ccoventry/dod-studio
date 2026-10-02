@@ -55,6 +55,10 @@ async function loadHarness(page, { edits = null } = {}) {
         written: [`C:/games/Half-Life/dod_addon/overviews/${args.request.map}.${args.request.format}`],
         backed_up: [],
       }),
+      overview_export_hd: (bytes) => {
+        window.__hdBytes = bytes.length;
+        return 'C:/games/Half-Life/dod_addon/overviews/dod_test_hd.tga';
+      },
     };
   }, { installs: INSTALLS, maps: MAPS, scene: SCENE, edits });
   await page.goto('/tests/e2e/overviews.html');
@@ -161,4 +165,16 @@ test('save hands the backend the 1024x768 drawing, format and place', async ({ p
   expect(request.transform).toEqual(SCENE.transform);
   // 1024 * 768 * 4 bytes, base64.
   expect(request.rgba.length).toBe(Math.ceil((1024 * 768 * 4) / 3) * 4);
+  // And the high-quality copy, raw: 4096 * 3072 * 4 bytes.
+  await expect(page.locator('#ov-save-status')).toContainText('dod_test_hd.tga');
+  expect(await page.evaluate(() => window.__hdBytes)).toBe(4096 * 3072 * 4);
+});
+
+test('the high-quality copy can be left out', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await page.uncheck('#ov-hd');
+  await page.click('#ov-save-btn');
+  await expect(page.locator('#ov-save-status')).toContainText('dod_test.tga');
+  expect(await calls(page, 'overview_export_hd')).toHaveLength(0);
 });

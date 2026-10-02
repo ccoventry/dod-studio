@@ -10,11 +10,11 @@ import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import {
   overviewInstalls, overviewMaps, overviewScene, overviewLoadEdits,
-  overviewSaveEdits, overviewResetEdits, overviewExport,
+  overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd,
 } from './ipc_bridge.js';
 import {
   emptyEdits, normaliseEdits, drawOverview, faceAt, labelAt, setAreaEdit,
-  areaEdit, setFaceColour, flagName, setFlagName, toWorld, renderExport, toBase64,
+  areaEdit, setFaceColour, flagName, setFlagName, toWorld, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 
 const INSTALL_KEY = 'overviews.install';
@@ -48,6 +48,7 @@ export function initOverviewsPane() {
   const labelList = pane.querySelector('#ov-labels');
   const formatSelect = pane.querySelector('#ov-format');
   const targetSelect = pane.querySelector('#ov-target');
+  const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
   const saveStatus = pane.querySelector('#ov-save-status');
@@ -267,6 +268,7 @@ export function initOverviewsPane() {
     });
     formatSelect.value = edits.format || 'tga';
     targetSelect.value = edits.target || 'addon';
+    hdBox.checked = edits.hd !== false;
 
     flagList.innerHTML = '';
     if (scene && !scene.flags.length) {
@@ -335,6 +337,7 @@ export function initOverviewsPane() {
 
   formatSelect.addEventListener('change', () => change({ ...edits, format: formatSelect.value }, { remember: false }));
   targetSelect.addEventListener('change', () => change({ ...edits, target: targetSelect.value }, { remember: false }));
+  hdBox.addEventListener('change', () => change({ ...edits, hd: hdBox.checked }, { remember: false }));
 
   // ── Installs and maps ──────────────────────────────────────────────────
   function renderMapList() {
@@ -453,7 +456,16 @@ export function initOverviewsPane() {
         rgba: toBase64(image.rgba),
         transform: scene.transform,
       });
-      const lines = [STRINGS.OVERVIEWS.saved(result.written)];
+      const written = [...result.written];
+      if (edits.hd !== false) {
+        const hd = renderHd(scene, edits);
+        const path = await overviewExportHd(
+          { install, map: scene.map, target: edits.target || 'addon', width: hd.width, height: hd.height },
+          new Uint8Array(hd.rgba.buffer),
+        );
+        written.push(path);
+      }
+      const lines = [STRINGS.OVERVIEWS.saved(written)];
       if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.backedUp(result.backed_up));
       saveStatus.textContent = lines.join(' ');
       showToast(STRINGS.OVERVIEWS.savedToast(scene.map), 'success');

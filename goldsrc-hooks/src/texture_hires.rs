@@ -1735,15 +1735,15 @@ fn renamed_by_engine<'a>(
 }
 
 /// A decoded TGA: RGBA8, top row first.
-struct Rgba {
-    width: u32,
-    height: u32,
-    pixels: Vec<u8>,
+pub(crate) struct Rgba {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) pixels: Vec<u8>,
 }
 
 /// Decodes a 24- or 32-bit truecolor TGA, uncompressed (type 2) or RLE (type
 /// 10). Anything else is refused rather than guessed at.
-fn decode_tga(bytes: &[u8]) -> Result<Rgba, String> {
+pub(crate) fn decode_tga(bytes: &[u8]) -> Result<Rgba, String> {
     if bytes.len() < 18 {
         return Err("shorter than a TGA header".into());
     }

@@ -258,6 +258,29 @@ pub fn export(request: &Export) -> Result<Saved, String> {
     )
 }
 
+/// Writes the high-quality copy, `<map>_hd.tga`, beside where [`save`]
+/// puts the overview: DoD Studio's hook cuts the game's tiles from it.
+/// Always ours, so it is simply replaced.
+pub fn save_hd(
+    install: &Path,
+    target: Target,
+    map: &str,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> Result<String, String> {
+    let map = safe(map);
+    let folder = match target {
+        Target::Addon => install.join("dod_addon").join("overviews"),
+        Target::Game => install.join("dod").join("overviews"),
+    };
+    std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    let bytes = super::image::tga_hd(width, height, rgba)?;
+    let path = folder.join(format!("{map}_hd.tga"));
+    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
 /// The page's saved edits for `map`, as it wrote them.
 pub fn load_edits(map: &str) -> Option<serde_json::Value> {
     let text = std::fs::read_to_string(edits_path(map)).ok()?;
