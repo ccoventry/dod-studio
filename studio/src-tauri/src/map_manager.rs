@@ -123,32 +123,73 @@ pub struct CfgWarningRow {
     pub line: usize,
 }
 
+/// One value stated for a cvar, and where (`cfg_scan::StatedValue`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CfgOverrideRow {
-    pub command: String,
-    pub cvar: String,
-    pub init_value: String,
-    pub cfg_value: String,
-    pub file: String,
-    pub line: usize,
-    /// True when the command comes from the pipeline itself rather than from
-    /// something the user typed — those override a config too, and the user has
-    /// no other way to find out.
-    pub from_app: bool,
+pub struct ValueSourceRow {
+    pub value: String,
+    /// `config` | `initial` | `app` | `before` | `after`
+    pub kind: String,
+    pub file: Option<String>,
+    pub line: Option<usize>,
+    pub offset_seconds: Option<f32>,
 }
 
+impl From<&native::patch::cfg_scan::StatedValue> for ValueSourceRow {
+    fn from(v: &native::patch::cfg_scan::StatedValue) -> Self {
+        use native::patch::cfg_scan::ValueSource;
+        let (kind, file, line, offset_seconds) = match &v.source {
+            ValueSource::Config { file, line } => (
+                "config",
+                Some(
+                    file.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| file.to_string_lossy().to_string()),
+                ),
+                Some(*line),
+                None,
+            ),
+            ValueSource::Initial => ("initial", None, None, None),
+            ValueSource::App => ("app", None, None, None),
+            ValueSource::ScheduledBefore { offset_seconds } => {
+                ("before", None, None, Some(*offset_seconds))
+            }
+            ValueSource::ScheduledAfter { offset_seconds } => {
+                ("after", None, None, Some(*offset_seconds))
+            }
+        };
+        ValueSourceRow {
+            value: v.value.clone(),
+            kind: kind.to_string(),
+            file,
+            line,
+            offset_seconds,
+        }
+    }
+}
+
+/// Rule 1 of #216: a cvar given different values across the configs, Initial
+/// Commands and Scheduled `Before` commands.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct CfgShadowRow {
+pub struct ValueConflictRow {
     pub cvar: String,
-    /// The command that will not take effect.
-    pub shadowed: String,
-    pub shadowed_value: String,
-    pub winner_value: String,
-    /// True when the winning command is one the pipeline appends for itself, in
-    /// which case the fix is a setting rather than an edit to this list.
-    pub winner_from_app: bool,
+    /// Every value, in the order the engine runs them.
+    pub values: Vec<ValueSourceRow>,
+    pub effective: ValueSourceRow,
+    /// True when a Scheduled `Before` is among the values, so the row shows
+    /// under Scheduled Commands rather than Initial Commands.
+    pub scheduled: bool,
+}
+
+/// Rule 2 of #216: an unpaired Scheduled `After` that differs from the
+/// baseline, so every clip after the first records at its value.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AsymmetricAfterRow {
+    pub cvar: String,
+    pub after: ValueSourceRow,
+    pub baseline: ValueSourceRow,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -156,7 +197,7 @@ pub struct CfgShadowRow {
 pub struct CustomCommandWarning {
     pub command: String,
     pub cvar: String,
-    /// `hazard` | `overridesInit` | `overridesConfig`
+    /// `hazard`. Value conflicts are `conflicts`/`asymmetric` now (#216).
     pub kind: String,
     /// What this displaces, and where that came from.
     pub replaced_value: String,
@@ -208,11 +249,14 @@ pub struct NoopCommandRow {
 pub struct CfgReport {
     /// Values the pipeline reads that a config sets and no init command names.
     pub unseen: Vec<CfgWarningRow>,
-    /// Init commands that will win over a config's value.
-    pub overrides: Vec<CfgOverrideRow>,
-    /// Init commands beaten by a later entry in the same list.
-    pub shadowed: Vec<CfgShadowRow>,
-    /// Scheduled commands that displace something, or that must not run mid-demo.
+    /// Rule 1 (#216): cvars given different values across the configs,
+    /// Initial Commands (the pipeline's own included) and Scheduled `Before`
+    /// commands. Replaces the old override and shadowed lists.
+    pub conflicts: Vec<ValueConflictRow>,
+    /// Rule 2 (#216): unpaired Scheduled `After` commands that leave a
+    /// different value in place for every later clip.
+    pub asymmetric: Vec<AsymmetricAfterRow>,
+    /// Scheduled commands that must not run mid-demo.
     pub custom: Vec<CustomCommandWarning>,
     /// Banned commands (`cfg_scan::BANNED_COMMANDS`) found in Initial
     /// Commands. Not merely advisory: `start_capture_batch` must refuse to
@@ -223,6 +267,11 @@ pub struct CfgReport {
     /// Commands but refused here because the decal flush sizes itself
     /// against them once, before the demo plays.
     pub banned_scheduled: Vec<BannedCommandRow>,
+    /// Initial / Scheduled Commands too long for one ConsoleCommand frame
+    /// (`native::patch::too_long_commands`). Blocking, like the banned lists:
+    /// `start_capture_batch` refuses them too (#453).
+    pub too_long_init: Vec<String>,
+    pub too_long_scheduled: Vec<String>,
     /// The `r_decals` ring size this capture will silently use, when nothing
     /// — no config file, no Initial Command — states one (see
     /// `ring_limit_from_init` / `ring_limit_from_game_config`). `None`
@@ -255,6 +304,20 @@ pub struct CfgReport {
     /// warning this report carries: everything else degrades a capture,
     /// this one crashes the game.
     pub fatal_cvars: Vec<CfgFatalRow>,
+    /// `dod/config.cfg` exists and is not read-only (#478). The engine
+    /// rewrites that file from its current values whenever the game quits,
+    /// so anything Initial or Scheduled Commands set ends up saved in it.
+    /// Advisory: the app never changes the file or its attributes.
+    pub config_cfg_writable: bool,
+}
+
+/// Whether `<game_dir>/config.cfg` exists and is not read-only. The engine's
+/// own `Host_WriteConfiguration` ("This file is overwritten whenever you
+/// change your user settings in the game.") rewrites only that file; the
+/// user's other configs are never written back.
+fn config_cfg_is_writable(game_dir: &Path) -> bool {
+    std::fs::metadata(game_dir.join("config.cfg"))
+        .is_ok_and(|m| m.is_file() && !m.permissions().readonly())
 }
 
 /// Scheduled commands in the order the engine reaches them.
@@ -303,6 +366,7 @@ pub async fn scan_game_configs(
 
     tokio::task::spawn_blocking(move || {
         let scan = native::patch::cfg_scan::scan(&dir);
+        let config_cfg_writable = config_cfg_is_writable(&dir);
 
         // The list the engine will actually receive, so the app's own additions
         // — the movie fps, the decal pin — are checked too. game_path is
@@ -343,57 +407,6 @@ pub async fn scan_game_configs(
         // ever becomes settable, decal_ring_limit's own default being 0.
         let decal_flush_is_noop = cfg.decal_flush && native::patch::ring_limit(&cfg) == 0;
         let effective_commands = native::patch::final_init_commands(&cfg);
-        let user_typed: std::collections::HashSet<String> =
-            init_commands.iter().map(|c| c.trim().to_string()).collect();
-
-        // A command that never applies cannot override anything, so the ones
-        // beaten later in the list are dropped rather than reported twice with
-        // opposite implications.
-        let dead: std::collections::HashSet<String> =
-            native::patch::cfg_scan::self_overrides(&effective_commands)
-                .into_iter()
-                .map(|s| s.shadowed)
-                .collect();
-
-        // One row per cvar. Typing `mirv_movie_fps 120` when the app appends the
-        // same value produces two commands that both override movie.cfg, and
-        // listing the identical consequence twice reads as a bug rather than as
-        // two facts. Only the last one applies, so that is the one reported.
-        let mut by_cvar: indexmap::IndexMap<String, CfgOverrideRow> = indexmap::IndexMap::new();
-        for o in scan.overrides_in(&effective_commands) {
-            if dead.contains(&o.command) {
-                continue;
-            }
-            by_cvar.insert(
-                o.cvar.to_lowercase(),
-                CfgOverrideRow {
-                    from_app: !user_typed.contains(&o.command),
-                    file: o.file_name(),
-                    command: o.command,
-                    cvar: o.cvar,
-                    init_value: o.init_value,
-                    cfg_value: o.cfg_value,
-                    line: o.line,
-                },
-            );
-        }
-        let overrides: Vec<CfgOverrideRow> = by_cvar.into_iter().map(|(_, v)| v).collect();
-
-        // An init command later in the list beats an earlier one, so a value the
-        // user typed can be dead on arrival without anything on screen saying
-        // so — the pipeline appends its own commands after theirs.
-        let user_count = init_commands.len();
-        let shadowed = native::patch::cfg_scan::self_overrides(&effective_commands)
-            .into_iter()
-            .filter(|s| user_typed.contains(&s.shadowed))
-            .map(|s| CfgShadowRow {
-                winner_from_app: s.winner_index >= user_count,
-                cvar: s.cvar,
-                shadowed: s.shadowed,
-                shadowed_value: s.shadowed_value,
-                winner_value: s.winner_value,
-            })
-            .collect::<Vec<_>>();
 
         // Anything the pipeline reads that a config sets and no init command
         // even names — the genuinely silent case. Naming it at the same value
@@ -474,8 +487,8 @@ pub async fn scan_game_configs(
         }
 
         // Custom commands are scheduled into playback, so they run after the
-        // configs AND after the init commands — they are the last word on any
-        // cvar they touch, and the only place a value can change mid-demo.
+        // configs AND after the init commands, and are the only place a value
+        // can change mid-demo.
         let mut custom = Vec::new();
         let command_texts: Vec<String> =
             custom_commands.iter().map(|c| c.command.clone()).collect();
@@ -517,44 +530,51 @@ pub async fn scan_game_configs(
             });
         }
 
-        // Only the FIRST scheduled command to touch a cvar displaces the config
-        // or init value. A paired set — `hud_deathnotice_time 555` before the
-        // clip and `1` after it — is one override and one restore, and
-        // reporting the restore against the config file too says the same thing
-        // twice while describing the second one wrongly.
-        let mut already_reported: std::collections::HashSet<String> =
-            std::collections::HashSet::new();
-        for payload in application_order(&custom_commands) {
-            let command = &payload.command;
-            let Some((cvar, _)) = native::patch::cfg_scan::assigned_cvar(command) else {
-                continue;
-            };
-            if custom.iter().any(|w| w.command == command.trim()) {
-                continue;
-            }
-            if !already_reported.insert(cvar.to_lowercase()) {
-                continue;
-            }
-            if let Some(existing) =
-                native::patch::cfg_scan::effective_in(&effective_commands, &cvar)
-            {
-                custom.push(CustomCommandWarning {
-                    command: command.trim().to_string(),
-                    cvar,
-                    kind: "overridesInit".to_string(),
-                    replaced_value: existing,
-                    source: String::new(),
-                });
-            } else if let Some(setting) = scan.effective(&cvar) {
-                custom.push(CustomCommandWarning {
-                    command: command.trim().to_string(),
-                    cvar,
-                    kind: "overridesConfig".to_string(),
-                    replaced_value: setting.value.clone(),
-                    source: format!("{}, line {}", setting.file_name(), setting.line),
-                });
-            }
-        }
+        // The two value rules (#216). Scheduled commands already reported as
+        // hazards or banned are left out: each has its own, louder warning.
+        let flagged: std::collections::HashSet<String> = custom
+            .iter()
+            .map(|w| w.cvar.to_lowercase())
+            .chain(banned_scheduled.iter().map(|b| b.cvar.to_lowercase()))
+            .collect();
+        let scheduled: Vec<native::patch::cfg_scan::ScheduledCommand> =
+            application_order(&custom_commands)
+                .into_iter()
+                .filter(|c| {
+                    native::patch::cfg_scan::assigned_cvar(&c.command)
+                        .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
+                })
+                .map(|c| native::patch::cfg_scan::ScheduledCommand {
+                    command: &c.command,
+                    after: c.relation == "After",
+                    offset_seconds: c.offset_seconds,
+                })
+                .collect();
+        let values = native::patch::cfg_scan::value_warnings(
+            &scan,
+            &effective_commands,
+            init_commands.len(),
+            &scheduled,
+        );
+        let conflicts: Vec<ValueConflictRow> = values
+            .conflicts
+            .iter()
+            .map(|c| ValueConflictRow {
+                cvar: c.cvar.clone(),
+                values: c.values.iter().map(ValueSourceRow::from).collect(),
+                effective: ValueSourceRow::from(&c.effective),
+                scheduled: c.values.iter().any(|v| v.source.is_scheduled()),
+            })
+            .collect();
+        let asymmetric: Vec<AsymmetricAfterRow> = values
+            .asymmetric
+            .iter()
+            .map(|a| AsymmetricAfterRow {
+                cvar: a.cvar.clone(),
+                after: ValueSourceRow::from(&a.after),
+                baseline: ValueSourceRow::from(&a.baseline),
+            })
+            .collect();
 
         // Config-file values DoD's own client will quit the game over --
         // distinct from banned_init/banned_scheduled, which is about commands
@@ -572,16 +592,19 @@ pub async fn scan_game_configs(
 
         CfgReport {
             unseen,
-            overrides,
-            shadowed,
+            conflicts,
+            asymmetric,
             custom,
             banned_init,
             banned_scheduled,
+            too_long_init: native::patch::too_long_commands(&init_commands),
+            too_long_scheduled: native::patch::too_long_commands(&command_texts),
             decal_default_ring,
             decal_flush_is_noop,
             noop_init,
             noop_scheduled,
             fatal_cvars,
+            config_cfg_writable,
         }
     })
     .await
@@ -838,12 +861,25 @@ mod tests {
         .unwrap()
     }
 
+    /// The Rule 1 row for `cvar`, if any.
+    fn conflict<'a>(r: &'a CfgReport, cvar: &str) -> Option<&'a ValueConflictRow> {
+        r.conflicts
+            .iter()
+            .find(|c| c.cvar.eq_ignore_ascii_case(cvar))
+    }
+
+    fn values_of(row: &ValueConflictRow) -> Vec<(&str, &str)> {
+        row.values
+            .iter()
+            .map(|v| (v.value.as_str(), v.kind.as_str()))
+            .collect()
+    }
+
     #[test]
-    fn a_set_and_restore_pair_is_one_override_not_two() {
+    fn a_set_and_restore_pair_is_one_conflict_and_no_asymmetry() {
         // The real shape: raise a cvar before the clip, put it back after.
-        // Only the first one displaces what movie.cfg left it at — the second
-        // displaces the first. Reporting both against the config file says the
-        // same thing twice and describes the second one wrongly.
+        // The Before conflicts with movie.cfg's 10 (Rule 1); the After is
+        // paired, so Rule 2 says nothing, and it is never in Rule 1's pool.
         let r = report_scheduled(
             "pair",
             vec![
@@ -852,21 +888,18 @@ mod tests {
             ],
         );
 
-        let rows: Vec<_> = r
-            .custom
-            .iter()
-            .filter(|c| c.cvar.eq_ignore_ascii_case("hud_deathnotice_time"))
-            .collect();
-        assert_eq!(rows.len(), 1, "{:?}", r.custom);
-        assert_eq!(
-            rows[0].command, "hud_deathnotice_time 555",
-            "the one that displaces"
-        );
+        let row = conflict(&r, "hud_deathnotice_time").expect("Rule 1");
+        assert_eq!(values_of(row), [("10", "config"), ("555", "before")]);
+        assert_eq!(row.effective.value, "555");
+        assert!(row.scheduled, "shown under Scheduled Commands");
+        assert!(r.asymmetric.is_empty(), "{:?}", r.asymmetric);
     }
 
     #[test]
-    fn the_earliest_before_command_is_the_one_that_displaces() {
-        // Larger "Before" offsets are further back, so they run first.
+    fn the_latest_before_command_is_the_one_in_effect() {
+        // Larger "Before" offsets are further back, so they run first -- and
+        // the one nearest the highlight is what the clip records at. The old
+        // test credited the 10s one, which is the one that gets overwritten.
         let r = report_scheduled(
             "order",
             vec![
@@ -875,16 +908,145 @@ mod tests {
             ],
         );
 
-        let rows: Vec<_> = r
-            .custom
-            .iter()
-            .filter(|c| c.cvar.eq_ignore_ascii_case("hud_deathnotice_time"))
-            .collect();
-        assert_eq!(rows.len(), 1, "{:?}", r.custom);
+        let row = conflict(&r, "hud_deathnotice_time").expect("Rule 1");
         assert_eq!(
-            rows[0].command, "hud_deathnotice_time 555",
-            "10s back runs before 2s back"
+            values_of(row),
+            [("10", "config"), ("555", "before"), ("1", "before")]
         );
+        assert_eq!(row.effective.value, "1");
+        assert_eq!(row.effective.offset_seconds, Some(2.0));
+    }
+
+    #[test]
+    fn an_unpaired_after_that_differs_is_reported_against_the_config_baseline() {
+        let r = report_scheduled(
+            "unpaired",
+            vec![scheduled("hud_deathnotice_time 1", "After", 0.5)],
+        );
+
+        assert!(
+            conflict(&r, "hud_deathnotice_time").is_none(),
+            "{:?}",
+            r.conflicts
+        );
+        assert_eq!(r.asymmetric.len(), 1, "{:?}", r.asymmetric);
+        let a = &r.asymmetric[0];
+        assert_eq!(a.after.value, "1");
+        assert_eq!(a.after.kind, "after");
+        assert_eq!(a.baseline.value, "10");
+        assert_eq!(a.baseline.file.as_deref(), Some("movie.cfg"));
+        assert_eq!(a.baseline.line, Some(3));
+    }
+
+    #[test]
+    fn an_unpaired_after_matching_the_baseline_is_silent() {
+        let r = report_scheduled(
+            "unpaired_same",
+            vec![scheduled("hud_deathnotice_time 10", "After", 0.5)],
+        );
+        assert!(r.asymmetric.is_empty(), "{:?}", r.asymmetric);
+        assert!(conflict(&r, "hud_deathnotice_time").is_none());
+    }
+
+    #[test]
+    fn pairing_an_after_moves_the_warning_from_rule_two_to_rule_one() {
+        // Any Before pairs the After; this one differs from the baseline, so
+        // Rule 1 takes over.
+        let r = report_scheduled(
+            "paired_differs",
+            vec![
+                scheduled("hud_deathnotice_time 20", "Before", 1.0),
+                scheduled("hud_deathnotice_time 1", "After", 0.5),
+            ],
+        );
+        assert!(r.asymmetric.is_empty(), "{:?}", r.asymmetric);
+        assert_eq!(
+            conflict(&r, "hud_deathnotice_time")
+                .expect("Rule 1")
+                .effective
+                .value,
+            "20"
+        );
+    }
+
+    #[test]
+    fn a_paired_after_with_a_before_at_the_baseline_is_silent_the_accepted_gap() {
+        // #216's known, accepted gap: the After still leaves 1 behind, but a
+        // Before at the baseline pairs it and neither rule looks again.
+        let r = report_scheduled(
+            "accepted_gap",
+            vec![
+                scheduled("hud_deathnotice_time 10", "Before", 1.0),
+                scheduled("hud_deathnotice_time 1", "After", 0.5),
+            ],
+        );
+        assert!(r.asymmetric.is_empty(), "{:?}", r.asymmetric);
+        assert!(
+            conflict(&r, "hud_deathnotice_time").is_none(),
+            "{:?}",
+            r.conflicts
+        );
+    }
+
+    #[test]
+    fn the_same_value_everywhere_is_silent() {
+        // movie.cfg says 10; Initial and Scheduled say 10 too. And
+        // mirv_movie_fps 300 in movie.cfg matches the Capture FPS the app
+        // appends, so nothing at all is reported.
+        let r = report_full(
+            "same_everywhere",
+            &["hud_deathnotice_time 10", "hud_deathnotice_time \"10\""],
+            vec![scheduled("hud_deathnotice_time 10.0", "Before", 2.0)],
+            300,
+        );
+        assert!(r.conflicts.is_empty(), "{:?}", r.conflicts);
+        assert!(r.asymmetric.is_empty(), "{:?}", r.asymmetric);
+    }
+
+    #[test]
+    fn every_pair_of_sources_and_all_three_conflict() {
+        // config (10) + Initial
+        let r = report_full("combo_ci", &["hud_deathnotice_time 3"], vec![], 300);
+        let row = conflict(&r, "hud_deathnotice_time").expect("config + Initial");
+        assert_eq!(values_of(row), [("10", "config"), ("3", "initial")]);
+        assert!(!row.scheduled, "shown under Initial Commands");
+
+        // config + Scheduled Before
+        let r = report_full(
+            "combo_cs",
+            &[],
+            vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],
+            300,
+        );
+        let row = conflict(&r, "hud_deathnotice_time").expect("config + Scheduled");
+        assert_eq!(values_of(row), [("10", "config"), ("4", "before")]);
+
+        // Initial + Scheduled Before, the config agreeing with Initial
+        let r = report_full(
+            "combo_is",
+            &["hud_deathnotice_time 10"],
+            vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],
+            300,
+        );
+        let row = conflict(&r, "hud_deathnotice_time").expect("Initial + Scheduled");
+        assert_eq!(
+            values_of(row),
+            [("10", "config"), ("10", "initial"), ("4", "before")]
+        );
+
+        // all three different
+        let r = report_full(
+            "combo_all",
+            &["hud_deathnotice_time 3"],
+            vec![scheduled("hud_deathnotice_time 4", "Before", 2.0)],
+            300,
+        );
+        let row = conflict(&r, "hud_deathnotice_time").expect("all three");
+        assert_eq!(
+            values_of(row),
+            [("10", "config"), ("3", "initial"), ("4", "before")]
+        );
+        assert_eq!(row.effective.value, "4");
     }
 
     #[test]
@@ -905,6 +1067,27 @@ mod tests {
             "{:?}",
             r.custom
         );
+    }
+
+    fn report_full(
+        tag: &str,
+        init: &[&str],
+        custom: Vec<CustomCommandPayload>,
+        fps: i32,
+    ) -> CfgReport {
+        let rt = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let (_dir, game) = fake_game(tag);
+        rt.block_on(scan_game_configs(
+            game,
+            init.iter().map(|s| s.to_string()).collect(),
+            custom,
+            Some(fps),
+            Some(true),
+        ))
+        .unwrap()
     }
 
     fn report(tag: &str, init: &[&str], custom: &[&str], fps: i32) -> CfgReport {
@@ -994,6 +1177,15 @@ mod tests {
         assert_eq!(r.banned_init.len(), 1, "{:?}", r.banned_init);
         assert_eq!(r.banned_init[0].cvar, "mirv_recordmovie_start");
         assert!(r.banned_scheduled.is_empty());
+    }
+
+    #[test]
+    fn a_command_too_long_for_a_demo_frame_is_reported_in_its_own_list() {
+        let long = format!("echo {}", "x".repeat(59)); // 64 bytes
+        let r = report("too_long", &[long.as_str()], &[long.as_str()], 120);
+
+        assert_eq!(r.too_long_init, vec![long.clone()]);
+        assert_eq!(r.too_long_scheduled, vec![long]);
     }
 
     #[test]
@@ -1267,7 +1459,7 @@ mod tests {
         // Regression, in two stages. First: this used to fire even though
         // movie.cfg names r_decals (fake_game's movie.cfg always does) — "no
         // r_decals value is set anywhere" was simply false whenever a config
-        // states one. Second: once that was fixed to defer to an `overrides`
+        // states one. Second: once that was fixed to defer to an override
         // row instead, r_decals stopped being silently pinned to the app's
         // default at all (see cfg_scan / ring_limit's doc comments — a config
         // now gets the same standing Initial Commands do, same as mirv_fov
@@ -1277,9 +1469,9 @@ mod tests {
         assert_eq!(r.decal_default_ring, None, "{:?}", r.decal_default_ring);
         assert!(r.decal_flush_is_noop, "{:?}", r);
         assert!(
-            !r.overrides.iter().any(|o| o.cvar == "r_decals"),
+            conflict(&r, "r_decals").is_none(),
             "nothing overrides it anymore — the config's own value now stands: {:?}",
-            r.overrides
+            r.conflicts
         );
     }
 
@@ -1341,11 +1533,7 @@ mod tests {
             ))
             .unwrap();
         assert!(!r.decal_flush_is_noop, "{:?}", r);
-        assert!(
-            !r.overrides.iter().any(|o| o.cvar == "r_decals"),
-            "{:?}",
-            r.overrides
-        );
+        assert!(conflict(&r, "r_decals").is_none(), "{:?}", r.conflicts);
     }
 
     #[test]
@@ -1387,57 +1575,61 @@ mod tests {
     }
 
     #[test]
-    fn a_quoted_r_decals_the_user_typed_is_respected_not_shadowed() {
+    fn a_quoted_r_decals_the_user_typed_is_the_one_in_effect() {
         // Regression: real .cfg syntax quotes every value, and the app used
-        // to parse r_decals from Initial Commands without unquoting first —
+        // to parse r_decals from Initial Commands without unquoting first --
         // `r_decals "512"` silently read as "nothing stated" and the app
-        // appended its own default afterward, shadowing the user's own line
-        // even though nothing was actually wrong with it.
+        // appended its own default afterward, overruling the user's own line.
+        // It conflicts with movie.cfg's 0, and it is what applies.
         let r = report("quoted_decals", &["r_decals \"512\""], &[], 120);
 
-        assert!(
-            !r.shadowed
-                .iter()
-                .any(|s| s.cvar.eq_ignore_ascii_case("r_decals")),
-            "the user's own r_decals must not be reported as dead: {:?}",
-            r.shadowed
-        );
+        let row = conflict(&r, "r_decals").expect("512 vs movie.cfg's 0");
+        assert_eq!(values_of(row), [("0", "config"), ("512", "initial")]);
+        assert_eq!(row.effective.kind, "initial", "no app value overrules it");
     }
 
     #[test]
-    fn one_override_row_per_cvar_even_when_two_commands_set_it() {
+    fn one_row_per_cvar_even_when_two_commands_set_it() {
         // Regression: typing the value the app also appends produced two rows
         // saying the identical thing, which reads as a bug rather than as two
         // facts.
         let r = report("dupe", &["mirv_movie_fps 120"], &[], 120);
 
-        let fps_rows: Vec<_> = r
-            .overrides
+        let rows: Vec<_> = r
+            .conflicts
             .iter()
-            .filter(|o| o.cvar.eq_ignore_ascii_case("mirv_movie_fps"))
+            .filter(|c| c.cvar.eq_ignore_ascii_case("mirv_movie_fps"))
             .collect();
-        assert_eq!(fps_rows.len(), 1, "{:?}", r.overrides);
-        assert_eq!(fps_rows[0].cfg_value, "300");
+        assert_eq!(rows.len(), 1, "{:?}", r.conflicts);
+        assert_eq!(
+            values_of(rows[0]),
+            [("300", "config"), ("120", "initial"), ("120", "app")]
+        );
     }
 
     #[test]
-    fn a_typed_command_the_app_overrides_is_reported_against_the_setting() {
+    fn a_typed_command_the_app_overrides_names_the_app_as_the_effective_value() {
         // The screenshot case: mirv_movie_fps 500 typed by hand, Capture FPS at
         // 120 appended after it. The typed value never applies.
         let r = report("shadow", &["mirv_movie_fps 500"], &[], 120);
 
-        assert_eq!(r.shadowed.len(), 1, "{:?}", r.shadowed);
-        assert_eq!(r.shadowed[0].shadowed_value, "500");
-        assert_eq!(r.shadowed[0].winner_value, "120");
-        assert!(r.shadowed[0].winner_from_app, "the app appended the winner");
-
-        assert!(
-            !r.overrides
-                .iter()
-                .any(|o| o.command == "mirv_movie_fps 500"),
-            "a command that never applies overrides nothing: {:?}",
-            r.overrides
+        let row = conflict(&r, "mirv_movie_fps").expect("reported");
+        assert_eq!(
+            values_of(row),
+            [("300", "config"), ("500", "initial"), ("120", "app")]
         );
+        assert_eq!(row.effective.value, "120");
+        assert_eq!(row.effective.kind, "app", "the app appended the winner");
+    }
+
+    #[test]
+    fn an_app_value_overriding_a_config_is_reported_with_nothing_typed() {
+        // What FROM_APP_NOTE used to cover: movie.cfg's mirv_movie_fps 300
+        // quietly replaced by Capture FPS.
+        let r = report("app_only", &[], &[], 120);
+
+        let row = conflict(&r, "mirv_movie_fps").expect("reported");
+        assert_eq!(values_of(row), [("300", "config"), ("120", "app")]);
     }
 
     #[test]
@@ -1447,31 +1639,44 @@ mod tests {
         let hazards: Vec<_> = r.custom.iter().filter(|c| c.kind == "hazard").collect();
         assert_eq!(hazards.len(), 1, "{:?}", r.custom);
         assert_eq!(hazards[0].cvar, "r_decals");
-        assert_eq!(
-            r.custom
-                .iter()
-                .filter(|c| c.command == "r_decals 128")
-                .count(),
-            1,
-            "the hazard must not also be listed as an ordinary override"
+        assert!(
+            conflict(&r, "r_decals").is_none(),
+            "the hazard must not also be listed as a conflict: {:?}",
+            r.conflicts
         );
     }
 
     #[test]
-    fn a_scheduled_command_is_reported_against_whatever_it_displaces() {
+    fn a_scheduled_command_conflicts_with_whatever_it_displaces() {
         // Scheduled commands run last of all, so they beat the init commands as
-        // well as the configs. Not mirv_fov/r_decals/gl_widescreenfov — those
+        // well as the configs. Not mirv_fov/r_decals/gl_widescreenfov -- those
         // are hazards regardless of what they'd otherwise displace, and are
-        // covered by their own tests below.
+        // covered by their own tests.
         let r = report("custom", &["sensitivity 3"], &["sensitivity 5"], 120);
 
-        let row = r
-            .custom
-            .iter()
-            .find(|c| c.cvar.eq_ignore_ascii_case("sensitivity"))
-            .expect("reported");
-        assert_eq!(row.kind, "overridesInit");
-        assert_eq!(row.replaced_value, "3");
+        let row = conflict(&r, "sensitivity").expect("reported");
+        assert_eq!(values_of(row), [("3", "initial"), ("5", "before")]);
+        assert_eq!(row.effective.value, "5");
+    }
+
+    #[test]
+    fn a_writable_config_cfg_is_reported_and_a_read_only_one_is_not() {
+        let dir = Scratch::new("cfg_readonly");
+        assert!(!config_cfg_is_writable(dir.path()), "no config.cfg at all");
+
+        let cfg = dir.path().join("config.cfg");
+        std::fs::write(&cfg, "sensitivity 2\n").unwrap();
+        assert!(config_cfg_is_writable(dir.path()));
+
+        let mut perms = std::fs::metadata(&cfg).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&cfg, perms.clone()).unwrap();
+        assert!(!config_cfg_is_writable(dir.path()));
+
+        // Put it back so the scratch folder can be removed.
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&cfg, perms).unwrap();
     }
 
     #[test]
@@ -1481,9 +1686,12 @@ mod tests {
         let r = report("bind", &[], &[], 120);
 
         assert!(
-            !r.overrides.iter().any(|o| o.cfg_value == "4000"),
+            !r.conflicts
+                .iter()
+                .flat_map(|c| &c.values)
+                .any(|v| v.value == "4000"),
             "{:?}",
-            r.overrides
+            r.conflicts
         );
     }
 }

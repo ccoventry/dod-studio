@@ -467,6 +467,11 @@ spectator camera at a chosen player — are **past the end of the table** and
 discarded unread. The bytes following the table are instruction padding, not
 entries.
 
+`goldsrc-hooks` swaps slot 38 too: `dodstudio_hide_hltv_messages 1` drops
+every message whose command byte is 6 before it reaches this function, which
+is how the proxy's "You're watching HLTV" line is hidden without patching the
+demo (issue #30, `goldsrc-hooks/src/hltv_messages.rs`).
+
 ### Why this matters
 
 Pinning the spectator view to one player by injecting `DRC_CMD_INEYE` into an
