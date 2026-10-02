@@ -100,6 +100,12 @@ pub struct AnalyzerState {
     /// (`use_segment_boundary`).
     pub map_changed: bool,
     pub initial_map_name: Option<String>,
+    /// Which of `DemoInfo::map_segments` this analysis covers: the one picked
+    /// (`AnalysisOptions::segment`), or else the last one before the analysed
+    /// demo ended. Several same-map signons before any gameplay all feed one
+    /// analysis; this is the last of them.
+    #[serde(default)]
+    pub map_segment: usize,
     pub current_time: GameTime,
 
     pub frame_index: usize,
@@ -143,6 +149,116 @@ pub struct DemoInfo {
 
     /// Map checksum / CRC.
     pub map_checksum: u32,
+
+    /// Every map the demo holds, one per signon, in recording order (#217).
+    /// Most demos have exactly one. A demo that kept recording through a level
+    /// change has more, and each can be analysed on its own
+    /// (`AnalysisOptions::segment`).
+    #[serde(default)]
+    pub map_segments: Vec<MapSegment>,
+}
+
+/// One map of a demo: everything from one signon (`SvcServerInfo`) up to the
+/// next (#217).
+///
+/// A level change re-sends the whole signon -- delta descriptions, baselines
+/// and full entity snapshots -- so nothing in a segment depends on the one
+/// before it.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct MapSegment {
+    /// The map loaded, as `dod_anzio`.
+    pub map_name: String,
+    /// Seconds since the recording started, as the frames count them: the
+    /// frame carrying the signon, and the first frame of the next segment (or
+    /// the demo's last frame).
+    pub start_secs: f32,
+    pub end_secs: f32,
+    /// 0-based index, counted across every directory entry, of the frame
+    /// carrying the signon.
+    pub start_frame: usize,
+}
+
+/// Records `MapSegment`s from the event stream.
+#[derive(Default)]
+struct MapSegmentRecorder {
+    segments: Vec<MapSegment>,
+    /// Playback seconds at the latest frame.
+    secs: f32,
+    /// Where the current directory entry's clock starts on the playback
+    /// clock, or `None` inside the loading entry.
+    entry_start: Option<f32>,
+    /// Playback seconds covered by the entries before the next one.
+    played: f32,
+}
+
+impl MapSegmentRecorder {
+    /// The loading entry (type 0, where the first signon lives) stamps its
+    /// frames with the client's own clock, 2060 s into the session say, not
+    /// time into the recording; its frames all count as the playback time
+    /// reached so far. Each playback entry's clock starts at 0.
+    fn enter_entry(&mut self, entry_type: i32, track_time: f32) {
+        if entry_type == 0 {
+            self.entry_start = None;
+        } else {
+            self.entry_start = Some(self.played);
+            self.played += track_time;
+        }
+    }
+
+    fn observe(&mut self, frame_index: usize, event: &AnalyzerEvent) {
+        match event {
+            AnalyzerEvent::Frame(frame) => {
+                if let Some(start) = self.entry_start {
+                    self.secs = start + frame.time;
+                }
+                if let Some(last) = self.segments.last_mut() {
+                    last.end_secs = self.secs;
+                }
+            }
+            AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) => {
+                self.segments.push(MapSegment {
+                    map_name: signon_map_name(msg),
+                    start_secs: self.secs,
+                    end_secs: self.secs,
+                    start_frame: frame_index,
+                });
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Only `Frame` and engine-message events matter to `MapSegmentRecorder`, so
+/// this skips decoding user messages.
+fn scan_map_segments(demo: &Demo) -> Vec<MapSegment> {
+    let mut recorder = MapSegmentRecorder::default();
+    let mut frame_index = 0;
+    for entry in &demo.directory.entries {
+        recorder.enter_entry(entry.type_, entry.track_time);
+        for frame in &entry.frames {
+            recorder.observe(frame_index, &AnalyzerEvent::Frame(frame));
+            if let FrameData::NetworkMessage(box_type) = &frame.frame_data
+                && let MessageData::Parsed(msgs) = &box_type.1.messages
+            {
+                for net_msg in msgs {
+                    if let NetMessage::EngineMessage(engine_msg) = net_msg {
+                        recorder.observe(frame_index, &AnalyzerEvent::EngineMessage(engine_msg));
+                    }
+                }
+            }
+            frame_index += 1;
+        }
+    }
+    recorder.segments
+}
+
+/// How to analyse a demo. The default is what every caller got before #217.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AnalysisOptions {
+    /// Analyse this map segment (an index into `DemoInfo::map_segments`) and
+    /// nothing else. `None` lets the analyzer pick the match itself
+    /// (`use_segment_boundary`).
+    pub segment: Option<usize>,
 }
 
 impl From<&Demo> for DemoInfo {
@@ -212,6 +328,7 @@ impl From<&Demo> for DemoInfo {
             game_directory,
             demo_type,
             map_checksum: value.header.map_checksum,
+            map_segments: Vec::new(),
         }
     }
 }
@@ -317,6 +434,33 @@ fn extract_ip_port(s: &str) -> Option<String> {
     None
 }
 
+/// The map a signon loads, as `dod_anzio` rather than `maps/dod_anzio.bsp`.
+fn signon_map_name(msg: &dem::types::SvcServerInfo) -> String {
+    String::from_utf8_lossy(&msg.map_file_name)
+        .trim_end_matches('\0')
+        .trim_start_matches("maps/")
+        .trim_end_matches(".bsp")
+        .to_string()
+}
+
+/// Ends a pinned segment at the next signon, whatever it loads (#217).
+///
+/// `use_segment_boundary` guesses which segment is the match; this is for when
+/// the user has already picked one (`AnalysisOptions::segment`). The picked
+/// segment is exactly what `DemoInfo::map_segments` lists for it, so a
+/// warm-up with no kills is shown as that, not replaced by the next map.
+fn use_pinned_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if matches!(
+        event,
+        AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(_))
+    ) && state.initial_map_name.is_some()
+    {
+        state.map_changed = true;
+    } else {
+        use_segment_boundary(state, event);
+    }
+}
+
 /// Ends the analysed demo at a second signon (#217).
 ///
 /// `SvcServerInfo` starts every signon. A second one means the server changed
@@ -335,13 +479,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
         return;
     };
-    let map_name = String::from_utf8_lossy(&msg.map_file_name)
-        .trim_end_matches('\0')
-        .to_string();
-    let clean_map = map_name
-        .trim_start_matches("maps/")
-        .trim_end_matches(".bsp")
-        .to_string();
+    let clean_map = signon_map_name(msg);
     let Some(ref initial) = state.initial_map_name else {
         state.initial_map_name = Some(clean_map);
         return;
@@ -606,7 +744,18 @@ impl Analysis {
         Self::try_from_bytes_with_progress(value, |_, _| {})
     }
 
-    pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
+    pub fn try_from_bytes_with_progress<F>(value: &[u8], progress_cb: F) -> Result<Self, String>
+    where
+        F: FnMut(usize, usize),
+    {
+        Self::try_from_bytes_with_options(value, AnalysisOptions::default(), progress_cb)
+    }
+
+    pub fn try_from_bytes_with_options<F>(
+        value: &[u8],
+        options: AnalysisOptions,
+        mut progress_cb: F,
+    ) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
     {
@@ -627,33 +776,16 @@ impl Analysis {
             Err(_) => return Err("Parser panicked during demo structural decoding".to_string()),
         };
 
-        let mut state = AnalyzerState::default();
-
-        let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-            if !state.map_changed {
-                use_segment_boundary(state, event);
-            }
-            if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                return;
-            }
-            use_timing_updates(state, event);
-            use_player_updates(state, event);
-            with_mortality_detection(state, event);
-            use_scoreboard_updates(state, event);
-            use_kill_streak_updates(state, event);
-            use_weapon_breakdown_updates(state, event);
-            use_teamkill_and_suicide_updates(state, event);
-            use_team_score_updates(state, event);
-            use_rounds_updates(state, event);
-            use_objective_updates(state, event);
-            use_chat_updates(state, event);
-            use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-            use_pov_stats_updates(state, event);
-            use_general_finalization(state, event);
-            check_and_promote_british(state);
+        // A picked segment needs its first frame before the main pass reaches
+        // it. The default path records segments during the main pass instead,
+        // so it costs nothing extra.
+        let mut analyzer = match options.segment {
+            None => SegmentAnalyzer::automatic(),
+            Some(segment) => SegmentAnalyzer::pinned(segment, &scan_map_segments(&demo))?,
         };
+        let mut recorder = MapSegmentRecorder::default();
 
-        process_event(&mut state, &AnalyzerEvent::Initialization);
+        analyzer.process(&AnalyzerEvent::Initialization);
 
         let total_frames: usize = demo
             .directory
@@ -664,25 +796,34 @@ impl Analysis {
         let mut processed_frames = 0;
 
         for entry in &demo.directory.entries {
+            recorder.enter_entry(entry.type_, entry.track_time);
             for frame in &entry.frames {
-                process_event(&mut state, &AnalyzerEvent::Frame(frame));
+                let frame_index = processed_frames;
+                let analysed = analyzer.wants(frame_index);
+                let frame_event = AnalyzerEvent::Frame(frame);
+                recorder.observe(frame_index, &frame_event);
+                if analysed {
+                    analyzer.process(&frame_event);
+                }
                 if let FrameData::NetworkMessage(box_type) = &frame.frame_data
                     && let MessageData::Parsed(msgs) = &box_type.1.messages
                 {
                     for net_msg in msgs {
                         match net_msg {
                             NetMessage::EngineMessage(engine_msg) => {
-                                process_event(
-                                    &mut state,
-                                    &AnalyzerEvent::EngineMessage(engine_msg),
-                                );
+                                let event = AnalyzerEvent::EngineMessage(engine_msg);
+                                recorder.observe(frame_index, &event);
+                                if analysed {
+                                    analyzer.process(&event);
+                                }
                             }
                             NetMessage::UserMessage(user_msg) => {
-                                if is_relevant_message(user_msg.name.as_ref())
+                                if analysed
+                                    && is_relevant_message(user_msg.name.as_ref())
                                     && let Ok(msg) =
                                         UserMessage::new(&user_msg.name, &user_msg.data)
                                 {
-                                    process_event(&mut state, &AnalyzerEvent::UserMessage(msg));
+                                    analyzer.process(&AnalyzerEvent::UserMessage(msg));
                                 }
                             }
                         }
@@ -696,11 +837,102 @@ impl Analysis {
             }
         }
 
-        process_event(&mut state, &AnalyzerEvent::Finalization);
+        analyzer.process(&AnalyzerEvent::Finalization);
 
-        let info = DemoInfo::from(&demo);
+        let mut demo_info = DemoInfo::from(&demo);
+        demo_info.map_segments = recorder.segments;
         release_frames(demo);
-        Ok(Analysis::new(info, state))
+        Ok(Analysis::new(demo_info, analyzer.state))
+    }
+}
+
+/// Runs every analysis hook over the event stream, limited to one map segment
+/// (#217).
+struct SegmentAnalyzer {
+    state: AnalyzerState,
+    /// The user picked the segment (`AnalysisOptions::segment`), so the next
+    /// signon ends it, whatever it loads.
+    pinned: bool,
+    /// Frames before this one belong to earlier segments and are skipped.
+    start_frame: usize,
+    /// The index the next analysed signon has in `DemoInfo::map_segments`.
+    next_signon: usize,
+}
+
+impl SegmentAnalyzer {
+    fn automatic() -> Self {
+        Self {
+            state: AnalyzerState::default(),
+            pinned: false,
+            start_frame: 0,
+            next_signon: 0,
+        }
+    }
+
+    fn pinned(segment: usize, segments: &[MapSegment]) -> Result<Self, String> {
+        let start_frame = segments
+            .get(segment)
+            .ok_or_else(|| {
+                format!(
+                    "The demo has {} map segment(s); there is no segment {}",
+                    segments.len(),
+                    segment
+                )
+            })?
+            .start_frame;
+        Ok(Self {
+            // Frame indexes stay counted from the start of the demo, so a time
+            // in a later segment still names the frame it is at.
+            state: AnalyzerState {
+                frame_index: start_frame,
+                ..AnalyzerState::default()
+            },
+            pinned: true,
+            start_frame,
+            next_signon: segment,
+        })
+    }
+
+    fn wants(&self, frame_index: usize) -> bool {
+        frame_index >= self.start_frame
+    }
+
+    fn process(&mut self, event: &AnalyzerEvent) {
+        let state = &mut self.state;
+        if !state.map_changed {
+            if self.pinned {
+                use_pinned_segment_boundary(state, event);
+            } else {
+                use_segment_boundary(state, event);
+            }
+            if matches!(
+                event,
+                AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(_))
+            ) {
+                if !state.map_changed {
+                    state.map_segment = self.next_signon;
+                }
+                self.next_signon += 1;
+            }
+        }
+        if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
+            return;
+        }
+        use_timing_updates(state, event);
+        use_player_updates(state, event);
+        with_mortality_detection(state, event);
+        use_scoreboard_updates(state, event);
+        use_kill_streak_updates(state, event);
+        use_weapon_breakdown_updates(state, event);
+        use_teamkill_and_suicide_updates(state, event);
+        use_team_score_updates(state, event);
+        use_rounds_updates(state, event);
+        use_objective_updates(state, event);
+        use_chat_updates(state, event);
+        use_clan_match_detection_updates(Duration::from_secs(30), state, event);
+        use_pov_stats_updates(state, event);
+        use_general_finalization(state, event);
+        check_and_promote_british(state);
     }
 }
 
@@ -1497,6 +1729,226 @@ mod tests {
         );
         assert!(!state.map_changed);
         assert_eq!(state.players.len(), 1);
+    }
+
+    /// A synthetic demo for the map-segment tests (#217), one step per event.
+    enum Step {
+        /// A frame at this many playback seconds.
+        Frame(f32),
+        Signon(&'static str),
+        /// A player joins client slot `.0` (0-based) under name `.1`.
+        Join(u8, &'static str),
+        /// The scoreboard gives slot `.0` this many kills.
+        Kills(u8, i16),
+    }
+
+    fn user_info(index: u8, name: &str) -> EngineMessage {
+        EngineMessage::SvcUpdateUserInfo(dem::types::SvcUpdateUserInfo {
+            index,
+            id: index as u32,
+            user_info: dem::types::ByteString(
+                format!("\\name\\{name}\\*sid\\{}\0", 1000 + index as u32).into_bytes(),
+            ),
+            cd_key_hash: dem::types::ByteString(vec![0; 16]),
+        })
+    }
+
+    /// Runs `steps` the way `try_from_bytes_with_options` runs a demo's frames:
+    /// the segments are recorded from every event, the analyzer sees only the
+    /// frames it wants.
+    fn run_steps(
+        steps: &[Step],
+        segment: Option<usize>,
+    ) -> Result<(Vec<MapSegment>, AnalyzerState), String> {
+        let frames: Vec<Frame> = steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Frame(time) => Some(Frame {
+                    time: *time,
+                    frame: 0,
+                    frame_data: FrameData::DemoStart,
+                }),
+                _ => None,
+            })
+            .collect();
+        let engine: Vec<EngineMessage> = steps
+            .iter()
+            .filter_map(|s| match s {
+                Step::Signon(map) => Some(server_info(map)),
+                Step::Join(index, name) => Some(user_info(*index, name)),
+                _ => None,
+            })
+            .collect();
+        let (mut frames_left, mut engine_left) = (frames.iter(), engine.iter());
+        let mut frame_index = None;
+        let stream: Vec<(usize, AnalyzerEvent)> = steps
+            .iter()
+            .map(|s| {
+                let event = match s {
+                    Step::Frame(_) => {
+                        frame_index = Some(frame_index.map_or(0, |i| i + 1));
+                        AnalyzerEvent::Frame(frames_left.next().unwrap())
+                    }
+                    Step::Signon(_) | Step::Join(..) => {
+                        AnalyzerEvent::EngineMessage(engine_left.next().unwrap())
+                    }
+                    Step::Kills(index, kills) => {
+                        AnalyzerEvent::UserMessage(UserMessage::ScoreShort(dod::ScoreShort {
+                            client_index: index + 1,
+                            score: *kills,
+                            kills: *kills,
+                            deaths: 0,
+                        }))
+                    }
+                };
+                (frame_index.expect("steps start with a frame"), event)
+            })
+            .collect();
+
+        let mut recorder = MapSegmentRecorder::default();
+        recorder.enter_entry(1, 0.0);
+        for (i, event) in &stream {
+            recorder.observe(*i, event);
+        }
+        let mut analyzer = match segment {
+            None => SegmentAnalyzer::automatic(),
+            Some(n) => SegmentAnalyzer::pinned(n, &recorder.segments)?,
+        };
+        analyzer.process(&AnalyzerEvent::Initialization);
+        for (i, event) in &stream {
+            if analyzer.wants(*i) {
+                analyzer.process(event);
+            }
+        }
+        analyzer.process(&AnalyzerEvent::Finalization);
+        Ok((recorder.segments, analyzer.state))
+    }
+
+    fn kills_by_name(state: &AnalyzerState) -> Vec<(String, i32)> {
+        let mut kills: Vec<_> = state
+            .players
+            .iter()
+            .map(|p| (p.name.clone(), p.stats.1))
+            .collect();
+        kills.sort();
+        kills
+    }
+
+    /// Both halves of a match on one map, as in `wsod25_grp3_h1_dyelife.dem`.
+    fn both_halves() -> Vec<Step> {
+        vec![
+            Step::Frame(0.0),
+            Step::Signon("dod_lennon2"),
+            Step::Join(0, "Alice"),
+            Step::Frame(5.0),
+            Step::Kills(0, 3),
+            Step::Frame(600.0),
+            Step::Signon("dod_lennon2"),
+            Step::Join(1, "Bob"),
+            Step::Frame(610.0),
+            Step::Kills(1, 7),
+            Step::Frame(1200.0),
+        ]
+    }
+
+    #[test]
+    fn every_signon_starts_a_map_segment() {
+        let (segments, _) = run_steps(&both_halves(), None).unwrap();
+        let summary: Vec<_> = segments
+            .iter()
+            .map(|s| (s.map_name.as_str(), s.start_secs, s.end_secs, s.start_frame))
+            .collect();
+        assert_eq!(
+            summary,
+            [
+                ("dod_lennon2", 0.0, 600.0, 0),
+                ("dod_lennon2", 600.0, 1200.0, 2),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_default_analysis_keeps_the_first_half() {
+        let (_, state) = run_steps(&both_halves(), None).unwrap();
+        assert_eq!(state.map_segment, 0);
+        assert!(state.map_changed);
+        assert_eq!(kills_by_name(&state), [("Alice".to_string(), 3)]);
+    }
+
+    #[test]
+    fn a_picked_segment_skips_everything_before_its_signon() {
+        let (_, state) = run_steps(&both_halves(), Some(1)).unwrap();
+        assert_eq!(state.map_segment, 1);
+        assert!(!state.map_changed);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_lennon2"));
+        assert_eq!(kills_by_name(&state), [("Bob".to_string(), 7)]);
+        // Still counted from the start of the demo: frames 2, 3 and 4 were
+        // analysed, and the 1-based index of the last is 5.
+        assert_eq!(state.current_time.frame_index, 5);
+    }
+
+    #[test]
+    fn picking_the_first_segment_matches_the_default_here() {
+        let (_, default) = run_steps(&both_halves(), None).unwrap();
+        let (_, picked) = run_steps(&both_halves(), Some(0)).unwrap();
+        assert_eq!(kills_by_name(&picked), kills_by_name(&default));
+        assert_eq!(picked.map_segment, default.map_segment);
+        assert_eq!(picked.map_changed, default.map_changed);
+    }
+
+    #[test]
+    fn a_picked_warm_up_is_not_replaced_by_the_next_map() {
+        let steps = [
+            Step::Frame(0.0),
+            Step::Signon("dod_warmup"),
+            Step::Join(0, "Alice"),
+            Step::Frame(60.0),
+            Step::Signon("dod_anzio"),
+            Step::Join(0, "Alice"),
+            Step::Frame(70.0),
+            Step::Kills(0, 4),
+            Step::Frame(900.0),
+        ];
+        // Left to itself, the analyzer drops the empty warm-up for the match...
+        let (_, default) = run_steps(&steps, None).unwrap();
+        assert_eq!(default.map_segment, 1);
+        assert_eq!(default.initial_map_name.as_deref(), Some("dod_anzio"));
+        assert_eq!(kills_by_name(&default), [("Alice".to_string(), 4)]);
+        // ...but a warm-up the user picked stays the warm-up.
+        let (_, picked) = run_steps(&steps, Some(0)).unwrap();
+        assert_eq!(picked.map_segment, 0);
+        assert!(picked.map_changed);
+        assert_eq!(picked.initial_map_name.as_deref(), Some("dod_warmup"));
+        assert_eq!(kills_by_name(&picked), [("Alice".to_string(), 0)]);
+    }
+
+    #[test]
+    fn a_segment_past_the_last_is_an_error() {
+        assert!(run_steps(&both_halves(), Some(2)).is_err());
+    }
+
+    #[test]
+    fn the_loading_entry_clock_is_not_playback_time() {
+        // The loading entry stamps frames with the client's own clock.
+        let loading = Frame {
+            time: 2060.3,
+            frame: 0,
+            frame_data: FrameData::DemoStart,
+        };
+        let playback = Frame {
+            time: 12.5,
+            frame: 0,
+            frame_data: FrameData::DemoStart,
+        };
+        let signon = server_info("dod_anzio");
+        let mut recorder = MapSegmentRecorder::default();
+        recorder.enter_entry(0, 0.0);
+        recorder.observe(0, &AnalyzerEvent::Frame(&loading));
+        recorder.observe(0, &AnalyzerEvent::EngineMessage(&signon));
+        recorder.enter_entry(1, 12.5);
+        recorder.observe(1, &AnalyzerEvent::Frame(&playback));
+        assert_eq!(recorder.segments[0].start_secs, 0.0);
+        assert_eq!(recorder.segments[0].end_secs, 12.5);
     }
 
     #[test]

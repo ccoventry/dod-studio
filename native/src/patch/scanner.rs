@@ -184,8 +184,12 @@ pub fn scan_demo_for_highlights_with_analysis(
     // The analysis comes from the analyzer cache when the Demo Analyzer (or an
     // earlier scan) already parsed this exact file: ~15 ms instead of a full
     // parse of up to several seconds. A miss parses and fills the cache.
-    let (_, analysis, _) = crate::run_analyzer_cached(&path.to_path_buf(), |_, _| {})
-        .map_err(|e| format!("Failed to parse demo: {}", e))?;
+    let (_, analysis, _) = crate::run_analyzer_cached(
+        &path.to_path_buf(),
+        analysis::AnalysisOptions::default(),
+        |_, _| {},
+    )
+    .map_err(|e| format!("Failed to parse demo: {}", e))?;
 
     // `frame_times` only covers the demo's opening segment (the walk stops at
     // the first section boundary), so it only needs the start of the file.

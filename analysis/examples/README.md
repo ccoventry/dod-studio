@@ -22,6 +22,7 @@ ignores them; `cargo build --examples` and `cargo test` compile them.
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
+| `map_segments_probe` | Which maps does a demo hold, and what does each analyse to on its own? (#217) |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and

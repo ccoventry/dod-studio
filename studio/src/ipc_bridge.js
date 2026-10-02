@@ -174,8 +174,11 @@ export async function linkHlaeFfmpeg(hlaePath, ffmpegPath, elevated = false) {
     });
 }
 
-export async function analyzeDemoFull(demoPath) {
-  return await invoke('analyze_demo_full', { demoPath })
+/** `segment` picks one map of a demo that recorded through a level change
+ *  (an index into `demo_info.map_segments`, #217); `null` lets the analyzer
+ *  choose. */
+export async function analyzeDemoFull(demoPath, segment = null) {
+  return await invoke('analyze_demo_full', { demoPath, segment })
     .catch((err) => {
       console.error("IPC Execution Error (analyze_demo_full):", err);
       showToast(STRINGS.IPC.analysisError(err), 'error');

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for analyzer_pane.js's Summary tab — see tests/e2e/README.md
+  for the general shape. Only the report area is here: the Explorer sidebar's
+  elements are absent, and analyzer_pane.js skips whatever it cannot find. A
+  test registers `analyze_demo_full` in `window.__mockInvokeHandlers`, then
+  calls `window.__openDemo(path)`.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>analyzer_pane.js test harness</title>
+</head>
+<body>
+  <div id="pane-demo-analyzer">
+    <span id="analyzer-current-file"></span>
+    <div id="analyzer-tab-content"></div>
+  </div>
+
+  <script type="module">
+    import { openAnalyzerDemo } from '/src/analyzer_pane.js';
+
+    window.__openDemo = openAnalyzerDemo;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -8,6 +8,7 @@
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
+import { mapSegmentOptions, segmentToRequest } from './map_segments.js';
 import { STRINGS } from './strings.js';
 import { escapeHtml as esc } from './html.js';
 
@@ -19,6 +20,10 @@ function setAnalyzerFileIndicator(text) {
 }
 
 let report = null;
+// The demo `report` came from, and which of its map segments the default
+// analysis chose (#217) -- picking that one again reuses the default analysis.
+let reportPath = null;
+let autoMapSegment = 0;
 let analyzerLoadInProgress = false;
 let activeSubTab = 'summary';
 let highlightedPlayerId = null; // shared selection: Scoreboard row <-> Player Details dropdown
@@ -976,13 +981,17 @@ export async function openAnalyzerDemo(path) {
   await loadAnalyzerDemo(path);
 }
 
-async function loadAnalyzerDemo(path) {
+// `segment` is a map segment the user picked (#217); `null` lets the analyzer
+// choose, which is what every ordinary open does.
+async function loadAnalyzerDemo(path, segment = null) {
   const container = document.querySelector('#analyzer-tab-content');
   if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
   analyzerLoadInProgress = true;
   try {
-    report = await analyzeDemoFull(path);
+    report = await analyzeDemoFull(path, segment);
+    reportPath = path;
+    if (segment === null) autoMapSegment = report.state.map_segment || 0;
     highlightedPlayerId = null;
     selectedPlayerId = null;
     setAnalyzerFileIndicator(report.file_name);
@@ -1054,6 +1063,16 @@ function renderSummaryTab(container) {
 
   const demoDuration = formatDuration(durSecs(st.current_time && st.current_time.viewdemo_offset));
 
+  const segmentOptions = mapSegmentOptions(r);
+  const mapName = segmentOptions ? di.map_segments[st.map_segment || 0].map_name : di.map_name;
+  const mapPicker = segmentOptions ? `
+    <div class="analyzer-toolbar" title="${esc(STRINGS.ANALYZER.MAP_SEGMENT_HINT)}">
+      <label for="analyzer-map-segment-select">${esc(STRINGS.ANALYZER.MAP_SEGMENT_LABEL)}</label>
+      <select id="analyzer-map-segment-select">
+        ${segmentOptions.map((o) => `<option value="${o.index}" ${o.selected ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
+      </select>
+    </div>` : '';
+
   const matchDuration = (() => {
     const rounds = st.rounds || [];
     if (rounds.length === 0) return STRINGS.ANALYZER.EMPTY_DASH;
@@ -1064,7 +1083,7 @@ function renderSummaryTab(container) {
     return formatDuration(Math.max(0, durSecs(endTime.viewdemo_offset) - durSecs(startTime.viewdemo_offset)));
   })();
 
-  container.innerHTML = `
+  container.innerHTML = `${mapPicker}
     <div class="analyzer-summary-grid">
       ${section(STRINGS.ANALYZER.FILE_INFO_SECTION, [
         [STRINGS.ANALYZER.FILE_NAME_LABEL, esc(r.file_name)],
@@ -1074,7 +1093,7 @@ function renderSummaryTab(container) {
       ])}
       ${section(STRINGS.ANALYZER.GAME_DETAILS_SECTION, [
         [STRINGS.ANALYZER.GAME_MOD_LABEL, esc(gameMod)],
-        [STRINGS.ANALYZER.MAP_NAME_LABEL, esc(di.map_name)],
+        [STRINGS.ANALYZER.MAP_NAME_LABEL, esc(mapName)],
         [STRINGS.ANALYZER.MAP_CHECKSUM_LABEL, String(di.map_checksum)],
       ])}
       ${section(STRINGS.ANALYZER.SERVER_INFO_SECTION, [
@@ -1093,6 +1112,14 @@ function renderSummaryTab(container) {
         [STRINGS.ANALYZER.NETWORK_PROTOCOL_LABEL, String(di.network_protocol)],
       ])}
     </div>`;
+
+  const picker = container.querySelector('#analyzer-map-segment-select');
+  if (picker) {
+    picker.addEventListener('change', (e) => {
+      if (analyzerLoadInProgress || !reportPath) return;
+      loadAnalyzerDemo(reportPath, segmentToRequest(Number(e.target.value), autoMapSegment));
+    });
+  }
 }
 
 // ── 2. Scoreboard ────────────────────────────────────────────────────────────
