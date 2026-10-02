@@ -598,7 +598,8 @@ def run(args):
     hooklog = Tail(hook_log_path())
     # The same line Studio builds (native::patch::types::build_hlae_process).
     game_cmd = (f"-game dod -insecure -windowed -w {args.width} -h {args.height} -gl -32bpp "
-                "-afxRenderMode standard -afxForceAlpha8 1 -condebug")
+                "-afxRenderMode standard -afxForceAlpha8 1 -condebug"
+                + (" -addons" if args.addons else ""))
     probe_copy = None
     if args.demo and args.at_launch:
         # `+playdemo` at launch, as a capture batch starts its primer: the demo
@@ -853,6 +854,8 @@ def main():
     p.add_argument("--step", action="append", default=[])
     p.add_argument("--dll", help="hook DLL (default: Studio's setting, then the repo's release build)")
     p.add_argument("--hlae", help="HLAE.exe (default: Studio's setting)")
+    p.add_argument("--addons", action="store_true",
+                   help="add -addons, so dod_addon is read (as Studio does once #412 is merged)")
     p.add_argument("--width", type=int, default=1280)
     p.add_argument("--height", type=int, default=720)
     p.add_argument("--out", help="report folder (default: local/game-probe/<timestamp>)")
