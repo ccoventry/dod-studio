@@ -8,9 +8,14 @@
 //!   however far a slope rises under its corner). Tested on the floor itself,
 //!   every stair riser and curb beside a node reads as solid and the fill
 //!   stops at the first step.
-//! - Walking off an edge carries a player forward while he falls, up to four
-//!   cells, through open air only. Without it, dod_railroad2_s10a's spawns
-//!   are sealed in by the high end of a ramp.
+//! - Walking off an edge carries a player forward while he falls, through
+//!   open air only, up to twelve cells. Without it, dod_railroad2_s10a's
+//!   spawns are sealed in by the high end of a ramp; with only four,
+//!   dod_anjou's are, behind rock too steep to stand on (normal below 0.7),
+//!   which a player slides down rather than walks.
+//! - Stairs under a clip ramp: the player stands on the ramp, up to a step
+//!   above the tread, and a sloped clip plane is pushed out further still, so
+//!   the crouch hull is also tried 12 and 24 units higher.
 //! - A floor above that a player doesn't fit on (a sill, a fence top beside a
 //!   wall) isn't climbed onto, so it doesn't hide the floor under it.
 
@@ -26,8 +31,9 @@ pub const JUMP: f32 = 45.0;
 /// Hull 3, the crouching player: 32x32x36, origin in the middle.
 const CROUCH_HALF: f32 = 18.0;
 const CROUCH_HULL: usize = 3;
-/// How far a fall carries a player past the edge, in cells.
-const FALL_CELLS: i32 = 4;
+/// How far a fall (or a slide down rock too steep to stand on) carries a
+/// player past the edge, in cells.
+const FALL_CELLS: i32 = 12;
 
 /// Textures no player stands on.
 const TOOL_TEXTURES: [&str; 8] = [
@@ -270,6 +276,8 @@ pub fn build(level: &Level) -> Result<Reach, String> {
             let [x, y] = reach.centre(cell);
             fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF])
                 || fits(level, [x, y, z + 2.0 + rise + CROUCH_HALF])
+                || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 12.0])
+                || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 24.0])
         })
         .collect();
 
