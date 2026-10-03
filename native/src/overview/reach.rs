@@ -189,6 +189,18 @@ fn drop_clear(level: &Level, x: f32, y: f32, top: f32, bottom: f32) -> bool {
     true
 }
 
+/// Whether `x, y` at hull height `h` is inside solid itself, not just
+/// within a player's half-width of it: a player's box centred near each of
+/// the box's own corners hits something. (The hulls are solid out to 16
+/// units past a brush, so a point beside a wall tests solid too; 14, not
+/// 16, since past a slanted wall the hull reaches exactly as far as the
+/// corner and rounding decides it.)
+fn buried(level: &Level, x: f32, y: f32, h: f32) -> bool {
+    [(14.0, 14.0), (14.0, -14.0), (-14.0, 14.0), (-14.0, -14.0)]
+        .iter()
+        .all(|&(dx, dy)| !fits(level, [x + dx, y + dy, h]))
+}
+
 fn ladders(level: &Level, reach: &Reach) -> HashMap<i32, (f32, f32)> {
     let mut out = HashMap::new();
     for model in level.models.iter().filter(|m| m.class == "func_ladder") {
@@ -303,17 +315,27 @@ pub fn build(level: &Level) -> Result<Reach, String> {
     // A step above the floor first; a crouch resting on it for low passages.
     // Then with the player off to one side: his 32-unit box stands on any
     // sliver of floor under it, so a ledge too thin for him to be centred on
-    // (against a wall, a beam) still holds him.
+    // (against a wall, a beam) still holds him. Not when the floor there is
+    // itself inside something solid: dod_harrington's rock slope by Bridge
+    // is boxed in by a clip brush whose wall runs along its edge, and a box
+    // beside that wall stands on the grass, not on the slope.
     reach.fits = kept
         .iter()
         .map(|&(cell, z, _, rise)| {
             let [cx, cy] = reach.centre(cell);
-            OFFSETS.iter().any(|&(dx, dy)| {
-                let (x, y) = (cx + dx, cy + dy);
-                fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF])
-                    || fits(level, [x, y, z + 2.0 + rise + CROUCH_HALF])
-                    || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 12.0])
-                    || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 24.0])
+            [
+                z + STEP + 2.0 + rise + CROUCH_HALF,
+                z + 2.0 + rise + CROUCH_HALF,
+                z + STEP + 2.0 + rise + CROUCH_HALF + 12.0,
+                z + STEP + 2.0 + rise + CROUCH_HALF + 24.0,
+            ]
+            .into_iter()
+            .any(|h| {
+                fits(level, [cx, cy, h])
+                    || (!buried(level, cx, cy, h)
+                        && OFFSETS[1..]
+                            .iter()
+                            .any(|&(dx, dy)| fits(level, [cx + dx, cy + dy, h])))
             })
         })
         .collect();

@@ -427,10 +427,51 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
             under.insert(face);
         }
     }
+    // A face drawn whole would paint all of one reached only along an edge
+    // (dod_harrington's rock slope by Bridge, clipped off, is reached only
+    // where it meets the grass). Under a tenth reached: only its reached
+    // cells are drawn, each cut out of the face.
+    let mut cells: HashMap<usize, (usize, Vec<usize>)> = HashMap::new();
+    for k in 0..reach.cell.len() {
+        let entry = cells
+            .entry(reach.floors[reach.floor[k] as usize])
+            .or_default();
+        entry.0 += 1;
+        if reach.reached[k] {
+            entry.1.push(k);
+        }
+    }
+    let partial: HashMap<usize, Vec<usize>> = cells
+        .into_iter()
+        .filter(|(_, (all, hit))| !hit.is_empty() && hit.len() * 10 < *all)
+        .map(|(face, (_, hit))| (face, hit))
+        .collect();
+    votes.retain(|face, _| !partial.contains_key(face));
+    under.retain(|face| !partial.contains_key(face));
+    let half = super::reach::GRID / 2.0;
+    let pieces: Vec<(usize, u32, Vec<[f32; 2]>)> = partial
+        .iter()
+        .flat_map(|(&face, hit)| {
+            let outline: Vec<[f32; 2]> = level.faces[face]
+                .points
+                .iter()
+                .map(|p| [p[0], p[1]])
+                .collect();
+            hit.iter()
+                .filter_map(|&k| {
+                    let [x, y] = reach.centre(reach.cell[k]);
+                    let cut = clip_to_box(&outline, [x - half, y - half], [x + half, y + half]);
+                    let area = area_of.get(&reach.cell[k]).copied().unwrap_or(0);
+                    (cut.len() >= 3).then_some((face, area, cut))
+                })
+                .collect::<Vec<_>>()
+        })
+        .collect();
+
     // Faces too small for a cell (stair treads, ledges): the area of a
     // reachable floor right beside them, at about their height.
     for &face in &reach.floors {
-        if votes.contains_key(&face) || under.contains(&face) {
+        if votes.contains_key(&face) || under.contains(&face) || partial.contains_key(&face) {
             continue;
         }
         let points = &level.faces[face].points;
@@ -461,6 +502,7 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
         .keys()
         .chain(under.iter())
         .flat_map(|&f| level.faces[f].points.iter().map(|p| [p[0], p[1]]))
+        .chain(pieces.iter().flat_map(|(_, _, cut)| cut.iter().copied()))
         .collect();
     let mut transform =
         Transform::fit(&drawn, 24.0).ok_or("nothing is reachable from the spawns")?;
@@ -491,6 +533,16 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
             .and_then(|c| area_of.get(&c).copied())
             .unwrap_or(0);
         faces.push(scene_face(level, &reach, &transform, face, area));
+    }
+    for (face, area, cut) in &pieces {
+        let points = &level.faces[*face].points;
+        faces.push(SceneFace {
+            points: cut.iter().map(|p| transform.to_pixel(p[0], p[1])).collect(),
+            z: points.iter().map(|p| p[2]).sum::<f32>() / points.len() as f32,
+            area: *area,
+            stairs: false,
+            face: *face as u32,
+        });
     }
     faces.sort_by(|a, b| a.z.total_cmp(&b.z).then(a.face.cmp(&b.face)));
 
@@ -593,6 +645,36 @@ fn outline(polygons: &[&Vec<[f32; 3]>]) -> Vec<[[f32; 2]; 2]> {
     edges.into_iter().map(|(_, (_, e))| e).collect()
 }
 
+/// `polygon` cut to the box from `lo` to `hi` (Sutherland-Hodgman, one
+/// side at a time).
+fn clip_to_box(polygon: &[[f32; 2]], lo: [f32; 2], hi: [f32; 2]) -> Vec<[f32; 2]> {
+    let mut out = polygon.to_vec();
+    for (axis, bound, keep_above) in [
+        (0, lo[0], true),
+        (0, hi[0], false),
+        (1, lo[1], true),
+        (1, hi[1], false),
+    ] {
+        let inside = |p: &[f32; 2]| (p[axis] >= bound) == keep_above || p[axis] == bound;
+        let input = std::mem::take(&mut out);
+        for i in 0..input.len() {
+            let (a, b) = (input[i], input[(i + 1) % input.len()]);
+            let (ia, ib) = (inside(&a), inside(&b));
+            if ia {
+                out.push(a);
+            }
+            if ia != ib {
+                let t = (bound - a[axis]) / (b[axis] - a[axis]);
+                out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+            }
+        }
+        if out.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
 fn scene_face(level: &Level, reach: &Reach, t: &Transform, face: usize, area: u32) -> SceneFace {
     let points = &level.faces[face].points;
     let z = points.iter().map(|p| p[2]).sum::<f32>() / points.len() as f32;
@@ -608,6 +690,20 @@ fn scene_face(level: &Level, reach: &Reach, t: &Transform, face: usize, area: u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_triangle_cut_to_a_box_keeps_only_the_part_inside() {
+        let triangle = [[0.0, 0.0], [10.0, 0.0], [0.0, 10.0]];
+        let cut = clip_to_box(&triangle, [2.0, 2.0], [6.0, 6.0]);
+        // The box's corner past the hypotenuse is cut off: a pentagon.
+        assert_eq!(cut.len(), 5);
+        assert!(
+            cut.iter()
+                .all(|p| (2.0..=6.0).contains(&p[0]) && (2.0..=6.0).contains(&p[1]))
+        );
+        assert!(cut.iter().all(|p| p[0] + p[1] <= 10.0 + 1e-4));
+        assert!(clip_to_box(&triangle, [8.0, 8.0], [9.0, 9.0]).is_empty());
+    }
 
     #[test]
     fn a_breakables_outline_leaves_out_the_edge_its_faces_share() {
