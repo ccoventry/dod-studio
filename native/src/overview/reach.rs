@@ -37,10 +37,33 @@ const CROUCH_HULL: usize = 3;
 /// How far a fall (or a slide down rock too steep to stand on) carries a
 /// player past the edge, in cells.
 const FALL_CELLS: i32 = 12;
-/// How far a running jump carries a player while he rises to the top of
-/// it, in cells: about a third of a second at a run, some 70 units, and his
-/// box lands on a ledge 16 units before his centre is over it.
-const LEAP_CELLS: i32 = 11;
+/// A running jump, as measured from a demo of one (dod_harrington, a
+/// player jumping and ducking onto the crates by Bridge): he leaves the
+/// ground at 264 units/s upward and 215-220 across; gravity 800; ducking in
+/// the air lifts his feet 18. His feet top out 63 above where he left at
+/// 0.32 s, and he lands on a ledge 58-60 up 78-92 units on, in the air
+/// 0.39-0.43 s; on level ground he is in the air 0.73 s.
+/// sqrt(2 * 800 * 45): the 45 units a jump rises before the duck.
+const JUMP_SPEED: f32 = 268.33;
+const RUN_SPEED: f32 = 220.0;
+const GRAVITY: f32 = 800.0;
+const DUCK_LIFT: f32 = 18.0;
+/// The furthest a running jump is looked along, in cells: across level
+/// ground, about 160 units.
+const LEAP_CELLS: i32 = 22;
+
+/// How far across a running jump carries a player before his feet come
+/// back down to `rise` above where he left (ducked at the top), plus half
+/// his box, which lands on a ledge before his centre is over it. None above
+/// the top of the jump.
+pub fn leap_reach(rise: f32) -> Option<f32> {
+    if rise > JUMP {
+        return None;
+    }
+    let lift = rise - DUCK_LIFT;
+    let disc = (JUMP_SPEED * JUMP_SPEED - 2.0 * GRAVITY * lift).max(0.0);
+    Some(RUN_SPEED * (JUMP_SPEED + disc.sqrt()) / GRAVITY + 16.0)
+}
 /// Where a player's origin can be, from a cell's centre, with his box (16
 /// either side) still over it: centred first.
 const OFFSETS: [(f32, f32); 9] = [
@@ -447,19 +470,29 @@ fn flood(level: &Level, reach: &mut Reach) {
                     break;
                 }
             }
-            // A running jump: across lower ground onto a ledge up to a
-            // crouch-jump higher, as far as a run carries a player while he
-            // rises (dod_harrington's crates by Bridge are jumped onto from
-            // the bump in the grass, not from beside them).
+            // A running jump (see `leap_reach`): onto a ledge above, over
+            // lower ground or a gap, as far as the jump carries a player to
+            // that height. Across a gap only if every cell before the far
+            // side is a drop (otherwise he would just walk).
+            let next = (i + di) * reach.ny + (j + dj);
+            let mut gap = (0..reach.nx).contains(&(i + di))
+                && (0..reach.ny).contains(&(j + dj))
+                && !reach
+                    .nodes_in(next)
+                    .any(|k2| (reach.z[k2] - z).abs() <= STEP);
             for step in 2..=LEAP_CELLS {
                 let (ii, jj) = (i + di * step, j + dj * step);
                 if !(0..reach.nx).contains(&ii) || !(0..reach.ny).contains(&jj) {
                     break;
                 }
                 let c2 = ii * reach.ny + jj;
+                let far = step as f32 * GRID;
+                let carries = |z2: f32| leap_reach(z2 - z).is_some_and(|d| far <= d);
                 let ledge = reach.nodes_in(c2).find(|&k2| {
                     let z2 = reach.z[k2];
-                    z2 > z + STEP && z2 <= z + JUMP && reach.fits[k2]
+                    reach.fits[k2]
+                        && carries(z2)
+                        && (z2 > z + STEP || (gap && z2 >= z - STEP && z2 <= z + STEP))
                 });
                 if let Some(k2) = ledge {
                     if !reach.reached[k2] {
@@ -467,6 +500,9 @@ fn flood(level: &Level, reach: &mut Reach) {
                         queue.push_back(k2);
                     }
                     break;
+                }
+                if reach.nodes_in(c2).any(|k2| (reach.z[k2] - z).abs() <= STEP) {
+                    gap = false;
                 }
                 // Through open air, low or at the top of the jump (over the
                 // edge of the very ledge he lands on).
@@ -484,6 +520,18 @@ fn flood(level: &Level, reach: &mut Reach) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_running_jump_carries_as_far_as_the_demo_showed() {
+        // Onto the crate 58-60 above: landed 78-92 units on.
+        assert!(leap_reach(60.0).unwrap() >= 92.0);
+        // Not past the top of a ducked jump.
+        assert!(leap_reach(63.0).is_some());
+        assert!(leap_reach(64.0).is_none());
+        // Level ground: 0.73 s in the air at a run.
+        let level = leap_reach(0.0).unwrap();
+        assert!((150.0..190.0).contains(&level), "{level}");
+    }
 
     #[test]
     fn newell_finds_an_upward_floor() {
