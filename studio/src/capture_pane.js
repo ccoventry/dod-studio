@@ -1,3 +1,4 @@
+import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -14,7 +15,11 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { setStatusLine, uiStatusText } from './status_line.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
+let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
 let unlistenFastForwardToClip = null;
@@ -168,76 +173,6 @@ function generateSessionId() {
 }
 
 // ── Pre-Flight Disk Space Estimator ───────────────────────────────────────────
-
-/**
- * Sums required capture bytes across every selected streak, merging
- * overlapping (or touching) pre/post-roll windows *within each source demo*
- * before billing them for disk space — two highlights that share footage
- * must not be double-counted, since the engine records that overlap once.
- * Base cost is `w * h * 3` bytes/frame at the configured capture FPS.
- *
- * Does not account for `mirv_movie_separate_hud 1` typed into Initial
- * Commands — that triples the real cost (HUD pass recorded as its own
- * stream), but there is no longer a dedicated setting to read it from, and
- * this does not parse Initial Commands text to find it.
- */
-function computeRequiredCaptureBytes(currentScannedDemos, opts) {
-  const {
-    preRollSeconds, postRollSeconds,
-    recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight,
-  } = opts;
-  let totalSeconds = 0;
-
-  (currentScannedDemos || []).forEach(demo => {
-    const intervals = (demo.streaks || [])
-      // Opt-in model (detail_pane.js): a streak counts as selected only once
-      // explicitly checked. `undefined` covers both demos never opened in the
-      // Highlight Details view and every non-recording-player streak (which
-      // never renders as a checkable row at all) — neither should ever be
-      // billed for capture space.
-      .filter(streak => streak.selected === true)
-      .map(streak => {
-        const fps = streak.demo_fps || 100;
-        const startSec = streak.start_tick / fps;
-        const endSec = streak.end_tick / fps;
-        return [startSec, endSec];
-      })
-      .sort((a, b) => a[0] - b[0]);
-
-    // Two different windows are at play, and mixing them up is what this used
-    // to get wrong:
-    //  - whether two highlights collapse into ONE take is decided by
-    //    pre/post-roll (native/src/patch/builder.rs's blocks_merge), and
-    //  - how many frames actually get written is start-lead -> stop-trail
-    //    (PatcherConfig::calculate_total_capture_duration).
-    // So merge on the roll window, then bill the lead/trail window.
-    let mergedStart = null;
-    let mergedEnd = null;
-    const bill = () => {
-      totalSeconds += recordStartLead + (mergedEnd - mergedStart) + recordStopTrail;
-    };
-    intervals.forEach(([start, end]) => {
-      if (mergedStart === null) {
-        mergedStart = start;
-        mergedEnd = end;
-      } else if (start - preRollSeconds <= mergedEnd + postRollSeconds) {
-        mergedEnd = Math.max(mergedEnd, end);
-      } else {
-        bill();
-        mergedStart = start;
-        mergedEnd = end;
-      }
-    });
-    if (mergedStart !== null) {
-      bill();
-    }
-  });
-
-  const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
-  const bytesPerFrame = resWidth * resHeight * 3;
-  return frames * bytesPerFrame;
-}
 
 const PATH_PROBLEM_REASONS = {
   not_absolute: STRINGS.CAPTURE.pathProblem.notAbsolute,
@@ -729,6 +664,7 @@ async function initStandaloneLaunchButton() {
       return;
     }
 
+    if (!(await ensureSteamReady())) return;
     await performLaunch();
   });
 }
@@ -839,7 +775,7 @@ function initClearPreviewsModal() {
   }
 }
 
-export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished) {
+export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
   const statusEl = document.querySelector('#batch-status');
@@ -897,10 +833,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initImportCfgButton();
 
   // The pipeline turns some settings into init commands, so the warnings go
-  // stale when one changes.
+  // stale when one changes -- including by undo, which fires no 'change'
+  // until blur (#535).
   FIELDS_THAT_BECOME_COMMANDS.forEach((sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("change", refreshInitCommandWarnings);
+    refreshAfterTyping(document.querySelector(sel), refreshInitCommandWarnings);
   });
 
   const addInitCommandBtn = document.querySelector('#add-init-command-btn');
@@ -965,6 +901,16 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // every restart.
   refreshLaunchGuard();
 
+  // An error box shown by the game or HLAE after a preview or Launch Game,
+  // read by the backend (native::sys::dialogs). A batch reports its own
+  // through capture_status instead.
+  if (!listeningForExternalErrors) {
+    listeningForExternalErrors = true;
+    listen('external_error', (event) => {
+      showToast(String(event.payload || ''), 'error', 15000);
+    });
+  }
+
   if (!unlistenCaptureStatus) {
     listen('capture_status', (event) => {
       const payload = event.payload || {};
@@ -980,7 +926,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           }
         }
         const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        if (statusEl) statusEl.textContent = statusText;
+        setStatusLine(statusEl, statusText);
         if (startBtn) startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
       } else {
@@ -991,18 +937,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (currentOnBatchFinished) currentOnBatchFinished();
 
         if (payload.error) {
-          const errorBody = STRINGS.CAPTURE.captureErrorToast(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
+          // Without the engine's pointers at the log (#534); the log has them.
+          const errorBody = STRINGS.CAPTURE.captureErrorToast(uiStatusText(payload.status) || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
           showToast(errorBody, "error");
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
+          setStatusLine(statusEl, STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT));
           notify('error', STRINGS.NOTIFICATIONS.CAPTURES_ERROR_TITLE, errorBody);
         } else if (payload.status === "Cancelled") {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
           if (progressBar) progressBar.style.width = '0%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.CANCELLED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.CANCELLED);
         } else {
           showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
           if (progressBar) progressBar.style.width = '100%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.COMPLETED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.COMPLETED);
           notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
         }
       }
@@ -1323,6 +1270,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // A demo may have moved since the queue was loaded (#21). main.js looks
+      // for it the same way Load Project does and offers the match; a demo
+      // still missing after that stops the batch, since its highlights
+      // cannot be captured.
+      if (pickedDemosPresent && !(await pickedDemosPresent())) {
+        showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+        return;
+      }
+
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
 
@@ -1360,6 +1316,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // Before any patching: without Steam the game can't start.
+      if (!(await ensureSteamReady())) {
+        setStatusLine(statusEl, STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
+        return;
+      }
       runBatch();
     });
   }
