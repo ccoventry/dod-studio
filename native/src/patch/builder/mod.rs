@@ -22,6 +22,116 @@ pub use preview::*;
 pub use timing::*;
 pub use workspace::*;
 
+// ── Record aliases ────────────────────────────────────────────────────────────
+
+/// The helper cfg's `sys_record_start` / `sys_record_stop` definitions for this
+/// batch's capture mode.
+///
+/// Every mode schedules the same two alias names at the same ticks, so the
+/// patched demos are identical whatever the mode — only what the names do
+/// changes, and that lives here.
+///
+/// AGR mode (#450): `mirv_agr` records one frame per `Host_Frame`, stamped with
+/// `host_frametime`, so the recorded rate is whatever `host_framerate` pins it
+/// to (#403 did exactly this by hand). Start pins it to `1 / agr_fps`; stop
+/// ends the recording and hands playback back to real time for the post-roll,
+/// the way `mirv_recordmovie_stop` releases its own timestep. The recording
+/// itself is started by the block's route alias, which is the one place that
+/// knows the block's file — see `route_alias_line`.
+fn record_alias_lines(config: &PatcherConfig) -> String {
+    match config.capture_mode {
+        crate::patch::CaptureMode::FrameSequence | crate::patch::CaptureMode::DirectToVideo => {
+            "alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n\
+             alias sys_record_stop \"mirv_recordmovie_stop\"\n"
+                .to_string()
+        }
+        crate::patch::CaptureMode::Obs => "alias sys_record_start \"stopsound\"\n\
+             alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
+            .to_string(),
+        crate::patch::CaptureMode::Agr => format!(
+            "alias sys_record_start \"host_framerate {}\"\n\
+             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
+            agr_host_framerate(config)
+        ),
+    }
+}
+
+/// The `host_framerate` that makes `mirv_agr` record at `effective_agr_fps`.
+pub fn agr_host_framerate(config: &PatcherConfig) -> f32 {
+    1.0 / config.effective_agr_fps() as f32
+}
+
+/// The `.agr` file a block records to, inside its take folder. Named after the
+/// block rather than a fixed `take.agr` so a file copied out of its folder
+/// still says which take it is.
+pub fn agr_file_name(demo_name: &str, block_index: usize) -> String {
+    format!("{demo_name}_b{block_index}.agr")
+}
+
+/// The path `mirv_agr start` is given for a block: through the same
+/// `_route_<drive>` junction `mirv_movie_filename` uses, so it lands in the
+/// block's `take_folder`.
+///
+/// Relative, and unquoted, on purpose. Both were settled offline rather than
+/// assumed (#450's one open question):
+///
+/// - **Relative works.** `AfxHookGoldSrc.dll` (2.25.3) hands `mirv_agr start`'s
+///   argument, converted to UTF-16 and otherwise untouched, straight to
+///   `_wfopen_s` (the call at `+0x28bfb`). A relative path therefore resolves
+///   against `hl.exe`'s working directory, which the custom loader leaves at
+///   the game root (`docs/hlae_protocols.md`) — the folder the `_route_N`
+///   junctions are made in.
+/// - **An absolute path cannot get here at all.** GoldSrc's tokenizer splits a
+///   bare word at `:` (`COM_Parse`; addresses here are the pre-Anniversary
+///   `hw.dll`'s, `0x1d2b1ae`), so `C:\x.agr` reaches HLAE as `C` — #403's
+///   "writes nothing unquoted". It must be
+///   quoted, but an alias body cannot carry quotes: `alias` rebuilds its body
+///   from the parsed arguments (`0x1d27cf0`), dropping every quote. `exec` of
+///   a per-block cfg is no way round it either — from a demo it is refused
+///   unless the file is on a short class/map-config whitelist (`0x1d27858`),
+///   and an alias invoked from a demo runs its body with the same privilege
+///   (`0x1d28647`). And a quoted absolute path typed straight into a
+///   ConsoleCommand frame has 64 bytes to fit in, which a real capture folder
+///   plus a file name does not.
+///
+/// The relative form contains none of the characters the tokenizer splits on
+/// (`{ } ( ) ' , :`, quotes, whitespace), so it survives both the alias and
+/// the tokenizer as one argument. It also never appears in a demo frame: the
+/// frame carries only the `<demo>_route_<N>` alias name, as in every mode.
+pub fn agr_route_path(drive_idx: usize, demo_name: &str, block_index: usize) -> String {
+    format!(
+        "_route_{drive_idx}/{demo_name}_b{block_index}/{}",
+        agr_file_name(demo_name, block_index)
+    )
+}
+
+/// The helper cfg line defining a block's `<demo>_route_<N>` alias, scheduled
+/// at the block's record start just ahead of `sys_record_start`.
+///
+/// For the movie modes it points `mirv_movie_filename` at the block's take
+/// folder; HLAE makes the folder itself. In AGR mode it starts the recording
+/// into that folder instead (made ahead of the batch by `build_batch_queue`).
+fn route_alias_line(
+    config: &PatcherConfig,
+    demo_name: &str,
+    block_index: usize,
+    drive_idx: usize,
+) -> String {
+    if config.capture_mode == crate::patch::CaptureMode::Agr {
+        format!(
+            "alias {}_route_{} \"mirv_agr start {}\"\n",
+            demo_name,
+            block_index,
+            agr_route_path(drive_idx, demo_name, block_index)
+        )
+    } else {
+        format!(
+            "alias {}_route_{} \"mirv_movie_filename _route_{}/{}_b{}\"\n",
+            demo_name, block_index, drive_idx, demo_name, block_index
+        )
+    }
+}
+
 /// Every command the engine will run at demo load: the user's own init
 /// commands, then the ones the pipeline adds for itself.
 ///
@@ -234,15 +344,9 @@ pub fn build_batch_queue(
     // `sys_record_stop` becomes an echo rather than an empty alias: GoldSrc
     // treats an alias with an empty body as a parse oddity, and a no-op that
     // announces itself is easier to recognise in a log than one that vanishes.
-    if config.capture_mode.hlae_records() {
-        helper_cfg_content
-            .push_str("alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n");
-        helper_cfg_content.push_str("alias sys_record_stop \"mirv_recordmovie_stop\"\n");
-    } else {
-        helper_cfg_content.push_str("alias sys_record_start \"stopsound\"\n");
-        helper_cfg_content
-            .push_str("alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n");
-    }
+    //
+    // AGR mode has its own pair — see `record_alias_lines`.
+    helper_cfg_content.push_str(&record_alias_lines(config));
     helper_cfg_content.push_str("alias sys_capture_done_path \"mirv_movie_filename DOD_STUDIO_EXIT_TRIGGER; mirv_recordmovie_start; mirv_recordmovie_stop\"\n");
 
     // Direct-to-video (docs/direct_to_video_capture.md), driven by the capture-
@@ -289,6 +393,14 @@ pub fn build_batch_queue(
              same way it reads frame sequences.",
             codec_args,
             crate::hlcr::scanner::VIDEO_FILE,
+        ));
+    }
+
+    if config.capture_mode == crate::patch::CaptureMode::Agr {
+        crate::log_markdown(&format!(
+            "🦴 **AGR capture** — HLAE records no video. Each clip is saved as one `.agr` file \
+             (models and camera, for the Blender page) at {} fps, in its take folder.",
+            config.effective_agr_fps(),
         ));
     }
 
@@ -474,12 +586,19 @@ pub fn build_batch_queue(
                 let anchor_duration =
                     ((streak.end_tick - streak.start_tick) as f32) / demo_fps.max(1.0);
                 let clip_duration_secs = config.calculate_total_capture_duration(anchor_duration);
-                crate::sys::disk::calculate_raw_sequence_bytes(
-                    config.resolution_width,
-                    config.resolution_height,
-                    config.capture_fps,
-                    clip_duration_secs,
-                )
+                if config.capture_mode == crate::patch::CaptureMode::Agr {
+                    crate::sys::disk::calculate_agr_bytes(
+                        config.effective_agr_fps(),
+                        clip_duration_secs,
+                    )
+                } else {
+                    crate::sys::disk::calculate_raw_sequence_bytes(
+                        config.resolution_width,
+                        config.resolution_height,
+                        config.capture_fps,
+                        clip_duration_secs,
+                    )
+                }
             })
             .collect();
 
@@ -501,9 +620,11 @@ pub fn build_batch_queue(
             let streak = &merged_streaks[block_index];
             block_routes.push((streak.start_tick, streak.end_tick, drive_idx));
             utilized_drives.insert(drive_idx);
-            helper_cfg_content.push_str(&format!(
-                "alias {}_route_{} \"mirv_movie_filename _route_{}/{}_b{}\"\n",
-                demo_name, block_index, drive_idx, demo_name, block_index
+            helper_cfg_content.push_str(&route_alias_line(
+                config,
+                &demo_name,
+                block_index,
+                drive_idx,
             ));
 
             // Mirror of the junction target built after this loop, so the two
@@ -947,6 +1068,18 @@ pub fn build_batch_queue(
                     .args(["/C", "mklink", "/J", junction_str, target_str])
                     .output();
             }
+        }
+    }
+
+    // `mirv_agr start` opens its file with a plain `_wfopen_s` and creates no
+    // folders (#403: a missing parent means it says "Started AGR recording."
+    // and writes nothing). HLAE's movie recorder makes its own take folder, so
+    // only this mode needs them made in advance. Failing here is loud on
+    // purpose: the alternative is a batch that runs to the end and saves
+    // nothing.
+    if config.capture_mode == crate::patch::CaptureMode::Agr {
+        for block in jobs.iter().flat_map(|j| j.blocks.iter()) {
+            std::fs::create_dir_all(&block.take_folder)?;
         }
     }
 

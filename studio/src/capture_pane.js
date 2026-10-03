@@ -15,7 +15,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
-import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
 
@@ -356,14 +356,19 @@ export async function refreshLaunchGuard(state) {
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
   const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
   const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  // AGR mode writes a few KB a frame, at its own rate — sizing it like a
+  // frame sequence would block batches that fit with room to spare.
+  const agrMode = document.querySelector('#config-capture-mode')?.value === 'agr';
+  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
     recordStartLead: recordStartLeadVal,
     recordStopTrail: recordStopTrailVal,
-    captureFps: captureFpsVal,
+    captureFps: agrMode ? agrFpsVal : captureFpsVal,
     resWidth: resWidthVal,
     resHeight: resHeightVal,
+    bytesPerFrame: agrMode ? AGR_BYTES_PER_FRAME : undefined,
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -864,10 +869,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // window, so they change the disk estimate the guard is built on.
   ['#config-res-width', '#config-res-height', '#config-ffmpeg-capture',
    '#config-pre-roll', '#config-post-roll', '#config-capture-fps',
-   '#config-record-start-lead', '#config-record-stop-trail'].forEach(selector => {
+   '#config-record-start-lead', '#config-record-stop-trail', '#config-agr-fps'].forEach(selector => {
     const el = document.querySelector(selector);
     if (el) el.addEventListener('input', () => { refreshLaunchGuard(); notifySettingsChange(); });
   });
+  // AGR mode sizes a batch in KB rather than GB, so switching mode moves the
+  // disk estimate too.
+  document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -1132,6 +1140,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
     const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+    const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRollVal = numberField('#config-pre-roll', 2.0);
     const postRollVal = numberField('#config-post-roll', 0.6);
     const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
@@ -1216,6 +1226,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       capture_directories: outputDrivePool,
       capture_fps: captureFpsVal,
       obs_capture_fps: obsCaptureFpsVal,
+      agr_fps: agrFpsVal,
       drives: state.targetDrives || [],
       record_start_lead: recordStartLeadVal,
       record_stop_trail: recordStopTrailVal,
