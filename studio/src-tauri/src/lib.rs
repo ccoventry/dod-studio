@@ -1,5 +1,6 @@
 mod audit_manager;
 mod capture_manager;
+mod crash_maps_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -646,6 +647,8 @@ pub fn run() {
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
+            crash_maps_manager::crash_map_warnings,
+            crash_maps_manager::forget_crash_map,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,

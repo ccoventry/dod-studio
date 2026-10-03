@@ -156,6 +156,19 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── crash_maps.rs (#207) ──────────────────────────────────────────────────
+
+/// What the hook log says about a crash that ended a batch.
+pub fn crash_explained(what: &str, site: &str, map: Option<&str>, cause: Option<&str>) -> String {
+    let on = map.map(|m| format!(" on {m}")).unwrap_or_default();
+    match cause {
+        Some(cause) => format!("The game crashed{on} ({what} at {site}). {cause}"),
+        None => format!(
+            "The game crashed{on} ({what} at {site}), a crash DoD Studio doesn't know yet. goldsrc-hooks/tools/crash_report.py shows what led up to it."
+        ),
+    }
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

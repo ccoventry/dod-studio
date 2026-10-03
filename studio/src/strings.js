@@ -1241,6 +1241,15 @@ export const STRINGS = {
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
   },
 
+  // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
+  CRASH_MAPS: {
+    title: (count) => `${count} demo${count === 1 ? ' is' : 's are'} on a map the game crashed on`,
+    message: (maps) => `A capture on ${maps === 1 ? 'this map' : 'these maps'} ended in a crash before, for a reason the demo file can't show. Start the batch anyway?`,
+    demos: (names) => (names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`),
+    seen: (count, date, build) => `Seen ${count === 1 ? 'once' : `${count} times`}, last on ${date}${build ? `, ${build} build` : ''}.`,
+    START_ANYWAY: 'Start anyway',
+  },
+
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
   // Checked before DoD Studio starts the game (steam_guard.js).
   STEAM: {

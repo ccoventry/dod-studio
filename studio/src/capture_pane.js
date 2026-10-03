@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { confirmCrashMaps } from './crash_map_warnings.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
@@ -1278,6 +1279,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
         return;
       }
+
+      // A map a session crashed on before, for a reason the demo file can't
+      // show (#207): ask before patching.
+      const pickedPaths = (state.currentScannedDemos || [])
+        .filter((d) => (d.streaks || []).some((s) => s.selected === true))
+        .map((d) => d.path);
+      if (!(await confirmCrashMaps(pickedPaths))) return;
 
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
