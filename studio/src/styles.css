@@ -2026,3 +2026,7 @@ tr.keyboard-selected {
 .ov-label-row.active input {
   outline: 1px dashed #ffdd00;
 }
+
+.ov-add-label {
+  align-self: flex-start;
+}
