@@ -364,9 +364,18 @@ fn flood(level: &Level, reach: &mut Reach) {
                 {
                     let z2 = reach.z[k2];
                     let [x, y] = reach.centre(c2);
-                    let top = z + STEP + 2.0 + CROUCH_HALF;
+                    // From resting on the ledge, crouched: a window's sill
+                    // leaves room for no more (dod_anjou_a4's windows by
+                    // Factory are crouch-jumped through, then dropped from).
+                    let top = z + 2.0 + CROUCH_HALF;
                     if z2 < z - STEP && !drop_clear(level, x, y, top, z2 + STEP + 2.0 + CROUCH_HALF)
                     {
+                        // No way down here, but still room to go on at the
+                        // ledge's height: through a thick wall's window, over
+                        // the floor that runs on under the wall.
+                        if fits(level, [x, y, top]) {
+                            continue;
+                        }
                         break;
                     }
                     if !reach.reached[k2] {
@@ -379,9 +388,12 @@ fn flood(level: &Level, reach: &mut Reach) {
                 if !falling {
                     break;
                 }
-                // Only through open air, never through a wall.
+                // Only through open air, never through a wall: a step above
+                // the ledge, or crouched on it through a window.
                 let [x, y] = reach.centre(c2);
-                if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF]) {
+                if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF])
+                    && !fits(level, [x, y, z + 2.0 + CROUCH_HALF])
+                {
                     break;
                 }
             }
