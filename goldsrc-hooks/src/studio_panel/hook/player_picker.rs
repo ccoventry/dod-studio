@@ -32,28 +32,64 @@ static WAS_OPEN: AtomicBool = AtomicBool::new(false);
 /// What the picked-players line says now.
 static CHOSEN_SHOWN: Mutex<Option<String>> = Mutex::new(None);
 
-/// The picked-players line under the box.
+/// Roughly how wide a character of the window's font is, in pixels: what
+/// the picked-players line is cut to fit by.
+const CHAR_WIDE: i32 = 7;
+
+/// The picked players as one line of at most `room` characters: as many
+/// names as fit, then how many more there are.
+fn fit_names(picked: &[String], room: usize) -> String {
+    if picked.is_empty() {
+        return "none: pick names from the Player list".to_string();
+    }
+    let all = picked.join(", ");
+    if all.chars().count() <= room {
+        return all;
+    }
+    let mut line = String::new();
+    for (shown, name) in picked.iter().enumerate() {
+        let more = format!(" +{} more", picked.len() - shown);
+        let next = if line.is_empty() {
+            name.clone()
+        } else {
+            format!("{line}, {name}")
+        };
+        let rest = picked.len() - shown - 1;
+        let tail = if rest > 0 {
+            format!(" +{rest} more").chars().count()
+        } else {
+            0
+        };
+        if next.chars().count() + tail > room {
+            return if line.is_empty() {
+                format!("{} picked", picked.len())
+            } else {
+                format!("{line}{more}")
+            };
+        }
+        line = next;
+    }
+    line
+}
+
+/// The picked-players line beside the box, cut to fit its width.
 unsafe fn show_picked(vgui: &Vgui, page: Vpanel) {
     unsafe {
         let picked = PICKED_PLAYERS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        let line = if picked.is_empty() {
-            "none: pick names from the Player list".to_string()
-        } else {
-            picked.join(", ")
+        let Some(vp) = vgui.child_named(page, PLAYER_CHOSEN) else {
+            return;
         };
+        let (_, _, wide, _) = vgui.rect(vp);
+        let room = ((wide - 8) / CHAR_WIDE).max(8) as usize;
+        let line = fit_names(&picked, room);
         let mut shown = CHOSEN_SHOWN.lock().unwrap_or_else(|e| e.into_inner());
         if shown.as_deref() == Some(line.as_str()) {
             return;
         }
-        let Some(label) = vgui
-            .child_named(page, PLAYER_CHOSEN)
-            .map(|vp| vgui.object(vp))
-        else {
-            return;
-        };
+        let label = vgui.object(vp);
         if label.is_null() {
             return;
         }
@@ -235,6 +271,20 @@ pub(super) unsafe fn update(vgui: &Vgui) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_picked_line_fits_its_room() {
+        let names: Vec<String> = ["dyelife", "m00cat", "Candyman", "gorilla"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(fit_names(&names, 100), "dyelife, m00cat, Candyman, gorilla");
+        let cut = fit_names(&names, 26);
+        assert_eq!(cut, "dyelife, m00cat +2 more");
+        assert!(cut.chars().count() <= 26);
+        assert_eq!(fit_names(&names, 5), "4 picked");
+        assert!(fit_names(&[], 30).starts_with("none"));
+    }
 
     #[test]
     fn every_typed_word_narrows_the_names() {
