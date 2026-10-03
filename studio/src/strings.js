@@ -1297,6 +1297,7 @@ export const STRINGS = {
     FLAG_RESET_TIP: 'Put the name back under the flag',
     SHOW_SPAWNS: 'Spawn points',
     SHOW_SPAWN_NAMES: 'Spawn names',
+    SHOW_SPAWN_PROTECTION: 'Spawn protection',
     SHOW_STAIRS: 'Stairs in white',
     SHOW_WATER: 'Water',
     FLAGS_TITLE: 'Flag names',

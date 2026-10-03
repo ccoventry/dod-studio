@@ -12,6 +12,7 @@
 //!   `.txt`;
 //! - [`image`] encodes what the Overviews page drew as the `.tga` or `.bmp`
 //!   the game's loader takes;
+//! - [`spawn_zones`] finds each spawn's protection, which the page outlines;
 //! - [`flag_icons`] reads the icons the game draws on its map for each flag,
 //!   for the page to preview;
 //! - [`files`] finds installs and maps and writes the result, keeping a
@@ -26,6 +27,7 @@ pub mod level;
 pub mod reach;
 pub mod scene;
 pub mod slopes;
+pub mod spawn_zones;
 pub mod transform;
 
 use std::path::Path;

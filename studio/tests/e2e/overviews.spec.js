@@ -428,3 +428,19 @@ test('scrolling zooms around the pointer, clicks still land where they point, an
   await expect(page.locator('#ov-zoom-fit')).toHaveText('100%');
   await expect(page.locator('#ov-zoom-out')).toBeDisabled();
 });
+
+test("spawn protection is outlined in the team's colour, and can be turned off", async ({ page }) => {
+  const scene = { ...SCENE, spawn_zones: [{ team: 'axis', edges: [[[100, 600], [400, 600]]] }] };
+  await loadHarness(page, { scene });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const red = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    const d = c.getContext('2d').getImageData(Math.round(100 * s), Math.round(600 * s) - 2, Math.round(300 * s), 5).data;
+    for (let i = 0; i < d.length; i += 4) if (d[i] > 150 && d[i + 1] < 120) return true;
+    return false;
+  });
+  expect(await red()).toBe(true);
+  await page.locator('input[data-show="spawnProtection"]').uncheck();
+  expect(await red()).toBe(false);
+});

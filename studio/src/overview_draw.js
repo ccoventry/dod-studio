@@ -24,6 +24,7 @@ export function emptyEdits() {
     show: {
       spawns: true,
       spawnLabels: true,
+      spawnProtection: true,
       flags: true,
       flagLabels: true,
       // The game's flag icons over the map, on the page only (never saved).
@@ -479,6 +480,25 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       }
     }
     ctx.drawImage(rim, vx, vy);
+  }
+
+  // Spawn protection: a dashed outline in the team's colour, round the area
+  // that hurts the other team.
+  if (edits.show.spawnProtection && scene.spawn_zones?.length) {
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 2 * s;
+    ctx.setLineDash([7 * s, 4 * s]);
+    for (const zone of scene.spawn_zones) {
+      ctx.strokeStyle = zone.team === 'axis' ? 'rgb(220,40,40)' : 'rgb(40,200,60)';
+      ctx.beginPath();
+      for (const [a, b] of zone.edges) {
+        ctx.moveTo(a[0] * s, a[1] * s);
+        ctx.lineTo(b[0] * s, b[1] * s);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   // Slopes too steep to stand on that a player still gets onto: an outline

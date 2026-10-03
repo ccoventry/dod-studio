@@ -104,6 +104,10 @@ pub struct Scene {
     /// another version of the map are told apart by it.
     #[serde(default)]
     pub checksum: u32,
+    /// Each spawn's protection (`spawn_zones.rs`), outlined in its team's
+    /// colour.
+    #[serde(default)]
+    pub spawn_zones: Vec<super::spawn_zones::SpawnZone>,
     pub flags: Vec<Marker>,
     pub allies: Vec<Marker>,
     pub axis: Vec<Marker>,
@@ -616,6 +620,7 @@ pub fn build_until(
         breakable_edges,
         slope_edges,
         checksum: 0,
+        spawn_zones: super::spawn_zones::spawn_zones(level, &transform),
         flags,
         allies,
         axis,
