@@ -50,6 +50,11 @@ KNOWN = {
                       "-- hull_trace_guard guards this; check its log line",
     "hw.dll+0x6c8d1": "#384: the engine's hull trace read a garbage plane from a previous map's collision data "
                       "-- hull_trace_guard guards this; check its log line",
+    # The same plane read in the 25th Anniversary hw.dll's PM_RecursiveHullCheck
+    # (+0x1e2540), found offline; its stack-overflow site isn't listed because
+    # that build's frame is written at several places before the first push.
+    "hw.dll+0x1e2612": "#384 (25th Anniversary build): the engine's hull trace read a garbage plane from a previous "
+                       "map's collision data -- hull_trace_guard guards this; check its log line",
 }
 # Engine fatal errors already understood: a substring of the message -> what it is.
 KNOWN_ERRORS = {
