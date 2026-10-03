@@ -142,14 +142,23 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             }
         }
 
-        // Open the list while typing: not for the first build, an empty box,
-        // no match, or a name picked from the list.
-        let picked = all.iter().any(|n| n.eq_ignore_ascii_case(typed.trim()));
-        if first_build || fresh || typed.trim().is_empty() || shown.is_empty() || picked {
+        let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
+        if menu.is_null() || first_build || fresh {
             return;
         }
-        let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
-        if menu.is_null() {
+        let open = vgui.visible(vpanel_of(menu));
+        // Nothing to offer (an empty box, no match, or a name just picked):
+        // close it. Through the panel, not the box's own close, which selects
+        // all its text so the next key replaces it.
+        let picked = all.iter().any(|n| n.eq_ignore_ascii_case(typed.trim()));
+        if typed.trim().is_empty() || shown.is_empty() || picked {
+            if open {
+                vgui.set_visible(vpanel_of(menu), false);
+            }
+            return;
+        }
+        // Already open: the rebuilt items show in it as they are.
+        if open {
             return;
         }
         // The list must not take the keyboard: an open menu takes keys as
@@ -159,11 +168,6 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         let keyboard: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
         keyboard(vgui.panel, vpanel_of(menu), 0);
         let on_command: OnCommandFn = slot(combo, FRAME_SLOT_ON_COMMAND);
-        if vgui.visible(vpanel_of(menu)) {
-            // Close and reopen, so the list is sized and placed for its
-            // new length.
-            on_command(combo, BUTTON_CLICKED.as_ptr());
-        }
         on_command(combo, BUTTON_CLICKED.as_ptr());
         let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
         focus(vgui.panel, vpanel_of(combo), 0);
