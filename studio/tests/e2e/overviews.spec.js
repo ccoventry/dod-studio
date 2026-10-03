@@ -593,3 +593,19 @@ test('colouring an area keeps pieces coloured on their own, and Shift paints ove
   await page.click('#ov-undo-btn');
   await expect.poll(async () => (await theme())?.faces).toHaveLength(1);
 });
+
+test("the colour swatches are the theme's own", async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const swatches = () => page.locator('#ov-palette .ov-swatch').evaluateAll((els) => els.map((e) => e.title));
+  // Colour-coded: the scene's palette.
+  expect(await swatches()).toEqual(['#5e5e55', '#929bf7', '#7d1d37', '#ffffff']);
+  // Flat grey: its greys, and nothing from Colour-coded.
+  await page.selectOption('#ov-theme', 'grey');
+  const grey = await swatches();
+  expect(grey).not.toContain('#929bf7');
+  expect(grey[0]).toBe('#767674');
+  // Classic: its paper first.
+  await page.selectOption('#ov-theme', 'classic');
+  expect((await swatches())[0]).toBe('#f0eee7');
+});

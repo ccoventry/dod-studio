@@ -11,6 +11,8 @@
 //   paper: bool           aged paper under everything (overview_paper.js)
 //   edges: bool           thin dark lines round every area
 //   frame: bool           the ruler frame, grid and title card
+//   palette(scene)        the swatches the page offers: the theme's own
+//                         colours first, so a repaint can match the look
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
@@ -40,6 +42,7 @@ export const THEMES = [
     voidFill: true,
     outline: null,
     water: [64, 208, 213],
+    palette: (scene) => scene.palette,
   },
   {
     // Untextured floors, lighter the higher they are, on the game's
@@ -48,6 +51,16 @@ export const THEMES = [
     floor: (scene, face) => greyFor(scene, face.z),
     voidFill: false,
     outline: [62, 62, 60],
+    // The floors' own greys, low to high, then the edge and the water.
+    palette: () => [
+      ...[0, 0.17, 0.33, 0.5, 0.67, 0.83, 1].map((t) => {
+        const v = Math.round(118 + t * (226 - 118));
+        return [v, v, Math.round(v * 0.98)];
+      }),
+      [62, 62, 60],
+      [92, 94, 97],
+      [255, 255, 255],
+    ],
     // Grey too, darker than the lowest floor (118), so it still reads as water.
     water: [92, 94, 97],
   },
@@ -61,6 +74,19 @@ export const THEMES = [
     voidColour: [38, 36, 33],
     outline: null,
     water: [150, 182, 196],
+    // Its paper and ink, then the muted colours a printed map would use.
+    palette: () => [
+      [240, 238, 231],
+      [214, 208, 192],
+      [190, 180, 158],
+      [38, 36, 33],
+      [150, 182, 196],
+      [120, 70, 55],
+      [96, 110, 70],
+      [70, 86, 120],
+      [176, 140, 70],
+      [255, 255, 255],
+    ],
     paper: true,
     edges: true,
     frame: true,

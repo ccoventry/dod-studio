@@ -18,7 +18,7 @@ import {
   areaEdit, setFaceColour, paintedPieces, clearAreaPieces, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
   spawnNameAt, setSpawnOffset, spawnNameSpots, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
-import { THEMES } from './overview_themes.js';
+import { THEMES, themeOf } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
 
 const INSTALL_KEY = 'overviews.install';
@@ -523,7 +523,8 @@ export function initOverviewsPane() {
   // ── Colours ────────────────────────────────────────────────────────────
   function renderPalette() {
     palette.innerHTML = '';
-    const colours = scene?.palette || [];
+    // The theme shown's own colours (overview_themes.js).
+    const colours = scene ? themeOf(edits).palette?.(scene) || scene.palette || [] : [];
     for (const c of colours) {
       const swatch = document.createElement('button');
       swatch.className = 'ov-swatch';
@@ -683,6 +684,7 @@ export function initOverviewsPane() {
     defaultTheme = themeSelect.value;
     storageSet(THEME_KEY, defaultTheme);
     change({ ...edits, theme: defaultTheme });
+    renderPalette();
   });
   for (const t of THEMES) {
     const opt = document.createElement('option');
