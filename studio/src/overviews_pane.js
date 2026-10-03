@@ -18,6 +18,7 @@ import {
   areaEdit, setFaceColour, flagName, setFlagName, toWorld, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES } from './overview_themes.js';
+import { fitEdits } from './overview_fit.js';
 
 const INSTALL_KEY = 'overviews.install';
 // The theme is one choice for every map, not saved with a map's edits.
@@ -500,14 +501,16 @@ export function initOverviewsPane() {
       opening = null;
       building.hidden = true;
       scene = built;
-      edits = { ...normaliseEdits(saved), theme };
+      const fit = fitEdits(built, normaliseEdits(saved));
+      edits = { ...fit.edits, theme };
       history = [];
       undoBtn.disabled = true;
       selectedLabel = null;
       for (const key of Object.keys(cache)) delete cache[key];
       title.textContent = name;
       if (footer) footer.textContent = STRINGS.OVERVIEWS.footer(name, scene.areas.length, scene.faces.length);
-      saveStatus.textContent = '';
+      const { areas, faces, flagNames } = fit.unplaced;
+      saveStatus.textContent = areas + faces + flagNames ? STRINGS.OVERVIEWS.keptAside(fit.unplaced) : '';
     } catch {
       if (token === loadToken) {
         opening = null;

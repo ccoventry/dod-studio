@@ -100,6 +100,10 @@ pub struct Scene {
     /// gets onto and slides off (`slopes.rs`): drawn as an outline only.
     #[serde(default)]
     pub slope_edges: Vec<[[f32; 2]; 2]>,
+    /// The map file's checksum, as the engine computes it: edits made on
+    /// another version of the map are told apart by it.
+    #[serde(default)]
+    pub checksum: u32,
     pub flags: Vec<Marker>,
     pub allies: Vec<Marker>,
     pub axis: Vec<Marker>,
@@ -611,6 +615,7 @@ pub fn build_until(
         cap_zones: cap_zones(level, &transform),
         breakable_edges,
         slope_edges,
+        checksum: 0,
         flags,
         allies,
         axis,

@@ -1309,6 +1309,14 @@ export const STRINGS = {
     RESET_BUTTON: 'Start over',
     resetConfirm: (map) => `Throw away every change made to ${map}'s overview here? The saved overview files are not touched.`,
     BUILDING: 'Working out where players can go...',
+    // overview_fit.js: edits that fit nothing on the map as it is now.
+    keptAside: ({ areas, faces, flagNames }) => {
+      const parts = [];
+      if (areas) parts.push(`${areas} area colour${areas === 1 ? '' : 's'}`);
+      if (faces) parts.push(`${faces} piece colour${faces === 1 ? '' : 's'} (the map file has changed since)`);
+      if (flagNames) parts.push(`${flagNames} flag name${flagNames === 1 ? '' : 's'}`);
+      return `Some earlier edits don't fit this map any more and are kept aside: ${parts.join(', ')}.`;
+    },
     building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
     SAVING: 'Saving...',
     saved: (paths) => `Saved: ${paths.join(', ')}`,

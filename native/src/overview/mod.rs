@@ -44,5 +44,7 @@ pub fn scene_for_until(
     let level = level::Level::from_file(&bsp)?;
     let strings =
         scene::read_strings(&install.join("dod").join("resource").join("dod_english.txt"));
-    scene::build_until(&level, &strings, progress)
+    let mut scene = scene::build_until(&level, &strings, progress)?;
+    scene.checksum = crate::patch::bsp::map_checksum_of_file(&bsp).unwrap_or(0);
+    Ok(scene)
 }

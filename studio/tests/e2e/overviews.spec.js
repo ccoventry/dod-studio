@@ -311,3 +311,15 @@ test('a slope you slide on is outlined, not filled, and can be turned off', asyn
   await page.locator('input[data-show="slopes"]').uncheck();
   expect(await dark()).toBe(false);
 });
+
+test('edits that fit nothing on the map any more are kept aside, and the page says so', async ({ page }) => {
+  await loadHarness(page, {
+    edits: { version: 1, areas: [{ at: [99999, 99999], colour: [1, 2, 3] }], labels: [], faces: [], flagNames: [] },
+  });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await expect(page.locator('#ov-save-status')).toContainText('1 area colour');
+  // Kept with the rest, to try again next time.
+  await page.selectOption('#ov-theme', 'grey');
+  await page.locator('#ov-show input[data-show="water"]').uncheck();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.aside.areas).toEqual([{ at: [99999, 99999], colour: [1, 2, 3] }]);
+});

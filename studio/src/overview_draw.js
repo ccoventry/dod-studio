@@ -34,6 +34,10 @@ export function emptyEdits() {
     theme: 'colours',
     // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.
     hd: true,
+    // The map file's checksum when these edits were made (overview_fit.js).
+    mapChecksum: null,
+    // Edits that fit nothing on the map as built now, kept to try again.
+    aside: { areas: [], faces: [], flagNames: [], mapChecksum: null },
   };
 }
 
@@ -49,6 +53,12 @@ export function normaliseEdits(raw) {
     labels: Array.isArray(raw.labels) ? raw.labels : [],
     flagNames: Array.isArray(raw.flagNames) ? raw.flagNames : [],
     show: { ...base.show, ...(raw.show || {}) },
+    aside: {
+      areas: Array.isArray(raw.aside?.areas) ? raw.aside.areas : [],
+      faces: Array.isArray(raw.aside?.faces) ? raw.aside.faces : [],
+      flagNames: Array.isArray(raw.aside?.flagNames) ? raw.aside.flagNames : [],
+      mapChecksum: raw.aside?.mapChecksum ?? null,
+    },
   };
 }
 
