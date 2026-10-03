@@ -67,7 +67,7 @@ use crate::names::console_name;
 use crate::{
     anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
     hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
-    spectator_eye, spectator_target, texture_hires, voice,
+    spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -514,6 +514,9 @@ pub fn poll() {
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();
+    // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
+    // two while both of its settings are off.
+    window_layout::poll();
     // Runs any console commands Studio has sent over the pipe.
     crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
@@ -1106,6 +1109,23 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
+/// Only registered when the window-layout cvars could not be registered.
+unsafe extern "C" fn cmd_resizable_windows() {
+    handle_toggle(
+        window_layout::RESIZABLE_NAME,
+        &window_layout::RESIZABLE,
+        window_layout::resizable_status,
+    );
+}
+
+unsafe extern "C" fn cmd_remember_window_layout() {
+    handle_toggle(
+        window_layout::REMEMBER_NAME,
+        &window_layout::REMEMBER,
+        window_layout::remember_status,
+    );
+}
+
 /// Only registered when `dodstudio_seek_skip_between` could not be a cvar.
 unsafe extern "C" fn cmd_seek_skip_between() {
     handle_toggle(
@@ -1332,6 +1352,20 @@ pub fn install() {
     match register(demo_list_folders::NAME, "0") {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
+
+    // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
+    // it walks the windows, so they need no poll here, and a failed
+    // registration costs only their type-ahead -- plain toggles stand in.
+    match (
+        register(window_layout::RESIZABLE_NAME, "0"),
+        register(window_layout::REMEMBER_NAME, "0"),
+    ) {
+        (Some(resizable), Some(remember)) => window_layout::set_cvars(resizable, remember),
+        _ => {
+            add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
+            add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
+        }
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
