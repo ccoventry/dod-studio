@@ -48,7 +48,8 @@ export const THEMES = [
     floor: (scene, face) => greyFor(scene, face.z),
     voidFill: false,
     outline: [62, 62, 60],
-    water: [86, 128, 196],
+    // Grey too, darker than the lowest floor (118), so it still reads as water.
+    water: [92, 94, 97],
   },
   {
     // Valve's own overviews (anzio, chemille, donner...): aged paper in a

@@ -2030,3 +2030,8 @@ tr.keyboard-selected {
 .ov-add-label {
   align-self: flex-start;
 }
+
+/* The side panel scrolls, which clips an outline drawn outside the button. */
+.ov-add-label.active {
+  outline-offset: -2px;
+}
