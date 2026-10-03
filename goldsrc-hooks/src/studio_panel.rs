@@ -215,6 +215,9 @@ pub struct Build {
     /// `ComboBox`'s vftable: only a control with exactly this one is filled
     /// as the Demos tab's Type dropdown.
     pub combo_box_vftable: usize,
+    /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
+    /// hand on to, `mov ecx, [ecx + combo_menu]`).
+    pub combo_menu: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -238,6 +241,7 @@ pub const BUILDS: [Build; 2] = [
         keyvalues_ctor: 0x5_2510,
         progress_bar_vftable: 0xa_1dcc,
         combo_box_vftable: 0x9_fbbc,
+        combo_menu: 0x13c,
     },
     Build {
         name: "25th Anniversary",
@@ -259,6 +263,7 @@ pub const BUILDS: [Build; 2] = [
         keyvalues_ctor: 0x4_4010,
         progress_bar_vftable: 0xa_bbd4,
         combo_box_vftable: 0xa_8f10,
+        combo_menu: 0x140,
     },
 ];
 
@@ -556,6 +561,13 @@ const DEMO_TYPES: [&CStr; 3] = [c"All", c"POV", c"HLTV"];
 /// `ActivateItemByRow(int row)`.
 const COMBO_SLOT_ADD_ITEM: usize = 196;
 const COMBO_SLOT_ACTIVATE_ITEM_BY_ROW: usize = 208;
+/// `ComboBox::DeleteAllItems()`, handing on to its drop-down menu's (which
+/// marks every item for deletion): the Player dropdown's list is rebuilt
+/// for what is typed.
+const COMBO_SLOT_DELETE_ALL_ITEMS: usize = 203;
+/// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
+/// or closes it if open.
+const BUTTON_CLICKED: &CStr = c"ButtonClicked";
 const DAYS_FILTER: &str = "DaysFilter";
 /// The Player filter: a name or SteamID, "they recorded it", and the note on
 /// how many demos it can see, shown in place of the hint while it is in use.
@@ -1204,8 +1216,14 @@ mod hook {
 
     /// The Playback tab's loading progress (#465).
     mod load_progress;
+    /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
+    mod player_picker;
     /// The Highlights tab (#565).
     mod streaks_tab;
+
+    /// Bumped each time the demo list is refilled and stamped, so what is
+    /// worked out from its rows is worked out again.
+    static DEMO_LIST_STAMPS: AtomicUsize = AtomicUsize::new(0);
 
     type Vpanel = u32;
     type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;
@@ -1708,6 +1726,7 @@ mod hook {
                 }
                 id = next(list, id);
             }
+            DEMO_LIST_STAMPS.fetch_add(1, Ordering::AcqRel);
             true
         }
     }
@@ -2752,6 +2771,7 @@ mod hook {
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
                     streaks_tab::update(&vgui);
+                    player_picker::update(&vgui);
                     load_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {

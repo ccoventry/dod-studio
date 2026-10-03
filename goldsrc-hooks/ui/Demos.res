@@ -121,7 +121,7 @@
 	}
 	"PlayerFilter"
 	{
-		"ControlName"		"TextEntry"
+		"ControlName"		"ComboBox"
 		"fieldName"		"PlayerFilter"
 		"xpos"		"206"
 		"ypos"		"34"
@@ -129,7 +129,8 @@
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
-		"helptext"		"Part of a player name or SteamID. Only demos Studio or the Highlights tab analysed are searched."
+		"editable"		"1"
+		"helptext"		"Type part of a player name, or pick one from the list. Only demos Studio or the Highlights tab analysed are searched."
 	}
 	"PlayerRecorded"
 	{

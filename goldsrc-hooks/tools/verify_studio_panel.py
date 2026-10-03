@@ -311,6 +311,31 @@ def verify(game, src):
     check(combo_vt and ui.u32(combo_vt + 4 * get_text) == ui.u32(text_vt + 4 * get_text),
           f"ComboBox reads its text through TextEntry's slot {get_text}")
 
+    # 23: the Player dropdown. DeleteAllItems hands on to the drop-down menu
+    # kept at combo_menu, whose own walks the items marking each for deletion
+    # (Panel slot 71); OnCommand("ButtonClicked") is what opens the list.
+    clear_slot = vwl.rust_usize(src, "COMBO_SLOT_DELETE_ALL_ITEMS")
+    clear_fn = ui.u32(combo_vt + 4 * clear_slot) - ui.base if combo_vt else 0
+    clear = ui.body(clear_fn, 0x20)
+    menu_at = re.fullmatch(r"mov ecx, dword ptr \[ecx \+ (0x[0-9a-f]+)\]", clear[0]) if clear else None
+    check(menu_at and int(menu_at.group(1), 16) == build["combo_menu"],
+          f"ComboBox slot {clear_slot} reads its menu at combo_menu: {clear[:1]}")
+    hop = [x for x in clear if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
+    marks = False
+    if hop and menu_vt:
+        menu_fn = ui.u32(menu_vt + int(hop[0].split("+ ")[1].rstrip("]"), 16)) - ui.base
+        marks = any(x.endswith("+ 0x11c]") and x.startswith("call") for x in ui.body(menu_fn, 0x80))
+    check(marks, f"which hands on to the menu's DeleteAllItems, marking each item for deletion: {hop}")
+    on_cmd = ui.u32(combo_vt + 4 * on_command) - ui.base if combo_vt else 0
+    pushed = []
+    for x in ui.body(on_cmd, 0x30):
+        for t in re.findall(r"0x1[0-9a-f]{7}", x):
+            r = int(t, 16) - ui.base
+            if 0 < r < len(ui.img):
+                pushed.append(ui.img[r:r + 20].split(b"\x00")[0])
+    check(b"ButtonClicked" in pushed,
+          f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
+
     # 21: the Killstreaks tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
     check(bar_vt == build["progress_bar_vftable"],
