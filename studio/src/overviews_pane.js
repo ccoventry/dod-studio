@@ -21,7 +21,8 @@ import { THEMES } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
 
 const INSTALL_KEY = 'overviews.install';
-// The theme is one choice for every map, not saved with a map's edits.
+// Each map keeps the theme it was made in; the one last picked on any map
+// is what a map not yet given one opens in.
 const THEME_KEY = 'overviews.theme';
 const UNDO_LIMIT = 100;
 
@@ -67,8 +68,8 @@ export function initOverviewsPane() {
   let install = '';
   let maps = [];
   let scene = null;
-  let theme = THEMES.some((t) => t.id === storageGet(THEME_KEY)) ? storageGet(THEME_KEY) : THEMES[0].id;
-  let edits = { ...emptyEdits(), theme };
+  let defaultTheme = THEMES.some((t) => t.id === storageGet(THEME_KEY)) ? storageGet(THEME_KEY) : THEMES[0].id;
+  let edits = { ...emptyEdits(), theme: defaultTheme };
   let history = [];
   let mode = 'area';
   // The colour clicks paint with; null puts an area's own colour back.
@@ -101,7 +102,7 @@ export function initOverviewsPane() {
 
   function undo() {
     if (!history.length) return;
-    edits = { ...history.pop(), theme };
+    edits = history.pop();
     undoBtn.disabled = history.length === 0;
     persistSoon();
     draw();
@@ -279,7 +280,7 @@ export function initOverviewsPane() {
       box.disabled = !scene;
     });
     formatSelect.value = edits.format || 'tga';
-    themeSelect.value = edits.theme || 'colours';
+    themeSelect.value = edits.theme || defaultTheme;
     themeSelect.disabled = !scene;
     hdBox.checked = edits.hd !== false;
 
@@ -350,11 +351,9 @@ export function initOverviewsPane() {
 
   formatSelect.addEventListener('change', () => change({ ...edits, format: formatSelect.value }, { remember: false }));
   themeSelect.addEventListener('change', () => {
-    theme = themeSelect.value;
-    storageSet(THEME_KEY, theme);
-    edits = { ...edits, theme };
-    draw();
-    renderSidePanels();
+    defaultTheme = themeSelect.value;
+    storageSet(THEME_KEY, defaultTheme);
+    change({ ...edits, theme: defaultTheme });
   });
   for (const t of THEMES) {
     const opt = document.createElement('option');
@@ -502,7 +501,7 @@ export function initOverviewsPane() {
       building.hidden = true;
       scene = built;
       const fit = fitEdits(built, normaliseEdits(saved));
-      edits = { ...fit.edits, theme };
+      edits = { ...fit.edits, theme: fit.edits.theme || defaultTheme };
       history = [];
       undoBtn.disabled = true;
       selectedLabel = null;
@@ -584,7 +583,7 @@ export function initOverviewsPane() {
     }
     clearTimeout(saveTimer);
     history.push(edits);
-    edits = { ...emptyEdits(), theme };
+    edits = { ...emptyEdits(), theme: defaultTheme };
     undoBtn.disabled = false;
     selectedLabel = null;
     const entry = maps.find((m) => m.name === scene.map);

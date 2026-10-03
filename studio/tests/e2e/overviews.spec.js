@@ -48,8 +48,12 @@ async function loadHarness(page, { edits = null, scene = SCENE } = {}) {
       overview_installs: () => installs,
       overview_maps: () => maps,
       overview_scene: (a) => ({ ...scene, map: a.map }),
-      overview_load_edits: () => edits,
-      overview_save_edits: () => null,
+      // Per map, as the backend keeps them; `edits` for a map not saved yet.
+      overview_load_edits: (a) => window.__savedEdits?.[a.map] ?? edits,
+      overview_save_edits: (a) => {
+        (window.__savedEdits ||= {})[a.map] = a.edits;
+        return null;
+      },
       overview_reset_edits: () => null,
       overview_export: (args) => ({
         written: [`C:/games/Half-Life/dod/overviews/${args.request.map}.${args.request.format}`],
@@ -196,7 +200,7 @@ test('Up and Down move through the map list and open each map', async ({ page })
   await expect.poll(async () => (await calls(page, 'overview_scene')).at(-1)?.args.map).toBe('dod_anzio');
 });
 
-test('the theme changes how the floors are drawn, and stays chosen for the next map', async ({ page }) => {
+test('the theme changes how the floors are drawn, each map keeps its own, and a new map opens in the last one', async ({ page }) => {
   await loadHarness(page);
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   const pixel = () => page.evaluate(() => {
@@ -209,14 +213,19 @@ test('the theme changes how the floors are drawn, and stays chosen for the next 
   const grey = await pixel();
   expect(grey[0]).toBe(grey[1]);
   expect(grey).not.toEqual([94, 94, 85]);
-  // One choice for every map: another map opens in it, and so does this
-  // page next time.
+  await expect.poll(() => page.evaluate(() => window.__savedEdits?.dod_test?.theme)).toBe('grey');
+  // A map with no theme of its own opens in the last one picked...
   await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
   await expect(page.locator('#ov-theme')).toHaveValue('grey');
-  expect(await page.evaluate(() => localStorage.getItem('overviews.theme'))).toBe('grey');
-  await page.reload();
+  await page.selectOption('#ov-theme', 'classic');
+  await expect.poll(() => page.evaluate(() => window.__savedEdits?.dod_anzio?.theme)).toBe('classic');
+  // ...and one that has a theme keeps it.
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await expect(page.locator('#ov-theme')).toHaveValue('grey');
+  await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
+  await expect(page.locator('#ov-theme')).toHaveValue('classic');
+  // The last one picked is remembered for next time.
+  expect(await page.evaluate(() => localStorage.getItem('overviews.theme'))).toBe('classic');
 });
 
 test('the classic theme draws the paper map: a dark ruler frame round pale floors', async ({ page }) => {

@@ -30,8 +30,9 @@ export function emptyEdits() {
       water: true,
     },
     format: 'tga',
-    // overview_themes.js: how it looks.
-    theme: 'colours',
+    // overview_themes.js: how it looks. Null until chosen for this map: the
+    // page then uses the theme last picked on any map.
+    theme: null,
     // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.
     hd: true,
     // The map file's checksum when these edits were made (overview_fit.js).
