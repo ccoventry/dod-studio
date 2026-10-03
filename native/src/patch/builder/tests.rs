@@ -65,6 +65,7 @@ fn test_build_batch_queue_merging() {
             viewdemo_times: Vec::new(),
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
+            source_key: None,
             status: Default::default(),
         },
         CaptureStreak {
@@ -84,6 +85,7 @@ fn test_build_batch_queue_merging() {
             viewdemo_times: Vec::new(),
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
+            source_key: None,
             status: Default::default(),
         },
         CaptureStreak {
@@ -103,6 +105,7 @@ fn test_build_batch_queue_merging() {
             viewdemo_times: Vec::new(),
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
+            source_key: None,
             status: Default::default(),
         },
     ];
@@ -203,6 +206,7 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
         viewdemo_times: Vec::new(),
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
+        source_key: None,
         status: Default::default(),
     };
     build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
@@ -246,6 +250,7 @@ fn every_injected_command_fits_a_console_command_frame() {
         viewdemo_times: Vec::new(),
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
+        source_key: None,
         status: Default::default(),
     }];
 
@@ -424,6 +429,7 @@ fn streak_with_kills(start_tick: i32, end_tick: i32, kill_frames: &[i32]) -> Cap
         viewdemo_times: Vec::new(),
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
+        source_key: None,
         status: Default::default(),
     }
 }
