@@ -22,6 +22,8 @@ import { THEMES } from './overview_themes.js';
 const INSTALL_KEY = 'overviews.install';
 // The theme is one choice for every map, not saved with a map's edits.
 const THEME_KEY = 'overviews.theme';
+// So is where the overview is saved.
+const TARGET_KEY = 'overviews.target';
 const UNDO_LIMIT = 100;
 
 function storageGet(key) {
@@ -68,7 +70,8 @@ export function initOverviewsPane() {
   let maps = [];
   let scene = null;
   let theme = THEMES.some((t) => t.id === storageGet(THEME_KEY)) ? storageGet(THEME_KEY) : THEMES[0].id;
-  let edits = { ...emptyEdits(), theme };
+  let target = ['game', 'addon'].includes(storageGet(TARGET_KEY)) ? storageGet(TARGET_KEY) : 'game';
+  let edits = { ...emptyEdits(), theme, target };
   let history = [];
   let mode = 'area';
   // The colour clicks paint with; null puts an area's own colour back.
@@ -101,7 +104,7 @@ export function initOverviewsPane() {
 
   function undo() {
     if (!history.length) return;
-    edits = { ...history.pop(), theme };
+    edits = { ...history.pop(), theme, target };
     undoBtn.disabled = history.length === 0;
     persistSoon();
     draw();
@@ -281,7 +284,7 @@ export function initOverviewsPane() {
     formatSelect.value = edits.format || 'tga';
     themeSelect.value = edits.theme || 'colours';
     themeSelect.disabled = !scene;
-    targetSelect.value = edits.target || 'addon';
+    targetSelect.value = target;
     hdBox.checked = edits.hd !== false;
 
     flagList.innerHTML = '';
@@ -363,7 +366,11 @@ export function initOverviewsPane() {
     opt.textContent = STRINGS.OVERVIEWS.THEMES[t.id] || t.id;
     themeSelect.appendChild(opt);
   }
-  targetSelect.addEventListener('change', () => change({ ...edits, target: targetSelect.value }, { remember: false }));
+  targetSelect.addEventListener('change', () => {
+    target = targetSelect.value;
+    storageSet(TARGET_KEY, target);
+    edits = { ...edits, target };
+  });
   hdBox.addEventListener('change', () => change({ ...edits, hd: hdBox.checked }, { remember: false }));
 
   // ── Installs and maps ──────────────────────────────────────────────────
@@ -503,7 +510,7 @@ export function initOverviewsPane() {
       opening = null;
       building.hidden = true;
       scene = built;
-      edits = { ...normaliseEdits(saved), theme };
+      edits = { ...normaliseEdits(saved), theme, target };
       history = [];
       undoBtn.disabled = true;
       selectedLabel = null;
@@ -535,7 +542,7 @@ export function initOverviewsPane() {
       const result = await overviewExport({
         install,
         map: scene.map,
-        target: edits.target || 'addon',
+        target,
         format: edits.format || 'tga',
         width: image.width,
         height: image.height,
@@ -546,7 +553,7 @@ export function initOverviewsPane() {
       if (edits.hd !== false) {
         const hd = renderHd(scene, edits);
         const path = await overviewExportHd(
-          { install, map: scene.map, target: edits.target || 'addon', width: hd.width, height: hd.height },
+          { install, map: scene.map, width: hd.width, height: hd.height },
           new Uint8Array(hd.rgba.buffer),
         );
         written.push(path);
@@ -577,7 +584,7 @@ export function initOverviewsPane() {
     }
     clearTimeout(saveTimer);
     history.push(edits);
-    edits = { ...emptyEdits(), theme };
+    edits = { ...emptyEdits(), theme, target };
     undoBtn.disabled = false;
     selectedLabel = null;
     const entry = maps.find((m) => m.name === scene.map);

@@ -26,8 +26,9 @@
 //! The engine keeps its own idea of the bound texture, so the binding is put
 //! back after the uploads. Pure green is made transparent, as the game does.
 //!
-//! `dod_addon/overviews` is looked in first when the game runs with
-//! `-addons`, as the game itself does.
+//! The `_hd` image is looked for in `dod_addon/overviews` first, where DoD
+//! Studio writes it, whether or not the game runs with `-addons` (only this
+//! hook reads it), then beside the overview in `dod/overviews`.
 
 use std::ffi::{CStr, c_char, c_void};
 use std::path::{Path, PathBuf};
@@ -122,12 +123,8 @@ fn game_root() -> PathBuf {
         .unwrap_or_default()
 }
 
-fn addons_on() -> bool {
-    std::env::args().any(|a| a.eq_ignore_ascii_case("-addons"))
-}
-
-/// `overviews/x.tga` -> `overviews/x_hd.tga`, in `dod_addon` (with
-/// `-addons`) or `dod`, whichever has it.
+/// `overviews/x.tga` -> `overviews/x_hd.tga`, in `dod_addon` or `dod`,
+/// whichever has it.
 fn hd_file(image: &str) -> Option<PathBuf> {
     let image = image.replace('\\', "/");
     let stem = image.rsplit_once('.').map(|(s, _)| s).unwrap_or(&image);
@@ -136,12 +133,7 @@ fn hd_file(image: &str) -> Option<PathBuf> {
     }
     let relative = format!("{stem}_hd.tga");
     let root = game_root();
-    let mut folders = Vec::new();
-    if addons_on() {
-        folders.push(root.join("dod_addon"));
-    }
-    folders.push(root.join("dod"));
-    folders
+    [root.join("dod_addon"), root.join("dod")]
         .into_iter()
         .map(|f| f.join(&relative))
         .find(|p| p.is_file())

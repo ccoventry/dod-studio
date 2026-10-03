@@ -34,8 +34,10 @@ pub struct MapEntry {
     pub has_edits: bool,
 }
 
-/// Where to write: `dod_addon/overviews` (read only when the game runs with
-/// `-addons`, which DoD Studio's launches add) or `dod/overviews`.
+/// Where to write the overview the game reads: `dod/overviews`, which every
+/// launch reads, or `dod_addon/overviews`, read first but only when the
+/// game runs with `-addons` (DoD Studio's launches add it). The
+/// high-quality copy always goes to `dod_addon` ([`save_hd`]).
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
@@ -174,6 +176,11 @@ pub struct Saved {
     pub written: Vec<String>,
     /// The user's own files moved aside first.
     pub backed_up: Vec<String>,
+    /// An older overview of ours for the map in the other folder, removed:
+    /// left in `dod_addon` it would win over a new one in `dod` whenever
+    /// the game runs with `-addons`.
+    #[serde(default)]
+    pub removed: Vec<String>,
 }
 
 /// Writes `image` (already encoded) and its `.txt` for `map`. A user's own
@@ -221,6 +228,19 @@ pub fn save(
     let text = transform.text(&map, &format!("overviews/{map}.{ext}"));
     std::fs::write(&txt, text).map_err(|e| format!("{}: {e}", txt.display()))?;
     saved.written.push(txt.to_string_lossy().into_owned());
+
+    let other = match target {
+        Target::Addon => install.join("dod").join("overviews"),
+        Target::Game => install.join("dod_addon").join("overviews"),
+    };
+    if is_ours(&other.join(format!("{map}.txt"))) {
+        for ext in ["txt", "bmp", "tga"] {
+            let stale = other.join(format!("{map}.{ext}"));
+            if stale.is_file() && std::fs::remove_file(&stale).is_ok() {
+                saved.removed.push(stale.to_string_lossy().into_owned());
+            }
+        }
+    }
     Ok(saved)
 }
 
@@ -258,26 +278,30 @@ pub fn export(request: &Export) -> Result<Saved, String> {
     )
 }
 
-/// Writes the high-quality copy, `<map>_hd.tga`, beside where [`save`]
-/// puts the overview: DoD Studio's hook cuts the game's tiles from it.
-/// Always ours, so it is simply replaced.
+/// Writes the high-quality copy, `dod_addon/overviews/<map>_hd.tga`: only
+/// DoD Studio's hook reads it (cutting the game's tiles from it), so it
+/// stays out of the game's own folder. Always ours, so it is simply
+/// replaced, and one an older version left in `dod/overviews` is removed.
 pub fn save_hd(
     install: &Path,
-    target: Target,
     map: &str,
     width: u32,
     height: u32,
     rgba: &[u8],
 ) -> Result<String, String> {
     let map = safe(map);
-    let folder = match target {
-        Target::Addon => install.join("dod_addon").join("overviews"),
-        Target::Game => install.join("dod").join("overviews"),
-    };
+    let folder = install.join("dod_addon").join("overviews");
     std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
     let bytes = super::image::tga_hd(width, height, rgba)?;
     let path = folder.join(format!("{map}_hd.tga"));
     std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+    let old = install
+        .join("dod")
+        .join("overviews")
+        .join(format!("{map}_hd.tga"));
+    if old.is_file() {
+        let _ = std::fs::remove_file(&old);
+    }
     Ok(path.to_string_lossy().into_owned())
 }
 
@@ -391,6 +415,74 @@ mod tests {
                 .is_file()
         );
         assert_eq!(saved.written.len(), 2);
+    }
+
+    #[test]
+    fn saving_to_dod_removes_our_older_copy_in_dod_addon() {
+        let dir = Scratch::new("overview_move");
+        save(
+            dir.path(),
+            Target::Addon,
+            "dod_z",
+            Format::Tga,
+            b"tga",
+            &transform(),
+        )
+        .unwrap();
+        let saved = save(
+            dir.path(),
+            Target::Game,
+            "dod_z",
+            Format::Tga,
+            b"tga",
+            &transform(),
+        )
+        .unwrap();
+        let addon = dir.path().join("dod_addon").join("overviews");
+        assert!(!addon.join("dod_z.txt").exists());
+        assert!(!addon.join("dod_z.tga").exists());
+        assert_eq!(saved.removed.len(), 2);
+        assert!(
+            dir.path()
+                .join("dod")
+                .join("overviews")
+                .join("dod_z.tga")
+                .is_file()
+        );
+    }
+
+    #[test]
+    fn someone_elses_overview_in_the_other_folder_is_left_alone() {
+        let dir = Scratch::new("overview_keep");
+        let addon = dir.path().join("dod_addon").join("overviews");
+        std::fs::create_dir_all(&addon).unwrap();
+        std::fs::write(addon.join("dod_w.txt"), "a server's own").unwrap();
+        let saved = save(
+            dir.path(),
+            Target::Game,
+            "dod_w",
+            Format::Tga,
+            b"tga",
+            &transform(),
+        )
+        .unwrap();
+        assert!(saved.removed.is_empty());
+        assert!(addon.join("dod_w.txt").is_file());
+    }
+
+    #[test]
+    fn the_high_quality_copy_goes_to_dod_addon() {
+        let dir = Scratch::new("overview_hd");
+        let game = dir.path().join("dod").join("overviews");
+        std::fs::create_dir_all(&game).unwrap();
+        std::fs::write(game.join("dod_v_hd.tga"), "older").unwrap();
+        let rgba = vec![0u8; 4 * 1024 * 768];
+        let path = save_hd(dir.path(), "dod_v", 1024, 768, &rgba).unwrap();
+        assert!(
+            path.replace('\\', "/")
+                .ends_with("dod_addon/overviews/dod_v_hd.tga")
+        );
+        assert!(!game.join("dod_v_hd.tga").exists());
     }
 
     #[test]

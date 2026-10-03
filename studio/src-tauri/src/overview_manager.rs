@@ -83,7 +83,7 @@ pub fn overview_reset_edits(map: String) -> Result<(), String> {
 /// Writes the high-quality copy (`<map>_hd.tga`). The pixels come as the raw
 /// request body -- 48 MB at 4096x3072, too big to send as JSON -- and where
 /// to put them in the `x-overview` header, URI-encoded JSON:
-/// `{install, map, target, width, height}`.
+/// `{install, map, width, height}`. Always to `dod_addon` (`files::save_hd`).
 #[tauri::command]
 pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<String, String> {
     let tauri::ipc::InvokeBody::Raw(rgba) = request.body() else {
@@ -102,7 +102,6 @@ pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<Stri
     struct Meta {
         install: String,
         map: String,
-        target: files::Target,
         width: u32,
         height: u32,
     }
@@ -111,7 +110,6 @@ pub async fn overview_export_hd(request: tauri::ipc::Request<'_>) -> Result<Stri
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         files::save_hd(
             Path::new(&meta.install),
-            meta.target,
             &meta.map,
             meta.width,
             meta.height,

@@ -52,7 +52,7 @@ async function loadHarness(page, { edits = null, scene = SCENE } = {}) {
       overview_save_edits: () => null,
       overview_reset_edits: () => null,
       overview_export: (args) => ({
-        written: [`C:/games/Half-Life/dod_addon/overviews/${args.request.map}.${args.request.format}`],
+        written: [`C:/games/Half-Life/dod/overviews/${args.request.map}.${args.request.format}`],
         backed_up: [],
       }),
       overview_export_hd: (bytes) => {
@@ -146,12 +146,27 @@ test('add label puts one where clicked, and it can be renamed and deleted', asyn
 
 test('saved edits come back when the map is opened', async ({ page }) => {
   await loadHarness(page, {
-    edits: { version: 1, show: { flags: false }, format: 'bmp', target: 'game', labels: [], areas: [], faces: [], flagNames: [] },
+    edits: { version: 1, show: { flags: false }, format: 'bmp', target: 'addon', labels: [], areas: [], faces: [], flagNames: [] },
   });
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await expect(page.locator('#ov-show input[data-show="flags"]')).not.toBeChecked();
   await expect(page.locator('#ov-format')).toHaveValue('bmp');
+  // Where to save is the page's choice, not the map's: dod unless changed.
   await expect(page.locator('#ov-target')).toHaveValue('game');
+});
+
+test('where to save is dod by default and stays chosen for every map', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await expect(page.locator('#ov-target')).toHaveValue('game');
+  await page.selectOption('#ov-target', 'addon');
+  await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
+  await expect(page.locator('#ov-target')).toHaveValue('addon');
+  await page.reload();
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await expect(page.locator('#ov-target')).toHaveValue('addon');
+  await page.click('#ov-save-btn');
+  await expect.poll(async () => (await calls(page, 'overview_export')).at(-1)?.args.request.target).toBe('addon');
 });
 
 test('save hands the backend the 1024x768 drawing, format and place', async ({ page }) => {
@@ -159,9 +174,9 @@ test('save hands the backend the 1024x768 drawing, format and place', async ({ p
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await page.selectOption('#ov-format', 'bmp');
   await page.click('#ov-save-btn');
-  await expect(page.locator('#ov-save-status')).toContainText('dod_addon/overviews/dod_test.bmp');
+  await expect(page.locator('#ov-save-status')).toContainText('dod/overviews/dod_test.bmp');
   const request = (await calls(page, 'overview_export')).at(-1).args.request;
-  expect(request).toMatchObject({ map: 'dod_test', install: 'C:/games/Half-Life', format: 'bmp', target: 'addon', width: 1024, height: 768 });
+  expect(request).toMatchObject({ map: 'dod_test', install: 'C:/games/Half-Life', format: 'bmp', target: 'game', width: 1024, height: 768 });
   expect(request.transform).toEqual(SCENE.transform);
   // 1024 * 768 * 4 bytes, base64.
   expect(request.rgba.length).toBe(Math.ceil((1024 * 768 * 4) / 3) * 4);
