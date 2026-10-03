@@ -54,6 +54,9 @@ export function bannedCommandCount() {
   );
 }
 
+/** Bumped per scan, so only the latest one's answer is drawn. */
+let scanGeneration = 0;
+
 /**
  * Re-scan and redraw. Safe to call repeatedly — on start-up, when the hl.exe
  * path changes, and whenever the init command list is edited.
@@ -71,9 +74,14 @@ export async function refreshCfgWarnings(
   customCommands = [],
   context = {}
 ) {
-  report = gamePath
+  // Scans can overlap now that typing triggers them (#535): only the latest
+  // one's answer is shown, whichever order they come back in.
+  const generation = ++scanGeneration;
+  const next = gamePath
     ? await scanGameConfigs(gamePath, initCommands, customCommands, context)
     : EMPTY;
+  if (generation !== scanGeneration) return;
+  report = next;
   render();
 }
 
