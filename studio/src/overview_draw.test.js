@@ -3,6 +3,7 @@ import {
   emptyEdits, normaliseEdits, setAreaEdit, areaEdit, setFaceColour, faceColour,
   insidePolygon, faceAt, toPixel, toWorld, spawnLabels, flagName, setFlagName,
   labelAt, toBase64, flagOffset, setFlagOffset, flagLabelAt, flagLabelSpot,
+  spawnNameSpots, setSpawnName, setSpawnOffset, resetSpawn, spawnChanged, spawnName, spawnNameAt, titleShown,
 } from './overview_draw.js';
 import { mapTitle } from './overview_themes.js';
 
@@ -181,6 +182,60 @@ describe('spawnLabels', () => {
     expect(labels).toHaveLength(1);
     expect(labels[0].team).toBe('Allies');
     expect(labels[0].at[1]).toBeGreaterThan(100);
+  });
+});
+
+describe('spawn names (#581)', () => {
+  const withSpawns = () => {
+    const s = scene();
+    s.allies = [0, 1, 2, 3].map((i) => ({ name: 'Allies', at: [100 + i * 10, 100], world: [0, 0, 0] }));
+    s.axis = [0, 1, 2, 3].map((i) => ({ name: 'Axis', at: [600 + i * 10, 500], world: [0, 0, 0] }));
+    return s;
+  };
+
+  it('are "Allies spawn" and "Axis spawn" until renamed', () => {
+    const s = withSpawns();
+    expect(spawnNameSpots(s, emptyEdits()).map((p) => p.name)).toEqual(['Allies spawn', 'Axis spawn']);
+  });
+
+  it('a typed name is drawn and found where it is, and keeps a drag', () => {
+    const s = withSpawns();
+    const [allies] = spawnNameSpots(s, emptyEdits());
+    let e = setSpawnOffset(s, emptyEdits(), allies.label, [64, 0]);
+    e = setSpawnName(s, e, allies.label, '  Beach landing  ');
+    expect(spawnName(s, e, allies.label)).toBe('Beach landing');
+    const spot = spawnNameSpots(s, e)[0];
+    expect(spot.name).toBe('Beach landing');
+    expect(spot.at).not.toEqual(spot.home);
+    expect(spawnNameAt(s, e, spot.at[0], spot.at[1])?.team).toBe('Allies');
+    expect(e.spawnNames).toHaveLength(1);
+    expect(spawnChanged(s, e, allies.label)).toBe(true);
+    // The other spawn is untouched.
+    expect(spawnChanged(s, e, spawnNameSpots(s, e)[1].label)).toBe(false);
+  });
+
+  it('a blank or default name takes the name back but keeps the place; reset takes both', () => {
+    const s = withSpawns();
+    const [allies] = spawnNameSpots(s, emptyEdits());
+    let e = setSpawnName(s, emptyEdits(), allies.label, 'Beach');
+    e = setSpawnOffset(s, e, allies.label, [10, 10]);
+    e = setSpawnName(s, e, allies.label, '');
+    expect(spawnName(s, e, allies.label)).toBe('Allies spawn');
+    expect(e.spawnNames[0].offset).toEqual([10, 10]);
+    expect(setSpawnName(s, setSpawnName(s, emptyEdits(), allies.label, 'x'), allies.label, 'Allies spawn').spawnNames).toEqual([]);
+    expect(resetSpawn(s, e, allies.label).spawnNames).toEqual([]);
+  });
+});
+
+describe('titleShown (#581)', () => {
+  it('follows the theme until set, then stays as set', () => {
+    expect(titleShown({ ...emptyEdits(), theme: 'classic' })).toBe(true);
+    expect(titleShown({ ...emptyEdits(), theme: 'grey' })).toBe(false);
+    expect(titleShown({ ...emptyEdits(), theme: 'colours' })).toBe(false);
+    const off = { ...emptyEdits(), theme: 'classic', show: { ...emptyEdits().show, title: false } };
+    expect(titleShown(off)).toBe(false);
+    const on = normaliseEdits({ theme: 'grey', show: { title: true } });
+    expect(titleShown(on)).toBe(true);
   });
 });
 

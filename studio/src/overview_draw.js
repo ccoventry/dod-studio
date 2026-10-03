@@ -4,7 +4,7 @@
 // and scales it down, so the file is what the page showed.
 
 import { themeOf, mapTitle } from './overview_themes.js';
-import { paper, grid, frame, titleCard, areaEdges } from './overview_paper.js';
+import { paper, squaredPaper, grid, frame, titleCard, titleCardBox, areaEdges } from './overview_paper.js';
 import { drawOverlay } from './overview_overlay.js';
 
 /** Spawn protection's look, until changed. Colours are #rrggbb. */
@@ -32,10 +32,15 @@ export function emptyEdits() {
     labels: [],
     // Flag names typed over the game's, keyed by the flag's world position.
     flagNames: [],
-    // Spawn names dragged away from their spawn: { team, at, offset }, `at`
-    // the world point of the spawn group the name belongs to, `offset` in
-    // world units from where the page would put it.
+    // Spawn names renamed or dragged away from their spawn:
+    // { team, at, name?, offset? }, `at` the world point of the spawn group
+    // the name belongs to, `name` typed over "Allies spawn"/"Axis spawn",
+    // `offset` in world units from where the page would put it.
     spawnNames: [],
+    // Where the map title was dragged to, in image pixels from its place in
+    // the top right, or null. Whether it shows is `show.title`, which is
+    // left out until set: each theme has its own default (titleShown).
+    titleOffset: null,
     show: {
       spawns: true,
       spawnLabels: true,
@@ -314,39 +319,93 @@ export function spawnLabels(scene) {
 }
 
 // A spawn name's key: its team and the world point of where the page puts
-// it, so a drag survives a rebuild that leaves the spawns where they were.
+// it, so a rename or a drag survives a rebuild that leaves the spawns where
+// they were.
 const spawnKey = (scene, l) => toWorld(scene.transform, l.at[0], l.at[1]);
 const spawnEntry = (scene, edits, l) => {
   const at = spawnKey(scene, l);
   return (edits.spawnNames || []).find((e) => e.team === l.team && near(e.at, at, 48));
 };
 
-/** Each spawn name with where it is drawn: `{ team, at, home }`, image pixels. */
+/** What a spawn is called until renamed. */
+export const defaultSpawnName = (team) => `${team} spawn`;
+
+function setSpawnEntry(scene, edits, label, patch) {
+  const at = spawnKey(scene, label);
+  const rest = (edits.spawnNames || []).filter((e) => !(e.team === label.team && near(e.at, at, 48)));
+  const next = { ...(spawnEntry(scene, edits, label) || {}), ...patch, team: label.team, at };
+  if (next.name == null) delete next.name;
+  if (next.offset == null) delete next.offset;
+  return { ...edits, spawnNames: next.name != null || next.offset ? [...rest, next] : rest };
+}
+
+/** A spawn's name: the one typed, else "Allies spawn" / "Axis spawn". */
+export function spawnName(scene, edits, label) {
+  return spawnEntry(scene, edits, label)?.name ?? defaultSpawnName(label.team);
+}
+
+/** Renames a spawn; blank, null or the default name takes it back. */
+export function setSpawnName(scene, edits, label, name) {
+  const typed = name == null ? '' : String(name).trim();
+  return setSpawnEntry(scene, edits, label, { name: !typed || typed === defaultSpawnName(label.team) ? null : typed });
+}
+
+/** Each spawn name with where it is drawn: `{ team, name, at, home }`, image pixels. */
 export function spawnNameSpots(scene, edits) {
   return spawnLabels(scene).map((l) => {
     const home = [l.at[0], l.at[1] + 7];
     const e = spawnEntry(scene, edits, l);
-    if (!e?.offset) return { team: l.team, at: home, home, label: l };
+    const name = e?.name ?? defaultSpawnName(l.team);
+    if (!e?.offset) return { team: l.team, name, at: home, home, label: l };
     const w = toWorld(scene.transform, home[0], home[1]);
-    return { team: l.team, at: toPixel(scene.transform, w[0] + e.offset[0], w[1] + e.offset[1]), home, label: l };
+    return { team: l.team, name, at: toPixel(scene.transform, w[0] + e.offset[0], w[1] + e.offset[1]), home, label: l };
   });
 }
 
 /** Moves a spawn name `offset` world units from its place; null puts it back. */
 export function setSpawnOffset(scene, edits, label, offset) {
-  const at = spawnKey(scene, label);
-  const rest = (edits.spawnNames || []).filter((e) => !(e.team === label.team && near(e.at, at, 48)));
-  return { ...edits, spawnNames: offset ? [...rest, { team: label.team, at, offset }] : rest };
+  return setSpawnEntry(scene, edits, label, { offset });
+}
+
+/** Whether a spawn was renamed or moved. */
+export function spawnChanged(scene, edits, label) {
+  return !!spawnEntry(scene, edits, label);
+}
+
+/** Puts a spawn's name and place back. */
+export function resetSpawn(scene, edits, label) {
+  return setSpawnEntry(scene, edits, label, { name: null, offset: null });
 }
 
 /** The spawn name under an image pixel, when spawn names are shown. */
 export function spawnNameAt(scene, edits, x, y) {
   if (!edits.show.spawnLabels) return null;
   for (const spot of spawnNameSpots(scene, edits)) {
-    const half = nameHalf(`${spot.team} spawn`);
+    const half = nameHalf(spot.name);
     if (Math.abs(x - spot.at[0]) <= half && Math.abs(y - spot.at[1]) <= 15 * 0.7) return spot;
   }
   return null;
+}
+
+/** The title card's subtitle. */
+const TITLE_SUBTITLE = 'DoD Studio';
+
+/** Whether the map title shows: as set, else the theme's own default (on
+ *  for the themes with a ruler frame, Classic's printed-map look). */
+export function titleShown(edits) {
+  return edits.show?.title ?? !!themeOf(edits).frame;
+}
+
+/** The title card's box, in image pixels, wherever it was dragged. */
+export function titleBox(scene, edits) {
+  return titleCardBox(scene, mapTitle(scene.map), TITLE_SUBTITLE, edits.titleOffset);
+}
+
+/** Whether an image pixel is on the map title, when it shows. */
+export function titleAt(scene, edits, x, y) {
+  if (!titleShown(edits) || !mapTitle(scene.map)) return false;
+  const b = titleBox(scene, edits);
+  return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 }
 
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -437,7 +496,9 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
   ctx.clearRect(0, 0, cw, ch);
   ctx.translate(-vx, -vy);
   const theme = themeOf(edits);
-  if (theme.paper) {
+  if (theme.paper === 'squared') {
+    squaredPaper(ctx, scene, s);
+  } else if (theme.paper) {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(paper(scene, cache), 0, 0, w, h);
   } else if (!transparent) {
@@ -513,7 +574,10 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     f.stroke();
   }
   waterBelow(Infinity);
+  // A theme can let its paper show through the floors a little.
+  ctx.globalAlpha = theme.floorAlpha ?? 1;
   ctx.drawImage(floors, vx, vy);
+  ctx.globalAlpha = 1;
 
   // Lines round every area, and the frame's grid, on themes that have them.
   if (theme.edges) {
@@ -521,7 +585,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     const edgeKey = JSON.stringify([edits.areas.filter((e) => e.hidden), scene.map]);
     ctx.drawImage(areaEdges(scene, visible, cache, edgeKey), 0, 0, w, h);
   }
-  if (theme.frame) grid(ctx, scene, s);
+  if (theme.frame) grid(ctx, scene, s, theme.ink?.grid);
 
   // Capture zones: a yellow rim just outside each zone's footprint.
   if (edits.show.capZones) {
@@ -680,7 +744,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     }
   }
   if (edits.show.spawnLabels) {
-    for (const spot of spawnNameSpots(scene, edits)) text(`${spot.team} spawn`, spot.at[0], spot.at[1], 15, 'center');
+    for (const spot of spawnNameSpots(scene, edits)) text(spot.name, spot.at[0], spot.at[1], 15, 'center');
   }
   if (edits.show.flags) {
     for (const flag of scene.flags) {
@@ -730,9 +794,12 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       ctx.setLineDash([]);
     }
   }
-  if (theme.frame) {
-    frame(ctx, scene, s);
-    titleCard(ctx, scene, s, mapTitle(scene.map), 'DoD Studio');
+  if (theme.frame) frame(ctx, scene, s, theme.ink);
+  // Off paper the card is solid: over the transparent background a
+  // see-through card would let the game show through it.
+  if (titleShown(edits)) {
+    const look = theme.card || (theme.paper ? null : { fill: 'rgb(236,228,206)' });
+    titleCard(ctx, scene, s, mapTitle(scene.map), TITLE_SUBTITLE, edits.titleOffset, look);
   }
   // The page's editing aids (overview_overlay.js); never in an export.
   if (overlay) drawOverlay(ctx, scene, s, overlay);

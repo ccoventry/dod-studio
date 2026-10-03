@@ -502,8 +502,9 @@ test('a spawn name can be dragged and put back, and the cursor shows what a clic
   await page.mouse.move(...at(300, 600), { steps: 4 });
   await page.mouse.up();
   await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.spawnNames[0]?.team).toBe('Allies');
-  await expect(page.locator('#ov-spawn-reset')).toBeEnabled();
-  await page.click('#ov-spawn-reset');
+  const reset = page.locator('#ov-spawn-names .ov-flag-reset');
+  await expect(reset).toBeEnabled();
+  await reset.click();
   await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.spawnNames).toEqual([]);
   // Add label mode: a text cursor.
   await page.click('.ov-add-label');
@@ -641,4 +642,87 @@ test('colours used show as recent, and Pick from map takes a colour off the map'
   await page.keyboard.up('Control');
   await expect(page.locator('#ov-custom-colour')).toHaveValue('#929bf7');
   expect((await calls(page, 'overview_save_edits')).length).toBe(saves);
+});
+
+test('each spawn name has a field to rename it and a reset for name and place (#581)', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const field = page.locator('#ov-spawn-names input');
+  const reset = page.locator('#ov-spawn-names .ov-flag-reset');
+  // dod_test has one group of four Allies spawns, so one name.
+  await expect(field).toHaveCount(1);
+  await expect(field).toHaveValue('Allies spawn');
+  await expect(reset).toBeDisabled();
+  await field.fill('Beach landing');
+  await field.press('Enter');
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.spawnNames[0]?.name).toBe('Beach landing');
+  await expect(reset).toBeEnabled();
+  await reset.click();
+  await expect(field).toHaveValue('Allies spawn');
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.spawnNames).toEqual([]);
+});
+
+test('the map title shows by default on Classic only, on any theme when ticked, and drags with a reset (#581)', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const titleBox = page.locator('#ov-show input[data-show="title"]');
+  const reset = page.locator('#ov-title-reset');
+  // The card's middle, top right (1024 - 16 - 14 - half its width, 16 + 14 + 31).
+  const ink = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  // Colour-coded: no title, the key green behind the floors.
+  await expect(titleBox).not.toBeChecked();
+  expect(await ink(990, 32)).toEqual([0, 255, 0]);
+  await titleBox.check();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.show.title).toBe(true);
+  // The card's dark border, just inside its top-right corner.
+  await expect.poll(() => ink(993, 31)).not.toEqual([0, 255, 0]);
+  await expect(reset).toBeDisabled();
+
+  // Drag it from its top-right corner area down and left.
+  const box = await page.locator('#ov-canvas').boundingBox();
+  const at = (x, y) => [box.x + (x / 1024) * box.width, box.y + (y / 768) * box.height];
+  await page.mouse.move(...at(985, 40));
+  await expect.poll(() => page.locator('#ov-canvas').evaluate((c) => c.style.cursor)).toBe('grab');
+  await page.mouse.down();
+  await page.mouse.move(...at(785, 340), { steps: 4 });
+  await page.mouse.up();
+  const moved = async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.titleOffset;
+  await expect.poll(async () => Math.abs((await moved())?.[0] + 200) <= 2 && Math.abs((await moved())?.[1] - 300) <= 2).toBe(true);
+  await expect(reset).toBeEnabled();
+  await reset.click();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.titleOffset).toBeNull();
+
+  // On another map in Classic it is on without being ticked.
+  await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
+  await page.selectOption('#ov-theme', 'classic');
+  await expect(titleBox).toBeChecked();
+  await page.selectOption('#ov-theme', 'grey');
+  await expect(titleBox).not.toBeChecked();
+});
+
+test('the grid paper theme: squared paper in a blue ruler frame, flat floors, its own swatches (#581)', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await page.selectOption('#ov-theme', 'gridpaper');
+  const at = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  // The frame: navy, blue above red.
+  const corner = await at(3, 3);
+  expect(corner[2]).toBeGreaterThan(corner[0]);
+  expect(Math.max(...corner)).toBeLessThan(100);
+  // Off the floors: pale paper.
+  expect(Math.min(...(await at(30, 700)))).toBeGreaterThan(200);
+  // Both areas are the same flat tone (Colour-coded gave them two colours).
+  const a = await at(403, 397);
+  const b = await at(703, 247);
+  for (let i = 0; i < 3; i++) expect(Math.abs(a[i] - b[i])).toBeLessThan(14);
+  const swatches = await page.locator('#ov-palette .ov-swatch').evaluateAll((els) => els.map((e) => e.title));
+  expect(swatches[0]).toBe('#dee4ec');
 });

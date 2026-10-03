@@ -8,9 +8,16 @@
 //   outline: [r,g,b]|null a line round the floors' outer edge instead
 //   water: [r, g, b]
 //   voidColour: [r,g,b]   the enclosed space's colour, if not the scene's
-//   paper: bool           aged paper under everything (overview_paper.js)
+//   paper: true|'squared' aged (true) or squared paper under everything
+//                         (overview_paper.js)
+//   floorAlpha: number    how opaque the floors are (1 unless set), so a
+//                         paper can show through
 //   edges: bool           thin dark lines round every area
-//   frame: bool           the ruler frame, grid and title card
+//   frame: bool           the ruler frame and grid; also shows the map
+//                         title by default (any theme can show it)
+//   ink: { frame, light, grid }  the frame's and grid's colours, if not
+//                         Classic's
+//   card: { fill, border, ink }  the title card's colours, if not Classic's
 //   palette(scene)        the swatches the page offers: the theme's own
 //                         colours first, so a repaint can match the look
 
@@ -90,6 +97,34 @@ export const THEMES = [
     paper: true,
     edges: true,
     frame: true,
+  },
+  {
+    // A plain plan drawn on engineering paper: squared paper in a ruler
+    // frame, the floors one flat tone with the paper's squares faintly
+    // through them, outlined in ink.
+    id: 'gridpaper',
+    floor: () => [222, 228, 236],
+    voidFill: false,
+    outline: [36, 54, 88],
+    water: [150, 192, 228],
+    paper: 'squared',
+    floorAlpha: 0.86,
+    frame: true,
+    ink: { frame: 'rgb(36,54,88)', light: 'rgb(236,241,248)', grid: 'rgba(36,54,88,0.4)' },
+    card: { fill: 'rgba(252,252,248,0.96)', border: 'rgb(36,54,88)', ink: 'rgb(28,40,66)' },
+    // Its floor tone, paper and ink, then coloured pencils and a highlighter.
+    palette: () => [
+      [222, 228, 236],
+      [250, 250, 246],
+      [36, 54, 88],
+      [150, 192, 228],
+      [200, 62, 52],
+      [62, 132, 78],
+      [74, 118, 196],
+      [128, 90, 168],
+      [236, 196, 70],
+      [150, 150, 150],
+    ],
   },
 ];
 

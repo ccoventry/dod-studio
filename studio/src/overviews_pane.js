@@ -16,7 +16,8 @@ import {
 import {
   emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, faceColour, labelAt, setAreaEdit,
   areaEdit, setFaceColour, paintedPieces, clearAreaPieces, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
-  spawnNameAt, setSpawnOffset, spawnNameSpots, renderExport, renderHd, toBase64,
+  spawnNameAt, setSpawnOffset, spawnNameSpots, setSpawnName, resetSpawn, spawnChanged, defaultSpawnName,
+  titleShown, titleAt, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES, themeOf } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
@@ -63,8 +64,9 @@ export function initOverviewsPane() {
   const formatSelect = pane.querySelector('#ov-format');
   const themeSelect = pane.querySelector('#ov-theme');
   const flagScreenSelect = pane.querySelector('#ov-flag-screen');
-  const spawnReset = pane.querySelector('#ov-spawn-reset');
-  spawnReset.addEventListener('click', () => change({ ...edits, spawnNames: [] }));
+  const spawnList = pane.querySelector('#ov-spawn-names');
+  const titleReset = pane.querySelector('#ov-title-reset');
+  titleReset.addEventListener('click', () => change({ ...edits, titleOffset: null }));
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
@@ -292,6 +294,12 @@ export function initOverviewsPane() {
     const label = labelAt(scene, edits, x, y);
     const flag = label ? null : flagLabelAt(scene, edits, x, y);
     const spawn = label || flag ? null : spawnNameAt(scene, edits, x, y);
+    const onTitle = !label && !flag && !spawn && titleAt(scene, edits, x, y);
+    if (onTitle) {
+      drag = { title: true, start: [x, y], from: edits.titleOffset || [0, 0], moved: false, before: edits };
+      setCursor('grabbing');
+      return;
+    }
     if (flag) {
       drag = { flag, moved: false, before: edits };
       setCursor('grabbing');
@@ -359,7 +367,9 @@ export function initOverviewsPane() {
     if (!drag || !scene) return;
     const [x, y] = pixelOf(event);
     const world = toWorld(scene.transform, x, y);
-    if (drag.flag) {
+    if (drag.title) {
+      edits = { ...edits, titleOffset: [Math.round(drag.from[0] + x - drag.start[0]), Math.round(drag.from[1] + y - drag.start[1])] };
+    } else if (drag.flag) {
       edits = setFlagOffset(edits, drag.flag, [world[0] - drag.flag.world[0], world[1] - drag.flag.world[1]]);
     } else if (drag.spawn) {
       const home = toWorld(scene.transform, drag.spawn.home[0], drag.spawn.home[1]);
@@ -469,7 +479,7 @@ export function initOverviewsPane() {
   function hoverAt(event) {
     if (!scene || !event || drag || pan || spaceDown || mode === 'label' || mode === 'pick' || ctrlDown) return null;
     const [x, y] = pixelOf(event);
-    if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return null;
+    if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y) || titleAt(scene, edits, x, y)) return null;
     const face = faceAt(scene, edits, x, y, { includeHidden: mode === 'hide' });
     if (!face) return null;
     if (mode === 'face') return { kind: 'piece', face };
@@ -540,7 +550,7 @@ export function initOverviewsPane() {
     if (drag) return setCursor('grabbing');
     if (event) {
       const [x, y] = pixelOf(event);
-      if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return setCursor('grab');
+      if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y) || titleAt(scene, edits, x, y)) return setCursor('grab');
     }
     if (ctrlDown && mode !== 'label') return setCursor(CURSORS.pick);
     setCursor((mode === 'area' && shiftDown ? CURSORS.areaOver : CURSORS[mode]) || 'crosshair');
@@ -645,9 +655,11 @@ export function initOverviewsPane() {
 
   function renderSidePanels() {
     showBox.querySelectorAll('input[data-show]').forEach((box) => {
-      box.checked = !!edits.show[box.dataset.show];
+      // The title's default depends on the theme until it is set.
+      box.checked = box.dataset.show === 'title' ? titleShown(edits) : !!edits.show[box.dataset.show];
       box.disabled = !scene;
     });
+    titleReset.disabled = !scene || !titleShown(edits) || !edits.titleOffset;
     formatSelect.value = edits.format || 'tga';
     const look = { ...SPAWN_PROTECTION, ...(edits.spawnProtection || {}) };
     for (const [key, control] of Object.entries(spControls)) {
@@ -686,7 +698,35 @@ export function initOverviewsPane() {
       flagList.appendChild(row);
     }
     flagScreenSelect.disabled = !flagIconsBox.checked;
-    spawnReset.disabled = !scene || !(edits.spawnNames || []).length;
+
+    // One row per spawn name the map shows: type a name over it, drag it on
+    // the map to move it, and ↺ puts both back.
+    spawnList.innerHTML = '';
+    const spots = scene ? spawnNameSpots(scene, edits) : [];
+    if (scene && !spots.length) {
+      const p = document.createElement('p');
+      p.className = 'hd-hint';
+      p.textContent = STRINGS.OVERVIEWS.NO_SPAWN_NAMES;
+      spawnList.appendChild(p);
+    }
+    for (const spot of spots) {
+      const row = document.createElement('div');
+      row.className = 'ov-flag-row';
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.value = spot.name;
+      input.placeholder = defaultSpawnName(spot.team);
+      input.title = STRINGS.OVERVIEWS.SPAWN_NAME_TIP;
+      input.addEventListener('change', () => change(setSpawnName(scene, edits, spot.label, input.value)));
+      const reset = document.createElement('button');
+      reset.className = 'ov-flag-reset';
+      reset.textContent = '↺';
+      reset.title = STRINGS.OVERVIEWS.spawnResetTip(defaultSpawnName(spot.team));
+      reset.disabled = !spawnChanged(scene, edits, spot.label);
+      reset.addEventListener('click', () => change(resetSpawn(scene, edits, spot.label)));
+      row.append(input, reset);
+      spawnList.appendChild(row);
+    }
 
     labelList.innerHTML = '';
     for (const label of edits.labels) {

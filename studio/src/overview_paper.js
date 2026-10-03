@@ -1,8 +1,9 @@
-// overview_paper.js — the printed-map pieces of the Classic theme (#371):
-// aged paper, the black ruler frame with A-G across and 1-5 down, the faint
-// grid, a title card, and thin dark lines round every area. All drawn by
-// the program (nothing copied from the game's own overviews), at the
-// game's 1024x768 and scaled by `s` like the rest of the drawing.
+// overview_paper.js — the printed-map pieces of the Classic and Grid paper
+// themes (#371): aged or squared paper, the ruler frame with A-G across and
+// 1-5 down, the faint grid, a title card (any theme), and thin dark lines
+// round every area. All drawn by the program (nothing copied from the game's
+// own overviews), at the game's 1024x768 and scaled by `s` like the rest of
+// the drawing.
 
 /** A small seeded random generator, so a map's paper is the same each time. */
 function random(seedText) {
@@ -64,17 +65,50 @@ export function paper(scene, cache) {
   return c;
 }
 
+/**
+ * Squared paper, drawn straight onto `ctx` at its scale so the lines stay
+ * sharp: off-white, a fine square every 8 pixels and a stronger line every
+ * fifth, as engineering paper has.
+ */
+export function squaredPaper(ctx, scene, s) {
+  const w = scene.width;
+  const h = scene.height;
+  ctx.save();
+  ctx.fillStyle = 'rgb(250,250,246)';
+  ctx.fillRect(0, 0, w * s, h * s);
+  const step = 8;
+  for (const [every, colour, width] of [[1, 'rgba(70,130,190,0.16)', 0.6], [5, 'rgba(70,130,190,0.34)', 1]]) {
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = Math.max(width, width * s);
+    ctx.beginPath();
+    for (let x = 0; x <= w; x += step * every) {
+      ctx.moveTo(x * s, 0);
+      ctx.lineTo(x * s, h * s);
+    }
+    for (let y = 0; y <= h; y += step * every) {
+      ctx.moveTo(0, y * s);
+      ctx.lineTo(w * s, y * s);
+    }
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 /** The frame's width, in 1024x768 pixels. */
 export const FRAME = 16;
+
+/** The Classic theme's ink: a black frame with paper-coloured cells, and a
+ *  brown grid. A theme can bring its own (overview_themes.js `ink`). */
+const CLASSIC_INK = { frame: 'rgb(24,22,20)', light: 'rgb(222,212,186)', grid: 'rgba(110,90,55,0.35)' };
 const COLUMNS = 'ABCDEFG';
 const ROWS = 5;
 
 /** The faint grid the ruler letters and numbers name. */
-export function grid(ctx, scene, s) {
+export function grid(ctx, scene, s, colour = CLASSIC_INK.grid) {
   const w = scene.width;
   const h = scene.height;
   ctx.save();
-  ctx.strokeStyle = 'rgba(110,90,55,0.35)';
+  ctx.strokeStyle = colour;
   ctx.lineWidth = Math.max(1, s);
   ctx.setLineDash([6 * s, 5 * s]);
   for (let i = 1; i < COLUMNS.length; i++) {
@@ -94,13 +128,14 @@ export function grid(ctx, scene, s) {
   ctx.restore();
 }
 
-/** The black ruler frame: alternating light and dark cells, A-G and 1-5. */
-export function frame(ctx, scene, s) {
+/** The ruler frame: alternating light and dark cells, A-G and 1-5. */
+export function frame(ctx, scene, s, ink = CLASSIC_INK) {
   const w = scene.width;
   const h = scene.height;
-  const light = 'rgb(222,212,186)';
+  const dark = ink?.frame || CLASSIC_INK.frame;
+  const light = ink?.light || CLASSIC_INK.light;
   ctx.save();
-  ctx.fillStyle = 'rgb(24,22,20)';
+  ctx.fillStyle = dark;
   ctx.fillRect(0, 0, w * s, FRAME * s);
   ctx.fillRect(0, (h - FRAME) * s, w * s, FRAME * s);
   ctx.fillRect(0, 0, FRAME * s, h * s);
@@ -122,7 +157,7 @@ export function frame(ctx, scene, s) {
         ctx.fillStyle = light;
         ctx.fillRect(a * s, y * s, (b - a) * s, bar * s);
       }
-      ctx.fillStyle = i % 2 === 1 ? 'rgb(24,22,20)' : light;
+      ctx.fillStyle = i % 2 === 1 ? dark : light;
       ctx.fillText(COLUMNS[i], ((a + b) / 2) * s, (y + bar / 2) * s);
     }
   });
@@ -132,37 +167,65 @@ export function frame(ctx, scene, s) {
         ctx.fillStyle = light;
         ctx.fillRect(x * s, a * s, bar * s, (b - a) * s);
       }
-      ctx.fillStyle = i % 2 === 1 ? 'rgb(24,22,20)' : light;
+      ctx.fillStyle = i % 2 === 1 ? dark : light;
       ctx.fillText(String(i + 1), (x + bar / 2) * s, ((a + b) / 2) * s);
     }
   });
   ctx.restore();
 }
 
-/** A title card in the top right: the map's name, and a line under it. */
-export function titleCard(ctx, scene, s, title, subtitle) {
+// A serif whose digits sit on the line (Georgia's old-style figures made
+// RAILROAD2's "2" look small), until fonts can be picked.
+const TITLE_FONT = "'Palatino Linotype', 'Book Antiqua', Palatino, Cambria, 'Times New Roman', serif";
+const SUBTITLE_FONT = "'Courier New', monospace";
+
+let measurer = null;
+function textWidth(font, text) {
+  measurer ??= canvasOf(4, 4).getContext('2d');
+  measurer.font = font;
+  return measurer.measureText(text).width;
+}
+
+/**
+ * Where the title card goes, in image pixels: top right, inside where the
+ * ruler frame would be, moved by `offset` ([dx, dy]) when it was dragged.
+ * `{ x, y, w, h }`.
+ */
+export function titleCardBox(scene, title, subtitle, offset = null) {
+  const tw = textWidth(`bold 26px ${TITLE_FONT}`, title);
+  const sw = subtitle ? textWidth(`13px ${SUBTITLE_FONT}`, subtitle) : 0;
+  const w = Math.max(tw, sw) + 28;
+  const h = subtitle ? 62 : 44;
+  return {
+    x: scene.width - FRAME - 14 - w + (offset?.[0] || 0),
+    y: FRAME + 14 + (offset?.[1] || 0),
+    w,
+    h,
+  };
+}
+
+/** The Classic card: paper-coloured, a little of the paper showing through. */
+const CLASSIC_CARD = { fill: 'rgba(236,228,206,0.92)', border: 'rgb(40,36,30)', ink: 'rgb(28,26,22)' };
+
+/** A title card: the map's name, and a line under it. `look` is a theme's
+ *  own `{ fill, border, ink }`, else Classic's. */
+export function titleCard(ctx, scene, s, title, subtitle, offset = null, look = null) {
   if (!title) return;
+  const card = { ...CLASSIC_CARD, ...(look || {}) };
   ctx.save();
-  ctx.font = `bold ${26 * s}px Georgia, 'Times New Roman', serif`;
-  const tw = ctx.measureText(title).width / s;
-  ctx.font = `${13 * s}px 'Courier New', monospace`;
-  const sw = subtitle ? ctx.measureText(subtitle).width / s : 0;
-  const boxW = Math.max(tw, sw) + 28;
-  const boxH = subtitle ? 62 : 44;
-  const x = scene.width - FRAME - 14 - boxW;
-  const y = FRAME + 14;
-  ctx.fillStyle = 'rgba(236,228,206,0.92)';
+  const { x, y, w: boxW, h: boxH } = titleCardBox(scene, title, subtitle, offset);
+  ctx.fillStyle = card.fill;
   ctx.fillRect(x * s, y * s, boxW * s, boxH * s);
-  ctx.strokeStyle = 'rgb(40,36,30)';
+  ctx.strokeStyle = card.border;
   ctx.lineWidth = 2 * s;
   ctx.strokeRect(x * s, y * s, boxW * s, boxH * s);
-  ctx.fillStyle = 'rgb(28,26,22)';
+  ctx.fillStyle = card.ink;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  ctx.font = `bold ${26 * s}px Georgia, 'Times New Roman', serif`;
+  ctx.font = `bold ${26 * s}px ${TITLE_FONT}`;
   ctx.fillText(title, (x + boxW / 2) * s, (y + 8) * s);
   if (subtitle) {
-    ctx.font = `${13 * s}px 'Courier New', monospace`;
+    ctx.font = `${13 * s}px ${SUBTITLE_FONT}`;
     ctx.fillText(subtitle, (x + boxW / 2) * s, (y + 40) * s);
   }
   ctx.restore();

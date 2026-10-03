@@ -92,6 +92,10 @@
                   <label title="The area round each spawn that hurts the other team: its floor filled, and the line where you walk into it"><input type="checkbox" data-show="spawnProtection"> <span data-str="OVERVIEWS.SHOW_SPAWN_PROTECTION">Spawn protection</span></label>
                   <label><input type="checkbox" data-show="stairs"> <span data-str="OVERVIEWS.SHOW_STAIRS">Stairs in white</span></label>
                   <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
+                  <div class="ov-check-row">
+                    <label data-str-title="OVERVIEWS.SHOW_TITLE_TIP" title="The map's name on a card, top right. Drag it on the map to move it"><input type="checkbox" data-show="title"> <span data-str="OVERVIEWS.SHOW_TITLE">Map title</span></label>
+                    <button id="ov-title-reset" class="ov-flag-reset" data-str-title="OVERVIEWS.TITLE_RESET_TIP" title="Put the title back in the top right">↺</button>
+                  </div>
                 </div>
 
                 <div class="ov-subtitle" data-str="OVERVIEWS.PREVIEW_TITLE">While editing (not saved)</div>
@@ -134,7 +138,8 @@
                 <div class="ov-subtitle" data-str="OVERVIEWS.FLAGS_TITLE">Flag names</div>
                 <div id="ov-flag-names" class="ov-list"></div>
 
-                <button id="ov-spawn-reset" class="ov-spawn-reset" data-str="OVERVIEWS.SPAWN_RESET" data-str-title="OVERVIEWS.SPAWN_RESET_TIP" title="Put the Allies and Axis spawn names back under their spawns">Spawn names back in place</button>
+                <div class="ov-subtitle" data-str="OVERVIEWS.SPAWN_NAMES_TITLE">Spawn names</div>
+                <div id="ov-spawn-names" class="ov-list"></div>
 
                 <div class="ov-subtitle" data-str="OVERVIEWS.LABELS_TITLE">Labels</div>
                 <button class="ov-mode ov-add-label" data-mode="label" data-str="OVERVIEWS.MODE_LABEL" data-str-title="OVERVIEWS.MODE_LABEL_TIP" title="Click to put a text label there">Add label</button>
