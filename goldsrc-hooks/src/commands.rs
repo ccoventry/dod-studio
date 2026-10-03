@@ -519,6 +519,7 @@ pub fn poll() {
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     crate::events::poll();
+    crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.

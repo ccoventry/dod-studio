@@ -145,6 +145,11 @@ Plus twenty control surfaces, always available and doing nothing until used:
   connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off, and
   Studio then reads the log as before. See `src/events.rs` and
   `native/src/obs/pipe_tail.rs`.
+- **Batch end without Studio** (with the events pipe): if a batch's
+  `BATCH_COMPLETE` goes by and no Studio is reading the events pipe five
+  seconds later -- Studio was closed mid-batch -- the game runs `quit` itself
+  instead of sitting there (issue #545). A connected Studio still ends the
+  game as before. See `src/batch_end.rs`.
 - **Reload the demo** (`dodstudio_reload_demo`): plays the last `playdemo` or
   `viewdemo` again from the start, with the same name. The engine keeps no
   copy of the name, so the DLL wraps both engine commands to note it; the
