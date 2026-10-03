@@ -164,9 +164,9 @@
 	{
 		"ControlName"		"Label"
 		"fieldName"		"PlayerChosen"
-		"xpos"		"66"
+		"xpos"		"186"
 		"ypos"		"60"
-		"wide"		"336"
+		"wide"		"334"
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
@@ -178,7 +178,7 @@
 	{
 		"ControlName"		"ComboBox"
 		"fieldName"		"PlayerMatch"
-		"xpos"		"406"
+		"xpos"		"66"
 		"ypos"		"60"
 		"wide"		"60"
 		"tall"		"22"
@@ -191,7 +191,7 @@
 	{
 		"ControlName"		"Button"
 		"fieldName"		"PlayerClear"
-		"xpos"		"470"
+		"xpos"		"130"
 		"ypos"		"60"
 		"wide"		"50"
 		"tall"		"22"
