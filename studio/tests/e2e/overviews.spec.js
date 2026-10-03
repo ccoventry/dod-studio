@@ -117,11 +117,13 @@ test('a click colours an area and the edit is saved', async ({ page }) => {
   await expect.poll(async () => (await calls(page, 'overview_save_edits')).length).toBeGreaterThan(0);
   const saved = (await calls(page, 'overview_save_edits')).at(-1).args;
   expect(saved.map).toBe('dod_test');
-  expect(saved.edits.areas).toEqual([{ at: [30, 40], hidden: false, colour: [125, 29, 55] }]);
+  // In this theme's colours; hiding is for every theme.
+  expect(saved.edits.colours.colours.areas).toEqual([{ at: [30, 40], colour: [125, 29, 55] }]);
+  expect(saved.edits.areas).toEqual([]);
 
   // Undo takes it back.
   await page.click('#ov-undo-btn');
-  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.areas).toEqual([]);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.colours.colours?.areas ?? []).toEqual([]);
 });
 
 test('hide area hides it, and a second click shows it again', async ({ page }) => {
@@ -332,5 +334,24 @@ test('edits that fit nothing on the map any more are kept aside, and the page sa
   // Kept with the rest, to try again next time.
   await page.selectOption('#ov-theme', 'grey');
   await page.locator('#ov-show input[data-show="water"]').uncheck();
-  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.aside.areas).toEqual([{ at: [99999, 99999], colour: [1, 2, 3] }]);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.aside.colours.colours.areas).toEqual([{ at: [99999, 99999], colour: [1, 2, 3] }]);
+});
+
+test('each theme keeps its own colours', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const pixel = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(700 * s), Math.round(250 * s), 1, 1).data).slice(0, 3);
+  });
+  await page.locator('#ov-palette .ov-swatch').nth(2).click();
+  await clickPixel(page, 700, 250);
+  await expect.poll(pixel).toEqual([125, 29, 55]);
+  // Flat grey has its own colours: none yet.
+  await page.selectOption('#ov-theme', 'grey');
+  await expect.poll(pixel).not.toEqual([125, 29, 55]);
+  // Back to Colour-coded: still painted.
+  await page.selectOption('#ov-theme', 'colours');
+  await expect.poll(pixel).toEqual([125, 29, 55]);
 });

@@ -43,6 +43,33 @@ describe('edits', () => {
     expect(e.labels).toEqual([]);
   });
 
+  it('reads a version 1 file: its colours become those of the theme it was made in', () => {
+    const e = normaliseEdits({
+      version: 1,
+      theme: 'classic',
+      areas: [{ at: [1, 2], hidden: true, colour: [9, 9, 9] }, { at: [3, 4], hidden: false, colour: [8, 8, 8] }],
+      faces: [{ face: 7, colour: [5, 5, 5] }],
+    });
+    expect(e.version).toBe(2);
+    expect(e.areas).toEqual([{ at: [1, 2], hidden: true }]);
+    expect(e.colours).toEqual({
+      classic: { areas: [{ at: [1, 2], colour: [9, 9, 9] }, { at: [3, 4], colour: [8, 8, 8] }], faces: [{ face: 7, colour: [5, 5, 5] }] },
+    });
+    expect(e.faces).toBeUndefined();
+  });
+
+  it('keeps colours per theme, and hiding for every theme', () => {
+    const s = scene();
+    let e = setAreaEdit({ ...emptyEdits(), theme: 'colours' }, s.areas[1], { colour: [1, 2, 3] });
+    e = setAreaEdit(e, s.areas[0], { hidden: true });
+    const classic = { ...e, theme: 'classic' };
+    expect(areaEdit(classic, s.areas[1])).toBeUndefined();
+    expect(areaEdit(classic, s.areas[0]).hidden).toBe(true);
+    const painted = setAreaEdit(classic, s.areas[1], { colour: [7, 7, 7] });
+    expect(areaEdit(painted, s.areas[1]).colour).toEqual([7, 7, 7]);
+    expect(areaEdit({ ...painted, theme: 'colours' }, s.areas[1]).colour).toEqual([1, 2, 3]);
+  });
+
   it('keys an area edit by its anchor and removes it with null', () => {
     const s = scene();
     let e = setAreaEdit(emptyEdits(), s.areas[1], { colour: [1, 2, 3] });

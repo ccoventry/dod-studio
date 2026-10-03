@@ -9,11 +9,14 @@ import { paper, grid, frame, titleCard, areaEdges } from './overview_paper.js';
 /** A fresh, empty set of edits. */
 export function emptyEdits() {
   return {
-    version: 1,
-    // Keyed by the area's anchor (a world point), so they survive a rebuild.
+    version: 2,
+    // Hidden areas, for every theme: { at, hidden }, keyed by the area's
+    // anchor (a world point), so they survive a rebuild.
     areas: [],
-    // Keyed by the BSP face index.
-    faces: [],
+    // Colours, one set per theme id (overview_themes.js), so each theme
+    // keeps its own: { areas: [{ at, colour }], faces: [{ face, colour }] },
+    // faces keyed by the BSP face index.
+    colours: {},
     // Text placed by hand, at a world point.
     labels: [],
     // Flag names typed over the game's, keyed by the flag's world position.
@@ -37,50 +40,105 @@ export function emptyEdits() {
     hd: true,
     // The map file's checksum when these edits were made (overview_fit.js).
     mapChecksum: null,
-    // Edits that fit nothing on the map as built now, kept to try again.
-    aside: { areas: [], faces: [], flagNames: [], mapChecksum: null },
+    // Edits that fit nothing on the map as built now, kept to try again
+    // (overview_fit.js); colours per theme, as above.
+    aside: { areas: [], flagNames: [], colours: {}, mapChecksum: null },
   };
+}
+
+const list = (v) => (Array.isArray(v) ? v : []);
+
+/** `{ theme: { areas, faces } }` with both lists always there. */
+function colourSets(raw) {
+  const out = {};
+  for (const [id, set] of Object.entries(raw && typeof raw === 'object' ? raw : {})) {
+    out[id] = { areas: list(set?.areas), faces: list(set?.faces) };
+  }
+  return out;
+}
+
+/**
+ * Splits an area/face list of a version 1 file (one set of colours for
+ * every theme) into hidden areas and the colours of the theme it was made
+ * in, so nothing done before per-theme colours is lost.
+ */
+function splitOld(areas, faces, theme) {
+  const coloured = list(areas).filter((e) => e.colour).map((e) => ({ at: e.at, colour: e.colour }));
+  const hidden = list(areas).filter((e) => e.hidden).map((e) => ({ at: e.at, hidden: true }));
+  const sets = coloured.length || list(faces).length ? { [theme]: { areas: coloured, faces: list(faces) } } : {};
+  return { hidden, sets };
 }
 
 /** Fills in anything an older or partial edits file lacks. */
 export function normaliseEdits(raw) {
   const base = emptyEdits();
   if (!raw || typeof raw !== 'object') return base;
+  const theme = themeOf(raw).id;
+  const now = Array.isArray(raw.faces) || list(raw.areas).some((e) => e.colour)
+    ? splitOld(raw.areas, raw.faces, theme)
+    : { hidden: list(raw.areas), sets: {} };
+  const aside = raw.aside || {};
+  const asideNow = Array.isArray(aside.faces) || list(aside.areas).some((e) => e.colour)
+    ? splitOld(aside.areas, aside.faces, theme)
+    : { hidden: list(aside.areas), sets: {} };
+  const { faces: _old, ...rest } = raw;
   return {
     ...base,
-    ...raw,
-    areas: Array.isArray(raw.areas) ? raw.areas : [],
-    faces: Array.isArray(raw.faces) ? raw.faces : [],
-    labels: Array.isArray(raw.labels) ? raw.labels : [],
-    flagNames: Array.isArray(raw.flagNames) ? raw.flagNames : [],
+    ...rest,
+    version: 2,
+    areas: now.hidden,
+    colours: { ...colourSets(raw.colours), ...now.sets },
+    labels: list(raw.labels),
+    flagNames: list(raw.flagNames),
     show: { ...base.show, ...(raw.show || {}) },
     aside: {
-      areas: Array.isArray(raw.aside?.areas) ? raw.aside.areas : [],
-      faces: Array.isArray(raw.aside?.faces) ? raw.aside.faces : [],
-      flagNames: Array.isArray(raw.aside?.flagNames) ? raw.aside.flagNames : [],
-      mapChecksum: raw.aside?.mapChecksum ?? null,
+      areas: asideNow.hidden,
+      flagNames: list(aside.flagNames),
+      colours: { ...colourSets(aside.colours), ...asideNow.sets },
+      mapChecksum: aside.mapChecksum ?? null,
     },
   };
 }
 
 const near = (a, b, d) => Math.abs(a[0] - b[0]) <= d && Math.abs(a[1] - b[1]) <= d;
 
-/** The edit for an area, matched by its anchor. */
+/** The colours of the theme the edits are drawn in. */
+export function themeColours(edits) {
+  return edits.colours?.[themeOf(edits).id] || { areas: [], faces: [] };
+}
+
+function withThemeColours(edits, patch) {
+  const id = themeOf(edits).id;
+  return { ...edits, colours: { ...(edits.colours || {}), [id]: { ...themeColours(edits), ...patch } } };
+}
+
+/**
+ * An area's edit in the current theme, `{ at, hidden, colour? }`, or
+ * undefined: whether it is hidden (every theme) and its colour (this one).
+ */
 export function areaEdit(edits, area) {
-  return edits.areas.find((e) => near(e.at, area.anchor, 1));
+  const hidden = !!edits.areas.find((e) => near(e.at, area.anchor, 1))?.hidden;
+  const colour = themeColours(edits).areas.find((e) => near(e.at, area.anchor, 1))?.colour;
+  if (!hidden && !colour) return undefined;
+  return colour ? { at: area.anchor, hidden, colour } : { at: area.anchor, hidden };
 }
 
-/** Changes one area's edit; `patch` null removes it. */
+/** Changes one area's edit; `patch` null removes it (in this theme). */
 export function setAreaEdit(edits, area, patch) {
-  const rest = edits.areas.filter((e) => !near(e.at, area.anchor, 1));
-  if (!patch) return { ...edits, areas: rest };
-  const old = areaEdit(edits, area) || { at: area.anchor };
-  return { ...edits, areas: [...rest, { ...old, ...patch, at: area.anchor }] };
+  const next = patch ? { ...(areaEdit(edits, area) || {}), ...patch } : {};
+  const away = (e) => !near(e.at, area.anchor, 1);
+  const hidden = edits.areas.filter(away);
+  const coloured = themeColours(edits).areas.filter(away);
+  return withThemeColours(
+    { ...edits, areas: next.hidden ? [...hidden, { at: area.anchor, hidden: true }] : hidden },
+    { areas: next.colour ? [...coloured, { at: area.anchor, colour: next.colour }] : coloured },
+  );
 }
 
+/** Colours one floor piece in the current theme; null takes it back. */
 export function setFaceColour(edits, face, colour) {
-  const rest = edits.faces.filter((e) => e.face !== face.face);
-  return { ...edits, faces: colour ? [...rest, { face: face.face, colour }] : rest };
+  const rest = themeColours(edits).faces.filter((e) => e.face !== face.face);
+  return withThemeColours(edits, { faces: colour ? [...rest, { face: face.face, colour }] : rest });
 }
 
 export function flagName(edits, flag) {
@@ -99,7 +157,7 @@ export function faceColour(scene, edits, face) {
   const area = scene.areas[face.area];
   const areaChange = area ? areaEdit(edits, area) : null;
   if (areaChange?.hidden) return null;
-  const own = edits.faces.find((e) => e.face === face.face);
+  const own = themeColours(edits).faces.find((e) => e.face === face.face);
   if (own) return own.colour;
   if (areaChange?.colour) return areaChange.colour;
   if (face.stairs && edits.show.stairs) return [255, 255, 255];

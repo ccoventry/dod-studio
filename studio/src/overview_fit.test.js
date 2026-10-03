@@ -27,20 +27,21 @@ function scene(checksum = 111) {
 }
 
 const edits = (patch) => ({ ...emptyEdits(), ...patch });
+const painted = (areas = [], faces = []) => ({ colours: { areas, faces } });
 
 describe('fitEdits', () => {
   it('keeps edits that still fit as they are', () => {
-    const e = edits({ areas: [{ at: world(250, 50), colour: [9, 9, 9] }], mapChecksum: 111 });
+    const e = edits({ colours: painted([{ at: world(250, 50), colour: [9, 9, 9] }]), mapChecksum: 111 });
     const { edits: out, unplaced } = fitEdits(scene(), e);
-    expect(out.areas).toEqual([{ at: world(250, 50), colour: [9, 9, 9] }]);
+    expect(out.colours.colours.areas).toEqual([{ at: world(250, 50), colour: [9, 9, 9] }]);
     expect(unplaced).toEqual({ areas: 0, faces: 0, flagNames: 0 });
   });
 
   it('moves an area colour to the area now under its point', () => {
     // The area was reshaped: its old anchor is elsewhere inside it.
-    const e = edits({ areas: [{ at: world(280, 80), colour: [9, 9, 9] }] });
+    const e = edits({ colours: painted([{ at: world(280, 80), colour: [9, 9, 9] }]) });
     const { edits: out } = fitEdits(scene(), e);
-    expect(out.areas).toEqual([{ at: world(250, 50), colour: [9, 9, 9] }]);
+    expect(out.colours.colours.areas).toEqual([{ at: world(250, 50), colour: [9, 9, 9] }]);
   });
 
   it('takes the top floor when floors are stacked', () => {
@@ -48,31 +49,43 @@ describe('fitEdits', () => {
     expect(fitEdits(scene(), e).edits.areas[0].at).toEqual(world(250, 50));
   });
 
+  it("fits every theme's colours, not just the one shown", () => {
+    const e = edits({
+      colours: {
+        colours: { areas: [{ at: world(280, 80), colour: [1, 1, 1] }], faces: [] },
+        classic: { areas: [{ at: world(80, 80), colour: [2, 2, 2] }], faces: [] },
+      },
+    });
+    const { edits: out } = fitEdits(scene(), e);
+    expect(out.colours.colours.areas[0].at).toEqual(world(250, 50));
+    expect(out.colours.classic.areas[0].at).toEqual(world(50, 50));
+  });
+
   it('sets aside an area colour with no floor under it, and fits it again later', () => {
-    const e = edits({ areas: [{ at: world(600, 600), colour: [9, 9, 9] }] });
+    const e = edits({ colours: painted([{ at: world(600, 600), colour: [9, 9, 9] }]) });
     const first = fitEdits(scene(), e);
-    expect(first.edits.areas).toEqual([]);
+    expect(first.edits.colours.colours.areas).toEqual([]);
     expect(first.unplaced.areas).toBe(1);
     const grown = scene();
     grown.faces.push({ points: square(550, 550, 100), z: 0, area: 0, face: 10 });
-    expect(fitEdits(grown, first.edits).edits.areas).toEqual([{ at: world(50, 50), colour: [9, 9, 9] }]);
+    expect(fitEdits(grown, first.edits).edits.colours.colours.areas).toEqual([{ at: world(50, 50), colour: [9, 9, 9] }]);
   });
 
   it('sets piece colours aside on another version of the map, and back on the right one', () => {
-    const e = edits({ faces: [{ face: 8, colour: [5, 5, 5] }], mapChecksum: 111 });
+    const e = edits({ colours: painted([], [{ face: 8, colour: [5, 5, 5] }]), mapChecksum: 111 });
     const changed = fitEdits(scene(222), e);
-    expect(changed.edits.faces).toEqual([]);
+    expect(changed.edits.colours.colours.faces).toEqual([]);
     expect(changed.unplaced.faces).toBe(1);
     expect(changed.edits.mapChecksum).toBe(222);
     const back = fitEdits(scene(111), changed.edits);
-    expect(back.edits.faces).toEqual([{ face: 8, colour: [5, 5, 5] }]);
+    expect(back.edits.colours.colours.faces).toEqual([{ face: 8, colour: [5, 5, 5] }]);
     expect(back.unplaced.faces).toBe(0);
   });
 
   it('adopts the checksum of edits saved before there was one', () => {
-    const e = edits({ faces: [{ face: 8, colour: [5, 5, 5] }] });
+    const e = edits({ colours: painted([], [{ face: 8, colour: [5, 5, 5] }]) });
     const { edits: out } = fitEdits(scene(), e);
-    expect(out.faces).toHaveLength(1);
+    expect(out.colours.colours.faces).toHaveLength(1);
     expect(out.mapChecksum).toBe(111);
   });
 
