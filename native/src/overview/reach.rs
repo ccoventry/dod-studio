@@ -159,9 +159,10 @@ fn fits(level: &Level, p: [f32; 3]) -> bool {
 }
 
 /// Whether a crouching player falls clear down the column at `x, y` from a
-/// hull centre at `top` to one at `bottom`: no invisible clip lid or ceiling
-/// between a ledge and the floor far below it (dod_anzio's river behind its
-/// grate is under a clip brush, so dropping off the bank stops on top).
+/// hull centre at `top` to one at `bottom`: no street, clip brush or gap too
+/// narrow for a player between a ledge and the floor far below it
+/// (dod_anzio's drain south of the bridge runs under the street, and walking
+/// off the kerb used to land in it).
 fn drop_clear(level: &Level, x: f32, y: f32, top: f32, bottom: f32) -> bool {
     let mut h = top;
     while h > bottom {
