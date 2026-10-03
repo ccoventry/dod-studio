@@ -563,7 +563,8 @@ const DEMO_TYPES: [&CStr; 3] = [c"All", c"POV", c"HLTV"];
 /// or any.
 const PLAYER_CHOSEN: &str = "PlayerChosen";
 const PLAYER_MATCH: &str = "PlayerMatch";
-const PLAYER_MATCHES: [&CStr; 2] = [c"All", c"Any"];
+/// Any first: the usual case is one player under several names.
+const PLAYER_MATCHES: [&CStr; 2] = [c"Any", c"All"];
 /// `TextEntry::SetText(const char *)`: the Player box is emptied after a
 /// name is picked from its list.
 const TEXT_ENTRY_SLOT_SET_TEXT: usize = 134;
@@ -1552,9 +1553,9 @@ mod hook {
                 terms.push(typing);
             }
             let player = terms.join(" | ");
-            let all = !box_text(vgui, page, PLAYER_MATCH)
+            let all = box_text(vgui, page, PLAYER_MATCH)
                 .trim()
-                .eq_ignore_ascii_case("Any");
+                .eq_ignore_ascii_case("All");
             let recorded = box_ticked_or(vgui, page, PLAYER_RECORDED, false);
             if !terms.is_empty() {
                 crate::demo_rosters::ensure_filled();
@@ -2267,7 +2268,7 @@ mod hook {
                 let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
                 activate_row(o, 0);
             }
-            // The Player match dropdown: All, Any, starting on All.
+            // The Player match dropdown: Any, All, starting on Any.
             if let Some(o) = vgui
                 .child_named(demos_page, PLAYER_MATCH)
                 .map(|vp| vgui.object(vp))
