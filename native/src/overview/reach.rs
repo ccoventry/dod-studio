@@ -34,6 +34,19 @@ const CROUCH_HULL: usize = 3;
 /// How far a fall (or a slide down rock too steep to stand on) carries a
 /// player past the edge, in cells.
 const FALL_CELLS: i32 = 12;
+/// Where a player's origin can be, from a cell's centre, with his box (16
+/// either side) still over it: centred first.
+const OFFSETS: [(f32, f32); 9] = [
+    (0.0, 0.0),
+    (12.0, 0.0),
+    (-12.0, 0.0),
+    (0.0, 12.0),
+    (0.0, -12.0),
+    (12.0, 12.0),
+    (12.0, -12.0),
+    (-12.0, 12.0),
+    (-12.0, -12.0),
+];
 
 /// Textures no player stands on.
 const TOOL_TEXTURES: [&str; 8] = [
@@ -288,14 +301,20 @@ pub fn build(level: &Level) -> Result<Reach, String> {
         }
     }
     // A step above the floor first; a crouch resting on it for low passages.
+    // Then with the player off to one side: his 32-unit box stands on any
+    // sliver of floor under it, so a ledge too thin for him to be centred on
+    // (against a wall, a beam) still holds him.
     reach.fits = kept
         .iter()
         .map(|&(cell, z, _, rise)| {
-            let [x, y] = reach.centre(cell);
-            fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF])
-                || fits(level, [x, y, z + 2.0 + rise + CROUCH_HALF])
-                || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 12.0])
-                || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 24.0])
+            let [cx, cy] = reach.centre(cell);
+            OFFSETS.iter().any(|&(dx, dy)| {
+                let (x, y) = (cx + dx, cy + dy);
+                fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF])
+                    || fits(level, [x, y, z + 2.0 + rise + CROUCH_HALF])
+                    || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 12.0])
+                    || fits(level, [x, y, z + STEP + 2.0 + rise + CROUCH_HALF + 24.0])
+            })
         })
         .collect();
 
