@@ -80,7 +80,7 @@ test('lists the installs, picks the stock one, and badges the maps', async ({ pa
   await expect(rows).toHaveCount(2);
   await expect(rows.nth(0)).toContainText('has one');
   await expect(rows.nth(1)).toContainText('edited');
-  await expect(rows.nth(1)).toContainText('ours');
+  await expect(rows.nth(1)).toContainText('saved');
 
   await page.fill('#ov-map-filter', 'anz');
   await expect(rows).toHaveCount(1);
