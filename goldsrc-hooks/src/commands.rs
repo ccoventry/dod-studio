@@ -511,6 +511,8 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::frame_esc::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
@@ -660,6 +662,9 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(esc) = crate::frame_esc::status_line() {
+        lines.push(esc);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
