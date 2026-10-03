@@ -43,7 +43,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 ### 2.1 Always present
 
-- **File menu:** New Session (Ctrl+N), Load Session (Ctrl+O), Save Session (Ctrl+S). A session is a JSON project file holding the queue, highlight statuses, notes and the take index. There is no project autosave.
+- **File menu:** New Session (Ctrl+N), Load Session (Ctrl+O), Save Session (Ctrl+S). A session is a JSON project file holding the queue, highlight statuses, notes, the take index and the Teams list's names and merges. There is no project autosave.
 - **Help menu:** Check for Updates, View Logs (reveals today's activity log), About.
 - **Updates:** two channels, Stable (from `main`) and Experimental (from `dev`). Switching channel counts as an update, so it can downgrade. The startup check is skipped in local and debug builds.
 - **Unsaved-changes prompt** on close. F5 and Ctrl+R are swallowed. Ctrl+W is swallowed and does nothing.
@@ -62,6 +62,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 - **Clear Untracked** removes demos with no statuses, notes or narrowed ranges.
 - **Clear Selected** and **Clear All** ask to save first when tracked work would be lost.
+- **Teams** lists the clan tags found in the queue's demos (issue #445), with how many demos each is in. A tag is the longest start or end that at least 60% and at least 3 of a side's player names share, kept to letters, digits and spaces. Each row takes a display name and a **Same team as** pick that merges it into another row (× on the merged tag splits it out). Names and merges are saved in the project file. Demos from a project saved before this have no teams until **Read Their Teams** scans them again. These feed the clip-name `{team_name}` and `{opponent}` placeholders (#441).
 - A **Maps needed** banner lists maps that are missing or a different build than the demo expects, with a Download button that fetches from the KTP mirror, verifies the checksum, and never overwrites a map in place. HLTV demos are skipped because their map cannot be verified.
 
 **Highlight Details.** One row per kill streak of the recording player, at or above **Min Kills** (default 1). Columns: select, kill range (narrowable), kills, time, duration, status (None / Pending / Captured / Rendered), notes, weapon timeline.

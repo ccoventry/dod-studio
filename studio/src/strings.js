@@ -665,6 +665,27 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
   },
 
+  // ── Teams list (#445) — clan tags found in the project's demos ──────────
+  TEAMS: {
+    BUTTON: 'Teams',
+    BUTTON_TITLE: "The clan tags found in this project's demos, and the team names clip names use for them",
+    TITLE: 'Teams',
+    INTRO: "Tags found in players' names, one per side of each demo. Type the name you want a team to go by, or pick another tag it is the same team as.",
+    HEADER_TAG: 'Tag',
+    HEADER_DEMOS: 'Demos',
+    HEADER_NAME: 'Name',
+    HEADER_SAME_AS: 'Same team as',
+    SAME_AS_NONE: '—',
+    EMPTY: 'No tags found yet. They appear once demos with tagged players are in the queue.',
+    unreadNote: (count) => `${count} demo(s) in the queue were scanned before teams were read.`,
+    READ_BUTTON: 'Read Their Teams',
+    READ_BUTTON_TITLE: 'Scan those demos again. Statuses, notes and kill ranges are kept.',
+    READING_BUTTON: 'Reading...',
+    alsoTag: (tag) => `also ${tag}`,
+    splitTitle: (tag) => `Split ${tag} back out into a team of its own`,
+    CLOSE_BUTTON: 'Close',
+  },
+
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
   ANALYZER: {
     EXPLORER_TITLE: 'Explorer',

@@ -1300,6 +1300,11 @@ pub struct SerializedDemo {
     /// The file's modified time, for the clip name's `{date}` (#441).
     #[serde(default)]
     pub modified_unix_secs: Option<u64>,
+    /// Each playing side and the clan tag its players' names share (#445),
+    /// feeding the project's Teams list. Missing from demos in a project
+    /// saved before it existed; the frontend scans those again.
+    #[serde(default)]
+    pub teams: Vec<analysis::TeamTag>,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -1904,6 +1909,7 @@ pub async fn scan_directory_impl(
                                         .ok()
                                         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                                         .map(|d| d.as_secs()),
+                                    teams: ::analysis::team_tags(&analysis.state),
                                 }
                             },
                         );
