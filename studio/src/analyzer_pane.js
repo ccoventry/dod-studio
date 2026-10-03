@@ -7,7 +7,8 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, indexDemoPlayers } from './ipc_bridge.js';
+import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
 import { escapeHtml as esc } from './html.js';
 
@@ -94,6 +95,13 @@ let demoFilterType = 'All';
 let demoFilterMap = '';
 let demoFilterDateStart = '';
 let demoFilterDateEnd = '';
+// #437: who is in each demo of the current folder, filled in as the backend
+// reads them (path -> { demoType, players }), and the player box's text.
+let demoPlayers = new Map();
+let playerIndexRequest = 0;
+let playerIndexTotal = 0;
+let demoFilterPlayer = '';
+let playerOptions = [];
 let demoSortColumn = null; // 'name' | 'type' | 'map' | 'date'
 let demoSortAscending = true;
 
@@ -224,8 +232,53 @@ function groupConsecutiveWeapons(names) {
 // ── Explorer sidebar + single-folder demo list ───────────────────────────────
 
 function demoTypeOf(entry) {
-  return entry.demo_type || STRINGS.ANALYZER.TYPE_POV;
+  // The real type once the player index has read the demo; until then the
+  // listing's own guess.
+  return demoPlayers.get(entry.path)?.demoType || entry.demo_type || STRINGS.ANALYZER.TYPE_POV;
 }
+
+/** The player the box picks out in `entry`, or null (also null while that
+ *  demo's players haven't been read yet). */
+function filteredPlayerIn(entry) {
+  const query = parsePlayerQuery(demoFilterPlayer, playerOptions);
+  if (!query) return null;
+  return findPlayer(demoPlayers.get(entry.path)?.players, query);
+}
+
+function refreshPlayerOptions() {
+  playerOptions = groupPlayers([...demoPlayers.values()].flatMap((d) => d.players || []));
+  const list = document.querySelector('#analyzer-player-options');
+  if (list) list.innerHTML = playerOptions.map((o) => `<option value="${esc(o.label)}"></option>`).join('');
+}
+
+function renderPlayerStatus() {
+  const el = document.querySelector('#analyzer-player-status');
+  if (!el) return;
+  el.textContent = demoPlayers.size < playerIndexTotal
+    ? STRINGS.ANALYZER.playersReading(demoPlayers.size, playerIndexTotal)
+    : '';
+}
+
+/** Starts reading who is in every demo of the current folder (#437). */
+function startPlayerIndex(demos) {
+  playerIndexRequest += 1;
+  demoPlayers = new Map();
+  playerIndexTotal = demos.length;
+  refreshPlayerOptions();
+  renderPlayerStatus();
+  if (demos.length > 0) indexDemoPlayers(demos.map((d) => d.path), playerIndexRequest, 'analyzer');
+}
+
+listen('demo_players', (event) => {
+  const p = event.payload || {};
+  if (p.lane !== 'analyzer' || p.requestId !== playerIndexRequest) return;
+  demoPlayers.set(p.path, { demoType: p.demoType, players: p.players || [] });
+  refreshPlayerOptions();
+  renderPlayerStatus();
+  // Re-render when the list can change: a filter by player, or the type
+  // column's guess being replaced by the real type.
+  renderDemoTable();
+}).catch((err) => console.error('Failed to register demo_players listener:', err));
 
 // Guarantees the drive letter and final folder name stay visible, eliding
 // the middle when the full path is too long to fit the sidebar — e.g.
@@ -585,6 +638,7 @@ async function setCurrentDir(path) {
   dirCache.set(path, listing);
   browserError = null;
   currentFolderDemos = listing.demos;
+  startPlayerIndex(listing.demos);
 
   renderQuickLinksSection();
   await renderExplorerTree();
@@ -633,6 +687,7 @@ function passesDemoFilter(entry) {
   const iso = demoDateISO(entry);
   if (demoFilterDateStart.length === 10 && (iso.length < 10 || iso < demoFilterDateStart)) return false;
   if (demoFilterDateEnd.length === 10 && (iso.length < 10 || iso > demoFilterDateEnd)) return false;
+  if (demoFilterPlayer.trim() && !filteredPlayerIn(entry)) return false;
   return true;
 }
 
@@ -688,9 +743,11 @@ function renderDemoTable() {
     const isSelected = entry.path === browserSelectedDemo;
     const isCursor = entry.path === browserCursorPath;
     const classes = ['analyzer-demo-row', isSelected ? 'selected' : '', isCursor ? 'keyboard-selected' : ''].filter(Boolean).join(' ');
+    const player = filteredPlayerIn(entry);
+    const role = player ? ` · ${player.recorder ? STRINGS.ANALYZER.ROLE_RECORDED : STRINGS.ANALYZER.ROLE_PLAYED}` : '';
     return `<tr class="${classes}" data-path="${esc(entry.path)}" title="${esc(entry.path)}">
       <td>${esc(entry.name)}</td>
-      <td>${esc(demoTypeOf(entry))}</td>
+      <td>${esc(demoTypeOf(entry) + role)}</td>
       <td>${esc(entry.map_name || STRINGS.ANALYZER.EMPTY_DASH)}</td>
       <td>${esc(demoDateDisplay(entry))}</td>
     </tr>`;
@@ -814,6 +871,7 @@ function initAnalyzerBrowser() {
   const mapEl = document.querySelector('#analyzer-filter-map');
   const dateStartEl = document.querySelector('#analyzer-filter-date-start');
   const dateEndEl = document.querySelector('#analyzer-filter-date-end');
+  const playerEl = document.querySelector('#analyzer-filter-player');
   const resetBtn = document.querySelector('#analyzer-filter-reset');
 
   searchEl?.addEventListener('input', (e) => { demoFilterQuery = e.target.value; renderDemoTable(); });
@@ -821,8 +879,10 @@ function initAnalyzerBrowser() {
   mapEl?.addEventListener('input', (e) => { demoFilterMap = e.target.value; renderDemoTable(); });
   dateStartEl?.addEventListener('input', (e) => { demoFilterDateStart = e.target.value; renderDemoTable(); });
   dateEndEl?.addEventListener('input', (e) => { demoFilterDateEnd = e.target.value; renderDemoTable(); });
+  playerEl?.addEventListener('input', (e) => { demoFilterPlayer = e.target.value; renderDemoTable(); });
   resetBtn?.addEventListener('click', () => {
-    demoFilterQuery = ''; demoFilterType = 'All'; demoFilterMap = ''; demoFilterDateStart = ''; demoFilterDateEnd = '';
+    demoFilterQuery = ''; demoFilterType = 'All'; demoFilterMap = ''; demoFilterDateStart = ''; demoFilterDateEnd = ''; demoFilterPlayer = '';
+    if (playerEl) playerEl.value = '';
     if (searchEl) searchEl.value = '';
     if (typeEl) typeEl.value = 'All';
     if (mapEl) mapEl.value = '';

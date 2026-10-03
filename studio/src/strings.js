@@ -57,6 +57,9 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #174: demos you can capture a player from (POV demos they recorded).
+    PLAYER_FILTER_ALL: 'All players',
+    PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
@@ -676,6 +679,12 @@ export const STRINGS = {
     TYPE_POV: 'POV',
     TYPE_HLTV: 'HLTV',
     MAP_PLACEHOLDER: 'Map',
+    // #437: every demo a player appears in.
+    PLAYER_PLACEHOLDER: 'Player',
+    PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
+    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    ROLE_RECORDED: 'recorded it',
+    ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
     MAX_DATE_PLACEHOLDER: 'Max Date (YYYY-MM-DD)',
     RESET_BUTTON: 'Reset',

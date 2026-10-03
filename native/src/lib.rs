@@ -36,6 +36,10 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
+
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]
@@ -136,7 +140,7 @@ struct AnalyzerCacheEntryRef<'a> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
+pub(crate) fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
     let canonical = fs::canonicalize(demo_path).ok()?;
     let key = canonical.to_string_lossy();
     let hash = crate::utils::demo_hasher::fnv1a_hash(key.as_bytes());
@@ -313,6 +317,8 @@ pub fn warm_analyzer_cache(demo_path: &PathBuf, analysis: &Analysis) {
         &file_info,
         analysis,
     );
+    // The player filters (#437, #174) read this instead of the whole entry.
+    player_index::write_index(demo_path, analysis);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
