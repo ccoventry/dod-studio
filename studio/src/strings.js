@@ -840,6 +840,11 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #207: what decides whether the pre-Anniversary engine can play it.
+    PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
+    peakEntitiesValue: (peak) => (peak > 256
+      ? `${peak}: over the pre-Anniversary engine's 256, so it closes the game there. The 25th Anniversary engine plays it.`
+      : peak >= 240 ? `${peak}: close to the pre-Anniversary engine's limit of 256` : String(peak)),
     GAME_MOD_DOD: 'Day of Defeat',
     GAME_MOD_CS: 'Counter-Strike',
     GAME_MOD_HL: 'Half-Life',
@@ -1239,6 +1244,20 @@ export const STRINGS = {
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+  },
+
+  // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
+  ENTITY_LIMIT: {
+    BADGE: "won't play",
+    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so it can't play this demo: a capture or preview of it fails at that point.`,
+    batchTitle: (count) => `${count} demo${count === 1 ? '' : 's'} won't play in this game`,
+    batchMessage: (count, limit) => `${count === 1 ? 'This demo has' : 'These demos have'} more than ${limit} entities in one snapshot, and the game closes when it gets there. Start the batch anyway?`,
+    PREVIEW_TITLE: "This demo won't play in this game",
+    previewMessage: (limit) => `It has more than ${limit} entities in one snapshot, and the game closes when it gets there. Launch it anyway?`,
+    peakDetail: (peak) => `Up to ${peak} entities in one snapshot`,
+    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024: set its hl.exe in Configuration → Paths for these.',
+    START_ANYWAY: 'Start anyway',
+    PREVIEW_ANYWAY: 'Launch anyway',
   },
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────

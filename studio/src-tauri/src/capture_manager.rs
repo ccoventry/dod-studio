@@ -1284,6 +1284,11 @@ pub struct SerializedDemo {
     /// simply scanned again.
     #[serde(default)]
     pub file_key: Option<String>,
+    /// The most entities in one snapshot (#207): over the engine's
+    /// `MAX_PACKET_ENTITIES` the game closes to the desktop. `None` for a
+    /// demo from a project saved before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -1867,6 +1872,7 @@ pub async fn scan_directory_impl(
                                     playback_frames,
                                     streaks: serialized_streaks,
                                     file_key: file_keys[idx].clone(),
+                                    peak_packet_entities: analysis.demo_info.peak_packet_entities,
                                 }
                             },
                         );
