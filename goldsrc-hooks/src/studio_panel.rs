@@ -856,8 +856,17 @@ fn wrap_toggleconsole() {
 unsafe extern "C" fn wrapped_toggleconsole() {
     if console_in_panel() {
         #[cfg(target_arch = "x86")]
-        if hook::close_if_on_console() {
-            return;
+        match hook::close_if_on_console() {
+            hook::Closed::No => {}
+            hook::Closed::Window => return,
+            // The key opened the console window behind our tab, so the game
+            // still thinks the console is open: close it the game's own way
+            // too. Without that, ESC on the main menu brought the stock
+            // console back (2026-10-03).
+            hook::Closed::WindowAndConsole => {
+                unsafe { crate::cmd_list::call_real(&REAL_TOGGLECONSOLE) };
+                return;
+            }
         }
         CONSOLE_PENDING.store(VIEWDEMO_WAIT_FRAMES, Ordering::Release);
     }
@@ -1358,6 +1367,21 @@ mod hook {
     /// Frames left to keep giving the borrowed console input line the
     /// keyboard after the console key opened the Console tab.
     static FOCUS_ENTRY: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+    /// The console key opened the console window and our tab took its place:
+    /// the game thinks its console is open until the key closes it again.
+    static CONSOLE_OPENED_BY_KEY: std::sync::atomic::AtomicBool =
+        std::sync::atomic::AtomicBool::new(false);
+
+    /// What the console key closed.
+    pub(super) enum Closed {
+        /// Nothing: our window isn't showing its Console tab.
+        No,
+        /// Our window.
+        Window,
+        /// Our window, and the console window behind it is shown again for
+        /// the engine's own `toggleconsole` to close.
+        WindowAndConsole,
+    }
     const FOCUS_ENTRY_FRAMES: u32 = 5;
 
     /// Each class's own `OnCommand`, for whatever our handler passes on.
@@ -2779,23 +2803,33 @@ mod hook {
     }
 
     /// Whether our window is showing its Console tab; if so, closes it.
-    pub(super) fn close_if_on_console() -> bool {
-        let Ok(vgui) = Vgui::get() else { return false };
+    pub(super) fn close_if_on_console() -> Closed {
+        let Ok(vgui) = Vgui::get() else {
+            return Closed::No;
+        };
         unsafe {
             let Some((_, vp)) = window(&vgui) else {
-                return false;
+                return Closed::No;
             };
             let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
             if !vgui.visible(vp) || sheet.is_null() {
-                return false;
+                return Closed::No;
             }
             let active: GetActivePageFn = slot(sheet, SHEET_SLOT_GET_ACTIVE_PAGE);
             let console = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
             if active(sheet) != console {
-                return false;
+                return Closed::No;
             }
             vgui.set_visible(vp, false);
-            true
+            if !CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
+                return Closed::Window;
+            }
+            // Visible for the engine's toggle to see it open and hide it. It
+            // is hidden again before anything draws.
+            if let Some(window) = vgui.popup(CONSOLE) {
+                vgui.set_visible(window, true);
+            }
+            Closed::WindowAndConsole
         }
     }
 
@@ -2813,6 +2847,7 @@ mod hook {
             };
             CONSOLE_PENDING.store(0, Ordering::Relaxed);
             vgui.set_visible(console, false);
+            CONSOLE_OPENED_BY_KEY.store(true, Ordering::Release);
             let line = match ensure_window(vgui, false)
                 .and_then(|(object, vp, _)| show(vgui, object, vp, Some(CONSOLE_PAGE)))
             {
