@@ -207,3 +207,19 @@ test('the theme changes how the floors are drawn, and is saved with the map', as
   expect(grey).not.toEqual([94, 94, 85]);
   await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.theme).toBe('grey');
 });
+
+test('the classic theme draws the paper map: a dark ruler frame round pale floors', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await page.selectOption('#ov-theme', 'classic');
+  const at = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  const corner = await at(3, 3);
+  expect(Math.max(...corner)).toBeLessThan(40);
+  const floor = await at(400, 400);
+  expect(Math.min(...floor)).toBeGreaterThan(180);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.theme).toBe('classic');
+});

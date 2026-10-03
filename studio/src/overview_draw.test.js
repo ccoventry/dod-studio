@@ -4,6 +4,7 @@ import {
   insidePolygon, faceAt, toPixel, toWorld, spawnLabels, flagName, setFlagName,
   labelAt, toBase64,
 } from './overview_draw.js';
+import { mapTitle } from './overview_themes.js';
 
 const square = (x, y, size = 10) => [[x, y], [x + size, y], [x + size, y + size], [x, y + size]];
 
@@ -137,5 +138,16 @@ describe('toBase64', () => {
     const bytes = new Uint8Array(200000).fill(65);
     expect(toBase64(bytes).slice(0, 4)).toBe('QUFB');
     expect(toBase64(new Uint8Array([0, 255]))).toBe('AP8=');
+  });
+});
+
+describe('mapTitle', () => {
+  it('drops dod_, league tags and versions', () => {
+    expect(mapTitle('dod_anzio')).toBe('ANZIO');
+    expect(mapTitle('dod_railroad2_s10a')).toBe('RAILROAD2');
+    expect(mapTitle('dod_saints2_b4e')).toBe('SAINTS2');
+    expect(mapTitle('dod_cevo_russka_mtek')).toBe('RUSSKA');
+    expect(mapTitle('dod_anjou_a4_v04')).toBe('ANJOU');
+    expect(mapTitle('dod_lennon5_b1')).toBe('LENNON5');
   });
 });

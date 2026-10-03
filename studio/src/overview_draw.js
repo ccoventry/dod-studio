@@ -3,7 +3,8 @@
 // draws it on screen with this, and the export draws it three times larger
 // and scales it down, so the file is what the page showed.
 
-import { themeOf } from './overview_themes.js';
+import { themeOf, mapTitle } from './overview_themes.js';
+import { paper, grid, frame, titleCard, areaEdges } from './overview_paper.js';
 
 /** A fresh, empty set of edits. */
 export function emptyEdits() {
@@ -234,14 +235,17 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
   const h = scene.height * s;
   ctx.save();
   ctx.clearRect(0, 0, w, h);
-  if (!transparent) {
+  const theme = themeOf(edits);
+  if (theme.paper) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(paper(scene, cache), 0, 0, w, h);
+  } else if (!transparent) {
     ctx.fillStyle = css(scene.background);
     ctx.fillRect(0, 0, w, h);
   }
 
-  const theme = themeOf(edits);
   // The void: enclosed space, black (themes that have one).
-  const key = JSON.stringify([edits.areas.filter((e) => e.hidden), scene.map]);
+  const key = JSON.stringify([edits.areas.filter((e) => e.hidden), scene.map, theme.id]);
   let mask = !theme.voidFill ? null : cache && cache.key === key ? cache.mask : null;
   if (theme.voidFill && !mask) {
     mask = voidMask(scene, edits);
@@ -254,9 +258,10 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     const img = mctx.createImageData(scene.width, scene.height);
     for (let i = 0; i < mask.length; i++) {
       if (!mask[i]) continue;
-      img.data[i * 4] = scene.void[0];
-      img.data[i * 4 + 1] = scene.void[1];
-      img.data[i * 4 + 2] = scene.void[2];
+      const v = theme.voidColour || scene.void;
+      img.data[i * 4] = v[0];
+      img.data[i * 4 + 1] = v[1];
+      img.data[i * 4 + 2] = v[2];
       img.data[i * 4 + 3] = 255;
     }
     mctx.putImageData(img, 0, 0);
@@ -301,6 +306,14 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     f.globalCompositeOperation = 'source-over';
   }
   ctx.drawImage(floors, 0, 0);
+
+  // Lines round every area, and the frame's grid, on themes that have them.
+  if (theme.edges) {
+    const visible = (face) => faceColour(scene, edits, face) != null;
+    const edgeKey = JSON.stringify([edits.areas.filter((e) => e.hidden), scene.map]);
+    ctx.drawImage(areaEdges(scene, visible, cache, edgeKey), 0, 0, w, h);
+  }
+  if (theme.frame) grid(ctx, scene, s);
 
   // Capture zones: a yellow rim just outside each zone's footprint.
   if (edits.show.capZones) {
@@ -387,6 +400,10 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       ctx.strokeRect(x * s - tw / 2 - 3 * s, y * s - th / 2 - 2 * s, tw + 6 * s, th + 4 * s);
       ctx.setLineDash([]);
     }
+  }
+  if (theme.frame) {
+    frame(ctx, scene, s);
+    titleCard(ctx, scene, s, mapTitle(scene.map), 'DoD Studio');
   }
   ctx.restore();
 }

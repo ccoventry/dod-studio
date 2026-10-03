@@ -1278,7 +1278,7 @@ export const STRINGS = {
     COLOUR_TITLE: 'Colour',
     THEME_LABEL: 'Theme',
     // overview_themes.js, by id.
-    THEMES: { colours: 'Colour-coded', grey: 'Flat grey' },
+    THEMES: { colours: 'Colour-coded', grey: 'Flat grey', classic: 'Classic war map' },
     CUSTOM_COLOUR_LABEL: 'Other colour',
     CLEAR_COLOUR_BUTTON: 'Original colour',
     CLEAR_COLOUR_TIP: 'Pick this, then click an area to put its own colour back',

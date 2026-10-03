@@ -7,6 +7,10 @@
 //   voidFill: bool        black for enclosed space and a rim round the floors
 //   outline: [r,g,b]|null a line round the floors' outer edge instead
 //   water: [r, g, b]
+//   voidColour: [r,g,b]   the enclosed space's colour, if not the scene's
+//   paper: bool           aged paper under everything (overview_paper.js)
+//   edges: bool           thin dark lines round every area
+//   frame: bool           the ruler frame, grid and title card
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 
@@ -46,7 +50,31 @@ export const THEMES = [
     outline: [62, 62, 60],
     water: [86, 128, 196],
   },
+  {
+    // Valve's own overviews (anzio, chemille, donner...): aged paper in a
+    // ruler frame, buildings you can't enter as black blocks, the rest pale
+    // and outlined, a title card.
+    id: 'classic',
+    floor: (scene, face, area) => (area?.indoor ? [240, 238, 231] : [214, 208, 192]),
+    voidFill: true,
+    voidColour: [38, 36, 33],
+    outline: null,
+    water: [150, 182, 196],
+    paper: true,
+    edges: true,
+    frame: true,
+  },
 ];
+
+/** The title card's text for a map: its name without "dod_" or a version. */
+export function mapTitle(map) {
+  let name = String(map || '').replace(/^dod_/i, '').replace(/^(cevo|ktp)_/i, '');
+  // Versions and league tags off the end, as many as there are
+  // (railroad2_s10a, cevo_russka_mtek, anjou_a4_v04).
+  const tail = /_(v?\d+[a-z]?|[a-z]\d+[a-z]?|beta\d*|final\d*|test\d*|mtek|gg|ktp\d*)$/i;
+  while (tail.test(name)) name = name.replace(tail, '');
+  return name.replace(/_/g, ' ').toUpperCase();
+}
 
 /** The theme an edits object asks for, or the first. */
 export function themeOf(edits) {
