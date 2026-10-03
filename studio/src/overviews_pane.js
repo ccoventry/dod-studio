@@ -70,6 +70,7 @@ export function initOverviewsPane() {
   const saveStatus = pane.querySelector('#ov-save-status');
   const undoBtn = pane.querySelector('#ov-undo-btn');
   const showAreasBox = pane.querySelector('#ov-show-areas');
+  const showAreasText = showAreasBox.parentElement.querySelector('span');
   const hoverBox = pane.querySelector('#ov-hover-preview');
   const flagIconsBox = pane.querySelector('#ov-flag-icons');
   const zoomIn = pane.querySelector('#ov-zoom-in');
@@ -217,7 +218,7 @@ export function initOverviewsPane() {
       selectedLabel,
       flagIcons: flagIconsBox.checked ? { icons: flagIcons, screenHeight: flagScreen } : null,
       view: { ox, oy, cw: canvas.width, ch: canvas.height },
-      overlay: { outlines: showAreasBox.checked ? (altDown ? 'pieces' : 'areas') : null, hover: hoverBox.checked ? hover : null },
+      overlay: { outlines: showAreasBox.checked ? outlineKind() : null, hover: hoverBox.checked ? hover : null },
     });
     zoomFit.textContent = `${Math.round(zoom * 100)}%`;
     zoomOut.disabled = zoom <= 1;
@@ -386,6 +387,8 @@ export function initOverviewsPane() {
       canvas.dataset.mode = mode;
       updateCursor(lastPointer);
       updateHover(lastPointer);
+      renderOutlineLabel();
+      if (showAreasBox.checked && scene) draw();
     });
   });
 
@@ -427,6 +430,17 @@ export function initOverviewsPane() {
       draw();
     });
   }
+  // "Show areas" outlines what the tool works on: pieces for Colour piece,
+  // areas otherwise; Alt shows the other while held.
+  function outlineKind() {
+    const pieces = mode === 'face';
+    return pieces !== altDown ? 'pieces' : 'areas';
+  }
+  function renderOutlineLabel() {
+    showAreasText.textContent = mode === 'face' ? STRINGS.OVERVIEWS.SHOW_PIECES : STRINGS.OVERVIEWS.SHOW_AREAS;
+    showAreasBox.parentElement.title = mode === 'face' ? STRINGS.OVERVIEWS.SHOW_PIECES_TIP : STRINGS.OVERVIEWS.SHOW_AREAS_TIP;
+  }
+
   function hoverAt(event) {
     if (!scene || !event || drag || pan || spaceDown || mode === 'label') return null;
     const [x, y] = pixelOf(event);

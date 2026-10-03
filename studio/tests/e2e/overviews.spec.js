@@ -541,6 +541,13 @@ test('hovering shows what a click would paint, and Show areas outlines them all'
   const before = await sum();
   await page.check('#ov-show-areas');
   await expect.poll(sum).toBeLessThan(before);
+  // With Colour piece picked it outlines the pieces instead, and says so.
+  const areasSum = await sum();
+  await page.click('.ov-mode[data-mode="face"]');
+  await expect(page.locator('#ov-preview')).toContainText('Show pieces');
+  await page.click('.ov-mode[data-mode="area"]');
+  await expect(page.locator('#ov-preview')).toContainText('Show areas');
+  await expect.poll(sum).toBe(areasSum);
   await page.uncheck('#ov-show-areas');
   await expect.poll(sum).toBe(before);
   // With the highlight turned off, hovering changes nothing.

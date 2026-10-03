@@ -1294,6 +1294,8 @@ export const STRINGS = {
     HOVER_TIP: 'Light up what a click would change before you click',
     SHOW_AREAS: 'Show areas',
     SHOW_AREAS_TIP: 'Outline every area. Hold Alt to outline every floor piece instead',
+    SHOW_PIECES: 'Show pieces',
+    SHOW_PIECES_TIP: 'Outline every floor piece. Hold Alt to outline every area instead',
     ZOOM_OUT_TIP: 'Zoom out (or scroll)',
     ZOOM_IN_TIP: 'Zoom in (or scroll)',
     ZOOM_FIT_TIP: 'Show the whole map. Scroll to zoom; drag with the right or middle button, or hold Space, to move about',
