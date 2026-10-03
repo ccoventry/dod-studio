@@ -523,13 +523,16 @@ const PROGRESS_BAR_SLOT_SET_PROGRESS: usize = 134;
 /// `KeyValues` constructor the demo list's rows are made with calls it.
 const KEYVALUES_SLOT_SET_STRING: usize = 17;
 /// The width the Demos tab gives the demo name column.
-const NAME_COLUMN_WIDE: i32 = 250;
+const NAME_COLUMN_WIDE: i32 = 170;
 /// The Demos tab's columns past the demo's own name: key, heading, width.
 /// Type is POV or HLTV, read from the demo's header like the Type filter.
-const DEMO_COLUMNS: [(&CStr, &CStr, i32); 3] = [
-    (c"map", c"Map", 120),
-    (c"type", c"Type", 50),
-    (c"date", c"Date", 120),
+/// Player is who recorded a POV demo, from the players file Studio saves
+/// with an analysis (blank until one is), and a dash for HLTV.
+const DEMO_COLUMNS: [(&CStr, &CStr, i32); 4] = [
+    (c"map", c"Map", 100),
+    (c"type", c"Type", 42),
+    (c"player", c"Player", 100),
+    (c"date", c"Date", 110),
 ];
 /// Set on a row once its Map, Type and Date are filled in, so a list the Load Demo
 /// window refilled on its own (opening a folder) is noticed.
@@ -1658,7 +1661,12 @@ mod hook {
                 return false;
             }
             let row = get_item(list, id);
-            if row.is_null() || !get(row, STAMP_KEY).is_empty() {
+            // Stamped with the players files' generation, so names that
+            // arrive later (an analysis, the background fill) are shown.
+            crate::demo_rosters::ensure_filled();
+            let stamp = std::ffi::CString::new(crate::demo_rosters::generation().to_string())
+                .unwrap_or_default();
+            if row.is_null() || get(row, STAMP_KEY) == stamp.to_string_lossy() {
                 return false;
             }
             let mut id = id;
@@ -1675,9 +1683,25 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[0].0.as_ptr(), map.as_ptr());
                         let kind = if info.hltv { c"HLTV" } else { c"POV" };
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), kind.as_ptr());
-                        set_string(row, DEMO_COLUMNS[2].0.as_ptr(), date.as_ptr());
+                        set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
                     }
-                    set_string(row, STAMP_KEY.as_ptr(), c"1".as_ptr());
+                    if let Some(info) = info_for(&get(row, ROW_KEY)) {
+                        // A dash for HLTV (nobody recorded it); blank for a
+                        // POV demo not analysed yet.
+                        let player = if info.hltv {
+                            "-".to_string()
+                        } else {
+                            row_path(&get(row, ROW_KEY))
+                                .and_then(|path| crate::demo_rosters::players_for(&path))
+                                .and_then(|d| d.players.into_iter().find(|p| p.recorder))
+                                .map(|p| p.name.replace('\0', ""))
+                                .unwrap_or_default()
+                        };
+                        if let Ok(player) = std::ffi::CString::new(player) {
+                            set_string(row, DEMO_COLUMNS[2].0.as_ptr(), player.as_ptr());
+                        }
+                    }
+                    set_string(row, STAMP_KEY.as_ptr(), stamp.as_ptr());
                     // Each column keeps its rows sorted as they were added;
                     // re-sort this one into the new columns.
                     apply_changes(list, id);
