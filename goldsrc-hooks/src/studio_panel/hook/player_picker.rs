@@ -14,7 +14,7 @@
 
 use std::ffi::{CString, c_void};
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
 
@@ -27,6 +27,43 @@ type Names = Option<((u64, usize), Vec<String>)>;
 static NAMES: Mutex<Names> = Mutex::new(None);
 /// The text the list was last built for.
 static BUILT_FOR: Mutex<Option<String>> = Mutex::new(None);
+/// Whether the list was open last frame: a name clicked in it closes it.
+static WAS_OPEN: AtomicBool = AtomicBool::new(false);
+/// What the picked-players line says now.
+static CHOSEN_SHOWN: Mutex<Option<String>> = Mutex::new(None);
+
+/// The picked-players line under the box.
+unsafe fn show_picked(vgui: &Vgui, page: Vpanel) {
+    unsafe {
+        let picked = PICKED_PLAYERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let line = if picked.is_empty() {
+            "none: pick names from the Player list".to_string()
+        } else {
+            picked.join(", ")
+        };
+        let mut shown = CHOSEN_SHOWN.lock().unwrap_or_else(|e| e.into_inner());
+        if shown.as_deref() == Some(line.as_str()) {
+            return;
+        }
+        let Some(label) = vgui
+            .child_named(page, PLAYER_CHOSEN)
+            .map(|vp| vgui.object(vp))
+        else {
+            return;
+        };
+        if label.is_null() {
+            return;
+        }
+        if let Ok(c) = CString::new(line.replace('\0', "")) {
+            let set_text: SetTextFn = slot(label, LABEL_SLOT_SET_TEXT);
+            set_text(label, c.as_ptr());
+            *shown = Some(line);
+        }
+    }
+}
 
 /// Distinct player names in the demos `list` holds, sorted, case ignored.
 unsafe fn names_in(list: *mut c_void) -> Vec<String> {
@@ -125,6 +162,29 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         };
 
         let typed = box_text(vgui, page, PLAYER_FILTER);
+        show_picked(vgui, page);
+        let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
+        if menu.is_null() {
+            return;
+        }
+        let open = vgui.visible(vpanel_of(menu));
+        let was_open = WAS_OPEN.swap(open, Ordering::AcqRel);
+        // A name clicked in the list: the list closed itself and the box holds
+        // that name. It joins the picked players and the box empties for the
+        // next. (A name typed out in full is still just a search.)
+        if was_open
+            && !open
+            && let Some(name) = all.iter().find(|n| n.eq_ignore_ascii_case(typed.trim()))
+        {
+            let mut picked = PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner());
+            if !picked.iter().any(|p| p.eq_ignore_ascii_case(name)) {
+                picked.push(name.clone());
+            }
+            drop(picked);
+            let set_text: SetTextFn = slot(combo, TEXT_ENTRY_SLOT_SET_TEXT);
+            set_text(combo, c"".as_ptr());
+            return;
+        }
         let mut built = BUILT_FOR.lock().unwrap_or_else(|e| e.into_inner());
         if !fresh && built.as_deref() == Some(typed.as_str()) {
             return;
@@ -142,18 +202,16 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             }
         }
 
-        let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
-        if menu.is_null() || first_build || fresh {
+        if first_build || fresh {
             return;
         }
-        let open = vgui.visible(vpanel_of(menu));
-        // Nothing to offer (an empty box, no match, or a name just picked):
-        // close it. Through the panel, not the box's own close, which selects
-        // all its text so the next key replaces it.
-        let picked = all.iter().any(|n| n.eq_ignore_ascii_case(typed.trim()));
-        if typed.trim().is_empty() || shown.is_empty() || picked {
+        // Nothing to offer (an empty box, no match): close it. Through the
+        // panel, not the box's own close, which selects all its text so the
+        // next key replaces it.
+        if typed.trim().is_empty() || shown.is_empty() {
             if open {
                 vgui.set_visible(vpanel_of(menu), false);
+                WAS_OPEN.store(false, Ordering::Release);
             }
             return;
         }

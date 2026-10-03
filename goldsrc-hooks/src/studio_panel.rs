@@ -559,6 +559,16 @@ const MAP_FILTER: &str = "MapFilter";
 /// The Type dropdown (All / POV / HLTV), as Studio's Demo Analyzer has it.
 const DEMO_TYPE: &str = "DemoType";
 const DEMO_TYPES: [&CStr; 3] = [c"All", c"POV", c"HLTV"];
+/// The Demos tab's picked players, and whether a demo needs all of them
+/// or any.
+const PLAYER_CHOSEN: &str = "PlayerChosen";
+const PLAYER_MATCH: &str = "PlayerMatch";
+const PLAYER_MATCHES: [&CStr; 2] = [c"All", c"Any"];
+/// `TextEntry::SetText(const char *)`: the Player box is emptied after a
+/// name is picked from its list.
+const TEXT_ENTRY_SLOT_SET_TEXT: usize = 134;
+/// The players picked from the Player list, in the order picked.
+static PICKED_PLAYERS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 /// `ComboBox::AddItem(const char *text, const KeyValues *userData)` and
 /// `ActivateItemByRow(int row)`.
 const COMBO_SLOT_ADD_ITEM: usize = 196;
@@ -985,6 +995,8 @@ enum Action<'a> {
     Goto,
     /// Put every setting saved from the Settings tab back to its default.
     ResetSettings,
+    /// Forget the players picked on the Demos tab.
+    ClearPlayers,
     /// Anything else, for the class's own `OnCommand`.
     Own,
 }
@@ -998,6 +1010,9 @@ fn action(command: &str) -> Action<'_> {
     }
     if command.eq_ignore_ascii_case("reset_settings") {
         return Action::ResetSettings;
+    }
+    if command.eq_ignore_ascii_case("clear_players") {
+        return Action::ClearPlayers;
     }
     match VCR_COMMANDS
         .iter()
@@ -1527,14 +1542,26 @@ mod hook {
                 pov: shows_type(&box_text(vgui, page, DEMO_TYPE), false),
                 days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
-            let player = box_text(vgui, page, PLAYER_FILTER).trim().to_string();
+            // The picked players, and whatever is being typed.
+            let mut terms = PICKED_PLAYERS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone();
+            let typing = box_text(vgui, page, PLAYER_FILTER).trim().to_string();
+            if !typing.is_empty() {
+                terms.push(typing);
+            }
+            let player = terms.join(" | ");
+            let all = !box_text(vgui, page, PLAYER_MATCH)
+                .trim()
+                .eq_ignore_ascii_case("Any");
             let recorded = box_ticked_or(vgui, page, PLAYER_RECORDED, false);
-            if !player.is_empty() {
+            if !terms.is_empty() {
                 crate::demo_rosters::ensure_filled();
             }
             // Rosters written in the background filter the list again.
             let filter = format!(
-                "{filters:?} {player:?} {recorded} {}",
+                "{filters:?} {player:?} {all} {recorded} {}",
                 crate::demo_rosters::generation()
             );
             let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
@@ -1595,7 +1622,7 @@ mod hook {
                         let players = crate::demo_rosters::players_for(&path);
                         with_players += players.is_some() as usize;
                         shown &= players.is_some_and(|r| {
-                            crate::demo_rosters::has_player(&r, &player, recorded)
+                            crate::demo_rosters::has_players(&r, &terms, all, recorded)
                         });
                         matched += shown as usize;
                     }
@@ -2235,6 +2262,19 @@ mod hook {
             {
                 let add_item: ComboAddItemFn = slot(o, COMBO_SLOT_ADD_ITEM);
                 for item in DEMO_TYPES {
+                    add_item(o, item.as_ptr(), std::ptr::null());
+                }
+                let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
+                activate_row(o, 0);
+            }
+            // The Player match dropdown: All, Any, starting on All.
+            if let Some(o) = vgui
+                .child_named(demos_page, PLAYER_MATCH)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null() && *(*o as *const usize) == base + build.combo_box_vftable)
+            {
+                let add_item: ComboAddItemFn = slot(o, COMBO_SLOT_ADD_ITEM);
+                for item in PLAYER_MATCHES {
                     add_item(o, item.as_ptr(), std::ptr::null());
                 }
                 let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
@@ -2940,6 +2980,13 @@ mod hook {
             }
             Action::Vcr(c) => Vgui::get().and_then(|vgui| unsafe { to_vcr_bar(&vgui, c) }),
             Action::Goto => unsafe { goto_typed_time() },
+            Action::ClearPlayers => {
+                PICKED_PLAYERS
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clear();
+                Ok(())
+            }
             Action::ResetSettings => {
                 crate::commands::console_print(&format!("{NAME}: {}\n", reset_settings()));
                 Ok(())

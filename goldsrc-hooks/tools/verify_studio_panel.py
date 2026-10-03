@@ -311,6 +311,15 @@ def verify(game, src):
     check(combo_vt and ui.u32(combo_vt + 4 * get_text) == ui.u32(text_vt + 4 * get_text),
           f"ComboBox reads its text through TextEntry's slot {get_text}")
 
+    # 24: the Player box is emptied after a pick through TextEntry's
+    # SetText(const char *), the slot that looks for a "#" localisation
+    # token before handing on to the wide SetText.
+    set_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_SET_TEXT")
+    set_fn = ui.u32(text_vt + 4 * set_text) - ui.base if text_vt else 0
+    looks_for_hash = any(re.search(r"cmp (byte ptr \[\w+\]|\w+), 0x23$", x) for x in ui.body(set_fn, 0x60))
+    check(looks_for_hash and combo_vt and ui.u32(combo_vt + 4 * set_text) == ui.u32(text_vt + 4 * set_text),
+          f"TextEntry slot {set_text} is SetText(const char *) (checks for a # token), and ComboBox inherits it")
+
     # 23: the Player dropdown. DeleteAllItems hands on to the drop-down menu
     # kept at combo_menu, whose own walks the items marking each for deletion
     # (Panel slot 71); OnCommand("ButtonClicked") is what opens the list.

@@ -94,6 +94,22 @@ pub fn has_player(demo: &DemoPlayers, player: &str, recorded: bool) -> bool {
     })
 }
 
+/// Whether the demo has the players `terms` name (each as [`has_player`]
+/// reads one): every one of them when `all`, else at least one. With
+/// `recorded`, one of those found recorded it.
+pub fn has_players(demo: &DemoPlayers, terms: &[String], all: bool, recorded: bool) -> bool {
+    let found: Vec<&String> = terms
+        .iter()
+        .filter(|t| has_player(demo, t, false))
+        .collect();
+    let enough = if all {
+        found.len() == terms.len()
+    } else {
+        !found.is_empty()
+    };
+    enough && (!recorded || found.iter().any(|t| has_player(demo, t, true)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -127,5 +143,30 @@ mod tests {
     fn recorded_it_needs_the_recorder() {
         assert!(has_player(&demo(), "brain", true));
         assert!(!has_player(&demo(), "element", true));
+    }
+
+    #[test]
+    fn several_players_all_or_any() {
+        let demo = DemoPlayers {
+            demo_type: "POV".into(),
+            players: ["dyelife", "m00cat"]
+                .iter()
+                .enumerate()
+                .map(|(i, n)| DemoPlayer {
+                    id: format!("PLAYER_{i}"),
+                    steam_id: None,
+                    name: n.to_string(),
+                    recorder: i == 0,
+                })
+                .collect(),
+        };
+        let terms = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(has_players(&demo, &terms(&["dye", "cat"]), true, false));
+        assert!(!has_players(&demo, &terms(&["dye", "nobody"]), true, false));
+        assert!(has_players(&demo, &terms(&["dye", "nobody"]), false, false));
+        assert!(!has_players(&demo, &terms(&["nobody"]), false, false));
+        // Recorded: one of those found recorded it.
+        assert!(has_players(&demo, &terms(&["cat", "dye"]), true, true));
+        assert!(!has_players(&demo, &terms(&["cat"]), true, true));
     }
 }
