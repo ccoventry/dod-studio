@@ -48,9 +48,11 @@
 //! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
 //! tab (`Playback.res`, `Demos.res`, `Studio.res`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
-//! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time and
-//! never again, so build-mode edits stay. `dodstudio_panel reset` puts the
-//! defaults back and rebuilds the window.
+//! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
+//! later DLL with a changed default replaces a file only while it is still
+//! exactly what was written (`defaults.txt` keeps each one's hash), so
+//! build-mode edits stay. `dodstudio_panel reset` puts every default back and
+//! rebuilds the window.
 //!
 //! ## Per build
 //!
@@ -1185,23 +1187,78 @@ fn reset_settings() -> String {
     format!("{} setting(s) back to their defaults", defaults.len())
 }
 
-/// Writes each default layout that is missing (or all of them on `reset`),
-/// and says what it wrote. Never touches an existing file otherwise:
-/// build-mode edits are the user's.
+/// What each layout file held when this DLL (or an earlier one) wrote it:
+/// `<file> <fnv1a>` per line, in `dodstudio_ui/defaults.txt`.
+const DEFAULTS_FILE: &str = "defaults.txt";
+
+fn fnv1a(text: &str) -> u32 {
+    text.bytes()
+        .filter(|&b| b != b'\r')
+        .fold(0x811c_9dc5u32, |h, b| {
+            (h ^ b as u32).wrapping_mul(0x0100_0193)
+        })
+}
+
+/// Which layouts to write, given what is on disk and what was written there:
+/// a missing file; on `reset`, every file; and a file still exactly as an
+/// earlier DLL wrote it when this one's default differs (a new control).
+/// A file edited since (build mode) is the user's and left alone.
+fn res_to_write(
+    reset: bool,
+    on_disk: Option<&str>,
+    written_before: Option<u32>,
+    default: &str,
+) -> bool {
+    match on_disk {
+        None => true,
+        Some(_) if reset => true,
+        Some(text) => fnv1a(text) != fnv1a(default) && written_before == Some(fnv1a(text)),
+    }
+}
+
+/// Writes each default layout that is missing, still as an earlier DLL wrote
+/// it but changed since, or (on `reset`) all of them, and says what it wrote.
+/// Never touches a file edited since: build-mode edits are the user's.
 fn ensure_res(reset: bool) -> Result<Option<String>, String> {
     let dir = res_dir();
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    let stamps_path = dir.join(DEFAULTS_FILE);
+    let mut stamps: Vec<(String, u32)> = std::fs::read_to_string(&stamps_path)
+        .unwrap_or_default()
+        .lines()
+        .filter_map(|l| {
+            let (file, hash) = l.split_once(' ')?;
+            Some((file.to_string(), u32::from_str_radix(hash.trim(), 16).ok()?))
+        })
+        .collect();
     let mut written = Vec::new();
     for (_, file, default) in std::iter::once(WINDOW_RES).chain(PAGES.iter().map(|p| p.res)) {
         let path = dir.join(file);
-        if path.exists() && !reset {
-            continue;
+        let on_disk = std::fs::read_to_string(&path).ok();
+        let before = stamps.iter().find(|(f, _)| f == file).map(|(_, h)| *h);
+        let write = res_to_write(reset, on_disk.as_deref(), before, default);
+        if write {
+            std::fs::write(&path, default)
+                .map_err(|e| format!("could not write {}: {e}", path.display()))?;
+            written.push(file);
         }
-        std::fs::write(&path, default)
-            .map_err(|e| format!("could not write {}: {e}", path.display()))?;
-        written.push(file);
+        // Note what this file holds when it is ours: just written, or still
+        // the default this DLL would write.
+        if write
+            || on_disk
+                .as_deref()
+                .is_some_and(|t| fnv1a(t) == fnv1a(default))
+        {
+            stamps.retain(|(f, _)| f != file);
+            stamps.push((file.to_string(), fnv1a(default)));
+        }
     }
+    let text: String = stamps
+        .iter()
+        .map(|(f, h)| format!("{f} {h:08x}\n"))
+        .collect();
+    let _ = std::fs::write(&stamps_path, text);
     Ok((!written.is_empty()).then(|| format!("wrote {} to {}", written.join(", "), dir.display())))
 }
 
@@ -3355,6 +3412,25 @@ mod tests {
         missing.sort();
         missing.dedup();
         assert!(missing.is_empty(), "missing from Commands.res: {missing:?}");
+    }
+
+    #[test]
+    fn a_layout_is_rewritten_only_while_it_is_still_ours() {
+        let (old, new, edited) = ("a 1", "a 2", "a 1 moved");
+        // Missing: written.
+        assert!(res_to_write(false, None, None, new));
+        // As an earlier DLL wrote it, and the default changed: upgraded.
+        assert!(res_to_write(false, Some(old), Some(fnv1a(old)), new));
+        // Edited in build mode since: left alone.
+        assert!(!res_to_write(false, Some(edited), Some(fnv1a(old)), new));
+        // Never stamped (written before stamps existed): left alone.
+        assert!(!res_to_write(false, Some(old), None, new));
+        // Already the default: nothing to do.
+        assert!(!res_to_write(false, Some(new), Some(fnv1a(new)), new));
+        // Reset writes regardless.
+        assert!(res_to_write(true, Some(edited), None, new));
+        // Line endings don't count as an edit.
+        assert_eq!(fnv1a("a\r\nb"), fnv1a("a\nb"));
     }
 
     #[test]
