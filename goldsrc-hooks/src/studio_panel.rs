@@ -2905,6 +2905,16 @@ mod hook {
                     load_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {
+                    // Closed some other way than the console key (its X,
+                    // Close): the game still thinks the console the key
+                    // opened is open, and ESC would bring it back. Close it
+                    // the game's way, as the key does.
+                    if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
+                        if let Some(window) = vgui.popup(CONSOLE) {
+                            vgui.set_visible(window, true);
+                        }
+                        crate::cmd_list::call_real(&super::REAL_TOGGLECONSOLE);
+                    }
                     give_back(&vgui, &mut lent, None);
                     unpark(&vgui, &mut lent);
                     return;
