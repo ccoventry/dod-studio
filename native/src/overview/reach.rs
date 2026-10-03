@@ -504,6 +504,9 @@ fn flood(level: &Level, reach: &mut Reach, progress: &dyn Fn(f32) -> bool) -> Re
                 && !reach
                     .nodes_in(next)
                     .any(|k2| (reach.z[k2] - z).abs() <= STEP);
+            // First the landing, from the grid alone; only then the air on
+            // the way, which costs hull tests (most scans find nothing).
+            let mut landing = None;
             for step in 2..=LEAP_CELLS {
                 let (ii, jj) = (i + di * step, j + dj * step);
                 if !(0..reach.nx).contains(&ii) || !(0..reach.ny).contains(&jj) {
@@ -519,23 +522,39 @@ fn flood(level: &Level, reach: &mut Reach, progress: &dyn Fn(f32) -> bool) -> Re
                         && (z2 > z + STEP || (gap && z2 >= z - STEP && z2 <= z + STEP))
                 });
                 if let Some(k2) = ledge {
-                    if !reach.reached[k2] {
-                        reach.reached[k2] = true;
-                        queue.push_back(k2);
-                    }
+                    landing = Some((step, k2));
+                    break;
+                }
+                // Ground on the way as high as the take-off, or a step above
+                // it, that he can stand on: he would walk on and jump from
+                // there, and that node's own scan covers it. Only jumps over
+                // ground lower than where he left are worth following.
+                if reach
+                    .nodes_in(c2)
+                    .any(|k2| reach.fits[k2] && (z - 2.0..=z + STEP).contains(&reach.z[k2]))
+                {
                     break;
                 }
                 if reach.nodes_in(c2).any(|k2| (reach.z[k2] - z).abs() <= STEP) {
                     gap = false;
                 }
-                // Through open air, low or at the top of the jump (over the
-                // edge of the very ledge he lands on).
-                let [x, y] = reach.centre(c2);
-                if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF])
-                    && !fits(level, [x, y, z + JUMP + CROUCH_HALF])
-                {
-                    break;
-                }
+            }
+            let Some((at, k2)) = landing else {
+                continue;
+            };
+            if reach.reached[k2] {
+                continue;
+            }
+            // Through open air, low or at the top of the jump (over the edge
+            // of the very ledge he lands on).
+            let open = (2..at).all(|step| {
+                let [x, y] = reach.centre((i + di * step) * reach.ny + (j + dj * step));
+                fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF])
+                    || fits(level, [x, y, z + JUMP + CROUCH_HALF])
+            });
+            if open {
+                reach.reached[k2] = true;
+                queue.push_back(k2);
             }
         }
     }
