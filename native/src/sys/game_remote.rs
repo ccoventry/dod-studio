@@ -15,6 +15,12 @@ pub fn pipe_name(pid: u32) -> String {
     format!(r"\\.\pipe\dodstudio-hl-{pid}")
 }
 
+/// The game's events pipe (#434): it writes the pipeline's markers to it.
+/// Must match `goldsrc-hooks`' `events::events_pipe_name` to the character.
+pub fn events_pipe_name(pid: u32) -> String {
+    format!(r"\\.\pipe\dodstudio-hl-{pid}-events")
+}
+
 /// Why a command can't be sent as it is.
 pub fn check_command(command: &str) -> Result<(), String> {
     if command.trim().is_empty() {
@@ -85,6 +91,12 @@ mod tests {
     fn the_pipe_is_named_after_the_game_process() {
         // goldsrc-hooks' remote.rs pins the same string.
         assert_eq!(pipe_name(4242), r"\\.\pipe\dodstudio-hl-4242");
+    }
+
+    #[test]
+    fn the_events_pipe_is_named_after_the_game_process() {
+        // goldsrc-hooks' events.rs pins the same string.
+        assert_eq!(events_pipe_name(4242), r"\\.\pipe\dodstudio-hl-4242-events");
     }
 
     #[test]
