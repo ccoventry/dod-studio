@@ -65,6 +65,10 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `engine_buttons`: a button inside a GameUI window whose command is
+//!   `engine <console command>` runs it, as the ESC menu's entries do
+//!   (issue #408). On by default, since it only acts on commands the window
+//!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
 //! - `demo_seek`: the `dodstudio_seek_to` / `dodstudio_seek_by` commands --
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
@@ -127,6 +131,7 @@ mod demo_reload;
 mod demo_seek;
 mod detour;
 mod engine;
+mod engine_buttons;
 mod events;
 mod ex_interp;
 mod fire_sounds;
@@ -213,6 +218,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     hull_trace_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
+        Ordering::Relaxed,
+    );
+    // Only acts on commands a window would otherwise drop, so on unless asked
+    // not to.
+    engine_buttons::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
         Ordering::Relaxed,
     );
     // A crash fix, so on unless asked not to.
