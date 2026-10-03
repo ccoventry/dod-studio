@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   emptyEdits, normaliseEdits, setAreaEdit, areaEdit, setFaceColour, faceColour,
   insidePolygon, faceAt, toPixel, toWorld, spawnLabels, flagName, setFlagName,
-  labelAt, toBase64,
+  labelAt, toBase64, flagOffset, setFlagOffset, flagLabelAt, flagLabelSpot,
 } from './overview_draw.js';
 import { mapTitle } from './overview_themes.js';
 
@@ -77,6 +77,30 @@ describe('edits', () => {
     expect(areaEdit(e, s.areas[0])).toBeUndefined();
     e = setAreaEdit(e, s.areas[1], null);
     expect(e.areas).toEqual([]);
+  });
+
+  it('a dragged flag name keeps its place when renamed, and loses it on reset', () => {
+    const s = scene();
+    const flag = s.flags[0];
+    let e = setFlagOffset(emptyEdits(), flag, [40, -10]);
+    e = setFlagName(e, flag, 'Square');
+    expect(flagOffset(e, flag)).toEqual([40, -10]);
+    expect(flagName(e, flag)).toBe('Square');
+    e = setFlagName(e, flag, 'Plaza');
+    expect(flagOffset(e, flag)).toEqual([40, -10]);
+    e = setFlagOffset(e, flag, null);
+    expect(e.flagNames).toEqual([]);
+  });
+
+  it("finds a flag's name where it is drawn", () => {
+    const s = scene();
+    const flag = s.flags[0];
+    const [x, y] = flagLabelSpot(s, emptyEdits(), flag);
+    expect(y).toBeGreaterThan(flag.at[1]);
+    expect(flagLabelAt(s, emptyEdits(), x, y)).toBe(flag);
+    expect(flagLabelAt(s, emptyEdits(), flag.at[0], flag.at[1])).toBeNull();
+    const hidden = { ...emptyEdits(), show: { ...emptyEdits().show, flagLabels: false } };
+    expect(flagLabelAt(s, hidden, x, y)).toBeNull();
   });
 
   it('typed flag names replace the game name, and the game name clears them', () => {

@@ -759,6 +759,22 @@ export async function overviewScene(install, map) {
     });
 }
 
+export async function overviewFlagIcons(install, map) {
+  return invoke("overview_flag_icons", { install, map })
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_flag_icons):", err);
+      throw err;
+    });
+}
+
+export async function overviewScreenHeight() {
+  return invoke("overview_screen_height")
+    .catch((err) => {
+      console.error("IPC Execution Error (overview_screen_height):", err);
+      return null;
+    });
+}
+
 export async function overviewLoadEdits(map, install) {
   return invoke("overview_load_edits", { map, install })
     .catch((err) => {

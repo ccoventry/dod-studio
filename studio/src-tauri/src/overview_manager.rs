@@ -67,6 +67,59 @@ pub async fn overview_scene(
 
 /// The page's edits for `map`: this PC's own, else the ones saved beside
 /// `install`'s overview (`dod_addon/overviews/<map>.dodstudio.json`).
+/// Each flag's icon as the game draws it on its map, read from `install`
+/// (`native::overview::flag_icons`), for the page to preview.
+#[tauri::command]
+pub async fn overview_flag_icons(
+    install: String,
+    map: String,
+) -> Result<Vec<native::overview::flag_icons::FlagIcon>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let install = Path::new(&install);
+        let bsp = install.join("dod").join("maps").join(format!("{map}.bsp"));
+        let level = native::overview::level::Level::from_file(&bsp)?;
+        Ok(native::overview::flag_icons::flag_icons(install, &level))
+    }))
+    .await
+}
+
+/// The screen height Half-Life last ran at (`ScreenHeight` under
+/// `HKCU\Software\Valve\Half-Life\Settings`), for sizing the flag icons
+/// the page previews; None when it can't be read.
+#[tauri::command]
+pub async fn overview_screen_height() -> Option<u32> {
+    tokio::task::spawn_blocking(screen_height)
+        .await
+        .ok()
+        .flatten()
+}
+
+#[cfg(windows)]
+fn screen_height() -> Option<u32> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Valve\Half-Life\Settings",
+            "/v",
+            "ScreenHeight",
+        ])
+        .creation_flags(0x08000000) // CREATE_NO_WINDOW
+        .output()
+        .ok()?;
+    let text = String::from_utf8_lossy(&out.stdout);
+    let value = text
+        .split_whitespace()
+        .skip_while(|w| *w != "REG_DWORD")
+        .nth(1)?;
+    u32::from_str_radix(value.trim_start_matches("0x"), 16).ok()
+}
+
+#[cfg(not(windows))]
+fn screen_height() -> Option<u32> {
+    None
+}
+
 #[tauri::command]
 pub fn overview_load_edits(map: String, install: Option<String>) -> Option<serde_json::Value> {
     files::load_edits_for(install.as_deref().map(Path::new), &map)

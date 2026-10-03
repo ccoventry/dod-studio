@@ -670,6 +670,8 @@ pub fn run() {
             overview_manager::overview_reset_edits,
             overview_manager::overview_export,
             overview_manager::overview_export_hd,
+            overview_manager::overview_flag_icons,
+            overview_manager::overview_screen_height,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

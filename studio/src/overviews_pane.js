@@ -11,11 +11,11 @@ import { listen } from '@tauri-apps/api/event';
 import { STRINGS } from './strings.js';
 import {
   overviewInstalls, overviewMaps, overviewScene, overviewLoadEdits,
-  overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd,
+  overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd, overviewFlagIcons, overviewScreenHeight,
 } from './ipc_bridge.js';
 import {
   emptyEdits, normaliseEdits, drawOverview, faceAt, labelAt, setAreaEdit,
-  areaEdit, setFaceColour, flagName, setFlagName, toWorld, renderExport, renderHd, toBase64,
+  areaEdit, setFaceColour, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
@@ -24,6 +24,9 @@ const INSTALL_KEY = 'overviews.install';
 // Each map keeps the theme it was made in; the one last picked on any map
 // is what a map not yet given one opens in.
 const THEME_KEY = 'overviews.theme';
+// The screen height the flag icon preview is sized for.
+const FLAG_SCREEN_KEY = 'overviews.flagScreen';
+const SCREEN_HEIGHTS = [480, 600, 720, 768, 900, 1024, 1080, 1200, 1440, 2160];
 const UNDO_LIMIT = 100;
 
 function storageGet(key) {
@@ -57,6 +60,7 @@ export function initOverviewsPane() {
   const labelList = pane.querySelector('#ov-labels');
   const formatSelect = pane.querySelector('#ov-format');
   const themeSelect = pane.querySelector('#ov-theme');
+  const flagScreenSelect = pane.querySelector('#ov-flag-screen');
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
@@ -79,6 +83,11 @@ export function initOverviewsPane() {
   let saveTimer = null;
   let loaded = false;
   let loadToken = 0;
+  // The game's flag icons for the map shown, and the screen height they are
+  // previewed at (the game's own, from its settings, unless picked here).
+  let flagIcons = [];
+  let gameScreen = null;
+  let flagScreen = Number(storageGet(FLAG_SCREEN_KEY)) || 720;
   // The map being built: highlighted in the list straight away.
   let opening = null;
   const cache = {};
@@ -147,7 +156,11 @@ export function initOverviewsPane() {
     canvas.style.display = '';
     empty.style.display = 'none';
     const s = layout();
-    drawOverview(canvas.getContext('2d'), scene, edits, s, { cache, selectedLabel });
+    drawOverview(canvas.getContext('2d'), scene, edits, s, {
+      cache,
+      selectedLabel,
+      flagIcons: { icons: flagIcons, screenHeight: flagScreen },
+    });
   }
 
   function pixelOf(event) {
@@ -160,6 +173,11 @@ export function initOverviewsPane() {
     if (!scene || event.button !== 0) return;
     const [x, y] = pixelOf(event);
     const label = labelAt(scene, edits, x, y);
+    const flag = label ? null : flagLabelAt(scene, edits, x, y);
+    if (flag) {
+      drag = { flag, moved: false, before: edits };
+      return;
+    }
     if (label) {
       selectedLabel = label.id;
       drag = { id: label.id, moved: false, before: edits };
@@ -202,7 +220,11 @@ export function initOverviewsPane() {
     if (!drag || !scene) return;
     const [x, y] = pixelOf(event);
     const world = toWorld(scene.transform, x, y);
-    edits = { ...edits, labels: edits.labels.map((l) => (l.id === drag.id ? { ...l, world } : l)) };
+    if (drag.flag) {
+      edits = setFlagOffset(edits, drag.flag, [world[0] - drag.flag.world[0], world[1] - drag.flag.world[1]]);
+    } else {
+      edits = { ...edits, labels: edits.labels.map((l) => (l.id === drag.id ? { ...l, world } : l)) };
+    }
     drag.moved = true;
     draw();
   });
@@ -213,6 +235,7 @@ export function initOverviewsPane() {
       history.push(drag.before);
       undoBtn.disabled = false;
       persistSoon();
+      if (drag.flag) renderSidePanels();
     }
     drag = null;
   });
@@ -292,13 +315,24 @@ export function initOverviewsPane() {
       flagList.appendChild(p);
     }
     for (const flag of scene?.flags || []) {
+      const row = document.createElement('div');
+      row.className = 'ov-flag-row';
       const input = document.createElement('input');
       input.type = 'text';
       input.value = flagName(edits, flag);
       input.placeholder = flag.name;
       input.addEventListener('change', () => change(setFlagName(edits, flag, input.value.trim() || flag.name)));
-      flagList.appendChild(input);
+      // Drag the name on the map to move it; this puts it back.
+      const reset = document.createElement('button');
+      reset.className = 'ov-flag-reset';
+      reset.textContent = '↺';
+      reset.title = STRINGS.OVERVIEWS.FLAG_RESET_TIP;
+      reset.disabled = !flagOffset(edits, flag);
+      reset.addEventListener('click', () => change(setFlagOffset(edits, flag, null)));
+      row.append(input, reset);
+      flagList.appendChild(row);
     }
+    flagScreenSelect.disabled = !edits.show.flagIcons;
 
     labelList.innerHTML = '';
     for (const label of edits.labels) {
@@ -478,6 +512,52 @@ export function initOverviewsPane() {
     if (event.payload?.map === opening) showProgress(event.payload.fraction);
   });
 
+  // ── The game's flag icons, previewed ───────────────────────────────────
+  // Read from the install for the map shown (overview_flag_icons), sized
+  // for a screen height: the one picked here, else the game's own.
+  function renderScreenOptions() {
+    flagScreenSelect.innerHTML = '';
+    const heights = [...new Set([...SCREEN_HEIGHTS, flagScreen, gameScreen].filter(Boolean))].sort((a, b) => a - b);
+    for (const h of heights) {
+      const opt = document.createElement('option');
+      opt.value = h;
+      opt.textContent = STRINGS.OVERVIEWS.flagScreen(h, h === gameScreen);
+      flagScreenSelect.appendChild(opt);
+    }
+    flagScreenSelect.value = flagScreen;
+  }
+  flagScreenSelect.addEventListener('change', () => {
+    flagScreen = Number(flagScreenSelect.value);
+    storageSet(FLAG_SCREEN_KEY, String(flagScreen));
+    draw();
+  });
+  overviewScreenHeight().then((h) => {
+    gameScreen = h || null;
+    if (gameScreen && !storageGet(FLAG_SCREEN_KEY)) flagScreen = gameScreen;
+    renderScreenOptions();
+    draw();
+  });
+  renderScreenOptions();
+
+  async function loadFlagIcons(name) {
+    flagIcons = [];
+    try {
+      const list = await overviewFlagIcons(install, name);
+      if (scene?.map !== name) return;
+      flagIcons = list.map((icon) => {
+        const bytes = Uint8ClampedArray.from(atob(icon.rgba), (c) => c.charCodeAt(0));
+        const image = document.createElement('canvas');
+        image.width = icon.width;
+        image.height = icon.height;
+        image.getContext('2d').putImageData(new ImageData(bytes, icon.width, icon.height), 0, 0);
+        return { world: icon.world, width: icon.width, height: icon.height, image };
+      });
+      draw();
+    } catch {
+      // No icons to preview: the box just shows nothing.
+    }
+  }
+
   // A newer pick makes the backend drop the older build (overview_manager.rs).
   // The last map goes at once: the page shows the one being built, not the
   // one before it.
@@ -522,6 +602,7 @@ export function initOverviewsPane() {
     renderSidePanels();
     renderMapList();
     draw();
+    loadFlagIcons(name);
   }
 
   // ── Save and start over ────────────────────────────────────────────────

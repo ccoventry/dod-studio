@@ -72,6 +72,7 @@
                 <div class="ov-checks" id="ov-show">
                   <label><input type="checkbox" data-show="flags"> <span data-str="OVERVIEWS.SHOW_FLAGS">Flags</span></label>
                   <label><input type="checkbox" data-show="flagLabels"> <span data-str="OVERVIEWS.SHOW_FLAG_NAMES">Flag names</span></label>
+                  <label title="The game's flag icons over the map, as big as they come out in game. Never saved in the overview."><input type="checkbox" data-show="flagIcons"> <span data-str="OVERVIEWS.SHOW_FLAG_ICONS">Flag icons (preview only)</span></label>
                   <label><input type="checkbox" data-show="capZones"> <span data-str="OVERVIEWS.SHOW_CAP_ZONES">Capture zones</span></label>
                   <label title="Floors you can shoot or blow away get a dotted outline"><input type="checkbox" data-show="breakables"> <span data-str="OVERVIEWS.SHOW_BREAKABLES">Breakable floors</span></label>
                   <label title="Slopes too steep to stand on, that you can still get onto and slide off, get an outline"><input type="checkbox" data-show="slopes"> <span data-str="OVERVIEWS.SHOW_SLOPES">Slopes you slide on</span></label>
@@ -81,6 +82,10 @@
                   <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
                 </div>
 
+                <label class="ov-field" title="The game draws flag icons at a fixed size on screen, so they cover more of the map the smaller the screen">
+                  <span data-str="OVERVIEWS.FLAG_SCREEN_LABEL">Flag icons as seen at</span>
+                  <select id="ov-flag-screen"></select>
+                </label>
                 <div class="ov-subtitle" data-str="OVERVIEWS.FLAGS_TITLE">Flag names</div>
                 <div id="ov-flag-names" class="ov-list"></div>
 

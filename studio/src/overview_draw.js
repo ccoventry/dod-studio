@@ -26,6 +26,8 @@ export function emptyEdits() {
       spawnLabels: true,
       flags: true,
       flagLabels: true,
+      // The game's flag icons over the map, on the page only (never saved).
+      flagIcons: false,
       capZones: true,
       breakables: true,
       slopes: true,
@@ -141,15 +143,66 @@ export function setFaceColour(edits, face, colour) {
   return withThemeColours(edits, { faces: colour ? [...rest, { face: face.face, colour }] : rest });
 }
 
+// A flag's entry in edits.flagNames: { at, name?, offset? }, `at` the
+// flag's world position, `name` typed over the game's, `offset` (world
+// units from the flag) where its name was dragged to.
+const flagEntry = (edits, flag) => edits.flagNames.find((e) => near(e.at, flag.world, 1));
+
+function setFlagEntry(edits, flag, patch) {
+  const rest = edits.flagNames.filter((e) => !near(e.at, flag.world, 1));
+  const next = { ...(flagEntry(edits, flag) || {}), ...patch, at: [flag.world[0], flag.world[1]] };
+  if (next.name == null) delete next.name;
+  if (next.offset == null) delete next.offset;
+  return { ...edits, flagNames: next.name != null || next.offset ? [...rest, next] : rest };
+}
+
 export function flagName(edits, flag) {
-  const typed = edits.flagNames.find((e) => near(e.at, flag.world, 1));
-  return typed ? typed.name : flag.name;
+  return flagEntry(edits, flag)?.name ?? flag.name;
 }
 
 export function setFlagName(edits, flag, name) {
-  const rest = edits.flagNames.filter((e) => !near(e.at, flag.world, 1));
-  if (name == null || name === flag.name) return { ...edits, flagNames: rest };
-  return { ...edits, flagNames: [...rest, { at: [flag.world[0], flag.world[1]], name }] };
+  return setFlagEntry(edits, flag, { name: name == null || name === flag.name ? null : name });
+}
+
+/** Where a flag's name has been dragged to (world units from it), or null. */
+export function flagOffset(edits, flag) {
+  return flagEntry(edits, flag)?.offset ?? null;
+}
+
+/** Moves a flag's name `offset` world units from the flag; null puts it back. */
+export function setFlagOffset(edits, flag, offset) {
+  return setFlagEntry(edits, flag, { offset });
+}
+
+/** Rough half-width of a 15 px bold name, in image pixels. */
+const nameHalf = (name) => Math.max(12, (name.length * 15 * 0.6) / 2);
+
+/**
+ * The middle of a flag's name, in image pixels: where it was dragged to,
+ * else under the flag, clear of the icon the game draws over it (about 64
+ * image pixels across on the full map at 720p); above it at the bottom
+ * edge; kept inside the image sideways.
+ */
+export function flagLabelSpot(scene, edits, flag) {
+  const offset = flagOffset(edits, flag);
+  if (offset) return toPixel(scene.transform, flag.world[0] + offset[0], flag.world[1] + offset[1]);
+  const [x, y] = flag.at;
+  const half = nameHalf(flagName(edits, flag));
+  const cx = Math.max(half + 4, Math.min(scene.width - half - 4, x));
+  const below = y + FLAG_CLEAR + 8 < scene.height - 4;
+  return [cx, below ? y + FLAG_CLEAR : y - FLAG_CLEAR];
+}
+
+/** The flag whose name is under an image pixel, when names are shown. */
+export function flagLabelAt(scene, edits, x, y) {
+  if (!edits.show.flags || !edits.show.flagLabels) return null;
+  for (const flag of scene.flags) {
+    const name = flagName(edits, flag);
+    if (!name) continue;
+    const [lx, ly] = flagLabelSpot(scene, edits, flag);
+    if (Math.abs(x - lx) <= nameHalf(name) && Math.abs(y - ly) <= 15 * 0.7) return flag;
+  }
+  return null;
 }
 
 /** The colour a face is drawn in, or null when its area is hidden. */
@@ -303,7 +356,7 @@ function voidMask(scene, edits) {
  * becomes the game's transparency) instead of the key green.
  * `cache` (an object) keeps the void mask between draws of unchanged edits.
  */
-export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null } = {}) {
+export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null, flagIcons = null } = {}) {
   const w = scene.width * s;
   const h = scene.height * s;
   ctx.save();
@@ -494,18 +547,27 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       ctx.arc(x * s, y * s, 6 * s, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-      if (edits.show.flagLabels) {
+    }
+    // The game's own flag icons, as big as they come out on the full map
+    // at the screen height asked for (preview only; see flag_icons.rs).
+    if (edits.show.flagIcons && flagIcons?.icons?.length) {
+      const k = 768 / (0.625 * flagIcons.screenHeight);
+      ctx.save();
+      ctx.imageSmoothingEnabled = true;
+      for (const icon of flagIcons.icons) {
+        const [x, y] = toPixel(scene.transform, icon.world[0], icon.world[1]);
+        const w = icon.width * k;
+        const h = icon.height * k;
+        ctx.drawImage(icon.image, (x - w / 2) * s, (y - h / 2) * s, w * s, h * s);
+      }
+      ctx.restore();
+    }
+    if (edits.show.flagLabels) {
+      for (const flag of scene.flags) {
         const name = flagName(edits, flag);
-        if (name) {
-          // Under the flag, clear of the icon the game draws over it (about
-          // 64 image pixels across on the full map); above it at the bottom
-          // edge. Kept inside the image sideways.
-          ctx.font = `bold ${15 * s}px Arial, sans-serif`;
-          const half = ctx.measureText(name).width / s / 2;
-          const cx = Math.max(half + 4, Math.min(scene.width - half - 4, x));
-          const below = y + FLAG_CLEAR + 8 < scene.height - 4;
-          text(name, cx, below ? y + FLAG_CLEAR : y - FLAG_CLEAR, 15, 'center');
-        }
+        if (!name) continue;
+        const [lx, ly] = flagLabelSpot(scene, edits, flag);
+        text(name, lx, ly, 15, 'center');
       }
     }
   }

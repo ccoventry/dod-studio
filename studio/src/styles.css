@@ -2023,6 +2023,16 @@ tr.keyboard-selected {
   min-width: 0;
 }
 
+.ov-flag-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ov-flag-row input {
+  flex: 1;
+  min-width: 0;
+}
+
 .ov-label-row.active input {
   outline: 1px dashed #ffdd00;
 }

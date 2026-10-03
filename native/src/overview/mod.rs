@@ -12,12 +12,15 @@
 //!   `.txt`;
 //! - [`image`] encodes what the Overviews page drew as the `.tga` or `.bmp`
 //!   the game's loader takes;
+//! - [`flag_icons`] reads the icons the game draws on its map for each flag,
+//!   for the page to preview;
 //! - [`files`] finds installs and maps and writes the result, keeping a
 //!   backup of anyone's own overview.
 //!
 //! The page does the drawing and the editing; this module never rasterises.
 
 pub mod files;
+pub mod flag_icons;
 pub mod image;
 pub mod level;
 pub mod reach;

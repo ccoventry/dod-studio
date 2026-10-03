@@ -355,3 +355,52 @@ test('each theme keeps its own colours', async ({ page }) => {
   await page.selectOption('#ov-theme', 'colours');
   await expect.poll(pixel).toEqual([125, 29, 55]);
 });
+
+test('a flag name can be dragged, and the reset button puts it back', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const box = await page.locator('#ov-canvas').boundingBox();
+  const at = (x, y) => [box.x + (x / 1024) * box.width, box.y + (y / 768) * box.height];
+  // Plaza's name sits under the flag (300, 300) by default.
+  await page.mouse.move(...at(300, 342));
+  await page.mouse.down();
+  await page.mouse.move(...at(450, 200), { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.flagNames[0]?.offset).toBeTruthy();
+  const reset = page.locator('#ov-flag-names .ov-flag-reset');
+  await expect(reset).toBeEnabled();
+  await reset.click();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.flagNames).toEqual([]);
+  await expect(reset).toBeDisabled();
+});
+
+test("the game's flag icons can be previewed, sized for a screen height, and are never saved", async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.overview_screen_height = () => 720;
+    window.__mockInvokeHandlers.overview_flag_icons = async () => {
+      const { toWorld } = await import('/src/overview_draw.js');
+      const [x, y] = toWorld({ zoom: 1.5, origin: [0, 0, 0], rotated: false, height: 0 }, 600, 650);
+      const red = new Uint8Array(32 * 32 * 4).map((_, i) => [255, 0, 0, 255][i % 4]);
+      return [{ world: [x, y, 0], width: 32, height: 32, rgba: btoa(String.fromCharCode(...red)) }];
+    };
+  });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const pixel = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  expect(await pixel(600, 650)).not.toEqual([255, 0, 0]);
+  await page.locator('#ov-show input[data-show="flagIcons"]').check();
+  await expect.poll(() => pixel(600, 650)).toEqual([255, 0, 0]);
+  // At 720p a 32 px icon is 32 * 768 / 450 = 55 image pixels across: 25 out
+  // from its middle is still icon; at 2160p (18 across) it isn't.
+  await page.selectOption('#ov-flag-screen', '720');
+  await expect.poll(() => pixel(625, 650)).toEqual([255, 0, 0]);
+  await page.selectOption('#ov-flag-screen', '2160');
+  await expect.poll(() => pixel(625, 650)).not.toEqual([255, 0, 0]);
+  // Saving draws without them.
+  await page.click('#ov-save-btn');
+  await expect(page.locator('#ov-save-status')).toContainText('Saved');
+});
