@@ -373,6 +373,12 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
   }, { once: true });
 }
 
+/** The output files of this session's finished render jobs, in table order,
+ *  for Combine Clips (#107). */
+export function finishedRenderOutputs() {
+  return jobs.filter((j) => j.status === 'Finished' && j.output_path).map((j) => j.output_path);
+}
+
 export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChange, takeTracking) {
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');

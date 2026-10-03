@@ -1,5 +1,6 @@
 mod audit_manager;
 mod capture_manager;
+mod combine_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -577,6 +578,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
@@ -646,6 +648,9 @@ pub fn run() {
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
+            combine_manager::combine_plan,
+            combine_manager::combine_clips,
+            combine_manager::combine_cancel,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
