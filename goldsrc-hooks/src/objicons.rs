@@ -688,7 +688,7 @@ mod tests {
     fn the_status_line_distinguishes_a_set_coordinate_from_the_game_s() {
         // The one test in this module touching WANTED_X/Y/TIMER directly --
         // cargo test's default parallel runner would race two tests that both
-        // did this, the same shared-static hazard msglog.rs/hide_sprite.rs
+        // did this, the same shared-static hazard msglog.rs/hide_entity.rs
         // document for their own equivalent statics. Restoring all three to
         // UNSET (not just the one this test sets to a real value) keeps that
         // true if a second such test is ever added here.

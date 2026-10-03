@@ -105,7 +105,7 @@ at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
 ### `dodstudio_hide_hudelement`
 
-`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the ten
+`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the nine
 elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
 chat, the kill feed, the status bar, the objective icons and the rest.
 `dodstudio_hide_hudelement all 0` puts everything back. See
@@ -177,19 +177,22 @@ was left alone on purpose (tool textures, blank sprites, per-player skins). A
 texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
 shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
-### `dodstudio_hide_sprite`
+### `dodstudio_hide_entity`
 
-`dodstudio_hide_sprite <model-path>...` suppresses specific map-placed
-`env_sprite` entities by exact model path -- an allow-list, not a blanket
-toggle, replacing the whole set on each call (not additive). `clear` stops
-hiding anything. Only reaches genuine `env_sprite` entities rendered through
-the engine's normal entity list (`HUD_AddEntity`); DoD draws some
-sprite-looking things -- the crosshair, the capture-area icon -- as ordinary
-2D HUD elements instead, which this command can never reach regardless of
-path spelling (`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach
-those). No enumeration of valid paths either: an unmatched entry (wrong path,
-wrong extension, or a 2D-drawn element like the above) fails silently, with
-no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
+`dodstudio_hide_entity <model-path>...` suppresses specific world entities
+by exact model path: map sprites, props (`.mdl`), brush entities (`*12`).
+It is an allow-list, not a blanket toggle, replacing the whole set on each
+call (not additive). `clear` stops hiding anything. The old name,
+`dodstudio_hide_sprite`, still works for now (#333).
+
+It reaches only entities rendered through the engine's normal entity list
+(`HUD_AddEntity`). DoD draws some sprite-looking things -- the crosshair, the
+capture-area icon -- as ordinary 2D HUD elements instead, which this command
+can never reach regardless of path spelling
+(`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
+status, bare or in `dodstudio_debug_status`, says whether each path has
+matched anything this session, so a typo no longer fails silently. See
+`src/hide_entity.rs`'s module doc.
 
 ## Keeping this in sync
 

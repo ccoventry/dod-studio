@@ -37,10 +37,10 @@
 //! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
-//!   suppress specific map-placed `env_sprite` entities by model path, an
-//!   allow-list rather than a blanket toggle. Full design write-up in the
-//!   module doc itself (issue #315).
+//! - `hide_entity`: the `dodstudio_hide_entity <model-path>...` command (old
+//!   name `dodstudio_hide_sprite`, #333) -- suppress specific world entities
+//!   by model path, an allow-list rather than a blanket toggle. Full design
+//!   write-up in the module doc itself (issue #315).
 //! - `spectator_follow`: `dodstudio_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `dodstudio_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -131,7 +131,7 @@ mod events;
 mod ex_interp;
 mod fire_sounds;
 mod hand_signals;
-mod hide_sprite;
+mod hide_entity;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;

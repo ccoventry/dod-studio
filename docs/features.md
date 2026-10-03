@@ -255,11 +255,11 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
+| `dodstudio_hide_entity` | command | — | Hides world entities (sprites, props, brush entities) by model path, and says whether each path matched anything; old name `dodstudio_hide_sprite` still works | both |
 | `dodstudio_hide_hltv_messages` | cvar | 0 | Hides the HLTV proxy's on-screen text ("You're watching HLTV...") during playback | both |
-| `dodstudio_hide_hudelement` | command | — | Hides one of ten HUD elements: `crosshair`, `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
+| `dodstudio_hide_hudelement` | command | — | Hides one of nine HUD elements: `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
 | `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
-| `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
 | `dodstudio_spec_match_pov` | cvar | 0 | Makes a spectated first-person view match the player's own recording: weapon animations (grenades and priming included), the gunshots an HLTV demo lost, and the POV-style crosshair, hidden when the player's own would be while playing (sprinting, jumping, prone transitions, crawling, ladders, reloads, weapon switches, bolt cycling, knives, snipers, undeployed machine guns), the camera at ground level for a prone player, and the gun lowered off screen while sprinting, jumping, going prone, crawling or climbing | both |
 | `dodstudio_seek_by` | command | — | `viewdemo` only: jumps playback by a number of seconds, back if negative | both |
 | `dodstudio_seek_skip_between` | cvar | 0 | `1` makes a forward seek skip the commands it jumps over, so it lands clean | both |
