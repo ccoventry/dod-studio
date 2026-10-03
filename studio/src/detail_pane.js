@@ -5,6 +5,7 @@ import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { confirmOverLimit } from './packet_entity_limit.js';
 import { numberField } from './number_field.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -259,6 +260,8 @@ window.addEventListener("DOMContentLoaded", () => {
       }
       if (!currentDemo || !currentDemo.streaks) return;
       const highlights = allPreviewableStreaks(currentDemo);
+      // The game closes on a demo over its entity limit (#207).
+      if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
 
       let engineAlreadyRunning = false;
       try {

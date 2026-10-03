@@ -5,6 +5,7 @@ mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
+mod packet_limit_manager;
 mod render_manager;
 mod settings_manager;
 mod updater_manager;
@@ -646,6 +647,7 @@ pub fn run() {
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
+            packet_limit_manager::engine_packet_entity_limit,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
