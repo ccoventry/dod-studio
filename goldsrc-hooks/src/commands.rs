@@ -688,6 +688,9 @@ fn status_text() -> String {
     if let Some(lock) = crate::spectator_follow::status_line() {
         lines.push(lock);
     }
+    if let Some(hd) = crate::overview_hd::status_line() {
+        lines.push(hd);
+    }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
     }
