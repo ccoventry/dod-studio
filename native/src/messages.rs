@@ -156,6 +156,17 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── demo_rename.rs (#469) ─────────────────────────────────────────────────
+
+pub const RENAME_NOT_IN_PLACE: &str =
+    "a demo is only renamed within its own folder, never moved to another";
+pub const RENAME_SOURCE_GONE: &str = "the demo is no longer there";
+pub const RENAME_TARGET_EXISTS: &str = "a file with the new name is already there";
+
+pub fn rename_bad_name(name: &str) -> String {
+    format!("`{name}` isn't a usable demo name")
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any

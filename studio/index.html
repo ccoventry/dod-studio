@@ -721,6 +721,51 @@
             </div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
           </div>
+
+          <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
+          <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
+            <div class="panel-header flex-between">
+              <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
+            </div>
+            <div class="panel-body">
+              <p class="rename-hint" data-str="DEMO_RENAME.HINT"></p>
+              <div class="input-row">
+                <label for="rename-pov-template" class="rename-label" data-str="DEMO_RENAME.POV_LABEL">POV demos:</label>
+                <input type="text" id="rename-pov-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-pov-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-pov-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div class="input-row">
+                <label for="rename-hltv-template" class="rename-label" data-str="DEMO_RENAME.HLTV_LABEL">HLTV demos:</label>
+                <input type="text" id="rename-hltv-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div id="rename-chips" class="rename-chips"></div>
+              <div class="row-inputs">
+                <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
+                <button id="rename-cancel-btn" disabled data-str="DEMO_RENAME.CANCEL_BUTTON">Cancel</button>
+                <button id="rename-apply-btn" class="primary-btn" disabled data-str="DEMO_RENAME.APPLY_BUTTON">Rename</button>
+                <button id="rename-undo-btn" disabled data-str="DEMO_RENAME.UNDO_BUTTON">Undo Last Rename</button>
+              </div>
+              <p class="status-indicator"><span id="rename-status"></span></p>
+            </div>
+            <div class="table-wrapper" style="max-height: 400px;">
+              <table id="rename-table">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="rename-select-all" checked /></th>
+                    <th data-str="DEMO_RENAME.COL_CURRENT">Current Name</th>
+                    <th data-str="DEMO_RENAME.COL_NEW">New Name</th>
+                    <th data-str="DEMO_RENAME.COL_TYPE">Type</th>
+                  </tr>
+                </thead>
+                <tbody id="rename-body">
+                  <tr><td colspan="4" class="table-empty" data-str="DEMO_RENAME.TABLE_EMPTY">Choose a Target Folder above and click List Demos.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
         </section>
 
         <!-- HD Textures (#372): what is built, the movie.cfg lines to use it,

@@ -24,6 +24,7 @@ import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_
 import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
@@ -389,6 +390,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initDemoRenamePane({
+    projectTeams: () => projectTeams,
+    onChange: () => persistAppSettings(),
+  });
   initHdPane();
   initTeamsPane({
     getDemos: () => currentScannedDemos,
@@ -558,6 +563,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
       clip_name_template: getClipNameTemplate(),
+      demo_rename_pov_template: getDemoRenameTemplates().pov,
+      demo_rename_hltv_template: getDemoRenameTemplates().hltv,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -704,6 +711,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
       setClipNameTemplate(settings.clip_name_template);
+      setDemoRenameTemplates(settings.demo_rename_pov_template, settings.demo_rename_hltv_template);
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;

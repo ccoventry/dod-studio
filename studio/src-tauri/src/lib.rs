@@ -1,5 +1,6 @@
 mod audit_manager;
 mod capture_manager;
+mod demo_rename_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -577,6 +578,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
@@ -646,6 +648,11 @@ pub fn run() {
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
+            demo_rename_manager::demo_rename_list,
+            demo_rename_manager::demo_rename_cancel,
+            demo_rename_manager::demo_rename_apply,
+            demo_rename_manager::demo_rename_undo,
+            demo_rename_manager::demo_rename_undoable,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,

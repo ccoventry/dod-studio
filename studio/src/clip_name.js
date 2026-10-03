@@ -39,11 +39,22 @@ export const PATH_LIMIT = 250;
 /** Room for what the renderer adds: `_hud`, a wav suffix, `_NN`, extension. */
 const RENDER_SUFFIX_MARGIN = 20;
 
+/** What a template may hold, and what to warn about. A clip name's by
+ *  default; the Demo Auditor's renamer (#469) passes its own. */
+const CLIP_RULES = {
+  placeholders: PLACEHOLDERS,
+  withFallback: WITH_FALLBACK,
+  distinguishing: DISTINGUISHING,
+  noDistinguishing: () => STRINGS.CLIP_NAME.NO_DISTINGUISHING,
+  fallbackNotAllowed: (raw) => STRINGS.CLIP_NAME.fallbackNotAllowed(raw),
+};
+
 /**
  * Splits a template into literal text and placeholders, with everything
  * wrong with it. `errors` stop it being used; `warnings` don't.
  */
-export function parseTemplate(template) {
+export function parseTemplate(template, rules = CLIP_RULES) {
+  const { placeholders, withFallback, distinguishing } = rules;
   const text = String(template ?? '');
   const parts = [];
   const errors = [];
@@ -78,9 +89,9 @@ export function parseTemplate(template) {
     const [name, modifier] = spec.split(':', 2);
     const part = { raw, name: name.trim(), modifier: modifier?.trim() || null, fallback: fallback ?? null };
     if (!part.name) errors.push(STRINGS.CLIP_NAME.EMPTY_PLACEHOLDER);
-    else if (!PLACEHOLDERS.includes(part.name)) errors.push(STRINGS.CLIP_NAME.unknownPlaceholder(raw));
+    else if (!placeholders.includes(part.name)) errors.push(STRINGS.CLIP_NAME.unknownPlaceholder(raw));
     else if (part.modifier !== null && !MODIFIERS.includes(part.modifier)) errors.push(STRINGS.CLIP_NAME.unknownModifier(raw));
-    else if (part.fallback !== null && !WITH_FALLBACK.has(part.name)) errors.push(STRINGS.CLIP_NAME.fallbackNotAllowed(raw));
+    else if (part.fallback !== null && !withFallback.has(part.name)) errors.push(rules.fallbackNotAllowed(raw));
     else if (part.fallback !== null && INVALID_CHARS.test(part.fallback)) errors.push(STRINGS.CLIP_NAME.invalidCharacters(raw));
     parts.push(part);
     i = close;
@@ -90,9 +101,9 @@ export function parseTemplate(template) {
   const bad = parts.filter((p) => p.text !== undefined && INVALID_CHARS.test(p.text));
   if (bad.length) errors.push(STRINGS.CLIP_NAME.invalidCharacters(bad.map((p) => p.text).join(' ')));
   if (!parts.some((p) => p.name || (p.text && p.text.trim()))) errors.push(STRINGS.CLIP_NAME.EMPTY_TEMPLATE);
-  else if (!parts.some((p) => DISTINGUISHING.includes(p.name))) warnings.push(STRINGS.CLIP_NAME.NO_DISTINGUISHING);
+  else if (distinguishing.length && !parts.some((p) => distinguishing.includes(p.name))) warnings.push(rules.noDistinguishing());
 
-  return { parts, errors, warnings };
+  return { parts, errors, warnings, placeholders };
 }
 
 /** A value made safe for a file name. */
@@ -193,7 +204,7 @@ export function buildName(parsed, values, { maxLength } = {}) {
   const pieces = parsed.parts.map((p) => {
     if (p.text !== undefined) return { text: p.text, name: null };
     // Shown as typed, so the preview points at it (the error says why).
-    if (!PLACEHOLDERS.includes(p.name)) return { text: p.raw, name: null };
+    if (!(parsed.placeholders || PLACEHOLDERS).includes(p.name)) return { text: p.raw, name: null };
     const value = values[p.name];
     const text = value === null || value === undefined || value === ''
       ? cleanValue(p.fallback ?? STRINGS.CLIP_NAME.MISSING_VALUE)

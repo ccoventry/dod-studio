@@ -104,6 +104,8 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 Finds byte-identical duplicate demos under one folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
 
+**Rename Demos** (#469) renames the same folder's demos, subfolders too, in place: one template for POV demos (default `{name}_{kills}k_v_{opponent}_{map}`) and one for HLTV demos (default `{allies}_v_{axis}_{map}_{date}`), on the clip names' template engine. Team names come from the project's Teams list. A preview lists every demo first; a clash gets `_2`, and a name already in the folder is never taken. **Undo Last Rename** reverses the newest batch, from a log in `%APPDATA%\dod-studio\demo_rename_logs`. A demo's analyzer cache entry moves with it.
+
 ### 2.6 Demo Analyzer
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.

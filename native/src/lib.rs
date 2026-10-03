@@ -31,6 +31,10 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// The Demo Auditor's renamer: facts, renames and the undo log (#469).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_rename;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
@@ -139,7 +143,7 @@ struct AnalyzerCacheEntryRef<'a> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
+pub(crate) fn analyzer_cache_path(demo_path: &PathBuf) -> Option<PathBuf> {
     let canonical = fs::canonicalize(demo_path).ok()?;
     let key = canonical.to_string_lossy();
     let hash = crate::utils::demo_hasher::fnv1a_hash(key.as_bytes());
@@ -281,6 +285,41 @@ fn write_analyzer_cache_entry(
     // Best-effort: a cache write failure must never fail the caller.
     if let Ok(json) = serde_json::to_vec(&entry_ref) {
         let _ = fs::write(cache_path, json);
+    }
+}
+
+/// Moves a renamed demo's analyzer cache entry from `old_cache` (the entry's
+/// path before the rename, since the key is the demo's canonical path) to
+/// the key of `new_demo`, and points its recorded file name and path at the
+/// new name. Without it the renamed demo is parsed again on its next open,
+/// and the old entry is never read again. Best-effort and silent: a miss
+/// only costs that parse.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::path::Path) {
+    let Some(new_cache) = analyzer_cache_path(&new_demo.to_path_buf()) else {
+        return;
+    };
+    if new_cache == old_cache {
+        return;
+    }
+    let Ok(bytes) = fs::read(old_cache) else {
+        return;
+    };
+    let Ok(mut entry) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    if let Some(info) = entry.get_mut("file_info").and_then(|i| i.as_object_mut()) {
+        let name = new_demo
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        info.insert("name".into(), name.into());
+        info.insert("path".into(), new_demo.to_string_lossy().to_string().into());
+    }
+    if let Ok(json) = serde_json::to_vec(&entry)
+        && fs::write(&new_cache, json).is_ok()
+    {
+        let _ = fs::remove_file(old_cache);
     }
 }
 
