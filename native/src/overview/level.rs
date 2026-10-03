@@ -50,6 +50,11 @@ pub struct Model {
     pub offset: [f32; 3],
     /// The owning entity's classname (`worldspawn` for model 0).
     pub class: String,
+    /// A `func_breakable` that goes during a round: shot, knifed, grenaded
+    /// or blown up with TNT or a bazooka, or by a trigger when it is "only
+    /// trigger" (spawnflag 1) and named, as a TNT objective's wall is. Not
+    /// unbreakable glass (material 7), nor an only-trigger one nothing names.
+    pub breakable: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -179,14 +184,24 @@ impl Level {
             bsp_entities::parse_entity_text(&String::from_utf8_lossy(lump(bytes, LUMP_ENTITIES)?))?;
 
         // Brush entities: which model each owns, and its origin.
-        let mut owner: HashMap<usize, (String, [f32; 3])> = HashMap::new();
+        let mut owner: HashMap<usize, (String, [f32; 3], bool)> = HashMap::new();
         for entity in &entities {
             if let Some(model) = entity.brush_submodel() {
                 let origin = entity
                     .get("origin")
                     .and_then(parse_origin)
                     .unwrap_or([0.0; 3]);
-                owner.insert(model as usize, (entity.classname().to_string(), origin));
+                let number = |key| entity.get(key).and_then(|v| v.trim().parse::<i32>().ok());
+                let named = entity
+                    .get("targetname")
+                    .is_some_and(|n| !n.trim().is_empty());
+                let breakable = entity.classname() == "func_breakable"
+                    && (number("spawnflags").unwrap_or(0) & 1 == 0 || named)
+                    && number("material") != Some(7);
+                owner.insert(
+                    model as usize,
+                    (entity.classname().to_string(), origin, breakable),
+                );
             }
         }
         let models = entries(lump(bytes, LUMP_MODELS)?, 64, |b, at| {
@@ -203,15 +218,17 @@ impl Level {
                 face_count: rd_i32(b, at + 60)?.max(0) as usize,
                 offset: [0.0; 3],
                 class: String::new(),
+                breakable: false,
             })
         })?;
         let mut models = models;
         for (index, model) in models.iter_mut().enumerate() {
             if index == 0 {
                 model.class = "worldspawn".to_string();
-            } else if let Some((class, origin)) = owner.get(&index) {
+            } else if let Some((class, origin, breakable)) = owner.get(&index) {
                 model.class = class.clone();
                 model.offset = *origin;
+                model.breakable = *breakable;
             }
         }
         let mut face_model = HashMap::new();

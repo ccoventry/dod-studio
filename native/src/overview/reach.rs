@@ -135,13 +135,15 @@ impl Reach {
 }
 
 /// Whether a crouching player fits with his origin at `p`: hull 3 of the
-/// world and of every solid brush entity.
+/// world and of every solid brush entity. Breakables count as broken: a
+/// player can shoot through (dod_anzio's drain has a breakable floor at one
+/// end), though one still holds him up before it goes (they stay floors).
 fn fits(level: &Level, p: [f32; 3]) -> bool {
     if level.hull_contents(0, CROUCH_HULL, p) == CONTENTS_SOLID {
         return false;
     }
     for (index, model) in level.models.iter().enumerate().skip(1) {
-        if !SOLID_CLASSES.contains(&model.class.as_str()) {
+        if !SOLID_CLASSES.contains(&model.class.as_str()) || model.breakable {
             continue;
         }
         let local = [
