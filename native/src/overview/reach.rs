@@ -37,6 +37,10 @@ const CROUCH_HULL: usize = 3;
 /// How far a fall (or a slide down rock too steep to stand on) carries a
 /// player past the edge, in cells.
 const FALL_CELLS: i32 = 12;
+/// How far a running jump carries a player while he rises to the top of
+/// it, in cells: about a third of a second at a run, some 70 units, and his
+/// box lands on a ledge 16 units before his centre is over it.
+const LEAP_CELLS: i32 = 11;
 /// Where a player's origin can be, from a cell's centre, with his box (16
 /// either side) still over it: centred first.
 const OFFSETS: [(f32, f32); 9] = [
@@ -439,6 +443,36 @@ fn flood(level: &Level, reach: &mut Reach) {
                 let [x, y] = reach.centre(c2);
                 if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF])
                     && !fits(level, [x, y, z + 2.0 + CROUCH_HALF])
+                {
+                    break;
+                }
+            }
+            // A running jump: across lower ground onto a ledge up to a
+            // crouch-jump higher, as far as a run carries a player while he
+            // rises (dod_harrington's crates by Bridge are jumped onto from
+            // the bump in the grass, not from beside them).
+            for step in 2..=LEAP_CELLS {
+                let (ii, jj) = (i + di * step, j + dj * step);
+                if !(0..reach.nx).contains(&ii) || !(0..reach.ny).contains(&jj) {
+                    break;
+                }
+                let c2 = ii * reach.ny + jj;
+                let ledge = reach.nodes_in(c2).find(|&k2| {
+                    let z2 = reach.z[k2];
+                    z2 > z + STEP && z2 <= z + JUMP && reach.fits[k2]
+                });
+                if let Some(k2) = ledge {
+                    if !reach.reached[k2] {
+                        reach.reached[k2] = true;
+                        queue.push_back(k2);
+                    }
+                    break;
+                }
+                // Through open air, low or at the top of the jump (over the
+                // edge of the very ledge he lands on).
+                let [x, y] = reach.centre(c2);
+                if !fits(level, [x, y, z + STEP + 2.0 + CROUCH_HALF])
+                    && !fits(level, [x, y, z + JUMP + CROUCH_HALF])
                 {
                     break;
                 }
