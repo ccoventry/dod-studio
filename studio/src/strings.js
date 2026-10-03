@@ -1294,7 +1294,7 @@ export const STRINGS = {
     HOVER_TIP: 'Light up what a click would change before you click',
     RECENT_LABEL: 'Recent',
     RECENT_NONE: 'Colours you use show here',
-    PICK_TIP: 'Click the map to take the colour there (then back to the tool you had). Or hold Ctrl and click',
+    PICK_TIP: 'Pick a colour from the map: click a floor to take its colour (then back to the tool you had). Or hold Ctrl and click',
     SHOW_AREAS: 'Show areas',
     SHOW_AREAS_TIP: 'Outline every area. Hold Alt to outline every floor piece instead',
     SHOW_PIECES: 'Show pieces',

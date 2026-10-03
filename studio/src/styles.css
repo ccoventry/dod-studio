@@ -2066,6 +2066,15 @@ tr.keyboard-selected {
   align-items: center;
 }
 
+#ov-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+}
+
 .ov-recent .ov-swatch {
   width: 20px;
   height: 20px;
