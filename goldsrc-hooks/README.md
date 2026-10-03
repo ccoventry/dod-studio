@@ -122,6 +122,12 @@ Plus twenty control surfaces, always available and doing nothing until used:
   every director event and console command it skips, all at once;
   `dodstudio_seek_skip_between 1` lands clean instead. Refuses while the demo
   is still loading. Both builds; see `docs/goldsrc_viewdemo.md`.
+- **Folders in the Load Demo window** (`dodstudio_demo_list_folders 1`): the
+  window lists `../` and each subfolder as well as the demos, and Load (or a
+  double-click) on a folder opens it. Each demo row is its path from `dod/`,
+  which is what `viewdemo` takes. Two vftable swaps -- the file system's
+  `Find*` for the window's own `"*.dem"` call, and the window's `OnCommand`
+  -- on both builds; off, the list is stock. See `src/demo_list_folders.rs`.
 - **Window layout** (`dodstudio_resizable_windows 1`,
   `dodstudio_remember_window_layout 1`): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart
