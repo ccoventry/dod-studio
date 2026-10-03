@@ -26,8 +26,11 @@ use super::level::{CONTENTS_SOLID, Face, Level};
 pub const GRID: f32 = 8.0;
 /// A stair step (18) plus slack for slopes.
 pub const STEP: f32 = 20.0;
-/// DoD's jump onto a ledge.
-pub const JUMP: f32 = 45.0;
+/// DoD's highest climb onto a ledge: a full-stamina jump rises 45 units
+/// (`pm_shared.c` PM_Jump: sqrt(45 * 1600) up against gravity 800), and
+/// ducking in the air lifts the feet 18 more (the crouch box is 36 shorter,
+/// shrinking from both ends).
+pub const JUMP: f32 = 63.0;
 /// Hull 3, the crouching player: 32x32x36, origin in the middle.
 const CROUCH_HALF: f32 = 18.0;
 const CROUCH_HULL: usize = 3;
