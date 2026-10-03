@@ -73,6 +73,9 @@
 //!   Load Demo window, the console -- open when ESC is pressed on the 25th
 //!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
 //!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
+//! - `window_layout`: the `dodstudio_resizable_windows` and
+//!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
+//!   resized, and each comes back where it was left after a restart (#408).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
@@ -158,6 +161,7 @@ mod sprite_blend;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod window_layout;
 mod world_shaders;
 
 use std::sync::atomic::{AtomicBool, Ordering};

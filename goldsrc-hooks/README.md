@@ -122,6 +122,13 @@ Plus twenty control surfaces, always available and doing nothing until used:
   every director event and console command it skips, all at once;
   `dodstudio_seek_skip_between 1` lands clean instead. Refuses while the demo
   is still loading. Both builds; see `docs/goldsrc_viewdemo.md`.
+- **Window layout** (`dodstudio_resizable_windows 1`,
+  `dodstudio_remember_window_layout 1`): every GameUI window can be resized
+  like the console, and each comes back where it was left after a restart
+  (the console loads no `.res`, so build mode can't save its place). Walks
+  the engine surface's popups through vgui2's own interfaces; only
+  `Frame::SetSizeable`/`IsSizeable` are per-build addresses. See
+  `src/window_layout.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when
