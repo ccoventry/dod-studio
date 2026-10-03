@@ -92,6 +92,10 @@ pub struct Scene {
     /// Each capture area's footprint as polygons; the page draws the rim of
     /// their union.
     pub cap_zones: Vec<Vec<Vec<[f32; 2]>>>,
+    /// The outline of every drawn floor that can be broken (a breakable
+    /// floor or cover), as line segments in image pixels: drawn dotted.
+    #[serde(default)]
+    pub breakable_edges: Vec<[[f32; 2]; 2]>,
     pub flags: Vec<Marker>,
     pub allies: Vec<Marker>,
     pub axis: Vec<Marker>,
@@ -525,6 +529,7 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
         .map(|(_, o)| marker("Axis".to_string(), o))
         .collect();
 
+    let breakable_edges = breakable_edges(level, &faces, &transform);
     Ok(Scene {
         map: level.name.clone(),
         transform,
@@ -534,6 +539,7 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
         areas,
         water,
         cap_zones: cap_zones(level, &transform),
+        breakable_edges,
         flags,
         allies,
         axis,
@@ -541,6 +547,50 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
         background: BACKGROUND,
         void: VOID,
     })
+}
+
+/// The outer edges of each breakable's drawn floors: every edge of its
+/// faces that no other of its faces shares.
+fn breakable_edges(level: &Level, faces: &[SceneFace], t: &Transform) -> Vec<[[f32; 2]; 2]> {
+    let mut by_model: HashMap<usize, Vec<&Vec<[f32; 3]>>> = HashMap::new();
+    for face in faces {
+        let f = &level.faces[face.face as usize];
+        if level.models.get(f.model).is_some_and(|m| m.breakable) {
+            by_model.entry(f.model).or_default().push(&f.points);
+        }
+    }
+    let mut out = Vec::new();
+    for polygons in by_model.values() {
+        out.extend(
+            outline(polygons)
+                .into_iter()
+                .map(|[a, b]| [t.to_pixel(a[0], a[1]), t.to_pixel(b[0], b[1])]),
+        );
+    }
+    out
+}
+
+/// Edges (in x and y) used by exactly one of `polygons`.
+fn outline(polygons: &[&Vec<[f32; 3]>]) -> Vec<[[f32; 2]; 2]> {
+    let key = |p: [f32; 3]| ((p[0] * 2.0).round() as i64, (p[1] * 2.0).round() as i64);
+    let mut count: HashMap<((i64, i64), (i64, i64)), (usize, [[f32; 2]; 2])> = HashMap::new();
+    for points in polygons {
+        for i in 0..points.len() {
+            let (a, b) = (points[i], points[(i + 1) % points.len()]);
+            let (ka, kb) = (key(a), key(b));
+            if ka == kb {
+                continue;
+            }
+            let k = if ka < kb { (ka, kb) } else { (kb, ka) };
+            count
+                .entry(k)
+                .or_insert((0, [[a[0], a[1]], [b[0], b[1]]]))
+                .0 += 1;
+        }
+    }
+    let mut edges: Vec<_> = count.into_iter().filter(|(_, (n, _))| *n == 1).collect();
+    edges.sort_by_key(|(k, _)| *k);
+    edges.into_iter().map(|(_, (_, e))| e).collect()
 }
 
 fn scene_face(level: &Level, reach: &Reach, t: &Transform, face: usize, area: u32) -> SceneFace {
@@ -558,6 +608,26 @@ fn scene_face(level: &Level, reach: &Reach, t: &Transform, face: usize, area: u3
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_breakables_outline_leaves_out_the_edge_its_faces_share() {
+        let left = vec![
+            [0.0, 0.0, 0.0],
+            [10.0, 0.0, 0.0],
+            [10.0, 10.0, 0.0],
+            [0.0, 10.0, 0.0],
+        ];
+        let right = vec![
+            [10.0, 0.0, 0.0],
+            [20.0, 0.0, 0.0],
+            [20.0, 10.0, 0.0],
+            [10.0, 10.0, 0.0],
+        ];
+        let edges = outline(&[&left, &right]);
+        assert_eq!(edges.len(), 6);
+        let shared = |e: &[[f32; 2]; 2]| e.iter().all(|p| p[0] == 10.0);
+        assert!(!edges.iter().any(shared));
+    }
 
     #[test]
     fn flag_names_drop_the_and_take_a_capital() {

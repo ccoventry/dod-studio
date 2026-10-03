@@ -24,6 +24,7 @@ export function emptyEdits() {
       flags: true,
       flagLabels: true,
       capZones: true,
+      breakables: true,
       stairs: true,
       water: true,
     },
@@ -343,6 +344,28 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       }
     }
     ctx.drawImage(rim, 0, 0);
+  }
+
+  // Floors that break: a dotted outline, black on white so it shows on
+  // any theme.
+  if (edits.show.breakables && scene.breakable_edges?.length) {
+    ctx.save();
+    ctx.lineCap = 'butt';
+    ctx.lineWidth = 2.5 * s;
+    const strokeAll = () => {
+      ctx.beginPath();
+      for (const [a, b] of scene.breakable_edges) {
+        ctx.moveTo(a[0] * s, a[1] * s);
+        ctx.lineTo(b[0] * s, b[1] * s);
+      }
+      ctx.stroke();
+    };
+    ctx.strokeStyle = '#fff';
+    strokeAll();
+    ctx.strokeStyle = '#000';
+    ctx.setLineDash([4 * s, 4 * s]);
+    strokeAll();
+    ctx.restore();
   }
 
   const text = (label, x, y, size, align = 'left') => {

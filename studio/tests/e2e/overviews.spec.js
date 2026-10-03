@@ -244,3 +244,26 @@ test('water covers the floors below it but not a bridge above it', async ({ page
   expect(await at(400, 400)).toEqual([64, 208, 213]);
   expect(await at(700, 300)).toEqual([146, 155, 247]);
 });
+
+test('a floor that breaks gets a dotted outline, and it can be turned off', async ({ page }) => {
+  const scene = { ...SCENE, breakable_edges: [[[200, 600], [400, 600]]] };
+  await loadHarness(page, { scene });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  // Along the line: black dashes with white between them.
+  const row = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    const d = c.getContext('2d').getImageData(Math.round(200 * s), Math.round(600 * s) - 2, Math.round(200 * s), 5).data;
+    const out = [];
+    for (let i = 0; i < d.length; i += 4) out.push([d[i], d[i + 1], d[i + 2]]);
+    return out;
+  });
+  const black = (p) => p.every((v) => v < 60);
+  const white = (p) => p.every((v) => v > 200);
+  const on = await row();
+  expect(on.some(black)).toBe(true);
+  expect(on.some(white)).toBe(true);
+  await page.locator('input[data-show="breakables"]').uncheck();
+  const off = await row();
+  expect(off.some(black) || off.some(white)).toBe(false);
+});
