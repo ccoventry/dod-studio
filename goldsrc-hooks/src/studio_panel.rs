@@ -763,7 +763,7 @@ const VIEWDEMO_WAIT_FRAMES: u32 = 600;
 pub const VIEWDEMO_NAME: &str = console_name!("viewdemo_in_panel");
 /// The fallback toggle, when the cvar could not be registered.
 pub static VIEWDEMO_IN_PANEL: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+    std::sync::atomic::AtomicBool::new(true);
 static VIEWDEMO_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 /// Frames left to wait for the VCR bar after a `viewdemo`, or 0.
@@ -795,7 +795,7 @@ pub fn parked_bar() -> u32 {
 pub const CONSOLE_NAME: &str = console_name!("console_in_panel");
 /// The fallback toggle, when the cvar could not be registered.
 pub static CONSOLE_IN_PANEL: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
+    std::sync::atomic::AtomicBool::new(true);
 static CONSOLE_CVAR: std::sync::atomic::AtomicPtr<crate::engine::CvarSPartial> =
     std::sync::atomic::AtomicPtr::new(std::ptr::null_mut());
 /// Frames left to wait for the console window after `toggleconsole`, or 0.

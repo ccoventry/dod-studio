@@ -132,10 +132,11 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
 - **DoD Studio window** (`dodstudio_panel`): our own window in the game, a
   GameUI `Frame` with a `PropertySheet` of tabs, like the Options window; its
   Playback buttons drive the demo player like the VCR bar's, and the tab
-  borrows the bar's own time slider and label. With
-  `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens it on Playback and parks
+  borrows the bar's own time slider and label. By default
+  (`dodstudio_viewdemo_in_panel 1`), `viewdemo` opens it on Playback and parks
   the bar off screen. A Console tab holds the real console's history and
-  input line; `dodstudio_console_in_panel 1` makes the console key open it.
+  input line, and the console key opens it (`dodstudio_console_in_panel 1`,
+  also on by default; `0` brings back the stock console).
   A Highlights tab lists the playing demo's streaks, from Studio's analyzer
   cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
   crate; a demo too big for the game's address space is refused, not tried).

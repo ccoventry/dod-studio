@@ -1367,11 +1367,13 @@ pub fn install() {
         }
     }
 
-    match register(crate::studio_panel::VIEWDEMO_NAME, "0") {
+    // Both on by default (the user, 2026-10-03): the window is how DoD
+    // Studio's console and playback controls are reached.
+    match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
         Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
         None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
     }
-    match register(crate::studio_panel::CONSOLE_NAME, "0") {
+    match register(crate::studio_panel::CONSOLE_NAME, "1") {
         Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
         None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
