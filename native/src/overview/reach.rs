@@ -158,6 +158,21 @@ fn fits(level: &Level, p: [f32; 3]) -> bool {
     true
 }
 
+/// Whether a crouching player falls clear down the column at `x, y` from a
+/// hull centre at `top` to one at `bottom`: no invisible clip lid or ceiling
+/// between a ledge and the floor far below it (dod_anzio's river behind its
+/// grate is under a clip brush, so dropping off the bank stops on top).
+fn drop_clear(level: &Level, x: f32, y: f32, top: f32, bottom: f32) -> bool {
+    let mut h = top;
+    while h > bottom {
+        if !fits(level, [x, y, h]) {
+            return false;
+        }
+        h -= 16.0;
+    }
+    true
+}
+
 fn ladders(level: &Level, reach: &Reach) -> HashMap<i32, (f32, f32)> {
     let mut out = HashMap::new();
     for model in level.models.iter().filter(|m| m.class == "func_ladder") {
@@ -346,6 +361,13 @@ fn flood(level: &Level, reach: &mut Reach) {
                 if let Some(k2) = land
                     && reach.fits[k2]
                 {
+                    let z2 = reach.z[k2];
+                    let [x, y] = reach.centre(c2);
+                    let top = z + STEP + 2.0 + CROUCH_HALF;
+                    if z2 < z - STEP && !drop_clear(level, x, y, top, z2 + STEP + 2.0 + CROUCH_HALF)
+                    {
+                        break;
+                    }
                     if !reach.reached[k2] {
                         reach.reached[k2] = true;
                         queue.push_back(k2);
