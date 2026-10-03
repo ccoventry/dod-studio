@@ -39,8 +39,8 @@
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodstudio_hltv_show_viewmodel_animations` is
-//! on (any level). Turn that on too when using this to investigate #206 --
+//! only has fresh data while `dodstudio_spec_match_pov` is on. Turn that on too
+//! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!
 //! This module's `poll` runs from `commands.rs`'s per-frame *prologue*,
@@ -75,6 +75,19 @@ fn read_i32(base: usize, rva: usize) -> Option<i32> {
     // Safety: rva is a fixed, confirmed offset into client.dll's own
     // .data section, read-only here.
     Some(unsafe { *((base + rva) as *const i32) })
+}
+
+/// `g_iUser1`'s value for the in-eye camera (`OBS_IN_EYE`).
+const OBS_IN_EYE: i32 = 4;
+
+/// The player the in-eye camera is on, or `None` when the spectator camera is
+/// in any other mode (or not up at all).
+pub fn in_eye_target() -> Option<i32> {
+    let base = engine::client_module_base()?;
+    if read_i32(base, MODE_RVA)? != OBS_IN_EYE {
+        return None;
+    }
+    read_i32(base, TARGET_RVA).filter(|target| *target > 0)
 }
 
 /// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two

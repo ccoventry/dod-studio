@@ -33,7 +33,10 @@ impl Demo {
     /// in dod-studio' decal-flush pass — about 3 seconds for a 110MB, 730k-frame
     /// demo, roughly 70% of the whole pass — and it used to be one
     /// uninterruptible call. A user cancelling a capture batch had to wait it
-    /// out, once per job still in flight. See dod-studio#193.
+    /// out, once per job still in flight. See dod-studio#193. (The flush now
+    /// writes with `write_to_bytes_reusing_source_cancellable`, which copies
+    /// the frames it did not edit instead of re-encoding them: ~3s down to
+    /// ~80ms on that demo.)
     ///
     /// `should_cancel` is polled once every `CANCEL_CHECK_FRAMES` frames rather
     /// than per frame, which keeps an atomic load off a loop that runs
@@ -42,12 +45,51 @@ impl Demo {
     /// buffer is dropped rather than returned, so a cancelled write can never
     /// be mistaken for a complete demo.
     pub fn write_to_bytes_cancellable(&self, should_cancel: &dyn Fn() -> bool) -> Option<Vec<u8>> {
+        self.write_frames(None, should_cancel)
+    }
+
+    /// `write_to_bytes_cancellable`, copying every network frame whose messages
+    /// are untouched since the parse straight out of `source` instead of
+    /// re-encoding them.
+    ///
+    /// Re-encoding is what makes the write slow: every message of every frame
+    /// goes back through its encoder, delta packets included. A demo edited in
+    /// a few thousand frames out of hundreds of thousands already has the
+    /// encoding of all the rest sitting in the file it was parsed from.
+    ///
+    /// `source` must be the very buffer this demo was parsed from: the same
+    /// allocation, not merely equal bytes. Anything else is ignored and every
+    /// frame is re-encoded, exactly as `write_to_bytes_cancellable` does, so a
+    /// wrong buffer costs speed, never correctness. A frame is only copied
+    /// while its [`NetworkMessage::source_span`] survives, which is why edits
+    /// must go through [`NetworkMessage::messages_mut`].
+    ///
+    /// [`NetworkMessage::source_span`]: crate::types::NetworkMessage::source_span
+    /// [`NetworkMessage::messages_mut`]: crate::types::NetworkMessage::messages_mut
+    pub fn write_to_bytes_reusing_source_cancellable(
+        &self,
+        source: &[u8],
+        should_cancel: &dyn Fn() -> bool,
+    ) -> Option<Vec<u8>> {
+        let parsed_from = self._aux.as_ref().and_then(|aux| aux.borrow().parsed_from);
+        let source =
+            (parsed_from == Some((source.as_ptr() as usize, source.len()))).then_some(source);
+        self.write_frames(source, should_cancel)
+    }
+
+    fn write_frames(
+        &self,
+        source: Option<&[u8]>,
+        should_cancel: &dyn Fn() -> bool,
+    ) -> Option<Vec<u8>> {
         /// Frames between cancellation polls. At roughly 4µs a frame this is a
         /// check every ~15ms of writing.
         const CANCEL_CHECK_FRAMES: usize = 4096;
         let mut frames_since_check = 0usize;
 
-        let mut writer = ByteWriter::new();
+        // Copying most frames verbatim makes the output about the size of the
+        // source, so reserve that up front rather than regrowing ~27 times.
+        let mut writer = ByteWriter::with_capacity(source.map_or(0, <[u8]>::len));
 
         // Magic has 8 bytes in total
         writer.append_u8_slice("HLDEMO\x00\x00".as_bytes());
@@ -241,9 +283,23 @@ impl Demo {
                         writer.append_i32(data.sequence_info.reliable_sequence);
                         writer.append_i32(data.sequence_info.last_reliable_sequence);
 
+                        // An untouched frame's own bytes are already its
+                        // encoding. Only ever `Some` for parsed messages whose
+                        // span survived, read out of the buffer they came from.
+                        let verbatim = match (&data.messages, &data.source_span, source) {
+                            (MessageData::Parsed(_), Some(span), Some(source)) => {
+                                source.get(span.clone())
+                            }
+                            _ => None,
+                        };
+
                         // write the frame itself
-                        match &data.messages {
-                            MessageData::Parsed(vec) => {
+                        match (&data.messages, verbatim) {
+                            (_, Some(original)) => {
+                                writer.append_u32(original.len() as u32);
+                                writer.append_u8_slice(original);
+                            }
+                            (MessageData::Parsed(vec), None) => {
                                 // delay writing message length
                                 let start_offset_value = writer.get_offset();
                                 writer.append_u32(0);
@@ -266,11 +322,11 @@ impl Demo {
                                     ((end_length - start_length) as u32).to_le_bytes(),
                                 );
                             }
-                            MessageData::Raw(vec) => {
+                            (MessageData::Raw(vec), None) => {
                                 writer.append_i32(vec.len() as i32);
                                 writer.append_u8_slice(vec.as_slice());
                             }
-                            MessageData::None => {
+                            (MessageData::None, None) => {
                                 // length
                                 writer.append_i32(0);
                             }
@@ -317,6 +373,177 @@ impl Demo {
         );
 
         Some(writer.data)
+    }
+}
+
+#[cfg(test)]
+mod reusing_source_tests {
+    use crate::open_demo_from_bytes;
+    use crate::types::{
+        Aux, ByteString, Demo, Directory, DirectoryEntry, EngineMessage, Frame, FrameData, Header,
+        MessageData, NetMessage, NetworkMessage, NetworkMessageType, SvcPrint, SvcTempEntity,
+        TempEntity,
+    };
+
+    /// A small demo with real network frames: each carries a print, a world
+    /// decal and a nop, so every frame has something that has to go back
+    /// through an encoder if it is re-encoded rather than copied.
+    fn built() -> Demo {
+        // `DemoInfo` and `SequenceInfo` have no constructor; an all-zero one
+        // parsed off the wire is as good as any and is what a writer would
+        // have to reproduce anyway.
+        let zeros = [0u8; 1024];
+        let (_, info) = crate::demo_parser::parse_network_messages_info(&zeros).unwrap();
+        let (_, sequence_info) = crate::demo_parser::parse_sequence_info(&zeros).unwrap();
+
+        let network_frame = |i: usize| Frame {
+            time: i as f32 * 0.01,
+            frame: i as i32,
+            frame_data: FrameData::NetworkMessage(Box::new((
+                NetworkMessageType::Normal,
+                NetworkMessage {
+                    info: info.clone(),
+                    sequence_info: sequence_info.clone(),
+                    message_length: 0,
+                    messages: MessageData::Parsed(vec![
+                        // The terminator is part of the message on the wire.
+                        NetMessage::EngineMessage(Box::new(EngineMessage::SvcPrint(SvcPrint {
+                            message: ByteString::from(format!("frame {i}\n\0").as_str()),
+                        }))),
+                        NetMessage::EngineMessage(Box::new(EngineMessage::SvcTempEntity(
+                            SvcTempEntity {
+                                entity_type: 116,
+                                entity: TempEntity::TeWorldDecal(vec![8, 0, 16, 0, 24, 0, i as u8]),
+                            },
+                        ))),
+                        NetMessage::EngineMessage(Box::new(EngineMessage::SvcNop)),
+                    ]),
+                    source_span: None,
+                },
+            ))),
+        };
+
+        let mut frames = vec![Frame {
+            time: 0.0,
+            frame: 0,
+            frame_data: FrameData::DemoStart,
+        }];
+        frames.extend((1..=40).map(network_frame));
+        frames.push(Frame {
+            time: 1.0,
+            frame: 41,
+            frame_data: FrameData::NextSection,
+        });
+
+        Demo {
+            header: Header {
+                magic: b"HLDEMO\x00\x00".to_vec(),
+                demo_protocol: 5,
+                network_protocol: 48,
+                map_name: ByteString::from("dod_anzio"),
+                game_directory: ByteString::from("dod"),
+                map_checksum: 0,
+                directory_offset: 0,
+            },
+            directory: Directory {
+                entries: vec![DirectoryEntry {
+                    type_: 1,
+                    description: ByteString::from("Playback"),
+                    flags: 0,
+                    cd_track: -1,
+                    track_time: 0.0,
+                    frame_count: 0,
+                    frame_offset: 0,
+                    file_length: 0,
+                    frames,
+                }],
+            },
+            _aux: Some(Aux::new2()),
+        }
+    }
+
+    /// The file `built()` writes, and the demo parsed back out of it.
+    fn parsed() -> (Vec<u8>, Demo) {
+        let bytes = built().write_to_bytes();
+        let demo = open_demo_from_bytes(&bytes).unwrap();
+        (bytes, demo)
+    }
+
+    fn network_message(demo: &mut Demo, frame: usize) -> &mut NetworkMessage {
+        match &mut demo.directory.entries[0].frames[frame].frame_data {
+            FrameData::NetworkMessage(b) => &mut b.1,
+            _ => panic!("frame {frame} is not a network message"),
+        }
+    }
+
+    fn reuse(demo: &Demo, source: &[u8]) -> Vec<u8> {
+        demo.write_to_bytes_reusing_source_cancellable(source, &|| false)
+            .expect("not cancelled")
+    }
+
+    #[test]
+    fn every_parsed_network_frame_knows_where_it_came_from() {
+        let (bytes, mut demo) = parsed();
+        for i in 1..=40 {
+            let nm = network_message(&mut demo, i);
+            let span = nm
+                .source_span
+                .clone()
+                .expect("a parsed frame records its span");
+            assert_eq!(span.len(), nm.message_length as usize);
+            assert!(span.end <= bytes.len());
+        }
+    }
+
+    /// The guard on the whole idea: with nothing edited, copying every frame
+    /// back out must give back exactly the file that was read.
+    #[test]
+    fn an_untouched_demo_is_written_back_byte_for_byte() {
+        let (bytes, demo) = parsed();
+        assert_eq!(reuse(&demo, &bytes), bytes);
+    }
+
+    #[test]
+    fn an_edit_through_messages_mut_is_what_gets_written() {
+        let (bytes, mut demo) = parsed();
+        if let MessageData::Parsed(messages) = network_message(&mut demo, 7).messages_mut() {
+            messages[1] = NetMessage::EngineMessage(Box::new(EngineMessage::SvcNop));
+        }
+
+        let reused = reuse(&demo, &bytes);
+        assert_ne!(reused, bytes, "the edit was lost");
+        assert_eq!(
+            reused,
+            demo.write_to_bytes(),
+            "must match re-encoding every frame, the edited one included"
+        );
+    }
+
+    /// Only the very buffer the demo was parsed from is trusted, not an equal
+    /// copy of it. The edit below deliberately bypasses `messages_mut`, which
+    /// is the one way to make the difference visible: against the original
+    /// buffer its stale span would win, against anything else nothing is
+    /// copied and the edit is re-encoded like every other frame.
+    #[test]
+    fn a_buffer_the_demo_was_not_parsed_from_is_not_trusted() {
+        let (bytes, mut demo) = parsed();
+        if let MessageData::Parsed(messages) = &mut network_message(&mut demo, 7).messages {
+            messages.push(NetMessage::EngineMessage(Box::new(EngineMessage::SvcNop)));
+        }
+
+        let copy = bytes.clone();
+        assert_eq!(reuse(&demo, &copy), demo.write_to_bytes());
+
+        // And the hazard `messages_mut` exists for, pinned down so a change to
+        // it is noticed: the same edit against the original buffer is lost.
+        assert_eq!(reuse(&demo, &bytes), bytes);
+    }
+
+    #[test]
+    fn a_built_demo_has_no_spans_and_is_simply_re_encoded() {
+        let demo = built();
+        let bytes = demo.write_to_bytes();
+        assert_eq!(reuse(&demo, &bytes), bytes);
     }
 }
 
