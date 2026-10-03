@@ -74,6 +74,8 @@ export function initOverviewsPane() {
   let saveTimer = null;
   let loaded = false;
   let loadToken = 0;
+  // The map being built: highlighted in the list straight away.
+  let opening = null;
   const cache = {};
 
   function gamePath() {
@@ -369,7 +371,7 @@ export function initOverviewsPane() {
       if (filter && !entry.name.toLowerCase().includes(filter)) continue;
       const row = document.createElement('button');
       row.className = 'ov-map-row';
-      row.classList.toggle('active', (pending ?? scene?.map) === entry.name);
+      row.classList.toggle('active', (pending ?? opening ?? scene?.map) === entry.name);
       row.dataset.map = entry.name;
       const name = document.createElement('span');
       name.textContent = entry.name;
@@ -466,12 +468,18 @@ export function initOverviewsPane() {
     await loadMaps();
   }
 
+  // A newer pick makes the backend drop the older build (overview_manager.rs).
   async function openMap(name) {
     const token = ++loadToken;
+    opening = name;
+    for (const row of mapList.querySelectorAll('.ov-map-row')) {
+      row.classList.toggle('active', row.dataset.map === name);
+    }
     title.textContent = `${name} — ${STRINGS.OVERVIEWS.BUILDING}`;
     try {
       const [built, saved] = await Promise.all([overviewScene(install, name), overviewLoadEdits(name).catch(() => null)]);
       if (token !== loadToken) return;
+      opening = null;
       scene = built;
       edits = { ...normaliseEdits(saved), theme };
       history = [];
@@ -482,7 +490,10 @@ export function initOverviewsPane() {
       if (footer) footer.textContent = STRINGS.OVERVIEWS.footer(name, scene.areas.length, scene.faces.length);
       saveStatus.textContent = '';
     } catch {
-      if (token === loadToken) title.textContent = name;
+      if (token === loadToken) {
+        opening = null;
+        title.textContent = name;
+      }
       return;
     }
     renderPalette();

@@ -249,8 +249,18 @@ fn ladders(level: &Level, reach: &Reach) -> HashMap<i32, (f32, f32)> {
     out
 }
 
+/// What a build stopped by its caller returns: the Overviews page asked
+/// for another map before this one was done.
+pub const CANCELLED: &str = "cancelled";
+
 /// Builds the grid, tests every node, and floods from the spawns.
 pub fn build(level: &Level) -> Result<Reach, String> {
+    build_until(level, &|| false)
+}
+
+/// [`build`], giving up with [`CANCELLED`] once `stop` says so (asked every
+/// few thousand nodes).
+pub fn build_until(level: &Level, stop: &dyn Fn() -> bool) -> Result<Reach, String> {
     let floors: Vec<usize> = (0..level.faces.len())
         .filter(|&i| is_floor(level, &level.faces[i]) && level.faces[i].points.len() >= 3)
         .collect();
@@ -351,9 +361,13 @@ pub fn build(level: &Level) -> Result<Reach, String> {
     // beside that wall stands on the grass, not on the slope.
     reach.fits = kept
         .iter()
-        .map(|&(cell, z, _, rise)| {
+        .enumerate()
+        .map(|(n, &(cell, z, _, rise))| {
+            if n.is_multiple_of(4096) && stop() {
+                return Err(CANCELLED.to_string());
+            }
             let [cx, cy] = reach.centre(cell);
-            [
+            Ok([
                 z + STEP + 2.0 + rise + CROUCH_HALF,
                 z + 2.0 + rise + CROUCH_HALF,
                 z + STEP + 2.0 + rise + CROUCH_HALF + 12.0,
@@ -366,15 +380,15 @@ pub fn build(level: &Level) -> Result<Reach, String> {
                         && OFFSETS[1..]
                             .iter()
                             .any(|&(dx, dy)| fits(level, [cx + dx, cy + dy, h])))
-            })
+            }))
         })
-        .collect();
+        .collect::<Result<_, _>>()?;
 
-    flood(level, &mut reach);
+    flood(level, &mut reach, stop)?;
     Ok(reach)
 }
 
-fn flood(level: &Level, reach: &mut Reach) {
+fn flood(level: &Level, reach: &mut Reach, stop: &dyn Fn() -> bool) -> Result<(), String> {
     let ladders = ladders(level, reach);
     let mut queue = VecDeque::new();
     for class in ["info_player_allies", "info_player_axis"] {
@@ -393,7 +407,12 @@ fn flood(level: &Level, reach: &mut Reach) {
             }
         }
     }
+    let mut done = 0usize;
     while let Some(k) = queue.pop_front() {
+        done += 1;
+        if done.is_multiple_of(4096) && stop() {
+            return Err(CANCELLED.to_string());
+        }
         let cell = reach.cell[k];
         let (i, j) = (cell / reach.ny, cell % reach.ny);
         let z = reach.z[k];
@@ -515,6 +534,7 @@ fn flood(level: &Level, reach: &mut Reach) {
             }
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]

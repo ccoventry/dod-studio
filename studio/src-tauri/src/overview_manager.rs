@@ -3,6 +3,7 @@
 //! is in `native::overview`; this is the Tauri surface.
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use native::overview::files::{self, Export, Install, MapEntry, Saved};
 use native::overview::scene::Scene;
@@ -27,12 +28,19 @@ pub async fn overview_maps(install: String) -> Result<Vec<MapEntry>, String> {
     .await
 }
 
+/// Which `overview_scene` call is the newest: an older one still building
+/// gives up, so clicking down the map list builds only the map clicked last.
+static LATEST_SCENE: AtomicU64 = AtomicU64::new(0);
+
 /// Reads the map and works out what to draw. A tenth of a second to a
-/// second, off the async runtime's threads.
+/// second, off the async runtime's threads. Fails with
+/// `native::overview::reach::CANCELLED` once another map is asked for.
 #[tauri::command]
 pub async fn overview_scene(install: String, map: String) -> Result<Scene, String> {
+    let mine = LATEST_SCENE.fetch_add(1, Ordering::SeqCst) + 1;
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        native::overview::scene_for(Path::new(&install), &map)
+        let stop = || LATEST_SCENE.load(Ordering::SeqCst) != mine;
+        native::overview::scene_for_until(Path::new(&install), &map, &stop)
     }))
     .await
 }

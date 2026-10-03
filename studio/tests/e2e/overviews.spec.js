@@ -267,3 +267,16 @@ test('a floor that breaks gets a dotted outline, and it can be turned off', asyn
   const off = await row();
   expect(off.some(black) || off.some(white)).toBe(false);
 });
+
+test('a map clicked while another is building is highlighted at once and wins', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    const build = window.__mockInvokeHandlers.overview_scene;
+    window.__mockInvokeHandlers.overview_scene = (a) => new Promise((done) => setTimeout(() => done(build(a)), 400));
+  });
+  await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_test/);
+  await expect(page.locator('#ov-map-title')).toHaveText('dod_test');
+  await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_test/);
+});
