@@ -116,9 +116,13 @@ unsafe extern "C" fn wrapped_playdemo() {
 }
 
 unsafe extern "C" fn wrapped_viewdemo() {
-    // A bare viewdemo only prints its usage; with
-    // dodstudio_viewdemo_in_panel it opens the DoD Studio window's demo list.
-    if crate::cmd_list::args().is_empty() && crate::studio_panel::bare_viewdemo() {
+    // A bare viewdemo brings a closed VCR bar back without restarting the
+    // demo (or prints its usage with none loaded). With
+    // dodstudio_viewdemo_in_panel it does that, so the bar can lend its slider
+    // again, and then opens the DoD Studio window on Playback.
+    if crate::cmd_list::args().is_empty() && crate::studio_panel::viewdemo_in_panel() {
+        unsafe { call_real(&REAL_VIEWDEMO) };
+        crate::studio_panel::bare_viewdemo();
         return;
     }
     remember("viewdemo");

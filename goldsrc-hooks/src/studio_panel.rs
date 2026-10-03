@@ -878,7 +878,7 @@ pub fn set_viewdemo_cvar(cvar: *mut crate::engine::CvarSPartial) {
     VIEWDEMO_CVAR.store(cvar, Ordering::Release);
 }
 
-fn viewdemo_in_panel() -> bool {
+pub(crate) fn viewdemo_in_panel() -> bool {
     let cvar = VIEWDEMO_CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
         VIEWDEMO_IN_PANEL.load(Ordering::Relaxed)
@@ -2034,6 +2034,10 @@ mod hook {
         borrowed: Vec<Borrowed>,
         /// The bar's own place while it is parked off screen.
         parked_from: Option<(Vpanel, i32, i32)>,
+        /// The bar, when it had been closed (its X) and we showed it again
+        /// off screen: a hidden bar doesn't update the slider and time it
+        /// lends us. Hidden again when it comes back on screen.
+        revived: Option<Vpanel>,
         /// The minimum size last set on the window.
         minimum: (i32, i32),
         /// Loans already reported missing, so each is logged once.
@@ -2070,6 +2074,7 @@ mod hook {
             std::cell::RefCell::new(Lent {
                 borrowed: Vec::new(),
                 parked_from: None,
+                revived: None,
                 minimum: (0, 0),
                 reported: Vec::new(),
                 console_home: None,
@@ -2784,6 +2789,10 @@ mod hook {
             if lent.parked_from.is_none() && x != PARKED_AT {
                 lent.parked_from = Some((bar, x, y));
             }
+            if !vgui.visible(bar) {
+                vgui.set_visible(bar, true);
+                lent.revived = Some(bar);
+            }
             vgui.place(bar, (PARKED_AT, PARKED_AT, w, h));
         }
         PARKED.store(bar, Ordering::Release);
@@ -2791,6 +2800,7 @@ mod hook {
 
     unsafe fn unpark(vgui: &Vgui, lent: &mut Lent) {
         PARKED.store(0, Ordering::Release);
+        let revived = lent.revived.take();
         if let Some((bar, x, y)) = lent.parked_from.take() {
             unsafe {
                 if vgui.object(bar).is_null() {
@@ -2798,6 +2808,9 @@ mod hook {
                 }
                 let (_, _, w, h) = vgui.rect(bar);
                 vgui.place(bar, (x, y, w, h));
+                if revived == Some(bar) {
+                    vgui.set_visible(bar, false);
+                }
             }
         }
     }
