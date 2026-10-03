@@ -16,6 +16,7 @@ import {
   emptyEdits, normaliseEdits, drawOverview, faceAt, labelAt, setAreaEdit,
   areaEdit, setFaceColour, flagName, setFlagName, toWorld, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
+import { THEMES } from './overview_themes.js';
 
 const INSTALL_KEY = 'overviews.install';
 const UNDO_LIMIT = 100;
@@ -47,6 +48,7 @@ export function initOverviewsPane() {
   const flagList = pane.querySelector('#ov-flag-names');
   const labelList = pane.querySelector('#ov-labels');
   const formatSelect = pane.querySelector('#ov-format');
+  const themeSelect = pane.querySelector('#ov-theme');
   const targetSelect = pane.querySelector('#ov-target');
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
@@ -267,6 +269,8 @@ export function initOverviewsPane() {
       box.disabled = !scene;
     });
     formatSelect.value = edits.format || 'tga';
+    themeSelect.value = edits.theme || 'colours';
+    themeSelect.disabled = !scene;
     targetSelect.value = edits.target || 'addon';
     hdBox.checked = edits.hd !== false;
 
@@ -336,6 +340,13 @@ export function initOverviewsPane() {
   }
 
   formatSelect.addEventListener('change', () => change({ ...edits, format: formatSelect.value }, { remember: false }));
+  themeSelect.addEventListener('change', () => change({ ...edits, theme: themeSelect.value }));
+  for (const t of THEMES) {
+    const opt = document.createElement('option');
+    opt.value = t.id;
+    opt.textContent = STRINGS.OVERVIEWS.THEMES[t.id] || t.id;
+    themeSelect.appendChild(opt);
+  }
   targetSelect.addEventListener('change', () => change({ ...edits, target: targetSelect.value }, { remember: false }));
   hdBox.addEventListener('change', () => change({ ...edits, hd: hdBox.checked }, { remember: false }));
 

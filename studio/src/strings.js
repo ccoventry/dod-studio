@@ -1276,6 +1276,9 @@ export const STRINGS = {
     UNDO_TIP: 'Undo (Ctrl+Z)',
     EDIT_TITLE: 'Edit',
     COLOUR_TITLE: 'Colour',
+    THEME_LABEL: 'Theme',
+    // overview_themes.js, by id.
+    THEMES: { colours: 'Colour-coded', grey: 'Flat grey' },
     CUSTOM_COLOUR_LABEL: 'Other colour',
     CLEAR_COLOUR_BUTTON: 'Original colour',
     CLEAR_COLOUR_TIP: 'Pick this, then click an area to put its own colour back',

@@ -3,6 +3,8 @@
 // draws it on screen with this, and the export draws it three times larger
 // and scales it down, so the file is what the page showed.
 
+import { themeOf } from './overview_themes.js';
+
 /** A fresh, empty set of edits. */
 export function emptyEdits() {
   return {
@@ -26,6 +28,8 @@ export function emptyEdits() {
     },
     format: 'tga',
     target: 'addon',
+    // overview_themes.js: how it looks.
+    theme: 'colours',
     // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.
     hd: true,
   };
@@ -86,7 +90,7 @@ export function faceColour(scene, edits, face) {
   if (own) return own.colour;
   if (areaChange?.colour) return areaChange.colour;
   if (face.stairs && edits.show.stairs) return [255, 255, 255];
-  return area ? area.colour : [145, 145, 130];
+  return themeOf(edits).floor(scene, face, area);
 }
 
 /** Ray-casting point-in-polygon, in image pixels. */
@@ -235,15 +239,16 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     ctx.fillRect(0, 0, w, h);
   }
 
-  // The void: enclosed space, black.
+  const theme = themeOf(edits);
+  // The void: enclosed space, black (themes that have one).
   const key = JSON.stringify([edits.areas.filter((e) => e.hidden), scene.map]);
-  let mask = cache && cache.key === key ? cache.mask : null;
-  if (!mask) {
+  let mask = !theme.voidFill ? null : cache && cache.key === key ? cache.mask : null;
+  if (theme.voidFill && !mask) {
     mask = voidMask(scene, edits);
     if (cache) Object.assign(cache, { key, mask, image: null });
   }
-  let maskImage = cache?.image;
-  if (!maskImage) {
+  let maskImage = theme.voidFill ? cache?.image : null;
+  if (theme.voidFill && !maskImage) {
     maskImage = layer(scene.width, scene.height);
     const mctx = maskImage.getContext('2d');
     const img = mctx.createImageData(scene.width, scene.height);
@@ -258,12 +263,23 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     if (cache) cache.image = maskImage;
   }
   ctx.imageSmoothingEnabled = true;
-  ctx.drawImage(maskImage, 0, 0, w, h);
+  if (maskImage) ctx.drawImage(maskImage, 0, 0, w, h);
 
   // Floors, lowest first, on their own layer so water can be clipped to them.
   const floors = layer(Math.ceil(w), Math.ceil(h));
   const f = floors.getContext('2d');
   f.lineJoin = 'round';
+  // A theme's outline: every floor stroked wide first, then filled over, so
+  // only the line round the outside is left.
+  if (theme.outline) {
+    f.strokeStyle = css(theme.outline);
+    f.lineWidth = 3 * s;
+    for (const face of scene.faces) {
+      if (!faceColour(scene, edits, face)) continue;
+      polygon(f, face.points, s);
+      f.stroke();
+    }
+  }
   f.lineWidth = Math.max(1, 0.8 * s);
   for (const face of scene.faces) {
     const colour = faceColour(scene, edits, face);
@@ -277,7 +293,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
   }
   if (edits.show.water) {
     f.globalCompositeOperation = 'source-atop';
-    f.fillStyle = 'rgb(64,208,213)';
+    f.fillStyle = css(theme.water);
     for (const pts of scene.water) {
       polygon(f, pts, s);
       f.fill();

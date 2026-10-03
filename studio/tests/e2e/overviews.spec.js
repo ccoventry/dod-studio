@@ -191,3 +191,19 @@ test('Up and Down move through the map list and open each map', async ({ page })
   await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await calls(page, 'overview_scene')).at(-1)?.args.map).toBe('dod_anzio');
 });
+
+test('the theme changes how the floors are drawn, and is saved with the map', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const pixel = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(400 * s), Math.round(400 * s), 1, 1).data).slice(0, 3);
+  });
+  expect(await pixel()).toEqual([94, 94, 85]);
+  await page.selectOption('#ov-theme', 'grey');
+  const grey = await pixel();
+  expect(grey[0]).toBe(grey[1]);
+  expect(grey).not.toEqual([94, 94, 85]);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.theme).toBe('grey');
+});
