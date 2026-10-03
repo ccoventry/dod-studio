@@ -404,3 +404,27 @@ test("the game's flag icons can be previewed, sized for a screen height, and are
   await page.click('#ov-save-btn');
   await expect(page.locator('#ov-save-status')).toContainText('Saved');
 });
+
+test('scrolling zooms around the pointer, clicks still land where they point, and 100% shows it all', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const box = await page.locator('#ov-canvas').boundingBox();
+  // Over the indoor area (550-850 x 100-400 in image pixels).
+  const [mx, my] = [box.x + (600 / 1024) * box.width, box.y + (150 / 768) * box.height];
+  await page.mouse.move(mx, my);
+  for (let i = 0; i < 4; i++) await page.mouse.wheel(0, -400);
+  await expect(page.locator('#ov-zoom-fit')).not.toHaveText('100%');
+  // What is under the pointer stayed: colouring there colours the indoor area.
+  await page.locator('#ov-palette .ov-swatch').nth(2).click();
+  await page.mouse.click(mx, my);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.colours.colours.areas[0]?.at).toEqual([30, 40]);
+  // Zoomed in, the canvas shows that area's colour edge to edge.
+  const corner = await page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    return Array.from(c.getContext('2d').getImageData(Math.round(c.width * 0.5), Math.round(c.height * 0.5), 1, 1).data).slice(0, 3);
+  });
+  expect(corner).toEqual([125, 29, 55]);
+  await page.click('#ov-zoom-fit');
+  await expect(page.locator('#ov-zoom-fit')).toHaveText('100%');
+  await expect(page.locator('#ov-zoom-out')).toBeDisabled();
+});

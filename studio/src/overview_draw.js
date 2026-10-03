@@ -356,11 +356,19 @@ function voidMask(scene, edits) {
  * becomes the game's transparency) instead of the key green.
  * `cache` (an object) keeps the void mask between draws of unchanged edits.
  */
-export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null, flagIcons = null } = {}) {
+export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null, flagIcons = null, view = null } = {}) {
   const w = scene.width * s;
   const h = scene.height * s;
+  // `view`: draw only a window of the map, its top-left at image pixel
+  // (ox, oy), onto a canvas cw x ch (the page zoomed in). Scratch layers
+  // are the canvas's size, not the whole map's at that scale.
+  const vx = view ? view.ox * s : 0;
+  const vy = view ? view.oy * s : 0;
+  const cw = view ? view.cw : Math.ceil(w);
+  const ch = view ? view.ch : Math.ceil(h);
   ctx.save();
-  ctx.clearRect(0, 0, w, h);
+  ctx.clearRect(0, 0, cw, ch);
+  ctx.translate(-vx, -vy);
   const theme = themeOf(edits);
   if (theme.paper) {
     ctx.imageSmoothingEnabled = true;
@@ -397,8 +405,9 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
   if (maskImage) ctx.drawImage(maskImage, 0, 0, w, h);
 
   // Floors, lowest first, on their own layer so water can be clipped to them.
-  const floors = layer(Math.ceil(w), Math.ceil(h));
+  const floors = layer(cw, ch);
   const f = floors.getContext('2d');
+  f.translate(-vx, -vy);
   f.lineJoin = 'round';
   // A theme's outline: every floor stroked wide first, then filled over, so
   // only the line round the outside is left.
@@ -437,7 +446,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     f.stroke();
   }
   waterBelow(Infinity);
-  ctx.drawImage(floors, 0, 0);
+  ctx.drawImage(floors, vx, vy);
 
   // Lines round every area, and the frame's grid, on themes that have them.
   if (theme.edges) {
@@ -449,8 +458,9 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
 
   // Capture zones: a yellow rim just outside each zone's footprint.
   if (edits.show.capZones) {
-    const rim = layer(Math.ceil(w), Math.ceil(h));
+    const rim = layer(cw, ch);
     const r = rim.getContext('2d');
+    r.translate(-vx, -vy);
     r.fillStyle = r.strokeStyle = 'rgb(255,221,0)';
     r.lineJoin = 'round';
     r.lineWidth = 6 * s;
@@ -468,7 +478,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
         r.fill();
       }
     }
-    ctx.drawImage(rim, 0, 0);
+    ctx.drawImage(rim, vx, vy);
   }
 
   // Slopes too steep to stand on that a player still gets onto: an outline

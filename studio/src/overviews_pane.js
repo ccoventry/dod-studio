@@ -66,6 +66,9 @@ export function initOverviewsPane() {
   const resetBtn = pane.querySelector('#ov-reset-btn');
   const saveStatus = pane.querySelector('#ov-save-status');
   const undoBtn = pane.querySelector('#ov-undo-btn');
+  const zoomIn = pane.querySelector('#ov-zoom-in');
+  const zoomOut = pane.querySelector('#ov-zoom-out');
+  const zoomFit = pane.querySelector('#ov-zoom-fit');
   const footer = document.querySelector('#footer-overviews-summary');
 
   let installs = [];
@@ -134,6 +137,50 @@ export function initOverviewsPane() {
   }
 
   // ── Drawing ────────────────────────────────────────────────────────────
+  // ── Zoom ──────────────────────────────────────────────────────────────
+  // The canvas keeps the size the whole map fits; zoomed in, it shows a
+  // window of the map, drawn sharp at that size (drawOverview's `view`).
+  // `centre` is the image pixel in the middle of the window.
+  const MAX_ZOOM = 16;
+  let zoom = 1;
+  let centre = [512, 384];
+  function clampView() {
+    if (!scene) return;
+    zoom = Math.max(1, Math.min(MAX_ZOOM, zoom));
+    const halfW = scene.width / zoom / 2;
+    const halfH = scene.height / zoom / 2;
+    centre = [
+      Math.max(halfW, Math.min(scene.width - halfW, centre[0])),
+      Math.max(halfH, Math.min(scene.height - halfH, centre[1])),
+    ];
+  }
+  function viewOrigin() {
+    return [centre[0] - scene.width / zoom / 2, centre[1] - scene.height / zoom / 2];
+  }
+  /** Zooms by `factor`, keeping image pixel `at` under the same point. */
+  function zoomBy(factor, at = centre) {
+    const [ox, oy] = viewOrigin();
+    const fx = (at[0] - ox) / (scene.width / zoom);
+    const fy = (at[1] - oy) / (scene.height / zoom);
+    zoom = Math.max(1, Math.min(MAX_ZOOM, zoom * factor));
+    centre = [at[0] - (fx - 0.5) * (scene.width / zoom), at[1] - (fy - 0.5) * (scene.height / zoom)];
+    clampView();
+    drawSoon();
+  }
+  let drawQueued = false;
+  function drawSoon() {
+    if (drawQueued) return;
+    drawQueued = true;
+    requestAnimationFrame(() => {
+      drawQueued = false;
+      draw();
+    });
+  }
+  function resetZoom() {
+    zoom = 1;
+    centre = scene ? [scene.width / 2, scene.height / 2] : centre;
+  }
+
   function layout() {
     if (!scene) return 1;
     const box = wrap.getBoundingClientRect();
@@ -156,17 +203,76 @@ export function initOverviewsPane() {
     canvas.style.display = '';
     empty.style.display = 'none';
     const s = layout();
-    drawOverview(canvas.getContext('2d'), scene, edits, s, {
+    clampView();
+    const [ox, oy] = viewOrigin();
+    drawOverview(canvas.getContext('2d'), scene, edits, s * zoom, {
       cache,
       selectedLabel,
       flagIcons: { icons: flagIcons, screenHeight: flagScreen },
+      view: { ox, oy, cw: canvas.width, ch: canvas.height },
     });
+    zoomFit.textContent = `${Math.round(zoom * 100)}%`;
+    zoomOut.disabled = zoom <= 1;
+    zoomIn.disabled = zoom >= MAX_ZOOM;
   }
 
   function pixelOf(event) {
     const r = canvas.getBoundingClientRect();
-    return [((event.clientX - r.left) / r.width) * scene.width, ((event.clientY - r.top) / r.height) * scene.height];
+    const [ox, oy] = viewOrigin();
+    return [
+      ox + ((event.clientX - r.left) / r.width) * (scene.width / zoom),
+      oy + ((event.clientY - r.top) / r.height) * (scene.height / zoom),
+    ];
   }
+
+  // Scroll to zoom around the pointer; drag with the middle button, or
+  // with Space held, to move about.
+  canvas.addEventListener('wheel', (event) => {
+    if (!scene) return;
+    event.preventDefault();
+    zoomBy(Math.exp(-event.deltaY * 0.0015), pixelOf(event));
+  }, { passive: false });
+  let pan = null;
+  let spaceDown = false;
+  document.addEventListener('keydown', (event) => {
+    if (event.code !== 'Space' || pane.style.display === 'none' || event.target.closest('input, select, textarea, button')) return;
+    event.preventDefault();
+    spaceDown = true;
+    canvas.style.cursor = 'grab';
+  });
+  document.addEventListener('keyup', (event) => {
+    if (event.code !== 'Space') return;
+    spaceDown = false;
+    canvas.style.cursor = '';
+  });
+  canvas.addEventListener('mousedown', (event) => {
+    if (!scene || !(event.button === 1 || (event.button === 0 && spaceDown))) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    pan = { x: event.clientX, y: event.clientY, centre };
+    canvas.style.cursor = 'grabbing';
+  });
+  window.addEventListener('mousemove', (event) => {
+    if (!pan) return;
+    const r = canvas.getBoundingClientRect();
+    centre = [
+      pan.centre[0] - ((event.clientX - pan.x) / r.width) * (scene.width / zoom),
+      pan.centre[1] - ((event.clientY - pan.y) / r.height) * (scene.height / zoom),
+    ];
+    drawSoon();
+  });
+  window.addEventListener('mouseup', () => {
+    if (!pan) return;
+    pan = null;
+    canvas.style.cursor = spaceDown ? 'grab' : '';
+  });
+  zoomIn.addEventListener('click', () => scene && zoomBy(1.5));
+  zoomOut.addEventListener('click', () => scene && zoomBy(1 / 1.5));
+  zoomFit.addEventListener('click', () => {
+    if (!scene) return;
+    resetZoom();
+    draw();
+  });
 
   // ── Canvas clicks ──────────────────────────────────────────────────────
   canvas.addEventListener('mousedown', (event) => {
@@ -580,6 +686,7 @@ export function initOverviewsPane() {
       opening = null;
       building.hidden = true;
       scene = built;
+      resetZoom();
       const fit = fitEdits(built, normaliseEdits(saved));
       edits = { ...fit.edits, theme: fit.edits.theme || defaultTheme };
       history = [];
