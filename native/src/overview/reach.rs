@@ -255,12 +255,12 @@ pub const CANCELLED: &str = "cancelled";
 
 /// Builds the grid, tests every node, and floods from the spawns.
 pub fn build(level: &Level) -> Result<Reach, String> {
-    build_until(level, &|| false)
+    build_until(level, &|_| false)
 }
 
-/// [`build`], giving up with [`CANCELLED`] once `stop` says so (asked every
-/// few thousand nodes).
-pub fn build_until(level: &Level, stop: &dyn Fn() -> bool) -> Result<Reach, String> {
+/// [`build`], telling `progress` how far along it is (0 to 0.95, every few
+/// thousand nodes) and giving up with [`CANCELLED`] when it answers true.
+pub fn build_until(level: &Level, progress: &dyn Fn(f32) -> bool) -> Result<Reach, String> {
     let floors: Vec<usize> = (0..level.faces.len())
         .filter(|&i| is_floor(level, &level.faces[i]) && level.faces[i].points.len() >= 3)
         .collect();
@@ -363,7 +363,7 @@ pub fn build_until(level: &Level, stop: &dyn Fn() -> bool) -> Result<Reach, Stri
         .iter()
         .enumerate()
         .map(|(n, &(cell, z, _, rise))| {
-            if n.is_multiple_of(4096) && stop() {
+            if n.is_multiple_of(4096) && progress(0.75 * n as f32 / kept.len() as f32) {
                 return Err(CANCELLED.to_string());
             }
             let [cx, cy] = reach.centre(cell);
@@ -384,11 +384,14 @@ pub fn build_until(level: &Level, stop: &dyn Fn() -> bool) -> Result<Reach, Stri
         })
         .collect::<Result<_, _>>()?;
 
-    flood(level, &mut reach, stop)?;
+    flood(level, &mut reach, progress)?;
     Ok(reach)
 }
 
-fn flood(level: &Level, reach: &mut Reach, stop: &dyn Fn() -> bool) -> Result<(), String> {
+/// Reports 0.75 to 0.95 to `progress`, by the share of standable nodes
+/// taken from the queue (most of them are reached).
+fn flood(level: &Level, reach: &mut Reach, progress: &dyn Fn(f32) -> bool) -> Result<(), String> {
+    let standable = reach.fits.iter().filter(|&&f| f).count().max(1);
     let ladders = ladders(level, reach);
     let mut queue = VecDeque::new();
     for class in ["info_player_allies", "info_player_axis"] {
@@ -410,7 +413,9 @@ fn flood(level: &Level, reach: &mut Reach, stop: &dyn Fn() -> bool) -> Result<()
     let mut done = 0usize;
     while let Some(k) = queue.pop_front() {
         done += 1;
-        if done.is_multiple_of(4096) && stop() {
+        if done.is_multiple_of(4096)
+            && progress(0.75 + 0.2 * (done as f32 / standable as f32).min(1.0))
+        {
             return Err(CANCELLED.to_string());
         }
         let cell = reach.cell[k];

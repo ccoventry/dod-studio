@@ -278,5 +278,16 @@ test('a map clicked while another is building is highlighted at once and wins', 
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_test/);
   await expect(page.locator('#ov-map-title')).toHaveText('dod_test');
+  // The last map's drawing is gone while the new one builds, with a bar.
+  await expect(page.locator('#ov-canvas')).toBeHidden();
+  await expect(page.locator('#ov-building')).toBeVisible();
+  await page.evaluate(() => window.__mockEmit('overview_progress', { map: 'dod_test', fraction: 0.5 }));
+  await expect(page.locator('#ov-building-text')).toContainText('50%');
+  await expect(page.locator('#ov-building-fill')).toHaveAttribute('style', /width: 50%/);
+  // Progress for a map no longer asked for is ignored.
+  await page.evaluate(() => window.__mockEmit('overview_progress', { map: 'dod_anzio', fraction: 0.9 }));
+  await expect(page.locator('#ov-building-text')).toContainText('50%');
+  await expect(page.locator('#ov-canvas')).toBeVisible();
+  await expect(page.locator('#ov-building')).toBeHidden();
   await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_test/);
 });

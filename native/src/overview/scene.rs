@@ -284,16 +284,20 @@ fn cap_zones(level: &Level, t: &Transform) -> Vec<Vec<Vec<[f32; 2]>>> {
 
 /// Builds the scene for `level`. `strings` names the flags.
 pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, String> {
-    build_until(level, strings, &|| false)
+    build_until(level, strings, &|_| false)
 }
 
-/// [`build`], giving up with [`reach::CANCELLED`] once `stop` says so.
+/// [`build`], telling `progress` how far along it is and giving up with
+/// [`reach::CANCELLED`] when it answers true (see [`reach::build_until`]).
 pub fn build_until(
     level: &Level,
     strings: &HashMap<String, String>,
-    stop: &dyn Fn() -> bool,
+    progress: &dyn Fn(f32) -> bool,
 ) -> Result<Scene, String> {
-    let reach = reach::build_until(level, stop)?;
+    let reach = reach::build_until(level, progress)?;
+    if progress(0.95) {
+        return Err(reach::CANCELLED.to_string());
+    }
 
     // The top reachable floor of every cell, and whether it is outdoors.
     let mut top: HashMap<i32, usize> = HashMap::new();

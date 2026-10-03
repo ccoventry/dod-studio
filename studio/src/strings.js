@@ -1311,6 +1311,7 @@ export const STRINGS = {
     RESET_BUTTON: 'Start over',
     resetConfirm: (map) => `Throw away every change made to ${map}'s overview here? The saved overview files are not touched.`,
     BUILDING: 'Working out where players can go...',
+    building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
     SAVING: 'Saving...',
     saved: (paths) => `Saved: ${paths.join(', ')}`,
     backedUp: (paths) => `Your own overview was copied first to: ${paths.join(', ')}`,

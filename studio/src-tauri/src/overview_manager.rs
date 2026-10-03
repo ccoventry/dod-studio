@@ -3,7 +3,10 @@
 //! is in `native::overview`; this is the Tauri surface.
 
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::time::Instant;
+
+use tauri::Emitter;
 
 use native::overview::files::{self, Export, Install, MapEntry, Saved};
 use native::overview::scene::Scene;
@@ -33,14 +36,31 @@ pub async fn overview_maps(install: String) -> Result<Vec<MapEntry>, String> {
 static LATEST_SCENE: AtomicU64 = AtomicU64::new(0);
 
 /// Reads the map and works out what to draw. A tenth of a second to a
-/// second, off the async runtime's threads. Fails with
+/// second, off the async runtime's threads, sending `overview_progress`
+/// (`{ map, fraction }`, at most every 33 ms) as it goes. Fails with
 /// `native::overview::reach::CANCELLED` once another map is asked for.
 #[tauri::command]
-pub async fn overview_scene(install: String, map: String) -> Result<Scene, String> {
+pub async fn overview_scene(
+    app: tauri::AppHandle,
+    install: String,
+    map: String,
+) -> Result<Scene, String> {
     let mine = LATEST_SCENE.fetch_add(1, Ordering::SeqCst) + 1;
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let stop = || LATEST_SCENE.load(Ordering::SeqCst) != mine;
-        native::overview::scene_for_until(Path::new(&install), &map, &stop)
+        let started = Instant::now();
+        let last_sent = AtomicU32::new(0);
+        let progress = |fraction: f32| {
+            let now = started.elapsed().as_millis() as u32;
+            if now.saturating_sub(last_sent.load(Ordering::Relaxed)) >= 33 {
+                last_sent.store(now, Ordering::Relaxed);
+                let _ = app.emit(
+                    "overview_progress",
+                    serde_json::json!({ "map": map, "fraction": fraction }),
+                );
+            }
+            LATEST_SCENE.load(Ordering::SeqCst) != mine
+        };
+        native::overview::scene_for_until(Path::new(&install), &map, &progress)
     }))
     .await
 }

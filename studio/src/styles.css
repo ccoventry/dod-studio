@@ -2031,6 +2031,12 @@ tr.keyboard-selected {
   align-self: flex-start;
 }
 
+/* A map's scene being built: what and how far, where the map will be. */
+.ov-building {
+  width: min(360px, 80%);
+  text-align: center;
+}
+
 /* The side panel scrolls, which clips an outline drawn outside the button. */
 .ov-add-label.active {
   outline-offset: -2px;

@@ -7,6 +7,7 @@
 
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
+import { listen } from '@tauri-apps/api/event';
 import { STRINGS } from './strings.js';
 import {
   overviewInstalls, overviewMaps, overviewScene, overviewLoadEdits,
@@ -43,6 +44,9 @@ export function initOverviewsPane() {
   const canvas = pane.querySelector('#ov-canvas');
   const wrap = pane.querySelector('#ov-canvas-wrap');
   const empty = pane.querySelector('#ov-empty');
+  const building = pane.querySelector('#ov-building');
+  const buildingText = pane.querySelector('#ov-building-text');
+  const buildingFill = pane.querySelector('#ov-building-fill');
   const palette = pane.querySelector('#ov-palette');
   const customColour = pane.querySelector('#ov-custom-colour');
   const clearColourBtn = pane.querySelector('#ov-clear-colour-btn');
@@ -133,9 +137,10 @@ export function initOverviewsPane() {
   }
 
   function draw() {
+    building.hidden = !opening;
     if (!scene) {
       canvas.style.display = 'none';
-      empty.style.display = '';
+      empty.style.display = opening ? 'none' : '';
       return;
     }
     canvas.style.display = '';
@@ -468,18 +473,35 @@ export function initOverviewsPane() {
     await loadMaps();
   }
 
+  function showProgress(fraction) {
+    buildingText.textContent = STRINGS.OVERVIEWS.building(opening, fraction);
+    buildingFill.style.width = `${Math.round(fraction * 100)}%`;
+  }
+  listen('overview_progress', (event) => {
+    if (event.payload?.map === opening) showProgress(event.payload.fraction);
+  });
+
   // A newer pick makes the backend drop the older build (overview_manager.rs).
+  // The last map goes at once: the page shows the one being built, not the
+  // one before it.
   async function openMap(name) {
     const token = ++loadToken;
     opening = name;
     for (const row of mapList.querySelectorAll('.ov-map-row')) {
       row.classList.toggle('active', row.dataset.map === name);
     }
-    title.textContent = `${name} — ${STRINGS.OVERVIEWS.BUILDING}`;
+    scene = null;
+    selectedLabel = null;
+    title.textContent = name;
+    if (footer) footer.textContent = '';
+    showProgress(0);
+    renderSidePanels();
+    draw();
     try {
       const [built, saved] = await Promise.all([overviewScene(install, name), overviewLoadEdits(name).catch(() => null)]);
       if (token !== loadToken) return;
       opening = null;
+      building.hidden = true;
       scene = built;
       edits = { ...normaliseEdits(saved), theme };
       history = [];
@@ -493,6 +515,7 @@ export function initOverviewsPane() {
       if (token === loadToken) {
         opening = null;
         title.textContent = name;
+        draw();
       }
       return;
     }
