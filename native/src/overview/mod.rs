@@ -13,6 +13,7 @@
 //! - [`image`] encodes what the Overviews page drew as the `.tga` or `.bmp`
 //!   the game's loader takes;
 //! - [`spawn_zones`] finds each spawn's protection, which the page outlines;
+//! - [`credit`] finds who made the map, for the title card;
 //! - [`flag_icons`] reads the icons the game draws on its map for each flag,
 //!   for the page to preview;
 //! - [`files`] finds installs and maps and writes the result, keeping a
@@ -20,6 +21,7 @@
 //!
 //! The page does the drawing and the editing; this module never rasterises.
 
+pub mod credit;
 pub mod files;
 pub mod flag_icons;
 pub mod image;
@@ -51,5 +53,6 @@ pub fn scene_for_until(
         scene::read_strings(&install.join("dod").join("resource").join("dod_english.txt"));
     let mut scene = scene::build_until(&level, &strings, progress)?;
     scene.checksum = crate::patch::bsp::map_checksum_of_file(&bsp).unwrap_or(0);
+    scene.credit = credit::map_credit(install, map, &level.entities);
     Ok(scene)
 }

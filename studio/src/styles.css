@@ -2114,6 +2114,10 @@ tr.keyboard-selected {
   gap: 6px;
 }
 
+.ov-credit-row {
+  margin-left: 20px;
+}
+
 .ov-check-row .ov-flag-reset {
   padding: 0 6px;
   line-height: 1.3;

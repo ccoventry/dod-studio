@@ -1315,6 +1315,10 @@ export const STRINGS = {
     SHOW_TITLE: 'Map title',
     SHOW_TITLE_TIP: "The map's name on a card, top right. Drag it on the map to move it",
     TITLE_RESET_TIP: 'Put the title back in the top right',
+    // #580: who made the map, on the title card's second line.
+    CREDIT_TIP: "Who made the map, on the title card's second line. Found in the map's .txt or the map itself: type over it, or clear it for none",
+    CREDIT_PLACEHOLDER: 'Credit (none)',
+    CREDIT_RESET_TIP: 'Back to the credit found with the map',
     SP_TITLE: 'Spawn protection',
     SP_FILL: 'Fill',
     SP_FILL_TINT: 'Tint',

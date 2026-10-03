@@ -17,7 +17,7 @@ import {
   emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, faceColour, labelAt, setAreaEdit,
   areaEdit, setFaceColour, paintedPieces, clearAreaPieces, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
   spawnNameAt, setSpawnOffset, spawnNameSpots, setSpawnName, resetSpawn, spawnChanged, defaultSpawnName,
-  titleShown, titleAt, renderExport, renderHd, toBase64,
+  titleShown, titleAt, titleCredit, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES, themeOf } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
@@ -67,6 +67,15 @@ export function initOverviewsPane() {
   const spawnList = pane.querySelector('#ov-spawn-names');
   const titleReset = pane.querySelector('#ov-title-reset');
   titleReset.addEventListener('click', () => change({ ...edits, titleOffset: null }));
+  // The credit on the title's second line (#580): typing the found credit
+  // back, or ↺, goes back to following the map; an empty field is none.
+  const creditInput = pane.querySelector('#ov-credit');
+  const creditReset = pane.querySelector('#ov-credit-reset');
+  creditInput.addEventListener('change', () => {
+    const typed = creditInput.value.trim();
+    change({ ...edits, credit: typed === (scene?.credit ?? '') ? null : typed });
+  });
+  creditReset.addEventListener('click', () => change({ ...edits, credit: null }));
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
@@ -660,6 +669,10 @@ export function initOverviewsPane() {
       box.disabled = !scene;
     });
     titleReset.disabled = !scene || !titleShown(edits) || !edits.titleOffset;
+    creditInput.value = scene ? titleCredit(scene, edits) : '';
+    creditInput.placeholder = STRINGS.OVERVIEWS.CREDIT_PLACEHOLDER;
+    creditInput.disabled = !scene || !titleShown(edits);
+    creditReset.disabled = creditInput.disabled || edits.credit == null;
     formatSelect.value = edits.format || 'tga';
     const look = { ...SPAWN_PROTECTION, ...(edits.spawnProtection || {}) };
     for (const [key, control] of Object.entries(spControls)) {

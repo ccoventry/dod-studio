@@ -41,6 +41,9 @@ export function emptyEdits() {
     // the top right, or null. Whether it shows is `show.title`, which is
     // left out until set: each theme has its own default (titleShown).
     titleOffset: null,
+    // The title card's second line (#580): null for the credit found with
+    // the map (scene.credit), else what was typed; '' for none.
+    credit: null,
     show: {
       spawns: true,
       spawnLabels: true,
@@ -387,8 +390,11 @@ export function spawnNameAt(scene, edits, x, y) {
   return null;
 }
 
-/** The title card's subtitle. */
-const TITLE_SUBTITLE = 'DoD Studio';
+/** The title card's second line: the credit typed, else the one found with
+ *  the map ("by ..."), else none. */
+export function titleCredit(scene, edits) {
+  return edits.credit ?? scene.credit ?? '';
+}
 
 /** Whether the map title shows: as set, else the theme's own default (on
  *  for the themes with a ruler frame, Classic's printed-map look). */
@@ -398,7 +404,7 @@ export function titleShown(edits) {
 
 /** The title card's box, in image pixels, wherever it was dragged. */
 export function titleBox(scene, edits) {
-  return titleCardBox(scene, mapTitle(scene.map), TITLE_SUBTITLE, edits.titleOffset);
+  return titleCardBox(scene, mapTitle(scene.map), titleCredit(scene, edits), edits.titleOffset);
 }
 
 /** Whether an image pixel is on the map title, when it shows. */
@@ -799,7 +805,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
   // see-through card would let the game show through it.
   if (titleShown(edits)) {
     const look = theme.card || (theme.paper ? null : { fill: 'rgb(236,228,206)' });
-    titleCard(ctx, scene, s, mapTitle(scene.map), TITLE_SUBTITLE, edits.titleOffset, look);
+    titleCard(ctx, scene, s, mapTitle(scene.map), titleCredit(scene, edits), edits.titleOffset, look);
   }
   // The page's editing aids (overview_overlay.js); never in an export.
   if (overlay) drawOverlay(ctx, scene, s, overlay);

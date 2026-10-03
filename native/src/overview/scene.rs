@@ -108,6 +108,10 @@ pub struct Scene {
     /// colour.
     #[serde(default)]
     pub spawn_zones: Vec<super::spawn_zones::SpawnZone>,
+    /// Who made the map, "by ..." (`credit.rs`), for the title card. Filled
+    /// in by `scene_for`, which knows the install.
+    #[serde(default)]
+    pub credit: Option<String>,
     pub flags: Vec<Marker>,
     pub allies: Vec<Marker>,
     pub axis: Vec<Marker>,
@@ -621,6 +625,7 @@ pub fn build_until(
         slope_edges,
         checksum: 0,
         spawn_zones: super::spawn_zones::spawn_zones(level, &transform),
+        credit: None,
         flags,
         allies,
         axis,

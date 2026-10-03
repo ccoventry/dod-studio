@@ -4,6 +4,7 @@ import {
   insidePolygon, faceAt, toPixel, toWorld, spawnLabels, flagName, setFlagName,
   labelAt, toBase64, flagOffset, setFlagOffset, flagLabelAt, flagLabelSpot,
   spawnNameSpots, setSpawnName, setSpawnOffset, resetSpawn, spawnChanged, spawnName, spawnNameAt, titleShown,
+  titleCredit,
 } from './overview_draw.js';
 import { mapTitle } from './overview_themes.js';
 
@@ -236,6 +237,17 @@ describe('titleShown (#581)', () => {
     expect(titleShown(off)).toBe(false);
     const on = normaliseEdits({ theme: 'grey', show: { title: true } });
     expect(titleShown(on)).toBe(true);
+  });
+});
+
+describe('titleCredit (#580)', () => {
+  it("is the map's credit until typed over, and an empty one is none", () => {
+    const s = { ...scene(), credit: 'by Holeman' };
+    expect(titleCredit(s, emptyEdits())).toBe('by Holeman');
+    expect(titleCredit(s, { ...emptyEdits(), credit: 'by me' })).toBe('by me');
+    expect(titleCredit(s, { ...emptyEdits(), credit: '' })).toBe('');
+    expect(titleCredit(scene(), emptyEdits())).toBe('');
+    expect(normaliseEdits({}).credit).toBeNull();
   });
 });
 

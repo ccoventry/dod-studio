@@ -726,3 +726,31 @@ test('the grid paper theme: squared paper in a blue ruler frame, flat floors, it
   const swatches = await page.locator('#ov-palette .ov-swatch').evaluateAll((els) => els.map((e) => e.title));
   expect(swatches[0]).toBe('#dee4ec');
 });
+
+test("the title card's second line is the map's credit, typed over or cleared, with a reset (#580)", async ({ page }) => {
+  await loadHarness(page, { scene: { ...SCENE, credit: 'by Holeman' } });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const credit = page.locator('#ov-credit');
+  const reset = page.locator('#ov-credit-reset');
+  // Colour-coded has no title until ticked, so no credit to edit.
+  await expect(credit).toBeDisabled();
+  await page.locator('#ov-show input[data-show="title"]').check();
+  await expect(credit).toBeEnabled();
+  await expect(credit).toHaveValue('by Holeman');
+  await expect(reset).toBeDisabled();
+  const saved = async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.credit;
+
+  await credit.fill('by the dod_test crew');
+  await credit.press('Enter');
+  await expect.poll(saved).toBe('by the dod_test crew');
+  await expect(reset).toBeEnabled();
+
+  // Cleared: no second line at all.
+  await credit.fill('');
+  await credit.press('Enter');
+  await expect.poll(saved).toBe('');
+
+  await reset.click();
+  await expect.poll(saved).toBeNull();
+  await expect(credit).toHaveValue('by Holeman');
+});
