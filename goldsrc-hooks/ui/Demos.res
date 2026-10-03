@@ -130,7 +130,7 @@
 		"visible"		"1"
 		"enabled"		"1"
 		"editable"		"1"
-		"helptext"		"Type part of a player name, or pick one from the list. Only demos Studio or the Highlights tab analysed are searched."
+		"helptext"		"Type to search the players, then click a name to filter the demos by them. Only demos Studio or the Highlights tab analysed are searched."
 	}
 	"PlayerRecorded"
 	{
