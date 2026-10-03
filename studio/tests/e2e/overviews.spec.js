@@ -394,7 +394,7 @@ test("the game's flag icons can be previewed, sized for a screen height, and are
     return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
   }, [x, y]);
   expect(await pixel(600, 650)).not.toEqual([255, 0, 0]);
-  await page.locator('#ov-show input[data-show="flagIcons"]').check();
+  await page.check('#ov-flag-icons');
   await expect.poll(() => pixel(600, 650)).toEqual([255, 0, 0]);
   // At 720p a 32 px icon is 32 * 768 / 450 = 55 image pixels across: 25 out
   // from its middle is still icon; at 2160p (18 across) it isn't.
@@ -521,6 +521,8 @@ test('hovering shows what a click would paint, and Show areas outlines them all'
     const s = c.width / 1024;
     return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
   }, [x, y]);
+  // The highlight is on unless turned off.
+  await expect(page.locator('#ov-hover-preview')).toBeChecked();
   // The indoor area is lighter while hovered, and back after.
   const plain = await pixel(700, 250);
   await page.mouse.move(...at(700, 250));
@@ -541,6 +543,13 @@ test('hovering shows what a click would paint, and Show areas outlines them all'
   await expect.poll(sum).toBeLessThan(before);
   await page.uncheck('#ov-show-areas');
   await expect.poll(sum).toBe(before);
+  // With the highlight turned off, hovering changes nothing.
+  await page.uncheck('#ov-hover-preview');
+  await page.mouse.move(...at(700, 250));
+  await page.waitForTimeout(100);
+  expect(await pixel(700, 250)).toEqual(plain);
+  await page.mouse.move(...at(1000, 700));
+  await page.check('#ov-hover-preview');
   // Nothing of this is in the saved image.
   await page.click('#ov-save-btn');
   const rgba = (await calls(page, 'overview_export')).at(-1).args.request.rgba;

@@ -42,8 +42,6 @@ export function emptyEdits() {
       spawnProtection: true,
       flags: true,
       flagLabels: true,
-      // The game's flag icons over the map, on the page only (never saved).
-      flagIcons: false,
       capZones: true,
       breakables: true,
       slopes: true,
@@ -685,7 +683,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     }
     // The game's own flag icons, as big as they come out on the full map
     // at the screen height asked for (preview only; see flag_icons.rs).
-    if (edits.show.flagIcons && flagIcons?.icons?.length) {
+    if (flagIcons?.icons?.length) {
       const k = 768 / (0.625 * flagIcons.screenHeight);
       ctx.save();
       ctx.imageSmoothingEnabled = true;

@@ -70,6 +70,8 @@ export function initOverviewsPane() {
   const saveStatus = pane.querySelector('#ov-save-status');
   const undoBtn = pane.querySelector('#ov-undo-btn');
   const showAreasBox = pane.querySelector('#ov-show-areas');
+  const hoverBox = pane.querySelector('#ov-hover-preview');
+  const flagIconsBox = pane.querySelector('#ov-flag-icons');
   const zoomIn = pane.querySelector('#ov-zoom-in');
   const zoomOut = pane.querySelector('#ov-zoom-out');
   const zoomFit = pane.querySelector('#ov-zoom-fit');
@@ -213,9 +215,9 @@ export function initOverviewsPane() {
     drawOverview(canvas.getContext('2d'), scene, edits, s * zoom, {
       cache,
       selectedLabel,
-      flagIcons: { icons: flagIcons, screenHeight: flagScreen },
+      flagIcons: flagIconsBox.checked ? { icons: flagIcons, screenHeight: flagScreen } : null,
       view: { ox, oy, cw: canvas.width, ch: canvas.height },
-      overlay: { outlines: showAreasBox.checked ? (altDown ? 'pieces' : 'areas') : null, hover },
+      overlay: { outlines: showAreasBox.checked ? (altDown ? 'pieces' : 'areas') : null, hover: hoverBox.checked ? hover : null },
     });
     zoomFit.textContent = `${Math.round(zoom * 100)}%`;
     zoomOut.disabled = zoom <= 1;
@@ -410,12 +412,21 @@ export function initOverviewsPane() {
   // under the pointer changes.
   let hover = null;
   let altDown = false;
-  const SHOW_AREAS_KEY = 'overviews.showAreas';
-  showAreasBox.checked = storageGet(SHOW_AREAS_KEY) === '1';
-  showAreasBox.addEventListener('change', () => {
-    storageSet(SHOW_AREAS_KEY, showAreasBox.checked ? '1' : '0');
-    draw();
-  });
+  // The page's editing aids, one choice for every map and remembered:
+  // hover highlight on unless turned off, the others off unless turned on.
+  for (const [box, key, start] of [
+    [showAreasBox, 'overviews.showAreas', false],
+    [hoverBox, 'overviews.hoverPreview', true],
+    [flagIconsBox, 'overviews.flagIcons', false],
+  ]) {
+    const saved = storageGet(key);
+    box.checked = saved == null ? start : saved === '1';
+    box.addEventListener('change', () => {
+      storageSet(key, box.checked ? '1' : '0');
+      flagScreenSelect.disabled = !flagIconsBox.checked;
+      draw();
+    });
+  }
   function hoverAt(event) {
     if (!scene || !event || drag || pan || spaceDown || mode === 'label') return null;
     const [x, y] = pixelOf(event);
@@ -582,7 +593,7 @@ export function initOverviewsPane() {
       row.append(input, reset);
       flagList.appendChild(row);
     }
-    flagScreenSelect.disabled = !edits.show.flagIcons;
+    flagScreenSelect.disabled = !flagIconsBox.checked;
     spawnReset.disabled = !scene || !(edits.spawnNames || []).length;
 
     labelList.innerHTML = '';

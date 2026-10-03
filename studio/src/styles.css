@@ -1937,16 +1937,6 @@ tr.keyboard-selected {
   align-self: flex-start;
 }
 
-.ov-show-areas {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  margin-left: 8px;
-  font-size: 12px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
 .ov-zoom {
   display: inline-flex;
   gap: 2px;
