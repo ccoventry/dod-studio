@@ -1,0 +1,41 @@
+<!doctype html>
+<!--
+  Minimal harness for clip_name_ui.js (#441) — see tests/e2e/README.md for the
+  general shape. Carries just Configuration > Render Output's Clip Name
+  Template block, with a fixed highlight for the preview.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>clip_name_ui.js test harness</title>
+</head>
+<body>
+  <input type="text" id="config-clip-name-template" />
+  <button id="config-clip-name-reset">Default</button>
+  <div id="config-clip-name-chips"></div>
+  <div id="config-clip-name-errors" style="display: none;"></div>
+  <div id="config-clip-name-warnings" style="display: none;"></div>
+  <div id="config-clip-name-preview"></div>
+
+  <script type="module">
+    import { initClipNameSettings, clipNameTemplateErrors } from '/src/clip_name_ui.js';
+
+    const streak = {
+      player_index: 3, target_player: 'krod', start_tick: 1000, end_tick: 1400, kill_count: 2,
+      kills: [[1000, 754.2, 'Garand'], [1400, 758, 'MP40']], viewdemo_times: [754.2, 758],
+      start_index: 0, end_index: 1, faction: 'Axis', victims: ['a', 'b'], victim_factions: ['Allies', 'Allies'],
+    };
+    const demo = { path: 'C:/d/x.dem', name: 'x.dem', map_name: 'dod_anzio', local_player_index: 3, streaks: [streak] };
+
+    window.__changes = 0;
+    window.__exportDirs = ['D:\\Clips'];
+    initClipNameSettings({
+      getHighlight: () => ({ demo, streak }),
+      getExportDirList: () => window.__exportDirs,
+      onChange: () => { window.__changes += 1; },
+    });
+    window.__errors = () => clipNameTemplateErrors();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

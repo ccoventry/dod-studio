@@ -16,6 +16,9 @@ use web_time::SystemTime;
 
 pub mod patch;
 
+/// What a highlight's clip name can say beyond the streak itself (#441).
+pub mod clip_facts;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
