@@ -526,6 +526,7 @@ pub fn poll() {
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
     crate::spectator_follow::poll();
+    crate::studio_panel::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -1098,6 +1099,24 @@ unsafe extern "C" fn cmd_texture_hires_log() {
 }
 
 /// Only registered when the window-layout cvars could not be registered.
+/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_viewdemo_in_panel() {
+    handle_toggle(
+        crate::studio_panel::VIEWDEMO_NAME,
+        &crate::studio_panel::VIEWDEMO_IN_PANEL,
+        crate::studio_panel::viewdemo_status,
+    );
+}
+
+/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_console_in_panel() {
+    handle_toggle(
+        crate::studio_panel::CONSOLE_NAME,
+        &crate::studio_panel::CONSOLE_IN_PANEL,
+        crate::studio_panel::console_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1320,6 +1339,7 @@ pub fn install() {
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+    add_command(crate::studio_panel::NAME, crate::studio_panel::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1345,6 +1365,17 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    // Both on by default (the user, 2026-10-03): the window is how DoD
+    // Studio's console and playback controls are reached.
+    match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
+    }
+    match register(crate::studio_panel::CONSOLE_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
