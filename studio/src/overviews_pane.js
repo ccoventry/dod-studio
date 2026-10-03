@@ -19,6 +19,8 @@ import {
 import { THEMES } from './overview_themes.js';
 
 const INSTALL_KEY = 'overviews.install';
+// The theme is one choice for every map, not saved with a map's edits.
+const THEME_KEY = 'overviews.theme';
 const UNDO_LIMIT = 100;
 
 function storageGet(key) {
@@ -61,7 +63,8 @@ export function initOverviewsPane() {
   let install = '';
   let maps = [];
   let scene = null;
-  let edits = emptyEdits();
+  let theme = THEMES.some((t) => t.id === storageGet(THEME_KEY)) ? storageGet(THEME_KEY) : THEMES[0].id;
+  let edits = { ...emptyEdits(), theme };
   let history = [];
   let mode = 'area';
   // The colour clicks paint with; null puts an area's own colour back.
@@ -92,7 +95,7 @@ export function initOverviewsPane() {
 
   function undo() {
     if (!history.length) return;
-    edits = history.pop();
+    edits = { ...history.pop(), theme };
     undoBtn.disabled = history.length === 0;
     persistSoon();
     draw();
@@ -340,7 +343,13 @@ export function initOverviewsPane() {
   }
 
   formatSelect.addEventListener('change', () => change({ ...edits, format: formatSelect.value }, { remember: false }));
-  themeSelect.addEventListener('change', () => change({ ...edits, theme: themeSelect.value }));
+  themeSelect.addEventListener('change', () => {
+    theme = themeSelect.value;
+    storageSet(THEME_KEY, theme);
+    edits = { ...edits, theme };
+    draw();
+    renderSidePanels();
+  });
   for (const t of THEMES) {
     const opt = document.createElement('option');
     opt.value = t.id;
@@ -464,7 +473,7 @@ export function initOverviewsPane() {
       const [built, saved] = await Promise.all([overviewScene(install, name), overviewLoadEdits(name).catch(() => null)]);
       if (token !== loadToken) return;
       scene = built;
-      edits = normaliseEdits(saved);
+      edits = { ...normaliseEdits(saved), theme };
       history = [];
       undoBtn.disabled = true;
       selectedLabel = null;
@@ -534,7 +543,7 @@ export function initOverviewsPane() {
     }
     clearTimeout(saveTimer);
     history.push(edits);
-    edits = emptyEdits();
+    edits = { ...emptyEdits(), theme };
     undoBtn.disabled = false;
     selectedLabel = null;
     const entry = maps.find((m) => m.name === scene.map);
