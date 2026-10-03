@@ -1289,6 +1289,50 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
+/* Last Batch (#172). */
+.batch-results {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.batch-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-results-close {
+  padding: 0 6px;
+}
+
+.batch-results-summary {
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.batch-results-error {
+  color: #ef5350;
+}
+
+.batch-results-wrap {
+  max-height: 220px;
+}
+
+.batch-results-row-missing td:first-child {
+  color: #ef5350;
+}
+
+.batch-results-row-unrenderable td:first-child {
+  color: #ffb74d;
+}
+
+.batch-results-row-ok td:first-child {
+  color: #66bb6a;
+}
+
 .analyzer-stat-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

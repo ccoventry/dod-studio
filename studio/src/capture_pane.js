@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
@@ -915,6 +916,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listen('capture_status', (event) => {
       const payload = event.payload || {};
       if (payload.running) {
+        // The first running report of a batch: the last one's results go.
+        if (!capturingInFlight) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         if (progressBar) {
@@ -935,6 +938,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
         if (currentOnBatchFinished) currentOnBatchFinished();
+        batchEnded(
+          payload.error ? 'error' : payload.status === 'Cancelled' ? 'cancelled' : 'completed',
+          uiStatusText(payload.status),
+        );
 
         if (payload.error) {
           // Without the engine's pointers at the log (#534); the log has them.
@@ -1028,6 +1035,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   if (!unlistenTakesVerified) {
     listen('capture_takes_verified', (event) => {
       const payload = event.payload || {};
+      batchVerified(payload, lastDispatch);
       const blocks = payload.blocks || [];
       const total = payload.total_count ?? blocks.length;
       const captured = payload.captured_count ?? 0;
