@@ -156,6 +156,25 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     )
 }
 
+// ── hlcr/combine.rs (#107) ────────────────────────────────────────────────
+
+pub const COMBINE_NEEDS_TWO: &str = "pick at least two clips to combine";
+pub const COMBINE_OUTPUT_IS_INPUT: &str =
+    "the combined video can't be saved over one of the clips going into it";
+pub const COMBINE_CANCELLED: &str = "cancelled";
+
+pub fn combine_unreadable_clip(path: &str) -> String {
+    format!("FFmpeg can't read {path} as a video")
+}
+
+pub fn combine_failed(log: &str) -> String {
+    if log.is_empty() {
+        "FFmpeg stopped without saying why".to_string()
+    } else {
+        format!("FFmpeg failed: {log}")
+    }
+}
+
 /// Pins every function above against the exact `format!`/literal it replaced
 /// at its original call site (text copied verbatim from the pre-PR source,
 /// not re-derived), so this refactor can't have silently changed any
