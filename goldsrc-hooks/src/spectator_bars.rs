@@ -1,383 +1,345 @@
-//! R&D for a `dodstudio_hide_spectator_bars` cvar to hide the top and bottom
-//! spectator UI without needing `mirv_recordmovie_start` running. **Parked,
-//! not wired into the crate** (`lib.rs` doesn't declare this as a `mod`) --
-//! two live-tested approaches both turned out to be dead ends; see the
-//! bottom two sections for exactly what's ruled out and what the real next
-//! step is (a live memory watch, not more static analysis). Kept on disk
-//! rather than deleted so the next attempt doesn't re-derive any of this
-//! from scratch -- the class hierarchy, the ownership chain and the
-//! `SetVisible` slot are all still correct, they just don't explain the
-//! bars' actual visibility.
+//! Hides DoD's spectator bars -- the two dark bands across the top and bottom
+//! of the screen while spectating, in a demo or live, and everything drawn on
+//! them -- with a cvar, on screen, without a capture running (issue #328).
 //!
-//! ## The problem this exists for
+//! `dodstudio_hide_spectator_bars 1` hides the whole spectator panel: the
+//! bands, the score, timer and player name on them, the DUCK menu row and the
+//! inset outline. An earlier version had a second cvar for the bands alone,
+//! with the text left floating; nobody wanted that, and it went.
 //!
-//! HLAE's `mirv_movie_hidepanels`/`mirv_disable_specmenu` only hide panels
-//! from the *capture* -- they stay on screen, and `mirv_disable_specmenu`
-//! does not support `dod` at all (its own "Supported modifications" list is
-//! `tfc`/`valve`). Editing `resource/ui/Spectator.res` does hide the top
-//! bar, but the same edit to `resource/ui/BottomSpectator.res` does nothing
-//! -- the bottom bar ignores it. Full investigation in
-//! `docs/goldsrc_spectator_bars.md`; this module is its ending.
+//! HLAE's `mirv_movie_hidepanels` only leaves panels out of what it records,
+//! and its `mirv_disable_specmenu` does not support DoD.
 //!
-//! ## Why the bottom bar ignores `.res`
+//! ## What the bands are
 //!
-//! Both bars turned out to be `vgui2::Frame` (the newer VGUI2 hierarchy,
-//! statically linked into `client.dll` -- not the `vgui.dll` VGUI1 runtime
-//! their RTTI names suggest). Neither overrides `SetVisible`; both inherit
-//! `Frame`'s own stock implementation unmodified. There is no DoD-authored
-//! "propagate visibility" hook to patch, and no obvious per-instance flag to
-//! flip -- so this does not try to read the `.res` scheme or find a "is
-//! visible" byte. Instead it intercepts the one call every visibility
-//! change already goes through: it redirects each class' *own* vtable slot
-//! for `SetVisible` to a small trampoline that forces the boolean argument
-//! to `false` and tails into the untouched stock function -- so every
-//! internal side effect `Frame::SetVisible` normally has (there is an
-//! animation controller it notifies) still happens, just always told to
-//! hide.
+//! Two plain `vgui2::Panel`s that `CSpectatorGUI`'s constructor creates
+//! (`client.dll+0x82b50`): `topbar` and `bottombarblank`, both given
+//! `SetBgColor(0, 0, 0, 196)` by its `ApplySchemeSettings` (`+0x83030`) and
+//! painted by the stock `Panel::PaintBackground`. `Spectator.res` renames the
+//! first `TopBar` (its `fieldName`). The frame around them, `SpectatorGUI`,
+//! paints nothing itself, and `CBottomBar` (`BottomBar`) is the transparent
+//! combobox row that DUCK brings up.
 //!
-//! ## Why the vtable and not the function
+//! ## Why the `.res` edit hides one band and not the other
 //!
-//! `crosshair.rs`/`scoreboard.rs` patch a function's own bytes, which works
-//! when the function is safe to change for *everyone* who calls it.
-//! `Frame::SetVisible` is not: every VGUI2 `Frame` in the client shares it
-//! (menus, dialogs, the scoreboard's own dialog chrome), so stubbing its
-//! code would hide all of them. `CDoDSpectatorGUI` and `CBottomBar` each
-//! have their *own* vtable array in `.rdata` even though the function
-//! pointer they currently hold is identical (both simply inherit `Frame`'s,
-//! unoverridden) -- so redirecting one class' array, like
-//! `hudelement.rs` already does for `Draw`, touches only that class.
+//! `"visible" "0"` reaches both panels. Nothing ever shows `TopBar` again, so
+//! it holds. For `bottombarblank` the constructor itself calls
+//! `SetVisible(true)` after loading the `.res` (`+0x82e39`), and
+//! `CSpectatorGUI::OnThink` (`+0x82ef0`) re-sizes and re-positions it at the
+//! bottom edge on top of that, which defeats `tall 0` / `ypos 9999` too.
 //!
-//! ## Reaching the two objects
+//! ## How this hides them
 //!
-//! `gViewPort` (`+0x19d564`, the same global `scoreboard.rs`'s
-//! `+showscores` patch already reads through) holds `DoDViewport*`.
-//! `CDoDSpectatorGUI` is a direct member, `DoDViewport::CDoDSpectatorGUI*
-//! m_pSpectatorGUI` at `+0x740` -- confirmed by disassembling the `new` +
-//! constructor pair that builds it. `CBottomBar` is in turn a member of
-//! `CSpectatorGUI`, `CDoDSpectatorGUI`'s own base class, at `+0x114`
-//! (`CDoDSpectatorGUI`'s constructor calls `CSpectatorGUI`'s at
-//! `client+0x1da42`, and `CSpectatorGUI::CSpectatorGUI` -- `client+0x82b50`
-//! -- is the one and only place in the image that constructs a `CBottomBar`
-//! and stores it there). Since `CSpectatorGUI` is `CDoDSpectatorGUI`'s
-//! primary, offset-0 base, both offsets apply directly off the same
-//! `CDoDSpectatorGUI*`.
+//! Every panel's paint, in every module, goes through one function: vgui2's
+//! `IPanel::PaintTraverse` (interface `VGUI_Panel007`, vtable slot 41).
+//! `client.dll`'s `Panel::PaintTraverse` calls it for each child
+//! (`client+0x576f2`), and the engine calls it for the root (`hw+0x3cf1` on
+//! the pre-Anniversary build). So this swaps that one vtable slot for a
+//! filter: the `SpectatorGUI` frame is not painted, and nor is anything under
+//! it, since children are only painted from inside their parent's paint.
+//! Nothing about the panel changes -- no visibility flag, no size, no `.res`
+//! -- so there is nothing for the game to put back, and turning the cvar off
+//! shows the panel again on the next frame.
 //!
-//! ## Live-tested, and it did not work (2026-09-21)
+//! The slot numbers are the same on both builds' `vgui2.dll` (the files
+//! differ; the interface does not, and `client.dll`, compiled against it, is
+//! byte-identical in both installs). `tools/verify_vgui2_ipanel.py` checks
+//! them against the real files. At install the vtable has to identify itself
+//! by RTTI as `VPanelWrapper`, the two slots used have to point into
+//! `vgui2.dll`'s own code, and each has to end in the `ret` its argument
+//! count demands; anything else is refused and logged, and nothing is
+//! patched.
 //!
-//! The redirect installs with no error (RTTI and stock-value checks all
-//! pass), but both bars stayed visible. The vtable-slot identity is
-//! re-confirmed correct by that same test -- three of `CDoDSpectatorGUI`'s
-//! and `CBottomBar`'s other "overridden" slots (27, 29, 30 -- 28 is the
-//! destructor) turned out to be either a cached-string getter or pure
-//! pass-through adjustor thunks wrapping the exact unmodified `Frame`
-//! function, not a `Paint` override -- so stubbing a render function instead
-//! is not an available fallback; these container classes apparently draw
-//! nothing of their own, only their (separately-classed) children do.
+//! The hook goes in the first time the cvar is turned on and stays for the
+//! session; with the cvar off it costs one flag read per painted panel.
 //!
-//! That leaves one real open question: whether `SetVisible` is ever called
-//! on these two objects at all during ordinary play. A virtual call site
-//! can't be enumerated by scanning for a fixed address the way a direct
-//! `call rel32` can, so [`HIT_COUNT`] answers it empirically instead -- the
-//! trampoline increments it on every invocation, and `dodstudio_debug_status`
-//! reports it.
+//! ## What was tried before
 //!
-//! ## Confirmed dead: the hit count is 0 (2026-09-21, same session)
-//!
-//! A second live test, with the redirect on, never once incremented
-//! [`HIT_COUNT`]. `SetVisible` is not the mechanism, full stop -- whatever
-//! applies `Spectator.res`'s initial value does it once, at construction,
-//! through some path this vtable slot is never on.
-//!
-//! Chased one step further anyway: `SetVisible`'s own first call,
-//! `call 0x1957b40`, is *not* the low-level setter it looks like. It
-//! disassembles to a bare `ret 4` -- an empty stub, byte-identical to (and
-//! very likely COMDAT-folded together with) dozens of other unrelated
-//! no-op stubs across the binary, including `Panel@vgui2`'s own
-//! never-overridden base version of this same slot. Reading the rest of the
-//! function's body with that ruled out: it never writes a persisted flag on
-//! `this` anywhere. It reads `this`'s *current* visibility (a call through
-//! `this`'s own vtable, `[eax+0x68]`), then hands both the old and new
-//! state to a *separate* animation-controller object
-//! (`call 0x1967370` looks like `GetAnimationController()`) via a call to
-//! `[ebp+0xdc]` on it. `Frame::SetVisible`, in other words, does not
-//! synchronously set anything here -- it queues an animated transition on
-//! another object, which is presumably what eventually writes the real
-//! flag, later, driven by its own per-frame ticking. So even if something
-//! is found that does call this slot, clamping its argument would not
-//! reliably force an immediate hide the way this module assumed.
-//!
-//! ## The actual next step
-//!
-//! Static analysis has now produced two wrong guesses in a row for this
-//! specific question (the vtable slot itself, then this helper). The
-//! reliable way to find what really sets a `CBottomBar`/`CDoDSpectatorGUI`
-//! instance's visible flag is a live memory watch: attach a debugger to a
-//! running session, set a hardware write-breakpoint on the field, and
-//! toggle the already-working `Spectator.res` edit to see what writes it.
-//! Not something this offline `pefile`/`capstone` toolchain can do.
-//!
-//! ## Sharper symptom, same day: it's the background, not the whole bar
-//!
-//! The user can already edit individual *items* on the bottom bar (the
-//! mode/player/view comboboxes) via `BottomSpectator.res` -- those respond
-//! fine. What doesn't respond is the black background/frame itself. That
-//! changes what "the bottom bar ignores `.res`" actually means: the
-//! children's own `visible`/`enabled` keys clearly do reach them, so
-//! `BottomSpectator.res` is being read and applied to *something* -- just
-//! not to whatever draws the black backdrop. Two real possibilities worth
-//! checking first, next time, before touching any code:
-//!
-//! - The backdrop is `CBottomBar`'s own `Frame::PaintBackground` (inherited,
-//!   generic -- reads a scheme border/color resource, not a `visible` key at
-//!   all), separate from whatever visibility mechanism gates the children.
-//! - The backdrop isn't `CBottomBar` at this point in the tree -- it could
-//!   be a parent/sibling panel `BottomSpectator.res` doesn't even declare a
-//!   section for, drawn unconditionally by something else entirely.
-//!
-//! ## Narrower goal for next time (2026-09-21): fix the `.res` file, not the game
-//!
-//! The user already has a working, no-code fix for the top bar --
-//! `Spectator.res`'s `visible`/`enabled` keys, edited by hand. They'd be
-//! fine with the same thing for the bottom bar instead of a
-//! `dodstudio_hide_spectator_bars` command, which changes the actual
-//! question worth investigating next: not "how do we force `CBottomBar`
-//! hidden at runtime" but "why does `BottomSpectator.res`'s `visible` key
-//! not reach `CBottomBar` the way `Spectator.res`'s reaches
-//! `CDoDSpectatorGUI`". That's a *narrower*, more answerable question --
-//! likely something in how `CSpectatorGUI::CSpectatorGUI` (`+0x82b50`, see
-//! above) constructs `CBottomBar`: does it even pass `BottomSpectator.res`'s
-//! path/section to `CBottomBar`'s own `LoadControlSettings`-equivalent, or
-//! does that call happen with the wrong resource name, get skipped, or get
-//! overwritten by something right after? Worth tracing the construction
-//! call site itself (`+0x82c66`) forward, rather than continuing to chase
-//! `SetVisible`, next time this is picked up.
+//! A redirect of `CDoDSpectatorGUI`'s and `CBottomBar`'s "`SetVisible`"
+//! vtable slot, live-tested twice in 2026-09 and never called. Slot 8 of a
+//! vgui2 `Panel` is `OnChildAdded`; `SetVisible` is slot 29, and neither
+//! class paints the bands anyway. `docs/goldsrc_spectator_bars.md` keeps
+//! that history.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+// The hook itself is 32-bit only; a host build compiles the rest for the tests.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
-use windows_sys::Win32::System::Memory::{MEM_COMMIT, MEM_RESERVE, PAGE_EXECUTE_READWRITE, VirtualAlloc};
+use std::ffi::{CStr, c_char, c_void};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
-use crate::engine;
+use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-/// The cvar name, for status and error text. Registered in `commands.rs`.
+/// Hides the spectator panel: the bands and everything on them.
 pub const NAME: &str = console_name!("hide_spectator_bars");
 
-/// A vtable is per-*class*, not per-instance, so patching it needs no live
-/// object at all -- unlike the ownership chain that proves these classes are
-/// real and constructed (`gViewPort` -> `DoDViewport::m_pSpectatorGUI` at
-/// `+0x740` -> `CSpectatorGUI::m_pBottomBar` at `+0x114`, see the module
-/// doc), which is why none of those three offsets appear as code here.
-///
-/// `SetVisible`'s position in `vgui2::Frame`'s vtable -- empirically
-/// derived (not from a public header): `Panel@vgui2`'s own slot 8 is a
-/// trivial 3-byte stub, `Frame` replaces it with a real 77-byte, one-bool
-/// (`ret 4`) function, and both `CDoDSpectatorGUI` and `CBottomBar` inherit
-/// that replacement unchanged.
-const SET_VISIBLE_SLOT: usize = 8;
+/// `IPanel` (`VGUI_Panel007`) vtable slots, 0-based; slot 0 is the virtual
+/// destructor. The same in both builds' `vgui2.dll`.
+const SLOT_GET_NAME: usize = 36;
+const SLOT_PAINT_TRAVERSE: usize = 41;
+/// How many slots the vtable has.
+const SLOT_COUNT: usize = 60;
 
-/// `.?AVCDoDSpectatorGUI@@`'s own vtable (the primary of its two -- offset
-/// 0, not the `+0x10c` `ISpectatorInterface` one).
-const TOP_BAR_VFTABLE_RVA: usize = 0xaab84;
+/// What each slot's function pops: `this` is in `ecx`, so a `VPANEL` alone is
+/// `ret 4`, and `PaintTraverse(VPANEL, bool, bool)` is `ret 0xc`.
+const RET_GET_NAME: u16 = 4;
+const RET_PAINT_TRAVERSE: u16 = 0xc;
 
-/// `.?AVCBottomBar@@`'s vtable.
-const BOTTOM_BAR_VFTABLE_RVA: usize = 0xb51b4;
+/// The vtable's class, by RTTI.
+const WRAPPER_CLASS: &str = ".?AVVPanelWrapper@@";
 
-/// The stock `SetVisible` both classes currently share, inherited from
-/// `Frame` -- an ILT jump thunk (`client.dll`'s vgui2-controls code is
-/// incrementally linked), not the function body itself. Tailing into the
-/// thunk rather than resolving its target keeps this independent of where
-/// the linker happened to place the real body.
-const STOCK_SET_VISIBLE_RVA: usize = 0x61420;
+/// The spectator frame. The bands (`TopBar`, `bottombarblank`), the labels
+/// and the menu row are all its children, so not painting it hides them all.
+const FRAME: &[u8] = b"SpectatorGUI";
 
-/// Whether the bars are currently asked to be hidden.
-static HIDDEN_NOW: AtomicBool = AtomicBool::new(false);
+static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+static HIDE: AtomicBool = AtomicBool::new(false);
 
-/// The trampoline's address, or 0 before the first successful build.
-static TRAMPOLINE: AtomicUsize = AtomicUsize::new(0);
+/// The stock functions, captured at install.
+static STOCK_PAINT_TRAVERSE: AtomicUsize = AtomicUsize::new(0);
+static GET_NAME: AtomicUsize = AtomicUsize::new(0);
+/// Set once install has been tried and refused, so it is tried and logged once.
+static INSTALL_FAILED: AtomicBool = AtomicBool::new(false);
+/// Paints skipped so far, for `dodstudio_debug_status`.
+static SKIPPED: AtomicU32 = AtomicU32::new(0);
 
-/// The module base [`TRAMPOLINE`] was built against. Same guard
-/// `crosshair.rs`/`scoreboard.rs` keep: a `client.dll` reloaded at a
-/// different address (not observed for a plain demo change,
-/// `docs/goldsrc_dod_quirks.md`) gets a freshly built trampoline rather
-/// than one pointing at a stale address.
-static BUILT_BASE: AtomicUsize = AtomicUsize::new(0);
-
-/// How many times the trampoline has actually run. A first live test
-/// (2026-09-21) installed the redirect with no error and left both bars
-/// visible -- this settles the open question that leaves, cheaply: whether
-/// `SetVisible` is ever called on these two objects at all during ordinary
-/// play. Incremented by the trampoline itself (`inc dword ptr [addr]`,
-/// baked in at build time), not by anything on the Rust side.
-static HIT_COUNT: AtomicU32 = AtomicU32::new(0);
-
-/// How many times the trampoline has run, for `dodstudio_debug_status`.
-pub fn hit_count() -> u32 {
-    HIT_COUNT.load(Ordering::Relaxed)
+/// Called once the cvar is registered.
+pub fn set_cvar(cvar: *mut CvarSPartial) {
+    CVAR.store(cvar, Ordering::Release);
 }
 
-unsafe fn read_u32(address: usize) -> u32 {
-    unsafe { (address as *const u32).read_unaligned() }
+fn installed() -> bool {
+    STOCK_PAINT_TRAVERSE.load(Ordering::Acquire) != 0
 }
 
-/// The decorated class name `vftable[-1]`'s RTTI leads to. Mirrors
-/// `hudelement.rs`'s own helper of the same name -- MSVC's 32-bit layout:
-/// slot -1 is a `RTTICompleteObjectLocator*`, whose fourth dword is a
-/// `TypeDescriptor*`, whose name starts eight bytes in.
-///
-/// Safety: `vftable` must be a mapped address inside the module.
-unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
-    unsafe {
-        let locator = read_u32(vftable - 4) as usize;
-        if locator == 0 {
-            return None;
-        }
-        if read_u32(locator) != 0 {
-            return None;
-        }
-        let descriptor = read_u32(locator + 0x0c) as usize;
-        if descriptor == 0 {
-            return None;
-        }
-        let name = std::ffi::CStr::from_ptr((descriptor + 8) as *const std::ffi::c_char);
-        name.to_str().ok().map(str::to_owned)
-    }
+/// Whether a panel is the one to leave unpainted.
+fn hides(name: &[u8]) -> bool {
+    name.eq_ignore_ascii_case(FRAME)
 }
 
-/// `mov dword ptr [esp+4], 0` (8 bytes), `inc dword ptr [hit_count_address]`
-/// (6 bytes), then `jmp rel32` (5 bytes) to the stock thunk. `[esp+4]` is the
-/// caller's pushed bool argument at trampoline entry -- confirmed against the
-/// real `SetVisible` body's own read of the same slot one push deeper
-/// (`mov ebx, [esp+8]`, after its own `push ebx`). A `jmp`, not a `call`, so
-/// the stack the trampoline was entered with -- return address included --
-/// reaches the stock function completely unchanged; its own `ret 4` returns
-/// straight to the original caller.
-fn build_trampoline(hit_count_address: usize) -> Vec<u8> {
-    let mut code = vec![0xc7, 0x44, 0x24, 0x04, 0x00, 0x00, 0x00, 0x00];
-    code.push(0xff);
-    code.push(0x05);
-    code.extend_from_slice(&(hit_count_address as u32).to_le_bytes());
-    code.push(0xe9);
-    code.extend_from_slice(&0u32.to_le_bytes()); // patched by the caller once the stub's own address is known
-    code
+/// The size a function's first `ret imm16` pops, looking at most `window`
+/// bytes in. Both builds' wrappers are short, straight-line forwarders, so
+/// the first `C2 xx 00` is the function's own return; a plain `ret` (`C3`)
+/// first means it pops nothing. `tools/verify_vgui2_ipanel.py` runs the same
+/// scan against the real files.
+fn first_ret_size(code: &[u8]) -> Option<u16> {
+    let mut i = 0;
+    while i < code.len() {
+        match code[i] {
+            0xc3 => return Some(0),
+            0xc2 if i + 2 < code.len() && code[i + 2] == 0 => return Some(code[i + 1] as u16),
+            _ => i += 1,
+        }
+    }
+    None
 }
 
-/// Resolves (building the trampoline once per module base) and returns its
-/// address.
-fn trampoline_address() -> Result<usize, String> {
-    let Some(base) = engine::client_module_base() else {
-        return Err("client.dll is not loaded yet".to_string());
-    };
+/// How far into a wrapper to look for its `ret`.
+const RET_WINDOW: usize = 64;
 
-    if BUILT_BASE.load(Ordering::Acquire) == base {
-        let cached = TRAMPOLINE.load(Ordering::Acquire);
-        if cached != 0 {
-            return Ok(cached);
+#[cfg(target_arch = "x86")]
+mod hook {
+    use super::*;
+
+    type PaintTraverseFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void, u32, u32);
+    type VPanelToPtrFn = unsafe extern "thiscall" fn(*mut c_void, *mut c_void) -> *mut c_void;
+
+    /// Whether `IPanel::GetName(vpanel)` is the spectator frame's.
+    unsafe fn is_the_frame(ipanel: *mut c_void, vpanel: *mut c_void) -> bool {
+        // Safety: captured from the vtable at install, checked there.
+        let get_name: VPanelToPtrFn =
+            unsafe { std::mem::transmute(GET_NAME.load(Ordering::Relaxed)) };
+        let name = unsafe { get_name(ipanel, vpanel) } as *const c_char;
+        !name.is_null() && hides(unsafe { CStr::from_ptr(name) }.to_bytes())
+    }
+
+    /// The filter. `bool`s arrive as 4-byte stack slots and are passed on
+    /// untouched; `thiscall` pops the three arguments either way, as the
+    /// stock function's `ret 0xc` does.
+    pub(super) unsafe extern "thiscall" fn paint_traverse(
+        ipanel: *mut c_void,
+        vpanel: *mut c_void,
+        force_repaint: u32,
+        allow_force: u32,
+    ) {
+        if HIDE.load(Ordering::Relaxed)
+            && !vpanel.is_null()
+            && unsafe { is_the_frame(ipanel, vpanel) }
+        {
+            SKIPPED.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        // Safety: the stock function, captured at install.
+        let stock: PaintTraverseFn =
+            unsafe { std::mem::transmute(STOCK_PAINT_TRAVERSE.load(Ordering::Relaxed)) };
+        unsafe { stock(ipanel, vpanel, force_repaint, allow_force) }
+    }
+
+    /// The decorated class name behind `vftable[-1]`'s RTTI (MSVC, 32-bit).
+    ///
+    /// Safety: `vftable - 4` must be readable.
+    unsafe fn rtti_class_name(
+        vftable: usize,
+        inside: impl Fn(usize, usize) -> bool,
+    ) -> Option<String> {
+        unsafe {
+            let locator = (vftable as *const u32).sub(1).read_unaligned() as usize;
+            if !inside(locator, 0x10) || (locator as *const u32).read_unaligned() != 0 {
+                return None;
+            }
+            let descriptor = ((locator + 0x0c) as *const u32).read_unaligned() as usize;
+            if !inside(descriptor, 8 + WRAPPER_CLASS.len() + 1) {
+                return None;
+            }
+            CStr::from_ptr((descriptor + 8) as *const c_char)
+                .to_str()
+                .ok()
+                .map(str::to_owned)
         }
     }
 
-    let top_vft = base + TOP_BAR_VFTABLE_RVA;
-    let top_name = unsafe { rtti_class_name(top_vft) };
-    if top_name.as_deref() != Some(".?AVCDoDSpectatorGUI@@") {
-        return Err(format!(
-            "+{TOP_BAR_VFTABLE_RVA:#x} identifies as {top_name:?}, not .?AVCDoDSpectatorGUI@@ -- this is not the client.dll this module describes"
-        ));
-    }
-    let bottom_vft = base + BOTTOM_BAR_VFTABLE_RVA;
-    let bottom_name = unsafe { rtti_class_name(bottom_vft) };
-    if bottom_name.as_deref() != Some(".?AVCBottomBar@@") {
-        return Err(format!(
-            "+{BOTTOM_BAR_VFTABLE_RVA:#x} identifies as {bottom_name:?}, not .?AVCBottomBar@@ -- this is not the client.dll this module describes"
-        ));
-    }
+    pub(super) fn install() -> Result<String, String> {
+        use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
-    let stock_address = base + STOCK_SET_VISIBLE_RVA;
-    for (name, vft) in [("CDoDSpectatorGUI", top_vft), ("CBottomBar", bottom_vft)] {
-        let present = unsafe { read_u32(vft + SET_VISIBLE_SLOT * 4) } as usize;
-        if present != stock_address {
+        let module = unsafe { GetModuleHandleA(c"vgui2.dll".as_ptr() as *const u8) };
+        if module.is_null() {
+            return Err("vgui2.dll is not loaded".to_string());
+        }
+        let base = module as usize;
+        let create = unsafe { GetProcAddress(module, c"CreateInterface".as_ptr() as *const u8) }
+            .ok_or("vgui2.dll exports no CreateInterface")?;
+        // Safety: the Source/GoldSrc factory signature.
+        let create: unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void =
+            unsafe { std::mem::transmute(create) };
+        let ipanel = unsafe { create(c"VGUI_Panel007".as_ptr(), std::ptr::null_mut()) };
+        if ipanel.is_null() {
+            return Err("vgui2.dll has no VGUI_Panel007".to_string());
+        }
+
+        let size = unsafe { crate::pe::image_size(base as *mut u8) }
+            .ok_or("vgui2.dll has no PE header")?;
+        let inside = |address: usize, len: usize| address >= base && address + len <= base + size;
+        let (code_rva, code_len) = unsafe { crate::pe::code_range(base as *mut u8) }
+            .ok_or("vgui2.dll has no code section")?;
+        let in_code = |address: usize| {
+            address >= base + code_rva && address + RET_WINDOW <= base + code_rva + code_len
+        };
+
+        // Safety: a live object's first dword is its vtable.
+        let vtable = unsafe { (ipanel as *const usize).read_unaligned() };
+        if !inside(vtable.wrapping_sub(4), (SLOT_COUNT + 1) * 4) {
             return Err(format!(
-                "{name}'s SetVisible slot holds +{:#x}, not the expected stock +{STOCK_SET_VISIBLE_RVA:#x} -- something else has already patched it",
-                present.wrapping_sub(base)
+                "the VGUI_Panel007 vtable {vtable:#x} is not inside vgui2.dll"
             ));
         }
-    }
-
-    let hit_count_address = &HIT_COUNT as *const AtomicU32 as usize;
-    let mut code = build_trampoline(hit_count_address);
-
-    // Safety: a fresh RWX page we own, sized for exactly the bytes copied in.
-    let stub = unsafe {
-        VirtualAlloc(std::ptr::null(), code.len(), MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE)
-    };
-    if stub.is_null() {
-        return Err("could not allocate an executable page for the trampoline".to_string());
-    }
-    let stub_address = stub as usize;
-    let displacement = stock_address.wrapping_sub(stub_address + code.len()) as u32;
-    let jmp_immediate = code.len() - 4;
-    code[jmp_immediate..].copy_from_slice(&displacement.to_le_bytes());
-    // Safety: `stub` is a page of at least `code.len()` bytes.
-    unsafe { std::ptr::copy_nonoverlapping(code.as_ptr(), stub as *mut u8, code.len()) };
-
-    TRAMPOLINE.store(stub_address, Ordering::Release);
-    BUILT_BASE.store(base, Ordering::Release);
-    Ok(stub_address)
-}
-
-/// Applies or removes the redirect on both classes' own vtables, returning
-/// whether anything was actually written. `hidden` is the cvar's own sense:
-/// `true` forces both bars invisible, `false` is the game's stock
-/// behaviour.
-///
-/// Idempotent and cheap to call every frame: a short pointer compare once
-/// the trampoline exists, which is how `crosshair.rs`/`scoreboard.rs`'s
-/// equivalents are used.
-pub fn set_hidden(hidden: bool) -> Result<bool, String> {
-    let trampoline = trampoline_address()?;
-    let Some(base) = engine::client_module_base() else {
-        return Err("client.dll is not loaded yet".to_string());
-    };
-    let stock_address = base + STOCK_SET_VISIBLE_RVA;
-    let want = if hidden { trampoline } else { stock_address };
-
-    let mut written = false;
-    for vftable_rva in [TOP_BAR_VFTABLE_RVA, BOTTOM_BAR_VFTABLE_RVA] {
-        let slot = base + vftable_rva + SET_VISIBLE_SLOT * 4;
-        let present = unsafe { read_u32(slot) } as usize;
-        if present == want {
-            continue;
-        }
-        if present != stock_address && present != trampoline {
+        // Safety: checked to lie inside the image.
+        let class = unsafe { rtti_class_name(vtable, inside) };
+        if class.as_deref() != Some(WRAPPER_CLASS) {
             return Err(format!(
-                "+{vftable_rva:#x}'s SetVisible slot holds +{:#x}, which is neither the stock function nor this module's trampoline -- something else has patched it",
-                present.wrapping_sub(base)
+                "the VGUI_Panel007 vtable identifies as {class:?}, not {WRAPPER_CLASS}"
             ));
         }
-        if !unsafe { crate::patch::write_code_bytes(slot, &(want as u32).to_le_bytes()) } {
-            return Err(format!("could not make +{vftable_rva:#x}'s vtable writable"));
+
+        let slot =
+            |index: usize| unsafe { ((vtable + index * 4) as *const usize).read_unaligned() };
+        let mut found = [0usize; 2];
+        for (i, (index, ret, what)) in [
+            (SLOT_GET_NAME, RET_GET_NAME, "GetName"),
+            (SLOT_PAINT_TRAVERSE, RET_PAINT_TRAVERSE, "PaintTraverse"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let function = slot(index);
+            if !in_code(function) {
+                return Err(format!(
+                    "slot {index} ({what}) points at {function:#x}, outside vgui2.dll's code -- something else has hooked it"
+                ));
+            }
+            // Safety: inside the code section, with the window in bounds.
+            let code = unsafe { std::slice::from_raw_parts(function as *const u8, RET_WINDOW) };
+            let pops = first_ret_size(code);
+            if pops != Some(ret) {
+                return Err(format!(
+                    "slot {index} should be {what} (ret {ret:#x}), but it returns with {pops:?}"
+                ));
+            }
+            found[i] = function;
         }
-        written = true;
+
+        GET_NAME.store(found[0], Ordering::Release);
+        let hook = paint_traverse as *const () as usize;
+        let slot_address = vtable + SLOT_PAINT_TRAVERSE * 4;
+        STOCK_PAINT_TRAVERSE.store(found[1], Ordering::Release);
+        // Safety: a vtable slot inside vgui2.dll, checked above; the write
+        // happens on the main thread, which is also the only one that paints.
+        if !unsafe { crate::patch::write_code_bytes(slot_address, &(hook as u32).to_le_bytes()) } {
+            STOCK_PAINT_TRAVERSE.store(0, Ordering::Release);
+            return Err("could not make the VGUI_Panel007 vtable writable".to_string());
+        }
+        Ok(format!(
+            "IPanel::PaintTraverse (vgui2.dll+{:#x}, slot {SLOT_PAINT_TRAVERSE}) now goes through the spectator-panel filter",
+            found[1] - base
+        ))
     }
-    HIDDEN_NOW.store(hidden, Ordering::Release);
-    Ok(written)
 }
 
-/// Whether the bars are currently asked to be hidden.
-pub fn hidden() -> bool {
-    HIDDEN_NOW.load(Ordering::Relaxed)
+#[cfg(not(target_arch = "x86"))]
+mod hook {
+    pub(super) fn install() -> Result<String, String> {
+        Err("only a 32-bit x86 build can hook vgui2.dll".to_string())
+    }
 }
 
-/// One line for `dodstudio_debug_status`.
-pub fn status() -> String {
-    if !hidden() {
-        return "both spectator bars draw normally".into();
+/// Reads the cvar and installs the filter the first time it is on. Called
+/// every frame from `commands::poll`.
+pub fn poll() {
+    let cvar = CVAR.load(Ordering::Acquire);
+    if cvar.is_null() {
+        return;
     }
-    format!(
-        "CDoDSpectatorGUI and CBottomBar's own SetVisible is redirected to force them hidden \
-         -- confirmed non-functional (docs/goldsrc_spectator_bars.md): trampoline hit count = {} \
-         after a live session, meaning SetVisible is never called on either object during \
-         ordinary play",
-        hit_count()
-    )
+    let wanted = unsafe { (*cvar).value } != 0.0;
+    if HIDE.swap(wanted, Ordering::Relaxed) != wanted {
+        let state = if wanted { "1 (hidden)" } else { "0 (shown)" };
+        unsafe { crate::debug::report(&format!("spectator_bars: {NAME} = {state}")) };
+    }
+    if !wanted || installed() || INSTALL_FAILED.load(Ordering::Relaxed) {
+        return;
+    }
+    let report = match hook::install() {
+        Ok(what) => format!("spectator_bars: {what} (#328)"),
+        Err(why) => {
+            INSTALL_FAILED.store(true, Ordering::Relaxed);
+            let line =
+                format!("spectator_bars: not installed -- {why}; {NAME} does nothing this session");
+            crate::commands::console_print(&format!("{line}\n"));
+            line
+        }
+    };
+    unsafe { crate::debug::report(&report) };
+}
+
+/// One `dodstudio_debug_status` line, once the cvar has been turned on.
+pub fn status_line() -> Option<String> {
+    if INSTALL_FAILED.load(Ordering::Relaxed) {
+        return Some(format!(
+            "spectator bars: the filter could not be installed (see the hook log); {NAME} does nothing"
+        ));
+    }
+    if !installed() {
+        return None;
+    }
+    let hidden = HIDE.load(Ordering::Relaxed);
+    Some(format!(
+        "spectator bars: {} ({NAME} = {}; {} panel paint(s) skipped so far)",
+        if hidden {
+            "the spectator panel is hidden"
+        } else {
+            "nothing hidden"
+        },
+        hidden as u8,
+        SKIPPED.load(Ordering::Relaxed)
+    ))
 }
 
 #[cfg(test)]
@@ -385,34 +347,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn trampoline_is_a_clamp_a_counter_then_a_tail_jump() {
-        let code = build_trampoline(0x1234_5678);
-        assert_eq!(code.len(), 19);
-        // mov dword ptr [esp+4], 0
-        assert_eq!(&code[0..8], &[0xc7, 0x44, 0x24, 0x04, 0x00, 0x00, 0x00, 0x00]);
-        // inc dword ptr [hit_count_address]
-        assert_eq!(&code[8..10], &[0xff, 0x05]);
-        assert_eq!(&code[10..14], &0x1234_5678u32.to_le_bytes());
-        // jmp rel32
-        assert_eq!(code[14], 0xe9);
+    fn only_the_spectator_frame_is_left_unpainted() {
+        assert!(hides(b"SpectatorGUI"));
+        assert!(hides(b"spectatorgui"));
+        // Its children are never reached once the frame is skipped, and are
+        // not matched on their own; the scoreboard has a TopBar too.
+        for other in [
+            &b"TopBar"[..],
+            b"bottombarblank",
+            b"playerlabel",
+            b"BottomBar",
+            b"ClientScoreBoard",
+            b"",
+        ] {
+            assert!(!hides(other), "{other:?}");
+        }
     }
 
     #[test]
-    fn set_visible_slot_is_the_established_constant() {
-        // Not a load-bearing assertion -- pins the one number the whole
-        // module's reasoning depends on, so an accidental edit fails loudly
-        // here rather than silently at runtime.
-        assert_eq!(SET_VISIBLE_SLOT, 8);
+    fn the_ret_scan_reads_a_wrappers_own_return() {
+        // Pre-Anniversary vgui2.dll+0x15ed0, IPanel::PaintTraverse.
+        let pre = [
+            0x8b, 0x54, 0x24, 0x04, 0x8b, 0x01, 0x52, 0xff, 0x90, 0xe8, 0x00, 0x00, 0x00, 0x8b,
+            0x4c, 0x24, 0x0c, 0x8b, 0x10, 0x51, 0x8b, 0x4c, 0x24, 0x0c, 0x51, 0x8b, 0xc8, 0xff,
+            0x52, 0x0c, 0xc2, 0x0c, 0x00,
+        ];
+        assert_eq!(first_ret_size(&pre), Some(RET_PAINT_TRAVERSE));
+        // A getter: mov ecx,[esp+4]; mov eax,[ecx]; call [eax+0x78]; ret 4.
+        let getter = [
+            0x8b, 0x4c, 0x24, 0x04, 0x8b, 0x01, 0xff, 0x50, 0x78, 0xc2, 0x04, 0x00,
+        ];
+        assert_eq!(first_ret_size(&getter), Some(RET_GET_NAME));
+        assert_eq!(first_ret_size(&[0x90, 0xc3]), Some(0));
+        assert_eq!(first_ret_size(&[0x90, 0x90]), None);
     }
 
     #[test]
-    fn status_names_the_two_classes_and_points_at_the_writeup() {
-        HIDDEN_NOW.store(true, Ordering::Release);
-        let text = status();
-        assert!(text.contains("CDoDSpectatorGUI"));
-        assert!(text.contains("CBottomBar"));
-        assert!(text.contains("confirmed non-functional"));
-        HIDDEN_NOW.store(false, Ordering::Release);
-        assert!(status().contains("normally"));
+    fn the_slots_are_the_verified_ones() {
+        // tools/verify_vgui2_ipanel.py reads these two out of this file.
+        assert_eq!((SLOT_GET_NAME, SLOT_PAINT_TRAVERSE), (36, 41));
+        const { assert!(SLOT_PAINT_TRAVERSE < SLOT_COUNT) };
     }
 }

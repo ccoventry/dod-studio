@@ -14,8 +14,6 @@ import {
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
   launchObs,
-  locateMissingDemos,
-  changedDemos,
   systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -32,7 +30,7 @@ import { initHdPane } from './hd_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
-import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked, renameDemoInTakeIndex } from './take_index.js';
+import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -42,7 +40,9 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
-import { fileNameOf, folderOf, shortFolder } from './path_display.js';
+import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
+import { fileNameOf, samePath } from './path_display.js';
+import { createProjectDemos } from './project_demos.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
@@ -307,6 +307,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initOsNotifications();
 
   let scanPaths = [];
+  // Set when the saved pinned list held single demo files (older builds), so
+  // the cleaned list is written back once after settings load.
+  let pinnedListCleaned = false;
   // Analyzer Explorer sidebar's "Recent" quick-links tier — most-recent-first,
   // capped at 10, pushed via recordDemoFolderVisit() below whenever browsing
   // into a folder yields a non-empty demo listing. Mirrors dev's
@@ -727,7 +730,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         if (inputEl) inputEl.value = settings.scan_workers;
       }
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
-        scanPaths = [...settings.pinned_folders];
+        // Folders only: older builds added every file picked with
+        // + Add Demo Files, one path per demo. Cleaned up once, here.
+        scanPaths = pinnedFoldersOnly(settings.pinned_folders);
+        if (scanPaths.length !== settings.pinned_folders.length) pinnedListCleaned = true;
       }
       if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
         demoFolderHistory = [...settings.demo_folder_history];
@@ -758,6 +764,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // present. Not awaited: a background check shouldn't block startup.
   initUpdater(settings, persistAppSettings);
   initAppMenu();
+  if (pinnedListCleaned) persistAppSettings();
 
   // Save Project Session — also called from the Clear All modal's "Save
   // Session First" action, so it lives here as a plain function rather than
@@ -790,7 +797,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       const hlPath = document.querySelector('#hl-path-input')?.value || "";
       const projectData = JSON.stringify({
         version: "0.12.0",
-        scanPaths: scanPaths,
+        // The folders this project's demos are in, not the app-wide pinned
+        // list (that is every folder ever added, nothing to do with the
+        // project). Read back only to look for demos that have moved (#21).
+        scanPaths: projectFolders(currentScannedDemos),
         demos: currentScannedDemos,
         hlaePath: hlaePath,
         hlPath: hlPath,
@@ -901,269 +911,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // A loaded project's demos may have moved or been deleted since it was
-  // saved (#21). Look for each missing one by its file key (size + first
-  // 64 KB) near the project and its old folders, and ask before using a
-  // match. Anything still missing is named in a toast. Also run by Start
-  // Capture Batch over the demos with a highlight picked (no project path
-  // then). Resolves to how many of `demos` are still missing.
-  async function checkMissingDemos(projectPath, savedScanPaths, demos = currentScannedDemos) {
-    const parentOf = (p) => p.replace(/[\\/][^\\/]*$/, '');
-    const nameOf = (p) => p.split(/[\\/]/).pop();
-    // Nearest first: where each demo was, then the project's folder, then the
-    // scan folders. The search is breadth-first in this order, so a demo moved
-    // next door is found before a big scan folder uses up the search budget.
-    // Scan entries that name single demo files aren't folders to search.
-    const isDemoFile = (p) => /\.dem$/i.test(p);
-    const dirs = [...new Set([
-      ...demos.map((d) => parentOf(d.path)),
-      projectPath && parentOf(projectPath),
-      ...savedScanPaths.filter((p) => !isDemoFile(p)),
-      ...scanPaths.filter((p) => !isDemoFile(p)),
-    ].filter(Boolean))];
-    const missing = await locateMissingDemos(
-      demos.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
-      dirs
-    );
-    // A demo marked missing earlier that is back where the queue says.
-    const missingPaths = new Set(missing.map((m) => m.path));
-    const back = demos.filter((d) => d.missing && !missingPaths.has(d.path));
-    back.forEach((d) => {
-      d.missing = false;
-      d.foundAt = null;
-    });
-    if (missing.length === 0) {
-      if (back.length > 0) refreshAfterRelocation(false);
-      return 0;
-    }
-
-    // A match that is already another row's file (an identical copy) isn't
-    // offered: two rows on one file would share its take records.
-    missing.forEach((m) => {
-      if (m.candidate && currentScannedDemos.some((d) => d.path !== m.path && samePath(d.path, m.candidate))) {
-        m.candidate = null;
-      }
-    });
-    const found = missing.filter((m) => m.candidate);
-    const relocated = new Set();
-    if (found.length > 0) {
-      // One entry per demo: its name (or old -> new when it was renamed),
-      // then the folder it's in now, shortened to the drive and the last
-      // folders; the full path is the entry's hover text.
-      const details = found.map((m) => {
-        const oldName = nameOf(m.path);
-        const newName = fileNameOf(m.candidate);
-        return {
-          primary: oldName === newName ? oldName : STRINGS.MAIN.relocateRenamed(oldName, newName),
-          secondary: STRINGS.MAIN.relocateFolder(shortFolder(folderOf(m.candidate))),
-          title: m.candidate,
-        };
-      });
-      const ok = await themedConfirm(STRINGS.MAIN.RELOCATE_DEMOS_MESSAGE, {
-        title: STRINGS.MAIN.RELOCATE_DEMOS_TITLE,
-        confirmLabel: STRINGS.MAIN.RELOCATE_CONFIRM,
-        cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL,
-        details,
-        footer: STRINGS.MAIN.RELOCATE_DEMOS_QUESTION,
-      });
-      if (ok) {
-        found.forEach((m) => {
-          const demo = currentScannedDemos.find((d) => d.path === m.path);
-          if (!demo) return;
-          relocateDemo(demo, m.candidate);
-          relocated.add(m.path);
-        });
-        showToast(STRINGS.MAIN.relocatedDemosToast(relocated.size), 'success');
-      }
-    }
-
-    const stillMissing = missing.filter((m) => !relocated.has(m.path));
-    const leftFound = [];
-    stillMissing.forEach((m) => {
-      const demo = currentScannedDemos.find((d) => d.path === m.path);
-      if (!demo) return;
-      // Runtime only: non-enumerable, so neither reaches the project file.
-      // `foundAt` keeps a declined match for the row's Use found copy button.
-      const runtime = { writable: true, configurable: true, enumerable: false };
-      Object.defineProperty(demo, 'missing', { ...runtime, value: true });
-      Object.defineProperty(demo, 'foundAt', { ...runtime, value: m.candidate || null });
-      if (m.candidate) leftFound.push(demo);
-    });
-    refreshAfterRelocation(relocated.size > 0);
-    const notFound = stillMissing.filter((m) => !m.candidate);
-    if (notFound.length > 0) {
-      showToast(STRINGS.MAIN.missingDemosToast(notFound.map((m) => nameOf(m.path))), 'warning', 10000);
-    }
-    if (leftFound.length > 0) {
-      showToast(STRINGS.MAIN.leftMissingToast(leftFound.map((d) => nameOf(d.path))), 'warning', 15000, {
-        action: { label: STRINGS.MAIN.USE_ALL_FOUND_COPIES, onClick: () => useFoundCopies(leftFound) },
-      });
-    }
-    return stillMissing.length;
-  }
-
-  // Start Capture Batch's check: a demo can go missing after the queue was
-  // loaded. True when every demo with a highlight picked is where the queue
-  // says, after any the user chose to relocate.
-  async function pickedDemosPresent() {
-    const picked = currentScannedDemos.filter((d) => (d.streaks || []).some((s) => s.selected === true));
-    if (picked.length === 0) return true;
-    if ((await checkMissingDemos(null, [], picked)) !== 0) return false;
-
-    // A file replaced in place (or pointed at by an older build's "Use it
-    // anyway") is at the right path but isn't the demo that was scanned:
-    // every highlight would record the wrong moment, and any past its end
-    // would leave the game stopped at the end of the demo.
-    const changed = await changedDemos(picked.filter((d) => d.file_key).map((d) => ({ path: d.path, file_key: d.file_key })));
-    if (changed.length === 0) return true;
-    const rescan = await themedConfirm(STRINGS.MAIN.CHANGED_DEMOS_MESSAGE, {
-      title: STRINGS.MAIN.CHANGED_DEMOS_TITLE,
-      confirmLabel: STRINGS.MAIN.CHANGED_DEMOS_RESCAN,
-      cancelLabel: STRINGS.MAIN.RELOCATE_CANCEL_PLAIN,
-      details: changed.map((p) => ({ primary: fileNameOf(p), secondary: shortFolder(folderOf(p)), title: p })),
-      footer: STRINGS.MAIN.CHANGED_DEMOS_QUESTION,
-    });
-    if (rescan) await triggerAutoScan(changed);
-    return false;
-  }
-
-  // Uses the matches the load-time search found for demos left as missing:
-  // one row's Use found copy button, or the toast's button for all of them.
-  // Each is checked again first, since the file may have moved since.
-  async function useFoundCopies(demos) {
-    const pending = demos.filter((d) => d.missing && d.foundAt);
-    if (pending.length === 0) return;
-    try {
-      const matches = await locateMissingDemos(
-        pending.map((d) => ({ path: d.path, file_key: d.file_key || '' })),
-        [...new Set(pending.map((d) => folderOf(d.foundAt)))]
-      );
-      const gone = [];
-      let used = 0;
-      pending.forEach((demo) => {
-        const match = matches.find((m) => m.path === demo.path);
-        if (match && match.candidate) {
-          relocateDemo(demo, match.candidate);
-          used += 1;
-        } else {
-          gone.push(fileNameOf(demo.foundAt));
-          demo.foundAt = null;
-        }
-      });
-      refreshAfterRelocation(used > 0);
-      if (used > 0) showToast(STRINGS.MAIN.relocatedDemosToast(used), 'success');
-      if (gone.length > 0) showToast(STRINGS.MAIN.foundCopiesGoneToast(gone), 'warning', 8000);
-    } catch (err) {
-      console.error('Use found copy error:', err);
-    }
-  }
-
-  // Identical copies a scan skipped (#21), in two kinds:
-  // - Copies of a demo that was already queued. One the user picked by hand,
-  //   or one of a queued demo whose own file is missing, is offered in that
-  //   row's place: same file, so the row keeps its highlights, statuses and
-  //   notes. Several copies of one row: the shortest name is offered.
-  // - Copies of each other within this scan: the scan kept one (the shortest
-  //   name). Picked by hand, they're listed in a dialog; from a folder, a toast.
-  async function offerIdenticalCopies(copies, pickedFiles) {
-    const nameOfRow = (d) => d.name || fileNameOf(d.path);
-    const byName = (a, b) => fileNameOf(a.demo.path).length - fileNameOf(b.demo.path).length
-      || fileNameOf(a.demo.path).localeCompare(fileNameOf(b.demo.path));
-    const ofQueued = copies.filter((c) => c.queued);
-    const ofEachOther = copies.filter((c) => !c.queued);
-
-    const offered = [];
-    const skipped = [];
-    [...ofQueued].sort(byName).forEach((c) => {
-      const entry = offered.find((o) => o.sameAs === c.sameAs);
-      if (entry) {
-        // Another copy of the same row: named on that row's entry.
-        entry.others.push(fileNameOf(c.demo.path));
-      } else if (pickedFiles || c.sameAs.missing) {
-        offered.push({ ...c, others: [] });
-      } else {
-        skipped.push(c);
-      }
-    });
-
-    if (ofEachOther.length > 0 && pickedFiles) {
-      // One entry per demo added, naming the copies that weren't.
-      const groups = new Map();
-      ofEachOther.forEach((c) => {
-        if (!groups.has(c.sameAs)) groups.set(c.sameAs, []);
-        groups.get(c.sameAs).push(fileNameOf(c.demo.path));
-      });
-      await themedConfirm(STRINGS.MAIN.PICKED_COPIES_MESSAGE, {
-        title: STRINGS.MAIN.PICKED_COPIES_TITLE,
-        confirmLabel: STRINGS.MAIN.PICKED_COPIES_OK,
-        hideCancel: true,
-        details: [...groups].map(([kept, names]) => ({
-          primary: nameOfRow(kept),
-          secondary: STRINGS.MAIN.pickedCopiesSkipped(names),
-          title: kept.path,
-        })),
-      });
-    } else {
-      skipped.push(...ofEachOther);
-    }
-
-    if (skipped.length > 0) {
-      showToast(STRINGS.MAIN.identicalCopiesToast(skipped.map((c) => [fileNameOf(c.demo.path), nameOfRow(c.sameAs)])), 'warning', 12000);
-    }
-    if (offered.length === 0) return;
-    const ok = await themedConfirm(STRINGS.MAIN.IDENTICAL_COPIES_MESSAGE, {
-      title: STRINGS.MAIN.IDENTICAL_COPIES_TITLE,
-      confirmLabel: STRINGS.MAIN.IDENTICAL_COPIES_SWITCH,
-      cancelLabel: STRINGS.MAIN.IDENTICAL_COPIES_KEEP,
-      details: offered.map((c) => ({
-        primary: STRINGS.MAIN.relocateRenamed(nameOfRow(c.sameAs), fileNameOf(c.demo.path)),
-        // The queued file hasn't moved, so not "now in": either the same
-        // folder as it, or where the copy is.
-        secondary: (c.sameAs.missing
-          ? STRINGS.MAIN.identicalCopyQueuedMissing(shortFolder(folderOf(c.demo.path)))
-          : samePath(folderOf(c.demo.path), folderOf(c.sameAs.path))
-            ? STRINGS.MAIN.IDENTICAL_COPY_SAME_FOLDER
-            : STRINGS.MAIN.identicalCopyFolder(shortFolder(folderOf(c.demo.path))))
-          + (c.others.length ? STRINGS.MAIN.identicalCopyOthers(c.others) : ''),
-        title: c.demo.path,
-      })),
-      footer: STRINGS.MAIN.IDENTICAL_COPIES_QUESTION,
-    });
-    if (!ok) return;
-    offered.forEach((c) => relocateDemo(c.sameAs, c.demo.path));
-    refreshAfterRelocation(true);
-    showToast(STRINGS.MAIN.relocatedDemosToast(offered.length), 'success');
-  }
-
-  // Takes a demo out of the queue and scans `newPath` in its place, with its
-  // own highlights: for a file that isn't the one that was scanned (#21).
-  async function replaceDemoWithScan(demo, newPath) {
-    replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo));
-    await triggerAutoScan([newPath]);
-  }
-
-  // Windows paths compare without case and either slash.
-  function samePath(a, b) {
-    const norm = (p) => p.replace(/\//g, '\\').toLowerCase();
-    return Boolean(a && b) && norm(a) === norm(b);
-  }
-
-  // Points a demo, its highlights and the take index at a new file (#21).
-  function relocateDemo(demo, newPath) {
-    const oldPath = demo.path;
-    demo.path = newPath;
-    // The queue shows the file's name; follow a rename (or a different file).
-    if (!demo.name || demo.name === fileNameOf(oldPath)) demo.name = fileNameOf(newPath);
-    if (demo.missing) demo.missing = false;
-    if (demo.foundAt) demo.foundAt = null;
-    (demo.streaks || []).forEach((s) => {
-      if (s.source_demo === oldPath) s.source_demo = newPath;
-      // The cached uid still names the old path; streakUid rebuilds it.
-      if ('uid' in s) s.uid = undefined;
-    });
-    renameDemoInTakeIndex(takeIndex, oldPath, newPath);
-  }
-
   function refreshAfterRelocation(changed) {
     renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
     if (!changed) return;
@@ -1173,46 +920,21 @@ window.addEventListener("DOMContentLoaded", async () => {
     markProjectDirty();
   }
 
-  // A missing demo's Locate button (#21): pick the file by hand. When the
-  // demo has a saved file key and the pick doesn't match it, ask first.
-  async function locateDemoByHand(demo) {
-    try {
-      const picked = await open({
-        multiple: false,
-        title: STRINGS.MAIN.LOCATE_DEMO_DIALOG_TITLE,
-        filters: [{ name: 'Demo', extensions: ['dem'] }],
-      });
-      const newPath = Array.isArray(picked) ? picked[0] : picked;
-      if (!newPath) return;
-      // Another row's own file: two rows on one file would share its take
-      // records and capture one demo's highlights from the other's footage.
-      const taken = currentScannedDemos.find((d) => d !== demo && samePath(d.path, newPath));
-      if (taken) {
-        showToast(STRINGS.MAIN.locateAlreadyQueued(taken.name || fileNameOf(newPath)), 'error', 10000);
-        return;
-      }
-      if (demo.file_key) {
-        const parent = newPath.replace(/[\\/][^\\/]*$/, '');
-        const [match] = await locateMissingDemos([{ path: demo.path, file_key: demo.file_key }], [parent]);
-        if (match && !samePath(match.candidate, newPath)) {
-          // A different file: this row's highlights are frame numbers in the
-          // old one and won't line up, so the only useful thing is to scan it
-          // fresh in this row's place.
-          const ok = await themedConfirm(STRINGS.MAIN.locateMismatchMessage(demo.name || fileNameOf(demo.path), fileNameOf(newPath)), {
-            title: STRINGS.MAIN.LOCATE_MISMATCH_TITLE,
-            confirmLabel: STRINGS.MAIN.LOCATE_MISMATCH_CONFIRM,
-          });
-          if (ok) await replaceDemoWithScan(demo, newPath);
-          return;
-        }
-      }
-      relocateDemo(demo, newPath);
-      refreshAfterRelocation(true);
-      showToast(STRINGS.MAIN.relocatedDemosToast(1), 'success');
-    } catch (err) {
-      console.error('Locate demo error:', err);
-    }
-  }
+  // Missing, moved, changed and copied demos (#21): project_demos.js.
+  const {
+    checkMissingDemos,
+    pickedDemosPresent,
+    useFoundCopies,
+    offerIdenticalCopies,
+    locateDemoByHand,
+  } = createProjectDemos({
+    getDemos: () => currentScannedDemos,
+    getTakeIndex: () => takeIndex,
+    getScanPaths: () => scanPaths,
+    refreshQueue: refreshAfterRelocation,
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+  });
 
   // New Session (#122/#149) — resets to the same blank state the app starts
   // in: no session file, no demos, no take index. Reuses replaceScannedDemos
@@ -1538,11 +1260,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Scans only the given paths and merges the results into the existing
   // master list (replacing entries with matching `path`, appending new ones).
-  // `scanPaths` itself is a separately-persisted "known library" list reused
-  // by the capture batch payload (`capture_directories`) — it must NOT be
-  // re-walked on every add, or every scan re-processes every folder ever
-  // added across the app's lifetime (dev only ever re-ingests the paths just
-  // picked in that action; see views/capture/workspace.rs Add Files/Add Folder).
+  // `scanPaths` is the app-wide pinned-folder list (settings' pinned_folders,
+  // also the Demo Analyzer's Pinned tier) -- it must NOT be re-walked on every
+  // add, or every scan re-processes every folder ever added across the app's
+  // lifetime. Capture's output folders are a separate list (targetDrives).
   //
   // Resolves true when the scan ran (a cancelled one included), false when it
   // failed -- e.g. every picked path is gone, which the backend reports (#432).
@@ -1658,15 +1379,8 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
         if (selected) {
           const files = Array.isArray(selected) ? selected : [selected];
-          files.forEach(f => {
-            if (!scanPaths.includes(f)) {
-              scanPaths.push(f);
-              markProjectDirty();
-            }
-          });
-          await persistAppSettings();
-          // Scan only the files just picked, not the full accumulated
-          // scanPaths history — see triggerAutoScan's doc comment.
+          // Files aren't remembered in the pinned-folder list (only folders
+          // are); the scan itself adds them to the queue and the project.
           await triggerAutoScan(files, { pickedFiles: true });
         }
       } catch (err) {
@@ -1772,15 +1486,30 @@ window.addEventListener("DOMContentLoaded", async () => {
       const targetId = btn.getAttribute('data-tab');
       const targetEl = document.getElementById(targetId);
       if (targetEl) targetEl.style.display = 'block';
+      refreshCommandWarningsIfShown();
     });
   });
+
+  // The game's config files change outside the app: the read-only flag on
+  // config.cfg (#478), or lines in config.cfg/movie.cfg. The Commands tab's
+  // warnings are only as fresh as their last check, so it runs again whenever
+  // that tab comes into view: opening it, returning to Configuration on it,
+  // or coming back to this window (from Explorer or an editor) while it shows.
+  function refreshCommandWarningsIfShown() {
+    const tab = document.getElementById('tab-custom-commands');
+    if (tab && tab.offsetParent !== null) refreshInitCommandWarnings();
+  }
+  window.addEventListener('focus', refreshCommandWarningsIfShown);
 
   // Top nav bar view routing (shared with detail_pane.js — see nav.js)
   switchNavTab('workspace');
 
   const navTabBtns = document.querySelectorAll('.nav-tab-btn');
   navTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => switchNavTab(btn.getAttribute('data-nav')));
+    btn.addEventListener('click', () => {
+      switchNavTab(btn.getAttribute('data-nav'));
+      refreshCommandWarningsIfShown();
+    });
   });
 
   // Capture Studio in-workflow phase switch (Highlights <-> Configuration) —

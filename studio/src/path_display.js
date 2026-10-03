@@ -36,3 +36,9 @@ export function shortFolder(folder, maxLength = 48) {
   if (tail.length === parts.length - 1) return text;
   return [drive, '…', ...tail].join(sep);
 }
+
+/** Windows paths compare without case and either slash. */
+export function samePath(a, b) {
+  const norm = (p) => p.replace(/\//g, '\\').toLowerCase();
+  return Boolean(a && b) && norm(a) === norm(b);
+}

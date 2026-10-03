@@ -19,7 +19,7 @@ use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
     generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
     launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
-    send_preview_to_running_game,
+    send_preview_to_running_game, start_steam, steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, check_render_autosave,
@@ -666,6 +666,8 @@ pub fn run() {
             read_cfg_commands,
             check_engine_processes,
             kill_engine_processes,
+            steam_state,
+            start_steam,
             send_preview_to_running_game,
             scan_orphaned_previews,
             delete_orphaned_previews,
