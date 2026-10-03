@@ -1291,7 +1291,7 @@ export const STRINGS = {
     SHOW_FLAG_ICONS: 'Flag icons (preview only)',
     ZOOM_OUT_TIP: 'Zoom out (or scroll)',
     ZOOM_IN_TIP: 'Zoom in (or scroll)',
-    ZOOM_FIT_TIP: 'Show the whole map. Scroll to zoom; drag with the middle button or hold Space to move about',
+    ZOOM_FIT_TIP: 'Show the whole map. Scroll to zoom; drag with the right or middle button, or hold Space, to move about',
     FLAG_SCREEN_LABEL: 'Flag icons as seen at',
     flagScreen: (height, yours) => `${height}p${yours ? ' (your game)' : ''}`,
     FLAG_RESET_TIP: 'Put the name back under the flag',

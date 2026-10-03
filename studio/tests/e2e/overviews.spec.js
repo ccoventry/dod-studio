@@ -424,6 +424,18 @@ test('scrolling zooms around the pointer, clicks still land where they point, an
     return Array.from(c.getContext('2d').getImageData(Math.round(c.width * 0.5), Math.round(c.height * 0.5), 1, 1).data).slice(0, 3);
   });
   expect(corner).toEqual([125, 29, 55]);
+  // Dragging with the right button moves about, and colours nothing.
+  const before = (await calls(page, 'overview_save_edits')).length;
+  const moved = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    return Array.from(c.getContext('2d').getImageData(Math.round(c.width * 0.5), Math.round(c.height * 0.5), 1, 1).data).slice(0, 3);
+  });
+  await page.mouse.move(mx, my);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(mx + box.width * 0.45, my, { steps: 5 });
+  await page.mouse.up({ button: 'right' });
+  await expect.poll(moved).not.toEqual([125, 29, 55]);
+  expect((await calls(page, 'overview_save_edits')).length).toBe(before);
   await page.click('#ov-zoom-fit');
   await expect(page.locator('#ov-zoom-fit')).toHaveText('100%');
   await expect(page.locator('#ov-zoom-out')).toBeDisabled();

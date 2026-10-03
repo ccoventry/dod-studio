@@ -228,8 +228,9 @@ export function initOverviewsPane() {
     ];
   }
 
-  // Scroll to zoom around the pointer; drag with the middle button, or
-  // with Space held, to move about.
+  // Scroll to zoom around the pointer; drag with the right or middle
+  // button, or with Space held, to move about.
+  canvas.addEventListener('contextmenu', (event) => event.preventDefault());
   canvas.addEventListener('wheel', (event) => {
     if (!scene) return;
     event.preventDefault();
@@ -249,7 +250,7 @@ export function initOverviewsPane() {
     updateCursor(lastPointer);
   });
   canvas.addEventListener('mousedown', (event) => {
-    if (!scene || !(event.button === 1 || (event.button === 0 && spaceDown))) return;
+    if (!scene || !(event.button === 1 || event.button === 2 || (event.button === 0 && spaceDown))) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     pan = { x: event.clientX, y: event.clientY, centre };
