@@ -10,6 +10,7 @@ import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
 import { escapeHtml as esc } from './html.js';
+import { renderFlagsTab } from './analyzer_flags.js';
 
 function setAnalyzerFileIndicator(text) {
   const titleEl = document.querySelector('#analyzer-current-file');
@@ -1013,6 +1014,7 @@ function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'flags': renderFlagsTab(container, report, { esc, teamColor, teamLabel, durSecs, formatMMSS }); break;
     case 'chat': renderChatTab(container); break;
   }
 }
