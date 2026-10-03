@@ -158,7 +158,7 @@
 		"enabled"		"1"
 		"labelText"		"Players"
 		"textAlignment"		"west"
-		"helptext"		"The players picked from the Player list. Type in Player and click a name to add one."
+		"helptext"		"The players picked from the Player list. Click a name in it to add one; the ones marked [x] at its top take one off again."
 	}
 	"PlayerChosen"
 	{
@@ -172,7 +172,7 @@
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"helptext"		"The players picked from the Player list. Type in Player and click a name to add one."
+		"helptext"		"The players picked from the Player list. Click a name in it to add one; the ones marked [x] at its top take one off again."
 	}
 	"PlayerMatch"
 	{
