@@ -506,6 +506,9 @@ pub fn poll() {
     spectator_target::poll();
     // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
     crate::msglog::poll();
+    // Reads the map's own on-screen strings once per level while
+    // dodstudio_hide_map_text is on, and keeps its HudText handler prepended.
+    crate::map_text::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -690,6 +693,9 @@ fn status_text() -> String {
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
+    }
+    if let Some(map_text) = crate::map_text::status_line() {
+        lines.push(map_text);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1388,6 +1394,10 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // Same: independent of every other setting, so outside the tuple.
+    if let Some(map_text) = register(crate::map_text::NAME, "0") {
+        crate::map_text::set_cvar(map_text);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
