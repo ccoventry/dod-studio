@@ -347,6 +347,8 @@ test('each theme keeps its own colours', async ({ page }) => {
   });
   await page.locator('#ov-palette .ov-swatch').nth(2).click();
   await clickPixel(page, 700, 250);
+  // Off the map, so the hover highlight isn't over the pixel read.
+  await page.mouse.move(0, 0);
   await expect.poll(pixel).toEqual([125, 29, 55]);
   // Flat grey has its own colours: none yet.
   await page.selectOption('#ov-theme', 'grey');
@@ -418,12 +420,13 @@ test('scrolling zooms around the pointer, clicks still land where they point, an
   await page.locator('#ov-palette .ov-swatch').nth(2).click();
   await page.mouse.click(mx, my);
   await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.colours.colours.areas[0]?.at).toEqual([30, 40]);
-  // Zoomed in, the canvas shows that area's colour edge to edge.
-  const corner = await page.evaluate(() => {
+  // Zoomed in, the canvas shows that area's colour edge to edge (pointer
+  // off the map, so no hover highlight).
+  await page.mouse.move(0, 0);
+  await expect.poll(() => page.evaluate(() => {
     const c = document.querySelector('#ov-canvas');
     return Array.from(c.getContext('2d').getImageData(Math.round(c.width * 0.5), Math.round(c.height * 0.5), 1, 1).data).slice(0, 3);
-  });
-  expect(corner).toEqual([125, 29, 55]);
+  })).toEqual([125, 29, 55]);
   // Dragging with the right button moves about, and colours nothing.
   const before = (await calls(page, 'overview_save_edits')).length;
   const moved = () => page.evaluate(() => {
@@ -506,4 +509,45 @@ test('a spawn name can be dragged and put back, and the cursor shows what a clic
   await page.click('.ov-add-label');
   await page.mouse.move(...at(500, 500));
   await expect.poll(cursor).toBe('text');
+});
+
+test('hovering shows what a click would paint, and Show areas outlines them all', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const box = await page.locator('#ov-canvas').boundingBox();
+  const at = (x, y) => [box.x + (x / 1024) * box.width, box.y + (y / 768) * box.height];
+  const pixel = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  // The indoor area is lighter while hovered, and back after.
+  const plain = await pixel(700, 250);
+  await page.mouse.move(...at(700, 250));
+  await expect.poll(async () => (await pixel(700, 250))[0]).toBeGreaterThan(plain[0]);
+  await page.mouse.move(...at(1000, 700));
+  await expect.poll(() => pixel(700, 250)).toEqual(plain);
+  // Show areas draws outlines (the canvas changes), and unticking takes
+  // them away again.
+  const sum = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+    let total = 0;
+    for (let i = 0; i < d.length; i += 4) total += d[i];
+    return total;
+  });
+  const before = await sum();
+  await page.check('#ov-show-areas');
+  await expect.poll(sum).toBeLessThan(before);
+  await page.uncheck('#ov-show-areas');
+  await expect.poll(sum).toBe(before);
+  // Nothing of this is in the saved image.
+  await page.click('#ov-save-btn');
+  const rgba = (await calls(page, 'overview_export')).at(-1).args.request.rgba;
+  const bytes = await page.evaluate((b) => {
+    const s = atob(b);
+    const i = (250 * 1024 + 700) * 4;
+    return [s.charCodeAt(i), s.charCodeAt(i + 1), s.charCodeAt(i + 2)];
+  }, rgba);
+  expect(bytes).toEqual([146, 155, 247]);
 });

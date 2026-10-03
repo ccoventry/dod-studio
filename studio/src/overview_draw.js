@@ -5,6 +5,7 @@
 
 import { themeOf, mapTitle } from './overview_themes.js';
 import { paper, grid, frame, titleCard, areaEdges } from './overview_paper.js';
+import { drawOverlay } from './overview_overlay.js';
 
 /** Spawn protection's look, until changed. Colours are #rrggbb. */
 export const SPAWN_PROTECTION = {
@@ -412,7 +413,7 @@ function voidMask(scene, edits) {
  * becomes the game's transparency) instead of the key green.
  * `cache` (an object) keeps the void mask between draws of unchanged edits.
  */
-export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null, flagIcons = null, view = null } = {}) {
+export function drawOverview(ctx, scene, edits, s, { transparent = false, cache = null, selectedLabel = null, flagIcons = null, view = null, overlay = null } = {}) {
   const w = scene.width * s;
   const h = scene.height * s;
   // `view`: draw only a window of the map, its top-left at image pixel
@@ -723,6 +724,8 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     frame(ctx, scene, s);
     titleCard(ctx, scene, s, mapTitle(scene.map), 'DoD Studio');
   }
+  // The page's editing aids (overview_overlay.js); never in an export.
+  if (overlay) drawOverlay(ctx, scene, s, overlay);
   ctx.restore();
 }
 

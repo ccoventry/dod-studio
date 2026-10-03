@@ -1289,6 +1289,8 @@ export const STRINGS = {
     SHOW_BREAKABLES: 'Breakable floors',
     SHOW_SLOPES: 'Slopes you slide on',
     SHOW_FLAG_ICONS: 'Flag icons (preview only)',
+    SHOW_AREAS: 'Show areas',
+    SHOW_AREAS_TIP: 'Outline every area. Hold Alt to outline every floor piece instead',
     ZOOM_OUT_TIP: 'Zoom out (or scroll)',
     ZOOM_IN_TIP: 'Zoom in (or scroll)',
     ZOOM_FIT_TIP: 'Show the whole map. Scroll to zoom; drag with the right or middle button, or hold Space, to move about',

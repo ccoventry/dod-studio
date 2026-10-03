@@ -69,6 +69,7 @@ export function initOverviewsPane() {
   const resetBtn = pane.querySelector('#ov-reset-btn');
   const saveStatus = pane.querySelector('#ov-save-status');
   const undoBtn = pane.querySelector('#ov-undo-btn');
+  const showAreasBox = pane.querySelector('#ov-show-areas');
   const zoomIn = pane.querySelector('#ov-zoom-in');
   const zoomOut = pane.querySelector('#ov-zoom-out');
   const zoomFit = pane.querySelector('#ov-zoom-fit');
@@ -111,6 +112,7 @@ export function initOverviewsPane() {
     edits = next;
     undoBtn.disabled = history.length === 0;
     persistSoon();
+    if (lastPointer && typeof updateHover === 'function') hover = hoverAt(lastPointer);
     draw();
     renderSidePanels();
   }
@@ -213,6 +215,7 @@ export function initOverviewsPane() {
       selectedLabel,
       flagIcons: { icons: flagIcons, screenHeight: flagScreen },
       view: { ox, oy, cw: canvas.width, ch: canvas.height },
+      overlay: { outlines: showAreasBox.checked ? (altDown ? 'pieces' : 'areas') : null, hover },
     });
     zoomFit.textContent = `${Math.round(zoom * 100)}%`;
     zoomOut.disabled = zoom <= 1;
@@ -380,6 +383,7 @@ export function initOverviewsPane() {
       pane.querySelectorAll('.ov-mode').forEach((b) => b.classList.toggle('active', b === btn));
       canvas.dataset.mode = mode;
       updateCursor(lastPointer);
+      updateHover(lastPointer);
     });
   });
 
@@ -400,6 +404,57 @@ export function initOverviewsPane() {
   function setCursor(cursor) {
     canvas.style.cursor = cursor;
   }
+
+  // ── What a click would change, and the map's areas ─────────────────────
+  // overview_overlay.js draws both; `hover` is redrawn only when what is
+  // under the pointer changes.
+  let hover = null;
+  let altDown = false;
+  const SHOW_AREAS_KEY = 'overviews.showAreas';
+  showAreasBox.checked = storageGet(SHOW_AREAS_KEY) === '1';
+  showAreasBox.addEventListener('change', () => {
+    storageSet(SHOW_AREAS_KEY, showAreasBox.checked ? '1' : '0');
+    draw();
+  });
+  function hoverAt(event) {
+    if (!scene || !event || drag || pan || spaceDown || mode === 'label') return null;
+    const [x, y] = pixelOf(event);
+    if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return null;
+    const face = faceAt(scene, edits, x, y, { includeHidden: mode === 'hide' });
+    if (!face) return null;
+    if (mode === 'face') return { kind: 'piece', face };
+    const area = scene.areas[face.area];
+    return { kind: 'area', area: face.area, hide: mode === 'hide' ? !areaEdit(edits, area)?.hidden : null };
+  }
+  const hoverKey = (h) => (h ? `${h.kind}:${h.kind === 'piece' ? h.face.face : h.area}:${h.hide}` : '');
+  function updateHover(event) {
+    const next = hoverAt(event);
+    if (hoverKey(next) === hoverKey(hover)) return;
+    hover = next;
+    drawSoon();
+  }
+  canvas.addEventListener('mouseleave', () => {
+    if (hover) {
+      hover = null;
+      drawSoon();
+    }
+  });
+  for (const type of ['keydown', 'keyup']) {
+    document.addEventListener(type, (event) => {
+      if (event.key !== 'Alt') return;
+      const down = type === 'keydown';
+      if (down) event.preventDefault();
+      if (down === altDown) return;
+      altDown = down;
+      if (showAreasBox.checked && scene) draw();
+    });
+  }
+  window.addEventListener('blur', () => {
+    if (altDown) {
+      altDown = false;
+      if (scene) draw();
+    }
+  });
   function updateCursor(event) {
     if (!scene || pan) return;
     if (spaceDown) return setCursor('grab');
@@ -413,6 +468,7 @@ export function initOverviewsPane() {
   canvas.addEventListener('mousemove', (event) => {
     lastPointer = event;
     updateCursor(event);
+    updateHover(event);
   });
   canvas.addEventListener('mouseleave', () => {
     lastPointer = null;
@@ -775,6 +831,7 @@ export function initOverviewsPane() {
       opening = null;
       building.hidden = true;
       scene = built;
+      hover = null;
       resetZoom();
       const fit = fitEdits(built, normaliseEdits(saved));
       edits = { ...fit.edits, theme: fit.edits.theme || defaultTheme };
