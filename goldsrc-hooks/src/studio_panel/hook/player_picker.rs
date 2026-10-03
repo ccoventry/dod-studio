@@ -20,6 +20,9 @@ use super::*;
 
 /// The most names the list shows at once.
 const MAX_SHOWN: usize = 40;
+/// What a picked player's row in the list starts with: clicking it takes
+/// them off the picked line again. Plain ASCII, which every font has.
+const REMOVE: &str = "[x] ";
 
 /// Every player name in the listed demos, with what it was built from (the
 /// players files' generation and the list's row count).
@@ -212,6 +215,18 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         // next. (A name typed out in full is still just a search.)
         if was_open
             && !open
+            && let Some(name) = typed.trim().strip_prefix(REMOVE.trim_end())
+        {
+            PICKED_PLAYERS
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|p| !p.eq_ignore_ascii_case(name.trim()));
+            let set_text: SetTextFn = slot(combo, TEXT_ENTRY_SLOT_SET_TEXT);
+            set_text(combo, c"".as_ptr());
+            return;
+        }
+        if was_open
+            && !open
             && let Some(name) = all.iter().find(|n| n.eq_ignore_ascii_case(typed.trim()))
         {
             let mut picked = PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner());
@@ -241,6 +256,24 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         let add_item: ComboAddItemFn = slot(combo, COMBO_SLOT_ADD_ITEM);
         delete_all(combo);
         let shown = matching(all, &typed, &picked);
+        // The picked players first, matching what is typed, each marked: a
+        // click takes one back off.
+        let words: Vec<String> = typed
+            .split_whitespace()
+            .map(|w| w.to_ascii_lowercase())
+            .collect();
+        let picked_rows: Vec<&String> = picked
+            .iter()
+            .filter(|n| {
+                let lower = n.to_ascii_lowercase();
+                words.iter().all(|w| lower.contains(w))
+            })
+            .collect();
+        for name in &picked_rows {
+            if let Ok(c) = CString::new(format!("{REMOVE}{name}")) {
+                add_item(combo, c.as_ptr(), std::ptr::null());
+            }
+        }
         for name in &shown {
             if let Ok(c) = CString::new(name.as_str()) {
                 add_item(combo, c.as_ptr(), std::ptr::null());
@@ -253,7 +286,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         // Nothing to offer (an empty box, no match): close it. Through the
         // panel, not the box's own close, which selects all its text so the
         // next key replaces it.
-        if typed.trim().is_empty() || shown.is_empty() {
+        if typed.trim().is_empty() || shown.is_empty() && picked_rows.is_empty() {
             if open {
                 vgui.set_visible(vpanel_of(menu), false);
                 WAS_OPEN.store(false, Ordering::Release);
