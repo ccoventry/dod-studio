@@ -286,9 +286,23 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     }
   }
   f.lineWidth = Math.max(1, 0.8 * s);
+  // Water goes in with the floors by height, painted only over what is
+  // already drawn (the floors below it), so a bridge drawn later covers it.
+  const water = edits.show.water ? [...scene.water].sort((a, b) => a.z - b.z) : [];
+  let nextWater = 0;
+  const waterBelow = (z) => {
+    f.globalCompositeOperation = 'source-atop';
+    f.fillStyle = css(theme.water);
+    for (; nextWater < water.length && water[nextWater].z < z; nextWater++) {
+      polygon(f, water[nextWater].points, s);
+      f.fill();
+    }
+    f.globalCompositeOperation = 'source-over';
+  };
   for (const face of scene.faces) {
     const colour = faceColour(scene, edits, face);
     if (!colour) continue;
+    if (nextWater < water.length && water[nextWater].z < face.z) waterBelow(face.z);
     f.fillStyle = css(colour);
     f.strokeStyle = css(colour);
     polygon(f, face.points, s);
@@ -296,15 +310,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     // Hides the hairline seams between neighbouring faces.
     f.stroke();
   }
-  if (edits.show.water) {
-    f.globalCompositeOperation = 'source-atop';
-    f.fillStyle = css(theme.water);
-    for (const pts of scene.water) {
-      polygon(f, pts, s);
-      f.fill();
-    }
-    f.globalCompositeOperation = 'source-over';
-  }
+  waterBelow(Infinity);
   ctx.drawImage(floors, 0, 0);
 
   // Lines round every area, and the frame's grid, on themes that have them.

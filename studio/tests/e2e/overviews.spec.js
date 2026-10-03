@@ -42,7 +42,7 @@ const MAPS = [
   { name: 'dod_test', bsp: 'y', has_overview: false, has_ours: true, has_edits: true },
 ];
 
-async function loadHarness(page, { edits = null } = {}) {
+async function loadHarness(page, { edits = null, scene = SCENE } = {}) {
   await page.addInitScript(({ installs, maps, scene, edits }) => {
     window.__mockInvokeHandlers = {
       overview_installs: () => installs,
@@ -60,7 +60,7 @@ async function loadHarness(page, { edits = null } = {}) {
         return 'C:/games/Half-Life/dod_addon/overviews/dod_test_hd.tga';
       },
     };
-  }, { installs: INSTALLS, maps: MAPS, scene: SCENE, edits });
+  }, { installs: INSTALLS, maps: MAPS, scene, edits });
   await page.goto('/tests/e2e/overviews.html');
   await page.waitForFunction(() => window.__harnessReady === true);
 }
@@ -228,4 +228,19 @@ test('the classic theme draws the paper map: a dark ruler frame round pale floor
   expect(Math.max(...corner)).toBeLessThan(40);
   const floor = await at(400, 400);
   expect(Math.min(...floor)).toBeGreaterThan(180);
+});
+
+test('water covers the floors below it but not a bridge above it', async ({ page }) => {
+  // One sheet of water at height 5 over both floors: the one at 0 is under
+  // it, the one at 10 crosses over it.
+  const scene = { ...SCENE, water: [{ points: square(50, 50, 900), z: 5 }] };
+  await loadHarness(page, { scene });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const at = (x, y) => page.evaluate(([x, y]) => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  expect(await at(400, 400)).toEqual([64, 208, 213]);
+  expect(await at(700, 300)).toEqual([146, 155, 247]);
 });

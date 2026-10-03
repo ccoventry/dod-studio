@@ -62,6 +62,15 @@ pub struct SceneFace {
     pub face: u32,
 }
 
+/// A water surface, seen from above.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Water {
+    /// Image pixels, 1024x768.
+    pub points: Vec<[f32; 2]>,
+    /// Its height: floors above it (a bridge) are drawn over it.
+    pub z: f32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Marker {
     pub name: String,
@@ -79,7 +88,7 @@ pub struct Scene {
     pub height: u32,
     pub faces: Vec<SceneFace>,
     pub areas: Vec<Area>,
-    pub water: Vec<Vec<[f32; 2]>>,
+    pub water: Vec<Water>,
     /// Each capture area's footprint as polygons; the page draws the rim of
     /// their union.
     pub cap_zones: Vec<Vec<Vec<[f32; 2]>>>,
@@ -485,11 +494,13 @@ pub fn build(level: &Level, strings: &HashMap<String, String>) -> Result<Scene, 
         .faces
         .iter()
         .filter(|f| f.texture.starts_with('!') && f.normal_z > 0.7 && f.points.len() >= 3)
-        .map(|f| {
-            f.points
+        .map(|f| Water {
+            points: f
+                .points
                 .iter()
                 .map(|p| transform.to_pixel(p[0], p[1]))
-                .collect()
+                .collect(),
+            z: f.points.iter().map(|p| p[2]).sum::<f32>() / f.points.len() as f32,
         })
         .collect();
 
