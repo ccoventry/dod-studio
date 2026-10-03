@@ -609,3 +609,36 @@ test("the colour swatches are the theme's own", async ({ page }) => {
   await page.selectOption('#ov-theme', 'classic');
   expect((await swatches())[0]).toBe('#f0eee7');
 });
+
+test('colours used show as recent, and Pick from map takes a colour off the map', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const recent = () => page.locator('#ov-recent .ov-swatch').evaluateAll((els) => els.map((e) => e.title));
+  expect(await recent()).toEqual([]);
+  await page.locator('#ov-palette .ov-swatch').nth(2).click();
+  await clickPixel(page, 700, 250);
+  await expect.poll(recent).toEqual(['#7d1d37']);
+  // Still there on another theme, and after a reload.
+  await page.selectOption('#ov-theme', 'grey');
+  expect(await recent()).toEqual(['#7d1d37']);
+  await page.reload();
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  expect(await recent()).toEqual(['#7d1d37']);
+  // Pick from map: the outdoor floor's colour as drawn (Colour-coded), then
+  // back to Colour area.
+  await page.selectOption('#ov-theme', 'colours');
+  await page.click('#ov-pick-btn');
+  await clickPixel(page, 300, 450);
+  await expect(page.locator('#ov-custom-colour')).toHaveValue('#5e5e55');
+  await expect(page.locator('.ov-mode[data-mode="area"]')).toHaveClass(/active/);
+  await expect.poll(recent).toEqual(['#5e5e55', '#7d1d37']);
+  // Ctrl-click picks too (the indoor area as drawn: the page reloaded, so
+  // its colouring went with the stand-in backend), and changes nothing.
+  const saves = (await calls(page, 'overview_save_edits')).length;
+  const box = await page.locator('#ov-canvas').boundingBox();
+  await page.keyboard.down('Control');
+  await page.mouse.click(box.x + (700 / 1024) * box.width, box.y + (250 / 768) * box.height);
+  await page.keyboard.up('Control');
+  await expect(page.locator('#ov-custom-colour')).toHaveValue('#929bf7');
+  expect((await calls(page, 'overview_save_edits')).length).toBe(saves);
+});

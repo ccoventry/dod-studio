@@ -14,7 +14,7 @@ import {
   overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd, overviewFlagIcons, overviewScreenHeight,
 } from './ipc_bridge.js';
 import {
-  emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, labelAt, setAreaEdit,
+  emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, faceColour, labelAt, setAreaEdit,
   areaEdit, setFaceColour, paintedPieces, clearAreaPieces, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
   spawnNameAt, setSpawnOffset, spawnNameSpots, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
@@ -54,6 +54,7 @@ export function initOverviewsPane() {
   const buildingText = pane.querySelector('#ov-building-text');
   const buildingFill = pane.querySelector('#ov-building-fill');
   const palette = pane.querySelector('#ov-palette');
+  const recentBox = pane.querySelector('#ov-recent');
   const customColour = pane.querySelector('#ov-custom-colour');
   const clearColourBtn = pane.querySelector('#ov-clear-colour-btn');
   const showBox = pane.querySelector('#ov-show');
@@ -330,6 +331,18 @@ export function initOverviewsPane() {
     }
     const face = faceAt(scene, edits, x, y);
     if (!face) return;
+    // Pick from map (or Ctrl-click with any tool): take the colour there.
+    if (mode === 'pick' || event.ctrlKey) {
+      const taken = faceColour(scene, edits, face);
+      if (taken) {
+        colour = taken;
+        customColour.value = hex(taken);
+        remember(taken);
+      }
+      if (mode === 'pick') setMode(modeBeforePick);
+      return;
+    }
+    remember(colour);
     if (mode === 'face') {
       change(setFaceColour(edits, face, colour));
     } else {
@@ -382,8 +395,15 @@ export function initOverviewsPane() {
     }
   });
 
+  // The tool to go back to after Pick from map.
+  let modeBeforePick = 'area';
+  function setMode(next) {
+    if (next === 'pick' && mode !== 'pick') modeBeforePick = mode;
+    pane.querySelector(`.ov-mode[data-mode="${next}"]`)?.click();
+  }
   pane.querySelectorAll('.ov-mode').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (btn.dataset.mode === 'pick' && mode !== 'pick') modeBeforePick = mode;
       mode = btn.dataset.mode;
       pane.querySelectorAll('.ov-mode').forEach((b) => b.classList.toggle('active', b === btn));
       canvas.dataset.mode = mode;
@@ -408,6 +428,7 @@ export function initOverviewsPane() {
     face: svgCursor("<path d='M14 3l7 7-8 8-4-4z' fill='white' stroke='black' stroke-width='1.5'/><path d='M9 14c-3 0-5 2-5 4 0 1.5-1 2.5-2 3 4 1 8-1 8-4z' fill='#3b82f6' stroke='black' stroke-width='1.2'/>", 2, 21, 'crosshair'),
     hide: svgCursor("<path d='M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z' fill='white' stroke='black' stroke-width='1.5'/><circle cx='12' cy='12' r='3' fill='black'/><path d='M3 21L21 3' stroke='black' stroke-width='2.5'/><path d='M3 21L21 3' stroke='white' stroke-width='1'/>", 12, 12, 'crosshair'),
     label: 'text',
+    pick: svgCursor("<path d='M14.5 4.5l5 5-9.5 9.5H5v-5z' fill='white' stroke='black' stroke-width='1.5'/><path d='M16 2.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19.5 10 14 4.5z' fill='black'/><path d='M5 19l-2.5 2.5' stroke='black' stroke-width='2'/>", 2, 22, 'crosshair'),
   };
   let lastPointer = null;
   function setCursor(cursor) {
@@ -446,7 +467,7 @@ export function initOverviewsPane() {
   }
 
   function hoverAt(event) {
-    if (!scene || !event || drag || pan || spaceDown || mode === 'label') return null;
+    if (!scene || !event || drag || pan || spaceDown || mode === 'label' || mode === 'pick' || ctrlDown) return null;
     const [x, y] = pixelOf(event);
     if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return null;
     const face = faceAt(scene, edits, x, y, { includeHidden: mode === 'hide' });
@@ -457,6 +478,20 @@ export function initOverviewsPane() {
     return { kind: 'area', area: face.area, hide: mode === 'hide' ? !areaEdit(edits, area)?.hidden : null, keep };
   }
   const hoverKey = (h) => (h ? `${h.kind}:${h.kind === 'piece' ? h.face.face : h.area}:${h.hide}:${h.keep?.size ?? '-'}` : '');
+  // Ctrl: pick the colour under the pointer, with any painting tool.
+  let ctrlDown = false;
+  for (const type of ['keydown', 'keyup']) {
+    document.addEventListener(type, (event) => {
+      if (event.key !== 'Control') return;
+      const down = type === 'keydown';
+      if (down === ctrlDown) return;
+      ctrlDown = down;
+      if (!scene) return;
+      updateCursor(lastPointer);
+      hover = hoverAt(lastPointer);
+      drawSoon();
+    });
+  }
   // Shift: Colour area paints over pieces coloured on their own.
   let shiftDown = false;
   for (const type of ['keydown', 'keyup']) {
@@ -507,6 +542,7 @@ export function initOverviewsPane() {
       const [x, y] = pixelOf(event);
       if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return setCursor('grab');
     }
+    if (ctrlDown && mode !== 'label') return setCursor(CURSORS.pick);
     setCursor((mode === 'area' && shiftDown ? CURSORS.areaOver : CURSORS[mode]) || 'crosshair');
   }
   canvas.addEventListener('mousemove', (event) => {
@@ -521,29 +557,51 @@ export function initOverviewsPane() {
   undoBtn.disabled = true;
 
   // ── Colours ────────────────────────────────────────────────────────────
+  // Colours used lately, newest first, for every map and theme: switching
+  // scheme doesn't mean hunting for them again.
+  const RECENT_KEY = 'overviews.recentColours';
+  const RECENT_MAX = 8;
+  let recent = [];
+  try {
+    recent = (JSON.parse(storageGet(RECENT_KEY) || '[]') || []).filter((c) => Array.isArray(c) && c.length === 3);
+  } catch {
+    recent = [];
+  }
+  function remember(c) {
+    if (!c) return;
+    recent = [c, ...recent.filter((r) => hex(r) !== hex(c))].slice(0, RECENT_MAX);
+    storageSet(RECENT_KEY, JSON.stringify(recent));
+    renderPalette();
+  }
+  const swatchFor = (c) => {
+    const swatch = document.createElement('button');
+    swatch.className = 'ov-swatch';
+    swatch.style.background = hex(c);
+    swatch.title = hex(c);
+    swatch.classList.toggle('active', !!colour && hex(c) === hex(colour));
+    swatch.addEventListener('click', () => {
+      colour = c;
+      customColour.value = hex(c);
+      renderPalette();
+    });
+    return swatch;
+  };
+
   function renderPalette() {
+    recentBox.innerHTML = '';
+    for (const c of recent) recentBox.appendChild(swatchFor(c));
+    if (!recent.length) recentBox.textContent = STRINGS.OVERVIEWS.RECENT_NONE;
     palette.innerHTML = '';
     // The theme shown's own colours (overview_themes.js).
     const colours = scene ? themeOf(edits).palette?.(scene) || scene.palette || [] : [];
-    for (const c of colours) {
-      const swatch = document.createElement('button');
-      swatch.className = 'ov-swatch';
-      swatch.style.background = hex(c);
-      swatch.title = hex(c);
-      swatch.classList.toggle('active', !!colour && hex(c) === hex(colour));
-      swatch.addEventListener('click', () => {
-        colour = c;
-        customColour.value = hex(c);
-        renderPalette();
-      });
-      palette.appendChild(swatch);
-    }
+    for (const c of colours) palette.appendChild(swatchFor(c));
     clearColourBtn.classList.toggle('active', colour === null);
   }
   customColour.addEventListener('input', () => {
     colour = rgb(customColour.value);
     renderPalette();
   });
+  customColour.addEventListener('change', () => remember(rgb(customColour.value)));
   clearColourBtn.addEventListener('click', () => {
     colour = null;
     renderPalette();
