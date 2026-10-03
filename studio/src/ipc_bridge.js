@@ -759,8 +759,8 @@ export async function overviewScene(install, map) {
     });
 }
 
-export async function overviewLoadEdits(map) {
-  return invoke("overview_load_edits", { map })
+export async function overviewLoadEdits(map, install) {
+  return invoke("overview_load_edits", { map, install })
     .catch((err) => {
       console.error("IPC Execution Error (overview_load_edits):", err);
       throw err;

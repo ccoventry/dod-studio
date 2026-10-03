@@ -65,9 +65,11 @@ pub async fn overview_scene(
     .await
 }
 
+/// The page's edits for `map`: this PC's own, else the ones saved beside
+/// `install`'s overview (`dod_addon/overviews/<map>.dodstudio.json`).
 #[tauri::command]
-pub fn overview_load_edits(map: String) -> Option<serde_json::Value> {
-    files::load_edits(&map)
+pub fn overview_load_edits(map: String, install: Option<String>) -> Option<serde_json::Value> {
+    files::load_edits_for(install.as_deref().map(Path::new), &map)
 }
 
 #[tauri::command]

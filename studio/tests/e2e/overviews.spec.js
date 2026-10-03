@@ -162,6 +162,9 @@ test('save hands the backend the 1024x768 drawing and format, for dod/overviews'
   const request = (await calls(page, 'overview_export')).at(-1).args.request;
   expect(request).toMatchObject({ map: 'dod_test', install: 'C:/games/Half-Life', format: 'bmp', target: 'game', width: 1024, height: 768 });
   expect(request.transform).toEqual(SCENE.transform);
+  // The edits go with it, for dod_addon/overviews/<map>.dodstudio.json.
+  expect(request.edits).toMatchObject({ format: 'bmp' });
+  expect((await calls(page, 'overview_load_edits')).at(-1).args).toEqual({ map: 'dod_test', install: 'C:/games/Half-Life' });
   // 1024 * 768 * 4 bytes, base64.
   expect(request.rgba.length).toBe(Math.ceil((1024 * 768 * 4) / 3) * 4);
   // And the high-quality copy, raw: 4096 * 3072 * 4 bytes.

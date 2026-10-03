@@ -495,7 +495,7 @@ export function initOverviewsPane() {
     renderSidePanels();
     draw();
     try {
-      const [built, saved] = await Promise.all([overviewScene(install, name), overviewLoadEdits(name).catch(() => null)]);
+      const [built, saved] = await Promise.all([overviewScene(install, name), overviewLoadEdits(name, install).catch(() => null)]);
       if (token !== loadToken) return;
       opening = null;
       building.hidden = true;
@@ -541,6 +541,8 @@ export function initOverviewsPane() {
         height: image.height,
         rgba: toBase64(image.rgba),
         transform: scene.transform,
+        // Kept beside the HD copy, so the edits go wherever the overview does.
+        edits,
       });
       const written = [...result.written];
       if (edits.hd !== false) {

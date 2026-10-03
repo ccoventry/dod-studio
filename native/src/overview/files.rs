@@ -157,7 +157,7 @@ pub fn maps(install: &Path) -> Vec<MapEntry> {
         out.push(MapEntry {
             has_overview: game_txt.is_file(),
             has_ours: is_ours(&game_txt) || is_ours(&addon_txt),
-            has_edits: edits_path(&name).is_file(),
+            has_edits: edits_path(&name).is_file() || sidecar_path(install, &name).is_file(),
             bsp: path.to_string_lossy().into_owned(),
             name,
         });
@@ -256,6 +256,10 @@ pub struct Export {
     /// Base64 of `width * height * 4` bytes, rows top first.
     pub rgba: String,
     pub transform: Transform,
+    /// The page's edits, written beside the high-quality copy so the
+    /// overview can be picked up again on another PC ([`sidecar_path`]).
+    #[serde(default)]
+    pub edits: Option<serde_json::Value>,
 }
 
 /// Encodes the page's drawing and writes it with [`save`].
@@ -268,14 +272,52 @@ pub fn export(request: &Export) -> Result<Saved, String> {
         Format::Tga => super::image::tga(request.width, request.height, &rgba)?,
         Format::Bmp => super::image::bmp(request.width, request.height, &rgba)?,
     };
-    save(
-        Path::new(&request.install),
+    let install = Path::new(&request.install);
+    let mut saved = save(
+        install,
         request.target,
         &request.map,
         request.format,
         &image,
         &request.transform,
-    )
+    )?;
+    if let Some(edits) = &request.edits {
+        saved
+            .written
+            .push(save_sidecar(install, &request.map, edits)?);
+    }
+    Ok(saved)
+}
+
+/// The page's edits that travel with an overview:
+/// `dod_addon/overviews/<map>.dodstudio.json`, with DoD Studio's other
+/// files, not in the game's `.txt` (which the game reads on joining a map).
+/// Copied with the overview to another PC, it lets the page pick the edits
+/// up there.
+pub fn sidecar_path(install: &Path, map: &str) -> PathBuf {
+    install
+        .join("dod_addon")
+        .join("overviews")
+        .join(format!("{}.dodstudio.json", safe(map)))
+}
+
+fn save_sidecar(install: &Path, map: &str, edits: &serde_json::Value) -> Result<String, String> {
+    let path = sidecar_path(install, map);
+    if let Some(folder) = path.parent() {
+        std::fs::create_dir_all(folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+    }
+    let text = serde_json::to_string_pretty(edits).map_err(|e| e.to_string())?;
+    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The page's edits for `map`: this PC's own, else the ones saved beside
+/// the install's overview ([`sidecar_path`]).
+pub fn load_edits_for(install: Option<&Path>, map: &str) -> Option<serde_json::Value> {
+    load_edits(map).or_else(|| {
+        let text = std::fs::read_to_string(sidecar_path(install?, map)).ok()?;
+        serde_json::from_str(&text).ok()
+    })
 }
 
 /// Writes the high-quality copy, `dod_addon/overviews/<map>_hd.tga`: only
@@ -483,6 +525,40 @@ mod tests {
                 .ends_with("dod_addon/overviews/dod_v_hd.tga")
         );
         assert!(!game.join("dod_v_hd.tga").exists());
+    }
+
+    #[test]
+    fn the_edits_travel_with_the_overview() {
+        use base64::Engine as _;
+        let dir = Scratch::new("overview_sidecar");
+        let edits = serde_json::json!({ "version": 1, "labels": [{ "text": "Church" }] });
+        let request = Export {
+            install: dir.path().to_string_lossy().into_owned(),
+            map: "dod_u".to_string(),
+            target: Target::Game,
+            format: Format::Tga,
+            width: 128,
+            height: 128,
+            rgba: base64::engine::general_purpose::STANDARD.encode(vec![0u8; 128 * 128 * 4]),
+            transform: transform(),
+            edits: Some(edits.clone()),
+        };
+        let saved = export(&request).unwrap();
+        let sidecar = sidecar_path(dir.path(), "dod_u");
+        assert!(sidecar.ends_with("dod_addon/overviews/dod_u.dodstudio.json"));
+        assert!(
+            saved
+                .written
+                .contains(&sidecar.to_string_lossy().into_owned())
+        );
+        let text = std::fs::read_to_string(&sidecar).unwrap();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&text).unwrap(),
+            edits
+        );
+        // Nothing of ours in the game's .txt beyond its one comment line.
+        let txt = std::fs::read_to_string(dir.path().join("dod/overviews/dod_u.txt")).unwrap();
+        assert!(!txt.contains("Church"));
     }
 
     #[test]
