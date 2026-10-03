@@ -526,6 +526,51 @@ export async function cancelAudit() {
     });
 }
 
+// ── Demo Auditor: Rename Demos (#469) ──────────────────────────────────────
+
+export async function demoRenameList(folder) {
+  return invoke("demo_rename_list", { folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_rename_list):", err);
+      showToast(STRINGS.IPC.demoRenameFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function demoRenameCancel() {
+  return invoke("demo_rename_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_rename_cancel):", err);
+      throw err;
+    });
+}
+
+export async function demoRenameApply(renames) {
+  return invoke("demo_rename_apply", { renames })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_rename_apply):", err);
+      showToast(STRINGS.IPC.demoRenameFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function demoRenameUndo() {
+  return invoke("demo_rename_undo")
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_rename_undo):", err);
+      showToast(STRINGS.IPC.demoRenameFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function demoRenameUndoable() {
+  return invoke("demo_rename_undoable")
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_rename_undoable):", err);
+      return null;
+    });
+}
+
 export async function revealInExplorer(path) {
   return invoke("reveal_in_explorer", { path })
     .catch((err) => {

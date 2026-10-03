@@ -665,6 +665,41 @@ button.primary-btn:hover:not(:disabled) {
   padding: 16px !important;
 }
 
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 /* Configuration Tabs */
 .config-tabs-nav {
   display: flex;
@@ -1287,6 +1322,51 @@ button.primary-btn:hover:not(:disabled) {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: #ccc;
+}
+
+/* Demo Auditor: Rename Demos (#469). */
+.rename-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rename-label {
+  min-width: 90px;
+}
+
+.rename-template {
+  flex: 1;
+  font-family: monospace;
+}
+
+.rename-errors {
+  margin: 2px 0 4px;
+  color: #ef5350;
+}
+
+.rename-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+  margin: 4px 0 8px;
+  font-size: 0.85em;
+}
+
+.rename-chip {
+  padding: 1px 6px;
+  font-family: monospace;
+  font-size: 1em;
+}
+
+#rename-table td.rename-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+#rename-table td.rename-numbered {
+  color: #ffb74d;
 }
 
 .analyzer-stat-cards {

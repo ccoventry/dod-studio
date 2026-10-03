@@ -159,6 +159,16 @@ pub struct AppSettings {
     pub update_channel: String,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// How a highlight's clip name is built (#441), in the placeholder syntax
+    /// of `studio/src/clip_name.js`. Configuration > Render Output.
+    #[serde(default = "default_clip_name_template")]
+    pub clip_name_template: String,
+    /// The Demo Auditor's rename templates (#469), one per demo type, in the
+    /// same syntax with `studio/src/demo_rename.js`'s placeholders.
+    #[serde(default = "default_demo_rename_pov_template")]
+    pub demo_rename_pov_template: String,
+    #[serde(default = "default_demo_rename_hltv_template")]
+    pub demo_rename_hltv_template: String,
 }
 
 fn default_resolution_width() -> i32 {
@@ -234,6 +244,18 @@ fn default_notify_updates() -> bool {
 fn default_update_channel() -> String {
     "stable".to_string()
 }
+/// Keep in step with `DEFAULT_TEMPLATE` in `studio/src/clip_name.js`.
+fn default_clip_name_template() -> String {
+    "{map}_{player}_{kills}k_{weapons}_{time}".to_string()
+}
+/// Keep in step with `DEFAULT_POV_TEMPLATE` in `studio/src/demo_rename.js`.
+fn default_demo_rename_pov_template() -> String {
+    "{name}_{kills}k_v_{opponent}_{map}".to_string()
+}
+/// Keep in step with `DEFAULT_HLTV_TEMPLATE` in `studio/src/demo_rename.js`.
+fn default_demo_rename_hltv_template() -> String {
+    "{allies}_v_{axis}_{map}_{date}".to_string()
+}
 fn default_auto_check_updates() -> bool {
     true
 }
@@ -301,6 +323,9 @@ impl Default for AppSettings {
             notify_updates: default_notify_updates(),
             update_channel: default_update_channel(),
             auto_check_updates: default_auto_check_updates(),
+            clip_name_template: default_clip_name_template(),
+            demo_rename_pov_template: default_demo_rename_pov_template(),
+            demo_rename_hltv_template: default_demo_rename_hltv_template(),
         }
     }
 }

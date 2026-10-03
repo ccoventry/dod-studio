@@ -104,6 +104,7 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -547,6 +548,18 @@
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
+
+              <!-- Clip names (#441): the finished file of each highlight is
+                   named from this template, unless its row has a typed name. -->
+              <div class="input-row" style="margin-top: 10px;">
+                <label for="config-clip-name-template" data-str="CLIP_NAME.TEMPLATE_LABEL" data-str-title="CLIP_NAME.TEMPLATE_TITLE">Clip Name Template:</label>
+                <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
+                <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
+              <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
@@ -707,6 +720,51 @@
               </table>
             </div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          </div>
+
+          <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
+          <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
+            <div class="panel-header flex-between">
+              <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
+            </div>
+            <div class="panel-body">
+              <p class="rename-hint" data-str="DEMO_RENAME.HINT"></p>
+              <div class="input-row">
+                <label for="rename-pov-template" class="rename-label" data-str="DEMO_RENAME.POV_LABEL">POV demos:</label>
+                <input type="text" id="rename-pov-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-pov-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-pov-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div class="input-row">
+                <label for="rename-hltv-template" class="rename-label" data-str="DEMO_RENAME.HLTV_LABEL">HLTV demos:</label>
+                <input type="text" id="rename-hltv-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div id="rename-chips" class="rename-chips"></div>
+              <div class="row-inputs">
+                <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
+                <button id="rename-cancel-btn" disabled data-str="DEMO_RENAME.CANCEL_BUTTON">Cancel</button>
+                <button id="rename-apply-btn" class="primary-btn" disabled data-str="DEMO_RENAME.APPLY_BUTTON">Rename</button>
+                <button id="rename-undo-btn" disabled data-str="DEMO_RENAME.UNDO_BUTTON">Undo Last Rename</button>
+              </div>
+              <p class="status-indicator"><span id="rename-status"></span></p>
+            </div>
+            <div class="table-wrapper" style="max-height: 400px;">
+              <table id="rename-table">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="rename-select-all" checked /></th>
+                    <th data-str="DEMO_RENAME.COL_CURRENT">Current Name</th>
+                    <th data-str="DEMO_RENAME.COL_NEW">New Name</th>
+                    <th data-str="DEMO_RENAME.COL_TYPE">Type</th>
+                  </tr>
+                </thead>
+                <tbody id="rename-body">
+                  <tr><td colspan="4" class="table-empty" data-str="DEMO_RENAME.TABLE_EMPTY">Choose a Target Folder above and click List Demos.</td></tr>
+                </tbody>
+              </table>
+            </div>
           </div>
         </section>
 
@@ -1084,6 +1142,36 @@
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teams list (#445) — the clan tags found in the project's demos, each
+         with the name clip names use for it. Filled by teams_pane.js; the
+         names and merges are saved in the project file. -->
+    <div id="teams-modal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+        <h2 data-str="TEAMS.TITLE">Teams</h2>
+        <p class="status-text" data-str="TEAMS.INTRO"></p>
+        <div id="teams-unread-row" class="teams-unread-row" hidden>
+          <span id="teams-unread-note"></span>
+          <button id="teams-read-btn" data-str="TEAMS.READ_BUTTON" data-str-title="TEAMS.READ_BUTTON_TITLE">Read Their Teams</button>
+        </div>
+        <div class="table-wrapper" style="max-height: 360px;">
+          <table id="teams-table">
+            <thead>
+              <tr>
+                <th data-str="TEAMS.HEADER_TAG">Tag</th>
+                <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th data-str="TEAMS.HEADER_NAME">Name</th>
+                <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
+              </tr>
+            </thead>
+            <tbody id="teams-table-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="teams-close-btn" data-str="TEAMS.CLOSE_BUTTON">Close</button>
         </div>
       </div>
     </div>
