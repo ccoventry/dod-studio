@@ -22,8 +22,6 @@ import { THEMES } from './overview_themes.js';
 const INSTALL_KEY = 'overviews.install';
 // The theme is one choice for every map, not saved with a map's edits.
 const THEME_KEY = 'overviews.theme';
-// So is where the overview is saved.
-const TARGET_KEY = 'overviews.target';
 const UNDO_LIMIT = 100;
 
 function storageGet(key) {
@@ -57,7 +55,6 @@ export function initOverviewsPane() {
   const labelList = pane.querySelector('#ov-labels');
   const formatSelect = pane.querySelector('#ov-format');
   const themeSelect = pane.querySelector('#ov-theme');
-  const targetSelect = pane.querySelector('#ov-target');
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
@@ -70,8 +67,7 @@ export function initOverviewsPane() {
   let maps = [];
   let scene = null;
   let theme = THEMES.some((t) => t.id === storageGet(THEME_KEY)) ? storageGet(THEME_KEY) : THEMES[0].id;
-  let target = ['game', 'addon'].includes(storageGet(TARGET_KEY)) ? storageGet(TARGET_KEY) : 'game';
-  let edits = { ...emptyEdits(), theme, target };
+  let edits = { ...emptyEdits(), theme };
   let history = [];
   let mode = 'area';
   // The colour clicks paint with; null puts an area's own colour back.
@@ -104,7 +100,7 @@ export function initOverviewsPane() {
 
   function undo() {
     if (!history.length) return;
-    edits = { ...history.pop(), theme, target };
+    edits = { ...history.pop(), theme };
     undoBtn.disabled = history.length === 0;
     persistSoon();
     draw();
@@ -284,7 +280,6 @@ export function initOverviewsPane() {
     formatSelect.value = edits.format || 'tga';
     themeSelect.value = edits.theme || 'colours';
     themeSelect.disabled = !scene;
-    targetSelect.value = target;
     hdBox.checked = edits.hd !== false;
 
     flagList.innerHTML = '';
@@ -366,11 +361,6 @@ export function initOverviewsPane() {
     opt.textContent = STRINGS.OVERVIEWS.THEMES[t.id] || t.id;
     themeSelect.appendChild(opt);
   }
-  targetSelect.addEventListener('change', () => {
-    target = targetSelect.value;
-    storageSet(TARGET_KEY, target);
-    edits = { ...edits, target };
-  });
   hdBox.addEventListener('change', () => change({ ...edits, hd: hdBox.checked }, { remember: false }));
 
   // ── Installs and maps ──────────────────────────────────────────────────
@@ -510,7 +500,7 @@ export function initOverviewsPane() {
       opening = null;
       building.hidden = true;
       scene = built;
-      edits = { ...normaliseEdits(saved), theme, target };
+      edits = { ...normaliseEdits(saved), theme };
       history = [];
       undoBtn.disabled = true;
       selectedLabel = null;
@@ -542,7 +532,10 @@ export function initOverviewsPane() {
       const result = await overviewExport({
         install,
         map: scene.map,
-        target,
+        // The overview the game reads goes in dod, which every launch reads;
+        // the high-quality copy, which only DoD Studio's hook reads, goes
+        // in dod_addon (files.rs save_hd).
+        target: 'game',
         format: edits.format || 'tga',
         width: image.width,
         height: image.height,
@@ -584,7 +577,7 @@ export function initOverviewsPane() {
     }
     clearTimeout(saveTimer);
     history.push(edits);
-    edits = { ...emptyEdits(), theme, target };
+    edits = { ...emptyEdits(), theme };
     undoBtn.disabled = false;
     selectedLabel = null;
     const entry = maps.find((m) => m.name === scene.map);

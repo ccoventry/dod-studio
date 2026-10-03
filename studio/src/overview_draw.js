@@ -30,7 +30,6 @@ export function emptyEdits() {
       water: true,
     },
     format: 'tga',
-    target: 'game',
     // overview_themes.js: how it looks.
     theme: 'colours',
     // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.

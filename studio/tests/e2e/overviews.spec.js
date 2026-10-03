@@ -151,25 +151,9 @@ test('saved edits come back when the map is opened', async ({ page }) => {
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await expect(page.locator('#ov-show input[data-show="flags"]')).not.toBeChecked();
   await expect(page.locator('#ov-format')).toHaveValue('bmp');
-  // Where to save is the page's choice, not the map's: dod unless changed.
-  await expect(page.locator('#ov-target')).toHaveValue('game');
 });
 
-test('where to save is dod by default and stays chosen for every map', async ({ page }) => {
-  await loadHarness(page);
-  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
-  await expect(page.locator('#ov-target')).toHaveValue('game');
-  await page.selectOption('#ov-target', 'addon');
-  await page.locator('.ov-map-row', { hasText: 'dod_anzio' }).click();
-  await expect(page.locator('#ov-target')).toHaveValue('addon');
-  await page.reload();
-  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
-  await expect(page.locator('#ov-target')).toHaveValue('addon');
-  await page.click('#ov-save-btn');
-  await expect.poll(async () => (await calls(page, 'overview_export')).at(-1)?.args.request.target).toBe('addon');
-});
-
-test('save hands the backend the 1024x768 drawing, format and place', async ({ page }) => {
+test('save hands the backend the 1024x768 drawing and format, for dod/overviews', async ({ page }) => {
   await loadHarness(page);
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await page.selectOption('#ov-format', 'bmp');
