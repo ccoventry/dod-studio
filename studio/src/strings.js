@@ -1298,6 +1298,8 @@ export const STRINGS = {
     SHOW_SPAWNS: 'Spawn points',
     SHOW_SPAWN_NAMES: 'Spawn names',
     SHOW_SPAWN_PROTECTION: 'Spawn protection',
+    SPAWN_RESET: 'Spawn names back in place',
+    SPAWN_RESET_TIP: 'Put the Allies and Axis spawn names back under their spawns',
     SP_TITLE: 'Spawn protection',
     SP_FILL: 'Fill',
     SP_FILL_TINT: 'Tint',

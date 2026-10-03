@@ -469,3 +469,29 @@ test('spawn protection fills its floor and draws the line where you walk in, in 
   await page.locator('input[data-show="spawnProtection"]').uncheck();
   await expect.poll(() => at(400, 300)).toEqual([94, 94, 85]);
 });
+
+test('a spawn name can be dragged and put back, and the cursor shows what a click does', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const box = await page.locator('#ov-canvas').boundingBox();
+  const at = (x, y) => [box.x + (x / 1024) * box.width, box.y + (y / 768) * box.height];
+  const cursor = () => page.locator('#ov-canvas').evaluate((c) => c.style.cursor);
+  // Colour area mode: the bucket.
+  await page.mouse.move(...at(200, 200));
+  await expect.poll(cursor).toContain('svg');
+  // Over the Allies spawn name (under the four spawns at 120-156, 450): a hand.
+  const spawnName = at(138, 463);
+  await page.mouse.move(...spawnName);
+  await expect.poll(cursor).toBe('grab');
+  await page.mouse.down();
+  await page.mouse.move(...at(300, 600), { steps: 4 });
+  await page.mouse.up();
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.spawnNames[0]?.team).toBe('Allies');
+  await expect(page.locator('#ov-spawn-reset')).toBeEnabled();
+  await page.click('#ov-spawn-reset');
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1).args.edits.spawnNames).toEqual([]);
+  // Add label mode: a text cursor.
+  await page.click('.ov-add-label');
+  await page.mouse.move(...at(500, 500));
+  await expect.poll(cursor).toBe('text');
+});

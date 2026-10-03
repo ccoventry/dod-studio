@@ -31,6 +31,10 @@ export function emptyEdits() {
     labels: [],
     // Flag names typed over the game's, keyed by the flag's world position.
     flagNames: [],
+    // Spawn names dragged away from their spawn: { team, at, offset }, `at`
+    // the world point of the spawn group the name belongs to, `offset` in
+    // world units from where the page would put it.
+    spawnNames: [],
     show: {
       spawns: true,
       spawnLabels: true,
@@ -106,6 +110,7 @@ export function normaliseEdits(raw) {
     colours: { ...colourSets(raw.colours), ...now.sets },
     labels: list(raw.labels),
     flagNames: list(raw.flagNames),
+    spawnNames: list(raw.spawnNames),
     show: { ...base.show, ...(raw.show || {}) },
     spawnProtection: { ...base.spawnProtection, ...(raw.spawnProtection || {}) },
     aside: {
@@ -295,6 +300,42 @@ export function spawnLabels(scene) {
     }
   }
   return out;
+}
+
+// A spawn name's key: its team and the world point of where the page puts
+// it, so a drag survives a rebuild that leaves the spawns where they were.
+const spawnKey = (scene, l) => toWorld(scene.transform, l.at[0], l.at[1]);
+const spawnEntry = (scene, edits, l) => {
+  const at = spawnKey(scene, l);
+  return (edits.spawnNames || []).find((e) => e.team === l.team && near(e.at, at, 48));
+};
+
+/** Each spawn name with where it is drawn: `{ team, at, home }`, image pixels. */
+export function spawnNameSpots(scene, edits) {
+  return spawnLabels(scene).map((l) => {
+    const home = [l.at[0], l.at[1] + 7];
+    const e = spawnEntry(scene, edits, l);
+    if (!e?.offset) return { team: l.team, at: home, home, label: l };
+    const w = toWorld(scene.transform, home[0], home[1]);
+    return { team: l.team, at: toPixel(scene.transform, w[0] + e.offset[0], w[1] + e.offset[1]), home, label: l };
+  });
+}
+
+/** Moves a spawn name `offset` world units from its place; null puts it back. */
+export function setSpawnOffset(scene, edits, label, offset) {
+  const at = spawnKey(scene, label);
+  const rest = (edits.spawnNames || []).filter((e) => !(e.team === label.team && near(e.at, at, 48)));
+  return { ...edits, spawnNames: offset ? [...rest, { team: label.team, at, offset }] : rest };
+}
+
+/** The spawn name under an image pixel, when spawn names are shown. */
+export function spawnNameAt(scene, edits, x, y) {
+  if (!edits.show.spawnLabels) return null;
+  for (const spot of spawnNameSpots(scene, edits)) {
+    const half = nameHalf(`${spot.team} spawn`);
+    if (Math.abs(x - spot.at[0]) <= half && Math.abs(y - spot.at[1]) <= 15 * 0.7) return spot;
+  }
+  return null;
 }
 
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
@@ -628,7 +669,7 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     }
   }
   if (edits.show.spawnLabels) {
-    for (const l of spawnLabels(scene)) text(`${l.team} spawn`, l.at[0], l.at[1] + 7, 15, 'center');
+    for (const spot of spawnNameSpots(scene, edits)) text(`${spot.team} spawn`, spot.at[0], spot.at[1], 15, 'center');
   }
   if (edits.show.flags) {
     for (const flag of scene.flags) {

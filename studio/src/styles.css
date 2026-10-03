@@ -1898,7 +1898,7 @@ tr.keyboard-selected {
 
 #ov-canvas {
   image-rendering: auto;
-  cursor: crosshair;
+  cursor: crosshair; /* overviews_pane.js sets it by what a click would do */
   box-shadow: 0 0 0 1px var(--border-color);
 }
 
@@ -1926,6 +1926,11 @@ tr.keyboard-selected {
   width: 26px;
   height: 20px;
   padding: 0;
+}
+
+.ov-spawn-reset {
+  align-self: flex-start;
+  margin-top: 4px;
 }
 
 #ov-sp-reset {

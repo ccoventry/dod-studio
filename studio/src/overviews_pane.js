@@ -15,7 +15,8 @@ import {
 } from './ipc_bridge.js';
 import {
   emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, labelAt, setAreaEdit,
-  areaEdit, setFaceColour, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld, renderExport, renderHd, toBase64,
+  areaEdit, setFaceColour, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
+  spawnNameAt, setSpawnOffset, spawnNameSpots, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES } from './overview_themes.js';
 import { fitEdits } from './overview_fit.js';
@@ -61,6 +62,8 @@ export function initOverviewsPane() {
   const formatSelect = pane.querySelector('#ov-format');
   const themeSelect = pane.querySelector('#ov-theme');
   const flagScreenSelect = pane.querySelector('#ov-flag-screen');
+  const spawnReset = pane.querySelector('#ov-spawn-reset');
+  spawnReset.addEventListener('click', () => change({ ...edits, spawnNames: [] }));
   const hdBox = pane.querySelector('#ov-hd');
   const saveBtn = pane.querySelector('#ov-save-btn');
   const resetBtn = pane.querySelector('#ov-reset-btn');
@@ -238,19 +241,19 @@ export function initOverviewsPane() {
     if (event.code !== 'Space' || pane.style.display === 'none' || event.target.closest('input, select, textarea, button')) return;
     event.preventDefault();
     spaceDown = true;
-    canvas.style.cursor = 'grab';
+    setCursor('grab');
   });
   document.addEventListener('keyup', (event) => {
     if (event.code !== 'Space') return;
     spaceDown = false;
-    canvas.style.cursor = '';
+    updateCursor(lastPointer);
   });
   canvas.addEventListener('mousedown', (event) => {
     if (!scene || !(event.button === 1 || (event.button === 0 && spaceDown))) return;
     event.preventDefault();
     event.stopImmediatePropagation();
     pan = { x: event.clientX, y: event.clientY, centre };
-    canvas.style.cursor = 'grabbing';
+    setCursor('grabbing');
   });
   window.addEventListener('mousemove', (event) => {
     if (!pan) return;
@@ -264,7 +267,7 @@ export function initOverviewsPane() {
   window.addEventListener('mouseup', () => {
     if (!pan) return;
     pan = null;
-    canvas.style.cursor = spaceDown ? 'grab' : '';
+    updateCursor(lastPointer);
   });
   zoomIn.addEventListener('click', () => scene && zoomBy(1.5));
   zoomOut.addEventListener('click', () => scene && zoomBy(1 / 1.5));
@@ -280,13 +283,21 @@ export function initOverviewsPane() {
     const [x, y] = pixelOf(event);
     const label = labelAt(scene, edits, x, y);
     const flag = label ? null : flagLabelAt(scene, edits, x, y);
+    const spawn = label || flag ? null : spawnNameAt(scene, edits, x, y);
     if (flag) {
       drag = { flag, moved: false, before: edits };
+      setCursor('grabbing');
+      return;
+    }
+    if (spawn) {
+      drag = { spawn, moved: false, before: edits };
+      setCursor('grabbing');
       return;
     }
     if (label) {
       selectedLabel = label.id;
       drag = { id: label.id, moved: false, before: edits };
+      setCursor('grabbing');
       draw();
       renderSidePanels();
       return;
@@ -328,6 +339,9 @@ export function initOverviewsPane() {
     const world = toWorld(scene.transform, x, y);
     if (drag.flag) {
       edits = setFlagOffset(edits, drag.flag, [world[0] - drag.flag.world[0], world[1] - drag.flag.world[1]]);
+    } else if (drag.spawn) {
+      const home = toWorld(scene.transform, drag.spawn.home[0], drag.spawn.home[1]);
+      edits = setSpawnOffset(scene, edits, drag.spawn.label, [world[0] - home[0], world[1] - home[1]]);
     } else {
       edits = { ...edits, labels: edits.labels.map((l) => (l.id === drag.id ? { ...l, world } : l)) };
     }
@@ -341,9 +355,10 @@ export function initOverviewsPane() {
       history.push(drag.before);
       undoBtn.disabled = false;
       persistSoon();
-      if (drag.flag) renderSidePanels();
+      renderSidePanels();
     }
     drag = null;
+    updateCursor(lastPointer);
   });
 
   document.addEventListener('keydown', (event) => {
@@ -363,7 +378,43 @@ export function initOverviewsPane() {
       mode = btn.dataset.mode;
       pane.querySelectorAll('.ov-mode').forEach((b) => b.classList.toggle('active', b === btn));
       canvas.dataset.mode = mode;
+      updateCursor(lastPointer);
     });
+  });
+
+  // ── Cursors ───────────────────────────────────────────────────────────
+  // What a click does shows in the pointer: a bucket fills an area, a brush
+  // paints one piece, an eye hides, a text cursor adds a label, a hand over
+  // anything that drags (labels, flag and spawn names), and while moving
+  // about the map.
+  const svgCursor = (body, x, y, fallback) =>
+    `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>${body}</svg>`)}") ${x} ${y}, ${fallback}`;
+  const CURSORS = {
+    area: svgCursor("<path d='M4 10l7-7 8 8-7 7z' fill='white' stroke='black' stroke-width='1.5'/><path d='M4 10h15' stroke='black' stroke-width='1.5'/><path d='M20 14c0 0 2.5 3 2.5 4.5a2.5 2.5 0 0 1-5 0c0-1.5 2.5-4.5 2.5-4.5z' fill='#3b82f6' stroke='black'/>", 20, 21, 'crosshair'),
+    face: svgCursor("<path d='M14 3l7 7-8 8-4-4z' fill='white' stroke='black' stroke-width='1.5'/><path d='M9 14c-3 0-5 2-5 4 0 1.5-1 2.5-2 3 4 1 8-1 8-4z' fill='#3b82f6' stroke='black' stroke-width='1.2'/>", 2, 21, 'crosshair'),
+    hide: svgCursor("<path d='M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z' fill='white' stroke='black' stroke-width='1.5'/><circle cx='12' cy='12' r='3' fill='black'/><path d='M3 21L21 3' stroke='black' stroke-width='2.5'/><path d='M3 21L21 3' stroke='white' stroke-width='1'/>", 12, 12, 'crosshair'),
+    label: 'text',
+  };
+  let lastPointer = null;
+  function setCursor(cursor) {
+    canvas.style.cursor = cursor;
+  }
+  function updateCursor(event) {
+    if (!scene || pan) return;
+    if (spaceDown) return setCursor('grab');
+    if (drag) return setCursor('grabbing');
+    if (event) {
+      const [x, y] = pixelOf(event);
+      if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return setCursor('grab');
+    }
+    setCursor(CURSORS[mode] || 'crosshair');
+  }
+  canvas.addEventListener('mousemove', (event) => {
+    lastPointer = event;
+    updateCursor(event);
+  });
+  canvas.addEventListener('mouseleave', () => {
+    lastPointer = null;
   });
   undoBtn.addEventListener('click', undo);
   undoBtn.disabled = true;
@@ -475,6 +526,7 @@ export function initOverviewsPane() {
       flagList.appendChild(row);
     }
     flagScreenSelect.disabled = !edits.show.flagIcons;
+    spawnReset.disabled = !scene || !(edits.spawnNames || []).length;
 
     labelList.innerHTML = '';
     for (const label of edits.labels) {
