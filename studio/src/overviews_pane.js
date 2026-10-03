@@ -556,9 +556,10 @@ export function initOverviewsPane() {
         );
         written.push(path);
       }
-      const lines = [STRINGS.OVERVIEWS.saved(written)];
-      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.backedUp(result.backed_up));
+      const lines = [STRINGS.OVERVIEWS.saved(edits.hd !== false)];
+      if (result.backed_up.length) lines.push(STRINGS.OVERVIEWS.BACKED_UP);
       saveStatus.textContent = lines.join(' ');
+      saveStatus.title = STRINGS.OVERVIEWS.savedPaths([...written, ...result.backed_up]);
       showToast(STRINGS.OVERVIEWS.savedToast(scene.map), 'success');
       const entry = maps.find((m) => m.name === scene.map);
       if (entry) {
@@ -567,6 +568,7 @@ export function initOverviewsPane() {
       }
     } catch {
       saveStatus.textContent = '';
+      saveStatus.title = '';
     } finally {
       saveBtn.disabled = false;
     }

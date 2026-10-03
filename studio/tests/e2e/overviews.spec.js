@@ -158,7 +158,9 @@ test('save hands the backend the 1024x768 drawing and format, for dod/overviews'
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await page.selectOption('#ov-format', 'bmp');
   await page.click('#ov-save-btn');
-  await expect(page.locator('#ov-save-status')).toContainText('dod/overviews/dod_test.bmp');
+  await expect(page.locator('#ov-save-status')).toHaveText('Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.');
+  // The full paths are there on hover, not on the page.
+  await expect(page.locator('#ov-save-status')).toHaveAttribute('title', /dod\/overviews\/dod_test\.bmp/);
   const request = (await calls(page, 'overview_export')).at(-1).args.request;
   expect(request).toMatchObject({ map: 'dod_test', install: 'C:/games/Half-Life', format: 'bmp', target: 'game', width: 1024, height: 768 });
   expect(request.transform).toEqual(SCENE.transform);
@@ -168,7 +170,7 @@ test('save hands the backend the 1024x768 drawing and format, for dod/overviews'
   // 1024 * 768 * 4 bytes, base64.
   expect(request.rgba.length).toBe(Math.ceil((1024 * 768 * 4) / 3) * 4);
   // And the high-quality copy, raw: 4096 * 3072 * 4 bytes.
-  await expect(page.locator('#ov-save-status')).toContainText('dod_test_hd.tga');
+  await expect(page.locator('#ov-save-status')).toHaveAttribute('title', /dod_test_hd\.tga/);
   expect(await page.evaluate(() => window.__hdBytes)).toBe(4096 * 3072 * 4);
 });
 
@@ -177,7 +179,7 @@ test('the high-quality copy can be left out', async ({ page }) => {
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
   await page.uncheck('#ov-hd');
   await page.click('#ov-save-btn');
-  await expect(page.locator('#ov-save-status')).toContainText('dod_test.tga');
+  await expect(page.locator('#ov-save-status')).toHaveText('Saved the overview in dod/overviews, and your edits in dod_addon/overviews.');
   expect(await calls(page, 'overview_export_hd')).toHaveLength(0);
 });
 

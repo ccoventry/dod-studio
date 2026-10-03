@@ -1319,8 +1319,12 @@ export const STRINGS = {
     },
     building: (map, fraction) => `${map}: working out where players can go... ${Math.round(fraction * 100)}%`,
     SAVING: 'Saving...',
-    saved: (paths) => `Saved: ${paths.join(', ')}`,
-    backedUp: (paths) => `Your own overview was copied first to: ${paths.join(', ')}`,
+    // Where Save put things, short; the full paths are the line's tooltip.
+    saved: (hd) => (hd
+      ? 'Saved the overview in dod/overviews, and the high-quality copy and your edits in dod_addon/overviews.'
+      : 'Saved the overview in dod/overviews, and your edits in dod_addon/overviews.'),
+    BACKED_UP: 'Your own overview was kept in dod/overviews/dodstudio_backup first.',
+    savedPaths: (paths) => `Saved:\n${paths.join('\n')}`,
     savedToast: (map) => `${map} overview saved.`,
     BADGE_HAS_OVERVIEW: 'has one',
     BADGE_HAS_OVERVIEW_TIP: 'The game already has an overview for this map',
