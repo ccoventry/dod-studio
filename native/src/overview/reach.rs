@@ -32,7 +32,7 @@ pub const STEP: f32 = 20.0;
 /// shrinking from both ends).
 pub const JUMP: f32 = 63.0;
 /// Hull 3, the crouching player: 32x32x36, origin in the middle.
-const CROUCH_HALF: f32 = 18.0;
+pub const CROUCH_HALF: f32 = 18.0;
 const CROUCH_HULL: usize = 3;
 /// How far a fall (or a slide down rock too steep to stand on) carries a
 /// player past the edge, in cells.
@@ -106,8 +106,13 @@ const SOLID_CLASSES: [&str; 3] = ["func_wall", "func_breakable", "func_wall_togg
 
 /// Whether `face` is ground a player could stand on.
 pub fn is_floor(level: &Level, face: &Face) -> bool {
-    face.normal_z > 0.7
-        && !face.texture.starts_with('!')
+    face.normal_z > 0.7 && is_floor_kind(level, face)
+}
+
+/// A face of something solid a player can be on, whatever its slope: not
+/// water or a tool texture, and of the world or a solid brush entity.
+pub fn is_floor_kind(level: &Level, face: &Face) -> bool {
+    !face.texture.starts_with('!')
         && !TOOL_TEXTURES.iter().any(|t| face.texture.starts_with(t))
         && level
             .models
@@ -181,7 +186,7 @@ impl Reach {
 /// world and of every solid brush entity. Breakables count as broken: a
 /// player can shoot through (dod_anzio's drain has a breakable floor at one
 /// end), though one still holds him up before it goes (they stay floors).
-fn fits(level: &Level, p: [f32; 3]) -> bool {
+pub fn fits(level: &Level, p: [f32; 3]) -> bool {
     if level.hull_contents(0, CROUCH_HULL, p) == CONTENTS_SOLID {
         return false;
     }

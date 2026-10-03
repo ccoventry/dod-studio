@@ -6,6 +6,8 @@
 //! - [`reach`] finds every floor a player can get to from the spawns;
 //! - [`scene`] turns that into polygons in image pixels, grouped into areas
 //!   with default colours, plus water, capture zones, flags and spawns;
+//! - [`slopes`] finds the slopes too steep to stand on that a player still
+//!   gets onto, which the page outlines;
 //! - [`transform`] is the game's own world-to-image mapping, and writes the
 //!   `.txt`;
 //! - [`image`] encodes what the Overviews page drew as the `.tga` or `.bmp`
@@ -20,6 +22,7 @@ pub mod image;
 pub mod level;
 pub mod reach;
 pub mod scene;
+pub mod slopes;
 pub mod transform;
 
 use std::path::Path;

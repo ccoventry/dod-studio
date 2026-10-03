@@ -96,6 +96,10 @@ pub struct Scene {
     /// floor or cover), as line segments in image pixels: drawn dotted.
     #[serde(default)]
     pub breakable_edges: Vec<[[f32; 2]; 2]>,
+    /// The outline of slopes too steep to stand on that a player still
+    /// gets onto and slides off (`slopes.rs`): drawn as an outline only.
+    #[serde(default)]
+    pub slope_edges: Vec<[[f32; 2]; 2]>,
     pub flags: Vec<Marker>,
     pub allies: Vec<Marker>,
     pub axis: Vec<Marker>,
@@ -595,6 +599,7 @@ pub fn build_until(
         .collect();
 
     let breakable_edges = breakable_edges(level, &faces, &transform);
+    let slope_edges = super::slopes::slope_edges(level, &reach, &transform);
     Ok(Scene {
         map: level.name.clone(),
         transform,
@@ -605,6 +610,7 @@ pub fn build_until(
         water,
         cap_zones: cap_zones(level, &transform),
         breakable_edges,
+        slope_edges,
         flags,
         allies,
         axis,
@@ -636,7 +642,7 @@ fn breakable_edges(level: &Level, faces: &[SceneFace], t: &Transform) -> Vec<[[f
 }
 
 /// Edges (in x and y) used by exactly one of `polygons`.
-fn outline(polygons: &[&Vec<[f32; 3]>]) -> Vec<[[f32; 2]; 2]> {
+pub(super) fn outline(polygons: &[&Vec<[f32; 3]>]) -> Vec<[[f32; 2]; 2]> {
     let key = |p: [f32; 3]| ((p[0] * 2.0).round() as i64, (p[1] * 2.0).round() as i64);
     let mut count: HashMap<((i64, i64), (i64, i64)), (usize, [[f32; 2]; 2])> = HashMap::new();
     for points in polygons {

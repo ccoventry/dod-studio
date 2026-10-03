@@ -1287,6 +1287,7 @@ export const STRINGS = {
     SHOW_FLAG_NAMES: 'Flag names',
     SHOW_CAP_ZONES: 'Capture zones',
     SHOW_BREAKABLES: 'Breakable floors',
+    SHOW_SLOPES: 'Slopes you slide on',
     SHOW_SPAWNS: 'Spawn points',
     SHOW_SPAWN_NAMES: 'Spawn names',
     SHOW_STAIRS: 'Stairs in white',

@@ -291,3 +291,21 @@ test('a map clicked while another is building is highlighted at once and wins', 
   await expect(page.locator('#ov-building')).toBeHidden();
   await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_test/);
 });
+
+test('a slope you slide on is outlined, not filled, and can be turned off', async ({ page }) => {
+  const scene = { ...SCENE, slope_edges: [[[600, 600], [800, 600]]] };
+  await loadHarness(page, { scene });
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const dark = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    const d = c.getContext('2d').getImageData(Math.round(650 * s), Math.round(600 * s) - 2, Math.round(100 * s), 5).data;
+    // Darker than the green round it (a thin line at a small canvas size
+    // blends with it).
+    for (let i = 0; i < d.length; i += 4) if (d[i + 1] < 160) return true;
+    return false;
+  });
+  expect(await dark()).toBe(true);
+  await page.locator('input[data-show="slopes"]').uncheck();
+  expect(await dark()).toBe(false);
+});

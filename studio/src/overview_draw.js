@@ -25,6 +25,7 @@ export function emptyEdits() {
       flagLabels: true,
       capZones: true,
       breakables: true,
+      slopes: true,
       stairs: true,
       water: true,
     },
@@ -161,6 +162,9 @@ export function spawnLabels(scene) {
 }
 
 const css = (c) => `rgb(${c[0]},${c[1]},${c[2]})`;
+
+/** How far a flag's name sits from the flag (its middle), in image pixels. */
+const FLAG_CLEAR = 42;
 
 function polygon(ctx, points, s) {
   ctx.beginPath();
@@ -346,6 +350,22 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     ctx.drawImage(rim, 0, 0);
   }
 
+  // Slopes too steep to stand on that a player still gets onto: an outline
+  // only, since he slides off them.
+  if (edits.show.slopes && scene.slope_edges?.length) {
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineWidth = 1.5 * s;
+    ctx.strokeStyle = 'rgba(30,30,28,0.85)';
+    ctx.beginPath();
+    for (const [a, b] of scene.slope_edges) {
+      ctx.moveTo(a[0] * s, a[1] * s);
+      ctx.lineTo(b[0] * s, b[1] * s);
+    }
+    ctx.stroke();
+    ctx.restore();
+  }
+
   // Floors that break: a dotted outline, black on white so it shows on
   // any theme.
   if (edits.show.breakables && scene.breakable_edges?.length) {
@@ -409,9 +429,14 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
       if (edits.show.flagLabels) {
         const name = flagName(edits, flag);
         if (name) {
+          // Under the flag, clear of the icon the game draws over it (about
+          // 64 image pixels across on the full map); above it at the bottom
+          // edge. Kept inside the image sideways.
           ctx.font = `bold ${15 * s}px Arial, sans-serif`;
-          const right = x + 10 + ctx.measureText(name).width / s < scene.width - 4;
-          text(name, right ? x + 10 : x - 10, y, 15, right ? 'left' : 'right');
+          const half = ctx.measureText(name).width / s / 2;
+          const cx = Math.max(half + 4, Math.min(scene.width - half - 4, x));
+          const below = y + FLAG_CLEAR + 8 < scene.height - 4;
+          text(name, cx, below ? y + FLAG_CLEAR : y - FLAG_CLEAR, 15, 'center');
         }
       }
     }
