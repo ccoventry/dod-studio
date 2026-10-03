@@ -2916,7 +2916,14 @@ mod hook {
                         crate::cmd_list::call_real(&super::REAL_TOGGLECONSOLE);
                     }
                     give_back(&vgui, &mut lent, None);
-                    unpark(&vgui, &mut lent);
+                    // The bar stays off screen while the setting is on, even
+                    // with our window closed: closing it by its X brought the
+                    // stock bar back (2026-10-03). ESC -> DoD Studio, or
+                    // viewdemo, opens the window again.
+                    match vgui.bar() {
+                        Some(bar) if viewdemo_in_panel() => park(&vgui, bar, &mut lent),
+                        _ => unpark(&vgui, &mut lent),
+                    }
                     return;
                 }
                 show_enable_buttons(&vgui);
