@@ -143,6 +143,7 @@ mod overview_map;
 mod patch;
 mod pe;
 mod pmove_guard;
+mod position;
 mod remote;
 mod scan;
 mod scoreboard;
