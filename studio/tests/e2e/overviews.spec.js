@@ -429,18 +429,43 @@ test('scrolling zooms around the pointer, clicks still land where they point, an
   await expect(page.locator('#ov-zoom-out')).toBeDisabled();
 });
 
-test("spawn protection is outlined in the team's colour, and can be turned off", async ({ page }) => {
-  const scene = { ...SCENE, spawn_zones: [{ team: 'axis', edges: [[[100, 600], [400, 600]]] }] };
+test('spawn protection fills its floor and draws the line where you walk in, in the colours picked', async ({ page }) => {
+  // An Axis zone over the outdoor floor (100-500) and beyond it: its edge
+  // at x 300 crosses the floor; the part past y 500 is off the floor.
+  const scene = {
+    ...SCENE,
+    spawn_zones: [{
+      team: 'axis',
+      edges: [[[300, 150], [300, 700]]],
+      polygons: [[[300, 150], [480, 150], [480, 700], [300, 700]]],
+    }],
+  };
   await loadHarness(page, { scene });
   await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
-  const red = () => page.evaluate(() => {
+  const at = (x, y) => page.evaluate(([x, y]) => {
     const c = document.querySelector('#ov-canvas');
     const s = c.width / 1024;
-    const d = c.getContext('2d').getImageData(Math.round(100 * s), Math.round(600 * s) - 2, Math.round(300 * s), 5).data;
-    for (let i = 0; i < d.length; i += 4) if (d[i] > 150 && d[i + 1] < 120) return true;
+    return Array.from(c.getContext('2d').getImageData(Math.round(x * s), Math.round(y * s), 1, 1).data).slice(0, 3);
+  }, [x, y]);
+  // Tinted red inside on the floor; nothing past the floor's edge.
+  const inside = await at(400, 300);
+  expect(inside[0]).toBeGreaterThan(inside[1] + 20);
+  expect(await at(400, 650)).toEqual([0, 255, 0]);
+  // The line in the team colour across the floor.
+  await expect.poll(async () => (await at(300, 300))[0]).toBeGreaterThan(180);
+  // Hazard stripes, in colours picked.
+  await page.selectOption('#ov-sp-line', 'hazard');
+  await page.locator('#ov-sp-stripe1').evaluate((el) => { el.value = '#0000ff'; el.dispatchEvent(new Event('change')); });
+  const column = () => page.evaluate(() => {
+    const c = document.querySelector('#ov-canvas');
+    const s = c.width / 1024;
+    const d = c.getContext('2d').getImageData(Math.round(300 * s) - 1, Math.round(150 * s), 3, Math.round(300 * s)).data;
+    for (let i = 0; i < d.length; i += 4) if (d[i + 2] > 200 && d[i] < 60) return true;
     return false;
   });
-  expect(await red()).toBe(true);
+  await expect.poll(column).toBe(true);
+  await expect.poll(async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.spawnProtection).toMatchObject({ line: 'hazard', stripe1: '#0000ff' });
+  // Off: no tint.
   await page.locator('input[data-show="spawnProtection"]').uncheck();
-  expect(await red()).toBe(false);
+  await expect.poll(() => at(400, 300)).toEqual([94, 94, 85]);
 });

@@ -873,9 +873,35 @@
                   <label title="Slopes too steep to stand on, that you can still get onto and slide off, get an outline"><input type="checkbox" data-show="slopes"> <span data-str="OVERVIEWS.SHOW_SLOPES">Slopes you slide on</span></label>
                   <label><input type="checkbox" data-show="spawns"> <span data-str="OVERVIEWS.SHOW_SPAWNS">Spawn points</span></label>
                   <label><input type="checkbox" data-show="spawnLabels"> <span data-str="OVERVIEWS.SHOW_SPAWN_NAMES">Spawn names</span></label>
-                  <label title="A dashed outline in the team's colour round the area that hurts the other team"><input type="checkbox" data-show="spawnProtection"> <span data-str="OVERVIEWS.SHOW_SPAWN_PROTECTION">Spawn protection</span></label>
+                  <label title="The area round each spawn that hurts the other team: its floor filled, and the line where you walk into it"><input type="checkbox" data-show="spawnProtection"> <span data-str="OVERVIEWS.SHOW_SPAWN_PROTECTION">Spawn protection</span></label>
                   <label><input type="checkbox" data-show="stairs"> <span data-str="OVERVIEWS.SHOW_STAIRS">Stairs in white</span></label>
                   <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SP_TITLE">Spawn protection</div>
+                <div class="ov-sp" id="ov-sp">
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_FILL">Fill</span>
+                    <select id="ov-sp-fill">
+                      <option value="tint" data-str="OVERVIEWS.SP_FILL_TINT">Tint</option>
+                      <option value="hatch" data-str="OVERVIEWS.SP_FILL_HATCH">Hatching</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_LINE">Line</span>
+                    <select id="ov-sp-line">
+                      <option value="team" data-str="OVERVIEWS.SP_LINE_TEAM">Team colour</option>
+                      <option value="hazard" data-str="OVERVIEWS.SP_LINE_HAZARD">Hazard stripes</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <div class="ov-sp-colours">
+                    <label title="Allies' spawn"><span data-str="OVERVIEWS.SP_ALLIES">Allies</span> <input type="color" id="ov-sp-allies"></label>
+                    <label title="Axis' spawn"><span data-str="OVERVIEWS.SP_AXIS">Axis</span> <input type="color" id="ov-sp-axis"></label>
+                    <label title="Hazard stripes"><span data-str="OVERVIEWS.SP_STRIPES">Stripes</span> <input type="color" id="ov-sp-stripe1"><input type="color" id="ov-sp-stripe2"></label>
+                  </div>
+                  <button id="ov-sp-reset" data-str="OVERVIEWS.SP_RESET">Default look</button>
                 </div>
 
                 <label class="ov-field" title="The game draws flag icons at a fixed size on screen, so they cover more of the map the smaller the screen">

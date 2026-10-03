@@ -14,7 +14,7 @@ import {
   overviewSaveEdits, overviewResetEdits, overviewExport, overviewExportHd, overviewFlagIcons, overviewScreenHeight,
 } from './ipc_bridge.js';
 import {
-  emptyEdits, normaliseEdits, drawOverview, faceAt, labelAt, setAreaEdit,
+  emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, labelAt, setAreaEdit,
   areaEdit, setFaceColour, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES } from './overview_themes.js';
@@ -403,12 +403,48 @@ export function initOverviewsPane() {
     });
   });
 
+  // Spawn protection's look: fill, line, and every colour.
+  const spBox = pane.querySelector('#ov-sp');
+  const spControls = {
+    fill: pane.querySelector('#ov-sp-fill'),
+    line: pane.querySelector('#ov-sp-line'),
+    allies: pane.querySelector('#ov-sp-allies'),
+    axis: pane.querySelector('#ov-sp-axis'),
+    stripe1: pane.querySelector('#ov-sp-stripe1'),
+    stripe2: pane.querySelector('#ov-sp-stripe2'),
+  };
+  for (const [key, control] of Object.entries(spControls)) {
+    // Colours preview while dragging; one undo step when let go.
+    control.addEventListener('input', () => {
+      if (control.type !== 'color') return;
+      edits = { ...edits, spawnProtection: { ...edits.spawnProtection, [key]: control.value } };
+      draw();
+    });
+    control.addEventListener('change', () => {
+      const before = history.length;
+      change({ ...edits, spawnProtection: { ...edits.spawnProtection, [key]: control.value } });
+      if (control.type === 'color' && history.length > before) history[history.length - 1] = { ...history[history.length - 1], spawnProtection: spBefore };
+    });
+    control.addEventListener('focus', () => {
+      spBefore = { ...edits.spawnProtection };
+    });
+  }
+  let spBefore = { ...SPAWN_PROTECTION };
+  pane.querySelector('#ov-sp-reset').addEventListener('click', () => change({ ...edits, spawnProtection: { ...SPAWN_PROTECTION } }));
+
   function renderSidePanels() {
     showBox.querySelectorAll('input[data-show]').forEach((box) => {
       box.checked = !!edits.show[box.dataset.show];
       box.disabled = !scene;
     });
     formatSelect.value = edits.format || 'tga';
+    const look = { ...SPAWN_PROTECTION, ...(edits.spawnProtection || {}) };
+    for (const [key, control] of Object.entries(spControls)) {
+      control.value = look[key];
+      control.disabled = !scene || !edits.show.spawnProtection;
+    }
+    spBox.classList.toggle('ov-off', !edits.show.spawnProtection);
+    pane.querySelector('#ov-sp-reset').disabled = !scene || !edits.show.spawnProtection;
     themeSelect.value = edits.theme || defaultTheme;
     themeSelect.disabled = !scene;
     hdBox.checked = edits.hd !== false;

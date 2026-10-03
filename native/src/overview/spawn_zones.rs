@@ -21,6 +21,9 @@ pub struct SpawnZone {
     /// `"allies"` or `"axis"`: whose spawn it protects.
     pub team: String,
     pub edges: Vec<[[f32; 2]; 2]>,
+    /// Its footprint as polygons in image pixels, for filling.
+    #[serde(default)]
+    pub polygons: Vec<Vec<[f32; 2]>>,
 }
 
 /// Every protecting `trigger_hurt`'s footprint: the outline of its upward
@@ -53,6 +56,25 @@ pub fn spawn_zones(level: &Level, t: &Transform) -> Vec<SpawnZone> {
             .filter(|f| f.normal_z > 0.7 && f.points.len() >= 3)
             .map(|f| &f.points)
             .collect();
+        let px = |p: [f32; 2]| t.to_pixel(p[0], p[1]);
+        let polygons: Vec<Vec<[f32; 2]>> = if tops.is_empty() {
+            let (lo, hi, o) = (model.mins, model.maxs, model.offset);
+            vec![
+                [
+                    [lo[0] + o[0], lo[1] + o[1]],
+                    [hi[0] + o[0], lo[1] + o[1]],
+                    [hi[0] + o[0], hi[1] + o[1]],
+                    [lo[0] + o[0], hi[1] + o[1]],
+                ]
+                .into_iter()
+                .map(px)
+                .collect(),
+            ]
+        } else {
+            tops.iter()
+                .map(|f| f.iter().map(|p| px([p[0], p[1]])).collect())
+                .collect()
+        };
         let world = if tops.is_empty() {
             let (lo, hi) = (model.mins, model.maxs);
             let o = model.offset;
@@ -72,6 +94,7 @@ pub fn spawn_zones(level: &Level, t: &Transform) -> Vec<SpawnZone> {
                 .into_iter()
                 .map(|[a, b]| [t.to_pixel(a[0], a[1]), t.to_pixel(b[0], b[1])])
                 .collect(),
+            polygons,
         });
     }
     out

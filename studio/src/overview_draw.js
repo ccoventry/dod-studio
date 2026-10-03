@@ -6,6 +6,16 @@
 import { themeOf, mapTitle } from './overview_themes.js';
 import { paper, grid, frame, titleCard, areaEdges } from './overview_paper.js';
 
+/** Spawn protection's look, until changed. Colours are #rrggbb. */
+export const SPAWN_PROTECTION = {
+  fill: 'tint', // 'tint' | 'hatch' | 'none'
+  line: 'team', // 'team' | 'hazard' | 'none'
+  allies: '#28c83c',
+  axis: '#dc2828',
+  stripe1: '#ffcc00',
+  stripe2: '#1a1a1a',
+};
+
 /** A fresh, empty set of edits. */
 export function emptyEdits() {
   return {
@@ -41,6 +51,9 @@ export function emptyEdits() {
     theme: null,
     // Also write <map>_hd.tga, which DoD Studio's hook tiles from in game.
     hd: true,
+    // How spawn protection is drawn (when shown): its floor filled, and the
+    // line where you walk into it, both only on floor a player can reach.
+    spawnProtection: { ...SPAWN_PROTECTION },
     // The map file's checksum when these edits were made (overview_fit.js).
     mapChecksum: null,
     // Edits that fit nothing on the map as built now, kept to try again
@@ -94,6 +107,7 @@ export function normaliseEdits(raw) {
     labels: list(raw.labels),
     flagNames: list(raw.flagNames),
     show: { ...base.show, ...(raw.show || {}) },
+    spawnProtection: { ...base.spawnProtection, ...(raw.spawnProtection || {}) },
     aside: {
       areas: asideNow.hidden,
       flagNames: list(aside.flagNames),
@@ -482,23 +496,72 @@ export function drawOverview(ctx, scene, edits, s, { transparent = false, cache 
     ctx.drawImage(rim, vx, vy);
   }
 
-  // Spawn protection: a dashed outline in the team's colour, round the area
-  // that hurts the other team.
+  // Spawn protection: the zone's floor filled and the line where you walk
+  // into it, in the team's colour or hazard stripes, kept to the floors
+  // (the zone itself runs through walls and empty space).
   if (edits.show.spawnProtection && scene.spawn_zones?.length) {
-    ctx.save();
-    ctx.lineCap = 'round';
-    ctx.lineWidth = 2 * s;
-    ctx.setLineDash([7 * s, 4 * s]);
+    const look = { ...SPAWN_PROTECTION, ...(edits.spawnProtection || {}) };
+    const onFloors = (paint) => {
+      const l = layer(cw, ch);
+      const c = l.getContext('2d');
+      c.translate(-vx, -vy);
+      paint(c);
+      c.globalAlpha = 1;
+      c.setLineDash([]);
+      c.globalCompositeOperation = 'destination-in';
+      c.drawImage(floors, vx, vy);
+      ctx.drawImage(l, vx, vy);
+    };
     for (const zone of scene.spawn_zones) {
-      ctx.strokeStyle = zone.team === 'axis' ? 'rgb(220,40,40)' : 'rgb(40,200,60)';
-      ctx.beginPath();
-      for (const [a, b] of zone.edges) {
-        ctx.moveTo(a[0] * s, a[1] * s);
-        ctx.lineTo(b[0] * s, b[1] * s);
+      const colour = zone.team === 'axis' ? look.axis : look.allies;
+      if (look.fill !== 'none' && zone.polygons?.length) {
+        onFloors((c) => {
+          if (look.fill === 'hatch') {
+            const tile = layer(Math.max(4, Math.round(10 * s)), Math.max(4, Math.round(10 * s)));
+            const t = tile.getContext('2d');
+            t.strokeStyle = colour;
+            t.lineWidth = Math.max(1, 1.6 * s);
+            t.beginPath();
+            t.moveTo(0, tile.height);
+            t.lineTo(tile.width, 0);
+            t.stroke();
+            c.fillStyle = c.createPattern(tile, 'repeat');
+            c.globalAlpha = 0.7;
+          } else {
+            c.fillStyle = colour;
+            c.globalAlpha = 0.28;
+          }
+          for (const pts of zone.polygons) {
+            polygon(c, pts, s);
+            c.fill();
+          }
+        });
       }
-      ctx.stroke();
+      if (look.line !== 'none') {
+        onFloors((c) => {
+          c.lineCap = 'butt';
+          c.lineWidth = 3 * s;
+          const strokeEdges = () => {
+            c.beginPath();
+            for (const [a, b] of zone.edges) {
+              c.moveTo(a[0] * s, a[1] * s);
+              c.lineTo(b[0] * s, b[1] * s);
+            }
+            c.stroke();
+          };
+          if (look.line === 'hazard') {
+            c.strokeStyle = look.stripe2;
+            strokeEdges();
+            c.strokeStyle = look.stripe1;
+            c.setLineDash([5 * s, 5 * s]);
+            strokeEdges();
+          } else {
+            c.strokeStyle = colour;
+            strokeEdges();
+          }
+        });
+      }
     }
-    ctx.restore();
   }
 
   // Slopes too steep to stand on that a player still gets onto: an outline
