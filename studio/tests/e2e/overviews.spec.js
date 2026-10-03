@@ -47,7 +47,7 @@ async function loadHarness(page, { edits = null } = {}) {
     window.__mockInvokeHandlers = {
       overview_installs: () => installs,
       overview_maps: () => maps,
-      overview_scene: () => scene,
+      overview_scene: (a) => ({ ...scene, map: a.map }),
       overview_load_edits: () => edits,
       overview_save_edits: () => null,
       overview_reset_edits: () => null,
@@ -177,4 +177,17 @@ test('the high-quality copy can be left out', async ({ page }) => {
   await page.click('#ov-save-btn');
   await expect(page.locator('#ov-save-status')).toContainText('dod_test.tga');
   expect(await calls(page, 'overview_export_hd')).toHaveLength(0);
+});
+
+test('Up and Down move through the map list and open each map', async ({ page }) => {
+  await loadHarness(page);
+  await expect(page.locator('.ov-map-row')).toHaveCount(2);
+  await page.focus('#ov-map-filter');
+  await page.keyboard.press('ArrowDown');
+  await expect(page.locator('.ov-map-row.active')).toHaveText(/dod_anzio/);
+  await expect.poll(async () => (await calls(page, 'overview_scene')).at(-1)?.args.map).toBe('dod_anzio');
+  await page.keyboard.press('ArrowDown');
+  await expect.poll(async () => (await calls(page, 'overview_scene')).at(-1)?.args.map).toBe('dod_test');
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await calls(page, 'overview_scene')).at(-1)?.args.map).toBe('dod_anzio');
 });

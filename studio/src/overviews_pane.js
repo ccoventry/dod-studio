@@ -342,12 +342,15 @@ export function initOverviewsPane() {
   // ── Installs and maps ──────────────────────────────────────────────────
   function renderMapList() {
     const filter = filterInput.value.trim().toLowerCase();
+    // Keyboard focus stays on the picked row across a rebuild.
+    const hadFocus = mapList.contains(document.activeElement);
     mapList.innerHTML = '';
     for (const entry of maps) {
       if (filter && !entry.name.toLowerCase().includes(filter)) continue;
       const row = document.createElement('button');
       row.className = 'ov-map-row';
-      row.classList.toggle('active', scene?.map === entry.name);
+      row.classList.toggle('active', (pending ?? scene?.map) === entry.name);
+      row.dataset.map = entry.name;
       const name = document.createElement('span');
       name.textContent = entry.name;
       row.appendChild(name);
@@ -364,8 +367,37 @@ export function initOverviewsPane() {
       row.addEventListener('click', () => openMap(entry.name));
       mapList.appendChild(row);
     }
+    if (hadFocus) mapList.querySelector('.ov-map-row.active')?.focus();
   }
   filterInput.addEventListener('input', renderMapList);
+
+  // Up and Down move through the map list (from the filter box too) and open
+  // each map, after a short pause so holding a key doesn't build every one.
+  let pending = null;
+  let pendingTimer = null;
+  function step(delta) {
+    const rows = [...mapList.querySelectorAll('.ov-map-row')];
+    if (!rows.length) return;
+    let at = rows.findIndex((r) => r.classList.contains('active'));
+    at = at < 0 ? (delta > 0 ? 0 : rows.length - 1) : Math.max(0, Math.min(rows.length - 1, at + delta));
+    rows.forEach((r, i) => r.classList.toggle('active', i === at));
+    rows[at].focus();
+    rows[at].scrollIntoView({ block: 'nearest' });
+    pending = rows[at].dataset.map;
+    clearTimeout(pendingTimer);
+    pendingTimer = setTimeout(() => {
+      const name = pending;
+      pending = null;
+      if (name && name !== scene?.map) openMap(name);
+    }, 200);
+  }
+  for (const el of [mapList, filterInput]) {
+    el.addEventListener('keydown', (event) => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
+      event.preventDefault();
+      step(event.key === 'ArrowDown' ? 1 : -1);
+    });
+  }
 
   async function loadMaps() {
     maps = [];
