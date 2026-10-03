@@ -1543,15 +1543,12 @@ mod hook {
                 pov: shows_type(&box_text(vgui, page, DEMO_TYPE), false),
                 days: box_text(vgui, page, DAYS_FILTER).trim().parse::<u64>().ok(),
             };
-            // The picked players, and whatever is being typed.
-            let mut terms = PICKED_PLAYERS
+            // The picked players only: what is typed in the Player box
+            // searches its list, not the demos.
+            let terms = PICKED_PLAYERS
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .clone();
-            let typing = box_text(vgui, page, PLAYER_FILTER).trim().to_string();
-            if !typing.is_empty() {
-                terms.push(typing);
-            }
             let player = terms.join(" | ");
             let all = box_text(vgui, page, PLAYER_MATCH)
                 .trim()
