@@ -152,6 +152,12 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         if menu.is_null() {
             return;
         }
+        // The list must not take the keyboard: an open menu takes keys as
+        // its own type-ahead (the next letter jumps to a row), so typing
+        // would stop going into the box. It still takes clicks. The same as
+        // the Console tab's completion list.
+        let keyboard: PanelSetBoolFn = slot(vgui.panel, IPANEL_SET_KEYBOARD_INPUT_ENABLED);
+        keyboard(vgui.panel, vpanel_of(menu), 0);
         let on_command: OnCommandFn = slot(combo, FRAME_SLOT_ON_COMMAND);
         if vgui.visible(vpanel_of(menu)) {
             // Close and reopen, so the list is sized and placed for its
@@ -159,6 +165,8 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             on_command(combo, BUTTON_CLICKED.as_ptr());
         }
         on_command(combo, BUTTON_CLICKED.as_ptr());
+        let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
+        focus(vgui.panel, vpanel_of(combo), 0);
     }
 }
 
