@@ -142,14 +142,16 @@ unsafe fn names_in(list: *mut c_void) -> Vec<String> {
     }
 }
 
-/// The names to offer for `typed`: every word in the name, case ignored.
-fn matching<'a>(names: &'a [String], typed: &str) -> Vec<&'a String> {
+/// The names to offer for `typed`: every word in the name, case ignored,
+/// and not one already picked.
+fn matching<'a>(names: &'a [String], typed: &str, picked: &[String]) -> Vec<&'a String> {
     let words: Vec<String> = typed
         .split_whitespace()
         .map(|w| w.to_ascii_lowercase())
         .collect();
     names
         .iter()
+        .filter(|n| !picked.iter().any(|p| p.eq_ignore_ascii_case(n)))
         .filter(|n| {
             let lower = n.to_ascii_lowercase();
             words.iter().all(|w| lower.contains(w))
@@ -221,17 +223,24 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             set_text(combo, c"".as_ptr());
             return;
         }
+        // Built again for new text, and when the picked players change: a
+        // picked name leaves the list, and Clear puts them all back.
+        let picked = PICKED_PLAYERS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let build_key = format!("{typed}\u{1}{}", picked.join("\u{1}"));
         let mut built = BUILT_FOR.lock().unwrap_or_else(|e| e.into_inner());
-        if !fresh && built.as_deref() == Some(typed.as_str()) {
+        if !fresh && built.as_deref() == Some(build_key.as_str()) {
             return;
         }
         let first_build = built.is_none();
-        *built = Some(typed.clone());
+        *built = Some(build_key);
 
         let delete_all: ListVoidFn = slot(combo, COMBO_SLOT_DELETE_ALL_ITEMS);
         let add_item: ComboAddItemFn = slot(combo, COMBO_SLOT_ADD_ITEM);
         delete_all(combo);
-        let shown = matching(all, &typed);
+        let shown = matching(all, &typed, &picked);
         for name in &shown {
             if let Ok(c) = CString::new(name.as_str()) {
                 add_item(combo, c.as_ptr(), std::ptr::null());
@@ -292,10 +301,14 @@ mod tests {
             .iter()
             .map(|s| s.to_string())
             .collect();
-        let got: Vec<&String> = matching(&names, "CAT");
+        let got: Vec<&String> = matching(&names, "CAT", &[]);
         assert_eq!(got, vec!["m00cat <3"]);
-        assert_eq!(matching(&names, "").len(), 4);
-        assert_eq!(matching(&names, "y man").len(), 1);
-        assert!(matching(&names, "nobody").is_empty());
+        assert_eq!(matching(&names, "", &[]).len(), 4);
+        assert_eq!(matching(&names, "y man", &[]).len(), 1);
+        assert!(matching(&names, "nobody", &[]).is_empty());
+        // A picked name is no longer offered.
+        let picked = vec!["DYELIFE".to_string()];
+        assert_eq!(matching(&names, "", &picked).len(), 3);
+        assert!(matching(&names, "dye", &picked).is_empty());
     }
 }

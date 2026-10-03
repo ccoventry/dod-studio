@@ -185,7 +185,7 @@
 		"visible"		"1"
 		"enabled"		"1"
 		"editable"		"0"
-		"helptext"		"All: demos with every picked player. Any: demos with at least one."
+		"helptext"		"Any: demos with at least one picked player (the same player under several names). All: demos with every one of them."
 	}
 	"PlayerClear"
 	{
