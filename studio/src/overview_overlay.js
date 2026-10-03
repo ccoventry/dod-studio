@@ -58,8 +58,9 @@ function tracePolygon(ctx, points, s) {
 /**
  * Draws the editing overlay on `ctx` (already placed for the view), at
  * scale `s`. `outlines`: null, 'areas' or 'pieces'. `hover`: null, or
- * `{ kind: 'area' | 'piece', face, area, hide }` (`hide`: the click would
- * hide it, false: show it again).
+ * `{ kind: 'area' | 'piece', face, area, hide, keep }` (`hide`: the click
+ * would hide it, false: show it again; `keep`: piece numbers left out of
+ * the wash).
  */
 export function drawOverlay(ctx, scene, s, { outlines = null, hover = null } = {}) {
   ctx.save();
@@ -81,7 +82,11 @@ export function drawOverlay(ctx, scene, s, { outlines = null, hover = null } = {
     // Light wash, then a bold outline in white over black so it shows on
     // any colour; red when the click would hide.
     const tint = hover.kind === 'area' && hover.hide === true ? 'rgba(255,60,60,0.30)' : 'rgba(255,255,255,0.30)';
-    const faces = hover.kind === 'piece' ? [hover.face] : scene.faces.filter((f) => f.area === hover.area);
+    // `keep`: pieces with their own colour that a plain area click leaves
+    // alone, so they stay out of the wash.
+    const faces = hover.kind === 'piece'
+      ? [hover.face]
+      : scene.faces.filter((f) => f.area === hover.area && !hover.keep?.has(f.face));
     ctx.fillStyle = tint;
     for (const face of faces) {
       tracePolygon(ctx, face.points, s);

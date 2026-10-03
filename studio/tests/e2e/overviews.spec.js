@@ -567,3 +567,29 @@ test('hovering shows what a click would paint, and Show areas outlines them all'
   }, rgba);
   expect(bytes).toEqual([146, 155, 247]);
 });
+
+test('colouring an area keeps pieces coloured on their own, and Shift paints over them', async ({ page }) => {
+  await loadHarness(page);
+  await page.locator('.ov-map-row', { hasText: 'dod_test' }).click();
+  const theme = async () => (await calls(page, 'overview_save_edits')).at(-1)?.args.edits.colours.colours;
+  // A piece coloured on its own (face 2, the indoor square).
+  await page.click('.ov-mode[data-mode="face"]');
+  await page.locator('#ov-palette .ov-swatch').nth(2).click();
+  await clickPixel(page, 700, 250);
+  await expect.poll(async () => (await theme())?.faces).toEqual([{ face: 2, colour: [125, 29, 55] }]);
+  // A plain area click colours the area and keeps the piece's colour.
+  await page.click('.ov-mode[data-mode="area"]');
+  await page.locator('#ov-palette .ov-swatch').nth(1).click();
+  await clickPixel(page, 700, 250);
+  await expect.poll(async () => (await theme())?.areas?.length).toBe(1);
+  expect((await theme()).faces).toHaveLength(1);
+  // Shift-click paints over it.
+  const box = await page.locator('#ov-canvas').boundingBox();
+  await page.keyboard.down('Shift');
+  await page.mouse.click(box.x + (700 / 1024) * box.width, box.y + (250 / 768) * box.height);
+  await page.keyboard.up('Shift');
+  await expect.poll(async () => (await theme())?.faces).toEqual([]);
+  // Undo brings the piece's colour back.
+  await page.click('#ov-undo-btn');
+  await expect.poll(async () => (await theme())?.faces).toHaveLength(1);
+});

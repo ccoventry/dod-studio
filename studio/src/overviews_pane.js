@@ -15,7 +15,7 @@ import {
 } from './ipc_bridge.js';
 import {
   emptyEdits, normaliseEdits, drawOverview, SPAWN_PROTECTION, faceAt, labelAt, setAreaEdit,
-  areaEdit, setFaceColour, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
+  areaEdit, setFaceColour, paintedPieces, clearAreaPieces, flagName, setFlagName, flagOffset, setFlagOffset, flagLabelAt, toWorld,
   spawnNameAt, setSpawnOffset, spawnNameSpots, renderExport, renderHd, toBase64,
 } from './overview_draw.js';
 import { THEMES } from './overview_themes.js';
@@ -336,7 +336,9 @@ export function initOverviewsPane() {
       const area = scene.areas[face.area];
       const old = areaEdit(edits, area) || {};
       const next = { hidden: !!old.hidden, colour };
-      change(setAreaEdit(edits, area, next.hidden || next.colour ? next : null));
+      // Shift paints over the pieces coloured on their own too.
+      const base = event.shiftKey ? clearAreaPieces(scene, edits, area) : edits;
+      change(setAreaEdit(base, area, next.hidden || next.colour ? next : null));
     }
   });
 
@@ -401,6 +403,8 @@ export function initOverviewsPane() {
     `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'>${body}</svg>`)}") ${x} ${y}, ${fallback}`;
   const CURSORS = {
     area: svgCursor("<path d='M4 10l7-7 8 8-7 7z' fill='white' stroke='black' stroke-width='1.5'/><path d='M4 10h15' stroke='black' stroke-width='1.5'/><path d='M20 14c0 0 2.5 3 2.5 4.5a2.5 2.5 0 0 1-5 0c0-1.5 2.5-4.5 2.5-4.5z' fill='#3b82f6' stroke='black'/>", 20, 21, 'crosshair'),
+    // The bucket with a "+": Shift held, painting over coloured pieces too.
+    areaOver: svgCursor("<path d='M4 10l7-7 8 8-7 7z' fill='white' stroke='black' stroke-width='1.5'/><path d='M4 10h15' stroke='black' stroke-width='1.5'/><path d='M20 14c0 0 2.5 3 2.5 4.5a2.5 2.5 0 0 1-5 0c0-1.5 2.5-4.5 2.5-4.5z' fill='#3b82f6' stroke='black'/><circle cx='5' cy='19' r='4.5' fill='#facc15' stroke='black'/><path d='M5 16.5v5M2.5 19h5' stroke='black' stroke-width='1.6'/>", 20, 21, 'crosshair'),
     face: svgCursor("<path d='M14 3l7 7-8 8-4-4z' fill='white' stroke='black' stroke-width='1.5'/><path d='M9 14c-3 0-5 2-5 4 0 1.5-1 2.5-2 3 4 1 8-1 8-4z' fill='#3b82f6' stroke='black' stroke-width='1.2'/>", 2, 21, 'crosshair'),
     hide: svgCursor("<path d='M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z' fill='white' stroke='black' stroke-width='1.5'/><circle cx='12' cy='12' r='3' fill='black'/><path d='M3 21L21 3' stroke='black' stroke-width='2.5'/><path d='M3 21L21 3' stroke='white' stroke-width='1'/>", 12, 12, 'crosshair'),
     label: 'text',
@@ -449,9 +453,24 @@ export function initOverviewsPane() {
     if (!face) return null;
     if (mode === 'face') return { kind: 'piece', face };
     const area = scene.areas[face.area];
-    return { kind: 'area', area: face.area, hide: mode === 'hide' ? !areaEdit(edits, area)?.hidden : null };
+    const keep = mode === 'area' && !shiftDown ? paintedPieces(scene, edits, area) : null;
+    return { kind: 'area', area: face.area, hide: mode === 'hide' ? !areaEdit(edits, area)?.hidden : null, keep };
   }
-  const hoverKey = (h) => (h ? `${h.kind}:${h.kind === 'piece' ? h.face.face : h.area}:${h.hide}` : '');
+  const hoverKey = (h) => (h ? `${h.kind}:${h.kind === 'piece' ? h.face.face : h.area}:${h.hide}:${h.keep?.size ?? '-'}` : '');
+  // Shift: Colour area paints over pieces coloured on their own.
+  let shiftDown = false;
+  for (const type of ['keydown', 'keyup']) {
+    document.addEventListener(type, (event) => {
+      if (event.key !== 'Shift') return;
+      const down = type === 'keydown';
+      if (down === shiftDown) return;
+      shiftDown = down;
+      if (!scene || mode !== 'area') return;
+      updateCursor(lastPointer);
+      hover = hoverAt(lastPointer);
+      drawSoon();
+    });
+  }
   function updateHover(event) {
     const next = hoverAt(event);
     if (hoverKey(next) === hoverKey(hover)) return;
@@ -488,7 +507,7 @@ export function initOverviewsPane() {
       const [x, y] = pixelOf(event);
       if (labelAt(scene, edits, x, y) || flagLabelAt(scene, edits, x, y) || spawnNameAt(scene, edits, x, y)) return setCursor('grab');
     }
-    setCursor(CURSORS[mode] || 'crosshair');
+    setCursor((mode === 'area' && shiftDown ? CURSORS.areaOver : CURSORS[mode]) || 'crosshair');
   }
   canvas.addEventListener('mousemove', (event) => {
     lastPointer = event;

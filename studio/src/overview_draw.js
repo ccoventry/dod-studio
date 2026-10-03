@@ -157,6 +157,18 @@ export function setAreaEdit(edits, area, patch) {
 }
 
 /** Colours one floor piece in the current theme; null takes it back. */
+/** The pieces of `area` coloured on their own in the current theme. */
+export function paintedPieces(scene, edits, area) {
+  const own = new Set(themeColours(edits).faces.map((e) => e.face));
+  return new Set(scene.faces.filter((f) => f.area === area.id && own.has(f.face)).map((f) => f.face));
+}
+
+/** Clears the own colours of `area`'s pieces in the current theme. */
+export function clearAreaPieces(scene, edits, area) {
+  const mine = new Set(scene.faces.filter((f) => f.area === area.id).map((f) => f.face));
+  return withThemeColours(edits, { faces: themeColours(edits).faces.filter((e) => !mine.has(e.face)) });
+}
+
 export function setFaceColour(edits, face, colour) {
   const rest = themeColours(edits).faces.filter((e) => e.face !== face.face);
   return withThemeColours(edits, { faces: colour ? [...rest, { face: face.face, colour }] : rest });

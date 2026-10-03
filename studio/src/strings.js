@@ -1265,7 +1265,7 @@ export const STRINGS = {
     NO_MAP_TITLE: 'Pick a map',
     EMPTY_HINT: 'Pick a map on the left. Its overview is made from the map itself: every floor a player can reach from the spawns.',
     MODE_AREA: 'Colour area',
-    MODE_AREA_TIP: 'Click an area to give it the chosen colour',
+    MODE_AREA_TIP: 'Click an area to give it the chosen colour. Pieces you coloured on their own keep theirs; hold Shift to paint over them too',
     MODE_FACE: 'Colour piece',
     MODE_FACE_TIP: 'Click to colour one piece of floor only',
     MODE_HIDE: 'Hide area',
