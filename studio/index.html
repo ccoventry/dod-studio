@@ -459,6 +459,11 @@
                   <button id="open-clear-previews-btn" data-str="CAPTURE_CONFIG.CLEAR_PREVIEWS_BUTTON">Clear Previews...</button>
                 </div>
               </div>
+              <div class="input-row">
+                <label for="config-scan-workers" data-str="CAPTURE_CONFIG.SCAN_WORKERS_LABEL" data-str-title="CAPTURE_CONFIG.SCAN_WORKERS_TITLE">Demo Scan Workers:</label>
+                <input type="number" id="config-scan-workers" value="2" min="1" max="8" style="width: 60px;" />
+                <span id="config-scan-workers-hint" class="text-muted"></span>
+              </div>
             </div>
 
             <!-- Tab Content: Initial + Scheduled Commands -->
@@ -985,13 +990,16 @@
                 <button id="start-capture-btn" class="primary-btn" data-str="CAPTURE_CONFIG.START_CAPTURE_BUTTON">Start Capture Batch</button>
                 <button id="cancel-batch-btn" disabled data-str="CAPTURE_CONFIG.CANCEL_BATCH_BUTTON">Cancel Batch</button>
               </div>
-              <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
             </div>
             <div class="footer-row-center">
               <div id="export-pool-free-indicator" data-str="MAIN.EXPORT_POOL_FREE_DEFAULT">Capture Output Free: 0.0 GB</div>
               <div id="footer-required-space" data-str="CAPTURE_CONFIG.REQUIRED_SPACE_DEFAULT">Required: 0.00 GB</div>
             </div>
           </div>
+          <!-- Its own line under the buttons (#534): every status and error
+               lands in one place, with the whole row's width, and the space
+               readouts above stay centred like the Render footer's. -->
+          <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
           <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
@@ -1100,7 +1108,7 @@
     <div id="themed-confirm-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 420px; padding: 20px;">
         <h2 id="themed-confirm-title" data-str="THEMED_CONFIRM_MODAL.TITLE_DEFAULT">Confirm</h2>
-        <p id="themed-confirm-message"></p>
+        <p id="themed-confirm-message" style="white-space: pre-line;"></p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
           <button id="themed-confirm-ok-btn" style="color: #ff5555; border-color: #ff5555;" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
           <button id="themed-confirm-cancel-btn" data-str="THEMED_CONFIRM_MODAL.CANCEL_BUTTON">Cancel</button>
