@@ -1,9 +1,14 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
-import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses } from './ipc_bridge.js';
+import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { showToast } from './toast.js';
-import { isRangeModified as isKillRangeModified } from './take_index.js';
+import { ensureSteamReady } from './steam_guard.js';
+import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { numberField } from './number_field.js';
+import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { refreshAfterTyping } from './input_refresh.js';
+import { statusColor as colorOfStatus } from './status_colors.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -220,6 +225,30 @@ window.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // The game is already open: if DoD Studio started it, its hook DLL takes
+  // console commands, so the preview goes straight to it (#413). Resolves true
+  // when it did; false leaves the caller to show the "already running" prompt.
+  async function sendPreviewToOpenGame(hlaePath, hlPath, highlights) {
+    btnLaunchPreview.disabled = true;
+    const originalLabel = btnLaunchPreview.textContent;
+    btnLaunchPreview.textContent = STRINGS.HIGHLIGHTS.LAUNCHING;
+    const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+    try {
+      const sent = await sendPreviewToRunningGame(hlaePath, hlPath, highlights, goldsrcHooksDllPath);
+      if (sent) {
+        showToast(STRINGS.HIGHLIGHTS.sentToRunningGame(sent), 'success');
+        return true;
+      }
+      return false;
+    } catch (err) {
+      // Already toasted by ipc_bridge.js; the prompt still offers a way on.
+      return false;
+    } finally {
+      btnLaunchPreview.textContent = originalLabel;
+      updatePreviewButtonStates();
+    }
+  }
+
   if (btnLaunchPreview) {
     btnLaunchPreview.addEventListener('click', async () => {
       const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim();
@@ -240,10 +269,12 @@ window.addEventListener("DOMContentLoaded", () => {
       }
 
       if (engineAlreadyRunning) {
+        if (await sendPreviewToOpenGame(hlaePath, hlPath, highlights)) return;
         requestProcessGuardedLaunch(() => performLaunchPreview(hlaePath, hlPath, highlights));
         return;
       }
 
+      if (!(await ensureSteamReady())) return;
       await performLaunchPreview(hlaePath, hlPath, highlights);
     });
   }
@@ -458,29 +489,17 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
 
-    const durTicks = streak.end_tick - streak.start_tick;
-    const tickrate = demo.tickrate || 100;
-    const durSecs = (durTicks / tickrate).toFixed(1);
-
-    // Time logic
-    const total_seconds = Math.floor(streak.start_tick / (demo.tickrate || 100));
-    const mins = Math.floor(total_seconds / 60);
-    const secs = Math.floor(total_seconds % 60).toString().padStart(2, '0');
-    const timeStr = `${mins}:${secs}`;
+    // Time matches the demo player's clock; see highlight_time.js (#464).
+    const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
+    const timeStr = formatClock(highlightStartSeconds(streak, demo.tickrate));
 
     // Details: precomputed weapon/timing chain from the backend
     // (e.g. "Rifle (+0:03) Rifle" — first kill weapon + gap + weapon chain).
     const timelineText = streak.timeline_string || STRINGS.HIGHLIGHTS.fallbackKillCount(streak.kill_count);
 
-    // Status badge colours matching HighlightStatus enum
-    const statusColors = {
-      Pending: '#888',
-      Captured: '#4caf50',
-      Rendered: '#2196f3',
-      None: '#555',
-    };
+    // Shared with the Master Demo Queue's columns (status_colors.js, #527).
     const statusLabel = streak.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT;
-    const statusColor = statusColors[statusLabel] || '#888';
+    const statusColor = colorOfStatus(statusLabel);
 
     const maxKillIdx = Math.max((streak.kills || []).length - 1, 0);
     const isRangeModified = isKillRangeModified(streak);
@@ -491,6 +510,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
       ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop())}</span>`
+      : '';
+
+    const byHandMark = streak.statusByHand
+      ? `<span class="status-by-hand-mark" title="${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_TITLE}" style="margin-left:4px;color:#aaa;cursor:help;">${STRINGS.HIGHLIGHTS.STATUS_BY_HAND_MARK}</span>`
       : '';
 
     tr.innerHTML = `
@@ -514,9 +537,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td style="padding: 8px;">
         <select class="streak-status-select" style="color: ${statusColor}; font-size: 0.85em;">
           ${STRINGS.HIGHLIGHTS.STATUS_OPTIONS.map(s =>
-            `<option value="${s}" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
+            // Each option in its own colour, not the selected one's (#527).
+            `<option value="${s}" style="color: ${colorOfStatus(s)};" ${s === statusLabel ? 'selected' : ''}>${s}</option>`
           ).join('')}
-        </select>${mergedBadge}
+        </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
         <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
@@ -565,11 +589,25 @@ export function renderDetailView(demo, selectedDemoIdx) {
     }
 
     const statusSelect = tr.querySelector('.streak-status-select');
-    statusSelect.addEventListener('change', (e) => {
-      streak.status = e.target.value;
-      statusSelect.style.color = statusColors[e.target.value] || '#888';
+    // Free in both directions (#105, D9); the mark and the Undo toast are
+    // what keep a hand-set status honest.
+    const afterStatusChange = () => {
+      renderDetailView(currentDemo, currentDemoIdx);
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
+    };
+    statusSelect.addEventListener('change', (e) => {
+      const previous = setStatusByHand(streak, e.target.value);
+      afterStatusChange();
+      showToast(STRINGS.HIGHLIGHTS.statusSetToast(e.target.value), 'info', 6000, {
+        action: {
+          label: STRINGS.HIGHLIGHTS.UNDO,
+          onClick: () => {
+            restoreStatus(streak, previous);
+            afterStatusChange();
+          },
+        },
+      });
     });
 
     const notesInput = tr.querySelector('.streak-notes-input');
@@ -577,10 +615,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       streak.notes = e.target.value;
     });
     // Master Queue's tracked badge (master_pane.js) depends on whether this
-    // streak has a note — 'change' (fires on blur/Enter, not per keystroke)
-    // rather than 'input' so typing a note doesn't rebuild the whole Master
-    // Queue table on every character, matching the Kill Range inputs above.
-    notesInput.addEventListener('change', () => {
+    // streak has a note. Refreshed shortly after typing stops, not per
+    // keystroke, so typing doesn't rebuild the whole Master Queue table on
+    // every character -- and not only on 'change', which an undo (Ctrl+Z)
+    // never fires until blur, leaving the badge stale (#535).
+    refreshAfterTyping(notesInput, () => {
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
     });
@@ -631,8 +670,8 @@ function renderTimeline(demo) {
     return;
   }
 
-  const preRollSecs = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-  const postRollSecs = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
+  const preRollSecs = numberField('#config-pre-roll', 2.0);
+  const postRollSecs = numberField('#config-post-roll', 0.6);
   const tickrate = demo.tickrate || 100;
   const preRollTicks = preRollSecs * tickrate;
   const postRollTicks = postRollSecs * tickrate;

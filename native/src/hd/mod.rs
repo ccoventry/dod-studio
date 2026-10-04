@@ -147,6 +147,10 @@ pub struct HdStatus {
     /// The install's `my_styles.txt`. Filled in by the caller, which knows
     /// the scripts' folder: [`my_styles::read`].
     pub my_styles: Option<my_styles::MyStyles>,
+    /// Whether the configured `hl.exe` gets 4 GB of address space (true) or
+    /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
+    /// the caller, which knows the game path.
+    pub large_address_aware: Option<bool>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -189,6 +193,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         python: None,
         scripts: None,
         my_styles: None,
+        large_address_aware: None,
     }
 }
 
