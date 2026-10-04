@@ -80,7 +80,7 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg` | status + usage |
 | `dodstudio_deathmsg max <4..127>` | lines of kill feed shown at once (default 4) |
 | `dodstudio_deathmsg offset <-4096..4096>` | y the feed starts at (default 20); negative pulls it above the top of the screen |
-| `dodstudio_deathmsg offset default` | hand y back to the game |
+| `dodstudio_deathmsg offset default` | hand y back to the default layout: while spectating, just below the spectator bar (at the top while it's hidden, under the minimap while `_cl_minimap 2` shows it) |
 | `dodstudio_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
 | `dodstudio_deathmsg block !<id>...` | hide everything *except* these players |
 | `dodstudio_deathmsg block clear` | stop hiding anything |
@@ -168,7 +168,7 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 | `dodstudio_objectives offset <y>` | y the objective icons are drawn at |
 | `dodstudio_objectives xoffset <x>` | x the icon row starts at |
 | `dodstudio_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
-| `dodstudio_objectives <any> default` | hand that one back to the game |
+| `dodstudio_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
 ### `dodstudio_debug_hd_misses`
 
