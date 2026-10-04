@@ -69,6 +69,10 @@
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
 //!   yet; they are there for a live test.
+//! - `frame_esc`: keep GameUI's windows -- the VCR bar, the events list, the
+//!   Load Demo window, the console -- open when ESC is pressed on the 25th
+//!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
+//!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
 //! - `window_layout`: the `dodstudio_resizable_windows` and
 //!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
@@ -130,6 +134,7 @@ mod engine;
 mod events;
 mod ex_interp;
 mod fire_sounds;
+mod frame_esc;
 mod hand_signals;
 mod hide_sprite;
 mod hltv_messages;
@@ -215,6 +220,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
     // A crash fix, so on unless asked not to.
     pmove_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_PMOVE_GUARD", true),
