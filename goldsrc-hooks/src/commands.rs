@@ -526,6 +526,7 @@ pub fn poll() {
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
     crate::spectator_follow::poll();
+    crate::nade::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -687,6 +688,9 @@ fn status_text() -> String {
     }
     if let Some(lock) = crate::spectator_follow::status_line() {
         lines.push(lock);
+    }
+    if let Some(nade) = crate::nade::status_line() {
+        lines.push(nade);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1393,6 +1397,19 @@ pub fn install() {
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
         crate::hltv_messages::set_cvar(hltv_messages);
+    }
+    // Grenade practice (#594): read by the module itself. The trails default
+    // on, since they only ever show on your own local server.
+    for (name, function) in crate::nade::COMMANDS {
+        add_command(name, *function);
+    }
+    if let (Some(trails), Some(xray), Some(keep), Some(autoreturn)) = (
+        register(crate::nade::TRAILS_NAME, "1"),
+        register(crate::nade::XRAY_NAME, "1"),
+        register(crate::nade::KEEP_NAME, "5"),
+        register(crate::nade::AUTORETURN_NAME, "0"),
+    ) {
+        crate::nade::set_cvars(trails, xray, keep, autoreturn);
     }
     // The same: a switch of its own, off until asked for.
     if let Some(bars) = register(crate::spectator_bars::NAME, "0") {

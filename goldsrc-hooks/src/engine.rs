@@ -737,6 +737,9 @@ const SLOT_INITIALIZE: usize = 0;
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
 const SLOT_CALC_REFDEF: usize = 19;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
+/// Checked 2026-10-03 the same way: `F` writes `HUD_DrawTransparentTriangles`
+/// here, after `HUD_CreateEntities` (21) and `HUD_DrawNormalTriangles` (22).
+const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
 const SLOT_HUD_FRAME: usize = 33;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
 /// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
@@ -747,6 +750,7 @@ const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
+        && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
@@ -766,6 +770,8 @@ type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i
 /// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
 /// message, with the opcode and length byte already stripped.
 type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
+/// `void HUD_DrawTransparentTriangles(void)`.
+type DrawTrianglesFn = unsafe extern "C" fn();
 /// The secured single-callback export: fills the caller-provided buffer with
 /// `CLDLL_FUNC_SLOTS` function pointers. `__cdecl`, one pointer argument --
 /// confirmed from `hw.dll`'s call site (`push edx; call eax; add esp, 4`).
@@ -777,6 +783,7 @@ static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mu
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Runs once, on the engine's own thread, immediately after `client.dll`'s
@@ -1125,6 +1132,17 @@ unsafe extern "C" fn tramp_hud_add_entity(
     unsafe { real(entity_type, ent, modelname) }
 }
 
+/// Runs `client.dll`'s own translucent triangles, then draws the grenade
+/// practice paths (`nade`) into the same pass.
+unsafe extern "C" fn tramp_draw_transparent_triangles() {
+    let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
+    if !real.is_null() {
+        let real: DrawTrianglesFn = unsafe { std::mem::transmute(real) };
+        unsafe { real() };
+    }
+    crate::nade::draw();
+}
+
 /// Called once per `svc_director` message. Drops the ones
 /// `hltv_messages::should_drop` asks for and forwards the rest unchanged.
 unsafe extern "C" fn tramp_hud_director_message(size: i32, buf: *mut c_void) {
@@ -1225,6 +1243,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
             &REAL_HUD_ADD_ENTITY,
             tramp_hud_add_entity as *mut c_void,
             "HUD_AddEntity",
+        );
+        swap_slot(
+            table,
+            SLOT_DRAW_TRANSPARENT_TRIANGLES,
+            &REAL_DRAW_TRANSPARENT_TRIANGLES,
+            tramp_draw_transparent_triangles as *mut c_void,
+            "HUD_DrawTransparentTriangles",
         );
         swap_slot(
             table,
@@ -1352,6 +1377,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_DirectorMessage" => {
             REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);
             tramp_hud_director_message as *mut c_void
+        }
+        "HUD_DrawTransparentTriangles" => {
+            REAL_DRAW_TRANSPARENT_TRIANGLES.store(result, Ordering::Release);
+            tramp_draw_transparent_triangles as *mut c_void
         }
         "HUD_GetStudioModelInterface" => {
             REAL_GET_STUDIO_MODEL_INTERFACE.store(result, Ordering::Release);

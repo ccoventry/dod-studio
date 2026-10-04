@@ -137,6 +137,7 @@ mod hudelement;
 mod hull_trace_guard;
 mod missing_shots;
 mod msglog;
+mod nade;
 mod names;
 mod objicons;
 mod overview_map;
