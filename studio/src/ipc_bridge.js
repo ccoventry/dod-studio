@@ -130,7 +130,7 @@ export async function scanGameConfigs(
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [], configCfgWritable: false };
     });
 }
 
@@ -244,6 +244,25 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */
+// Resolves "not_running", "signed_out" or "ready"; "ready" when the check
+// itself fails, so a broken check never blocks a launch.
+export async function steamState() {
+  return invoke("steam_state")
+    .catch((err) => {
+      console.error("IPC Execution Error (steam_state):", err);
+      return "ready";
+    });
+}
+
+export async function startSteam() {
+  return invoke("start_steam")
+    .catch((err) => {
+      console.error("IPC Execution Error (start_steam):", err);
+      showToast(String(err), 'error');
+      throw err;
+    });
+}
+
 export async function checkEngineProcesses() {
   return invoke("check_engine_processes")
     .catch((err) => {

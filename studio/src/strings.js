@@ -57,6 +57,7 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
@@ -916,17 +917,23 @@ export const STRINGS = {
     ADVICE:
       'These are set outside the app, so it cannot see them when it plans a capture. Either remove them from your configs, or state them in Initial Commands below so the pipeline works from the same values the engine does. Nothing here changes your config files.',
     location: (file, line) => `set in ${file}, line ${line}`,
-    OVERRIDE_TITLE: 'These Initial Commands will override your config files:',
-    OVERRIDE_ADVICE:
-      'Initial Commands run after the game loads its configs, so these values win. That is usually the point — but the config line stops applying, and nothing else would tell you.',
-    FROM_APP_NOTE: 'added by the app',
-    SHADOWED_TITLE: 'These Initial Commands will not take effect:',
-    SHADOWED_ADVICE:
-      'The app appends its own commands after yours, and the last one wins. Change the setting that owns the value instead — editing the line here cannot win.',
-    shadowedByApp: (cvar, yours, winner, setting) =>
-      `${cvar} ${yours} never applies — the app sets ${winner} from ${setting}`,
-    shadowedByYou: (cvar, yours, winner) =>
-      `${cvar} ${yours} never applies — a later Initial Command sets ${winner}`,
+    // Rule 1 of #216: one cvar, different values in more than one place.
+    CONFLICT_TITLE: 'These settings are given different values:',
+    CONFLICT_ADVICE:
+      'They run in order: your config files, then Initial Commands (with the ones DoD Studio adds last), then Scheduled Commands before each clip. The last one wins, so the others never apply. If DoD Studio sets the winning value, change that setting instead. Nothing here changes your config files.',
+    conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
+    stated: (value, source) => `${value} (${source})`,
+    sourceConfig: (file, line) => `${file}, line ${line}`,
+    SOURCE_INITIAL: 'Initial Commands',
+    sourceApp: (setting) => `DoD Studio, from ${setting}`,
+    sourceBefore: (secs) => `Scheduled, ${secs}s before`,
+    sourceAfter: (secs) => `Scheduled, ${secs}s after`,
+    // Rule 2 of #216: an After with no Before for the same cvar.
+    ASYMMETRIC_TITLE: 'These Scheduled Commands change a value for the rest of the batch:',
+    ASYMMETRIC_ADVICE:
+      'Scheduled Commands run around every clip, and nothing puts this value back. So the first clip records at one value and every clip after it at another. Add a Before command for the same setting with the value each clip should start from.',
+    asymmetricRow: (cvar, baseline, baselineSource, after, afterSource) =>
+      `${cvar}: the first clip records at ${baseline} (${baselineSource}), every later clip at ${after} (${afterSource})`,
     // Which setting owns a value the pipeline appends for itself, so the advice
     // can name the control rather than leaving the user to hunt for it.
     SETTING_FOR_CVAR: {
@@ -964,16 +971,7 @@ export const STRINGS = {
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
       "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
-    CUSTOM_TITLE: 'These Scheduled Commands override earlier values:',
-    CUSTOM_ADVICE:
-      'Scheduled commands run during playback, so they come after your configs and after the Initial Commands — they are the last word on whatever they set, and the only place a value changes partway through a capture.',
     hazardRow: (command) => `${command} — runs during playback`,
-    customOverridesInit: (cvar, value, previous) =>
-      `${cvar} ${value} replaces ${previous}, set before the demo loads`,
-    customOverridesConfig: (cvar, value, previous, source) =>
-      `${cvar} ${value} replaces ${previous} from ${source}`,
-    override: (cvar, initValue, cfgValue, file, line) =>
-      `${cvar} ${initValue} replaces ${cfgValue} from ${file}, line ${line}`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
       "The engine will use its default, 256, for the decal ring. That's a safe value on most maps — state r_decals in Initial Commands if you want a different one.",
@@ -987,6 +985,12 @@ export const STRINGS = {
       "DoD's own client checks these whenever the HUD is on screen, and for most cvars it just forces the right value back silently. For these it also closes the game outright rather than merely correcting course. Nothing here changes your config files -- open the file named above and remove the line, or give it the value DoD requires. Setting it in Initial Commands instead is not a way round this: the app refuses these there, for the same reason.",
     fatalRow: (cvar, value, required, file, line) =>
       `${cvar} ${value} — DoD requires ${required}, set in ${file}, line ${line}`,
+    // #478: the engine rewrites config.cfg on quit.
+    CONFIG_WRITABLE_TITLE: 'Your config.cfg is saved over when the game closes:',
+    CONFIG_WRITABLE_ROW:
+      'config.cfg is not read-only, so the game writes its current settings into it on quit, including values your Initial and Scheduled Commands set.',
+    CONFIG_WRITABLE_ADVICE:
+      'To keep your own values, make config.cfg read-only (right-click it, Properties, tick Read-only). The trade-off: settings you change inside the game, like binds and options, stop being saved too. DoD Studio never changes this file.',
     NOOP_TITLE: 'These commands have no effect:',
     NOOP_ADVICE:
       'The pipeline (or the engine itself) always overrides or drops these before they could ever apply — not wrong, just wasted keystrokes.',
@@ -1238,6 +1242,19 @@ export const STRINGS = {
   },
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
+  // Checked before DoD Studio starts the game (steam_guard.js).
+  STEAM: {
+    NOT_RUNNING_TITLE: "Steam isn't running",
+    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game closes straight away with an authentication error. Start Steam now? The launch carries on once you're signed in.",
+    START_STEAM: 'Start Steam',
+    CANCEL: 'Cancel',
+    WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
+    STILL_WAITING: 'Still waiting for Steam to sign in.',
+    WAIT_CANCELLED: 'Cancelled. Nothing was launched.',
+    // Beside Start Capture Batch when the Steam check stopped it.
+    BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
+    NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
+  },
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
