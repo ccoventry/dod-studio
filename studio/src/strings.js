@@ -57,6 +57,7 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
@@ -76,6 +77,13 @@ export const STRINGS = {
     TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
+    // #21: a project demo that is not at its saved path.
+    MISSING_BADGE: 'missing',
+    missingBadgeTitle: (path) => `Not found at ${path}. Use Locate to point at where it is now, or remove it from the queue.`,
+    LOCATE_DEMO_BUTTON: 'Locate…',
+    LOCATE_DEMO_TITLE: 'Pick where this demo is now',
+    USE_FOUND_COPY_BUTTON: 'Use found copy',
+    useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
@@ -129,6 +137,12 @@ export const STRINGS = {
     // this one later") rather than the implicit default every unset row
     // used to show — see isHighlightTracked's doc comment (take_index.js).
     STATUS_UNSET_DEFAULT: 'None',
+    // A status picked from the dropdown rather than set by a verified
+    // capture or render (#105).
+    STATUS_BY_HAND_MARK: '✎',
+    STATUS_BY_HAND_TITLE: 'Set by hand. The next capture or render that DoD Studio checks on disk replaces this mark.',
+    statusSetToast: (status) => `Status set to ${status}.`,
+    UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
     tickLabel: (tick) => `Tick ${tick}`,
@@ -139,6 +153,7 @@ export const STRINGS = {
       ? 'Every demo already had a preview — nothing new to generate.'
       : `Generated ${count} preview demo(s). Load them manually via HLAE.`,
     copiedViewCommand: (cmd) => `Copied "${cmd}" to clipboard.`,
+    sentToRunningGame: (cmd) => `Sent "${cmd}" to the running game.`,
     COPY_VIEW_COMMAND_FAILED: 'Failed to copy the view command to clipboard.',
     LAUNCHING_HLAE_TOAST: 'Launching HLAE...',
   },
@@ -360,6 +375,11 @@ export const STRINGS = {
     AUTO_CLEAR_LOGS_LABEL: 'Auto-clear Logs',
     AUTO_CLEAR_PREVIEWS_LABEL: 'Auto-clear Previews',
     AUTO_CLEAR_TEMP_DEMOS_LABEL: 'Auto-clear Temp Demos',
+    SCAN_WORKERS_LABEL: 'Demo Scan Workers:',
+    SCAN_WORKERS_TITLE: 'How many demos a scan reads at once. More is faster up to about 4, but each one holds the analysis of a whole demo in memory.',
+    scanWorkersHint: (totalGb) => totalGb
+      ? `≈1.2 GB per worker; this PC has ${totalGb} GB`
+      : '≈1.2 GB per worker',
     CLEAR_PREVIEWS_BUTTON: 'Clear Previews...',
     NOTIFY_PATCHING_LABEL: 'Patching Started/Complete',
     NOTIFY_PATCHING_TITLE: 'One notification when patching begins, one when your demos are ready and capture is about to start. Not per-demo — decal clearing makes patching take real time now, but a toast per demo patched would be noise.',
@@ -406,10 +426,11 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
+    DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
     OBS_CHECKING_WARNING: 'Checking the OBS connection…',
-    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands ${n === 1 ? 'is' : 'are'} not allowed — remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
+    bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
     // after rendering — the user has no other way to find out.
@@ -896,17 +917,23 @@ export const STRINGS = {
     ADVICE:
       'These are set outside the app, so it cannot see them when it plans a capture. Either remove them from your configs, or state them in Initial Commands below so the pipeline works from the same values the engine does. Nothing here changes your config files.',
     location: (file, line) => `set in ${file}, line ${line}`,
-    OVERRIDE_TITLE: 'These Initial Commands will override your config files:',
-    OVERRIDE_ADVICE:
-      'Initial Commands run after the game loads its configs, so these values win. That is usually the point — but the config line stops applying, and nothing else would tell you.',
-    FROM_APP_NOTE: 'added by the app',
-    SHADOWED_TITLE: 'These Initial Commands will not take effect:',
-    SHADOWED_ADVICE:
-      'The app appends its own commands after yours, and the last one wins. Change the setting that owns the value instead — editing the line here cannot win.',
-    shadowedByApp: (cvar, yours, winner, setting) =>
-      `${cvar} ${yours} never applies — the app sets ${winner} from ${setting}`,
-    shadowedByYou: (cvar, yours, winner) =>
-      `${cvar} ${yours} never applies — a later Initial Command sets ${winner}`,
+    // Rule 1 of #216: one cvar, different values in more than one place.
+    CONFLICT_TITLE: 'These settings are given different values:',
+    CONFLICT_ADVICE:
+      'They run in order: your config files, then Initial Commands (with the ones DoD Studio adds last), then Scheduled Commands before each clip. The last one wins, so the others never apply. If DoD Studio sets the winning value, change that setting instead. Nothing here changes your config files.',
+    conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
+    stated: (value, source) => `${value} (${source})`,
+    sourceConfig: (file, line) => `${file}, line ${line}`,
+    SOURCE_INITIAL: 'Initial Commands',
+    sourceApp: (setting) => `DoD Studio, from ${setting}`,
+    sourceBefore: (secs) => `Scheduled, ${secs}s before`,
+    sourceAfter: (secs) => `Scheduled, ${secs}s after`,
+    // Rule 2 of #216: an After with no Before for the same cvar.
+    ASYMMETRIC_TITLE: 'These Scheduled Commands change a value for the rest of the batch:',
+    ASYMMETRIC_ADVICE:
+      'Scheduled Commands run around every clip, and nothing puts this value back. So the first clip records at one value and every clip after it at another. Add a Before command for the same setting with the value each clip should start from.',
+    asymmetricRow: (cvar, baseline, baselineSource, after, afterSource) =>
+      `${cvar}: the first clip records at ${baseline} (${baselineSource}), every later clip at ${after} (${afterSource})`,
     // Which setting owns a value the pipeline appends for itself, so the advice
     // can name the control rather than leaving the user to hunt for it.
     SETTING_FOR_CVAR: {
@@ -936,20 +963,15 @@ export const STRINGS = {
       mirv_fov: "can't change mid-demo — set it in Initial Commands instead",
       gl_widescreenfov: "can't change mid-demo — set it in Initial Commands instead",
     },
+    TOO_LONG_TITLE: 'These commands are too long to fit in a demo:',
+    TOO_LONG_ADVICE:
+      'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
+    tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
       "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
-    CUSTOM_TITLE: 'These Scheduled Commands override earlier values:',
-    CUSTOM_ADVICE:
-      'Scheduled commands run during playback, so they come after your configs and after the Initial Commands — they are the last word on whatever they set, and the only place a value changes partway through a capture.',
     hazardRow: (command) => `${command} — runs during playback`,
-    customOverridesInit: (cvar, value, previous) =>
-      `${cvar} ${value} replaces ${previous}, set before the demo loads`,
-    customOverridesConfig: (cvar, value, previous, source) =>
-      `${cvar} ${value} replaces ${previous} from ${source}`,
-    override: (cvar, initValue, cfgValue, file, line) =>
-      `${cvar} ${initValue} replaces ${cfgValue} from ${file}, line ${line}`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
       "The engine will use its default, 256, for the decal ring. That's a safe value on most maps — state r_decals in Initial Commands if you want a different one.",
@@ -963,6 +985,12 @@ export const STRINGS = {
       "DoD's own client checks these whenever the HUD is on screen, and for most cvars it just forces the right value back silently. For these it also closes the game outright rather than merely correcting course. Nothing here changes your config files -- open the file named above and remove the line, or give it the value DoD requires. Setting it in Initial Commands instead is not a way round this: the app refuses these there, for the same reason.",
     fatalRow: (cvar, value, required, file, line) =>
       `${cvar} ${value} — DoD requires ${required}, set in ${file}, line ${line}`,
+    // #478: the engine rewrites config.cfg on quit.
+    CONFIG_WRITABLE_TITLE: 'Your config.cfg is saved over when the game closes:',
+    CONFIG_WRITABLE_ROW:
+      'config.cfg is not read-only, so the game writes its current settings into it on quit, including values your Initial and Scheduled Commands set.',
+    CONFIG_WRITABLE_ADVICE:
+      'To keep your own values, make config.cfg read-only (right-click it, Properties, tick Read-only). The trade-off: settings you change inside the game, like binds and options, stop being saved too. DoD Studio never changes this file.',
     NOOP_TITLE: 'These commands have no effect:',
     NOOP_ADVICE:
       'The pipeline (or the engine itself) always overrides or drops these before they could ever apply — not wrong, just wasted keystrokes.',
@@ -1013,16 +1041,80 @@ export const STRINGS = {
     NEW_SESSION_TOAST: 'Started a new session.',
     SAVE_PROJECT_ERROR: 'Error saving project session.',
     loadedDemosToast: (count) => `Loaded ${count} demos from project file`,
+    // #21: demos a loaded project names that are no longer where it says.
+    RELOCATE_DEMOS_TITLE: 'Demos have moved',
+    RELOCATE_DEMOS_MESSAGE: 'These demos aren\'t at their saved location any more, but a matching file (same size, same start) was found for each. Hover one for its full path.',
+    RELOCATE_DEMOS_QUESTION: 'Use the new locations?',
+    relocateRenamed: (oldName, newName) => `${oldName} → ${newName}`,
+    relocateFolder: (folder) => `now in ${folder}`,
+    RELOCATE_CONFIRM: 'Use new locations',
+    RELOCATE_CANCEL: 'Leave as missing',
+    relocatedDemosToast: (count) => `Updated the location of ${count} moved demo(s).`,
+    LOCATE_DEMO_DIALOG_TITLE: 'Where is this demo now?',
+    LOCATE_MISMATCH_TITLE: 'Different file',
+    locateMismatchMessage: (name, picked) =>
+      `${picked} isn't the ${name} that was scanned (its size or start is different), so this row's highlights won't line up with it.\n\nReplace the row with ${picked}? It's scanned fresh with its own highlights, and this row's statuses and notes are dropped.`,
+    LOCATE_MISMATCH_CONFIRM: 'Replace with this demo',
+    locateAlreadyQueued: (name) => `That file is already in the queue as ${name}. Pick this demo's own file, or remove one of the two rows first.`,
+    missingDemosToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `${names.length} demo(s) in this project could not be found: ${shown}${more}. Their highlights can't be captured until they're back.`;
+    },
+    leftMissingToast: (names) => {
+      const shown = names.slice(0, 3).join(', ');
+      const more = names.length > 3 ? ` and ${names.length - 3} more` : '';
+      return `Left ${names.length} moved demo(s) as missing: ${shown}${more}. Each row has a Use found copy button.`;
+    },
+    USE_ALL_FOUND_COPIES: 'Use all found copies',
+    foundCopiesGoneToast: (names) =>
+      `No longer where it was found: ${names.join(', ')}. Use Locate… to pick it.`,
+    // #21: a scanned demo that is an identical copy of one already queued.
+    identicalCopiesToast: (pairs) => {
+      const shown = pairs.slice(0, 3).map(([copy, original]) => `${copy} (same as ${original})`).join(', ');
+      const more = pairs.length > 3 ? ` and ${pairs.length - 3} more` : '';
+      return `Skipped ${pairs.length} identical cop${pairs.length === 1 ? 'y' : 'ies'} of a demo already in the queue: ${shown}${more}.`;
+    },
+    IDENTICAL_COPIES_TITLE: 'Already in the queue',
+    IDENTICAL_COPIES_MESSAGE: "These files are identical copies of demos already in the queue, under another name. They weren't added as new rows, which would capture every highlight twice.",
+    IDENTICAL_COPIES_QUESTION: 'Point those rows at these files instead? They keep their highlights, statuses and notes.',
+    IDENTICAL_COPIES_SWITCH: 'Use these files',
+    IDENTICAL_COPIES_KEEP: 'Keep the queued files',
+    identicalCopyQueuedMissing: (folder) => `in ${folder} (the queued file is missing)`,
+    IDENTICAL_COPY_SAME_FOLDER: 'in the same folder as the queued file',
+    identicalCopyOthers: (names) => ` · other copies, not added: ${names.join(', ')}`,
+    PICKED_COPIES_TITLE: 'Identical copies picked',
+    PICKED_COPIES_MESSAGE: "Some of the files you picked are identical copies of each other under different names. One of each was added, the one with the shortest name, so no highlight is captured twice.",
+    PICKED_COPIES_OK: 'OK',
+    pickedCopiesSkipped: (names) => `not added: ${names.join(', ')}`,
+    identicalCopyFolder: (folder) => `in ${folder}`,
+    // #21: demos whose file changed on disk after they were scanned.
+    CHANGED_DEMOS_TITLE: 'Demos have changed',
+    CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
+    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_RESCAN: 'Rescan',
+    RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 
     cancelledStatus: (count) => `Status: Cancelled — ${count} demo(s) found before cancel`,
     readyFoundStatus: (count) => `Status: Ready — ${count} demo(s) found`,
+    // Appended to the two statuses above when the scan skipped demos (#23).
+    skippedStatusSuffix: (n) => (n > 0 ? `, ${n} could not be read` : ''),
+    // `skipped` is [{name, reason}]; names the first three, counts the rest.
+    skippedDemosToast: (skipped) => {
+      const shown = skipped.slice(0, 3).map((s) => `${s.name} (${s.reason})`).join('; ');
+      const more = skipped.length > 3 ? `; and ${skipped.length - 3} more` : '';
+      return `${skipped.length} demo(s) could not be read and were skipped: ${shown}${more}`;
+    },
     statusGeneric: (status) => `Status: ${status}`,
     SCAN_CANCEL_REQUESTED_TOAST: 'Scan cancellation requested.',
     SCANNING_STATUS: 'Status: Scanning...',
     SCANNING_TOAST: 'Scanning directories...',
     SCANNING_PLEASE_WAIT_ROW: 'Scanning... please wait.',
-    scanCompleteToast: (count) => `Scan complete (${count} demo(s) found)`,
+    scanCompleteToast: (count, unchanged = 0) =>
+      unchanged > 0
+        ? `Scan complete (${count} new or changed demo(s) found, ${unchanged} already in the queue and unchanged)`
+        : `Scan complete (${count} demo(s) found)`,
     scanErrorToast: (err) => `Error: ${err}`,
     scanErrorStatus: (err) => `Status: Error — ${err}`,
 
@@ -1074,6 +1166,9 @@ export const STRINGS = {
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
   HD: {
+    // #430: whether hl.exe gets 2 GB or 4 GB of address space.
+    ADDRESS_SPACE_4GB: 'This hl.exe gets 4 GB of memory, room for the biggest HD textures.',
+    ADDRESS_SPACE_2GB: 'This hl.exe gets 2 GB of memory (the pre-Anniversary build isn\'t marked for more), so very large HD textures or a long session over many maps can run it out.',
     STATUS_TITLE: "What's built",
     REFRESH_BUTTON: 'Refresh',
     REFRESHING: 'Checking...',
@@ -1168,6 +1263,19 @@ export const STRINGS = {
   },
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
+  // Checked before DoD Studio starts the game (steam_guard.js).
+  STEAM: {
+    NOT_RUNNING_TITLE: "Steam isn't running",
+    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game closes straight away with an authentication error. Start Steam now? The launch carries on once you're signed in.",
+    START_STEAM: 'Start Steam',
+    CANCEL: 'Cancel',
+    WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
+    STILL_WAITING: 'Still waiting for Steam to sign in.',
+    WAIT_CANCELLED: 'Cancelled. Nothing was launched.',
+    // Beside Start Capture Batch when the Steam check stopped it.
+    BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
+    NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
+  },
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,

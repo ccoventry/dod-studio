@@ -573,6 +573,36 @@ button.primary-btn:hover:not(:disabled) {
   background: var(--primary-hover);
 }
 
+/* A text box's clear button (clearable_input.js, #529): an × at its
+   right-hand end, shown only while the box has text. */
+.clearable-input {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.clearable-x {
+  position: absolute;
+  right: 2px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.clearable-x[hidden] {
+  display: none;
+}
+
+/* Outranks the global button:hover:not(:disabled) background. */
+.clearable-x:hover:not(:disabled) {
+  background: transparent;
+  color: #fff;
+}
+
 /* Master Demo Queue Table */
 .table-wrapper {
   overflow-x: auto;
@@ -857,6 +887,19 @@ button.primary-btn:hover:not(:disabled) {
   display: flex;
   align-items: center;
   gap: 16px;
+}
+
+/* Capture footer (#534): the status line sits on its own line under the
+   buttons, the row's full width, and shows at most two lines;
+   status_line.js puts the whole message in its tooltip. */
+#batch-status {
+  margin: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 #export-pool-free-indicator,
