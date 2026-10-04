@@ -858,13 +858,21 @@ unsafe extern "C" fn wrapped_toggleconsole() {
         #[cfg(target_arch = "x86")]
         match hook::close_if_on_console() {
             hook::Closed::No => {}
-            hook::Closed::Window => return,
+            hook::Closed::Window => {
+                unsafe { crate::debug::report("studio_panel: the console key closed the window") };
+                return;
+            }
             // The key opened the console window behind our tab, so the game
             // still thinks the console is open: close it the game's own way
             // too. Without that, ESC on the main menu brought the stock
             // console back (2026-10-03).
             hook::Closed::WindowAndConsole => {
-                unsafe { crate::cmd_list::call_real(&REAL_TOGGLECONSOLE) };
+                unsafe {
+                    crate::debug::report(
+                        "studio_panel: the console key closed the window and the game's console",
+                    );
+                    crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
+                }
                 return;
             }
         }
@@ -1962,6 +1970,23 @@ mod hook {
             unsafe { visible(self.panel, vp) & 0xff != 0 }
         }
 
+        /// Whether `vp` and every panel above it are visible. ESC hides the
+        /// menu around our window and leaves the window's own flag set, so
+        /// [`Self::visible`] alone still says it is open.
+        unsafe fn shown(&self, vp: Vpanel) -> bool {
+            let mut panel = vp;
+            for _ in 0..32 {
+                if panel == 0 {
+                    return true;
+                }
+                if !unsafe { self.visible(panel) } {
+                    return false;
+                }
+                panel = unsafe { self.parent_of(panel) };
+            }
+            true
+        }
+
         unsafe fn set_visible(&self, vp: Vpanel, on: bool) {
             let set: PanelSetBoolFn = unsafe { slot(self.panel, IPANEL_SET_VISIBLE) };
             unsafe { set(self.panel, vp, on as u32) };
@@ -2831,6 +2856,23 @@ mod hook {
             let active: GetActivePageFn = slot(sheet, SHEET_SLOT_GET_ACTIVE_PAGE);
             let console = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
             if active(sheet) != console {
+                return Closed::No;
+            }
+            if !vgui.shown(vp) {
+                // ESC closed the menu around our window: it is still "open"
+                // on the Console tab, but not on screen, so the key would
+                // close it and show nothing (2026-10-04). Put the window and
+                // the game's console away, then let the key open it afresh.
+                vgui.set_visible(vp, false);
+                if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
+                    if let Some(window) = vgui.popup(CONSOLE) {
+                        vgui.set_visible(window, true);
+                    }
+                    crate::cmd_list::call_real(&super::REAL_TOGGLECONSOLE);
+                }
+                crate::debug::report(
+                    "studio_panel: the console key found the Console tab behind a closed menu; opening it again",
+                );
                 return Closed::No;
             }
             vgui.set_visible(vp, false);
