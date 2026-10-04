@@ -65,6 +65,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.maps = hd::preview::map_choices(&exe, &root, scripts.as_deref());
         status.map_list = Some(map_list::read(&exe, &root, scripts.as_deref()));
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
+        status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         status
     }))
     .await

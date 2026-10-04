@@ -1,7 +1,7 @@
 # Demo-derived stats for KTP League — where this stands
 
 **Start here if you're picking this up cold.** This is a separate work stream from the
-Capture/Render Studio track in `active_sprint_state.md` / `engineering_backlog.md` — it
+Capture/Render Studio track in `archive/active_sprint_state.md` / `archive/engineering_backlog.md` — it
 lives entirely on `dev`/`main` (commits `a86973a`, `8e6c3a5`, `c3b9c88`, `669d9f9`, all
 merged, both branches identical as of 2026-08-22 — hashes corrected 2026-08-24, the
 originally-recorded ones were unreachable from either branch, likely due to a history
@@ -42,23 +42,36 @@ There's also a stale standalone copy at `C:\Users\chris\Downloads\ktp-demo-stats
 - Two real bugs were found and fixed while validating this (see below): a live
   localization bug affecting 1,190 tokens, and a demo-type misclassification
   (`SvcDirector` appears in POV demos too, whenever an HLTV caster spectates — already
-  documented in `bugs.md` from the capture/render side, root cause is the same message).
+  documented in `archive/bugs.md` from the capture/render side, root cause is the same message).
 - `CapMsg` only ever names one flag-capper; ~20% of captures are multi-capper and the rest
   are recovered from same-frame `ObjScore` increments. This is scoped to the 126-demo LAN
   HLTV subset specifically, not the full corpus — flagged as a correction after an earlier
   draft mismeasured it with too wide a correlation window (27.4% → correct 19.8%).
 
-## What's blocking dod-studio from actually producing these stats
+## What dod-studio produces now (2026-09-29, #192)
 
-The `analysis` crate's message filter (`is_relevant_message` in `analysis/src/lib.rs`,
-~21-name allowlist) silently drops `CapMsg`, `InitObj`, `SetObj`, `StartProg`,
-`CancelProg` before any parsing logic ever sees them. That single list is blocking 3 of
-the 9 aggregation rules in the artifact (flag captures, flag ownership, cap blocks).
-**Adding those 5 names is the single highest-leverage change** — it's a one-line diff
-that unlocks two whole scoreboard columns. Full six-item punch list (this one plus half
-modelling, per-player teamkill/suicide fields, the demo-type-check fix, a read-only stats
-CLI entry point) is in the artifact's "What would make it usable for the league" section
-— not reproduced here since the artifact is the source of truth and this list will drift.
+The five objective messages are admitted (#103), and `analysis/src/objective.rs`
+consumes them. Per player, alongside the untouched server-counter `stats`:
+`obj_points` (the sum of `ObjScore` increments), `cap_credits` (the `CapMsg` capper plus
+every same-frame `ObjScore` riser, minus anyone known to be on the other team),
+`teamkills` and `suicides`. Per demo, `state.objectives`: the flag layout and owners,
+every capture with its cappers and the flag's owner just before it (`is_break()` is the
+artifact's "enemy-owned flag" rule; `owners_before` supports narrower ones), and every
+timed capture attempt with its outcome (cancelled = a cap block for the defenders). All of
+it clears when the match goes live. `dod-studio-cli stats <demos>` prints it as JSON.
+
+Measured by `analysis/examples/objective_probe` over the local library (484 of 488
+demos parsed; 52 classed HLTV by `SvcHltv`): HLTV 2,103 captures, 22.3% multi-capper,
+1.255 credits per capture; POV 16,786 captures, 24.7% multi-capper, 1.278. The raw
+whole-file `capwindow_probe` on the same 52 HLTV demos gives 22.1% and 1.252, and puts the
+named capper's own increment in the capture frame 99.3% of the time. About 30% of timed
+attempts are cancelled (28.6% HLTV, 31.5% POV). The artifact's 19.8% / 1.22 are from a
+different corpus (the 126 LAN HLTV demos).
+
+Still open from the punch list: half modelling (the CLI only reads `_h1`/`_h2` from the
+file name), the demo-type check (PR #395), and a per-player cap-break column, which needs
+the league's definition first: the scoreboard it copies credits one player with 2 breaks
+and 0 captures, so its "break" is not a capture at all.
 
 ## Repo changes already made in service of this (on dev/main)
 
@@ -69,7 +82,7 @@ CLI entry point) is in the artifact's "What would make it usable for the league"
   to resolve. Fixed by normalizing (`trim_start_matches('#').to_lowercase()`) on both
   insert and lookup. `localizations/dod_studio_english.txt` had its 327 keys stripped of
   their `#` prefix to match the convention every other file already used. See
-  `docs/staging_lessons.md`'s "Localization Key Canonicalization" entry.
+  `docs/archive/staging_lessons.md`'s "Localization Key Canonicalization" entry.
 - **Brought `main` current** — it was ~300 commits behind `dev` and still advertised a
   removed `egui` GUI. Fast-forwarded; `main`/`dev` are now identical.
 - **Test suite is green**: 21 passed, 0 failed (was 4 failing before the localization fix
@@ -98,9 +111,5 @@ duplicated here.
 
 ## Next step, if resumed
 
-Nothing is currently in progress. The artifact was last updated 2026-08-22 (consistency
-pass + section reorder + provenance-in-masthead). The natural next piece of actual code
-work — not yet started — is admitting the five objective messages into
-`is_relevant_message`, since it's small and unlocks the most value. Confirm with the user
-before starting feature work; this doc and the artifact are both descriptive, not a
-commitment to build anything yet.
+See "What dod-studio produces now" above for what #192 built and what is still open.
+The artifact was last updated 2026-08-22 and predates that work.

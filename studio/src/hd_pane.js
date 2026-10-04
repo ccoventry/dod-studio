@@ -313,8 +313,11 @@ export function initHdPane() {
     statusText.textContent = [
       status.hd_root_exists ? STRINGS.HD.hdRootFound(status.hd_root) : STRINGS.HD.hdRootMissing(status.hd_root),
       status.built_styles.length ? STRINGS.HD.stylesBuilt(status.built_styles) : STRINGS.HD.NO_STYLES_BUILT,
+      // #430: 2 GB is what big textures run out of.
+      status.large_address_aware === true ? STRINGS.HD.ADDRESS_SPACE_4GB
+        : status.large_address_aware === false ? STRINGS.HD.ADDRESS_SPACE_2GB : '',
       STRINGS.HD.checkedAt(new Date().toLocaleTimeString()),
-    ].join(' ');
+    ].filter(Boolean).join(' ');
     renderTable(status);
     renderStyles(status);
     renderCfgLines();

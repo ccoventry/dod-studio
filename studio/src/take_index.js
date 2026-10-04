@@ -50,6 +50,7 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     const previous = previousByUid.get(streakUid(freshDemo.path, fresh));
     if (!previous) return;
     if (previous.status !== undefined) fresh.status = previous.status;
+    if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
     // Kill Range edits are user edits too, not scan output.
@@ -58,6 +59,43 @@ export function preserveHighlightState(previousDemo, freshDemo) {
   });
 
   return freshDemo;
+}
+
+// ── Status source (#105) ────────────────────────────────────────────────────
+//
+// Status moves freely in both directions from the dropdown, but a status set
+// by hand carries `statusByHand` so it can be told apart from one a verified
+// capture or render set. Enumerable on purpose: it has to survive the project
+// file's JSON round trip, and the Rust side ignores fields it doesn't know.
+
+/**
+ * Sets `status` from the dropdown. Returns what it replaced, for Undo
+ * (restoreStatus).
+ */
+export function setStatusByHand(streak, status) {
+  const previous = { status: streak.status, statusByHand: streak.statusByHand === true };
+  streak.status = status;
+  streak.statusByHand = true;
+  return previous;
+}
+
+/** Puts back what setStatusByHand replaced. */
+export function restoreStatus(streak, previous) {
+  if (previous.status === undefined) delete streak.status;
+  else streak.status = previous.status;
+  if (previous.statusByHand) streak.statusByHand = true;
+  else delete streak.statusByHand;
+}
+
+/**
+ * A verified capture or render confirmed `status` on disk: sets it and
+ * clears the set-by-hand mark. Returns true if the status value changed.
+ */
+export function setVerifiedStatus(streak, status) {
+  const changed = streak.status !== status;
+  streak.status = status;
+  delete streak.statusByHand;
+  return changed;
 }
 
 // ── Durable take index ──────────────────────────────────────────────────────
@@ -80,6 +118,21 @@ export function recordTake(takeIndex, takeKey, uids) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
   const existing = takeIndex[takeKey] || [];
   takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+}
+
+/**
+ * Points every uid of a relocated demo at its new path (#21). A uid starts
+ * with the demo's path, so without this a moved demo's captured takes would
+ * no longer resolve to its highlights.
+ */
+export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
+  if (!takeIndex) return;
+  const oldPrefix = `${oldPath}#`;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = takeIndex[key].map((uid) =>
+      uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
+    );
+  });
 }
 
 /**

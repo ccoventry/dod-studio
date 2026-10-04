@@ -155,6 +155,10 @@ pub struct HdStatus {
     /// The install's `hd_maps.txt` and every map it can pick from. Filled in
     /// by the caller, which knows the scripts' folder: [`map_list::read`].
     pub map_list: Option<map_list::MapList>,
+    /// Whether the configured `hl.exe` gets 4 GB of address space (true) or
+    /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
+    /// the caller, which knows the game path.
+    pub large_address_aware: Option<bool>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -199,6 +203,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         my_styles: None,
         maps: Vec::new(),
         map_list: None,
+        large_address_aware: None,
     }
 }
 
