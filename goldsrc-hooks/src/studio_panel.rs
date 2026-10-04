@@ -2925,7 +2925,67 @@ mod hook {
         }
     }
 
+    /// The main menu's DoD Studio item (`ui/GameMenu.res`). GameUI runs an
+    /// `engine ...` item by queueing the command and then closing the menu,
+    /// as Resume Game does, so the window opened behind a closed menu and the
+    /// menu flashed back (2026-10-04). Taken in [`taskbar_on_command`] instead,
+    /// it opens at once, the way Options does.
+    const MENU_COMMAND: &str = "engine dodstudio_panel 1";
+    /// GameUI's `CTaskbar`, whose `OnCommand` runs the main menu's items,
+    /// once [`hook_taskbar`] has given it ours; and the class's own.
+    static TASKBAR_HOOKED: AtomicUsize = AtomicUsize::new(0);
+    static TASKBAR_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
+    static TASKBAR_TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+    /// Wraps `CTaskbar::OnCommand` (`FRAME_SLOT_ON_COMMAND` on both builds,
+    /// `verify_studio_panel.py`) once the menu is up, trying every 30 frames
+    /// until then. Without it, the item still works through the engine.
+    fn hook_taskbar() {
+        if TASKBAR_HOOKED.load(Ordering::Relaxed) != 0
+            || !TASKBAR_TRIES
+                .fetch_add(1, Ordering::Relaxed)
+                .is_multiple_of(30)
+            || gameui().is_err()
+        {
+            return;
+        }
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            let Ok(taskbar) = base_panel(&vgui) else {
+                return;
+            };
+            let own = own_on_command(taskbar, taskbar_on_command as *const () as usize);
+            TASKBAR_ON_COMMAND.store(own, Ordering::Release);
+            TASKBAR_HOOKED.store(taskbar as usize, Ordering::Release);
+            crate::debug::report(
+                "studio_panel: the main menu's DoD Studio item opens the window directly",
+            );
+        }
+    }
+
+    /// `CTaskbar`'s `OnCommand`: the DoD Studio item opens the window here;
+    /// everything else goes to GameUI's own.
+    unsafe extern "thiscall" fn taskbar_on_command(this: *mut c_void, raw: *const c_char) {
+        if text(raw) == MENU_COMMAND {
+            let line = match toggle(Request::Open) {
+                Ok(state) => format!("the menu's DoD Studio item: {state}"),
+                Err(why) => {
+                    format!("the menu's DoD Studio item could not open the window -- {why}")
+                }
+            };
+            unsafe { crate::debug::report(&format!("studio_panel: {line}")) };
+            return;
+        }
+        let own = TASKBAR_ON_COMMAND.load(Ordering::Acquire);
+        if own != 0 {
+            // Safety: the class's own OnCommand, from its vftable.
+            let own: OnCommandFn = unsafe { std::mem::transmute(own) };
+            unsafe { own(this, raw) };
+        }
+    }
+
     pub(super) fn poll() {
+        hook_taskbar();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0

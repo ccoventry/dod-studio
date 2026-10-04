@@ -471,6 +471,13 @@ def verify(game, src):
           f"after an `engine ...` menu command GameUI calls BaseUI slot {activate_ui - 1} (HideGameUI)")
     check(any(calls_slot(at, activate_ui) for at in loads),
           f"and GameUI calls BaseUI slot {activate_ui} (ActivateGameUI) itself")
+
+    # The main menu's items run in CTaskbar's OnCommand: the `engine ...`
+    # handling above sits in its body.
+    taskbar_vt = ui.vftable("CTaskbar")
+    handler = taskbar_vt and ui.u32(taskbar_vt + 4 * on_command) - ui.base
+    check(handler and any(0 < site - handler < 0x1000 for site in engine_sites),
+          f"CTaskbar's slot {on_command} (OnCommand, +{handler or 0:#x}) handles `engine ...` menu commands")
     return ok
 
 
