@@ -76,6 +76,9 @@
 //! - `window_layout`: the `dodstudio_resizable_windows` and
 //!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
+//! - `studio_panel`: `dodstudio_panel` -- DoD Studio's own window in the game,
+//!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
+//!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
@@ -130,7 +133,9 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_file;
 mod demo_reload;
+mod demo_rosters;
 mod demo_seek;
 mod detour;
 mod engine;
@@ -162,6 +167,8 @@ mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
 mod sprite_blend;
+mod streaks;
+mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
@@ -211,6 +218,10 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // First, so the file is there before GameUI reads the main menu.
+    if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
+        studio_panel::write_game_menu();
+    }
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
         Ordering::Relaxed,
