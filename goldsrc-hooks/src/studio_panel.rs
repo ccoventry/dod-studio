@@ -316,6 +316,11 @@ const KEY_PAD_ENTER: i32 = 0x33;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
+/// `IBaseUI::ActivateGameUI()` on the engine's `BaseUI001`: shows the menu.
+/// GameUI calls slot 7 (`[vftable+0x1c]`, `HideGameUI`) after `ResumeGame` and
+/// after every `engine ...` menu command, and slot 8 (`+0x20`) to bring the
+/// menu up; the same in both builds' `GameUI.dll`.
+const BASEUI_SLOT_ACTIVATE_GAME_UI: usize = 8;
 /// `Frame::GetClientArea(int &x, int &y, int &wide, int &tall)`, which
 /// `PropertyDialog::PerformLayout` sizes its sheet by.
 const FRAME_SLOT_GET_CLIENT_AREA: usize = 186;
@@ -3339,10 +3344,29 @@ mod hook {
                 vgui.set_visible(vp, false);
                 notes.push("closed".to_string());
             } else {
+                // The main menu's DoD Studio item is an `engine` command, and
+                // GameUI closes the menu after running one, as Resume Game
+                // does (2026-10-04). The window lives in the menu, so bring
+                // the menu back up.
+                if !vgui.shown(vgui.parent_of(vp)) {
+                    notes.push(activate_game_ui());
+                }
                 notes.push(show(&vgui, object, vp, None)?);
             }
             Ok(notes.join("; "))
         }
+    }
+
+    /// Brings the main menu up through the engine's `IBaseUI`.
+    fn activate_game_ui() -> String {
+        let Some(base_ui) = module(c"hw.dll").and_then(|hw| interface(hw, c"BaseUI001")) else {
+            return "could not bring the menu up: no BaseUI001".to_string();
+        };
+        unsafe {
+            let activate: ActivateFn = slot(base_ui, BASEUI_SLOT_ACTIVATE_GAME_UI);
+            activate(base_ui);
+        }
+        "brought the menu up".to_string()
     }
 }
 

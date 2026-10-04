@@ -18,6 +18,9 @@ GameUI builds its own Load Demo window (`CDemoPlayerFileDialog`):
      `FRAME_SLOT_ACTIVATE` (`jmp [reg + slot*4]`).
   7. `Frame@vgui2`'s vftable slot `FRAME_SLOT_ON_COMMAND` pops 4 bytes
      (`OnCommand(const char *)`), and the VCR bar overrides the same slot.
+  8. GameUI calls the engine's `BaseUI001` slot before
+     `BASEUI_SLOT_ACTIVATE_GAME_UI` (HideGameUI) after an `engine ...` menu
+     command, and calls that slot (ActivateGameUI) itself.
 
 Usage:
     python goldsrc-hooks/tools/verify_studio_panel.py [game-folder ...]
@@ -435,6 +438,39 @@ def verify(game, src):
         index = vwl.rust_usize(src, name)
         got = vg.last_ret(vg.u32(wrapper + 4 * index) - vg.base)
         check(got == want, f"IPanel slot {index} ({name}) returns with {got!r}")
+
+    # BaseUI001: GameUI keeps the engine's IBaseUI in a global, calls the slot
+    # before BASEUI_SLOT_ACTIVATE_GAME_UI (HideGameUI) after an `engine ...`
+    # menu command, and calls ActivateGameUI itself somewhere.
+    activate_ui = vwl.rust_usize(src, "BASEUI_SLOT_ACTIVATE_GAME_UI")
+
+    def pushes(text):
+        at = ui.img.find(text.encode() + b"\0")
+        return [m.start() for m in re.finditer(re.escape(b"\x68" + struct.pack("<I", ui.base + at)), ui.img)]
+
+    def disasm(rva, size):
+        return [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[rva:rva + size], ui.base + rva)]
+
+    def stored_result(at):
+        # `push "BaseUI001"; [store of the previous result]; call; mov [g], eax`
+        after = disasm(at, 0x20)
+        call = next((n for n, t in enumerate(after) if t.startswith("call ")), len(after))
+        return next((m.group(1) for t in after[call + 1:]
+                     if (m := re.fullmatch(r"mov dword ptr \[(0x[0-9a-f]+)\], eax", t))), None)
+
+    store = next(filter(None, map(stored_result, pushes("BaseUI001"))), None)
+    check(store, f"GameUI keeps BaseUI001 at {store}")
+    loads = [m.start() for m in re.finditer(re.escape(b"\x8b\x0d" + struct.pack("<I", int(store or "0", 16))), ui.img)]
+
+    def calls_slot(at, index):
+        return any(re.fullmatch(rf"call dword ptr \[e\w\w \+ {index * 4:#x}\]", t) for t in disasm(at, 0x18)[1:6])
+
+    engine_sites = pushes("engine ")
+    check(any(calls_slot(at, activate_ui - 1) for at in loads
+              if any(0 < at - site < 0x80 for site in engine_sites)),
+          f"after an `engine ...` menu command GameUI calls BaseUI slot {activate_ui - 1} (HideGameUI)")
+    check(any(calls_slot(at, activate_ui) for at in loads),
+          f"and GameUI calls BaseUI slot {activate_ui} (ActivateGameUI) itself")
     return ok
 
 
