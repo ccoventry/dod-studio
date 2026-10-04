@@ -2020,6 +2020,14 @@ mod hook {
         unsafe fn bar(&self) -> Option<Vpanel> {
             unsafe { self.popup(VCR_BAR) }
         }
+
+        /// Whether `vp`, kept from an earlier frame, is still GameUI's popup
+        /// `name`. A kept handle can outlive its panel: on the 25th Anniversary
+        /// build the VCR bar went away after ESC closed it, and asking vgui2
+        /// about the old one, `object` included, crashed the game (2026-10-04).
+        unsafe fn still(&self, name: &str, vp: Vpanel) -> bool {
+            unsafe { self.popup(name) == Some(vp) }
+        }
     }
 
     unsafe fn vpanel_of(object: *mut c_void) -> Vpanel {
@@ -2777,7 +2785,7 @@ mod hook {
             && let Some((console, x, y)) = lent.console_home.take()
         {
             unsafe {
-                if !vgui.object(console).is_null() {
+                if vgui.still(CONSOLE, console) {
                     let (_, _, w, h) = vgui.rect(console);
                     vgui.place(console, (x, y, w, h));
                 }
@@ -2785,7 +2793,7 @@ mod hook {
         }
         for b in back {
             unsafe {
-                if vgui.object(b.source).is_null() {
+                if !vgui.still(b.source_name, b.source) {
                     continue; // that window is gone
                 }
                 vgui.set_parent(b.control, b.source);
@@ -2795,6 +2803,14 @@ mod hook {
     }
 
     unsafe fn park(vgui: &Vgui, bar: Vpanel, lent: &mut Lent) {
+        // A bar other than the one recorded replaced it: the record is of a
+        // deleted panel, never to be touched again.
+        if lent.parked_from.is_some_and(|(kept, _, _)| kept != bar) {
+            lent.parked_from = None;
+        }
+        if lent.revived.is_some_and(|kept| kept != bar) {
+            lent.revived = None;
+        }
         unsafe {
             let (x, y, w, h) = vgui.rect(bar);
             if lent.parked_from.is_none() && x != PARKED_AT {
@@ -2814,7 +2830,7 @@ mod hook {
         let revived = lent.revived.take();
         if let Some((bar, x, y)) = lent.parked_from.take() {
             unsafe {
-                if vgui.object(bar).is_null() {
+                if !vgui.still(VCR_BAR, bar) {
                     return;
                 }
                 let (_, _, w, h) = vgui.rect(bar);
