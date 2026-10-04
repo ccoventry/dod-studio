@@ -518,6 +518,8 @@ pub fn poll() {
     window_layout::poll();
     // Runs any console commands Studio has sent over the pipe.
     crate::remote::poll();
+    // One step of a long forward seek, or a landed seek's follow-up command.
+    crate::demo_seek::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
     crate::events::poll();

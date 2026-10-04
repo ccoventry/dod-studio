@@ -126,8 +126,14 @@ See [`goldsrc_decals.md`](goldsrc_decals.md).
 clock the editor's events list shows); `dodstudio_seek_by <seconds>` jumps
 from where playback is, back when negative. Neither pauses, and both refuse
 while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
-Anniversary `DemoPlayer.dll`. Nothing in the pipeline calls them yet. See
-[`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
+Anniversary `DemoPlayer.dll`.
+
+A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
+(#596), so the names, teams and scores of everything jumped over reach the
+game; a 20-minute jump takes a few hundred frames. Anything after the time is
+a command to run once the jump has landed:
+`dodstudio_seek_to 1335.3 dodstudio_spec_target 13`. The in-game Highlights
+tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 
 ### `dodstudio_reload_demo`
 
