@@ -2,7 +2,7 @@
   "id": "confirm-dialog-fix",
   "label": "Confirm Dialogs",
   "title": "Confirm Dialog Fix — Cancel Actually Works Now",
-  "subtitle": "Every confirm() in the app used the global window.confirm, which Tauri intercepts asynchronously — since a pending Promise is truthy, Cancel never actually blocked anything anywhere, dialog or no dialog. Fixed 2026-08-19 by switching every call site to the awaited @tauri-apps/plugin-dialog confirm(). Cuts across features, not just Phase 4 — see bugs.md and engineering_backlog.md for the full writeup.",
+  "subtitle": "Every confirm() in the app used the global window.confirm, which Tauri intercepts asynchronously — since a pending Promise is truthy, Cancel never actually blocked anything anywhere, dialog or no dialog. Fixed 2026-08-19 by switching every call site to the awaited @tauri-apps/plugin-dialog confirm(). Cuts across features, not just Phase 4 — see docs/archive/bugs.md and docs/archive/engineering_backlog.md for the full writeup.",
   "sections": [
     {
       "title": "Clear Selected (untracked rows only)",

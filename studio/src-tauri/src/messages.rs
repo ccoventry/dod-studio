@@ -66,9 +66,21 @@ pub fn failed_to_read_file(path: &str, err: impl Display) -> String {
 
 pub const HLAE_EXECUTABLE_NOT_FOUND: &str = "HLAE executable not found at specified path.";
 pub const HL_EXECUTABLE_NOT_FOUND: &str = "Half-Life executable not found at specified path.";
+pub const STEAM_NOT_FOUND: &str =
+    "Couldn't find Steam to start it. Start Steam yourself, then try again.";
 
 pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)
+}
+
+// Why a scan skipped a demo, in the user's words (#23). The scanner's own
+// error text ("failed to fill whole buffer") still goes to the log.
+pub const SCAN_FAIL_TOO_SHORT: &str = "File too short to be a demo";
+pub const SCAN_FAIL_NOT_A_DEMO: &str = "Not a Half-Life demo (bad header)";
+pub const SCAN_FAIL_CORRUPT: &str = "Demo is corrupt partway through";
+
+pub fn scan_path_not_found(path: &str) -> String {
+    format!("Not found: {path} (moved or deleted?)")
 }
 
 pub fn not_a_directory(path: &str) -> String {
@@ -171,6 +183,10 @@ pub fn game_directory_not_found(game_dir: &str) -> String {
 pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str =
     "Could not resolve the 'dod' directory next to hl.exe";
 pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview patch job";
+
+pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
+    format!("Could not send the preview to the running game: {e}")
+}
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 
@@ -435,6 +451,10 @@ mod tests {
         assert_eq!(
             FAILED_TO_BUILD_PREVIEW_PATCH_JOB,
             "Failed to build the preview patch job"
+        );
+        assert_eq!(
+            failed_to_send_to_running_game("pipe closed"),
+            "Could not send the preview to the running game: pipe closed"
         );
         assert_eq!(
             COULD_NOT_RESOLVE_PREVIEW_FILE_STEM,
