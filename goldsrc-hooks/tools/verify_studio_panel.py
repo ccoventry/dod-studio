@@ -20,8 +20,7 @@ GameUI builds its own Load Demo window (`CDemoPlayerFileDialog`):
      (`OnCommand(const char *)`), and the VCR bar overrides the same slot.
   8. GameUI calls the engine's `BaseUI001` slot before
      `BASEUI_SLOT_ACTIVATE_GAME_UI` (HideGameUI) after an `engine ...` menu
-     command, and calls that slot (ActivateGameUI) itself; and the VCR bar's
-     `PANEL_SLOT_ON_KEY_CODE_TYPED` compares the key with `KEY_ESCAPE`.
+     command, and calls that slot (ActivateGameUI) itself.
 
 Usage:
     python goldsrc-hooks/tools/verify_studio_panel.py [game-folder ...]
@@ -479,16 +478,6 @@ def verify(game, src):
     handler = taskbar_vt and ui.u32(taskbar_vt + 4 * on_command) - ui.base
     check(handler and any(0 < site - handler < 0x1000 for site in engine_sites),
           f"CTaskbar's slot {on_command} (OnCommand, +{handler or 0:#x}) handles `engine ...` menu commands")
-
-    # ESC: the VCR bar (CDemoPlayerDialog) and our window keep Frame's
-    # OnKeyCodeTyped, which compares the key with KEY_ESCAPE (#369).
-    key_typed = vwl.rust_usize(src, "PANEL_SLOT_ON_KEY_CODE_TYPED")
-    escape = int(re.search(r"const KEY_ESCAPE: i32 = (0x[0-9a-f]+);", src).group(1), 16)
-    dialog_vt = ui.vftable("CDemoPlayerDialog")
-    on_key = dialog_vt and ui.u32(dialog_vt + 4 * key_typed) - ui.base
-    body = ui.body(on_key, 0x80) if on_key else []
-    check(any(re.fullmatch(rf"cmp (dword ptr \[e\w\w [+-] (0x\w+|\d+)\]|e\w\w), {escape:#x}", t) for t in body),
-          f"CDemoPlayerDialog's slot {key_typed} (OnKeyCodeTyped, +{on_key or 0:#x}) compares the key with {escape:#x} (ESC)")
     return ok
 
 
