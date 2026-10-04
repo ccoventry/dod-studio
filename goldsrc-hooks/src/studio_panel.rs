@@ -313,6 +313,10 @@ const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
 const KEY_PAD_ENTER: i32 = 0x33;
+/// vgui2's `KEY_ESCAPE`. On the 25th Anniversary build `Frame::OnKeyCodeTyped`
+/// closes the frame on it (`CloseFrameButtonPressed`, #369); pre-Anniversary
+/// it only posts `Cancel`. Both compare against it (`cmp [ebp+8], 0x46`).
+const KEY_ESCAPE: i32 = 0x46;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
@@ -1384,6 +1388,11 @@ mod hook {
     static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
     static DEMO_LIST_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
+    /// `Frame::OnKeyCodeTyped`, for every key but ESC (our window's and the
+    /// VCR bar's: neither class overrides it).
+    static FRAME_ON_KEY: AtomicUsize = AtomicUsize::new(0);
+    static BAR_ON_KEY: AtomicUsize = AtomicUsize::new(0);
+    static BAR_TRIES: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     /// Our own Load Demo window, or 0.
     static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
 
@@ -2228,10 +2237,21 @@ mod hook {
                 let ctor: FrameCtor3 = std::mem::transmute(base + build.frame_ctor);
                 ctor(frame, parent, PANEL_NAME.as_ptr(), 1);
             }
-            FRAME_ON_COMMAND.store(
-                own_on_command(frame, frame_on_command as *const () as usize),
-                Ordering::Release,
+            let own = own_slots(
+                frame,
+                &[
+                    (
+                        FRAME_SLOT_ON_COMMAND,
+                        frame_on_command as *const () as usize,
+                    ),
+                    (
+                        PANEL_SLOT_ON_KEY_CODE_TYPED,
+                        frame_on_key as *const () as usize,
+                    ),
+                ],
             );
+            FRAME_ON_COMMAND.store(own[0], Ordering::Release);
+            FRAME_ON_KEY.store(own[1], Ordering::Release);
             load(frame, WINDOW_RES.0.as_ptr(), std::ptr::null());
             let vgui = Vgui::get()?;
             let (_, _, fw, fh) = vgui.rect(vpanel_of(frame));
@@ -3000,8 +3020,65 @@ mod hook {
         }
     }
 
+    /// Our window's `OnKeyCodeTyped`: ESC is the menu's key, never a close.
+    /// On the 25th Anniversary build it closed the window (#369).
+    unsafe extern "thiscall" fn frame_on_key(this: *mut c_void, code: i32) {
+        unsafe { pass_key_unless_escape(&FRAME_ON_KEY, this, code) }
+    }
+
+    /// The VCR bar's `OnKeyCodeTyped`: as ours. On the 25th Anniversary build
+    /// ESC closed the bar and the Playback tab lost the controls borrowed from
+    /// it, the time slider among them (2026-10-04, #369).
+    unsafe extern "thiscall" fn bar_on_key(this: *mut c_void, code: i32) {
+        unsafe { pass_key_unless_escape(&BAR_ON_KEY, this, code) }
+    }
+
+    unsafe fn pass_key_unless_escape(own: &AtomicUsize, this: *mut c_void, code: i32) {
+        if code == KEY_ESCAPE {
+            return;
+        }
+        let own = own.load(Ordering::Acquire);
+        if own != 0 {
+            // Safety: the class's own OnKeyCodeTyped, from its vftable.
+            let own: KeyFn = unsafe { std::mem::transmute(own) };
+            unsafe { own(this, code) };
+        }
+    }
+
+    /// Gives each new VCR bar a vftable copy whose `OnKeyCodeTyped` ignores
+    /// ESC, checking every 10 frames: `viewdemo` builds the bar, and a bar
+    /// that ESC closed is replaced by a new one on the next `viewdemo`.
+    fn keep_bar_on_escape() {
+        if !BAR_TRIES.fetch_add(1, Ordering::Relaxed).is_multiple_of(10) || gameui().is_err() {
+            return;
+        }
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            let Some(bar) = vgui.bar() else { return };
+            let object = vgui.object(bar);
+            // Already ours (checked by the slot, not the address: a new bar
+            // can be built where a deleted one was).
+            if object.is_null()
+                || slot::<usize>(object, PANEL_SLOT_ON_KEY_CODE_TYPED)
+                    == bar_on_key as *const () as usize
+            {
+                return;
+            }
+            let own = own_slots(
+                object,
+                &[(
+                    PANEL_SLOT_ON_KEY_CODE_TYPED,
+                    bar_on_key as *const () as usize,
+                )],
+            );
+            BAR_ON_KEY.store(own[0], Ordering::Release);
+            crate::debug::report("studio_panel: the VCR bar stays open on ESC");
+        }
+    }
+
     pub(super) fn poll() {
         hook_taskbar();
+        keep_bar_on_escape();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0
