@@ -849,32 +849,23 @@ fn wrap_toggleconsole() {
     }
 }
 
-/// The console key. With `dodstudio_console_in_panel 1` it closes our window
-/// when the Console tab is showing; otherwise it runs the engine's own
-/// `toggleconsole` (which also brings up the menu when in game) and [`poll`]
-/// then swaps the console window for our Console tab.
+/// The console key. With `dodstudio_console_in_panel 1` it goes back to the
+/// game when the Console tab is showing, leaving our window open for the next
+/// ESC; otherwise it runs the engine's own `toggleconsole` (which also brings
+/// up the menu when in game) and [`poll`] then swaps the console window for
+/// our Console tab.
 unsafe extern "C" fn wrapped_toggleconsole() {
     if console_in_panel() {
         #[cfg(target_arch = "x86")]
-        match hook::close_if_on_console() {
-            hook::Closed::No => {}
-            hook::Closed::Window => {
-                unsafe { crate::debug::report("studio_panel: the console key closed the window") };
-                return;
+        if hook::back_to_game_if_on_console() {
+            // The game closes its console window its own way, which also
+            // closes the menu. That also keeps ESC on the main menu from
+            // bringing the stock console back (2026-10-03).
+            unsafe {
+                crate::debug::report("studio_panel: the console key went back to the game");
+                crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
             }
-            // The key opened the console window behind our tab, so the game
-            // still thinks the console is open: close it the game's own way
-            // too. Without that, ESC on the main menu brought the stock
-            // console back (2026-10-03).
-            hook::Closed::WindowAndConsole => {
-                unsafe {
-                    crate::debug::report(
-                        "studio_panel: the console key closed the window and the game's console",
-                    );
-                    crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
-                }
-                return;
-            }
+            return;
         }
         CONSOLE_PENDING.store(VIEWDEMO_WAIT_FRAMES, Ordering::Release);
     }
@@ -1380,16 +1371,6 @@ mod hook {
     static CONSOLE_OPENED_BY_KEY: std::sync::atomic::AtomicBool =
         std::sync::atomic::AtomicBool::new(false);
 
-    /// What the console key closed.
-    pub(super) enum Closed {
-        /// Nothing: our window isn't showing its Console tab.
-        No,
-        /// Our window.
-        Window,
-        /// Our window, and the console window behind it is shown again for
-        /// the engine's own `toggleconsole` to close.
-        WindowAndConsole,
-    }
     const FOCUS_ENTRY_FRAMES: u32 = 5;
 
     /// Each class's own `OnCommand`, for whatever our handler passes on.
@@ -2840,30 +2821,33 @@ mod hook {
         }
     }
 
-    /// Whether our window is showing its Console tab; if so, closes it.
-    pub(super) fn close_if_on_console() -> Closed {
+    /// Whether our window is on screen showing its Console tab. If so, the
+    /// window stays open (ESC brings it back with the menu) and the console
+    /// window is made visible for the caller's `toggleconsole` to close the
+    /// game's way, which goes back to the game (2026-10-04, the user's call).
+    pub(super) fn back_to_game_if_on_console() -> bool {
         let Ok(vgui) = Vgui::get() else {
-            return Closed::No;
+            return false;
         };
         unsafe {
             let Some((_, vp)) = window(&vgui) else {
-                return Closed::No;
+                return false;
             };
             let sheet = SHEET.load(Ordering::Acquire) as *mut c_void;
             if !vgui.visible(vp) || sheet.is_null() {
-                return Closed::No;
+                return false;
             }
             let active: GetActivePageFn = slot(sheet, SHEET_SLOT_GET_ACTIVE_PAGE);
             let console = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
             if active(sheet) != console {
-                return Closed::No;
+                return false;
             }
             if !vgui.shown(vp) {
-                // ESC closed the menu around our window: it is still "open"
-                // on the Console tab, but not on screen, so the key would
-                // close it and show nothing (2026-10-04). Put the window and
-                // the game's console away, then let the key open it afresh.
-                vgui.set_visible(vp, false);
+                // The menu is closed around our window (ESC, or this key's
+                // own trip back to the game): it is still open on the Console
+                // tab, but not on screen, so the key opens it afresh. Without
+                // this check, it took two presses (2026-10-04). A console the
+                // key left open behind the tab is closed the game's way first.
                 if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
                     if let Some(window) = vgui.popup(CONSOLE) {
                         vgui.set_visible(window, true);
@@ -2873,18 +2857,15 @@ mod hook {
                 crate::debug::report(
                     "studio_panel: the console key found the Console tab behind a closed menu; opening it again",
                 );
-                return Closed::No;
+                return false;
             }
-            vgui.set_visible(vp, false);
-            if !CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
-                return Closed::Window;
-            }
+            CONSOLE_OPENED_BY_KEY.store(false, Ordering::Release);
             // Visible for the engine's toggle to see it open and hide it. It
             // is hidden again before anything draws.
             if let Some(window) = vgui.popup(CONSOLE) {
                 vgui.set_visible(window, true);
             }
-            Closed::WindowAndConsole
+            true
         }
     }
 
@@ -2916,6 +2897,29 @@ mod hook {
         }
     }
 
+    /// The last state [`log_state_changes`] logged, or `u32::MAX`.
+    static LAST_STATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
+
+    /// Logs the menu, our window and the console window each time one of them
+    /// opens or closes: for the report of the DoD Studio menu item going back
+    /// to the game (2026-10-04), which nothing else in the log explains.
+    unsafe fn log_state_changes(vgui: &Vgui, vp: Vpanel) {
+        unsafe {
+            let menu = vgui.shown(vgui.parent_of(vp));
+            let window = vgui.visible(vp);
+            let console = vgui.popup(CONSOLE).is_some_and(|c| vgui.visible(c));
+            let by_key = CONSOLE_OPENED_BY_KEY.load(Ordering::Relaxed);
+            let state =
+                menu as u32 | (window as u32) << 1 | (console as u32) << 2 | (by_key as u32) << 3;
+            if LAST_STATE.swap(state, Ordering::Relaxed) != state {
+                crate::debug::report(&format!(
+                    "studio_panel: state: menu {}, window {}, console window {}, console opened by the key {}",
+                    menu as u8, window as u8, console as u8, by_key as u8
+                ));
+            }
+        }
+    }
+
     pub(super) fn poll() {
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
@@ -2944,6 +2948,7 @@ mod hook {
             let Some((frame, vp)) = window(&vgui) else {
                 return;
             };
+            log_state_changes(&vgui, vp);
             fit_sheet(&vgui, frame);
             LENT.with(|cell| {
                 let Ok(mut lent) = cell.try_borrow_mut() else {
