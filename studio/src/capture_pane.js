@@ -8,6 +8,7 @@ import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
+import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
@@ -838,7 +839,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initCommandsEditor = createListEditor({
     container: document.querySelector('#init-commands-list'),
     getItems: () => initCommands,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER }],
+    fields: [{
+      key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
+    }],
     onChange: () => {
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
@@ -851,7 +855,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     container: document.querySelector('#custom-commands-list'),
     getItems: () => customCommands,
     fields: [
-      { key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER },
+      {
+        key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true }),
+      },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],

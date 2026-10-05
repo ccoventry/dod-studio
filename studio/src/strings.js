@@ -1335,6 +1335,21 @@ export const STRINGS = {
     OPEN_FOLDER: 'Open folder',
   },
 
+  // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
+  COMMAND_SUGGEST: {
+    OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
+    GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
+    SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
+    NOOP_EVERYWHERE: 'Does nothing from a demo: the game drops it.',
+    NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
+    HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    describe: (source, kind, builds) => {
+      const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
+      const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';
+      return `${what}${where}`;
+    },
+  },
+
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
   // Checked before DoD Studio starts the game (steam_guard.js).
   STEAM: {
