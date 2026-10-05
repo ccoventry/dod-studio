@@ -5,8 +5,8 @@ import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
-import { numberField } from './number_field.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 
 let currentDemo = null;
@@ -31,18 +31,6 @@ export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
   currentGetAllDemos = getAllDemos;
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
-
-  // The timeline canvas now lives inside the collapsed-by-default Advanced
-  // Diagnostics <details> block, so it has 0 clientWidth/clientHeight (and
-  // therefore never actually draws) any time renderTimeline() runs while
-  // collapsed. Redraw on expand so it isn't stuck blank the first time the
-  // user opens it.
-  const advancedPanel = document.querySelector('#advanced-diagnostics-details');
-  if (advancedPanel) {
-    advancedPanel.addEventListener('toggle', () => {
-      if (advancedPanel.open) renderTimeline(currentDemo);
-    });
-  }
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -550,7 +538,6 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const cb = tr.querySelector('.streak-select-cb');
     cb.addEventListener('change', (e) => {
       streak.selected = e.target.checked;
-      renderTimeline(currentDemo);
       updatePreviewButtonStates();
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
@@ -614,10 +601,11 @@ export function renderDetailView(demo, selectedDemoIdx) {
       streak.notes = e.target.value;
     });
     // Master Queue's tracked badge (master_pane.js) depends on whether this
-    // streak has a note — 'change' (fires on blur/Enter, not per keystroke)
-    // rather than 'input' so typing a note doesn't rebuild the whole Master
-    // Queue table on every character, matching the Kill Range inputs above.
-    notesInput.addEventListener('change', () => {
+    // streak has a note. Refreshed shortly after typing stops, not per
+    // keystroke, so typing doesn't rebuild the whole Master Queue table on
+    // every character -- and not only on 'change', which an undo (Ctrl+Z)
+    // never fires until blur, leaving the badge stale (#535).
+    refreshAfterTyping(notesInput, () => {
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
     });
@@ -642,126 +630,5 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
-
-  renderTimeline(demo);
-}
-
-function renderTimeline(demo) {
-  const canvas = document.querySelector('#streak-timeline-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 100;
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-
-  ctx.fillStyle = '#1e1e1e';
-  ctx.fillRect(0, 0, width, height);
-
-  if (!demo || !demo.streaks || demo.streaks.length === 0) {
-    ctx.fillStyle = '#666666';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(STRINGS.HIGHLIGHTS.TIMELINE_NO_DATA, width / 2, height / 2);
-    return;
-  }
-
-  const preRollSecs = numberField('#config-pre-roll', 2.0);
-  const postRollSecs = numberField('#config-post-roll', 0.6);
-  const tickrate = demo.tickrate || 100;
-  const preRollTicks = preRollSecs * tickrate;
-  const postRollTicks = postRollSecs * tickrate;
-
-  let minTick = Infinity;
-  let maxTick = -Infinity;
-  demo.streaks.forEach(s => {
-    if (s.start_tick - preRollTicks < minTick) minTick = s.start_tick - preRollTicks;
-    if (s.end_tick + postRollTicks > maxTick) maxTick = s.end_tick + postRollTicks;
-  });
-
-  if (minTick === Infinity || maxTick === -Infinity || maxTick <= minTick) {
-    minTick = 0;
-    maxTick = 1000;
-  }
-
-  const padding = 20;
-  const usableWidth = width - (padding * 2);
-  const tickSpan = (maxTick - minTick) || 1;
-
-  // Timeline axis
-  ctx.strokeStyle = '#444444';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padding, height - 20);
-  ctx.lineTo(width - padding, height - 20);
-  ctx.stroke();
-
-  ctx.fillStyle = '#888888';
-  ctx.font = '10px monospace';
-  ctx.textAlign = 'left';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(minTick), padding, height - 5);
-  ctx.textAlign = 'right';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(maxTick), width - padding, height - 5);
-
-  demo.streaks.forEach((streak) => {
-    // Opt-in model, matching the checkbox default and the row-build loop
-    // above — only an explicit `true` counts as selected. `undefined`
-    // covers demos never opened in this view yet (and every streak that
-    // never renders as a checkable row at all, e.g. other players'), and
-    // must render as unselected, not selected.
-    const isSelected = streak.selected === true;
-    const startX = padding + ((streak.start_tick - minTick) / tickSpan) * usableWidth;
-    const endX = padding + ((streak.end_tick - minTick) / tickSpan) * usableWidth;
-    const blockWidth = Math.max(endX - startX, 4);
-
-    const preX = padding + (((streak.start_tick - preRollTicks) - minTick) / tickSpan) * usableWidth;
-    const preWidth = Math.max(startX - preX, 0);
-
-    const postX = endX;
-    const postEndX = padding + (((streak.end_tick + postRollTicks) - minTick) / tickSpan) * usableWidth;
-    const postWidth = Math.max(postEndX - postX, 0);
-
-    // Pre-roll margin
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.02)';
-    ctx.fillRect(preX, 15, preWidth, height - 40);
-
-    // Post-roll margin
-    ctx.fillRect(postX, 15, postWidth, height - 40);
-
-    // Core Span block
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.35)' : 'rgba(255, 255, 255, 0.05)';
-    ctx.fillRect(startX, 15, blockWidth, height - 40);
-
-    ctx.strokeStyle = isSelected ? '#4caf50' : '#444444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(startX, 15, blockWidth, height - 40);
-    // Draw outer bounds for margins
-    ctx.strokeStyle = isSelected ? 'rgba(76, 175, 80, 0.4)' : '#333333';
-    ctx.strokeRect(preX, 15, preWidth + blockWidth + postWidth, height - 40);
-
-    // Kill timestamp markers — kills are (tick, abs_time_secs, weapon) tuples
-    if (streak.kills && Array.isArray(streak.kills) && streak.kills.length > 0) {
-      streak.kills.forEach(k => {
-        // k[0] = tick (integer), k[1] = abs_time_secs, k[2] = weapon name
-        const kTick = k[0] !== undefined ? k[0] : streak.start_tick;
-        const kX = padding + ((kTick - minTick) / tickSpan) * usableWidth;
-        ctx.strokeStyle = isSelected ? '#ff4444' : '#773333';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(kX, 15);
-        ctx.lineTo(kX, height - 25);
-        ctx.stroke();
-      });
-    } else {
-      ctx.strokeStyle = isSelected ? '#ff9800' : '#664411';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(startX, 15);
-      ctx.lineTo(startX, height - 25);
-      ctx.stroke();
-    }
-  });
 }
 
