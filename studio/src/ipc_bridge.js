@@ -119,7 +119,7 @@ export async function scanGameConfigs(
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [], configCfgWritable: false };
     });
 }
 
@@ -233,6 +233,25 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */
+// Resolves "not_running", "signed_out" or "ready"; "ready" when the check
+// itself fails, so a broken check never blocks a launch.
+export async function steamState() {
+  return invoke("steam_state")
+    .catch((err) => {
+      console.error("IPC Execution Error (steam_state):", err);
+      return "ready";
+    });
+}
+
+export async function startSteam() {
+  return invoke("start_steam")
+    .catch((err) => {
+      console.error("IPC Execution Error (start_steam):", err);
+      showToast(String(err), 'error');
+      throw err;
+    });
+}
+
 export async function checkEngineProcesses() {
   return invoke("check_engine_processes")
     .catch((err) => {
@@ -578,6 +597,17 @@ export async function countDemoFiles(path) {
 /** Bounded background scan (depth-4, 2000-folder cap) for folders containing
  *  at least one `.dem` file, rooted at `root` (or the default browse dir).
  *  Feeds the Explorer sidebar's "Local" Quick Links tier. */
+/** Writes a text file the user picked a path for (#110's marker list).
+ *  Goes through the same unscoped Rust write as Save Project, since the fs
+ *  plugin can't reach paths a save dialog returns. */
+export async function writeTextFile(path, contents) {
+  return invoke("save_project_session", { path, contents })
+    .catch((err) => {
+      console.error("IPC Execution Error (save_project_session, text export):", err);
+      throw err;
+    });
+}
+
 export async function scanDemoFolders(root) {
   return invoke("scan_demo_folders", { root: root ?? null })
     .catch((err) => {
@@ -632,6 +662,16 @@ export async function isDebugBuild() {
   return invoke("is_debug_build").catch((err) => {
     console.error("IPC Execution Error (is_debug_build):", err);
     return false;
+  });
+}
+
+/** The git branch of the source tree this build came from, or null when it
+ *  wasn't built on this PC (every published installer). Best-effort, like
+ *  isDebugBuild(): a missing branch only leaves it out of the window title. */
+export async function localGitBranch() {
+  return invoke("local_git_branch").catch((err) => {
+    console.error("IPC Execution Error (local_git_branch):", err);
+    return null;
   });
 }
 

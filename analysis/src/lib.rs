@@ -1,3 +1,6 @@
+/// The on-disk analysis cache Studio and the hook DLL share (#565).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cache;
 mod chat;
 mod clan_match;
 mod kill;
@@ -26,10 +29,7 @@ use crate::{
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
-use dem::{
-    open_demo_from_bytes,
-    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
-};
+use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -216,6 +216,21 @@ impl From<&Demo> for DemoInfo {
             map_checksum: value.header.map_checksum,
         }
     }
+}
+
+/// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
+pub const PROGRESS_SCALE: usize = 1000;
+/// The part of [`PROGRESS_SCALE`] reading the demo's structure takes.
+pub const PARSE_SHARE: usize = 850;
+
+/// `done` of `total`, placed between `from` and `to` on [`PROGRESS_SCALE`].
+/// In u128: a byte count times 850 passes 2^32 in the 32-bit game DLL.
+fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
+    if total == 0 {
+        return to;
+    }
+    let done = (done as u128).min(total as u128);
+    from + (done * (to - from) as u128 / total as u128) as usize
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -608,6 +623,11 @@ impl Analysis {
         Self::try_from_bytes_with_progress(value, |_, _| {})
     }
 
+    /// Analyses a demo, calling `progress_cb(done, total)` as it goes. Only
+    /// the ratio means anything: reading the demo's structure is the first
+    /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
+    /// on a 72 MB demo), going through its frames the rest, and the last call
+    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
     pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
@@ -621,8 +641,11 @@ impl Analysis {
         // `BitReader::is_bad_read` turns an overrun into a parse error. See
         // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
         // proves it.
-        let demo_res =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_demo_from_bytes(value)));
+        let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dem::open_demo_from_bytes_with_progress(value, &mut |read, total| {
+                progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
+            })
+        }));
         let demo = match demo_res {
             Ok(Ok(d)) => d,
             Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
@@ -693,7 +716,10 @@ impl Analysis {
 
                 processed_frames += 1;
                 if processed_frames % 500 == 0 || processed_frames == total_frames {
-                    progress_cb(processed_frames, total_frames);
+                    progress_cb(
+                        scaled(processed_frames, total_frames, PARSE_SHARE, PROGRESS_SCALE),
+                        PROGRESS_SCALE,
+                    );
                 }
             }
         }
@@ -1041,7 +1067,7 @@ mod tests {
             let file_bytes = fs::read(path).expect("failed to read demo");
 
             // Unoptimized parse
-            let demo = open_demo_from_bytes(&file_bytes).unwrap();
+            let demo = dem::open_demo_from_bytes(&file_bytes).unwrap();
             let mut state_unopt = AnalyzerState::default();
             let mut last_live_frame = None;
             let mut processed_frames = 0;
@@ -1632,5 +1658,20 @@ mod tests {
                 recorder_id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_placed_on_one_scale() {
+        assert_eq!(scaled(0, 100, 0, PARSE_SHARE), 0);
+        assert_eq!(scaled(100, 100, 0, PARSE_SHARE), PARSE_SHARE);
+        assert_eq!(scaled(50, 100, PARSE_SHARE, PROGRESS_SCALE), 925);
+        assert_eq!(scaled(5, 0, PARSE_SHARE, PROGRESS_SCALE), PROGRESS_SCALE);
+        // A 4 GB file's worth of bytes still scales without overflow.
+        assert_eq!(scaled(usize::MAX / 2, usize::MAX, 0, 1000), 499);
     }
 }

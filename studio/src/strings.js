@@ -26,9 +26,17 @@ export const STRINGS = {
     // just not a release-profile one), 'experimental'
     // (release_experimental.yml), or anything else for a real stable build
     // (no parenthetical).
-    appWindowTitle: (baseVersion, buildKind) => {
+    // `branch` is set only for a build made on this PC (see localGitBranch):
+    // `local build - test/capture-batch`. A release build made here reports
+    // 'stable' or 'experimental' by version, but a branch means it came from
+    // the repo, so it's labelled a local release build instead.
+    // `port` is the Vite dev server's, set only under `npm run tauri dev`, so
+    // two dev copies running side by side can be told apart.
+    appWindowTitle: (baseVersion, buildKind, branch, port) => {
       const tags = { local: 'local build', debug: 'debug build', experimental: 'experimental build' };
-      const tag = tags[buildKind];
+      let tag = tags[buildKind];
+      if (branch) tag = `${tag && buildKind !== 'experimental' ? tag : 'local release build'} - ${branch}`;
+      if (port) tag = `${tag || 'local build'} - port ${port}`;
       return `DoD Studio — v${baseVersion}${tag ? ` (${tag})` : ''}`;
     },
     STUDIO_TAB: 'Studio',
@@ -57,6 +65,14 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #54: the Master Queue's quick filters.
+    KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
+    KILLS_FILTER_ALL: 'All demos',
+    KILLS_FILTER_WITH_KILLS: 'With kills',
+    KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
+    OWNER_ONLY_LABEL: 'POV only',
+    OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
@@ -73,7 +89,7 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
-    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
+    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
     // #21: a project demo that is not at its saved path.
@@ -116,8 +132,6 @@ export const STRINGS = {
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
-    ADVANCED_DIAGNOSTICS_SUMMARY: 'Advanced Diagnostics (Canvas Timeline & Telemetry)',
-    TIMELINE_NO_DATA: 'No highlight timeline available',
     COL_ROW_NUM: 'Row #',
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
@@ -144,7 +158,6 @@ export const STRINGS = {
     UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
-    tickLabel: (tick) => `Tick ${tick}`,
     secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Configure the HLAE and Half-Life executable paths in Batch Capture Config before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
@@ -424,6 +437,7 @@ export const STRINGS = {
       unusable: (p) => `"${p}" is unusable`,
     },
     andNMore: (n) => `...and ${n} more`,
+    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
@@ -487,6 +501,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #40: sortable columns and the whole-batch bar.
+    SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
+    batchProgress: (pct) => `Batch ${pct}%`,
+    // #110: a CSV of every captured highlight, for an editor.
+    EXPORT_MARKERS_BUTTON: 'Export Marker List…',
+    EXPORT_MARKERS_TITLE: 'Save a CSV with one row per captured or rendered highlight: its demo, player, kills, where it is in the demo, its take and its label. For lining clips up in your editor.',
+    EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
+    exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
+    exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -711,6 +734,7 @@ export const STRINGS = {
     SUBTAB_TEAM_DETAILS: 'Team Details',
     SUBTAB_TIMELINE: 'Timeline',
     SUBTAB_ROUNDS: 'Rounds',
+    SUBTAB_FLAGS: 'Flags',
     SUBTAB_CHAT: 'Chat Log',
     EMPTY_PICK_DEMO: 'Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".',
     EMPTY_PICK_DEMO_JS_FALLBACK: 'Browse for a demo file, or select one from the Workspace and click "View Match Telemetry".',
@@ -792,6 +816,16 @@ export const STRINGS = {
     STEAM_PROFILE_TEXT: 'Steam Profile',
     NO_STEAM_ID: 'No Steam ID',
     STEAM_ID_LABEL: 'Steam ID: ',
+    // #536: a real player's SteamID in all three forms, each copyable.
+    STEAM_ID64_LABEL: 'SteamID64',
+    STEAM_ID_CLASSIC_LABEL: 'Classic',
+    STEAM_ID3_LABEL: 'SteamID3',
+    COPY_BUTTON: 'Copy',
+    COPIED_BUTTON: 'Copied',
+    COPY_FAILED_BUTTON: "Couldn't copy",
+    copyValueTitle: (value) => `Copy ${value}`,
+    COPY_SHOW_ONLY_BUTTON: 'Copy kill-feed command',
+    copyShowOnlyTitle: (line) => `Copies "${line}". Paste it into the game console to hide every kill-feed line that doesn't involve this player.`,
     CLOCK_UNKNOWN: '??:??',
     TIMELINE_START_LABEL: '0:00',
     connectedSlot: (id) => `Connected (Slot ${id})`,
@@ -833,6 +867,27 @@ export const STRINGS = {
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
 
     ROUNDS_TITLE: 'Rounds',
+    // #192: the Flags tab.
+    FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
+    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    FLAGS_TITLE: 'Flags',
+    flagArea: (area) => `Area ${area}`,
+    COL_FLAG: 'Flag',
+    COL_OWNER_AT_END: 'Held at the end by',
+    COL_CAPTURES: 'Captures',
+    COL_BLOCKED: 'Blocked',
+    FLAGS_NO_LAYOUT: "The demo started after the flags were set up, so their layout isn't known.",
+    CAPTURES_TITLE: 'Captures',
+    COL_TEAM: 'Team',
+    COL_CAPPERS: 'Cappers',
+    FLAGS_BREAK: 'from the other team',
+    FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
+    CAPPERS_TITLE: 'Cappers',
+    COL_PLAYER: 'Player',
+    COL_CAP_CREDITS: 'Caps',
+    COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_OBJ_POINTS: 'Objective points',
+    COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
     COL_START_TIME: 'Start Time',
     COL_WINNER: 'Winner',
@@ -901,6 +956,15 @@ export const STRINGS = {
     CANCEL_BUTTON: 'Cancel',
   },
 
+  // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
+  BATCH_CLOSE_MODAL: {
+    TITLE: 'Capture batch running',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
+    CLOSE_BUTTON: 'Close DoD Studio',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+  },
+
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
   // Map library warnings. A demo names the map it was recorded on and stamps
   // that map's build alongside it, so "missing" and "wrong build" are different
@@ -937,17 +1001,23 @@ export const STRINGS = {
     ADVICE:
       'These are set outside the app, so it cannot see them when it plans a capture. Either remove them from your configs, or state them in Initial Commands below so the pipeline works from the same values the engine does. Nothing here changes your config files.',
     location: (file, line) => `set in ${file}, line ${line}`,
-    OVERRIDE_TITLE: 'These Initial Commands will override your config files:',
-    OVERRIDE_ADVICE:
-      'Initial Commands run after the game loads its configs, so these values win. That is usually the point — but the config line stops applying, and nothing else would tell you.',
-    FROM_APP_NOTE: 'added by the app',
-    SHADOWED_TITLE: 'These Initial Commands will not take effect:',
-    SHADOWED_ADVICE:
-      'The app appends its own commands after yours, and the last one wins. Change the setting that owns the value instead — editing the line here cannot win.',
-    shadowedByApp: (cvar, yours, winner, setting) =>
-      `${cvar} ${yours} never applies — the app sets ${winner} from ${setting}`,
-    shadowedByYou: (cvar, yours, winner) =>
-      `${cvar} ${yours} never applies — a later Initial Command sets ${winner}`,
+    // Rule 1 of #216: one cvar, different values in more than one place.
+    CONFLICT_TITLE: 'These settings are given different values:',
+    CONFLICT_ADVICE:
+      'They run in order: your config files, then Initial Commands (with the ones DoD Studio adds last), then Scheduled Commands before each clip. The last one wins, so the others never apply. If DoD Studio sets the winning value, change that setting instead. Nothing here changes your config files.',
+    conflictRow: (cvar, values, effective) => `${cvar}: ${values} — in effect: ${effective}`,
+    stated: (value, source) => `${value} (${source})`,
+    sourceConfig: (file, line) => `${file}, line ${line}`,
+    SOURCE_INITIAL: 'Initial Commands',
+    sourceApp: (setting) => `DoD Studio, from ${setting}`,
+    sourceBefore: (secs) => `Scheduled, ${secs}s before`,
+    sourceAfter: (secs) => `Scheduled, ${secs}s after`,
+    // Rule 2 of #216: an After with no Before for the same cvar.
+    ASYMMETRIC_TITLE: 'These Scheduled Commands change a value for the rest of the batch:',
+    ASYMMETRIC_ADVICE:
+      'Scheduled Commands run around every clip, and nothing puts this value back. So the first clip records at one value and every clip after it at another. Add a Before command for the same setting with the value each clip should start from.',
+    asymmetricRow: (cvar, baseline, baselineSource, after, afterSource) =>
+      `${cvar}: the first clip records at ${baseline} (${baselineSource}), every later clip at ${after} (${afterSource})`,
     // Which setting owns a value the pipeline appends for itself, so the advice
     // can name the control rather than leaving the user to hunt for it.
     SETTING_FOR_CVAR: {
@@ -985,16 +1055,7 @@ export const STRINGS = {
     HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
     HAZARD_ADVICE:
       "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
-    CUSTOM_TITLE: 'These Scheduled Commands override earlier values:',
-    CUSTOM_ADVICE:
-      'Scheduled commands run during playback, so they come after your configs and after the Initial Commands — they are the last word on whatever they set, and the only place a value changes partway through a capture.',
     hazardRow: (command) => `${command} — runs during playback`,
-    customOverridesInit: (cvar, value, previous) =>
-      `${cvar} ${value} replaces ${previous}, set before the demo loads`,
-    customOverridesConfig: (cvar, value, previous, source) =>
-      `${cvar} ${value} replaces ${previous} from ${source}`,
-    override: (cvar, initValue, cfgValue, file, line) =>
-      `${cvar} ${initValue} replaces ${cfgValue} from ${file}, line ${line}`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
       "The engine will use its default, 256, for the decal ring. That's a safe value on most maps — state r_decals in Initial Commands if you want a different one.",
@@ -1008,6 +1069,12 @@ export const STRINGS = {
       "DoD's own client checks these whenever the HUD is on screen, and for most cvars it just forces the right value back silently. For these it also closes the game outright rather than merely correcting course. Nothing here changes your config files -- open the file named above and remove the line, or give it the value DoD requires. Setting it in Initial Commands instead is not a way round this: the app refuses these there, for the same reason.",
     fatalRow: (cvar, value, required, file, line) =>
       `${cvar} ${value} — DoD requires ${required}, set in ${file}, line ${line}`,
+    // #478: the engine rewrites config.cfg on quit.
+    CONFIG_WRITABLE_TITLE: 'Your config.cfg is saved over when the game closes:',
+    CONFIG_WRITABLE_ROW:
+      'config.cfg is not read-only, so the game writes its current settings into it on quit, including values your Initial and Scheduled Commands set.',
+    CONFIG_WRITABLE_ADVICE:
+      'To keep your own values, make config.cfg read-only (right-click it, Properties, tick Read-only). The trade-off: settings you change inside the game, like binds and options, stop being saved too. DoD Studio never changes this file.',
     NOOP_TITLE: 'These commands have no effect:',
     NOOP_ADVICE:
       'The pipeline (or the engine itself) always overrides or drops these before they could ever apply — not wrong, just wasted keystrokes.',
@@ -1182,6 +1249,20 @@ export const STRINGS = {
   },
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
+  // #443: the capture summary strip above Start Capture Batch.
+  CAPTURE_SUMMARY: {
+    MODE_FRAMES: 'Frame sequence',
+    modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
+    modeObs: (fps) => `OBS @ ${fps} fps`,
+    format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
+    scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
+    banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
+    DECALS_CLEARED: 'Decals cleared',
+    DECALS_KEPT: 'Decals kept',
+    NO_DESTINATION: 'No destination folder',
+    LINK_TITLE: 'Open this setting in Configuration',
+  },
+
   HD: {
     // #430: whether hl.exe gets 2 GB or 4 GB of address space.
     ADDRESS_SPACE_4GB: 'This hl.exe gets 4 GB of memory, room for the biggest HD textures.',
@@ -1258,7 +1339,35 @@ export const STRINGS = {
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
   },
 
+  // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
+  COMMAND_SUGGEST: {
+    OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
+    GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
+    SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
+    NOOP_EVERYWHERE: 'Does nothing from a demo: the game drops it.',
+    NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
+    HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    describe: (source, kind, builds) => {
+      const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
+      const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';
+      return `${what}${where}`;
+    },
+  },
+
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────
+  // Checked before DoD Studio starts the game (steam_guard.js).
+  STEAM: {
+    NOT_RUNNING_TITLE: "Steam isn't running",
+    NOT_RUNNING_MESSAGE: "Day of Defeat needs Steam running and signed in. Without it the game closes straight away with an authentication error. Start Steam now? The launch carries on once you're signed in.",
+    START_STEAM: 'Start Steam',
+    CANCEL: 'Cancel',
+    WAITING_FOR_SIGN_IN: 'Waiting for Steam to sign in. The launch carries on once it has.',
+    STILL_WAITING: 'Still waiting for Steam to sign in.',
+    WAIT_CANCELLED: 'Cancelled. Nothing was launched.',
+    // Beside Start Capture Batch when the Steam check stopped it.
+    BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
+    NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
+  },
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
@@ -1329,6 +1438,12 @@ export const STRINGS = {
     STATUS_DOWNLOADING: 'Downloading update…',
     STATUS_READY: 'Update downloaded — restart to apply.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
+    // Local and debug builds: report what's published, never offer to install
+    // it -- the installer would replace the *installed* app, not this one.
+    statusLocalBuild: (stable, experimental) =>
+      `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
+      + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
+      + 'Get the published build from the Releases page.',
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────
