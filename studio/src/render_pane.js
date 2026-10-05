@@ -20,6 +20,7 @@ import {
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { sortJobs, nextSort, batchProgress } from './render_jobs.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
@@ -82,12 +83,51 @@ function summarizeBatchOutcome(finished, failed, cancelled) {
 }
 
 function updateFooterQueueSummary() {
+  updateBatchProgress();
   const el = document.querySelector('#render-footer-queue-summary');
   if (!el) return;
   const queued = jobs.filter((j) => j.status === 'Queued').length;
   const rendering = jobs.filter((j) => j.status === 'Rendering').length;
   const done = jobs.filter((j) => j.status === 'Finished' || j.status === 'Error' || j.status === 'Cancelled').length;
   el.textContent = STRINGS.RENDER.queueSummary(queued, rendering, done);
+}
+
+/** The footer's whole-batch bar (#40): hidden until there's a batch. */
+function updateBatchProgress() {
+  const wrap = document.querySelector('#render-batch-progress');
+  if (!wrap) return;
+  const pct = batchProgress(jobs);
+  wrap.style.display = pct === null ? 'none' : 'flex';
+  if (pct === null) return;
+  const fill = wrap.querySelector('.progress-bar-fill');
+  if (fill) fill.style.width = `${pct}%`;
+  const label = wrap.querySelector('#render-batch-progress-label');
+  if (label) label.textContent = STRINGS.RENDER.batchProgress(pct);
+}
+
+// ── Sortable columns (#40) ───────────────────────────────────────────────────
+
+/** `{ column, dir }` from a header click, or null for job order. */
+let jobSort = null;
+
+function renderSortHeaders() {
+  document.querySelectorAll('#render-jobs-table th[data-sort]').forEach((th) => {
+    if (th.dataset.label === undefined) th.dataset.label = th.textContent.trim();
+    const arrow = jobSort && jobSort.column === th.dataset.sort ? (jobSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+    th.textContent = th.dataset.label + arrow;
+  });
+}
+
+function initSortableHeaders() {
+  document.querySelectorAll('#render-jobs-table th[data-sort]').forEach((th) => {
+    th.title = STRINGS.RENDER.SORT_HEADER_TITLE;
+    th.addEventListener('click', () => {
+      jobSort = nextSort(jobSort, th.dataset.sort);
+      renderSortHeaders();
+      renderJobsTable();
+    });
+  });
+  renderSortHeaders();
 }
 
 /**
@@ -228,6 +268,12 @@ function createJobRow(j) {
  * since it never had a click in flight to lose.
  */
 function updateJobRow(row, j) {
+  // Snapshots arrive every scheduler tick while anything renders, and most
+  // rows (queued, finished) haven't changed; skip those outright.
+  const signature = JSON.stringify(j);
+  if (row.dataset.signature === signature) return;
+  row.dataset.signature = signature;
+
   row.querySelector('.rj-name').textContent = j.name;
   row.querySelector('.rj-stream').textContent = j.stream;
   row.querySelector('.rj-frames').textContent = j.frames;
@@ -286,18 +332,19 @@ function renderJobsTable() {
   const existingRows = new Map();
   tbody.querySelectorAll('tr[data-job-id]').forEach((tr) => existingRows.set(tr.dataset.jobId, tr));
 
-  // Job order is stable once a batch starts (`RenderJobRuntime`s are created
-  // once, at fixed indices, and never reordered) — so existing rows never
-  // need to move, only new ones need appending. That keeps every row that
-  // already existed untouched by this pass, not just its buttons.
-  jobs.forEach((j) => {
-    const row = existingRows.get(j.id);
+  // Rows are patched in place and only moved when the chosen sort (#40)
+  // puts them somewhere else — a move keeps the row's own nodes, buttons
+  // included, so a click in flight still lands (#80). With no sort, job
+  // order is stable once a batch starts, so nothing ever moves.
+  sortJobs(jobs, jobSort).forEach((j, i) => {
+    let row = existingRows.get(j.id);
     if (row) {
       existingRows.delete(j.id);
       updateJobRow(row, j);
     } else {
-      tbody.appendChild(createJobRow(j));
+      row = createJobRow(j);
     }
+    if (tbody.children[i] !== row) tbody.insertBefore(row, tbody.children[i] || null);
   });
   // Anything left in the map is a row for a job id no longer in the
   // snapshot — should not normally happen within a batch, but a leftover
@@ -402,6 +449,7 @@ async function exportMarkerList(getTakeIndex, getAllDemos) {
 }
 
 export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChange, takeTracking) {
+  initSortableHeaders();
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
   const cancelRenderBtn = document.querySelector('#cancel-render-btn');
