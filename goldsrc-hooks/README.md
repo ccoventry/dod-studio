@@ -224,6 +224,25 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log` for its own diagnostics (never pops a
    dialog -- this is meant to run inside an unattended capture pipeline).
 
+## Scripted in-game tests
+
+`tools/game_probe.py` runs one in-game test end to end and writes a report:
+it launches the game the way Studio does (HLAE plus this DLL, windowed,
+`-condebug`), plays a demo, then runs steps -- console commands over the
+remote pipe, waits, `waitfor`/`expect` checks against the console and hook
+logs, and screenshots (a frame recorded by HLAE, so the game can stay behind
+other windows). It always ends the game it started. Reports and screenshots
+go to `local/game-probe/<timestamp>/`.
+
+It refuses to run unless Steam is signed into the one account in-game tests
+may use -- named in a local file outside the repo,
+`%APPDATA%\dod-studio\game_probe.json`, and checked in the registry right
+before launch; no file, no test -- no `hl.exe` is
+already running, and the install is one of the two movie installs. See the
+script's docstring for the steps and flags; `--check` runs only the refusal
+checks. `--at-launch` starts the demo from the launch command line, as a
+capture batch starts its primer, which matters for first-demo bugs (#546).
+
 ## Status
 
 The animation fix and all four `dodstudio_deathmsg` subcommands are live-proven

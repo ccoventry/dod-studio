@@ -7,15 +7,14 @@
 // inside the single continuous Studio destination, not as separate top-level
 // nav tabs ("Batch Capture Config" was DRIFT, see docs/archive/tauri_parity_audit.md
 // Area 1; Render Studio's own top-level tab was folded in the same way for
-// #81). 'highlights' shows the Master Queue's detail view + advanced
-// diagnostics; 'render' shows the Render Studio job panel; 'configuration'
-// shows Path Routing/Timing/Destinations/Custom Commands/Render Output.
+// #81). 'highlights' shows the Master Queue's detail view; 'render' shows
+// the Render Studio job panel; 'configuration' shows Path Routing/Timing/
+// Destinations/Custom Commands/Render Output.
 let activeCaptureDetailSubtab = 'highlights';
 
 function applyCaptureDetailSubtabDisplay() {
   const workspacePane = document.querySelector('#pane-workspace');
   const detailPane = document.querySelector('#detail-pane');
-  const advancedPanel = document.querySelector('#advanced-diagnostics-details');
   const exportPanel = document.querySelector('#export-config-panel');
   const renderPanel = document.querySelector('#render-studio-panel');
   const footerCaptureStudio = document.querySelector('#footer-capture-studio');
@@ -33,7 +32,6 @@ function applyCaptureDetailSubtabDisplay() {
   // Highlights keeps the master-queue pane visible alongside it.
   if (workspacePane) workspacePane.style.display = showHighlights ? 'flex' : 'none';
   if (detailPane) detailPane.style.display = showHighlights ? 'block' : 'none';
-  if (advancedPanel) advancedPanel.style.display = showHighlights ? 'block' : 'none';
   if (exportPanel) exportPanel.style.display = showConfiguration ? 'block' : 'none';
   if (renderPanel) renderPanel.style.display = showRender ? 'block' : 'none';
   if (footerCaptureStudio) footerCaptureStudio.style.display = showHighlights ? 'flex' : 'none';
@@ -55,14 +53,13 @@ export function switchNavTab(navKey) {
   const detailsPane = document.querySelector('#pane-details-config');
   const captureSubtabsBar = document.querySelector('#capture-detail-subtabs');
   const detailPane = document.querySelector('#detail-pane');
-  const advancedPanel = document.querySelector('#advanced-diagnostics-details');
   const exportPanel = document.querySelector('#export-config-panel');
   const renderPanel = document.querySelector('#render-studio-panel');
   const auditorPane = document.querySelector('#pane-demo-auditor');
   const analyzerPane = document.querySelector('#pane-demo-analyzer');
   const hdPane = document.querySelector('#pane-hd-textures');
 
-  [workspacePane, detailsPane, captureSubtabsBar, detailPane, advancedPanel, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane]
+  [workspacePane, detailsPane, captureSubtabsBar, detailPane, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane]
     .forEach((el) => { if (el) el.style.display = 'none'; });
 
   const footerCaptureStudio = document.querySelector('#footer-capture-studio');
@@ -79,7 +76,7 @@ export function switchNavTab(navKey) {
   if (navKey === 'workspace') {
     if (detailsPane) detailsPane.style.display = 'flex';
     if (captureSubtabsBar) captureSubtabsBar.style.display = 'flex';
-    // Owns workspacePane/detailPane/advancedPanel/exportPanel/renderPanel
+    // Owns workspacePane/detailPane/exportPanel/renderPanel
     // and the footer swap — Highlights/Render/Configuration are now all
     // subtabs of this one navKey, not separate top-level destinations.
     applyCaptureDetailSubtabDisplay();
