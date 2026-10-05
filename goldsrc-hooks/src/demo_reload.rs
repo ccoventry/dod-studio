@@ -116,8 +116,19 @@ unsafe extern "C" fn wrapped_playdemo() {
 }
 
 unsafe extern "C" fn wrapped_viewdemo() {
+    // A bare viewdemo brings a closed VCR bar back without restarting the
+    // demo (or prints its usage with none loaded). With
+    // dodstudio_viewdemo_in_panel it does that, so the bar can lend its slider
+    // again, and then opens the DoD Studio window on Playback.
+    if crate::cmd_list::args().is_empty() && crate::studio_panel::viewdemo_in_panel() {
+        unsafe { call_real(&REAL_VIEWDEMO) };
+        crate::studio_panel::bare_viewdemo();
+        return;
+    }
     remember("viewdemo");
     unsafe { call_real(&REAL_VIEWDEMO) };
+    // dodstudio_viewdemo_in_panel: the DoD Studio window stands in for the bar.
+    crate::studio_panel::after_viewdemo();
 }
 
 /// Notes the name the command was given. A bare `playdemo` (it prints its
@@ -176,17 +187,28 @@ fn from_command_line(args: impl IntoIterator<Item = String>) -> Option<(&'static
     found
 }
 
-/// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
-pub unsafe extern "C" fn command() {
-    let last = LAST
-        .with(|last| last.borrow().clone())
+/// The last `playdemo`/`viewdemo` and its demo name, from this session or
+/// the game's command line. Main thread only (where commands run).
+fn last_played() -> Option<(&'static str, String)> {
+    LAST.with(|last| last.borrow().clone())
         // `args_os`, not `args`: `std::env::args()` panics on any argument
         // that isn't valid Unicode, and a panic in a console command handler
         // is a game crash under `panic = "abort"`. A lossy name just fails to
         // match and falls through to the "no demo" message.
         .or_else(|| {
             from_command_line(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
-        });
+        })
+}
+
+/// The name the demo last played was given (relative to the game folder,
+/// maybe without `.dem`), for the DoD Studio window's Highlights tab.
+pub fn current_demo() -> Option<String> {
+    last_played().map(|(_, name)| name)
+}
+
+/// `dodstudio_reload_demo`: runs the last `playdemo`/`viewdemo` again.
+pub unsafe extern "C" fn command() {
+    let last = last_played();
     let Some((command, name)) = last else {
         let why = if WRAPPED.load(Ordering::Relaxed) {
             "no demo has been played this session yet -- start one with playdemo or viewdemo first"
