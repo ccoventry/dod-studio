@@ -11,6 +11,7 @@ import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, sca
 import { STRINGS } from './strings.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
+import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
 function setAnalyzerFileIndicator(text) {
   const titleEl = document.querySelector('#analyzer-current-file');
@@ -164,19 +165,39 @@ function weaponName(w) {
   return String(w).replace(/([a-z0-9])([A-Z])/g, '$1 $2');
 }
 
-// SteamID64 -> classic STEAM_0:X:YYYY. Falls back to the raw id for
-// non-numeric PlayerGlobalId values (e.g. "PLAYER_<fid>").
-function steamIdDisplay(id) {
-  if (!id || !/^\d{15,20}$/.test(id)) return id || STRINGS.ANALYZER.EMPTY_DASH;
-  try {
-    const big = BigInt(id);
-    const base = 76561197960265728n;
-    if (big < base) return id;
-    const accountId = big - base;
-    return `STEAM_0:${accountId % 2n}:${accountId / 2n}`;
-  } catch {
-    return id;
-  }
+// A real player's SteamID in all three forms, each with a Copy button, and
+// one more button for the kill-feed command that shows only them (#536).
+function steamIdRowsHtml(forms) {
+  const A = STRINGS.ANALYZER;
+  const row = (label, value) => `
+    <span class="analyzer-steam-id"><span class="text-muted">${label}</span> <code>${esc(value)}</code>
+      <button type="button" class="analyzer-copy-btn" data-copy="${esc(value)}" title="${esc(A.copyValueTitle(value))}">${A.COPY_BUTTON}</button></span>`;
+  const line = deathmsgShowOnlyLine(forms);
+  return `
+    <div class="analyzer-steam-ids">
+      ${row(A.STEAM_ID64_LABEL, forms.id64)}
+      ${row(A.STEAM_ID_CLASSIC_LABEL, forms.classic)}
+      ${row(A.STEAM_ID3_LABEL, forms.id3)}
+      <button type="button" class="analyzer-copy-btn" data-copy="${esc(line)}" title="${esc(A.copyShowOnlyTitle(line))}">${A.COPY_SHOW_ONLY_BUTTON}</button>
+    </div>`;
+}
+
+// Copy buttons say "Copied" for a moment instead of raising a toast, so the
+// web analyzer's copy of this pane needs nothing extra.
+function wireCopyButtons(root) {
+  root.querySelectorAll('[data-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const label = btn.textContent;
+      try {
+        await navigator.clipboard.writeText(btn.dataset.copy);
+        btn.textContent = STRINGS.ANALYZER.COPIED_BUTTON;
+      } catch (err) {
+        console.error('Clipboard write failed:', err);
+        btn.textContent = STRINGS.ANALYZER.COPY_FAILED_BUTTON;
+      }
+      setTimeout(() => { btn.textContent = label; }, 1200);
+    });
+  });
 }
 
 function isConnected(player) {
@@ -1274,7 +1295,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
 
   const connected = isConnected(p);
   const clientId = playerClientId(p);
-  const steamId = steamIdDisplay(p.id);
+  const steamForms = steamIdForms(p.id);
 
   const weaponRows = Object.entries(p.weapon_breakdown || {}).sort((a, b) => b[1][0] - a[1][0] || a[0].localeCompare(b[0]));
   const totalKills = weaponRows.reduce((s, [, v]) => s + v[0], 0) || 1;
@@ -1287,15 +1308,16 @@ function renderPlayerDetailsBody(tabContainer, p) {
           <div class="analyzer-hero-sub" style="color:${color};">${esc((teamLabel(p.team, report.state.allies_are_british) || STRINGS.ANALYZER.UNASSIGNED_LABEL).toUpperCase())}${p.class ? ` &nbsp;|&nbsp; ${esc(p.class.toUpperCase())}` : ''}</div>
         </div>
         <div class="analyzer-hero-links">
-          ${/^\d{15,20}$/.test(p.id) ? `<a href="https://www.legit-proof.com/search?q=${esc(steamId)}" target="_blank" rel="noopener" title="${STRINGS.ANALYZER.LEGIT_PROOF_LINK_TITLE}">${STRINGS.ANALYZER.LEGIT_PROOF_TEXT}</a> / <a href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">${STRINGS.ANALYZER.STEAM_PROFILE_TEXT}</a>` : `<span class="text-muted">${STRINGS.ANALYZER.NO_STEAM_ID}</span>`}
+          ${steamForms ? `<a href="https://www.legit-proof.com/search?q=${esc(steamForms.classic)}" target="_blank" rel="noopener" title="${STRINGS.ANALYZER.LEGIT_PROOF_LINK_TITLE}">${STRINGS.ANALYZER.LEGIT_PROOF_TEXT}</a> / <a href="https://steamcommunity.com/profiles/${esc(p.id)}" target="_blank" rel="noopener">${STRINGS.ANALYZER.STEAM_PROFILE_TEXT}</a>` : `<span class="text-muted">${STRINGS.ANALYZER.NO_STEAM_ID}</span>`}
         </div>
       </div>
       <div class="analyzer-hero-status">
-        <span>${STRINGS.ANALYZER.STEAM_ID_LABEL}<code>${esc(steamId)}</code></span>
+        ${steamForms ? '' : `<span>${STRINGS.ANALYZER.STEAM_ID_LABEL}<code>${esc(p.id || STRINGS.ANALYZER.EMPTY_DASH)}</code></span>`}
         <span style="color:${connected ? '#4caf50' : '#888'};">${connected ? STRINGS.ANALYZER.connectedSlot(clientId) : STRINGS.ANALYZER.DISCONNECTED}</span>
         ${p.has_reconnected ? `<span style="color:#ffb74d;">${STRINGS.ANALYZER.RECONNECTED_MID_DEMO}</span>` : ''}
         ${p.has_pre_demo_activity ? `<span style="color:#ffb74d;">${STRINGS.ANALYZER.PRE_EXISTING_STATS}</span>` : ''}
       </div>
+      ${steamForms ? steamIdRowsHtml(steamForms) : ''}
     </div>
 
     <div class="analyzer-stat-cards">
@@ -1330,6 +1352,7 @@ function renderPlayerDetailsBody(tabContainer, p) {
       </div>
     </div>`;
 
+  wireCopyButtons(body);
   renderKillStreaksSection(p);
 }
 
