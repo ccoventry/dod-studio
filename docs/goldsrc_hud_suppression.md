@@ -209,7 +209,12 @@ For §6 the same loop earns its keep twice over: polling is also how it notices
 
 ---
 
-## 5. Not done: the spectator bars
+## 5. The spectator bars
+
+> **Done since (2026-09-30):** `dodstudio_hide_spectator_bars`, by the route
+> the last paragraph of this section guessed at, one level down: vgui2's own `IPanel::PaintTraverse`
+> rather than the panel's vtable. See `docs/goldsrc_spectator_bars.md`. The
+> rest of this section is the state before that.
 
 `mirv_disable_specmenu` is HLAE's equivalent, and it fails on DoD with
 `"Error: Hook not installed."` — its per-game
@@ -236,7 +241,12 @@ already have a working `.res` workaround.
 
 ---
 
-## 6. `dodstudio_match_pov_crosshair`
+## 6. The spectator crosshair (`dodstudio_spec_match_pov`)
+
+> This had a cvar of its own, `dodstudio_match_pov_crosshair`, until
+> 2026-10-01. It is now one of the things `dodstudio_spec_match_pov` turns
+> on. Where the text below says `dodstudio_match_pov_crosshair`, read
+> `dodstudio_spec_match_pov`.
 
 The other half of §3's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:
@@ -304,6 +314,84 @@ sees, whatever they set.
 function entirely, so there is no custom crosshair to match and this leaves the
 stock rect alone rather than guessing.
 
+### When it is hidden
+
+The spectator branch draws its crosshair whenever the camera is in a player's
+eyes. The player's own view does not: `ShouldDrawCrossHair` (`client+0x2d0e0`)
+hides it while the gun is lowered and for weapons that have none. With
+`dodstudio_spec_match_pov 1` the spectated view hides it in the same states
+(#310).
+
+**The reference is the game being played, not a POV demo.** The two differ.
+Recording POV demos to frames and looking for the crosshair in each one
+(about 13,000 frames, six demos) gives:
+
+| state | playing live | in a POV demo | spectated, with the switch |
+| --- | --- | --- | --- |
+| sprint key held and moving | hidden | hidden, to the frame | hidden |
+| in the air after a jump (not a plain fall) | hidden | **shown** (2 of 35) | hidden |
+| going prone, getting up | hidden | hidden 1.53s from the start | hidden 1.5s |
+| prone and moving | hidden | hidden, to the frame | hidden |
+| on a ladder | hidden | hidden | hidden |
+| knife, spade, Springfield, scoped K98, scoped Enfield | hidden | hidden | hidden |
+| MG42, MG34, .30 cal not deployed | hidden | hidden, back the instant it deploys | hidden |
+| dead | hidden | hidden | hidden |
+| 0.5s after drawing a weapon (0.8s K43, 0.68s Colt, 1s Webley and rockets) | hidden | **shown** (4 of 706 frames hidden) | hidden |
+| switching to or from a grenade | shown | shown | shown |
+| reloading | hidden | **shown** (0 of 75) | hidden |
+| 1.6s after a bolt rifle's shot | hidden | **shown** (0 of 132) | hidden |
+
+The four that differ are driven by the player's own client predicting his
+weapon and his jump (`flBoltHideXHair`, `g_iinjump`), and none of that runs
+while a demo plays. Shown both, the user chose live play (2026-10-01). Until
+then this matched the POV demo; that version is #556's second commit.
+
+The switch times come from dod13-client's `dlls/wpn_shared/*.cpp`: most
+weapons deploy through `DefaultDeploy` (0.5s), and the `TimedDeploy` ones set
+their own. Switching *from* a grenade would start the timer by the code, but
+the user saw no hide either way when playing, so neither direction starts it.
+
+Every state it does hide is read from what an HLTV demo carries for each
+player (`anim_fix/crosshair_rule.rs`):
+
+| POV's test | read from |
+| --- | --- |
+| sprint key and a move key | gait `dod_sprint`. On the same player in his POV demo and the HLTV demo of that half, the HLTV gait matched his sprint key 99.7% of the time |
+| jump | body `jump`, from take-off until landing |
+| weapon switch | the viewmodel changing, plus the weapon's switch time |
+| reload | the body playing a `*_reload` sequence |
+| bolt cycle | a shot from the K98 or Enfield, then 1.6s |
+| prone transition | 1.5s from the body entering `get_down` / `get_up` (those run 1.3s and 2.0s, so neither length is the answer) |
+| prone and a move key | gait `prone_forward`. Gait `dod_crawl` is the *crouched* walk and hides nothing |
+| ladder | `movetype` 5 |
+| weapon | the third-person model held |
+| machine gun deployed | body `sandbag_*` / `bipod_*` |
+
+Where it is not exact: crawling can read up to half a second long (the gait
+stays `prone_forward` while the player slides to a stop); fully underwater
+and the scoped FG42 while zoomed are left out, because nothing replicated says
+so reliably.
+
+The hide costs no new hook. The spectator draw (`client+0x2d1f0`) already has
+a gate of its own, 13 bytes just before the rect: it skips the crosshair while
+the view is zoomed (`0 < fov < 90`). While the player's own view would have no
+crosshair, those 13 bytes become a jump to the same exit; when the state ends,
+the stock bytes go back.
+
+An empty rect does **not** work, and was the first attempt: the engine takes a
+rect with no size to mean the whole sprite, so all sixteen tiles of
+`customXHair.spr` appeared below and right of the screen centre.
+
+To check it against a recording: `goldsrc-hooks/tools/crosshair_frames.py`
+finds the crosshair in recorded frames, and compares them with the hook's own
+trail (`hook`) or with a POV demo's state from
+`analysis/examples/crosshair_pov_probe.rs` (`pov`). It looks at the screen
+centre only, which is how the whole-sheet draw got past it at first; look at a
+frame too. On `monday-wsod25_r07_m1_h1_hltv`, in a stretch where the spectated
+player sprints, goes prone, crawls and gets up, the frames and the trail agree
+on 884 of 919 (pre-Anniversary) and 929 of 967 (25th Anniversary); every miss
+is the one frame at a change.
+
 ### It loses to §3, by construction
 
 `dodstudio_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
@@ -314,8 +402,9 @@ wins with no interlock written anywhere.
 
 #219 asks why the POV and HLTV first-person crosshairs differ. §3 found half of
 it — the spectator branch never reads the `crosshair` cvar. This is the other
-half: it never reads `cl_xhair_style` either. Whether anything *else* differs
-between the two views is still open.
+half: it never reads `cl_xhair_style` either. The third was *when* it draws,
+answered above. Still open: accuracy spread, which the POV crosshair shows and
+a spectator cannot know (it comes from the player's own prediction).
 
 ---
 

@@ -39,6 +39,7 @@ dependencies = [
  "dem",
  "dod",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -1801,6 +1802,7 @@ dependencies = [
 name = "goldsrc-hooks"
 version = "0.10.0"
 dependencies = [
+ "analysis",
  "windows-sys 0.59.0",
 ]
 
