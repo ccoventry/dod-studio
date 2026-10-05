@@ -26,9 +26,17 @@ export const STRINGS = {
     // just not a release-profile one), 'experimental'
     // (release_experimental.yml), or anything else for a real stable build
     // (no parenthetical).
-    appWindowTitle: (baseVersion, buildKind) => {
+    // `branch` is set only for a build made on this PC (see localGitBranch):
+    // `local build - test/capture-batch`. A release build made here reports
+    // 'stable' or 'experimental' by version, but a branch means it came from
+    // the repo, so it's labelled a local release build instead.
+    // `port` is the Vite dev server's, set only under `npm run tauri dev`, so
+    // two dev copies running side by side can be told apart.
+    appWindowTitle: (baseVersion, buildKind, branch, port) => {
       const tags = { local: 'local build', debug: 'debug build', experimental: 'experimental build' };
-      const tag = tags[buildKind];
+      let tag = tags[buildKind];
+      if (branch) tag = `${tag && buildKind !== 'experimental' ? tag : 'local release build'} - ${branch}`;
+      if (port) tag = `${tag || 'local build'} - port ${port}`;
       return `DoD Studio — v${baseVersion}${tag ? ` (${tag})` : ''}`;
     },
     STUDIO_TAB: 'Studio',
@@ -124,8 +132,6 @@ export const STRINGS = {
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
-    ADVANCED_DIAGNOSTICS_SUMMARY: 'Advanced Diagnostics (Canvas Timeline & Telemetry)',
-    TIMELINE_NO_DATA: 'No highlight timeline available',
     COL_ROW_NUM: 'Row #',
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
@@ -152,7 +158,6 @@ export const STRINGS = {
     UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
-    tickLabel: (tick) => `Tick ${tick}`,
     secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Configure the HLAE and Half-Life executable paths in Batch Capture Config before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
@@ -432,6 +437,7 @@ export const STRINGS = {
       unusable: (p) => `"${p}" is unusable`,
     },
     andNMore: (n) => `...and ${n} more`,
+    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
@@ -888,6 +894,15 @@ export const STRINGS = {
     CANCEL_BUTTON: 'Cancel',
   },
 
+  // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
+  BATCH_CLOSE_MODAL: {
+    TITLE: 'Capture batch running',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
+    CLOSE_BUTTON: 'Close DoD Studio',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+  },
+
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
   // Map library warnings. A demo names the map it was recorded on and stamps
   // that map's build alongside it, so "missing" and "wrong build" are different
@@ -1332,6 +1347,12 @@ export const STRINGS = {
     STATUS_DOWNLOADING: 'Downloading update…',
     STATUS_READY: 'Update downloaded — restart to apply.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
+    // Local and debug builds: report what's published, never offer to install
+    // it -- the installer would replace the *installed* app, not this one.
+    statusLocalBuild: (stable, experimental) =>
+      `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
+      + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
+      + 'Get the published build from the Releases page.',
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────
