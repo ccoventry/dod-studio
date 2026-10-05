@@ -26,9 +26,17 @@ export const STRINGS = {
     // just not a release-profile one), 'experimental'
     // (release_experimental.yml), or anything else for a real stable build
     // (no parenthetical).
-    appWindowTitle: (baseVersion, buildKind) => {
+    // `branch` is set only for a build made on this PC (see localGitBranch):
+    // `local build - test/capture-batch`. A release build made here reports
+    // 'stable' or 'experimental' by version, but a branch means it came from
+    // the repo, so it's labelled a local release build instead.
+    // `port` is the Vite dev server's, set only under `npm run tauri dev`, so
+    // two dev copies running side by side can be told apart.
+    appWindowTitle: (baseVersion, buildKind, branch, port) => {
       const tags = { local: 'local build', debug: 'debug build', experimental: 'experimental build' };
-      const tag = tags[buildKind];
+      let tag = tags[buildKind];
+      if (branch) tag = `${tag && buildKind !== 'experimental' ? tag : 'local release build'} - ${branch}`;
+      if (port) tag = `${tag || 'local build'} - port ${port}`;
       return `DoD Studio — v${baseVersion}${tag ? ` (${tag})` : ''}`;
     },
     STUDIO_TAB: 'Studio',
@@ -57,6 +65,14 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #54: the Master Queue's quick filters.
+    KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
+    KILLS_FILTER_ALL: 'All demos',
+    KILLS_FILTER_WITH_KILLS: 'With kills',
+    KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
+    OWNER_ONLY_LABEL: 'POV only',
+    OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
@@ -73,7 +89,7 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
-    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
+    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
     // #21: a project demo that is not at its saved path.
@@ -116,8 +132,6 @@ export const STRINGS = {
     MIN_KILLS_LABEL: 'Min Kills:',
     EMPTY_SELECT_DEMO: 'Select a demo in the Master List to view its highlights.',
     EMPTY_NO_STREAKS: 'No highlights detected in this demo.',
-    ADVANCED_DIAGNOSTICS_SUMMARY: 'Advanced Diagnostics (Canvas Timeline & Telemetry)',
-    TIMELINE_NO_DATA: 'No highlight timeline available',
     COL_ROW_NUM: 'Row #',
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
@@ -144,7 +158,6 @@ export const STRINGS = {
     UNDO: 'Undo',
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
-    tickLabel: (tick) => `Tick ${tick}`,
     secondsSuffix: (n) => `${n}s`,
     HLAE_PATH_REQUIRED: 'Configure the HLAE and Half-Life executable paths in Batch Capture Config before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
@@ -424,6 +437,7 @@ export const STRINGS = {
       unusable: (p) => `"${p}" is unusable`,
     },
     andNMore: (n) => `...and ${n} more`,
+    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
@@ -487,6 +501,12 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #110: a CSV of every captured highlight, for an editor.
+    EXPORT_MARKERS_BUTTON: 'Export Marker List…',
+    EXPORT_MARKERS_TITLE: 'Save a CSV with one row per captured or rendered highlight: its demo, player, kills, where it is in the demo, its take and its label. For lining clips up in your editor.',
+    EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
+    exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
+    exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -878,6 +898,15 @@ export const STRINGS = {
     SAVE_BUTTON: 'Save & Close',
     DISCARD_BUTTON: 'Close Without Saving',
     CANCEL_BUTTON: 'Cancel',
+  },
+
+  // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
+  BATCH_CLOSE_MODAL: {
+    TITLE: 'Capture batch running',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
+    CLOSE_BUTTON: 'Close DoD Studio',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
@@ -1338,6 +1367,12 @@ export const STRINGS = {
     STATUS_DOWNLOADING: 'Downloading update…',
     STATUS_READY: 'Update downloaded — restart to apply.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
+    // Local and debug builds: report what's published, never offer to install
+    // it -- the installer would replace the *installed* app, not this one.
+    statusLocalBuild: (stable, experimental) =>
+      `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
+      + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
+      + 'Get the published build from the Releases page.',
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────

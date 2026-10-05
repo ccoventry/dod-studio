@@ -17,6 +17,8 @@ import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { setStatusLine, uiStatusText } from './status_line.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
 let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
@@ -27,6 +29,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+
+/** Whether a capture batch is running right now (#545's close prompt). */
+export function isCaptureRunning() {
+  return capturingInFlight;
+}
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
 // drive is added, or detail_pane.js after a streak selection changes).
@@ -413,6 +420,11 @@ export async function refreshLaunchGuard(state) {
     0
   );
   const noHighlightsSelected = selectedHighlights === 0;
+  // Every capture launches hl.exe through HLAE, so with either path blank
+  // Start could only fail at click time (BOTH_PATHS_REQUIRED). A first-time
+  // user hit that before anything else; now the button says so up front.
+  const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
+    || !document.querySelector('#hlae-path-input')?.value?.trim();
 
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
@@ -438,7 +450,7 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
@@ -453,6 +465,10 @@ export async function refreshLaunchGuard(state) {
     if (bannedCommandsPresent) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
+      warningEl.style.display = 'block';
+    } else if (pathsMissing) {
+      warningEl.style.color = '#f44336';
+      warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = '#f44336';
@@ -854,10 +870,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initImportCfgButton();
 
   // The pipeline turns some settings into init commands, so the warnings go
-  // stale when one changes.
+  // stale when one changes -- including by undo, which fires no 'change'
+  // until blur (#535).
   FIELDS_THAT_BECOME_COMMANDS.forEach((sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("change", refreshInitCommandWarnings);
+    refreshAfterTyping(document.querySelector(sel), refreshInitCommandWarnings);
   });
 
   const addInitCommandBtn = document.querySelector('#add-init-command-btn');
@@ -947,7 +963,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           }
         }
         const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        if (statusEl) statusEl.textContent = statusText;
+        setStatusLine(statusEl, statusText);
         if (startBtn) startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
       } else {
@@ -958,18 +974,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (currentOnBatchFinished) currentOnBatchFinished();
 
         if (payload.error) {
-          const errorBody = STRINGS.CAPTURE.captureErrorToast(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
+          // Without the engine's pointers at the log (#534); the log has them.
+          const errorBody = STRINGS.CAPTURE.captureErrorToast(uiStatusText(payload.status) || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
           showToast(errorBody, "error");
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
+          setStatusLine(statusEl, STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT));
           notify('error', STRINGS.NOTIFICATIONS.CAPTURES_ERROR_TITLE, errorBody);
         } else if (payload.status === "Cancelled") {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
           if (progressBar) progressBar.style.width = '0%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.CANCELLED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.CANCELLED);
         } else {
           showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
           if (progressBar) progressBar.style.width = '100%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.COMPLETED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.COMPLETED);
           notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
         }
       }
@@ -1338,7 +1355,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       // Before any patching: without Steam the game can't start.
       if (!(await ensureSteamReady())) {
-        if (statusEl) statusEl.textContent = STRINGS.STEAM.BATCH_NOT_STARTED_STATUS;
+        setStatusLine(statusEl, STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
         return;
       }
       runBatch();
