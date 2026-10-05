@@ -879,6 +879,15 @@ export const STRINGS = {
     CANCEL_BUTTON: 'Cancel',
   },
 
+  // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
+  BATCH_CLOSE_MODAL: {
+    TITLE: 'Capture batch running',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
+    CLOSE_BUTTON: 'Close DoD Studio',
+    KEEP_OPEN_BUTTON: 'Keep Studio open',
+  },
+
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────
   // Map library warnings. A demo names the map it was recorded on and stamps
   // that map's build alongside it, so "missing" and "wrong build" are different
