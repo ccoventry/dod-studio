@@ -8,5 +8,9 @@ dod = { path = "../dod" }
 dem = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 
+# The analysis cache (`cache.rs`), which the wasm web analyzer doesn't build.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+serde_json = { workspace = true }
+
 [lints]
 workspace = true

@@ -514,6 +514,8 @@ pub fn poll() {
     log_level_changes();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::frame_esc::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
@@ -528,7 +530,10 @@ pub fn poll() {
     crate::world_shaders::poll();
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
+    // After spectator_bars::poll, so it lays out by this frame's bar state.
+    crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    crate::studio_panel::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -663,6 +668,9 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(esc) = crate::frame_esc::status_line() {
+        lines.push(esc);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
@@ -1104,6 +1112,24 @@ unsafe extern "C" fn cmd_texture_hires_log() {
 }
 
 /// Only registered when the window-layout cvars could not be registered.
+/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_viewdemo_in_panel() {
+    handle_toggle(
+        crate::studio_panel::VIEWDEMO_NAME,
+        &crate::studio_panel::VIEWDEMO_IN_PANEL,
+        crate::studio_panel::viewdemo_status,
+    );
+}
+
+/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_console_in_panel() {
+    handle_toggle(
+        crate::studio_panel::CONSOLE_NAME,
+        &crate::studio_panel::CONSOLE_IN_PANEL,
+        crate::studio_panel::console_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1326,6 +1352,7 @@ pub fn install() {
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+    add_command(crate::studio_panel::NAME, crate::studio_panel::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1351,6 +1378,17 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    // Both on by default (the user, 2026-10-03): the window is how DoD
+    // Studio's console and playback controls are reached.
+    match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
+    }
+    match register(crate::studio_panel::CONSOLE_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };

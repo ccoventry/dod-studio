@@ -294,6 +294,7 @@ pub fn parse_frame(
     netmsg_parse_mode: MessageDataParseMode,
     aux: AuxRefCell,
 ) -> Result<Frame> {
+    let source_len = aux.borrow().parsing_source_len;
     let (i, (type_, time, frame)) = (le_u8, le_f32, le_i32).parse(i)?;
 
     let (i, frame_data) = match type_ {
@@ -316,6 +317,10 @@ pub fn parse_frame(
             )
         }
     };
+
+    if let Some(len) = source_len {
+        crate::progress::report(len.saturating_sub(i.len()), len);
+    }
 
     Ok((
         i,
