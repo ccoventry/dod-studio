@@ -426,3 +426,43 @@ test.describe('Skip (keep original) toggle', () => {
     await expect(page.locator('tr[data-job-id="0"] .rj-settings')).not.toContainText('fps');
   });
 });
+
+test.describe('issue #40 — sortable columns and the batch progress bar', () => {
+  test('a header click sorts the rows, again reverses, a third time restores job order', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', name: 'b-clip' }),
+      job({ id: '1', name: 'a-clip' }),
+      job({ id: '2', name: 'c-clip' }),
+    ]);
+    const names = () => page.locator('#render-jobs-tbody .rj-name').allTextContents();
+    const header = page.locator('th[data-sort="name"]');
+
+    await header.click();
+    expect(await names()).toEqual(['a-clip', 'b-clip', 'c-clip']);
+    await expect(header).toHaveText(/▲$/);
+    await header.click();
+    expect(await names()).toEqual(['c-clip', 'b-clip', 'a-clip']);
+    await header.click();
+    expect(await names()).toEqual(['b-clip', 'a-clip', 'c-clip']);
+    await expect(header).toHaveText('Clip Name');
+  });
+
+  test('a sorted row keeps its own nodes when a snapshot moves it', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' }), job({ id: '1', status: 'Rendering', progress: 5 })]);
+    await page.locator('th[data-sort="status"]').click();
+    await page.evaluate(() => { window.__row0 = document.querySelector('tr[data-job-id="0"]'); });
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering', progress: 1 }), job({ id: '1', status: 'Finished', progress: 100 })]);
+    expect(await page.evaluate(() => window.__row0 === document.querySelector('tr[data-job-id="0"]'))).toBe(true);
+    expect(await page.locator('#render-jobs-tbody tr').first().getAttribute('data-job-id')).toBe('0');
+  });
+
+  test('the batch bar averages the batch and hides with no jobs', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(page.locator('#render-batch-progress')).toBeHidden();
+    await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Rendering', progress: 50 })]);
+    await expect(page.locator('#render-batch-progress')).toBeVisible();
+    await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 75%');
+  });
+});

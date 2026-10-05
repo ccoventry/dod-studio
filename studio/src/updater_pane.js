@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild } from './ipc_bridge.js';
+import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild, localGitBranch } from './ipc_bridge.js';
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
 
@@ -72,7 +72,13 @@ async function displayCurrentVersion() {
   }
   // OS window title (taskbar/Alt-Tab), not an in-page element — used to be
   // a footer label (#122) before moving here.
-  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind)).catch((err) => {
+  // Only a build made on this PC can find its source tree, so installers
+  // never show a branch.
+  const branch = await localGitBranch();
+  // Under the Vite dev server the page is served from localhost:<port>;
+  // bundled builds use Tauri's own protocol and have no port to show.
+  const port = import.meta.env.DEV ? window.location.port : '';
+  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind, branch, port)).catch((err) => {
     console.error('Failed to set window title:', err);
   });
   const modalLabel = document.querySelector('#update-modal-current-version');
@@ -82,6 +88,10 @@ async function displayCurrentVersion() {
 }
 
 export async function checkForUpdatesNow(channel = currentChannel()) {
+  if (await isLocalOrDebugBuild()) {
+    await reportPublishedVersions();
+    return;
+  }
   setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
   const downloadBtn = document.querySelector('#download-install-update-btn');
 
@@ -111,7 +121,25 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
   }
 }
 
+/** Local and debug builds: show the latest version on each channel as
+ *  information only. Every published version differs from a local build's,
+ *  so the usual "Update available" would always fire; and installing would
+ *  quit this dev copy and replace the *installed* app instead. */
+async function reportPublishedVersions() {
+  setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
+  const downloadBtn = document.querySelector('#download-install-update-btn');
+  if (downloadBtn) downloadBtn.style.display = 'none';
+  setFooterButtonState(false);
+  const [stable, experimental] = await Promise.all(
+    ['stable', 'experimental'].map((channel) => checkForUpdate(channel).catch(() => null)),
+  );
+  setStatus(STRINGS.UPDATE_MODAL.statusLocalBuild(stable?.version, experimental?.version));
+}
+
 async function beginDownloadAndInstall() {
+  // Belt and braces: the button is never shown on a local or debug build,
+  // and the backend refuses too.
+  if (await isLocalOrDebugBuild()) return;
   const downloadBtn = document.querySelector('#download-install-update-btn');
   const progressContainer = document.querySelector('#update-progress-container');
   setStatus(STRINGS.UPDATE_MODAL.STATUS_DOWNLOADING);
