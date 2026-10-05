@@ -28,6 +28,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+
+/** Whether a capture batch is running right now (#545's close prompt). */
+export function isCaptureRunning() {
+  return capturingInFlight;
+}
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
 // drive is added, or detail_pane.js after a streak selection changes).
@@ -414,6 +419,11 @@ export async function refreshLaunchGuard(state) {
     0
   );
   const noHighlightsSelected = selectedHighlights === 0;
+  // Every capture launches hl.exe through HLAE, so with either path blank
+  // Start could only fail at click time (BOTH_PATHS_REQUIRED). A first-time
+  // user hit that before anything else; now the button says so up front.
+  const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
+    || !document.querySelector('#hlae-path-input')?.value?.trim();
 
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
@@ -439,7 +449,7 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
@@ -451,6 +461,10 @@ export async function refreshLaunchGuard(state) {
     if (bannedCommandsPresent) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
+      warningEl.style.display = 'block';
+    } else if (pathsMissing) {
+      warningEl.style.color = '#f44336';
+      warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = '#f44336';
