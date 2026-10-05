@@ -8,6 +8,7 @@
 // string) or objects keyed by each field's `key`.
 
 import { STRINGS } from './strings.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
 function primaryValue(item, fields) {
   return fields[0].primitive ? item : item[fields[0].key];
@@ -35,6 +36,9 @@ export const TRASH_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" f
  * @param {boolean} [opts.unique] - reject add()/browse() when the primary field's value already exists elsewhere in the list
  * @param {() => void} [opts.onChange] - called after any add/edit/remove/reorder
  * @param {() => Promise<string|null>} [opts.browse] - opens a native picker for the primary field; adds a per-row 📁 button when set
+ *
+ * A text field may carry `enhance(input)`, called on each of its inputs as
+ * the row is built (the Commands tab's type-ahead, #215).
  */
 export function createListEditor({ container, getItems, fields, unique = false, onChange, browse }) {
   function notify() {
@@ -75,16 +79,18 @@ export function createListEditor({ container, getItems, fields, unique = false, 
         else input.style.flex = '1';
         if (field.placeholder) input.placeholder = field.placeholder;
         input.value = value ?? '';
-        // Keep the in-memory item updated every keystroke, but only notify
-        // (-> settings autosave-to-disk) on 'change' (blur/Enter) — matches
-        // detail_pane.js's notes-field split, avoiding a full settings write
-        // per character while composing a value, notably free-text Custom
-        // Commands / Init Commands entries.
+        // Keep the in-memory item updated every keystroke, but notify
+        // (-> warnings, settings autosave-to-disk) only once typing pauses,
+        // or on 'change' (blur/Enter) -- matches detail_pane.js's notes
+        // field, avoiding a full settings write per character while
+        // composing a value, notably free-text Custom Commands / Init
+        // Commands entries, while an undo (Ctrl+Z) still notifies (#535).
         input.addEventListener('input', (e) => {
           const v = field.type === 'number' ? (parseFloat(e.target.value) || 0) : e.target.value;
           setFieldValue(items, idx, field, v);
         });
-        input.addEventListener('change', () => notify());
+        refreshAfterTyping(input, () => notify());
+        field.enhance?.(input);
       }
       input.className = 'list-editor-field';
       row.appendChild(input);
