@@ -90,6 +90,12 @@ pub fn in_eye_target() -> Option<i32> {
     read_i32(base, TARGET_RVA).filter(|target| *target > 0)
 }
 
+/// The spectator interface mode (`g_iUser1`): 0 while not spectating, 1..4
+/// while the spectator camera is up.
+pub fn mode() -> Option<i32> {
+    read_i32(engine::client_module_base()?, MODE_RVA)
+}
+
 /// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two
 /// pointer reads and three atomic loads when off, which is the common case.
 pub fn poll() {
