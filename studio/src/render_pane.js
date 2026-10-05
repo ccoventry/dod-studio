@@ -23,6 +23,7 @@ import { STRINGS } from './strings.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
+import { escapeHtml as esc } from './html.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // id:status pairs from the last snapshot Export Pool Free/Required
@@ -30,14 +31,6 @@ let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot
 // job was added/removed/changed status" (worth a refresh) apart from "only
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
-
-function esc(s) {
-  return String(s ?? '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
