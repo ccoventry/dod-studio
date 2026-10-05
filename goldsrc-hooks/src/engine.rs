@@ -42,18 +42,20 @@
 //!
 //! - `"F"` (secured builds, what DoD 1.3 actually uses) -- we return our own
 //!   wrapper, which calls the real `F` to let it fill the caller's
-//!   `cldll_func_t` table, then swaps four of its 43 slots for our
+//!   `cldll_func_t` table, then swaps five of its 43 slots for our
 //!   trampolines before handing it back to the engine.
 //! - `"Initialize"` / `"HUD_Frame"` / `"HUD_AddEntity"` /
-//!   `"HUD_GetStudioModelInterface"` (classic non-secured builds) -- we
-//!   return the trampoline directly.
+//!   `"HUD_DirectorMessage"` / `"HUD_GetStudioModelInterface"` (classic
+//!   non-secured builds) -- we return the trampoline directly.
 //!
 //! Either way the trampolines receive what we need as ordinary arguments:
 //! `Initialize` hands us `pEnginefuncs`, `HUD_GetStudioModelInterface` hands
 //! us `pstudio`, `HUD_Frame` gives a real per-frame tick, and `HUD_AddEntity`
 //! hands us the model path of every entity about to be added to the render
-//! list -- the only one of the four that isn't a one-time capture, since it
-//! runs the suppress/forward decision itself, once per entity.
+//! list -- the first of two that aren't a one-time capture, since it runs the
+//! suppress/forward decision itself, once per entity. `HUD_DirectorMessage`
+//! is the second: it hands us every HLTV director message, so
+//! `hltv_messages.rs` can drop the proxy's on-screen text.
 
 use std::ffi::{c_char, c_void};
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
@@ -85,6 +87,12 @@ pub struct EventApiPartial {
         f_flags: i32,
         pitch: i32,
     ),
+    /// `EV_StopSound` .. `EV_PlayerTrace`, untouched.
+    _slots_before_weapon_animation: [*mut c_void; 14],
+    /// `EV_WeaponAnimation(int sequence, int body)`: what a fire handler
+    /// plays on the first-person gun. At `+0x40`, confirmed by the Garand
+    /// handler's `call [ecx+0x40]` at `client+0x7b34`.
+    pub ev_weapon_animation: unsafe extern "C" fn(sequence: i32, body: i32),
 }
 
 /// Partial mirror of `demo_api_s` (`common/demo_api.h`): `IsRecording`, then
@@ -104,6 +112,15 @@ pub struct DemoApiPartial {
 pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
 
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
+/// A client event handler, `void (*)(struct event_args_s *args)`.
+pub type EventHandlerFn = unsafe extern "C" fn(args: *mut c_void);
+/// `gEngfuncs.pfnHookEvent` (slot 69): registers the handler for one event
+/// script. DoD's `client.dll` calls it once per script from inside
+/// `Initialize` (`push handler; push "events/weapons/colt.sc"; call
+/// [gEngfuncs+0x114]` at `client.dll+0x106e5`), 52 slots after the
+/// `pfnAddCommand` slot its console commands go through -- the same in both
+/// builds.
+pub type HookEventFn = unsafe extern "C" fn(name: *const c_char, handler: EventHandlerFn);
 pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char);
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
 pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
@@ -385,11 +402,27 @@ pub struct ClEntityS {
     mouth: MouthT,
     latched: LatchedVarsT,
     lastmove: f32,
-    origin: Vec3,
+    /// Where the entity is drawn this frame. For the viewmodel,
+    /// `V_CalcRefdef` sets it and the renderer reads it next.
+    pub origin: Vec3,
     angles: Vec3,
     attachment: [Vec3; 4],
     trivial_accept: i32,
     pub model: *mut ModelSPartial,
+}
+
+/// Partial mirror of `ref_params_s` (`common/ref_params.h`) up through the
+/// fields read here: the view's vectors and the frame's time. Its layout is
+/// the same as a demo frame's `refparams` block, which `dem-patch` reads.
+#[repr(C)]
+pub struct RefParamsPartial {
+    pub vieworg: [f32; 3],
+    pub viewangles: [f32; 3],
+    pub forward: [f32; 3],
+    pub right: [f32; 3],
+    pub up: [f32; 3],
+    pub frametime: f32,
+    pub time: f32,
 }
 
 /// Partial mirror of `model_s` (`common/com_model.h`) -- `name` is its first
@@ -524,7 +557,10 @@ pub struct ClEngineFuncsPartial {
     pub get_entity_by_index: GetEntityByIndexFn,
     _slots_before_weapon_anim: [*mut c_void; 12], // GetClientTime .. pfnPlaybackEvent
     pub pfn_weapon_anim: WeaponAnimFn,
-    _slots_between: [*mut c_void; 4], // pfnRandomFloat, pfnRandomLong, pfnHookEvent, Con_IsVisible
+    _slots_before_hook_event: [*mut c_void; 2], // pfnRandomFloat, pfnRandomLong
+    /// Slot 69. See [`HookEventFn`].
+    pub pfn_hook_event: HookEventFn,
+    _slot_con_is_visible: *mut c_void,
     pub pfn_get_game_directory: GetGameDirectoryFn,
     /// Slot 72. See [`GetCvarPointerFn`].
     pub pfn_get_cvar_pointer: GetCvarPointerFn,
@@ -697,26 +733,39 @@ const CLDLL_FUNC_SLOTS: usize = 43;
 /// Slot indices within that table -- verified by resolving every address DoD's
 /// `F` writes back to its own export name.
 const SLOT_INITIALIZE: usize = 0;
+/// `V_CalcRefdef`, the slot before `HUD_AddEntity` in `cldll_func_t`
+/// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
+const SLOT_CALC_REFDEF: usize = 19;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
 const SLOT_HUD_FRAME: usize = 33;
+/// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
+/// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
+const SLOT_HUD_DIRECTOR_MESSAGE: usize = 38;
 const SLOT_GET_STUDIO_MODEL_INTERFACE: usize = 39;
 
 const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
+        && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
+        && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
     "a cldll_func_t slot index is outside the table F actually writes"
 );
 
 type InitializeFn = unsafe extern "C" fn(*mut ClEngineFuncsPartial, i32) -> i32;
 type HudFrameFn = unsafe extern "C" fn(f64);
+/// `void V_CalcRefdef(struct ref_params_s *pparams)`.
+type CalcRefdefFn = unsafe extern "C" fn(*mut RefParamsPartial);
 type GetStudioModelInterfaceFn =
     unsafe extern "C" fn(i32, *mut *mut c_void, *mut EngineStudioApiPartial) -> i32;
 /// `int (*pHudAddEntity)(int type, cl_entity_t *ent, const char *modelname)`.
 /// `ent` is passed through opaquely -- nothing here reads its fields, only
 /// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
+/// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
+/// message, with the opcode and length byte already stripped.
+type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
 /// The secured single-callback export: fills the caller-provided buffer with
 /// `CLDLL_FUNC_SLOTS` function pointers. `__cdecl`, one pointer argument --
 /// confirmed from `hw.dll`'s call site (`push edx; call eax; add esp, 4`).
@@ -725,7 +774,9 @@ type ClientApiFn = unsafe extern "C" fn(*mut *mut c_void);
 static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_GET_STUDIO_MODEL_INTERFACE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Runs once, on the engine's own thread, immediately after `client.dll`'s
@@ -737,7 +788,7 @@ static ON_ENGINE_READY: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 /// This exists so that work runs **on the engine thread, at a deterministic
 /// point**, rather than from our worker thread whenever it happens to notice.
 /// It matters because that work mutates engine-owned global state --
-/// `pfnAddCommand` prepends to the engine's command list, and `sound_fix`
+/// `pfnAddCommand` prepends to the engine's command list, and `fire_sounds`
 /// overwrites a function pointer inside the live `event_api_s` -- none of
 /// which is thread-safe against an engine that may be running concurrently.
 /// Registering right after `Initialize` also matches where DoD's own client
@@ -775,7 +826,13 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
         return 0;
     }
     let real: InitializeFn = unsafe { std::mem::transmute(real) };
-    let result = unsafe { real(engfuncs, version) };
+    let result = if engfuncs.is_null() {
+        unsafe { real(engfuncs, version) }
+    } else {
+        // The client registers its event handlers from inside Initialize;
+        // missing_shots notes the weapon ones as they go past.
+        unsafe { crate::missing_shots::noting_event_handlers(engfuncs, || real(engfuncs, version)) }
+    };
 
     // Only once the client is genuinely initialised, and only if we actually
     // captured the table -- installing against a null pEngfuncs would crash
@@ -1031,6 +1088,18 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
     unsafe { real(version, ppinterface, pstudio) }
 }
 
+/// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
+/// adjust the viewmodel it just placed (`spectator_gun`).
+unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
+    let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(pparams) };
+    unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+}
+
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_sprite.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
@@ -1054,6 +1123,25 @@ unsafe extern "C" fn tramp_hud_add_entity(
     }
     let real: HudAddEntityFn = unsafe { std::mem::transmute(real) };
     unsafe { real(entity_type, ent, modelname) }
+}
+
+/// Called once per `svc_director` message. Drops the ones
+/// `hltv_messages::should_drop` asks for and forwards the rest unchanged.
+unsafe extern "C" fn tramp_hud_director_message(size: i32, buf: *mut c_void) {
+    if size > 0 && !buf.is_null() {
+        // Safety: the engine's own buffer of `size` bytes, alive for the call.
+        let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) };
+        if crate::hltv_messages::should_drop(bytes) {
+            return;
+        }
+    }
+
+    let real = REAL_HUD_DIRECTOR_MESSAGE.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    let real: HudDirectorMessageFn = unsafe { std::mem::transmute(real) };
+    unsafe { real(size, buf) }
 }
 
 /// Swaps one slot of the `cldll_func_t` table `F` just filled for our own
@@ -1090,7 +1178,7 @@ unsafe fn swap_slot(
 
 /// Our stand-in for `client.dll`'s secured `F` export. Lets the real `F` fill
 /// the engine's `cldll_func_t` buffer exactly as it normally would, then
-/// replaces the four slots we care about before the engine ever reads them.
+/// replaces the five slots we care about before the engine ever reads them.
 unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
     let real = REAL_F.load(Ordering::Acquire);
     if real.is_null() {
@@ -1126,10 +1214,24 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
         );
         swap_slot(
             table,
+            SLOT_CALC_REFDEF,
+            &REAL_CALC_REFDEF,
+            tramp_calc_refdef as *mut c_void,
+            "V_CalcRefdef",
+        );
+        swap_slot(
+            table,
             SLOT_HUD_ADD_ENTITY,
             &REAL_HUD_ADD_ENTITY,
             tramp_hud_add_entity as *mut c_void,
             "HUD_AddEntity",
+        );
+        swap_slot(
+            table,
+            SLOT_HUD_DIRECTOR_MESSAGE,
+            &REAL_HUD_DIRECTOR_MESSAGE,
+            tramp_hud_director_message as *mut c_void,
+            "HUD_DirectorMessage",
         );
         swap_slot(
             table,
@@ -1219,7 +1321,7 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
     };
 
     // "F" is the secured single-callback export, and is what DoD 1.3 actually
-    // uses; the four named entries below are the classic convention, kept so
+    // uses; the five named entries below are the classic convention, kept so
     // this works unchanged on a non-secured client.dll too.
     match requested {
         "F" => {
@@ -1239,9 +1341,17 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
             REAL_HUD_FRAME.store(result, Ordering::Release);
             tramp_hud_frame as *mut c_void
         }
+        "V_CalcRefdef" => {
+            REAL_CALC_REFDEF.store(result, Ordering::Release);
+            tramp_calc_refdef as *mut c_void
+        }
         "HUD_AddEntity" => {
             REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
             tramp_hud_add_entity as *mut c_void
+        }
+        "HUD_DirectorMessage" => {
+            REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);
+            tramp_hud_director_message as *mut c_void
         }
         "HUD_GetStudioModelInterface" => {
             REAL_GET_STUDIO_MODEL_INTERFACE.store(result, Ordering::Release);
