@@ -26,9 +26,17 @@ export const STRINGS = {
     // just not a release-profile one), 'experimental'
     // (release_experimental.yml), or anything else for a real stable build
     // (no parenthetical).
-    appWindowTitle: (baseVersion, buildKind) => {
+    // `branch` is set only for a build made on this PC (see localGitBranch):
+    // `local build - test/capture-batch`. A release build made here reports
+    // 'stable' or 'experimental' by version, but a branch means it came from
+    // the repo, so it's labelled a local release build instead.
+    // `port` is the Vite dev server's, set only under `npm run tauri dev`, so
+    // two dev copies running side by side can be told apart.
+    appWindowTitle: (baseVersion, buildKind, branch, port) => {
       const tags = { local: 'local build', debug: 'debug build', experimental: 'experimental build' };
-      const tag = tags[buildKind];
+      let tag = tags[buildKind];
+      if (branch) tag = `${tag && buildKind !== 'experimental' ? tag : 'local release build'} - ${branch}`;
+      if (port) tag = `${tag || 'local build'} - port ${port}`;
       return `DoD Studio — v${baseVersion}${tag ? ` (${tag})` : ''}`;
     },
     STUDIO_TAB: 'Studio',
