@@ -19,15 +19,22 @@
 //!
 //! So the DLL wraps the four command nodes -- `connect`, `listen`, `retry`,
 //! `reconnect` -- the way `demo_reload` wraps `playdemo` (the SDK's
-//! command-list functions, no per-build address), and [`refuses`] decides:
+//! command-list functions, no per-build address), and [`decide`] picks:
 //!
-//! - `connect`: refused, except `connect local`, the engine's own listen
-//!   server (`map`), which no one else can be on.
-//! - `listen` (an HLTV proxy's broadcast): refused.
-//! - `retry`: refused, unless the last connect was `connect local`.
-//! - `reconnect`: refused, unless the last connect was `connect local` (a
-//!   `changelevel` on your own map sends it) or a demo is playing, where it
-//!   joins nothing and is left as the engine has it.
+//! - `connect <address>` and `listen <address>`: held back while
+//!   [`server_query`](crate::server_query) asks the address what it is, off
+//!   the game thread. An HLTV proxy that says VAC is off is joined: `poll`
+//!   reissues the command, approved. Anything else -- a game server, a proxy
+//!   that says VAC is on, no answer -- is refused. Watching a match through
+//!   HLTV is the one online use the user wants with this DLL loaded;
+//!   checking the proxy's own VAC byte as well keeps that safe if a proxy
+//!   ever reports one. `connect local`, the engine's own listen server
+//!   (`map`), which no one else can be on, goes straight through.
+//! - `retry`: always handed on. It only queues `connect` or `listen` for the
+//!   last address, which is then checked like any other.
+//! - `reconnect`: handed on when the game is on its own map (a `changelevel`
+//!   there sends it), on an HLTV proxy this let it join, or playing a demo,
+//!   where it joins nothing. Refused otherwise.
 //!
 //! A refused command prints why to the console and writes a line to the hook
 //! log, so a "why can't I connect" report explains itself.
@@ -45,10 +52,13 @@
 // Only the 32-bit build installs anything; a host check still compiles it.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
-use std::ffi::{CStr, c_char};
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::ffi::{CStr, CString, c_char};
+use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicUsize, Ordering};
+use std::time::Duration;
 
 use crate::engine::{self, ClEngineFuncsPartial, ConsoleCommandFn};
+use crate::server_query::{self, QueryError, ServerInfo};
 
 /// `GOLDSRC_HOOKS_ALLOW_CONNECT=1` sets this false, and nothing is wrapped.
 pub static ENABLED: AtomicBool = AtomicBool::new(true);
@@ -77,8 +87,47 @@ static REAL_RETRY: AtomicUsize = AtomicUsize::new(0);
 static REAL_RECONNECT: AtomicUsize = AtomicUsize::new(0);
 static WRAPPED: AtomicBool = AtomicBool::new(false);
 
-/// Whether the last `connect` let through was `connect local`.
-static LOCAL_SESSION: AtomicBool = AtomicBool::new(false);
+/// What the last `connect` or `listen` let through joined, as a [`Session`].
+static SESSION: AtomicU8 = AtomicU8::new(Session::None as u8);
+
+/// The server the game was last let join.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum Session {
+    None = 0,
+    /// `connect local`: the game's own listen server.
+    Local = 1,
+    /// An HLTV proxy that said VAC is off.
+    Hltv = 2,
+}
+
+impl Session {
+    fn current() -> Self {
+        match SESSION.load(Ordering::Relaxed) {
+            1 => Self::Local,
+            2 => Self::Hltv,
+            _ => Self::None,
+        }
+    }
+}
+
+/// How long a server gets to say what it is.
+const QUERY_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// A check `connect`/`listen` started and, once the query thread is done, its
+/// answer. The guard and `poll` touch it on the game thread (`poll` only
+/// `try_lock`s), the query thread once, at the end.
+struct Check {
+    command: Command,
+    address: String,
+    answer: Option<Result<ServerInfo, QueryError>>,
+}
+
+static CHECK: Mutex<Option<Check>> = Mutex::new(None);
+
+/// The command `poll` reissued after a check passed, which the guard lets
+/// through once. Game thread only.
+static APPROVED: Mutex<Option<(Command, String)>> = Mutex::new(None);
 
 /// How many more frames `poll` retries a wrap that found nothing.
 static RETRIES_LEFT: AtomicU32 = AtomicU32::new(300);
@@ -107,6 +156,7 @@ pub fn install() {
 /// frames, then says so once, in the log and the console. A no-op after that,
 /// or once wrapped.
 pub fn poll() {
+    finish_check();
     if RETRIES_LEFT.load(Ordering::Relaxed) == 0 {
         return;
     }
@@ -227,22 +277,67 @@ impl Command {
     }
 }
 
-/// Whether `command` would be refused. `argument` is its first argument, if
-/// any; `local_session` is whether the last connect let through was
-/// `connect local`; `playing_demo` is `pDemoAPI->IsPlayingback()`.
-fn refuses(
+/// What the guard does with a command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Action {
+    /// Hand it to the engine.
+    Allow,
+    /// Ask the server what it is first.
+    Check,
+    Refuse,
+}
+
+/// What to do with `command`. `argument` is its first argument, if any;
+/// `approved` is whether `poll` reissued exactly this command after a check
+/// passed; `playing_demo` is `pDemoAPI->IsPlayingback()`.
+fn decide(
     command: Command,
     argument: Option<&str>,
-    local_session: bool,
+    approved: bool,
+    session: Session,
     playing_demo: bool,
-) -> bool {
+) -> Action {
     match command {
-        // A bare `connect` only prints its usage.
-        Command::Connect => argument.is_some_and(|server| !is_local(server)),
-        Command::Listen => argument.is_some(),
-        Command::Retry => !local_session,
-        Command::Reconnect => !(local_session || playing_demo),
+        // A bare `connect` or `listen` only prints its usage.
+        Command::Connect | Command::Listen => match argument {
+            None => Action::Allow,
+            Some(server) if command == Command::Connect && is_local(server) => Action::Allow,
+            Some(_) if approved => Action::Allow,
+            Some(_) => Action::Check,
+        },
+        // It only queues `connect`/`listen` for the last address, checked then.
+        Command::Retry => Action::Allow,
+        Command::Reconnect => {
+            if session != Session::None || playing_demo {
+                Action::Allow
+            } else {
+                Action::Refuse
+            }
+        }
     }
+}
+
+/// Whether a server's answer lets the game join it, or why not.
+fn verdict(answer: &Result<ServerInfo, QueryError>) -> Result<(), &'static str> {
+    match answer {
+        Ok(info) if info.is_hltv() && !info.vac => Ok(()),
+        Ok(info) if info.is_hltv() => Err("it is an HLTV proxy, but it says VAC is on"),
+        Ok(_) => Err("it is a game server, not an HLTV proxy"),
+        Err(QueryError::NoAnswer) => {
+            Err("it didn't answer, so there's no telling whether it is an HLTV proxy")
+        }
+        Err(QueryError::Unreadable) => Err("its answer couldn't be read"),
+        Err(QueryError::BadAddress(_)) => Err("that address couldn't be looked up"),
+    }
+}
+
+/// An address `poll` can safely put back on a command line: nothing that
+/// could carry a second command (quotes, `;`, spaces, line breaks).
+fn is_plain_address(address: &str) -> bool {
+    !address.is_empty()
+        && address
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b':' | b'_'))
 }
 
 /// `local` is the engine's own listen server, the one `map` joins.
@@ -250,21 +345,39 @@ fn is_local(server: &str) -> bool {
     server.trim().eq_ignore_ascii_case("local")
 }
 
-/// Wraps `real`: refuses, or remembers and hands on.
+/// Wraps `real`: refuses, starts a check, or remembers and hands on.
 unsafe fn guard(command: Command, real: &AtomicUsize) {
     let argument = first_argument();
-    let playing_demo = playing_demo();
-    if refuses(
+    let approved = take_approval(command, argument.as_deref());
+    match decide(
         command,
         argument.as_deref(),
-        LOCAL_SESSION.load(Ordering::Relaxed),
-        playing_demo,
+        approved,
+        Session::current(),
+        playing_demo(),
     ) {
-        refuse(command, argument.as_deref());
-        return;
+        Action::Refuse => {
+            refuse(
+                command,
+                argument.as_deref(),
+                "the game isn't on its own map or an HLTV proxy",
+            );
+            return;
+        }
+        Action::Check => {
+            start_check(command, argument.unwrap_or_default());
+            return;
+        }
+        Action::Allow => {}
     }
-    if let (Command::Connect, Some(server)) = (command, argument.as_deref()) {
-        LOCAL_SESSION.store(is_local(server), Ordering::Relaxed);
+    match (command, argument.as_deref()) {
+        (Command::Connect, Some(server)) if is_local(server) => {
+            SESSION.store(Session::Local as u8, Ordering::Relaxed)
+        }
+        (Command::Connect | Command::Listen, Some(_)) => {
+            SESSION.store(Session::Hltv as u8, Ordering::Relaxed)
+        }
+        _ => {}
     }
     let address = real.load(Ordering::Relaxed);
     if address != 0 {
@@ -273,21 +386,113 @@ unsafe fn guard(command: Command, real: &AtomicUsize) {
     }
 }
 
-fn refuse(command: Command, argument: Option<&str>) {
+/// Whether `poll` reissued exactly this command; used up either way.
+fn take_approval(command: Command, argument: Option<&str>) -> bool {
+    let Ok(mut approved) = APPROVED.lock() else {
+        return false;
+    };
+    match (approved.take(), argument) {
+        (Some((c, address)), Some(argument)) => c == command && address == argument,
+        _ => false,
+    }
+}
+
+/// Asks `address` what it is on another thread; `poll` acts on the answer.
+fn start_check(command: Command, address: String) {
+    if !is_plain_address(&address) {
+        refuse(
+            command,
+            Some(&address),
+            "that isn't a plain host:port address",
+        );
+        return;
+    }
+    let line = format!("{} {address}", command.name());
+    let Ok(mut check) = CHECK.lock() else {
+        return;
+    };
+    if check.is_some() {
+        crate::commands::console_print(&format!(
+            "DoD Studio is still checking the last server; try `{line}` again in a moment.\n"
+        ));
+        return;
+    }
+    *check = Some(Check {
+        command,
+        address: address.clone(),
+        answer: None,
+    });
+    drop(check);
+    crate::commands::console_print(&format!(
+        "DoD Studio is checking whether {address} is an HLTV proxy before joining...\n"
+    ));
+    unsafe { crate::debug::report(&format!("connect_guard: checking `{line}`")) };
+    std::thread::spawn(move || {
+        let answer = server_query::query(&address, QUERY_TIMEOUT);
+        if let Ok(mut check) = CHECK.lock()
+            && let Some(check) = check.as_mut()
+        {
+            check.answer = Some(answer);
+        }
+    });
+}
+
+/// Acts on a finished check: reissues the command, approved, or refuses it.
+fn finish_check() {
+    let Ok(mut slot) = CHECK.try_lock() else {
+        return;
+    };
+    if slot.as_ref().is_none_or(|check| check.answer.is_none()) {
+        return;
+    }
+    let Some(Check {
+        command,
+        address,
+        answer: Some(answer),
+    }) = slot.take()
+    else {
+        return;
+    };
+    drop(slot);
+    let line = format!("{} {address}", command.name());
+    match verdict(&answer) {
+        Ok(()) => {
+            let Ok(cmd) = CString::new(format!("{line}\n")) else {
+                return;
+            };
+            if let Ok(mut approved) = APPROVED.lock() {
+                *approved = Some((command, address.clone()));
+            }
+            crate::commands::console_print(&format!(
+                "DoD Studio: {address} is an HLTV proxy with VAC off. Joining.\n"
+            ));
+            unsafe {
+                crate::debug::report(&format!(
+                    "connect_guard: allowed `{line}` (HLTV proxy, VAC off)"
+                ))
+            };
+            engine::client_cmd(&cmd);
+        }
+        Err(why) => refuse(command, Some(&address), why),
+    }
+}
+
+fn refuse(command: Command, argument: Option<&str>, why: &str) {
     let line = match argument {
         Some(argument) => format!("{} {argument}", command.name()),
         None => command.name().to_string(),
     };
-    crate::commands::console_print(&refusal_message(&line));
-    unsafe { crate::debug::report(&format!("connect_guard: refused `{line}`")) };
+    crate::commands::console_print(&refusal_message(&line, why));
+    unsafe { crate::debug::report(&format!("connect_guard: refused `{line}`: {why}")) };
 }
 
-/// What the console shows for a refused `line`.
-fn refusal_message(line: &str) -> String {
+/// What the console shows for a refused `line`, and `why`.
+fn refusal_message(line: &str, why: &str) -> String {
     format!(
-        "DoD Studio refused `{line}`: joining a server with DoD Studio's hook DLL loaded risks \
-         a VAC ban. Play online from a separate copy of Half-Life that DoD Studio never starts. \
-         To test on your own server anyway, start the game with {ALLOW_ENV}=1.\n"
+        "DoD Studio refused `{line}`: {why}. With DoD Studio's hook DLL loaded, the game only \
+         joins HLTV proxies that say VAC is off; joining a game server risks a VAC ban. Play \
+         online from a separate copy of Half-Life that DoD Studio never starts. To test on your \
+         own server anyway, start the game with {ALLOW_ENV}=1.\n"
     )
 }
 
@@ -338,49 +543,118 @@ pub fn allowed_by_env(value: Option<&str>) -> bool {
 mod tests {
     use super::*;
 
+    const NONE: Session = Session::None;
+
     #[test]
-    fn connecting_to_a_server_is_refused() {
+    fn connecting_to_an_address_asks_it_first() {
         for server in ["1.2.3.4:27015", "dod.example.com", "localhost", "127.0.0.1"] {
-            assert!(
-                refuses(Command::Connect, Some(server), false, false),
-                "{server}"
+            assert_eq!(
+                decide(Command::Connect, Some(server), false, NONE, false),
+                Action::Check
             );
-            assert!(
-                refuses(Command::Connect, Some(server), true, true),
-                "{server}"
+            assert_eq!(
+                decide(Command::Connect, Some(server), false, Session::Hltv, true),
+                Action::Check
+            );
+            assert_eq!(
+                decide(Command::Listen, Some(server), false, NONE, false),
+                Action::Check
             );
         }
     }
 
     #[test]
+    fn the_reissued_command_goes_through() {
+        assert_eq!(
+            decide(Command::Connect, Some("1.2.3.4:27020"), true, NONE, false),
+            Action::Allow
+        );
+        assert_eq!(
+            decide(Command::Listen, Some("1.2.3.4:27020"), true, NONE, false),
+            Action::Allow
+        );
+    }
+
+    #[test]
     fn the_games_own_listen_server_is_allowed() {
-        assert!(!refuses(Command::Connect, Some("local"), false, false));
-        assert!(!refuses(Command::Connect, Some(" LOCAL "), false, false));
+        assert_eq!(
+            decide(Command::Connect, Some("local"), false, NONE, false),
+            Action::Allow
+        );
+        assert_eq!(
+            decide(Command::Connect, Some(" LOCAL "), false, NONE, false),
+            Action::Allow
+        );
     }
 
     #[test]
     fn a_bare_connect_or_listen_only_prints_its_usage() {
-        assert!(!refuses(Command::Connect, None, false, false));
-        assert!(!refuses(Command::Listen, None, false, false));
+        assert_eq!(
+            decide(Command::Connect, None, false, NONE, false),
+            Action::Allow
+        );
+        assert_eq!(
+            decide(Command::Listen, None, false, NONE, false),
+            Action::Allow
+        );
     }
 
     #[test]
-    fn listen_is_refused() {
-        assert!(refuses(Command::Listen, Some("1.2.3.4:27020"), true, true));
+    fn retry_is_handed_on_since_what_it_queues_is_checked() {
+        assert_eq!(
+            decide(Command::Retry, None, false, NONE, false),
+            Action::Allow
+        );
     }
 
     #[test]
-    fn retry_is_refused_unless_the_last_connect_was_local() {
-        assert!(refuses(Command::Retry, None, false, false));
-        assert!(refuses(Command::Retry, None, false, true));
-        assert!(!refuses(Command::Retry, None, true, false));
+    fn reconnect_only_on_your_own_map_an_hltv_proxy_or_in_a_demo() {
+        assert_eq!(
+            decide(Command::Reconnect, None, false, NONE, false),
+            Action::Refuse
+        );
+        assert_eq!(
+            decide(Command::Reconnect, None, false, Session::Local, false),
+            Action::Allow
+        );
+        assert_eq!(
+            decide(Command::Reconnect, None, false, Session::Hltv, false),
+            Action::Allow
+        );
+        assert_eq!(
+            decide(Command::Reconnect, None, false, NONE, true),
+            Action::Allow
+        );
     }
 
     #[test]
-    fn reconnect_is_left_alone_on_your_own_map_and_in_a_demo() {
-        assert!(refuses(Command::Reconnect, None, false, false));
-        assert!(!refuses(Command::Reconnect, None, true, false));
-        assert!(!refuses(Command::Reconnect, None, false, true));
+    fn only_an_hltv_proxy_with_vac_off_is_joined() {
+        let info = |server_type, vac| Ok(ServerInfo { server_type, vac });
+        assert_eq!(verdict(&info(b'p', false)), Ok(()));
+        assert!(
+            verdict(&info(b'p', true))
+                .unwrap_err()
+                .contains("VAC is on")
+        );
+        assert!(
+            verdict(&info(b'd', false))
+                .unwrap_err()
+                .contains("game server")
+        );
+        assert!(verdict(&info(b'l', false)).is_err());
+        assert!(verdict(&Err(QueryError::NoAnswer)).is_err());
+        assert!(verdict(&Err(QueryError::Unreadable)).is_err());
+        assert!(verdict(&Err(QueryError::BadAddress("x".into()))).is_err());
+    }
+
+    #[test]
+    fn only_a_plain_address_is_put_back_on_a_command_line() {
+        for ok in ["1.2.3.4:27020", "hltv.example.com", "my-proxy_1:27020"] {
+            assert!(is_plain_address(ok), "{ok}");
+        }
+        for bad in ["", "1.2.3.4;quit", "a b", "\"a\"", "1.2.3.4\nquit"] {
+            assert!(!is_plain_address(bad), "{bad:?}");
+        }
     }
 
     #[test]
@@ -413,9 +687,10 @@ mod tests {
     }
 
     #[test]
-    fn the_refusal_names_the_command_and_the_way_out() {
-        let message = refusal_message("connect 1.2.3.4:27015");
-        assert!(message.contains("`connect 1.2.3.4:27015`"));
+    fn the_refusal_names_the_command_the_reason_and_the_way_out() {
+        let message = refusal_message("connect 1.2.3.4:27015", "it is a game server");
+        assert!(message.contains("`connect 1.2.3.4:27015`: it is a game server."));
+        assert!(message.contains("HLTV"));
         assert!(message.contains("VAC"));
         assert!(message.contains(ALLOW_ENV));
         assert!(message.ends_with('\n'));

@@ -77,14 +77,30 @@ given. There is no HLAE in that session, so no connect warning. Until #451
 that was the one route with no protection at all; the DLL's own refusal
 (below) now covers it too. Its README and the tool itself still warn.
 
-## The hook DLL refuses to join a server (#451)
+## The hook DLL refuses to join a server, except an HLTV proxy (#451)
 
 Built from option 1 of the proposals below (decided in the 2026-09-28 review,
 D2). While `dodstudio_goldsrc_hooks.dll` is loaded it wraps the engine's own
 `connect`, `listen`, `retry` and `reconnect` commands, through the SDK's
-command-list functions (no per-build address, both builds), and refuses them.
-The console says why, and the hook log gets a `connect_guard: refused ...`
-line. It is a stop, not a question, and it doesn't depend on HLAE's hook.
+command-list functions (no per-build address, both builds), and refuses to
+join anything but an HLTV proxy. The console says why, and the hook log gets a
+`connect_guard: refused ...` line. It is a stop, not a question, and it doesn't
+depend on HLAE's hook.
+
+**HLTV proxies can be joined** (the user's call, 2026-10-05: watching a match
+through HLTV is the one online use wanted with the DLL loaded). Before a
+`connect <address>` or `listen <address>` goes through, the DLL sends the
+address the standard server-info query (`A2S_INFO`) off the game thread, for up
+to 2 seconds. It joins only when the answer says **both** "HLTV proxy" (server
+type `p`) **and** "VAC off". A game server, a proxy that reports VAC on, an
+address that doesn't answer, or one with anything but plain `host:port`
+characters is refused, with the reason in the console. HLAE still asks "You are
+about to connect to a server" on top of that; answer Yes for the proxy.
+
+Read from both builds of `proxy.dll`: the proxy answers the query with type `p`
+and writes its VAC byte as a constant 0, so today every HLTV proxy passes and
+the VAC check is there in case a proxy ever reports otherwise. A proxy that
+isn't relaying a game answers nothing, so it can't be joined.
 
 Read from both `hw.dll`s: every way the game joins a server ends in the
 `connect` command. `retry` queues `connect <last server>` (or `listen`), and
@@ -96,8 +112,10 @@ What is still allowed:
 
 - **`connect local`**, which is how `map` joins the game's own listen server.
   No one else can be on it.
-- **`retry` and `reconnect` after `connect local`.** A `changelevel` on your
-  own map sends `reconnect`.
+- **`retry`**, always: it only queues `connect` or `listen` for the last
+  address, and that is checked like any other.
+- **`reconnect` after `connect local` or an HLTV proxy.** A `changelevel` on
+  your own map sends `reconnect`.
 - **`reconnect` while a demo plays.** There it joins nothing, so it is left as
   the engine has it.
 

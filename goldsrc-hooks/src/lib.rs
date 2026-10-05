@@ -169,6 +169,7 @@ mod pmove_guard;
 mod remote;
 mod scan;
 mod scoreboard;
+mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_eye;

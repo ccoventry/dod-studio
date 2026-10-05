@@ -163,10 +163,12 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
-- **Refuses to join a server** (on by default): `connect`, `retry`,
-  `reconnect` and `listen` are refused while the DLL is loaded, with a console
-  message and a log line, because joining a VAC-secured server with it loaded
-  is a ban risk. `connect local` (what `map` runs) still works.
+- **Refuses to join a server, except an HLTV proxy** (on by default):
+  `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
+  the game thread, `src/server_query.rs`) and only join an HLTV proxy that
+  says VAC is off; anything else is refused, with a console message and a log
+  line, because joining a VAC-secured server with the DLL loaded is a ban
+  risk. `connect local` (what `map` runs) still works.
   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
   server. Wraps the engine commands the same way as the demo reload. See
   `src/connect_guard.rs` and `docs/vac_safety.md`.
