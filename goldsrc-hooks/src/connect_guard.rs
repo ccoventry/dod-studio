@@ -490,9 +490,9 @@ fn refuse(command: Command, argument: Option<&str>, why: &str) {
 fn refusal_message(line: &str, why: &str) -> String {
     format!(
         "DoD Studio refused `{line}`: {why}. With DoD Studio's hook DLL loaded, the game only \
-         joins HLTV proxies that say VAC is off; joining a game server risks a VAC ban. Play \
-         online from a separate copy of Half-Life that DoD Studio never starts. To test on your \
-         own server anyway, start the game with {ALLOW_ENV}=1.\n"
+         joins HLTV proxies that say VAC is off; joining a game server risks a VAC ban. To play \
+         online, close the game and start Day of Defeat from Steam, without DoD Studio. To test \
+         on your own server anyway, start the game with {ALLOW_ENV}=1.\n"
     )
 }
 
