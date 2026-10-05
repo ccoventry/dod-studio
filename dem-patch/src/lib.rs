@@ -40,6 +40,7 @@ pub mod demo_parser;
 pub mod demo_writer;
 pub mod netmsg_doer;
 pub mod prelude;
+pub mod progress;
 pub mod types;
 
 pub use utils::bitslice_to_string;
@@ -83,6 +84,15 @@ pub fn open_demo(demo_path: impl AsRef<Path> + AsRef<OsStr>) -> eyre::Result<Dem
 
 pub fn open_demo_from_bytes(demo_bytes: &[u8]) -> eyre::Result<Demo> {
     Demo::parse_from_bytes(demo_bytes, types::MessageDataParseMode::Parse)
+}
+
+/// [`open_demo_from_bytes`], calling `progress(bytes_read, bytes_total)` as
+/// it goes (see [`progress`]).
+pub fn open_demo_from_bytes_with_progress(
+    demo_bytes: &[u8],
+    progress: &mut dyn FnMut(usize, usize),
+) -> eyre::Result<Demo> {
+    progress::with_progress(progress, || open_demo_from_bytes(demo_bytes))
 }
 
 /// Writes a [`u32`] into [`types::BitVec`]

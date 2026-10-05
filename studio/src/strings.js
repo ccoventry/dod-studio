@@ -429,6 +429,7 @@ export const STRINGS = {
       unusable: (p) => `"${p}" is unusable`,
     },
     andNMore: (n) => `...and ${n} more`,
+    PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
     NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
@@ -1351,6 +1352,12 @@ export const STRINGS = {
     STATUS_DOWNLOADING: 'Downloading update…',
     STATUS_READY: 'Update downloaded — restart to apply.',
     STATUS_CHECK_FAILED: (err) => `Update check failed: ${err}`,
+    // Local and debug builds: report what's published, never offer to install
+    // it -- the installer would replace the *installed* app, not this one.
+    statusLocalBuild: (stable, experimental) =>
+      `Latest stable: ${stable ? `v${stable}` : 'unavailable'} · latest experimental: ${experimental ? `v${experimental}` : 'unavailable'}. `
+      + "This is a local build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy. "
+      + 'Get the published build from the Releases page.',
   },
 
   // ── OS Toast Notifications (issue #98) ──────────────────────────────────

@@ -85,6 +85,9 @@ async function refreshPathWarnings() {
       warning: document.querySelector(warning),
     }))
     .filter((r) => r.input && r.warning);
+  // Start stays disabled while the hl.exe or HLAE path is blank: re-check it
+  // whenever a path changes.
+  refreshLaunchGuard();
   if (!rows.length) return;
 
   let states;
