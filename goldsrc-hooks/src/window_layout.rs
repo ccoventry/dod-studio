@@ -241,6 +241,18 @@ fn fit(child: Rect, design: (i32, i32), now: (i32, i32)) -> Rect {
     Rect { x, y, w, h }
 }
 
+/// [`fit`] for a control given as `(x, y, wide, tall)`, for the DoD Studio
+/// window's tabs, which follow their size by the same rule.
+pub(crate) fn fit_rect(
+    child: (i32, i32, i32, i32),
+    design: (i32, i32),
+    now: (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = child;
+    let r = fit(Rect { x, y, w, h }, design, now);
+    (r.x, r.y, r.w, r.h)
+}
+
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
 /// `Frame::PerformLayout` places itself. In GameUI they have no name at all
 /// (listed live on both builds, 2026-10-01), while every control a `.res`
@@ -484,6 +496,11 @@ mod hook {
                 if object.is_null() {
                     return None;
                 }
+                // DoD Studio's own window is a GameUI Frame with a copied
+                // vftable, so the range check below would turn it away.
+                if object as usize == crate::studio_panel::object() {
+                    return Some(object);
+                }
                 let vftable = *(object as *const usize);
                 if vftable < self.gameui.0
                     || vftable + (FRAME_SLOT_IS_SIZEABLE + 1) * 4 > self.gameui.1
@@ -600,6 +617,11 @@ mod hook {
                     continue;
                 };
                 present.insert(vp);
+                // Parked off screen while the DoD Studio window stands in for
+                // it: that place is not one to save or restore.
+                if vp == crate::studio_panel::parked_bar() {
+                    continue;
+                }
                 let window = state.windows.entry(vp).or_insert_with(|| Window {
                     key: format!(
                         "{}/{}",
