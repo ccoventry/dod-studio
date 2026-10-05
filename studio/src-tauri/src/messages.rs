@@ -293,6 +293,8 @@ pub fn failed_to_build_updater(err: impl Display) -> String {
 pub const NO_UPDATE_AVAILABLE_TO_INSTALL: &str =
     "No update available to install — call check_for_update first";
 
+pub const LOCAL_BUILD_CANNOT_INSTALL_UPDATE: &str = "This is a local or debug build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy";
+
 // ── settings_manager.rs ──────────────────────────────────────────────────
 
 pub fn failed_to_serialize_settings(err: impl Display) -> String {
