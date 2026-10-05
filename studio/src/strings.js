@@ -501,6 +501,9 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #40: sortable columns and the whole-batch bar.
+    SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
+    batchProgress: (pct) => `Batch ${pct}%`,
     // #110: a CSV of every captured highlight, for an editor.
     EXPORT_MARKERS_BUTTON: 'Export Marker List…',
     EXPORT_MARKERS_TITLE: 'Save a CSV with one row per captured or rendered highlight: its demo, player, kills, where it is in the demo, its take and its label. For lining clips up in your editor.',
@@ -710,6 +713,7 @@ export const STRINGS = {
     SUBTAB_TEAM_DETAILS: 'Team Details',
     SUBTAB_TIMELINE: 'Timeline',
     SUBTAB_ROUNDS: 'Rounds',
+    SUBTAB_FLAGS: 'Flags',
     SUBTAB_CHAT: 'Chat Log',
     EMPTY_PICK_DEMO: 'Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".',
     EMPTY_PICK_DEMO_JS_FALLBACK: 'Browse for a demo file, or select one from the Workspace and click "View Match Telemetry".',
@@ -842,6 +846,27 @@ export const STRINGS = {
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
 
     ROUNDS_TITLE: 'Rounds',
+    // #192: the Flags tab.
+    FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
+    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    FLAGS_TITLE: 'Flags',
+    flagArea: (area) => `Area ${area}`,
+    COL_FLAG: 'Flag',
+    COL_OWNER_AT_END: 'Held at the end by',
+    COL_CAPTURES: 'Captures',
+    COL_BLOCKED: 'Blocked',
+    FLAGS_NO_LAYOUT: "The demo started after the flags were set up, so their layout isn't known.",
+    CAPTURES_TITLE: 'Captures',
+    COL_TEAM: 'Team',
+    COL_CAPPERS: 'Cappers',
+    FLAGS_BREAK: 'from the other team',
+    FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
+    CAPPERS_TITLE: 'Cappers',
+    COL_PLAYER: 'Player',
+    COL_CAP_CREDITS: 'Caps',
+    COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_OBJ_POINTS: 'Objective points',
+    COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
     COL_START_TIME: 'Start Time',
     COL_WINNER: 'Winner',
@@ -1291,6 +1316,21 @@ export const STRINGS = {
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+  },
+
+  // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
+  COMMAND_SUGGEST: {
+    OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
+    GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
+    SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
+    NOOP_EVERYWHERE: 'Does nothing from a demo: the game drops it.',
+    NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
+    HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    describe: (source, kind, builds) => {
+      const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
+      const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';
+      return `${what}${where}`;
+    },
   },
 
   // ── ipc_bridge.js: error-toast prefixes wrapping backend errors ─────────

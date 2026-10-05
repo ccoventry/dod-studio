@@ -455,6 +455,20 @@ select {
   color: #ccc;
 }
 
+/* #192: the Flags tab. */
+.analyzer-team-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: baseline;
+}
+
+.analyzer-flag-cards {
+  grid-template-columns: repeat(2, 1fr);
+}
+
 .analyzer-steam-ids {
   display: flex;
   gap: 6px 16px;
