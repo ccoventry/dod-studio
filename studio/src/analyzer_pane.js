@@ -9,6 +9,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
@@ -68,6 +69,8 @@ let setAnalyzerExplorerWidth = async () => {};
 let currentDir = null;
 const dirCache = new Map(); // path -> DirListing from browse_directory
 const openTreeNodes = new Set();
+// Folders being read for the tree now, so a re-render never reads one twice.
+const pendingTreeLoads = new Set();
 let thisPcOpen = true;
 let driveRoots = []; // DirEntryLite[]
 let localFolders = []; // DemoFolderHit[] from scan_demo_folders
@@ -466,6 +469,8 @@ async function renderExplorerTree() {
     ${thisPcOpen ? `<div class="tree-children">${driveRoots.map(treeRowHtml).join('')}</div>` : ''}
   </div>`;
 
+  loadUnloadedOpenNodes();
+
   const thisPcToggle = container.querySelector('#tree-this-pc-toggle');
   thisPcToggle?.addEventListener('click', () => {
     thisPcOpen = !thisPcOpen;
@@ -481,6 +486,23 @@ async function renderExplorerTree() {
   container.querySelectorAll('.tree-label').forEach((el) => {
     el.addEventListener('click', () => setCurrentDir(el.dataset.path));
   });
+}
+
+// An open folder with nothing read shows "Loading…": read every such folder
+// nobody is reading yet, and draw the tree again as each arrives. A folder
+// that can't be read is stored empty, as openTreeNode does, so its
+// placeholder goes away instead of staying for good (#572).
+function loadUnloadedOpenNodes() {
+  for (const path of unloadedOpenNodes(openTreeNodes, dirCache, pendingTreeLoads)) {
+    pendingTreeLoads.add(path);
+    browseDirectory(path)
+      .then((listing) => dirCache.set(path, listing))
+      .catch(() => dirCache.set(path, { subdirs: [], demos: [] }))
+      .finally(() => {
+        pendingTreeLoads.delete(path);
+        renderExplorerTree();
+      });
+  }
 }
 
 // Shared by the toggle-button click handler above and the keyboard Right
