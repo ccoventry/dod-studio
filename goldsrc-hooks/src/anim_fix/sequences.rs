@@ -16,8 +16,6 @@ pub(super) struct Sequence {
     /// `label.to_lowercase()`, worked out once here rather than for every
     /// label on every lookup.
     lower: Box<str>,
-    /// How long it runs, in seconds. Zero means "don't know".
-    duration: f64,
 }
 
 /// One model's sequences, in index order.
@@ -82,44 +80,21 @@ fn read_sequences(model: *mut ModelSPartial) -> Option<SequenceInfo> {
         let entry =
             unsafe { base.add(seqindex as usize + i as usize * size_of::<StudioSeqDescPartial>()) }
                 as *const StudioSeqDescPartial;
-        let (fps, frames) = unsafe { ((*entry).fps, (*entry).numframes) };
-        // A sequence with a nonsense rate or frame count gets zero rather than
-        // an absurd duration -- callers treat zero as "don't know".
-        let duration = if fps > 0.0 && (0..=4096).contains(&frames) {
-            f64::from(frames) / f64::from(fps)
-        } else {
-            0.0
-        };
-        sequences.push(sequence(&unsafe { (*entry).label_str() }, duration));
+        sequences.push(sequence(&unsafe { (*entry).label_str() }));
     }
     Some(Arc::from(sequences))
 }
 
-fn sequence(label: &str, duration: f64) -> Sequence {
+fn sequence(label: &str) -> Sequence {
     Sequence {
         label: Arc::from(label),
         lower: label.to_lowercase().into_boxed_str(),
-        duration,
     }
 }
 
 /// Every sequence in `model`, or an empty list when it cannot be read.
 pub(super) fn model_sequences(model: *mut ModelSPartial) -> SequenceInfo {
     with_sequences(model, Arc::clone)
-}
-
-/// How long one of a model's sequences runs, in seconds. Zero when the model
-/// or index cannot be read, or the header's numbers are not credible.
-pub(super) fn model_sequence_duration(model: *mut ModelSPartial, sequence: i32) -> f64 {
-    if sequence < 0 {
-        return 0.0;
-    }
-    with_sequences(model, |sequences| {
-        sequences
-            .get(sequence as usize)
-            .map(|s| s.duration)
-            .unwrap_or(0.0)
-    })
 }
 
 /// What one of a model's sequences is called, or `None` when the model or
@@ -214,11 +189,7 @@ mod tests {
     /// the cache is shared by every test in the crate.
     fn seed(address: usize, labels: &[&str]) -> *mut ModelSPartial {
         let model = std::ptr::without_provenance_mut::<ModelSPartial>(address);
-        let sequences: Vec<Sequence> = labels
-            .iter()
-            .enumerate()
-            .map(|(i, label)| sequence(label, i as f64 * 0.5))
-            .collect();
+        let sequences: Vec<Sequence> = labels.iter().map(|label| sequence(label)).collect();
         SEQUENCE_CACHE
             .lock()
             .unwrap()
@@ -277,13 +248,10 @@ mod tests {
     }
 
     #[test]
-    fn labels_and_durations_are_read_by_index() {
+    fn labels_are_read_by_index() {
         let model = seed(0x5e9_0002, V_STICK);
         assert_eq!(sequence_label(model, 4).as_deref(), Some("throw"));
         assert_eq!(sequence_label(model, V_STICK.len()), None);
-        assert_eq!(model_sequence_duration(model, 4), 2.0);
-        assert_eq!(model_sequence_duration(model, V_STICK.len() as i32), 0.0);
-        assert_eq!(model_sequence_duration(model, -1), 0.0);
     }
 
     /// A model the engine cannot hand over yet reads as empty and is not

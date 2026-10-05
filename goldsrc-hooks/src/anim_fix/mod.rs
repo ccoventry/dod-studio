@@ -22,6 +22,12 @@
 //!   matters only for automatic fire: a held trigger leaves the body sequence
 //!   sitting on the same `_shoot` label, so the individual rounds after the
 //!   first have no sequence change to key off.
+//! - **grenades** -- copied from what the thrower's own recording shows, as
+//!   far as a spectator can see it: `pinpull` when the body enters its
+//!   grenade attack, `throw` 0.5s later when the grenade leaves the hand, and
+//!   then whichever of three things the player did -- caught it again to
+//!   prime it, kept a second grenade, or went to the next weapon. See
+//!   `grenade.rs`.
 //! - **reload** -- from the spectated player's body animation as well
 //!   (`crouch_bar_reload`, `prone_webley_reload`, ...).
 //! - **draw** -- when the viewmodel *settles* on a different weapon. Not
@@ -61,6 +67,8 @@
 //! the engine interfaces this crate captures itself.
 
 mod classify;
+mod crosshair_rule;
+mod grenade;
 mod sequences;
 mod trace;
 
@@ -68,11 +76,12 @@ use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
 
 use classify::{
     ATTACK_SEQUENCES, BodyAction, DeployState, DeployableWeapon, classify_body_sequence,
-    deploy_state_from_body_sequence, find_deployable_weapon, is_throw_label, model_stem,
+    deploy_state_from_body_sequence, find_deployable_weapon, is_grenade_viewmodel, model_stem,
     third_person_stem,
 };
+pub(crate) use crosshair_rule::Hidden as CrosshairHidden;
 pub(crate) use sequences::sequence_label;
-use sequences::{animation_lookup_any, animation_lookup_sequence, model_sequence_duration};
+use sequences::{animation_lookup_any, animation_lookup_sequence};
 pub use trace::{LOG_HELD_MODELS, status};
 use trace::{
     STAGE_DISABLED, STAGE_NO_ENGFUNCS, STAGE_NO_SPECTATED_PLAYER, STAGE_NO_VIEWMODEL_ENTITY,
@@ -82,60 +91,24 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// Which answer to the emptied-hand problem is in force.
+/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
 ///
-/// A grenade throw legitimately empties the hand -- `v_stick`'s `throw` is two
-/// frames, 0.050s, and the pose it ends on holds nothing. What is *not*
-/// settled is what should happen next, because the signal that would settle it
-/// is missing: a spectator cannot see the pin pull, and the replicated
-/// `weaponmodel` lags the thrower's own client badly. Measured on one capture,
-/// the server still claimed he held the grenade four seconds after he threw
-/// it; his own client had drawn the next weapon 1.25s in.
-///
-/// So this is a genuine choice between imperfect options rather than a
-/// difficulty being deferred, and the numbers exist so they can be compared in
-/// one session instead of across four rebuilds.
-///
-/// | value | behaviour | its flaw |
-/// | --- | --- | --- |
-/// | 0 | fix off entirely | no animations at all |
-/// | 1 | leave the hand empty | empty for as long as the server lags -- 3.5s, measured |
-/// | 2 | draw what is held as soon as the throw ends | shows a grenade he may already have put away |
-/// | 3 | never play the throw, so the grenade stays in hand | no throw animation, and the grenade lingers |
-/// | 4 | wait, then draw what is held | as 2, but gives the server time to catch up first |
-///
-/// Everything else the fix does -- drawing on the leading edge, not drawing
-/// when the camera changes player, not swallowing a weapon flashed past -- is
-/// settled and unconditional. Those were measured against captures and fixed;
-/// they are not options.
+/// This used to be a ladder of four ways to treat the hand after a grenade
+/// throw (leave it empty, draw at once, never throw, draw after a second),
+/// kept side by side because nothing said which was right. A POV demo does:
+/// `grenade.rs` now copies what the thrower's own recording plays, so there
+/// is one behaviour and the cvar is a switch. Values above 1 are taken as 1,
+/// so a config that still says 2 or 4 keeps working.
 pub static LEVEL: AtomicI32 = AtomicI32::new(0);
 
 pub const LEVEL_OFF: i32 = 0;
-/// Play the throw and leave the hand empty until something else draws.
-pub const LEVEL_EMPTY_HAND: i32 = 1;
-/// Draw whatever the replicated state says is held, the moment the throw ends.
-pub const LEVEL_REDRAW_NOW: i32 = 2;
-/// Never empty the hand: skip the throw animation for grenades entirely.
-pub const LEVEL_NEVER_EMPTY: i32 = 3;
-/// Draw what is held, but only after `LOOKAHEAD_SECONDS`.
-pub const LEVEL_LOOKAHEAD: i32 = 4;
-pub const LEVEL_MAX: i32 = LEVEL_LOOKAHEAD;
+pub const LEVEL_MAX: i32 = 1;
 
-/// How long option 4 waits before drawing.
-///
-/// Long enough to be worth waiting for -- the one measurement available puts
-/// the thrower's own client at 1.25s -- and short enough that the hand is not
-/// empty for anything like the 3.5s option 1 produced.
-const LOOKAHEAD_SECONDS: f64 = 1.0;
-
-/// What each option is, for `dodstudio_debug_status` and the startup line.
+/// What each value is, for `dodstudio_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
-        LEVEL_EMPTY_HAND => "throw empties the hand, left empty",
-        LEVEL_REDRAW_NOW => "draw what is held as soon as the throw ends",
-        LEVEL_NEVER_EMPTY => "no throw animation, grenade stays in hand",
-        _ => "draw what is held, after a 1s wait",
+        _ => "on",
     }
 }
 
@@ -287,66 +260,7 @@ fn play_viewmodel_animation(
         };
     }
 
-    // A grenade throw empties the hand and leaves it that way. `throw` is two
-    // frames -- 0.050s on `v_stick` -- so the viewmodel sits on that final,
-    // empty pose for as long as nothing else plays. Measured against a real
-    // HLTV capture that was 3.5 seconds, because the replicated `weaponmodel`
-    // went on insisting the player still held the grenade for four seconds
-    // after he threw it. His own client had drawn the next weapon 1.25s in.
-    //
-    // So schedule a re-draw for the moment the throw finishes. What gets drawn
-    // is whatever the replicated state then says is in hand, which is the only
-    // answer available -- it is behind the player's own client, but an empty
-    // hand for four seconds is further from the truth than a late draw.
-    if is_throw_label(played_label) {
-        match level() {
-            // Never empty the hand in the first place.
-            LEVEL_NEVER_EMPTY => {
-                unsafe {
-                    crate::debug::report(
-                        "anim_fix: skipping the throw animation, so the grenade stays in hand",
-                    )
-                };
-                return;
-            }
-            LEVEL_REDRAW_NOW | LEVEL_LOOKAHEAD => {
-                let ends =
-                    engine::client_time() + model_sequence_duration(viewmodel, sequence).max(0.05);
-                let at = if level() == LEVEL_LOOKAHEAD {
-                    ends + LOOKAHEAD_SECONDS
-                } else {
-                    ends
-                };
-                REDRAW_AFTER.store(at.to_bits(), Ordering::Relaxed);
-            }
-            // LEVEL_EMPTY_HAND: play it and leave the hand as it lands.
-            _ => {}
-        }
-    }
-
     unsafe { (engfuncs.pfn_weapon_anim)(sequence, 0) };
-}
-
-/// When to draw whatever is in hand after a throw empties it, as demo-time
-/// bits, or zero for "nothing pending".
-static REDRAW_AFTER: AtomicU64 = AtomicU64::new(0);
-
-/// Plays the draw for the weapon currently in view if a throw has finished.
-///
-/// Called every frame. Deliberately does nothing unless a throw actually
-/// scheduled one, so the ordinary path is a single relaxed load.
-fn redraw_after_throw_if_due(now: f64, state: Option<DeployState>, viewmodel: *mut ModelSPartial) {
-    let due = f64::from_bits(REDRAW_AFTER.load(Ordering::Relaxed));
-    if due == 0.0 || now < due {
-        return;
-    }
-    REDRAW_AFTER.store(0, Ordering::Relaxed);
-    play_viewmodel_animation(
-        animation_lookup_sequence("draw", state, viewmodel),
-        "throw finished, drawing what is now in hand",
-        state,
-        viewmodel,
-    );
 }
 
 // What `apply()` last saw, published for `on_weapon_fired`, which runs from
@@ -363,6 +277,38 @@ const FIRE_DEDUP_SECONDS: f64 = 0.03;
 
 /// Returns whether a firing animation should play now, or whether the other
 /// trigger already played one for this same shot.
+/// How long after a switch the new gun can't fire: `m_flNextAttack` is 0.5s
+/// after `DefaultDeploy` (longer for the `TimedDeploy` weapons). A shot in
+/// that window is the previous gun's, fired just before the switch.
+const JUST_DREW_SECONDS: f64 = 0.5;
+
+/// Whether the spectated player switched weapons less than
+/// [`JUST_DREW_SECONDS`] ago.
+fn just_drew(now: f64) -> bool {
+    let at = f64::from_bits(LAST_DRAW_TRIGGERED.load(Ordering::Relaxed));
+    at != 0.0 && now >= at && now - at < JUST_DREW_SECONDS
+}
+
+/// Whether a fire handler may play its fire animation on the first-person
+/// gun (`EV_WeaponAnimation`, see `fire_sounds`). Not while spectating a
+/// player who has just switched: the round belongs to the gun he put away,
+/// and its animation index means nothing on the new one -- a K98's fire
+/// played on the Luger he quick-switched to looks like the Luger firing.
+pub fn allow_event_weapon_animation(sequence: i32) -> bool {
+    if !enabled() || crate::spectator_target::in_eye_target().is_none() {
+        return true;
+    }
+    if !just_drew(engine::client_time()) {
+        return true;
+    }
+    unsafe {
+        crate::debug::report(&format!(
+            "anim_fix: a fire handler asked for sequence {sequence} on a gun drawn under {JUST_DREW_SECONDS}s ago -- the round was the previous gun's, not played"
+        ))
+    };
+    false
+}
+
 fn claim_fire(now: f64) -> bool {
     let last = f64::from_bits(LAST_FIRE_PLAYED.load(Ordering::Relaxed));
     // `now < last` means the clock went backwards -- a demo restarting -- so
@@ -473,7 +419,7 @@ pub fn install() {
 /// to detect, while the sound fires per round. Anything the body sequence
 /// already caught is filtered out by `claim_fire`.
 ///
-/// Called from `sound_fix`'s `EV_PlaySound` hook, on the engine thread, same as
+/// Called from `fire_sounds`' `EV_PlaySound` hook, on the engine thread, same as
 /// `apply()`.
 pub fn on_weapon_fired(entity_index: i32) {
     if !enabled() {
@@ -506,9 +452,16 @@ pub fn on_weapon_fired(entity_index: i32) {
     if viewmodel.is_null() {
         return;
     }
-    if !claim_fire(engine::client_time()) {
+    let now = engine::client_time();
+    if just_drew(now) {
+        // The sound is the previous gun's (a quick switch); the draw plays on.
         return;
     }
+    if !claim_fire(now) {
+        return;
+    }
+    // Safety: non-null, and the pointer `apply()` published this frame.
+    crosshair_rule::note_shot(now, model_stem(&unsafe { (*viewmodel).name_str() }));
 
     let state = i32_to_deploy_state(CURRENT_DEPLOY_STATE.load(Ordering::Relaxed));
     let sequence = animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel);
@@ -517,16 +470,53 @@ pub fn on_weapon_fired(entity_index: i32) {
 
 /// Runs once per client frame (see `engine::set_per_frame_callback`).
 pub fn apply() {
+    // Until a frame gets as far as a spectated player in first person, there
+    // is no POV to say the crosshair should be hidden. The one early return
+    // that leaves the last answer standing is the viewmodel mismatch below,
+    // which is a flicker inside such a view, not the end of one.
+    let no_view = || {
+        crate::spectator_crosshair::set_pov_hides(None);
+        crate::spectator_eye::set_prone(false);
+        crate::spectator_gun::set_lowered(false);
+    };
+    // In a player's eyes with no viewmodel to show: he is dead (his weapon
+    // goes with him), or holds nothing. POV has no crosshair for either, so
+    // this hides it rather than handing the view back to the stock draw.
+    let no_weapon = |engfuncs: &engine::ClEngineFuncsPartial| {
+        let reason = crate::spectator_target::in_eye_target().map(|target| {
+            let player = unsafe { (engfuncs.get_entity_by_index)(target) };
+            // The body playing a death animation. Not `solid` (V_GetInEyePos's
+            // test): an HLTV demo doesn't send it at a death. Not `health`:
+            // it arrives as an unsigned byte, so -30 reads 226.
+            let dying = !player.is_null()
+                && unsafe { !(*player).model.is_null() }
+                && sequence_label(unsafe { (*player).model }, unsafe {
+                    (*player).curstate.sequence.max(0) as usize
+                })
+                .is_some_and(|label| label.starts_with("die") || label.starts_with("dead"));
+            if dying {
+                crosshair_rule::Hidden::Dead
+            } else {
+                crosshair_rule::Hidden::NoWeapon
+            }
+        });
+        crate::spectator_crosshair::set_pov_hides(reason);
+        crate::spectator_eye::set_prone(false);
+        crate::spectator_gun::set_lowered(false);
+    };
     if !enabled() {
         stage(STAGE_DISABLED);
+        no_view();
         return;
     }
     let Some(engfuncs) = engine::engfuncs() else {
         stage(STAGE_NO_ENGFUNCS);
+        no_view();
         return;
     };
     if unsafe { (engfuncs.is_spectate_only)() } == 0 {
         stage(STAGE_NOT_SPECTATING);
+        no_view();
         return;
     }
 
@@ -538,6 +528,7 @@ pub fn apply() {
             std::ptr::null_mut::<u8>(),
             -1,
         );
+        no_weapon(engfuncs);
         return;
     }
     let viewmodel_model = unsafe { (*viewmodel_entity).model };
@@ -548,6 +539,7 @@ pub fn apply() {
             viewmodel_model,
             unsafe { (*viewmodel_entity).index },
         );
+        no_weapon(engfuncs);
         return;
     }
     let viewmodel_name = unsafe { (*viewmodel_model).name_str() }.into_owned();
@@ -566,6 +558,7 @@ pub fn apply() {
             viewmodel_model,
             viewmodel_index,
         );
+        no_weapon(engfuncs);
         return;
     }
     let spectated = unsafe { &*spectated };
@@ -666,10 +659,16 @@ pub fn apply() {
     let deploy_state_changed =
         previous_state.is_some() && state.is_some() && previous_state != state;
 
-    let viewmodel_changed =
-        viewmodel_changed_to_a_new_weapon(viewmodel_model, engine::client_time());
+    let now = engine::client_time();
+    let viewmodel_changed = viewmodel_changed_to_a_new_weapon(viewmodel_model, now);
 
     if switched_players {
+        // A throw the previous player wound up must not empty this one's hand.
+        grenade::forget("spectated player changed");
+        // Nor do his draw and bolt timers hide this one's crosshair.
+        crosshair_rule::forget();
+        // His gun starts up, as the game's own does.
+        crate::spectator_gun::reset();
         // Snap the new viewmodel straight to the right family's idle so it
         // doesn't sit on whatever sequence the previously-spectated player
         // left it on -- and adopt it as the weapon in hand, so the change of
@@ -711,14 +710,34 @@ pub fn apply() {
                 };
             }
             match body_label.as_deref().map(classify_body_sequence) {
+                Some(BodyAction::Shoot)
+                    if just_drew(now) && !is_grenade_viewmodel(&viewmodel_name) =>
+                {
+                    // Fired and switched in one update: the new gun can't
+                    // have fired, and its draw plays below.
+                    unsafe {
+                        crate::debug::report(
+                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                        )
+                    };
+                }
                 Some(BodyAction::Shoot) => {
-                    if claim_fire(engine::client_time()) {
-                        play_viewmodel_animation(
-                            animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
-                            "spectated player fired",
-                            state,
-                            viewmodel_model,
-                        );
+                    if claim_fire(now) {
+                        // A grenade's firing sequence is the *release*, and
+                        // the grenade leaves the hand half a second later --
+                        // so pin pull now, throw then. Every other weapon
+                        // fires on the spot.
+                        if is_grenade_viewmodel(&viewmodel_name) {
+                            grenade::wind_up(now, state, viewmodel_model);
+                        } else {
+                            crosshair_rule::note_shot(now, model_stem(&viewmodel_name));
+                            play_viewmodel_animation(
+                                animation_lookup_any(ATTACK_SEQUENCES, state, viewmodel_model),
+                                "spectated player fired",
+                                state,
+                                viewmodel_model,
+                            );
+                        }
                     } else {
                         // A detected shot that plays nothing looks identical in
                         // the log to a shot that was never detected, and the
@@ -743,22 +762,62 @@ pub fn apply() {
         }
 
         if viewmodel_changed {
-            // A real switch draws anyway, so drop any re-draw a throw had
-            // queued -- otherwise it would fire again a moment later and
-            // restart the animation this line just began.
-            REDRAW_AFTER.store(0, Ordering::Relaxed);
-            play_viewmodel_animation(
-                animation_lookup_sequence("draw", state, viewmodel_model),
-                "weapon changed",
+            // A real switch draws anyway, so whatever a throw still had
+            // coming is dropped -- unless this is a thrown grenade coming
+            // back into hand, which is a catch and plays its own animation.
+            let caught = grenade::weapon_changed(
+                now,
                 state,
                 viewmodel_model,
+                is_grenade_viewmodel(&viewmodel_name),
             );
+            // Starts the crosshair's switch timer, unless a grenade is involved.
+            crosshair_rule::note_deploy(now, model_stem(&viewmodel_name));
+            if !caught {
+                play_viewmodel_animation(
+                    animation_lookup_sequence("draw", state, viewmodel_model),
+                    "weapon changed",
+                    state,
+                    viewmodel_model,
+                );
+            }
         }
     }
 
     // Last, so anything this frame genuinely wanted to play has already had
-    // its say: a throw's hand stays empty until something draws into it.
-    redraw_after_throw_if_due(engine::client_time(), state, viewmodel_model);
+    // its say: the throw a wind-up booked, and what follows it.
+    if is_grenade_viewmodel(&viewmodel_name) {
+        grenade::each_frame(now, state, viewmodel_model, &viewmodel_name, spectated);
+    }
+
+    // Whether the player's own view would have a crosshair right now.
+    let gait_label = if spectated.model.is_null() {
+        None
+    } else {
+        sequence_label(
+            spectated.model,
+            spectated.curstate.gaitsequence.max(0) as usize,
+        )
+    };
+    let held_name = engine::engine_studio()
+        .map(|studio| unsafe { (studio.get_model_by_index)(spectated.curstate.weaponmodel) })
+        .filter(|held| !held.is_null())
+        .map(|held| unsafe { (*held).name_str() }.into_owned())
+        .unwrap_or_default();
+    crate::spectator_eye::set_prone(crate::spectator_eye::is_prone(
+        spectated.curstate.usehull,
+        body_label.as_deref().unwrap_or(""),
+        gait_label.as_deref().unwrap_or(""),
+    ));
+    let pov_view = crosshair_rule::View {
+        body: body_label.as_deref().unwrap_or(""),
+        gait: gait_label.as_deref().unwrap_or(""),
+        movetype: spectated.curstate.movetype,
+        held_stem: model_stem(&held_name),
+    };
+    crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
+    // After hidden_because, which keeps the prone timer current.
+    crate::spectator_gun::set_lowered(crosshair_rule::gun_lowered(&pov_view, now));
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);
@@ -768,6 +827,26 @@ pub fn apply() {
 pub(crate) mod tests {
     use super::*;
     use std::sync::Mutex;
+
+    /// Only the three grenades wind up and throw; every other weapon fires
+    /// on the spot.
+    #[test]
+    fn only_the_grenades_take_the_grenade_path() {
+        for grenade in [
+            "models/v_grenade.mdl",
+            "models/v_stick.mdl",
+            "models/v_mills.mdl",
+        ] {
+            assert!(is_grenade_viewmodel(grenade), "{grenade}");
+        }
+        for other in [
+            "models/v_garand.mdl",
+            "models/v_mg42.mdl",
+            "models/v_knife.mdl",
+        ] {
+            assert!(!is_grenade_viewmodel(other), "{other}");
+        }
+    }
 
     /// Fast-forwarding through the slow parts of a demo is routine when making
     /// movies, so returning to normal speed must not leave the fix mistiming
@@ -928,26 +1007,6 @@ pub(crate) mod tests {
         assert!(viewmodel_changed_to_a_new_weapon(a, 1.0));
     }
 
-    /// The re-draw is scheduled by a throw and consumed once, when its time
-    /// comes -- not every frame afterwards, which would restart the draw
-    /// animation continuously.
-    #[test]
-    fn a_queued_redraw_fires_once_and_only_when_due() {
-        let _statics = lock_statics();
-        let vm = std::ptr::without_provenance_mut::<ModelSPartial>(1);
-        REDRAW_AFTER.store(10.0f64.to_bits(), Ordering::Relaxed);
-
-        redraw_after_throw_if_due(9.9, None, vm);
-        assert_ne!(REDRAW_AFTER.load(Ordering::Relaxed), 0, "not due yet");
-
-        redraw_after_throw_if_due(10.0, None, vm);
-        assert_eq!(REDRAW_AFTER.load(Ordering::Relaxed), 0, "consumed when due");
-
-        // And nothing pending means nothing happens, however late it gets.
-        redraw_after_throw_if_due(9999.0, None, vm);
-        assert_eq!(REDRAW_AFTER.load(Ordering::Relaxed), 0);
-    }
-
     /// Serialises every test that touches the module's statics.
     ///
     /// They all share `LEVEL`, `SETTLED_VIEWMODEL` and the rest, and cargo
@@ -972,48 +1031,16 @@ pub(crate) mod tests {
 
     /// Resets state and holds the lock for the caller's lifetime.
     ///
-    /// Sets the emptied-hand option to `LEVEL_REDRAW_NOW`, because the level
-    /// defaults to *off* and most tests below would otherwise be asserting
-    /// against a disabled fix.
+    /// Turns the fix on, because it defaults to *off* and most tests below
+    /// would otherwise be asserting against a disabled fix.
     #[must_use = "the guard must outlive the test, or the statics are not actually reserved"]
     fn reset_settle_state() -> std::sync::MutexGuard<'static, ()> {
         let guard = lock_statics();
         SETTLED_VIEWMODEL.store(std::ptr::null_mut(), Ordering::Relaxed);
         LAST_DRAW_TRIGGERED.store(0f64.to_bits(), Ordering::Relaxed);
-        REDRAW_AFTER.store(0, Ordering::Relaxed);
-        LEVEL.store(LEVEL_REDRAW_NOW, Ordering::Relaxed);
+        grenade::forget("a test starting");
+        LEVEL.store(LEVEL_MAX, Ordering::Relaxed);
         guard
-    }
-
-    /// The options have to actually differ, or the number is decoration. This
-    /// pins what each one does with a throw, which is the only thing they
-    /// disagree about.
-    #[test]
-    fn each_option_treats_an_emptied_hand_differently() {
-        let _statics = reset_settle_state();
-
-        // 1: the throw plays and nothing is queued behind it.
-        LEVEL.store(LEVEL_EMPTY_HAND, Ordering::Relaxed);
-        REDRAW_AFTER.store(0, Ordering::Relaxed);
-        assert_eq!(REDRAW_AFTER.load(Ordering::Relaxed), 0);
-
-        // 2 and 4 both queue a draw; 4 waits LOOKAHEAD_SECONDS longer. The
-        // scheduling itself lives in play_viewmodel_animation, which needs the
-        // engine, so assert the arithmetic that decides between them.
-        let ends = 10.0f64;
-        let now_at = ends;
-        let later_at = ends + LOOKAHEAD_SECONDS;
-        assert!(later_at > now_at, "option 4 must wait longer than option 2");
-        assert_eq!(later_at - now_at, LOOKAHEAD_SECONDS);
-
-        // 3 is the only one that suppresses the throw outright.
-        assert_eq!(
-            level_description(LEVEL_NEVER_EMPTY),
-            "no throw animation, grenade stays in hand"
-        );
-        for other in [LEVEL_EMPTY_HAND, LEVEL_REDRAW_NOW, LEVEL_LOOKAHEAD] {
-            assert_ne!(other, LEVEL_NEVER_EMPTY);
-        }
     }
 
     /// Every option in range needs its own description -- `dodstudio_debug_status`
@@ -1031,13 +1058,16 @@ pub(crate) mod tests {
         }
     }
 
-    /// Out of range is clamped rather than refused, so `99` means "newest".
+    /// Out of range is clamped rather than refused, so a config left over from
+    /// the four-option ladder (`2`, `4`) still turns the fix on.
     #[test]
     fn a_level_outside_the_ladder_is_clamped() {
         let _statics = lock_statics();
-        LEVEL.store(99, Ordering::Relaxed);
-        assert_eq!(level(), LEVEL_MAX);
-        assert!(enabled());
+        for old_option in [2, 3, 4, 99] {
+            LEVEL.store(old_option, Ordering::Relaxed);
+            assert_eq!(level(), LEVEL_MAX);
+            assert!(enabled());
+        }
 
         LEVEL.store(-5, Ordering::Relaxed);
         assert_eq!(level(), LEVEL_OFF);
