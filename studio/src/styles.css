@@ -1333,6 +1333,36 @@ button.primary-btn:hover:not(:disabled) {
   color: #66bb6a;
 }
 
+/* #192: the Flags tab. */
+.analyzer-team-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: baseline;
+}
+
+.analyzer-flag-cards {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.analyzer-steam-ids {
+  display: flex;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #ccc;
+}
+
+.analyzer-copy-btn {
+  padding: 1px 6px;
+  font-size: 10px;
+  margin-left: 4px;
+}
+
 .analyzer-stat-cards {
   display: grid;
   grid-template-columns: repeat(4, 1fr);

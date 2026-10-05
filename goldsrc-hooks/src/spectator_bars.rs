@@ -112,6 +112,13 @@ fn installed() -> bool {
     STOCK_PAINT_TRAVERSE.load(Ordering::Acquire) != 0
 }
 
+/// Whether the spectator panel is hidden right now: the cvar is on and the
+/// filter that does the hiding is in place. `spectator_hud` lays out the top
+/// of the screen by it.
+pub fn hiding() -> bool {
+    HIDE.load(Ordering::Relaxed) && installed()
+}
+
 /// Whether a panel is the one to leave unpainted.
 fn hides(name: &[u8]) -> bool {
     name.eq_ignore_ascii_case(FRAME)
