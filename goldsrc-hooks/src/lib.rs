@@ -72,9 +72,16 @@
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
 //!   yet; they are there for a live test.
+//! - `frame_esc`: keep GameUI's windows -- the VCR bar, the events list, the
+//!   Load Demo window, the console -- open when ESC is pressed on the 25th
+//!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
+//!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
 //! - `window_layout`: the `dodstudio_resizable_windows` and
 //!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
+//! - `studio_panel`: `dodstudio_panel` -- DoD Studio's own window in the game,
+//!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
+//!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
@@ -101,6 +108,9 @@
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
 //!   see `docs/goldsrc_spectator_bars.md`.
+//! - `spectator_hud`: no command of its own -- while spectating, keeps the
+//!   objectives, the objective timer, the kill feed and the minimap just below
+//!   the spectator bar, or at the top as in a POV demo while the bar is hidden.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -126,14 +136,17 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_file;
 mod demo_list_folders;
 mod demo_reload;
+mod demo_rosters;
 mod demo_seek;
 mod detour;
 mod engine;
 mod events;
 mod ex_interp;
 mod fire_sounds;
+mod frame_esc;
 mod hand_signals;
 mod hide_sprite;
 mod hltv_messages;
@@ -155,8 +168,11 @@ mod spectator_crosshair;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
+mod spectator_hud;
 mod spectator_target;
 mod sprite_blend;
+mod streaks;
+mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
@@ -206,6 +222,10 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // First, so the file is there before GameUI reads the main menu.
+    if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
+        studio_panel::write_game_menu();
+    }
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
         Ordering::Relaxed,
@@ -219,6 +239,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
     // A crash fix, so on unless asked not to.
     pmove_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_PMOVE_GUARD", true),

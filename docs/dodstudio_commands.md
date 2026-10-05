@@ -48,6 +48,8 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 | `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 | `dodstudio_demo_list_folders` | `0` | the Load Demo window also lists folders (and `../`) and opens them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
+| `dodstudio_viewdemo_in_panel` | `1` | `viewdemo` opens the DoD Studio window (`dodstudio_panel`) on its Playback tab, which takes the VCR bar's time slider and time label; the stock bar stays off screen while this is on, with the window open or closed (ESC → DoD Studio opens the window again); `0` brings the stock bar back | `goldsrc-hooks/src/studio_panel.rs`, #408 |
+| `dodstudio_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `dodstudio_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `dodstudio_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
 
@@ -79,7 +81,7 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg` | status + usage |
 | `dodstudio_deathmsg max <4..127>` | lines of kill feed shown at once (default 4) |
 | `dodstudio_deathmsg offset <-4096..4096>` | y the feed starts at (default 20); negative pulls it above the top of the screen |
-| `dodstudio_deathmsg offset default` | hand y back to the game |
+| `dodstudio_deathmsg offset default` | hand y back to the default layout: while spectating, just below the spectator bar (at the top while it's hidden, under the minimap while `_cl_minimap 2` shows it) |
 | `dodstudio_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
 | `dodstudio_deathmsg block !<id>...` | hide everything *except* these players |
 | `dodstudio_deathmsg block clear` | stop hiding anything |
@@ -167,7 +169,7 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 | `dodstudio_objectives offset <y>` | y the objective icons are drawn at |
 | `dodstudio_objectives xoffset <x>` | x the icon row starts at |
 | `dodstudio_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
-| `dodstudio_objectives <any> default` | hand that one back to the game |
+| `dodstudio_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
 ### `dodstudio_debug_hd_misses`
 
@@ -191,6 +193,52 @@ path spelling (`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach
 those). No enumeration of valid paths either: an unmatched entry (wrong path,
 wrong extension, or a 2D-drawn element like the above) fails silently, with
 no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
+
+### `dodstudio_panel`
+
+Opens DoD Studio's own window in the game, or closes it if it's open. It sits
+with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
+Options and Find Servers windows (Playback, Demos, Highlights, Console,
+Settings, Commands, Studio), and never
+narrower than its tabs. The Playback buttons do what the VCR bar's do, so a
+demo has to be playing under `viewdemo`; the tab also shows the bar's own time
+slider and time label, and while the demo player is still reading the demo,
+how far it has got (#465). The Console tab holds the real console's history, input
+line and Submit button (Enter submits). Both are the original controls, lent
+by their windows while ours is open and handed back when it closes.
+The Demos tab lists the demos, with each one's map and date, and loads one
+with no demo playing. Click a column heading to sort by it; the boxes above
+filter by name or map (Search), map, HLTV or POV, and age in days.
+The Highlights tab lists every life with a kill in the demo playing
+(player, kills, weapons, time), narrowed by a Min kills box. A POV demo lists
+only the recording player's; an HLTV demo lists everyone's, with a Player box,
+and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
+double-click jumps to 5 s before the first kill. It reads Studio's analyzer cache
+(`%APPDATA%\dod-studio\analyzer_cache`), so a demo Studio's Demo Analyzer or
+Master Queue already read shows at once; anything else is analysed in the
+game, with a progress bar, and saved there for Studio too. A demo too big for
+the game's memory (analysis takes about 12 times the demo's size; the
+pre-Anniversary game has under 1 GB free) is refused with a note to open it in
+the Demo Analyzer instead. On the
+Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
+shows the value and sets it when clicked (add more in build mode).
+`dodstudio_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
+closes, `reset` writes the default layouts back and rebuilds the window, and a
+tab's name (`dodstudio_panel highlights`) opens it on that tab. With
+`dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Playback tab.
+
+The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`
+(DoD Studio, Resume/Disconnect in a demo, Options, Quit), shown when the game
+is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
+`dod_addon` menu without the "DoD Studio" mark is left alone.
+
+The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written
+the first time and never overwritten. The empty `...Slot` controls in
+`Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
+Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
+`slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
+or `engine <console command>`. See `src/studio_panel.rs` (#408).
 
 ## Keeping this in sync
 
