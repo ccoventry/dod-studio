@@ -347,7 +347,7 @@ fn is_local(server: &str) -> bool {
 
 /// Wraps `real`: refuses, starts a check, or remembers and hands on.
 unsafe fn guard(command: Command, real: &AtomicUsize) {
-    let argument = first_argument();
+    let argument = command_argument();
     let approved = take_approval(command, argument.as_deref());
     match decide(
         command,
@@ -496,18 +496,29 @@ fn refusal_message(line: &str, why: &str) -> String {
     )
 }
 
-fn first_argument() -> Option<String> {
+/// The command's argument, as the engine's own `connect` reads it: the rest
+/// of the line (`Cmd_Args`), which `cl_enginefunc_t` doesn't offer. GoldSrc's
+/// tokenizer makes `:` a token of its own, so `connect 1.2.3.4:27020` arrives
+/// as `1.2.3.4`, `:`, `27020`; [`join_tokens`] puts them back together. Taking
+/// only the first token loses the port (found live, 2026-10-05).
+fn command_argument() -> Option<String> {
     let engfuncs = engine::engfuncs()?;
-    unsafe {
-        if (engfuncs.cmd_argc)() < 2 {
-            return None;
-        }
-        let arg = (engfuncs.cmd_argv)(1);
-        if arg.is_null() {
-            return None;
-        }
-        Some(CStr::from_ptr(arg).to_string_lossy().into_owned())
-    }
+    let tokens: Vec<String> = unsafe {
+        (1..(engfuncs.cmd_argc)())
+            .filter_map(|i| {
+                let arg = (engfuncs.cmd_argv)(i);
+                (!arg.is_null()).then(|| CStr::from_ptr(arg).to_string_lossy().into_owned())
+            })
+            .collect()
+    };
+    join_tokens(&tokens)
+}
+
+/// The tokens after the command name, joined with nothing between them, as
+/// an address is written. None when there are none.
+fn join_tokens<S: AsRef<str>>(tokens: &[S]) -> Option<String> {
+    let joined: String = tokens.iter().map(AsRef::as_ref).collect();
+    (!joined.is_empty()).then_some(joined)
 }
 
 fn playing_demo() -> bool {
@@ -645,6 +656,16 @@ mod tests {
         assert!(verdict(&Err(QueryError::NoAnswer)).is_err());
         assert!(verdict(&Err(QueryError::Unreadable)).is_err());
         assert!(verdict(&Err(QueryError::BadAddress("x".into()))).is_err());
+    }
+
+    #[test]
+    fn an_address_split_at_its_colon_is_put_back_together() {
+        assert_eq!(
+            join_tokens(&["74.91.112.242", ":", "27020"]).as_deref(),
+            Some("74.91.112.242:27020")
+        );
+        assert_eq!(join_tokens(&["local"]).as_deref(), Some("local"));
+        assert_eq!(join_tokens::<&str>(&[]), None);
     }
 
     #[test]
