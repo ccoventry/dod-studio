@@ -1341,6 +1341,62 @@ button.primary-btn:hover:not(:disabled) {
   font-style: italic;
 }
 
+/* The Commands tab's type-ahead (#215). */
+.command-suggest {
+  position: absolute;
+  z-index: 1200;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.command-suggest-item {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.command-suggest-item.active,
+.command-suggest-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.command-suggest-name {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.command-suggest-meta {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.command-suggest-refused .command-suggest-name {
+  color: #ef5350;
+  text-decoration: line-through;
+}
+
+.command-suggest-refused .command-suggest-meta,
+.command-suggest-warned .command-suggest-meta {
+  color: #ffb74d;
+}
+
+.command-suggest-noop .command-suggest-name {
+  opacity: 0.6;
+}
+
 /* #192: the Flags tab. */
 .analyzer-team-dot {
   display: inline-block;
