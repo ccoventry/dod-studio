@@ -67,6 +67,8 @@ HD TEXTURES
 DEBUG
   dodstudio_debug_status
       Print everything DoD Studio's hook is doing to the console.
+  dodstudio_debug_position
+      Print where the view and the watched player are.
   dodstudio_debug_msglog <name>...
       Log chosen game messages to the hook log.
   dodstudio_debug_hd_misses
