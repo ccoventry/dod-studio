@@ -39,7 +39,7 @@ joins this switch rather than adding a command:
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
-Plus twenty control surfaces, always available and doing nothing until used:
+Plus twenty-one control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -122,6 +122,26 @@ Plus twenty control surfaces, always available and doing nothing until used:
   every director event and console command it skips, all at once;
   `dodstudio_seek_skip_between 1` lands clean instead. Refuses while the demo
   is still loading. Both builds; see `docs/goldsrc_viewdemo.md`.
+- **Window layout** (`dodstudio_resizable_windows 1`,
+  `dodstudio_remember_window_layout 1`): every GameUI window can be resized
+  like the console, and each comes back where it was left after a restart
+  (the console loads no `.res`, so build mode can't save its place). Walks
+  the engine surface's popups through vgui2's own interfaces; only
+  `Frame::SetSizeable`/`IsSizeable` are per-build addresses. See
+  `src/window_layout.rs`.
+- **DoD Studio window** (`dodstudio_panel`): our own window in the game, a
+  GameUI `Frame` with a `PropertySheet` of tabs, like the Options window; its
+  Playback buttons drive the demo player like the VCR bar's, and the tab
+  borrows the bar's own time slider and label. By default
+  (`dodstudio_viewdemo_in_panel 1`), `viewdemo` opens it on Playback and parks
+  the bar off screen. A Console tab holds the real console's history and
+  input line, and the console key opens it (`dodstudio_console_in_panel 1`,
+  also on by default; `0` brings back the stock console).
+  A Highlights tab lists the playing demo's streaks, from Studio's analyzer
+  cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
+  crate; a demo too big for the game's address space is refused, not tried).
+  One `.res` per tab in `dod\dodstudio_ui\`, editable in
+  build mode; never narrower than its tabs. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when
@@ -197,6 +217,25 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 4. `inject.exe <pid> path\to\dodstudio_goldsrc_hooks.dll`
 5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log` for its own diagnostics (never pops a
    dialog -- this is meant to run inside an unattended capture pipeline).
+
+## Scripted in-game tests
+
+`tools/game_probe.py` runs one in-game test end to end and writes a report:
+it launches the game the way Studio does (HLAE plus this DLL, windowed,
+`-condebug`), plays a demo, then runs steps -- console commands over the
+remote pipe, waits, `waitfor`/`expect` checks against the console and hook
+logs, and screenshots (a frame recorded by HLAE, so the game can stay behind
+other windows). It always ends the game it started. Reports and screenshots
+go to `local/game-probe/<timestamp>/`.
+
+It refuses to run unless Steam is signed into the one account in-game tests
+may use -- named in a local file outside the repo,
+`%APPDATA%\dod-studio\game_probe.json`, and checked in the registry right
+before launch; no file, no test -- no `hl.exe` is
+already running, and the install is one of the two movie installs. See the
+script's docstring for the steps and flags; `--check` runs only the refusal
+checks. `--at-launch` starts the demo from the launch command line, as a
+capture batch starts its primer, which matters for first-demo bugs (#546).
 
 ## Status
 
