@@ -53,6 +53,8 @@ DOD STUDIO WINDOW
       The console key opens this window on the Console tab.
   dodstudio_resizable_windows 0/1
       Every game window can be resized by its edges.
+  dodstudio_demo_list_folders 0/1
+      The Load Demo window also lists and opens folders.
   dodstudio_remember_window_layout 0/1
       Game windows come back where you left them.
 
