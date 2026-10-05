@@ -21,7 +21,8 @@ import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_war
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
@@ -40,7 +41,7 @@ import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
-import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
+import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
 import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
@@ -1601,6 +1602,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   const appWindow = getCurrentWindow();
   appWindow.onCloseRequested(async (event) => {
     event.preventDefault();
+    // A running batch first: closing leaves it unwatched (#545).
+    if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning, isLocalBuild: isLocalOrDebugBuild }))) return;
     // Capture Studio project state (scanned demos, takeIndex, scanPaths)
     // changed since the last save — offer to save, discard, or cancel the
     // close before losing it. See markProjectDirty() call sites above.
