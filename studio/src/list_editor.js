@@ -36,6 +36,9 @@ export const TRASH_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" f
  * @param {boolean} [opts.unique] - reject add()/browse() when the primary field's value already exists elsewhere in the list
  * @param {() => void} [opts.onChange] - called after any add/edit/remove/reorder
  * @param {() => Promise<string|null>} [opts.browse] - opens a native picker for the primary field; adds a per-row 📁 button when set
+ *
+ * A text field may carry `enhance(input)`, called on each of its inputs as
+ * the row is built (the Commands tab's type-ahead, #215).
  */
 export function createListEditor({ container, getItems, fields, unique = false, onChange, browse }) {
   function notify() {
@@ -87,6 +90,7 @@ export function createListEditor({ container, getItems, fields, unique = false, 
           setFieldValue(items, idx, field, v);
         });
         refreshAfterTyping(input, () => notify());
+        field.enhance?.(input);
       }
       input.className = 'list-editor-field';
       row.appendChild(input);
