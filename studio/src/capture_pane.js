@@ -1,3 +1,4 @@
+import { ensureSteamReady } from './steam_guard.js';
 import { startCaptureBatch, cancelCaptureBatch, validatePaths, calculateExportPoolSpace, diagnoseCaptureOutputPaths, scanOrphanedPreviews, deleteOrphanedPreviews, checkEngineProcesses, launchStandaloneGame, launchObs, readCfgCommands } from './ipc_bridge.js';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -9,11 +10,16 @@ import { createListEditor } from './list_editor.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
+import { numberField } from './number_field.js';
+import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { setStatusLine, uiStatusText } from './status_line.js';
+import { refreshAfterTyping } from './input_refresh.js';
 
+let listeningForExternalErrors = false;
 let unlistenCaptureStatus = null;
 let unlistenDemoLoading = null;
 let unlistenFastForwardToClip = null;
@@ -22,6 +28,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+
+/** Whether a capture batch is running right now (#545's close prompt). */
+export function isCaptureRunning() {
+  return capturingInFlight;
+}
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
 // drive is added, or detail_pane.js after a streak selection changes).
@@ -89,11 +100,11 @@ const TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS = 8.0;
  * once at init and on every `input` event from the five timing fields.
  */
 export function renderTimingDiagram() {
-  const preRoll = parseFloat(document.querySelector('#config-pre-roll')?.value) || 0;
-  const postRoll = parseFloat(document.querySelector('#config-post-roll')?.value) || 0;
-  const startLead = parseFloat(document.querySelector('#config-record-start-lead')?.value) || 0;
-  const stopTrail = parseFloat(document.querySelector('#config-record-stop-trail')?.value) || 0;
-  const initialDelay = parseFloat(document.querySelector('#config-initial-delay')?.value) || 0;
+  const preRoll = numberField('#config-pre-roll', 0);
+  const postRoll = numberField('#config-post-roll', 0);
+  const startLead = numberField('#config-record-start-lead', 0);
+  const stopTrail = numberField('#config-record-stop-trail', 0);
+  const initialDelay = numberField('#config-initial-delay', 0);
   const streak = TIMING_DIAGRAM_ILLUSTRATIVE_STREAK_SECONDS;
 
   const note = document.querySelector('#timing-diagram-initial-delay-note');
@@ -168,76 +179,6 @@ function generateSessionId() {
 
 // ── Pre-Flight Disk Space Estimator ───────────────────────────────────────────
 
-/**
- * Sums required capture bytes across every selected streak, merging
- * overlapping (or touching) pre/post-roll windows *within each source demo*
- * before billing them for disk space — two highlights that share footage
- * must not be double-counted, since the engine records that overlap once.
- * Base cost is `w * h * 3` bytes/frame at the configured capture FPS.
- *
- * Does not account for `mirv_movie_separate_hud 1` typed into Initial
- * Commands — that triples the real cost (HUD pass recorded as its own
- * stream), but there is no longer a dedicated setting to read it from, and
- * this does not parse Initial Commands text to find it.
- */
-function computeRequiredCaptureBytes(currentScannedDemos, opts) {
-  const {
-    preRollSeconds, postRollSeconds,
-    recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight,
-  } = opts;
-  let totalSeconds = 0;
-
-  (currentScannedDemos || []).forEach(demo => {
-    const intervals = (demo.streaks || [])
-      // Opt-in model (detail_pane.js): a streak counts as selected only once
-      // explicitly checked. `undefined` covers both demos never opened in the
-      // Highlight Details view and every non-recording-player streak (which
-      // never renders as a checkable row at all) — neither should ever be
-      // billed for capture space.
-      .filter(streak => streak.selected === true)
-      .map(streak => {
-        const fps = streak.demo_fps || 100;
-        const startSec = streak.start_tick / fps;
-        const endSec = streak.end_tick / fps;
-        return [startSec, endSec];
-      })
-      .sort((a, b) => a[0] - b[0]);
-
-    // Two different windows are at play, and mixing them up is what this used
-    // to get wrong:
-    //  - whether two highlights collapse into ONE take is decided by
-    //    pre/post-roll (native/src/patch/builder.rs's blocks_merge), and
-    //  - how many frames actually get written is start-lead -> stop-trail
-    //    (PatcherConfig::calculate_total_capture_duration).
-    // So merge on the roll window, then bill the lead/trail window.
-    let mergedStart = null;
-    let mergedEnd = null;
-    const bill = () => {
-      totalSeconds += recordStartLead + (mergedEnd - mergedStart) + recordStopTrail;
-    };
-    intervals.forEach(([start, end]) => {
-      if (mergedStart === null) {
-        mergedStart = start;
-        mergedEnd = end;
-      } else if (start - preRollSeconds <= mergedEnd + postRollSeconds) {
-        mergedEnd = Math.max(mergedEnd, end);
-      } else {
-        bill();
-        mergedStart = start;
-        mergedEnd = end;
-      }
-    });
-    if (mergedStart !== null) {
-      bill();
-    }
-  });
-
-  const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
-  const bytesPerFrame = resWidth * resHeight * 3;
-  return frames * bytesPerFrame;
-}
-
 const PATH_PROBLEM_REASONS = {
   not_absolute: STRINGS.CAPTURE.pathProblem.notAbsolute,
   malformed: STRINGS.CAPTURE.pathProblem.malformed,
@@ -291,9 +232,9 @@ export async function runObsConnectionTest({ auto = false } = {}) {
       host: document.querySelector('#config-obs-host')?.value?.trim() || '127.0.0.1',
       port: parseInt(document.querySelector('#config-obs-port')?.value, 10) || 4455,
       password: document.querySelector('#config-obs-password')?.value || '',
-      gameWidth: parseInt(document.querySelector('#config-res-width')?.value, 10) || 1280,
-      gameHeight: parseInt(document.querySelector('#config-res-height')?.value, 10) || 720,
-      obsCaptureFps: parseInt(document.querySelector('#config-obs-capture-fps')?.value, 10) || 120,
+      gameWidth: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+      gameHeight: numberField('#config-res-height', 720, { integer: true, positive: true }),
+      obsCaptureFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     });
     renderObsReport(report);
   } catch (e) {
@@ -413,13 +354,13 @@ export async function refreshLaunchGuard(state) {
 
   const resolvedState = state || (currentGetState ? currentGetState() : null) || { targetDrives: [], currentScannedDemos: [] };
 
-  const preRollVal = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-  const postRollVal = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
-  const recordStartLeadVal = parseFloat(document.querySelector("#config-record-start-lead")?.value) || 0.0;
-  const recordStopTrailVal = parseFloat(document.querySelector("#config-record-stop-trail")?.value) || 0.0;
-  const captureFpsVal = parseInt(document.querySelector("#config-capture-fps")?.value, 10) || 300;
-  const resWidthVal = parseInt(document.querySelector("#config-res-width")?.value, 10) || 1280;
-  const resHeightVal = parseInt(document.querySelector("#config-res-height")?.value, 10) || 720;
+  const preRollVal = numberField('#config-pre-roll', 2.0);
+  const postRollVal = numberField('#config-post-roll', 0.6);
+  const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
+  const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
+  const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+  const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
+  const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
@@ -478,6 +419,11 @@ export async function refreshLaunchGuard(state) {
     0
   );
   const noHighlightsSelected = selectedHighlights === 0;
+  // Every capture launches hl.exe through HLAE, so with either path blank
+  // Start could only fail at click time (BOTH_PATHS_REQUIRED). A first-time
+  // user hit that before anything else; now the button says so up front.
+  const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
+    || !document.querySelector('#hlae-path-input')?.value?.trim();
 
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
@@ -503,7 +449,7 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
@@ -515,6 +461,10 @@ export async function refreshLaunchGuard(state) {
     if (bannedCommandsPresent) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
+      warningEl.style.display = 'block';
+    } else if (pathsMissing) {
+      warningEl.style.color = '#f44336';
+      warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = '#f44336';
@@ -728,6 +678,7 @@ async function initStandaloneLaunchButton() {
       return;
     }
 
+    if (!(await ensureSteamReady())) return;
     await performLaunch();
   });
 }
@@ -838,7 +789,7 @@ function initClearPreviewsModal() {
   }
 }
 
-export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished) {
+export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTakeIndex, onBatchFinished, pickedDemosPresent) {
   const startBtn = document.querySelector('#start-capture-btn') || document.querySelector('#start-batch-btn');
   const cancelBtn = document.querySelector('#cancel-batch-btn');
   const statusEl = document.querySelector('#batch-status');
@@ -896,10 +847,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initImportCfgButton();
 
   // The pipeline turns some settings into init commands, so the warnings go
-  // stale when one changes.
+  // stale when one changes -- including by undo, which fires no 'change'
+  // until blur (#535).
   FIELDS_THAT_BECOME_COMMANDS.forEach((sel) => {
-    const el = document.querySelector(sel);
-    if (el) el.addEventListener("change", refreshInitCommandWarnings);
+    refreshAfterTyping(document.querySelector(sel), refreshInitCommandWarnings);
   });
 
   const addInitCommandBtn = document.querySelector('#add-init-command-btn');
@@ -964,6 +915,16 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // every restart.
   refreshLaunchGuard();
 
+  // An error box shown by the game or HLAE after a preview or Launch Game,
+  // read by the backend (native::sys::dialogs). A batch reports its own
+  // through capture_status instead.
+  if (!listeningForExternalErrors) {
+    listeningForExternalErrors = true;
+    listen('external_error', (event) => {
+      showToast(String(event.payload || ''), 'error', 15000);
+    });
+  }
+
   if (!unlistenCaptureStatus) {
     listen('capture_status', (event) => {
       const payload = event.payload || {};
@@ -979,7 +940,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           }
         }
         const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        if (statusEl) statusEl.textContent = statusText;
+        setStatusLine(statusEl, statusText);
         if (startBtn) startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
       } else {
@@ -990,18 +951,19 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (currentOnBatchFinished) currentOnBatchFinished();
 
         if (payload.error) {
-          const errorBody = STRINGS.CAPTURE.captureErrorToast(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
+          // Without the engine's pointers at the log (#534); the log has them.
+          const errorBody = STRINGS.CAPTURE.captureErrorToast(uiStatusText(payload.status) || STRINGS.CAPTURE.CAPTURE_ERROR_STATUS_DEFAULT);
           showToast(errorBody, "error");
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT);
+          setStatusLine(statusEl, STRINGS.CAPTURE.captureErrorStatusText(payload.status || STRINGS.CAPTURE.CAPTURE_ERROR_TEXT_DEFAULT));
           notify('error', STRINGS.NOTIFICATIONS.CAPTURES_ERROR_TITLE, errorBody);
         } else if (payload.status === "Cancelled") {
           showToast(STRINGS.CAPTURE.BATCH_CANCELLED_TOAST, "info");
           if (progressBar) progressBar.style.width = '0%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.CANCELLED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.CANCELLED);
         } else {
           showToast(STRINGS.CAPTURE.BATCH_COMPLETED_TOAST, "success");
           if (progressBar) progressBar.style.width = '100%';
-          if (statusEl) statusEl.textContent = STRINGS.CAPTURE.COMPLETED;
+          setStatusLine(statusEl, STRINGS.CAPTURE.COMPLETED);
           notify('captures_done', STRINGS.NOTIFICATIONS.CAPTURES_DONE_TITLE, STRINGS.CAPTURE.BATCH_COMPLETED_TOAST);
         }
       }
@@ -1088,6 +1050,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const takeIndex = currentGetTakeIndex ? currentGetTakeIndex() : null;
 
       let advanced = 0;
+      // A hand-set Captured confirmed on disk: no status change, but the
+      // set-by-hand mark goes (#105).
+      let markCleared = false;
       blocks.forEach(block => {
         if (!block.captured) return;
         // A block can cover several highlights — overlapping ones are recorded
@@ -1109,10 +1074,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
             Object.defineProperty(streak, 'mergedCount', { value: sourceIndices.length, enumerable: false, configurable: true });
           }
           // Status only ever moves forward. Re-capturing something already
-          // rendered must not knock it back down to Captured.
-          if (streak.status === 'Rendered') return;
-          if (streak.status !== 'Captured') advanced += 1;
-          streak.status = 'Captured';
+          // rendered must not knock it back down to Captured -- unless that
+          // Rendered was set by hand: a verified capture beats an unverified
+          // claim (#105, decided 2026-09-29).
+          if (streak.status === 'Rendered' && !streak.statusByHand) return;
+          if (streak.statusByHand) markCleared = true;
+          if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
         });
         // Recorded even when the take isn't renderable yet — a future render
         // still needs to resolve this take_key back to these highlights once
@@ -1124,7 +1091,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
       if (total === 0) return;
 
-      if (advanced > 0) {
+      if (advanced > 0 || markCleared) {
         // Both tables read status, and neither re-renders on its own.
         if (currentOnStatusChange) currentOnStatusChange();
       }
@@ -1177,22 +1144,22 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const sessionId = generateSessionId();
     lastDispatch = { sessionId, streaks: selectedStreaks, demoPaths: selectedDemoPaths };
 
-    const captureFpsVal = parseInt(document.querySelector("#config-capture-fps")?.value, 10) || 300;
-    const obsCaptureFpsVal = parseInt(document.querySelector("#config-obs-capture-fps")?.value, 10) || 120;
-    const preRollVal = parseFloat(document.querySelector("#config-pre-roll")?.value) || 2.0;
-    const postRollVal = parseFloat(document.querySelector("#config-post-roll")?.value) || 0.6;
-    const recordStartLeadVal = parseFloat(document.querySelector("#config-record-start-lead")?.value) || 0.0;
-    const recordStopTrailVal = parseFloat(document.querySelector("#config-record-stop-trail")?.value) || 0.0;
-    const initialDelayVal = parseFloat(document.querySelector("#config-initial-delay")?.value) || 3.0;
-    const fastForwardSpeedVal = parseFloat(document.querySelector("#config-fast-forward-speed")?.value) || 0.05;
+    const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    const preRollVal = numberField('#config-pre-roll', 2.0);
+    const postRollVal = numberField('#config-post-roll', 0.6);
+    const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
+    const recordStopTrailVal = numberField('#config-record-stop-trail', 0.0);
+    const initialDelayVal = numberField('#config-initial-delay', 3.0);
+    const fastForwardSpeedVal = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const hlaePathVal = document.querySelector("#hlae-path-input")?.value?.trim() || "";
     const hlPathVal = document.querySelector("#hl-path-input")?.value?.trim() || "";
     const ffmpegOverridePathVal = document.querySelector("#ffmpeg-override-path-input")?.value?.trim() || null;
     const goldsrcHooksDllPathVal = document.querySelector("#goldsrc-hooks-dll-path-input")?.value?.trim() || null;
 
-    const resWidthVal = parseInt(document.querySelector("#config-res-width")?.value, 10) || 1280;
-    const resHeightVal = parseInt(document.querySelector("#config-res-height")?.value, 10) || 720;
+    const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
+    const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
     // `?? true` not `|| false`: a missing element must not silently disable
     // the flush, since nothing in the captured video would show that it had.
     const decalFlushVal = document.querySelector("#config-decal-flush")?.checked ?? true;
@@ -1317,6 +1284,15 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // A demo may have moved since the queue was loaded (#21). main.js looks
+      // for it the same way Load Project does and offers the match; a demo
+      // still missing after that stops the batch, since its highlights
+      // cannot be captured.
+      if (pickedDemosPresent && !(await pickedDemosPresent())) {
+        showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+        return;
+      }
+
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
 
@@ -1354,6 +1330,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // Before any patching: without Steam the game can't start.
+      if (!(await ensureSteamReady())) {
+        setStatusLine(statusEl, STRINGS.STEAM.BATCH_NOT_STARTED_STATUS);
+        return;
+      }
       runBatch();
     });
   }

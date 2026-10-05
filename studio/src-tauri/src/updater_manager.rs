@@ -88,6 +88,12 @@ pub async fn download_and_install_update(
     app: AppHandle,
     state: tauri::State<'_, UpdaterState>,
 ) -> Result<(), String> {
+    // A debug build is a `tauri dev` session or a `--debug` bundle made from
+    // the repo. Installing from it would quit it and replace the *installed*
+    // app, so refuse; the frontend never offers it either.
+    if cfg!(debug_assertions) {
+        return Err(crate::messages::LOCAL_BUILD_CANNOT_INSTALL_UPDATE.to_string());
+    }
     let pending = Arc::clone(&state.pending);
     let update = pending
         .lock()

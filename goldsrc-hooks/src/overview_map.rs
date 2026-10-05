@@ -101,6 +101,16 @@ const FULL_AT: usize = 0x238;
 /// The minimap: 0.24 of the screen, top-right. `OverviewMapMode` 2.
 const MINI_AT: usize = 0x248;
 
+/// `CHud::OverviewMapMode`'s inputs (`+0x228e0`; see
+/// `docs/goldsrc_objective_icons.md` §5): the spectator predicate it calls (a
+/// `.data` function pointer the engine fills), `gHUD`'s FOV field, and
+/// `gHUD`'s cached `_cl_minimap` `cvar_t*`.
+const SPECTATOR_PREDICATE_RVA: usize = 0x19_5e40;
+const FOV_AT: usize = 0x234;
+const MINIMAP_CVAR_AT: usize = 0x6_e280;
+/// `cvar_t::value`.
+const CVAR_VALUE_AT: usize = 0xc;
+
 /// Rejects a rectangle that could not be a screen rectangle. The fields are
 /// plain `int`s the engine hands to the sprite drawing code, so nothing stops a
 /// nonsense value except this.
@@ -207,6 +217,12 @@ static HELD_FULL: [AtomicI32; 4] = [const { AtomicI32::new(0) }; 4];
 static HELD_MINI: [AtomicI32; 4] = [const { AtomicI32::new(0) }; 4];
 static HOLDING_FULL: AtomicBool = AtomicBool::new(false);
 static HOLDING_MINI: AtomicBool = AtomicBool::new(false);
+
+/// The minimap's y as the engine last cached it, and the y `shift_mini` last
+/// wrote over it, or [`NOT_SHIFTED`].
+static MINI_STOCK_Y: AtomicI32 = AtomicI32::new(NOT_SHIFTED);
+static MINI_SHIFTED_Y: AtomicI32 = AtomicI32::new(NOT_SHIFTED);
+const NOT_SHIFTED: i32 = i32::MIN;
 
 static GHUD: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
@@ -344,6 +360,76 @@ pub fn apply() -> Result<usize, String> {
         }
     }
     Ok(written)
+}
+
+/// Which map is up, the way `CHud::OverviewMapMode` decides it: 0 for none,
+/// 1 for the full map, 2 for the minimap. `_cl_minimap`'s value, but only while
+/// the spectator predicate holds and the FOV is 90 (a scope takes the map down).
+pub fn mode() -> Option<i32> {
+    let base = engine::client_module_base()?;
+    let ghud = ghud().ok()?;
+    // Safety: a dword in client.dll's .data, read-only here.
+    let predicate = unsafe { ((base + SPECTATOR_PREDICATE_RVA) as *const usize).read_unaligned() };
+    if predicate == 0 {
+        return Some(0);
+    }
+    // Safety: the engine filled this slot with a function `OverviewMapMode`
+    // itself calls with no arguments, every frame, on this same thread.
+    let predicate: unsafe extern "C" fn() -> i32 = unsafe { std::mem::transmute(predicate) };
+    if unsafe { predicate() } == 0 {
+        return Some(0);
+    }
+    // Safety: fields of the object the engine writes here itself.
+    let (fov, cvar) = unsafe {
+        (
+            ((ghud + FOV_AT) as *const i32).read_unaligned(),
+            ((ghud + MINIMAP_CVAR_AT) as *const usize).read_unaligned(),
+        )
+    };
+    if fov != 90 || cvar == 0 {
+        return Some(0);
+    }
+    // Safety: a registered cvar_t, which lives as long as the client.
+    Some(unsafe { ((cvar + CVAR_VALUE_AT) as *const f32).read_unaligned() } as i32)
+}
+
+/// Moves the minimap `by` pixels from where the engine cached it, for the
+/// spectator layout. Re-asserted every frame: a `VidInit` recomputes the cache,
+/// and the new value becomes the one shifted from. A held minimap (typed with
+/// this command) wins, and is left alone.
+pub fn shift_mini(by: i32) -> Result<(), String> {
+    if is_held(Which::Mini) {
+        MINI_SHIFTED_Y.store(NOT_SHIFTED, Ordering::Relaxed);
+        return Ok(());
+    }
+    let at = ghud()? + MINI_AT + 4;
+    // Safety: a dword inside the object the engine writes here itself.
+    let cached = unsafe { (at as *const i32).read_unaligned() };
+    if cached != MINI_SHIFTED_Y.load(Ordering::Relaxed) {
+        MINI_STOCK_Y.store(cached, Ordering::Relaxed);
+    }
+    let wanted = MINI_STOCK_Y.load(Ordering::Relaxed) + by;
+    if cached != wanted && !unsafe { crate::patch::write_code_bytes(at, &wanted.to_le_bytes()) } {
+        return Err("could not write the mini map's y".to_string());
+    }
+    MINI_SHIFTED_Y.store(wanted, Ordering::Relaxed);
+    Ok(())
+}
+
+/// Puts the minimap's y back where the engine cached it, if `shift_mini` moved
+/// it and nothing has written it since.
+pub fn unshift_mini() {
+    let shifted = MINI_SHIFTED_Y.swap(NOT_SHIFTED, Ordering::Relaxed);
+    if shifted == NOT_SHIFTED || is_held(Which::Mini) {
+        return;
+    }
+    let Ok(ghud) = ghud() else { return };
+    let at = ghud + MINI_AT + 4;
+    // Safety: as in `shift_mini`.
+    if unsafe { (at as *const i32).read_unaligned() } == shifted {
+        let stock = MINI_STOCK_Y.load(Ordering::Relaxed);
+        unsafe { crate::patch::write_code_bytes(at, &stock.to_le_bytes()) };
+    }
 }
 
 /// Both rectangles and what is being held, for the bare command.

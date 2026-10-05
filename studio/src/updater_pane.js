@@ -88,6 +88,10 @@ async function displayCurrentVersion() {
 }
 
 export async function checkForUpdatesNow(channel = currentChannel()) {
+  if (await isLocalOrDebugBuild()) {
+    await reportPublishedVersions();
+    return;
+  }
   setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
   const downloadBtn = document.querySelector('#download-install-update-btn');
 
@@ -117,7 +121,25 @@ export async function checkForUpdatesNow(channel = currentChannel()) {
   }
 }
 
+/** Local and debug builds: show the latest version on each channel as
+ *  information only. Every published version differs from a local build's,
+ *  so the usual "Update available" would always fire; and installing would
+ *  quit this dev copy and replace the *installed* app instead. */
+async function reportPublishedVersions() {
+  setStatus(STRINGS.UPDATE_MODAL.STATUS_CHECKING);
+  const downloadBtn = document.querySelector('#download-install-update-btn');
+  if (downloadBtn) downloadBtn.style.display = 'none';
+  setFooterButtonState(false);
+  const [stable, experimental] = await Promise.all(
+    ['stable', 'experimental'].map((channel) => checkForUpdate(channel).catch(() => null)),
+  );
+  setStatus(STRINGS.UPDATE_MODAL.statusLocalBuild(stable?.version, experimental?.version));
+}
+
 async function beginDownloadAndInstall() {
+  // Belt and braces: the button is never shown on a local or debug build,
+  // and the backend refuses too.
+  if (await isLocalOrDebugBuild()) return;
   const downloadBtn = document.querySelector('#download-install-update-btn');
   const progressContainer = document.querySelector('#update-progress-container');
   setStatus(STRINGS.UPDATE_MODAL.STATUS_DOWNLOADING);
