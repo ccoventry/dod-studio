@@ -11,6 +11,7 @@ import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, sca
 import { STRINGS } from './strings.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
+import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
 function setAnalyzerFileIndicator(text) {
@@ -1056,6 +1057,7 @@ function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'flags': renderFlagsTab(container, report, { esc, teamColor, teamLabel, durSecs, formatMMSS }); break;
     case 'chat': renderChatTab(container); break;
   }
 }

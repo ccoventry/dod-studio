@@ -7,6 +7,7 @@
 // identical to what desktop's analyze_demo_full Tauri command returns, so
 // these functions are a near-verbatim copy of their analyzer_pane.js source.
 import { STRINGS } from './strings.js';
+import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
 let report = null;
@@ -198,6 +199,7 @@ export function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'flags': renderFlagsTab(container, report, { esc, teamColor, teamLabel, durSecs, formatMMSS }); break;
     case 'chat': renderChatTab(container); break;
   }
 }
