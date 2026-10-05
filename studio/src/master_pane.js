@@ -7,6 +7,8 @@ import { logFrontendEvent } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { makeClearable } from './clearable_input.js';
+import { statusCountColor } from './status_colors.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -44,6 +46,10 @@ let wasEmptyQueue = false;
 // one row. Resolves true/false; undefined here only if main.js never wires
 // it, in which case the delete handler falls back to a plain confirm().
 let currentOnRequestTrackedDeleteConfirm = null;
+// main.js's handler for a missing demo's Locate button (#21).
+let currentOnLocateDemo = null;
+// main.js's handler for a missing demo's Use found copy button (#21).
+let currentOnUseFoundCopy = null;
 let currentSearchTerm = '';
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
@@ -70,9 +76,15 @@ export function getVisibleDemos() {
   return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm));
 }
 
-export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
+export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy) {
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
+  }
+  if (onLocateDemo) {
+    currentOnLocateDemo = onLocateDemo;
+  }
+  if (onUseFoundCopy) {
+    currentOnUseFoundCopy = onUseFoundCopy;
   }
   if (onRequestTrackedDeleteConfirm) {
     currentOnRequestTrackedDeleteConfirm = onRequestTrackedDeleteConfirm;
@@ -87,6 +99,7 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm) {
       currentSearchTerm = (e.target.value || '').toLowerCase().trim();
       renderMasterList(currentDemos, null, currentOnSelectDemo);
     });
+    makeClearable(searchInput, STRINGS.WORKSPACE.SEARCH_CLEAR_TITLE);
   }
 
   const selectAllCb = document.querySelector('#master-select-all-cb');
@@ -325,6 +338,16 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     nameSpan.textContent = demo.name || STRINGS.WORKSPACE.EMPTY_DASH;
     tdName.appendChild(nameSpan);
 
+    // Set by main.js's missing-demo check on project load (#21).
+    if (demo.missing) {
+      nameSpan.style.color = '#ef5350';
+      const missingBadge = document.createElement('span');
+      missingBadge.textContent = STRINGS.WORKSPACE.MISSING_BADGE;
+      missingBadge.title = STRINGS.WORKSPACE.missingBadgeTitle(demo.path);
+      missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:#ef5350;border:1px solid #ef5350;border-radius:2px;padding:0 4px;cursor:help;';
+      tdName.appendChild(missingBadge);
+    }
+
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {
       const badge = document.createElement('span');
@@ -355,21 +378,21 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdPending = document.createElement('td');
     tdPending.style.padding = '6px 8px';
     tdPending.style.textAlign = 'center';
-    tdPending.style.color = pending > 0 ? '#ffa726' : '#555';
+    tdPending.style.color = statusCountColor('Pending', pending);
     tdPending.textContent = pending;
 
     // Col 6: Captured count  [M4]
     const tdCaptured = document.createElement('td');
     tdCaptured.style.padding = '6px 8px';
     tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = captured > 0 ? '#4caf50' : '#555';
+    tdCaptured.style.color = statusCountColor('Captured', captured);
     tdCaptured.textContent = captured;
 
     // Col 7: Rendered count  [M4]
     const tdRendered = document.createElement('td');
     tdRendered.style.padding = '6px 8px';
     tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = rendered > 0 ? '#2196f3' : '#555';
+    tdRendered.style.color = statusCountColor('Rendered', rendered);
     tdRendered.textContent = rendered;
 
     // Col 8: Actions — remove-from-queue only, no status badge  [M3]
@@ -416,6 +439,34 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       logFrontendEvent(STRINGS.WORKSPACE.rowDeleteLog(demo.name || demo.path, demoIsTracked ? STRINGS.WORKSPACE.TRACKED_NOTE_SUFFIX : ''));
       renderMasterList(currentDemos, newSelectedIdx, currentOnSelectDemo);
     });
+    // A match the load-time search found but the user left as missing:
+    // one click to use it after all.
+    if (demo.missing && demo.foundAt && currentOnUseFoundCopy) {
+      const useBtn = document.createElement('button');
+      useBtn.type = 'button';
+      useBtn.className = 'use-found-copy-btn';
+      useBtn.textContent = STRINGS.WORKSPACE.USE_FOUND_COPY_BUTTON;
+      useBtn.title = STRINGS.WORKSPACE.useFoundCopyTitle(demo.foundAt);
+      useBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      useBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // do not select the row
+        currentOnUseFoundCopy(demo);
+      });
+      tdActions.appendChild(useBtn);
+    }
+    if (demo.missing && currentOnLocateDemo) {
+      const locateBtn = document.createElement('button');
+      locateBtn.type = 'button';
+      locateBtn.className = 'locate-demo-btn';
+      locateBtn.textContent = STRINGS.WORKSPACE.LOCATE_DEMO_BUTTON;
+      locateBtn.title = STRINGS.WORKSPACE.LOCATE_DEMO_TITLE;
+      locateBtn.style.cssText = 'margin-right:6px;font-size:0.8em;padding:1px 6px;';
+      locateBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // do not select the row
+        currentOnLocateDemo(demo);
+      });
+      tdActions.appendChild(locateBtn);
+    }
     tdActions.appendChild(deleteBtn);
 
     tr.appendChild(tdCheck);

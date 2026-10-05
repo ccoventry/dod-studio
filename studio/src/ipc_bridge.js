@@ -41,6 +41,27 @@ export async function scanDirectory(scanPaths, known = [], workers = undefined) 
     });
 }
 
+// Which of a loaded project's demos are missing, and a moved copy of each if
+// one with the same file key turns up in `searchDirs` (#21). Resolves
+// `[{ path, candidate }]`; quiet on failure, since the project itself loaded.
+// Paths of the demos whose file no longer matches its saved key (#21).
+// Empty when the check itself fails, so a broken check never blocks a batch.
+export async function changedDemos(demos) {
+  return invoke("changed_demos", { demos })
+    .catch((err) => {
+      console.error("IPC Execution Error (changed_demos):", err);
+      return [];
+    });
+}
+
+export async function locateMissingDemos(demos, searchDirs) {
+  return invoke("locate_missing_demos", { demos, searchDirs })
+    .catch((err) => {
+      console.error("IPC Execution Error (locate_missing_demos):", err);
+      return [];
+    });
+}
+
 // Total RAM for the scan worker hint (#246). Quiet on failure: the hint just
 // leaves out the "this PC has" half.
 export async function systemMemoryBytes() {
@@ -98,7 +119,7 @@ export async function scanGameConfigs(
   })
     .catch((err) => {
       console.error("IPC Execution Error (scan_game_configs):", err);
-      return { unseen: [], overrides: [], shadowed: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [] };
+      return { unseen: [], conflicts: [], asymmetric: [], custom: [], bannedInit: [], bannedScheduled: [], tooLongInit: [], tooLongScheduled: [], decalDefaultRing: null, decalFlushIsNoop: false, noopInit: [], noopScheduled: [], configCfgWritable: false };
     });
 }
 
@@ -222,6 +243,25 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */
+// Resolves "not_running", "signed_out" or "ready"; "ready" when the check
+// itself fails, so a broken check never blocks a launch.
+export async function steamState() {
+  return invoke("steam_state")
+    .catch((err) => {
+      console.error("IPC Execution Error (steam_state):", err);
+      return "ready";
+    });
+}
+
+export async function startSteam() {
+  return invoke("start_steam")
+    .catch((err) => {
+      console.error("IPC Execution Error (start_steam):", err);
+      showToast(String(err), 'error');
+      throw err;
+    });
+}
+
 export async function checkEngineProcesses() {
   return invoke("check_engine_processes")
     .catch((err) => {

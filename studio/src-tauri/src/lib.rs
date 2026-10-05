@@ -19,7 +19,7 @@ use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
     generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
     launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
-    send_preview_to_running_game,
+    send_preview_to_running_game, start_steam, steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, check_render_autosave,
@@ -87,6 +87,30 @@ async fn save_settings(
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+    }))
+    .await
+}
+
+/// Which of a loaded project's demos are missing, and where each one moved,
+/// if a file with the same key turns up in `search_dirs` (#21).
+#[tauri::command]
+async fn locate_missing_demos(
+    demos: Vec<capture_manager::KnownDemo>,
+    search_dirs: Vec<String>,
+) -> Result<Vec<capture_manager::MissingDemo>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let dirs: Vec<std::path::PathBuf> =
+            search_dirs.iter().map(std::path::PathBuf::from).collect();
+        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+    }))
+    .await
+}
+
+/// Which demos are no longer the file they were scanned from (#21).
+#[tauri::command]
+async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(capture_manager::changed_demos(&demos))
     }))
     .await
 }
@@ -589,6 +613,10 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
+            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // for the game's own memory (#565).
+            #[cfg(windows)]
+            native::sys::analysis_server::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -612,6 +640,8 @@ pub fn run() {
             read_cfg_commands,
             check_engine_processes,
             kill_engine_processes,
+            steam_state,
+            start_steam,
             send_preview_to_running_game,
             scan_orphaned_previews,
             delete_orphaned_previews,
@@ -638,6 +668,8 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            locate_missing_demos,
+            changed_demos,
             system_memory_bytes,
             run_demo_audit,
             delete_audit_files,

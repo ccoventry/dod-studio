@@ -66,6 +66,8 @@ pub fn failed_to_read_file(path: &str, err: impl Display) -> String {
 
 pub const HLAE_EXECUTABLE_NOT_FOUND: &str = "HLAE executable not found at specified path.";
 pub const HL_EXECUTABLE_NOT_FOUND: &str = "Half-Life executable not found at specified path.";
+pub const STEAM_NOT_FOUND: &str =
+    "Couldn't find Steam to start it. Start Steam yourself, then try again.";
 
 pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)
@@ -290,6 +292,8 @@ pub fn failed_to_build_updater(err: impl Display) -> String {
 
 pub const NO_UPDATE_AVAILABLE_TO_INSTALL: &str =
     "No update available to install — call check_for_update first";
+
+pub const LOCAL_BUILD_CANNOT_INSTALL_UPDATE: &str = "This is a local or debug build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy";
 
 // ── settings_manager.rs ──────────────────────────────────────────────────
 
