@@ -93,6 +93,12 @@ pub const MAX_MS: i32 = 1000;
 
 static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
+/// The `hw.dll` base a scan came up empty in, and why. `poll` asks every
+/// frame, and a miss rescans all of `.text` each time (1.1 ms, measured on
+/// the 25th Anniversary `hw.dll`, where the pattern doesn't match) -- so a
+/// miss is remembered until the module changes, the same as a hit.
+static FAILED_BASE: AtomicUsize = AtomicUsize::new(0);
+static FAILED_WHY: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// The ceiling currently written into the engine, or 0 before the first apply.
 static ACTIVE_MS: AtomicI32 = AtomicI32::new(0);
@@ -107,10 +113,22 @@ fn span_address() -> Result<usize, String> {
             return Ok(cached);
         }
     }
+    if FAILED_BASE.load(Ordering::Acquire) == base {
+        return Err(FAILED_WHY.lock().map(|why| why.clone()).unwrap_or_default());
+    }
     // Safety: `engine_module_base` only returns a base for a mapped module, and
     // hw.dll stays mapped for the session.
-    let address = unsafe { scan::find_unique(base, PATTERN) }
-        .map_err(|why| format!("could not find the ex_interp clamp -- {why}"))?;
+    let address = match unsafe { scan::find_unique(base, PATTERN) } {
+        Ok(address) => address,
+        Err(why) => {
+            let why = format!("could not find the ex_interp clamp -- {why}");
+            if let Ok(mut failed) = FAILED_WHY.lock() {
+                failed.clone_from(&why);
+            }
+            FAILED_BASE.store(base, Ordering::Release);
+            return Err(why);
+        }
+    };
     SPAN_ADDRESS.store(address, Ordering::Release);
     SCANNED_BASE.store(base, Ordering::Release);
     Ok(address)
@@ -148,6 +166,11 @@ pub fn validate(ms: i32) -> Result<(), String> {
 /// the cvar takes effect without a restart.
 pub fn set_max(ms: i32) -> Result<bool, String> {
     validate(ms)?;
+    // The cvar's default: nothing has been written, so there is nothing to
+    // write or undo, and no reason to find the clamp at all.
+    if ms == STOCK_MS && ACTIVE_MS.load(Ordering::Acquire) == 0 {
+        return Ok(false);
+    }
     let address = span_address()?;
     let present = current()?;
     if present == ms {

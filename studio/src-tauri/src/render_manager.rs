@@ -975,7 +975,7 @@ pub fn get_render_required_estimate_gb(state: tauri::State<'_, RenderManager>) -
         .unwrap()
         .iter()
         .filter(|j| j.status == "Queued" || j.status == "Rendering")
-        .map(|j| job_reservation_estimate(&j.clip, j.codec == RenderCodec::SourceCopy))
+        .map(|j| job_reservation_estimate(&j.clip, j.codec, &j.custom_codec_args))
         .sum();
     total as f64 / 1_073_741_824.0
 }
