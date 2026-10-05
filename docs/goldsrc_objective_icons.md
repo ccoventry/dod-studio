@@ -235,22 +235,42 @@ client.dll+0x228e0
   xor  eax, eax
 ```
 
-`1` (the small map) makes the loop overwrite both icon slots per objective from
-the objective's own record; `2` (the full map) draws each icon at its world
-position instead. Both are inside the loop and downstream of the row detour, so
+`1` (the full map, centred) makes the loop overwrite both icon slots per
+objective from the objective's own record; `2` (the minimap, top right) draws
+each icon at its world position instead. An earlier version of this section had
+the two sizes the wrong way round; `goldsrc-hooks/src/overview_map.rs` reads
+them off `CHud::ComputeOverviewMapRects`' arithmetic. Both are inside the loop and downstream of the row detour, so
 they keep winning — and they should: the icons are being drawn *on the map*, at
 map coordinates, and that is not a placement anyone would want overridden.
 
 This also **corrects a characterisation in `docs/goldsrc_death_notices.md` §3**.
 That document calls the same `+0x228e0` call "spectator mode" and its `cmp eax, 2`
 the "spectator-mode-2 path". It is the overview map's size, not a spectator mode:
-the kill feed takes its y from the map layout while the *full* overview map is up.
+the kill feed takes its y from the map layout while the minimap is up: it starts
+`round(2 * ScreenHeight / 480)` below the minimap's bottom edge.
 The behaviour recorded there is unaffected — the detour there sets the result on
 every path regardless — but the name was wrong.
 
 `gHUD+0x234` is the FOV field: it is compared against and assigned `0x5a` (90) in
 the `SetFOV` user-message path (`__MsgFunc_SetFOV` at `+0x20c30` → `+0x22160`,
 and the per-frame update at `+0x36d1c`).
+
+## 6. The spectator layout
+
+The game's spectating y, `round(54 * ScreenHeight / 480)`, is not the spectator
+bar's height. The bar is `GetProportionalScaledValue(64)` tall (`client+0x82dae`),
+so the icons and timer overlap its bottom ~10 pixels. With
+`dodstudio_hide_spectator_bars 1` the bar is gone and the gap remains.
+
+`goldsrc-hooks/src/spectator_hud.rs` fixes both. While spectating, and while no
+value has been typed, it sets the icon row's y and the timer's y through the two
+detours above:
+
+- the bar shown: just below it, as far down as a POV demo has them from the top;
+- the bar hidden: at a POV demo's positions.
+
+The kill feed and the minimap get the same treatment. `<any> default` hands a
+value back to that layout. When not spectating, everything goes back to the game.
 
 ## What is not proven
 
