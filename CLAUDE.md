@@ -20,10 +20,11 @@ Cargo workspace (`Cargo.toml`, resolver "3", edition 2024) containing the follow
   - `patch/` — Demo-file binary patcher (`engine.rs`, `builder.rs`, `scanner.rs`, `highlevel.rs`, `types.rs`). Scans, injects (bookmarks, director commands, `DRC_CMD_INEYE`), and rewrites GoldSrc frames.
   - `hlcr/` — Take management & FFmpeg transcoding (`renderer.rs`, `scanner.rs`, `config.rs`, `autosave.rs`).
   - `shared/`, `sys/`, `utils/` — Path resolution, disk-space queries, demo hashing.
-  - `src/bin/cli/main.rs` → `preview_cli` binary: Headless entry point with drag-and-drop support.
+  - `src/bin/preview_cli/main.rs` → `preview_cli` binary: Headless entry point with drag-and-drop support. (`src/bin/cli.rs` is a different binary, `dod-studio-cli`.) `autobins = false`: every binary is listed in `native/Cargo.toml`, and one-off R&D probes live in `native/examples/`.
 - **`hl-demo-auditor/`** — Standalone duplicate-demo detector using size + header hash (`fnv1a_hash`).
 - **`benchmark/`** — Performance benchmarking binary for the parsing/patching pipeline.
 - **`studio/`** — Active Tauri v2 + Vite/JS frontend workspace (`src-tauri/` backend and `src/*.js` frontend modules).
+- **`goldsrc-hooks/`** — 32-bit companion DLL injected into `hl.exe` alongside HLAE's: HLTV sound/viewmodel fixes, HUD/scoreboard/crosshair/kill-feed control, the decal clear, HD textures, and the `dodstudio_*` console surface (`docs/dodstudio_commands.md`). Builds only for `i686-pc-windows-msvc`: `cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --lib --bins`. See `goldsrc-hooks/README.md`.
 - **`web-analyzer/`** — `analysis` compiled to `wasm32-unknown-unknown`, deployed to GitHub Pages on every push to `main` (`.github/workflows/deploy_web.yml`). Static frontend lives in `www/`.
 
 > The GoldSrc HLDEMO → Xash3D IDEM transcoder for the browser preview viewer moved out of this repo entirely: it now lives at `ccoventry/dod-web-demo-viewer` (`xash-transcode/` + a hand-synced copy of `dem-patch/`), since that's the repo the browser preview viewer itself lives in. dod-tools' old `experimental/xash-transcode` branch is kept only as a historical record — do not add new commits to it, and do not open PRs against it. See `docs/web_preview_viewer.md` in the new repo before touching that code.
@@ -72,7 +73,7 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
 
 ### Terminal & Shell Rules
 - **Diagnostics:** Never output raw compiler logs. Provide concise, single-sentence failure summaries and direct mechanical fixes.
-- **Execution Bypass:** Use `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for blocked scripts. For unsigned binaries blocked by WDAC, execute via `run.ps1` to sequence process stops, build steps, and signature updates.
+- **Execution Bypass:** Use `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for blocked scripts. For unsigned binaries blocked by WDAC, execute via `build-and-launch.ps1` to sequence process stops, build steps, and signature updates.
 
 ### GitHub Issues & PRs
 - **Every PR targets `dev`** — always pass `gh pr create -B dev`. `main` is the default branch, so omitting `-B` opens the PR against `main`, which is how #325 skipped `dev`. The only PR into `main` is a `dev` → `main` release; the `Main only from dev` check refuses anything else. When syncing `main` back into `dev`, use a merge commit, never squash (#340 → #341).

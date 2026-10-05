@@ -1,8 +1,12 @@
+/// The on-disk analysis cache Studio and the hook DLL share (#565).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cache;
 mod chat;
 mod clan_match;
 mod kill;
 mod localization;
 mod mortality;
+mod objective;
 mod player;
 mod round;
 mod scoreboard;
@@ -14,17 +18,17 @@ mod weapon_names;
 use crate::{
     chat::use_chat_updates,
     clan_match::{ClanMatchDetection, use_clan_match_detection_updates},
-    kill::{use_kill_streak_updates, use_weapon_breakdown_updates},
+    kill::{
+        use_kill_streak_updates, use_teamkill_and_suicide_updates, use_weapon_breakdown_updates,
+    },
     mortality::with_mortality_detection,
+    objective::use_objective_updates,
     player::use_player_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
-use dem::{
-    open_demo_from_bytes,
-    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
-};
+use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -35,6 +39,7 @@ pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
     localization::{get_active_language, set_active_language, translate_key},
     mortality::{Mortality, MortalityChange, MortalityState},
+    objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
     round::Round,
 };
@@ -90,6 +95,9 @@ pub struct AnalyzerState {
     pub ended_early: bool,
     pub first_time_left: Option<std::time::Duration>,
     pub last_time_left: Option<std::time::Duration>,
+    /// The demo kept recording through a level change after the match, to
+    /// another map or the same one; everything from there on is ignored
+    /// (`use_segment_boundary`).
     pub map_changed: bool,
     pub initial_map_name: Option<String>,
     pub current_time: GameTime,
@@ -105,6 +113,9 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Flag layout, ownership, captures and capture attempts (#192).
+    #[serde(default)]
+    pub objectives: Objectives,
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -134,8 +145,8 @@ pub struct DemoInfo {
     pub map_checksum: u32,
 }
 
-impl From<Demo> for DemoInfo {
-    fn from(value: Demo) -> Self {
+impl From<&Demo> for DemoInfo {
+    fn from(value: &Demo) -> Self {
         let map_name = value
             .header
             .map_name
@@ -205,6 +216,21 @@ impl From<Demo> for DemoInfo {
     }
 }
 
+/// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
+pub const PROGRESS_SCALE: usize = 1000;
+/// The part of [`PROGRESS_SCALE`] reading the demo's structure takes.
+pub const PARSE_SHARE: usize = 850;
+
+/// `done` of `total`, placed between `from` and `to` on [`PROGRESS_SCALE`].
+/// In u128: a byte count times 850 passes 2^32 in the 32-bit game DLL.
+fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
+    if total == 0 {
+        return to;
+    }
+    let done = (done as u128).min(total as u128);
+    from + (done * (to - from) as u128 / total as u128) as usize
+}
+
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct Analysis {
     pub demo_info: DemoInfo,
@@ -245,6 +271,7 @@ fn is_relevant_message(name_bytes: &[u8]) -> bool {
             | b"InitObj"
             | b"SetObj"
             | b"StartProg"
+            | b"StartProgF"
             | b"CancelProg"
     )
 }
@@ -305,6 +332,56 @@ fn extract_ip_port(s: &str) -> Option<String> {
     None
 }
 
+/// Ends the analysed demo at a second signon (#217).
+///
+/// `SvcServerInfo` starts every signon. A second one means the server changed
+/// level and the demo kept recording: to another map, or to the *same* map,
+/// as when both halves of a match are played back to back. Everything after
+/// it re-sends teams, classes and the clock from scratch, so letting it
+/// through resets every player to Unassigned and restarts the demo clock.
+///
+/// Once the first segment has gameplay it is the match, and nothing after
+/// the boundary is analysed. Before that (a warm-up map, then the real one)
+/// a *different* map replaces the first segment outright.
+///
+/// Runs before every other hook, so none of them sees the new signon: the
+/// POV hook would otherwise take the new connection's player slot.
+pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
+        return;
+    };
+    let map_name = String::from_utf8_lossy(&msg.map_file_name)
+        .trim_end_matches('\0')
+        .to_string();
+    let clean_map = map_name
+        .trim_start_matches("maps/")
+        .trim_end_matches(".bsp")
+        .to_string();
+    let Some(ref initial) = state.initial_map_name else {
+        state.initial_map_name = Some(clean_map);
+        return;
+    };
+    let has_gameplay = state
+        .rounds
+        .iter()
+        .any(|r| matches!(r, Round::Completed { .. }))
+        || state
+            .players
+            .iter()
+            .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
+    if has_gameplay {
+        state.map_changed = true;
+    } else if initial != &clean_map {
+        state.initial_map_name = Some(clean_map);
+        state.players.clear();
+        state.rounds.clear();
+        state.team_scores.reset();
+        state.objectives = Objectives::default();
+        state.clan_match_detected = false;
+        state.clan_match_detection = ClanMatchDetection::WaitingForReset;
+    }
+}
+
 pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
         let hostname = String::from_utf8_lossy(&msg.hostname)
@@ -313,38 +390,6 @@ pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent
         state.server_name = Some(hostname.clone());
         if let Some(addr) = extract_ip_port(&hostname) {
             state.server_address = Some(addr);
-        }
-
-        let map_name = String::from_utf8_lossy(&msg.map_file_name)
-            .trim_end_matches('\0')
-            .to_string();
-        let clean_map = map_name
-            .trim_start_matches("maps/")
-            .trim_end_matches(".bsp")
-            .to_string();
-        if let Some(ref initial) = state.initial_map_name {
-            if initial != &clean_map {
-                let has_gameplay = state
-                    .rounds
-                    .iter()
-                    .any(|r| matches!(r, Round::Completed { .. }))
-                    || state
-                        .players
-                        .iter()
-                        .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
-                if has_gameplay {
-                    state.map_changed = true;
-                } else {
-                    state.initial_map_name = Some(clean_map);
-                    state.players.clear();
-                    state.rounds.clear();
-                    state.team_scores.reset();
-                    state.clan_match_detected = false;
-                    state.clan_match_detection = ClanMatchDetection::WaitingForReset;
-                }
-            }
-        } else {
-            state.initial_map_name = Some(clean_map);
         }
     }
 
@@ -547,6 +592,7 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                 }
             }
             state.team_scores.convert_allies_to_british();
+            state.objectives.convert_allies_to_british();
             for round in &mut state.rounds {
                 if let Round::Completed {
                     winner_stats: Some((winner_team, _)),
@@ -575,6 +621,11 @@ impl Analysis {
         Self::try_from_bytes_with_progress(value, |_, _| {})
     }
 
+    /// Analyses a demo, calling `progress_cb(done, total)` as it goes. Only
+    /// the ratio means anything: reading the demo's structure is the first
+    /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
+    /// on a 72 MB demo), going through its frames the rest, and the last call
+    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
     pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
@@ -588,8 +639,11 @@ impl Analysis {
         // `BitReader::is_bad_read` turns an overrun into a parse error. See
         // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
         // proves it.
-        let demo_res =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_demo_from_bytes(value)));
+        let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dem::open_demo_from_bytes_with_progress(value, &mut |read, total| {
+                progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
+            })
+        }));
         let demo = match demo_res {
             Ok(Ok(d)) => d,
             Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
@@ -599,6 +653,9 @@ impl Analysis {
         let mut state = AnalyzerState::default();
 
         let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
+            if !state.map_changed {
+                use_segment_boundary(state, event);
+            }
             if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
                 return;
             }
@@ -608,8 +665,10 @@ impl Analysis {
             use_scoreboard_updates(state, event);
             use_kill_streak_updates(state, event);
             use_weapon_breakdown_updates(state, event);
+            use_teamkill_and_suicide_updates(state, event);
             use_team_score_updates(state, event);
             use_rounds_updates(state, event);
+            use_objective_updates(state, event);
             use_chat_updates(state, event);
             use_clan_match_detection_updates(Duration::from_secs(30), state, event);
             use_pov_stats_updates(state, event);
@@ -655,15 +714,35 @@ impl Analysis {
 
                 processed_frames += 1;
                 if processed_frames % 500 == 0 || processed_frames == total_frames {
-                    progress_cb(processed_frames, total_frames);
+                    progress_cb(
+                        scaled(processed_frames, total_frames, PARSE_SHARE, PROGRESS_SCALE),
+                        PROGRESS_SCALE,
+                    );
                 }
             }
         }
 
         process_event(&mut state, &AnalyzerEvent::Finalization);
 
-        Ok(Analysis::new(demo.into(), state))
+        let info = DemoInfo::from(&demo);
+        release_frames(demo);
+        Ok(Analysis::new(info, state))
     }
+}
+
+/// Frees the decoded frame tree. That's about a third of a cold parse (441 ms
+/// of ~1.3 s, `docs/demo_analyzer_load_performance.md`) and nothing needs the
+/// tree once the analysis is built, so where there are threads the caller
+/// doesn't wait for it. The browser build (wasm) frees it in place.
+fn release_frames(demo: Demo) {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let mut demo = demo;
+        let entries = std::mem::take(&mut demo.directory.entries);
+        std::thread::spawn(move || drop(entries));
+    }
+    #[cfg(target_arch = "wasm32")]
+    drop(demo);
 }
 
 impl<'a> From<&'a [u8]> for Analysis {
@@ -949,6 +1028,7 @@ mod tests {
             b"InitObj",
             b"SetObj",
             b"StartProg",
+            b"StartProgF",
             b"CancelProg",
         ] {
             assert!(is_relevant_message(name), "{:?} should be relevant", name);
@@ -985,11 +1065,14 @@ mod tests {
             let file_bytes = fs::read(path).expect("failed to read demo");
 
             // Unoptimized parse
-            let demo = open_demo_from_bytes(&file_bytes).unwrap();
+            let demo = dem::open_demo_from_bytes(&file_bytes).unwrap();
             let mut state_unopt = AnalyzerState::default();
             let mut last_live_frame = None;
             let mut processed_frames = 0;
             let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
+                if !state.map_changed {
+                    use_segment_boundary(state, event);
+                }
                 if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
                     return;
                 }
@@ -999,8 +1082,10 @@ mod tests {
                 use_scoreboard_updates(state, event);
                 use_kill_streak_updates(state, event);
                 use_weapon_breakdown_updates(state, event);
+                use_teamkill_and_suicide_updates(state, event);
                 use_team_score_updates(state, event);
                 use_rounds_updates(state, event);
+                use_objective_updates(state, event);
                 use_chat_updates(state, event);
                 use_clan_match_detection_updates(Duration::from_secs(30), state, event);
                 use_pov_stats_updates(state, event);
@@ -1355,6 +1440,91 @@ mod tests {
         assert!(state.players[0].has_pre_demo_activity);
     }
 
+    fn server_info(map: &str) -> EngineMessage {
+        EngineMessage::SvcServerInfo(dem::types::SvcServerInfo {
+            protocol: 48,
+            spawn_count: 1,
+            map_checksum: 0,
+            client_dll_hash: dem::types::ByteString(vec![0; 16]),
+            max_players: 32,
+            player_index: 3,
+            is_deathmatch: 0,
+            game_dir: b"dod\0".to_vec(),
+            hostname: b"server\0".to_vec(),
+            map_file_name: format!("maps/{}.bsp\0", map).into_bytes(),
+            map_cycle: Vec::new(),
+            unknown: 0,
+        })
+    }
+
+    fn state_with_a_kill() -> AnalyzerState {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        let mut player = Player::new_mock(3, "Player");
+        player.update_session_stats(2, 1, 0);
+        state.players.push(player);
+        state
+    }
+
+    #[test]
+    fn a_same_map_signon_after_gameplay_ends_the_demo() {
+        // #217: both halves on dod_lennon2 in one recording.
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_lennon2")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+    }
+
+    #[test]
+    fn a_different_map_after_gameplay_ends_the_demo() {
+        let mut state = state_with_a_kill();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(state.map_changed);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_lennon2"));
+    }
+
+    #[test]
+    fn a_different_map_before_gameplay_replaces_the_warm_up() {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_warmup")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(!state.map_changed);
+        assert!(state.players.is_empty());
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_anzio"));
+    }
+
+    #[test]
+    fn a_same_map_signon_before_gameplay_changes_nothing() {
+        let mut state = AnalyzerState::default();
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        state.players.push(Player::new_mock(3, "Player"));
+        use_segment_boundary(
+            &mut state,
+            &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
+        );
+        assert!(!state.map_changed);
+        assert_eq!(state.players.len(), 1);
+    }
+
     #[test]
     fn test_inspect_lenn_demo() {
         let mut path = "local/demos/ktps8w1-m00cat_soul_lenn_h2.dem";
@@ -1486,5 +1656,20 @@ mod tests {
                 recorder_id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_placed_on_one_scale() {
+        assert_eq!(scaled(0, 100, 0, PARSE_SHARE), 0);
+        assert_eq!(scaled(100, 100, 0, PARSE_SHARE), PARSE_SHARE);
+        assert_eq!(scaled(50, 100, PARSE_SHARE, PROGRESS_SCALE), 925);
+        assert_eq!(scaled(5, 0, PARSE_SHARE, PROGRESS_SCALE), PROGRESS_SCALE);
+        // A 4 GB file's worth of bytes still scales without overflow.
+        assert_eq!(scaled(usize::MAX / 2, usize::MAX, 0, 1000), 499);
     }
 }
