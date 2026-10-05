@@ -26,9 +26,17 @@ export const STRINGS = {
     // just not a release-profile one), 'experimental'
     // (release_experimental.yml), or anything else for a real stable build
     // (no parenthetical).
-    appWindowTitle: (baseVersion, buildKind) => {
+    // `branch` is set only for a build made on this PC (see localGitBranch):
+    // `local build - test/capture-batch`. A release build made here reports
+    // 'stable' or 'experimental' by version, but a branch means it came from
+    // the repo, so it's labelled a local release build instead.
+    // `port` is the Vite dev server's, set only under `npm run tauri dev`, so
+    // two dev copies running side by side can be told apart.
+    appWindowTitle: (baseVersion, buildKind, branch, port) => {
       const tags = { local: 'local build', debug: 'debug build', experimental: 'experimental build' };
-      const tag = tags[buildKind];
+      let tag = tags[buildKind];
+      if (branch) tag = `${tag && buildKind !== 'experimental' ? tag : 'local release build'} - ${branch}`;
+      if (port) tag = `${tag || 'local build'} - port ${port}`;
       return `DoD Studio — v${baseVersion}${tag ? ` (${tag})` : ''}`;
     },
     STUDIO_TAB: 'Studio',
@@ -57,6 +65,13 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #54: the Master Queue's quick filters.
+    KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
+    KILLS_FILTER_ALL: 'All demos',
+    KILLS_FILTER_WITH_KILLS: 'With kills',
+    KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
+    OWNER_ONLY_LABEL: 'POV only',
+    OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
@@ -74,7 +89,7 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
-    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search.',
+    TABLE_EMPTY_NO_MATCH_SEARCH: 'No demos match your search and filters.',
     DEMO_LIST_FOOTER_DEFAULT: 'Loaded Demos: 0 | Total Highlights: 0',
     demoListFooter: (loaded, highlights) => `Loaded Demos: ${loaded} | Total Highlights: ${highlights}`,
     // #21: a project demo that is not at its saved path.
@@ -490,6 +505,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #40: sortable columns and the whole-batch bar.
+    SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
+    batchProgress: (pct) => `Batch ${pct}%`,
+    // #110: a CSV of every captured highlight, for an editor.
+    EXPORT_MARKERS_BUTTON: 'Export Marker List…',
+    EXPORT_MARKERS_TITLE: 'Save a CSV with one row per captured or rendered highlight: its demo, player, kills, where it is in the demo, its take and its label. For lining clips up in your editor.',
+    EXPORT_MARKERS_NONE: 'No captured highlights in the loaded project yet, so there is nothing to export.',
+    exportMarkersDone: (count) => `Marker list saved (${count} highlight${count === 1 ? '' : 's'})`,
+    exportMarkersFailed: (err) => `Couldn't save the marker list: ${err}`,
     CODEC_HUFFYUV: 'HuffYUV (Lossless, AVI)',
     CODEC_UNCOMPRESSED: 'Uncompressed (AVI, huge)',
     CODEC_H264: 'H.264 (Software, MP4)',
@@ -714,6 +738,7 @@ export const STRINGS = {
     SUBTAB_TEAM_DETAILS: 'Team Details',
     SUBTAB_TIMELINE: 'Timeline',
     SUBTAB_ROUNDS: 'Rounds',
+    SUBTAB_FLAGS: 'Flags',
     SUBTAB_CHAT: 'Chat Log',
     EMPTY_PICK_DEMO: 'Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".',
     EMPTY_PICK_DEMO_JS_FALLBACK: 'Browse for a demo file, or select one from the Workspace and click "View Match Telemetry".',
@@ -795,6 +820,16 @@ export const STRINGS = {
     STEAM_PROFILE_TEXT: 'Steam Profile',
     NO_STEAM_ID: 'No Steam ID',
     STEAM_ID_LABEL: 'Steam ID: ',
+    // #536: a real player's SteamID in all three forms, each copyable.
+    STEAM_ID64_LABEL: 'SteamID64',
+    STEAM_ID_CLASSIC_LABEL: 'Classic',
+    STEAM_ID3_LABEL: 'SteamID3',
+    COPY_BUTTON: 'Copy',
+    COPIED_BUTTON: 'Copied',
+    COPY_FAILED_BUTTON: "Couldn't copy",
+    copyValueTitle: (value) => `Copy ${value}`,
+    COPY_SHOW_ONLY_BUTTON: 'Copy kill-feed command',
+    copyShowOnlyTitle: (line) => `Copies "${line}". Paste it into the game console to hide every kill-feed line that doesn't involve this player.`,
     CLOCK_UNKNOWN: '??:??',
     TIMELINE_START_LABEL: '0:00',
     connectedSlot: (id) => `Connected (Slot ${id})`,
@@ -836,6 +871,27 @@ export const STRINGS = {
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
 
     ROUNDS_TITLE: 'Rounds',
+    // #192: the Flags tab.
+    FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
+    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    FLAGS_TITLE: 'Flags',
+    flagArea: (area) => `Area ${area}`,
+    COL_FLAG: 'Flag',
+    COL_OWNER_AT_END: 'Held at the end by',
+    COL_CAPTURES: 'Captures',
+    COL_BLOCKED: 'Blocked',
+    FLAGS_NO_LAYOUT: "The demo started after the flags were set up, so their layout isn't known.",
+    CAPTURES_TITLE: 'Captures',
+    COL_TEAM: 'Team',
+    COL_CAPPERS: 'Cappers',
+    FLAGS_BREAK: 'from the other team',
+    FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
+    CAPPERS_TITLE: 'Cappers',
+    COL_PLAYER: 'Player',
+    COL_CAP_CREDITS: 'Caps',
+    COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_OBJ_POINTS: 'Objective points',
+    COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
     COL_START_TIME: 'Start Time',
     COL_WINNER: 'Winner',
@@ -1197,6 +1253,20 @@ export const STRINGS = {
   },
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
+  // #443: the capture summary strip above Start Capture Batch.
+  CAPTURE_SUMMARY: {
+    MODE_FRAMES: 'Frame sequence',
+    modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
+    modeObs: (fps) => `OBS @ ${fps} fps`,
+    format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
+    scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
+    banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
+    DECALS_CLEARED: 'Decals cleared',
+    DECALS_KEPT: 'Decals kept',
+    NO_DESTINATION: 'No destination folder',
+    LINK_TITLE: 'Open this setting in Configuration',
+  },
+
   HD: {
     // #430: whether hl.exe gets 2 GB or 4 GB of address space.
     ADDRESS_SPACE_4GB: 'This hl.exe gets 4 GB of memory, room for the biggest HD textures.',

@@ -676,6 +676,7 @@ pub fn run() {
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
             updater_manager::is_debug_build,
+            updater_manager::local_git_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
