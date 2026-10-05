@@ -1,6 +1,6 @@
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
-import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild } from './ipc_bridge.js';
+import { checkForUpdate, downloadAndInstallUpdate, restartApp, getAppVersion, isDebugBuild, localGitBranch } from './ipc_bridge.js';
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
 
@@ -72,7 +72,13 @@ async function displayCurrentVersion() {
   }
   // OS window title (taskbar/Alt-Tab), not an in-page element — used to be
   // a footer label (#122) before moving here.
-  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind)).catch((err) => {
+  // Only a build made on this PC can find its source tree, so installers
+  // never show a branch.
+  const branch = await localGitBranch();
+  // Under the Vite dev server the page is served from localhost:<port>;
+  // bundled builds use Tauri's own protocol and have no port to show.
+  const port = import.meta.env.DEV ? window.location.port : '';
+  getCurrentWindow().setTitle(STRINGS.NAV.appWindowTitle(baseVersion, buildKind, branch, port)).catch((err) => {
     console.error('Failed to set window title:', err);
   });
   const modalLabel = document.querySelector('#update-modal-current-version');
