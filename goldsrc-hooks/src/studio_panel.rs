@@ -679,10 +679,11 @@ const FOLDER_TYPE: &CStr = c"Folder";
 /// The marks in front of a Demos tab row's name. The font has none of them:
 /// the game draws them from a fallback font but spaces them by its own font's
 /// narrower width, so each is followed by enough spaces to clear it
-/// (measured on PRE, 2026-10-05). The folder mark is a plain square: the 25th
-/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
-/// it draws these shapes and arrows.
-const FOLDER_MARK: &str = "\u{25A0}  ";
+/// (measured on PRE, 2026-10-05). The folder mark is a flat rectangle, more
+/// folder-shaped than a square (the user's pick): the 25th Anniversary build
+/// drew the folder emoji (U+1F4C1) as an empty box, while it draws these
+/// shapes and arrows.
+const FOLDER_MARK: &str = "\u{25AC}  ";
 const DEMO_MARK: &str = "\u{25B6}  ";
 const UP_MARK: &str = "\u{2191}  ";
 
