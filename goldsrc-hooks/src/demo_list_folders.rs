@@ -31,7 +31,8 @@
 //!   handler.
 //!
 //! The current folder outlives the window, so it reopens where it was left.
-//! Off by default, so the list looks stock until asked; the hooks are in
+//! On by default (a box on the DoD Studio window's Settings tab); off, the
+//! list looks stock. The hooks are in
 //! place either way and pass everything through while it is off.
 //!
 //! ## Per build
@@ -53,7 +54,7 @@ use crate::names::console_name;
 pub const NAME: &str = console_name!("demo_list_folders");
 
 /// The fallback path's flag, when the cvar could not be registered.
-pub static ENABLED: AtomicBool = AtomicBool::new(false);
+pub static ENABLED: AtomicBool = AtomicBool::new(true);
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// Called by `commands.rs` once `dodstudio_demo_list_folders` is registered.

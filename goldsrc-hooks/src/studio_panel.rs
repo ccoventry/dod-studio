@@ -669,6 +669,16 @@ struct DemoFilters {
     days: Option<u64>,
 }
 
+/// What a folder row shows in the Demos tab's Type column, where a demo says
+/// POV or HLTV.
+const FOLDER_TYPE: &CStr = c"Folder";
+
+/// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
+/// when the name has a space) rather than a demo.
+fn is_folder_row(row: &str) -> bool {
+    row.trim().trim_matches('"').ends_with('/')
+}
+
 /// Whether folder listing (#409) changed since the Demos tab's list was last
 /// filled: `last` and `now` are 0 off, 1 on; `last` 2 is not yet seen, when
 /// the tab has only just filled it.
@@ -1847,6 +1857,11 @@ mod hook {
                         let kind = if info.hltv { c"HLTV" } else { c"POV" };
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), kind.as_ptr());
                         set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
+                    }
+                    // A folder row (#409) says so in the Type column, so it
+                    // can't be mistaken for a demo.
+                    if is_folder_row(&get(row, ROW_KEY)) {
+                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                     }
                     if let Some(info) = info_for(&get(row, ROW_KEY)) {
                         // A dash for HLTV (nobody recorded it); blank for a
@@ -3789,6 +3804,22 @@ mod tests {
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
         assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn folder_rows_are_told_from_demos() {
+        for folder in [
+            "../",
+            "temp demos/",
+            "\"temp demos/\"",
+            "test/../",
+            " sub/ ",
+        ] {
+            assert!(is_folder_row(folder), "{folder}");
+        }
+        for demo in ["a.dem", "test/a.dem", "\"temp demos/a b.dem\"", ""] {
+            assert!(!is_folder_row(demo), "{demo}");
+        }
     }
 
     #[test]

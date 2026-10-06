@@ -1390,7 +1390,7 @@ pub fn install() {
     // Load Demo window asks for its list, so it needs no poll, and a failed
     // registration costs only this one setting's type-ahead -- a plain toggle
     // stands in for it.
-    match register(demo_list_folders::NAME, "0") {
+    match register(demo_list_folders::NAME, "1") {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
     }
