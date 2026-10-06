@@ -676,21 +676,29 @@ struct DemoFilters {
 /// POV or HLTV.
 const FOLDER_TYPE: &CStr = c"Folder";
 
+/// The marks in front of a Demos tab row's name. The font has none of them:
+/// the game draws them from a fallback font but spaces them by its own font's
+/// narrower width, so each is followed by enough spaces to clear it
+/// (measured on PRE, 2026-10-05).
+const FOLDER_MARK: &str = "\u{1F4C1}    ";
+const DEMO_MARK: &str = "\u{25B6}  ";
+const UP_MARK: &str = "\u{2191}  ";
+
 /// What the Demos tab's Demo File column shows for a row's `path` from
-/// `dod/`: a demo's file name, a folder's name and a slash, and the up row as
-/// `.. (up one folder)`, not the whole path (#409). The path itself stays on
-/// the row, under [`PATH_KEY`], for loading.
+/// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
+/// `.. (up one folder)` for the up row, not the whole path (#409). The path
+/// itself stays on the row, under [`PATH_KEY`], for loading.
 fn display_name(path: &str) -> String {
     let path = path.trim().trim_matches('"');
     if let Some(folder) = path.strip_suffix('/') {
         let last = folder.rsplit('/').next().unwrap_or(folder);
         if last == ".." {
-            ".. (up one folder)".to_string()
+            format!("{UP_MARK}.. (up one folder)")
         } else {
-            format!("{last}/")
+            format!("{FOLDER_MARK}{last}/")
         }
     } else {
-        path.rsplit('/').next().unwrap_or(path).to_string()
+        format!("{DEMO_MARK}{}", path.rsplit('/').next().unwrap_or(path))
     }
 }
 
@@ -3930,14 +3938,20 @@ mod tests {
 
     #[test]
     fn rows_show_names_not_paths() {
-        assert_eq!(display_name("temp demos/m3_h1.dem"), "m3_h1.dem");
-        assert_eq!(display_name("\"temp demos/my clip.dem\""), "my clip.dem");
-        assert_eq!(display_name("a.dem"), "a.dem");
-        assert_eq!(display_name("temp demos/"), "temp demos/");
-        assert_eq!(display_name("../../steamapps/"), "steamapps/");
-        assert_eq!(display_name("../"), ".. (up one folder)");
-        assert_eq!(display_name("temp demos/../"), ".. (up one folder)");
-        assert_eq!(display_name("../../../"), ".. (up one folder)");
+        let demo = |n: &str| format!("{DEMO_MARK}{n}");
+        let folder = |n: &str| format!("{FOLDER_MARK}{n}");
+        let up = format!("{UP_MARK}.. (up one folder)");
+        assert_eq!(display_name("temp demos/m3_h1.dem"), demo("m3_h1.dem"));
+        assert_eq!(
+            display_name("\"temp demos/my clip.dem\""),
+            demo("my clip.dem")
+        );
+        assert_eq!(display_name("a.dem"), demo("a.dem"));
+        assert_eq!(display_name("temp demos/"), folder("temp demos/"));
+        assert_eq!(display_name("../../steamapps/"), folder("steamapps/"));
+        assert_eq!(display_name("../"), up);
+        assert_eq!(display_name("temp demos/../"), up);
+        assert_eq!(display_name("../../../"), up);
     }
 
     #[test]
