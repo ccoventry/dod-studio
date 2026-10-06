@@ -77,6 +77,16 @@ export const STRINGS = {
     STEAM_PROFILE_TEXT: 'Steam Profile',
     NO_STEAM_ID: 'No Steam ID',
     STEAM_ID_LABEL: 'Steam ID: ',
+    // #536: a real player's SteamID in all three forms, each copyable.
+    STEAM_ID64_LABEL: 'SteamID64',
+    STEAM_ID_CLASSIC_LABEL: 'Classic',
+    STEAM_ID3_LABEL: 'SteamID3',
+    COPY_BUTTON: 'Copy',
+    COPIED_BUTTON: 'Copied',
+    COPY_FAILED_BUTTON: "Couldn't copy",
+    copyValueTitle: (value) => `Copy ${value}`,
+    COPY_SHOW_ONLY_BUTTON: 'Copy kill-feed command',
+    copyShowOnlyTitle: (line) => `Copies "${line}". Paste it into the game console to hide every kill-feed line that doesn't involve this player.`,
     CLOCK_UNKNOWN: '??:??',
     TIMELINE_START_LABEL: '0:00',
     connectedSlot: (id) => `Connected (Slot ${id})`,
@@ -118,6 +128,27 @@ export const STRINGS = {
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
 
     ROUNDS_TITLE: 'Rounds',
+    // #192: the Flags tab.
+    FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
+    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    FLAGS_TITLE: 'Flags',
+    flagArea: (area) => `Area ${area}`,
+    COL_FLAG: 'Flag',
+    COL_OWNER_AT_END: 'Held at the end by',
+    COL_CAPTURES: 'Captures',
+    COL_BLOCKED: 'Blocked',
+    FLAGS_NO_LAYOUT: "The demo started after the flags were set up, so their layout isn't known.",
+    CAPTURES_TITLE: 'Captures',
+    COL_TEAM: 'Team',
+    COL_CAPPERS: 'Cappers',
+    FLAGS_BREAK: 'from the other team',
+    FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
+    CAPPERS_TITLE: 'Cappers',
+    COL_PLAYER: 'Player',
+    COL_CAP_CREDITS: 'Caps',
+    COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_OBJ_POINTS: 'Objective points',
+    COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
     COL_START_TIME: 'Start Time',
     COL_WINNER: 'Winner',
@@ -160,5 +191,26 @@ export const STRINGS = {
     CHAT_SYSTEM_TAG: '[system]',
     CHAT_TEAM_BADGE: '(Team)',
     CHAT_SENDER_UNKNOWN: 'Unknown',
+  },
+
+  // Web-only: several demos picked at once (issue #102). Not in the
+  // desktop app's strings.js — there is no batch list there.
+  BATCH: {
+    batchSummary: (total, done, failed) => {
+      const parts = [`${done} of ${total} analyzed`];
+      if (failed) parts.push(`${failed} failed`);
+      return parts.join(', ');
+    },
+    STATUS_WAITING: 'Waiting',
+    statusAnalyzingPct: (pct) => `Analyzing… ${pct}%`,
+    STATUS_DONE: 'Done',
+    statusFailed: (err) => `Failed: ${err}`,
+    VIEW_BUTTON: 'View',
+    VIEW_BUTTON_TITLE: 'Show this demo\'s report below',
+    DOWNLOAD_ONE_BUTTON: 'JSON',
+    DOWNLOAD_ONE_TITLE: 'Download this demo\'s results as a JSON file',
+    DOWNLOAD_ALL_BUTTON: 'Download all (JSON)',
+    DOWNLOAD_ALL_TITLE: 'Download every demo\'s results as one JSON file (a list, one entry per demo)',
+    NO_DEMO_FILES: 'None of those files are .dem demos.',
   },
 };

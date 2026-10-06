@@ -169,9 +169,9 @@ Every launch (batch, preview, Launch Game) uses one command line:
 
 A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-demoedit` (PR #401) and `-addons` (PR #412) are not on `dev` yet.
 
-While the game runs, the app tails `qconsole.log` for its markers and turns them into status lines and notifications. The batch ends when:
+While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 
-- the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call), or OBS sees `BATCH_COMPLETE`;
+- `BATCH_COMPLETE` arrives over the events pipe (any mode), OBS mode sees it in the log, or the exit trigger folder appears (HLAE creates it on the last `mirv_movie_filename` call; the fallback);
 - you cancel (the app kills `hl.exe`);
 - the game closes on its own ("closed manually or crashed");
 - in OBS mode, markers stop arriving for too long, or OBS disconnects.
@@ -231,11 +231,17 @@ At load the DLL hooks two imports of `hw.dll` (`GetProcAddress`, `LoadLibraryA`)
 
 It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and a crash handler records any crash as `module+offset` with a stack trail.
 
-**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off. Nothing comes back from the game over the pipe yet (issue #434, step 1).
+**Refuses to join a server, except an HLTV proxy.** While the DLL is loaded, `connect` and `listen` first ask the address what it is, and the game only joins an HLTV proxy that says VAC is off. Anything else is refused, with a console message and a hook-log line (issue #451): joining a VAC-secured server with it loaded is a ban risk. `connect local` (what `map` runs) still works. `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off. See `docs/vac_safety.md`.
+
+**Commands from Studio.** The DLL serves a local named pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes to it as a console command on the next frame. Only the same Windows user on the same machine can write to it. Launch Preview uses it today. `GOLDSRC_HOOKS_REMOTE=0` turns it off.
+
+**Events to Studio.** A second pipe, `\\.\pipe\dodstudio-hl-<pid>-events`, carries the pipeline's `[dod-studio]` markers from the game as the engine runs each `echo` (the DLL wraps `echo` through the engine's command list, with no per-build address). Markers from before Studio connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off; Studio then reads `qconsole.log` as before (issue #434, step 1).
+
+**Batch end without Studio.** If a batch's `BATCH_COMPLETE` marker goes by and no Studio is reading the events pipe five seconds later (Studio was closed mid-batch), the game quits itself instead of sitting there (issue #545). A connected Studio still ends the game as before.
 
 ### 5.2 Console commands
 
-Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (15 cvars, 10 commands).
+Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio_commands.md` is the user-facing reference; this table is what the code registers on `dev` (16 cvars, 13 commands).
 
 | Name | Kind | Default | What it does | Works on |
 |---|---|---|---|---|
@@ -253,19 +259,23 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
+| `dodstudio_hide_hltv_messages` | cvar | 0 | Hides the HLTV proxy's on-screen text ("You're watching HLTV...") during playback | both |
 | `dodstudio_hide_hudelement` | command | — | Hides one of ten HUD elements: `crosshair`, `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |
+| `dodstudio_hide_spectator_bars` | cvar | 0 | Hides the spectator panel: the dark bands at the top and bottom, and the score, timer, player name and menu row on them | both |
 | `dodstudio_hide_sprite` | command | — | Hides map sprites by model path (`env_sprite` only) | both |
-| `dodstudio_hltv_gunshot_attenuation` | cvar | 0.3 | How far gunshots carry while the gunshots fix is on | both |
-| `dodstudio_hltv_gunshots_fix` | cvar | 0 | Makes distant gunshots audible while spectating | both |
-| `dodstudio_hltv_show_viewmodel_animations` | cvar | 0 | Animates the spectated player's first-person gun (levels 0–4) | both |
-| `dodstudio_match_pov_crosshair` | cvar | 0 | Draws the spectator crosshair in the POV style from `cl_xhair_style` | both |
+| `dodstudio_spec_match_pov` | cvar | 0 | Makes a spectated first-person view match the player's own recording: weapon animations (grenades and priming included), the gunshots an HLTV demo lost, and the POV-style crosshair, hidden when the player's own would be while playing (sprinting, jumping, prone transitions, crawling, ladders, reloads, weapon switches, bolt cycling, knives, snipers, undeployed machine guns), the camera at ground level for a prone player, and the gun lowered off screen while sprinting, jumping, going prone, crawling or climbing | both |
+| `dodstudio_seek_by` | command | — | `viewdemo` only: jumps playback by a number of seconds, back if negative | both |
+| `dodstudio_seek_skip_between` | cvar | 0 | `1` makes a forward seek skip the commands it jumps over, so it lands clean | both |
+| `dodstudio_seek_to` | command | — | `viewdemo` only: jumps playback to a demo time | both |
+| `dodstudio_spec_lock` | cvar | 0 | HLTV demos: keeps the camera on the player being watched when he dies, where the game moves on four seconds later | both |
+| `dodstudio_spec_target` | command | — | HLTV demos: puts the camera on a player by number (`dodstudio_deathmsg players` lists them) | both |
 | `dodstudio_mute_voice_commands` | cvar | 0 | Silences voice-command sounds; the chat line stays | both |
 | `dodstudio_objectives` | command | — | Moves the objective icons and timer (`offset`, `xoffset`, `timer`) | both |
 | `dodstudio_overviewmap` | command | — | Places and sizes the full and mini overview map | both |
 | `dodstudio_reload_demo` | command | — | Plays the last `playdemo`/`viewdemo` demo again from the start | both (wraps the engine's own commands through the SDK's command list, no per-build address) |
 
-Two fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off) and the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off).
+Four fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off), the **hull-trace guard** (the #384 crash after a `playdemo` map change, PRE only, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off), and the **sprite-blend upload fix** (`gl_spriteblend 0` at the first sprite load no longer darkens sprites for the session, #467, both builds, `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off), and the **first-demo pmove guard** (a session's first demo sending `InitHUD` in its first packets no longer crashes while DoD places the map's models, #546, both builds, `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off).
 
 Not compiled on `dev`: `spectator_bars.rs` (both approaches failed live; issue #328).
 
@@ -333,7 +343,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Binary | What it does |
 |---|---|
 | `preview_cli` | Drag demos or folders onto it; writes `<stem>_preview.dem` bookmark files into a `previews` folder. `--player` picks one player in an HLTV demo. |
-| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `patch-streak` is an older standalone patcher. |
+| `dod-studio-cli` | `analyze <demos>` prints a Markdown or JSON match report. `stats <demos>` prints league stats as JSON: teamkills, suicides, objective points, cap credits, every flag capture and cap blocks. `patch-streak` is an older standalone patcher. |
 | `dod-studio-dump` | Header, frame and message counts, first commands and sounds of one demo. |
 | `dod-studio-inspect` | Library statistics across folders: maps, message frequency, duplicates. |
 | `check_maps` | Per-demo map status against a maps folder, with optional download. |
@@ -377,7 +387,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 
 | On `dev` | Modules |
 |---|---|
-| Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
+| Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, HLTV text, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | PRE only | decal clear, HD textures, hull-trace guard |
 | Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
