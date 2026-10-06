@@ -679,36 +679,37 @@ fn is_folder_row(row: &str) -> bool {
     row.trim().trim_matches('"').ends_with('/')
 }
 
-/// How many `.dem` files sit directly in `folder`, not in its subfolders:
-/// one directory read, as the Demo Analyzer's folder view counts.
-fn demos_directly_in(folder: &std::path::Path) -> usize {
-    std::fs::read_dir(folder).map_or(0, |entries| {
-        entries
-            .filter_map(Result::ok)
-            .filter(|e| {
-                e.file_type().is_ok_and(|t| t.is_file())
-                    && e.file_name()
-                        .to_string_lossy()
-                        .to_ascii_lowercase()
-                        .ends_with(".dem")
-            })
-            .count()
-    })
-}
-
-/// A folder row's Map column: its demo count.
-fn demo_count_text(count: usize) -> String {
-    match count {
-        1 => "1 demo".to_string(),
-        n => format!("{n} demos"),
+/// A folder row's Map column: its demo count, `+` when the count stopped
+/// short of the whole folder.
+fn demo_count_text(count: crate::demo_list_folders::FolderCount) -> String {
+    let more = if count.complete { "" } else { "+" };
+    match count.demos {
+        1 if count.complete => "1 demo".to_string(),
+        n => format!("{n}{more} demos"),
     }
 }
 
-/// Whether folder listing (#409) changed since the Demos tab's list was last
-/// filled: `last` and `now` are 0 off, 1 on; `last` 2 is not yet seen, when
-/// the tab has only just filled it.
+/// The three folder settings as one value, so a change to any lists again.
+fn folder_settings() -> u8 {
+    use crate::demo_list_folders as f;
+    f::enabled() as u8 | (f::HIDE_EMPTY.on() as u8) << 1 | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+}
+
+/// A Settings-tab box that only applies while folders are listed, and so
+/// only shows then.
+fn shown_with_folders(cvar: &str) -> bool {
+    use crate::demo_list_folders as f;
+    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name
+}
+
+/// [`folder_settings`] before anything was seen: the tab has only just
+/// filled its list.
+const SETTINGS_UNSEEN: u8 = 0xff;
+
+/// Whether the folder settings (#409) changed since the Demos tab's list was
+/// last filled.
 fn folders_changed(last: u8, now: u8) -> bool {
-    last != 2 && last != now
+    last != SETTINGS_UNSEEN && last != now
 }
 
 /// The Demos tab's hint: how to load, and whether folders are listed, as a
@@ -1515,9 +1516,9 @@ mod hook {
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-    /// `dodstudio_demo_list_folders` as the Demos tab's list was last filled
-    /// with it: 0 off, 1 on, 2 not yet seen.
-    static LISTED_FOLDERS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+    /// [`folder_settings`] as the Demos tab's list was last filled with them.
+    static LISTED_FOLDERS: std::sync::atomic::AtomicU8 =
+        std::sync::atomic::AtomicU8::new(SETTINGS_UNSEEN);
 
     /// The Demos page whose hint last got [`demos_hint`]'s text, so a rebuilt
     /// window gets it too.
@@ -1615,10 +1616,10 @@ mod hook {
             if page == 0 || !vgui.visible(page) {
                 return;
             }
-            // The list is filled when the tab opens. Turning folder listing
-            // (#409) on or off while it shows lists it again, so the folders
-            // appear (or go) without reopening the window.
-            let folders = crate::demo_list_folders::enabled() as u8;
+            // The list is filled when the tab opens. Changing a folder
+            // setting (#409) while it shows lists it again, so the folders
+            // appear, go or recount without reopening the window.
+            let folders = folder_settings();
             let last = LISTED_FOLDERS.swap(folders, Ordering::AcqRel);
             if folders_changed(last, folders) {
                 refill_demo_list();
@@ -1631,7 +1632,7 @@ mod hook {
                 let object = vgui.object(hint);
                 if !object.is_null() {
                     let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
-                    set_text(object, demos_hint(folders == 1).as_ptr());
+                    set_text(object, demos_hint(folders & 1 == 1).as_ptr());
                 }
             }
             let filters = DemoFilters {
@@ -1890,11 +1891,9 @@ mod hook {
                     let name = get(row, ROW_KEY);
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
-                        let folder = res_dir()
-                            .parent()
-                            .map(|dod| dod.join(name.trim().trim_matches('"')));
-                        let count = folder.map_or(0, |f| demos_directly_in(&f));
-                        if let Ok(count) = std::ffi::CString::new(demo_count_text(count)) {
+                        if let Some(count) = crate::demo_list_folders::folder_count(&name)
+                            && let Ok(count) = std::ffi::CString::new(demo_count_text(count))
+                        {
                             set_string(row, DEMO_COLUMNS[0].0.as_ptr(), count.as_ptr());
                         }
                     }
@@ -2824,6 +2823,12 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
+                if shown_with_folders(cvar) {
+                    let want = crate::demo_list_folders::enabled();
+                    if vgui.visible(control) != want {
+                        vgui.set_visible(control, want);
+                    }
+                }
                 let object = vgui.object(control);
                 if object.is_null()
                     || *(object as *const usize) != base + build.check_button_vftable
@@ -3832,9 +3837,10 @@ mod tests {
 
     #[test]
     fn the_demos_list_refills_only_when_folder_listing_flips() {
-        // 2 = not seen yet: the tab just filled its list on opening.
-        assert!(!folders_changed(2, 1));
-        assert!(!folders_changed(2, 0));
+        // Not seen yet: the tab just filled its list on opening.
+        assert!(!folders_changed(SETTINGS_UNSEEN, 1));
+        assert!(!folders_changed(SETTINGS_UNSEEN, 0));
+        assert!(folders_changed(1, 3), "hide empty turned on");
         assert!(folders_changed(0, 1));
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
@@ -3858,19 +3864,22 @@ mod tests {
     }
 
     #[test]
-    fn a_folder_counts_only_the_demos_directly_in_it() {
-        let root = std::env::temp_dir().join(format!("dodstudio_count_{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(root.join("sub")).unwrap();
-        for f in ["a.dem", "B.DEM", "notes.txt", "sub/c.dem"] {
-            std::fs::write(root.join(f), b"").unwrap();
-        }
-        assert_eq!(demos_directly_in(&root), 2);
-        assert_eq!(demos_directly_in(&root.join("missing")), 0);
-        let _ = std::fs::remove_dir_all(&root);
-        assert_eq!(demo_count_text(0), "0 demos");
-        assert_eq!(demo_count_text(1), "1 demo");
-        assert_eq!(demo_count_text(12), "12 demos");
+    fn a_folder_count_reads_as_text() {
+        use crate::demo_list_folders::FolderCount;
+        let c = |demos, complete| FolderCount { demos, complete };
+        assert_eq!(demo_count_text(c(0, true)), "0 demos");
+        assert_eq!(demo_count_text(c(1, true)), "1 demo");
+        assert_eq!(demo_count_text(c(12, true)), "12 demos");
+        assert_eq!(demo_count_text(c(1, false)), "1+ demos");
+        assert_eq!(demo_count_text(c(500, false)), "500+ demos");
+    }
+
+    #[test]
+    fn the_folder_sub_options_show_only_with_folders() {
+        assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
+        assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
+        assert!(!shown_with_folders("dodstudio_demo_list_folders"));
+        assert!(!shown_with_folders("hud_draw"));
     }
 
     #[test]

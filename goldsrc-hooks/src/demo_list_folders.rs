@@ -72,6 +72,180 @@ pub(crate) fn enabled() -> bool {
     }
 }
 
+/// A second on/off setting of this module, a cvar or, when that couldn't be
+/// registered, the fallback toggle's flag.
+pub struct Setting {
+    pub name: &'static str,
+    pub fallback: AtomicBool,
+    cvar: AtomicPtr<CvarSPartial>,
+}
+
+impl Setting {
+    const fn new(name: &'static str, on: bool) -> Self {
+        Self {
+            name,
+            fallback: AtomicBool::new(on),
+            cvar: AtomicPtr::new(std::ptr::null_mut()),
+        }
+    }
+
+    /// Called by `commands.rs` once the cvar is registered.
+    pub fn set_cvar(&self, cvar: *mut CvarSPartial) {
+        self.cvar.store(cvar, Ordering::Release);
+    }
+
+    pub fn on(&self) -> bool {
+        let cvar = self.cvar.load(Ordering::Acquire);
+        if cvar.is_null() {
+            self.fallback.load(Ordering::Relaxed)
+        } else {
+            // Safety: the engine owns the cvar for the session.
+            unsafe { (*cvar).value != 0.0 }
+        }
+    }
+}
+
+/// `dodstudio_demo_list_hide_empty 1` (the default): while folders are
+/// listed, a folder with no demo anywhere inside it, at any depth, isn't.
+pub static HIDE_EMPTY: Setting = Setting::new(console_name!("demo_list_hide_empty"), true);
+
+/// `dodstudio_demo_list_count_subfolders 1` (the default): a folder's demo
+/// count on the Demos tab includes its subfolders, not just the demos
+/// directly in it.
+pub static COUNT_SUBFOLDERS: Setting =
+    Setting::new(console_name!("demo_list_count_subfolders"), true);
+
+/// For the fallback toggle commands' bare-name query.
+pub fn hide_empty_status() -> String {
+    if HIDE_EMPTY.on() {
+        "folders with no demo anywhere inside them aren't listed".to_string()
+    } else {
+        "every folder is listed, with or without demos".to_string()
+    }
+}
+
+pub fn count_subfolders_status() -> String {
+    if COUNT_SUBFOLDERS.on() {
+        "a folder's count includes its subfolders' demos".to_string()
+    } else {
+        "a folder's count is only the demos directly in it".to_string()
+    }
+}
+
+/// How many folder entries one folder's count reads before it stops.
+const COUNT_BUDGET: usize = 20_000;
+
+/// What a folder holds, as counted when the list was last filled.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FolderCount {
+    pub demos: usize,
+    /// False when the count stopped at [`COUNT_BUDGET`] entries: at least
+    /// `demos`, maybe more.
+    pub complete: bool,
+}
+
+/// The `.dem` files in `folder`: directly in it, or with `subfolders`, at any
+/// depth. Reads at most `budget` entries.
+pub fn count_demos(folder: &std::path::Path, subfolders: bool, budget: usize) -> FolderCount {
+    let mut queue = std::collections::VecDeque::from([folder.to_path_buf()]);
+    let (mut demos, mut read) = (0usize, 0usize);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            read += 1;
+            if read > budget {
+                return FolderCount {
+                    demos,
+                    complete: false,
+                };
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if subfolders {
+                    queue.push_back(entry.path());
+                }
+            } else if entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".dem")
+            {
+                demos += 1;
+            }
+        }
+    }
+    FolderCount {
+        demos,
+        complete: true,
+    }
+}
+
+/// Whether a `.dem` sits anywhere in `folder`, subfolders included. Stops at
+/// the first one. Running out of `budget` counts as "has one": a folder that
+/// wasn't fully checked is listed rather than hidden.
+pub fn has_demo_inside(folder: &std::path::Path, budget: usize) -> bool {
+    let mut queue = std::collections::VecDeque::from([folder.to_path_buf()]);
+    let mut read = 0usize;
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            read += 1;
+            if read > budget {
+                return true;
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                queue.push_back(entry.path());
+            } else if entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".dem")
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Each listed folder's count, by its row lowercased (`temp demos/`), from
+/// the last fill. The Demos tab shows them.
+static COUNTS: std::sync::Mutex<Option<std::collections::HashMap<String, FolderCount>>> =
+    std::sync::Mutex::new(None);
+
+/// A folder row's count from the last fill, if it was counted.
+pub fn folder_count(row: &str) -> Option<FolderCount> {
+    let key = row.trim().trim_matches('"').to_ascii_lowercase();
+    COUNTS.lock().ok()?.as_ref()?.get(&key).copied()
+}
+
+/// Counts one candidate folder for a fill: its count, and whether it is
+/// listed (not hidden as empty).
+fn count_for_fill(
+    path: &std::path::Path,
+    hide_empty: bool,
+    subfolders: bool,
+) -> (FolderCount, bool) {
+    let count = count_demos(path, subfolders, COUNT_BUDGET);
+    let empty = if !hide_empty {
+        false
+    } else if subfolders {
+        count.complete && count.demos == 0
+    } else {
+        count.demos == 0 && !has_demo_inside(path, COUNT_BUDGET)
+    };
+    (count, !empty)
+}
+
 /// For the fallback toggle command's bare-name query.
 pub fn status() -> String {
     if enabled() {
@@ -304,17 +478,48 @@ mod hook {
             find_close(fs, handle);
         }
         let dod = crate::texture_hires::game_dir();
-        rows(folder, entries, |path, is_dir| {
-            let path = dod.join(path);
-            if is_dir {
-                path.is_dir()
-            } else {
-                path.is_file()
+        let (hide_empty, subfolders) = (super::HIDE_EMPTY.on(), super::COUNT_SUBFOLDERS.on());
+        let started = std::time::Instant::now();
+        let counts = std::cell::RefCell::new(std::collections::HashMap::new());
+        let hidden = std::cell::Cell::new(0usize);
+        let listed = rows(folder, entries, |path, is_dir| {
+            let full = dod.join(path);
+            if !is_dir {
+                return full.is_file();
             }
-        })
-        .into_iter()
-        .filter_map(|row| CString::new(row).ok())
-        .collect()
+            if !full.is_dir() {
+                return false;
+            }
+            let (count, keep) = super::count_for_fill(&full, hide_empty, subfolders);
+            counts
+                .borrow_mut()
+                .insert(format!("{path}/").to_ascii_lowercase(), count);
+            hidden.set(hidden.get() + !keep as usize);
+            keep
+        });
+        let counts = counts.into_inner();
+        if !counts.is_empty() {
+            let line = format!(
+                "demo_list_folders: {} -- {} folder(s) counted in {} ms ({}), {} empty hidden",
+                if folder.is_empty() { "dod/" } else { folder },
+                counts.len(),
+                started.elapsed().as_millis(),
+                if subfolders {
+                    "with subfolders"
+                } else {
+                    "direct only"
+                },
+                hidden.get()
+            );
+            unsafe { crate::debug::report(&line) };
+        }
+        if let Ok(mut slot) = super::COUNTS.lock() {
+            *slot = Some(counts);
+        }
+        listed
+            .into_iter()
+            .filter_map(|row| CString::new(row).ok())
+            .collect()
     }
 
     unsafe extern "thiscall" fn find_first(
@@ -572,6 +777,65 @@ mod tests {
             ("sub".to_string(), true),
         ];
         assert_eq!(rows("", entries, |_, _| true), vec!["../", "sub/", "a.dem"]);
+    }
+
+    fn scratch(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("dodstudio_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("rounds/r1")).unwrap();
+        std::fs::create_dir_all(root.join("empty/deeper")).unwrap();
+        for f in [
+            "a.dem",
+            "rounds/r1/m1.DEM",
+            "rounds/r1/m2.dem",
+            "empty/deeper/notes.txt",
+        ] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        root
+    }
+
+    #[test]
+    fn counts_direct_or_with_subfolders() {
+        let root = scratch("count");
+        let direct = count_demos(&root, false, 1000);
+        assert_eq!(
+            direct,
+            FolderCount {
+                demos: 1,
+                complete: true
+            }
+        );
+        let all = count_demos(&root, true, 1000);
+        assert_eq!(
+            all,
+            FolderCount {
+                demos: 3,
+                complete: true
+            }
+        );
+        assert!(!count_demos(&root, true, 2).complete, "stops at the budget");
+        assert_eq!(count_demos(&root.join("missing"), true, 1000).demos, 0);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_folder_is_hidden_only_with_no_demo_at_any_depth() {
+        let root = scratch("hide");
+        for subfolders in [false, true] {
+            // `rounds/` has demos only in a subfolder: listed either way.
+            assert!(count_for_fill(&root.join("rounds"), true, subfolders).1);
+            assert!(!count_for_fill(&root.join("empty"), true, subfolders).1);
+            assert!(
+                count_for_fill(&root.join("empty"), false, subfolders).1,
+                "hide off"
+            );
+        }
+        assert!(
+            has_demo_inside(&root.join("empty"), 1),
+            "out of budget: listed"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

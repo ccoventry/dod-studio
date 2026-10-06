@@ -1130,6 +1130,25 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
+/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_hide_empty() {
+    handle_toggle(
+        demo_list_folders::HIDE_EMPTY.name,
+        &demo_list_folders::HIDE_EMPTY.fallback,
+        demo_list_folders::hide_empty_status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_list_count_subfolders` could not be
+/// a cvar.
+unsafe extern "C" fn cmd_demo_list_count_subfolders() {
+    handle_toggle(
+        demo_list_folders::COUNT_SUBFOLDERS.name,
+        &demo_list_folders::COUNT_SUBFOLDERS.fallback,
+        demo_list_folders::count_subfolders_status,
+    );
+}
+
 /// Only registered when the window-layout cvars could not be registered.
 /// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
@@ -1393,6 +1412,17 @@ pub fn install() {
     match register(demo_list_folders::NAME, "1") {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
+    match register(demo_list_folders::HIDE_EMPTY.name, "1") {
+        Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
+        None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
+    }
+    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "1") {
+        Some(cvar) => demo_list_folders::COUNT_SUBFOLDERS.set_cvar(cvar),
+        None => add_command(
+            demo_list_folders::COUNT_SUBFOLDERS.name,
+            cmd_demo_list_count_subfolders,
+        ),
     }
 
     // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
