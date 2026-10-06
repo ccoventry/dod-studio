@@ -284,6 +284,9 @@ const LIST_SLOT_GET_ITEM: usize = 153;
 const KEYVALUES_SLOT_GET_STRING: usize = 12;
 /// The key each row's demo name is stored under.
 const ROW_KEY: &CStr = c"demoname";
+/// Where the Demos tab keeps a row's real path from `dod/` once
+/// [`ROW_KEY`], the list's own first column, shows just the name (#409).
+const PATH_KEY: &CStr = c"dodstudio_path";
 
 /// The `viewdemo` line for a row of the Load Demo list: the row as is when it
 /// is already quoted or has no space, quoted otherwise.
@@ -480,6 +483,10 @@ fn lends(source: &str) -> bool {
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const DEMOS_PAGE: usize = 1;
+
+/// The slots whose borrowed lists take all the height their tab gains,
+/// whatever their share of the tab's design height (#612).
+const FILL_HEIGHT: [&str; 2] = ["DemoListSlot", "StreakListSlot"];
 const STREAKS_PAGE: usize = 2;
 const CONSOLE_PAGE: usize = 3;
 const SETTINGS_PAGE: usize = 4;
@@ -667,6 +674,145 @@ struct DemoFilters {
     pov: bool,
     /// Newer than this many days, or none.
     days: Option<u64>,
+}
+
+/// What a folder row shows in the Demos tab's Type column, where a demo says
+/// POV or HLTV.
+const FOLDER_TYPE: &CStr = c"Folder";
+
+/// The marks in front of a Demos tab row's name. The font has none of them:
+/// the game draws them from a fallback font but spaces them by its own font's
+/// narrower width, so each is followed by enough spaces to clear it
+/// (measured on PRE, 2026-10-05; one more each after the 25th Anniversary
+/// build drew them almost touching the name, 2026-10-06). The folder mark is a square: the 25th
+/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
+/// it draws these shapes and arrows. Not the rectangle (U+25AC): in Tahoma,
+/// the list's font, that is a 20x4 bar that reads as a dash, where the square
+/// is a solid block about 11x9.
+const FOLDER_MARK: &str = "\u{25A0}   ";
+const DEMO_MARK: &str = "\u{25B6}   ";
+const UP_MARK: &str = "\u{2191}   ";
+
+/// What the Demos tab's Demo File column shows for a row's `path` from
+/// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
+/// `.. (up one folder)` for the up row, not the whole path (#409). The path
+/// itself stays on the row, under [`PATH_KEY`], for loading.
+///
+/// A folder's demo count goes in brackets after its name, `count` (the
+/// user's call, 2026-10-05: the Map column is for maps only).
+fn display_name(path: &str, count: Option<&str>) -> String {
+    let path = path.trim().trim_matches('"');
+    let count = count.map_or_else(String::new, |c| format!(" ({c})"));
+    if let Some(folder) = path.strip_suffix('/') {
+        let last = folder.rsplit('/').next().unwrap_or(folder);
+        if last == ".." {
+            format!("{UP_MARK}.. up one folder{count}")
+        } else {
+            format!("{FOLDER_MARK}{last}/{count}")
+        }
+    } else {
+        format!("{DEMO_MARK}{}", path.rsplit('/').next().unwrap_or(path))
+    }
+}
+
+/// The Demos tab's line above the list, naming the folder the list is in: as
+/// a path under the install folder's parent (`Half-Life - PRE-Anniversary for
+/// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
+/// parent itself included, where the path under it would be empty.
+fn folder_line(dod: &std::path::Path, folder: &str) -> String {
+    let here = crate::folder_counts::normalize(&dod.join(folder));
+    let shown = dod
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(|common| here.strip_prefix(common).ok())
+        .filter(|under| !under.as_os_str().is_empty())
+        .map_or_else(|| here.to_path_buf(), std::path::Path::to_path_buf);
+    let mut shown = shown.to_string_lossy().replace('\\', "/");
+    if !shown.is_empty() && !shown.ends_with('/') {
+        shown.push('/');
+    }
+    format!("Currently in {}", keep_the_end(&shown, FOLDER_LINE_CHARS))
+}
+
+/// The Demos tab's line above the list (`ui/Demos.res`).
+const FOLDER_LINE: &str = "FolderPath";
+
+/// How much of a folder path the line above the list shows. A label clips on
+/// the right at its width, which would cut off the folder's own name; a long
+/// path loses folders from the left instead. (The label's own limit is about
+/// 1,023 characters, so nothing overflows either way.)
+const FOLDER_LINE_CHARS: usize = 90;
+
+/// `path` (folders, each ending in `/`) cut to at most about `max` characters
+/// by dropping whole folders from the left behind `.../`. The last folder is
+/// always kept, however long.
+fn keep_the_end(path: &str, max: usize) -> String {
+    if path.chars().count() <= max {
+        return path.to_string();
+    }
+    let parts: Vec<&str> = path.split_inclusive('/').collect();
+    let mut kept = String::new();
+    for part in parts.iter().rev() {
+        let would = part.chars().count() + kept.chars().count() + 4;
+        if !kept.is_empty() && would > max {
+            break;
+        }
+        kept.insert_str(0, part);
+    }
+    format!(".../{kept}")
+}
+
+/// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
+/// when the name has a space) rather than a demo.
+fn is_folder_row(row: &str) -> bool {
+    row.trim().trim_matches('"').ends_with('/')
+}
+
+/// A folder row's count, in brackets after its name, before it is in.
+const COUNTING: &str = "counting...";
+
+/// A folder row's demo count, in brackets after its name; `+` when the count stopped
+/// short of the whole folder.
+fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
+    let more = if count.complete { "" } else { "+" };
+    match count.demos {
+        1 if count.complete => "1 demo".to_string(),
+        n => format!("{n}{more} demos"),
+    }
+}
+
+/// The three folder settings as one value, so a change to any lists again.
+fn folder_settings() -> u8 {
+    use crate::demo_list_folders as f;
+    f::enabled() as u8 | (f::HIDE_EMPTY.on() as u8) << 1 | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+}
+
+/// A Settings-tab box that only applies while folders are listed, and so
+/// only shows then.
+fn shown_with_folders(cvar: &str) -> bool {
+    use crate::demo_list_folders as f;
+    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name
+}
+
+/// [`folder_settings`] before anything was seen: the tab has only just
+/// filled its list.
+const SETTINGS_UNSEEN: u8 = 0xff;
+
+/// Whether the folder settings (#409) changed since the Demos tab's list was
+/// last filled.
+fn folders_changed(last: u8, now: u8) -> bool {
+    last != SETTINGS_UNSEEN && last != now
+}
+
+/// The Demos tab's hint: how to load, and whether folders are listed, as a
+/// state rather than a command that reads like one.
+fn demos_hint(folders: bool) -> &'static CStr {
+    // No longer than the layout's first text, which fits its 416-wide label.
+    if folders {
+        c"Double-click a demo, or a folder to open it. Folders: on"
+    } else {
+        c"Double-click a demo to play it. Folders: off (dodstudio_demo_list_folders 1)"
+    }
 }
 
 /// Whether a row passes every filter. `info` is `None` for a row whose
@@ -1301,6 +1447,7 @@ mod hook {
     use super::*;
 
     /// The Playback tab's loading progress (#465).
+    mod folder_progress;
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
@@ -1389,7 +1536,47 @@ mod hook {
 
     /// The selected row's `demoname` in our Load Demo window's list.
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
-        unsafe { selected_value(dialog, ROW_KEY) }
+        unsafe { selected_value(dialog, PATH_KEY).or_else(|| selected_value(dialog, ROW_KEY)) }
+    }
+
+    /// A row's path from `dod/`: the hidden [`PATH_KEY`] once the tab has
+    /// given it a display name, otherwise the list's own [`ROW_KEY`].
+    unsafe fn row_path_text(row: *mut c_void) -> String {
+        unsafe {
+            let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+            for key in [PATH_KEY, ROW_KEY] {
+                let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                if !raw.is_null() {
+                    let value = text(raw);
+                    if !value.is_empty() {
+                        return value;
+                    }
+                }
+            }
+            String::new()
+        }
+    }
+
+    /// Puts the selected row's path back in [`ROW_KEY`], for the window's
+    /// own handler (#409's folder opening reads it there).
+    unsafe fn restore_selected_path(dialog: *mut c_void) {
+        unsafe {
+            let Some(path) = selected_value(dialog, PATH_KEY) else {
+                return;
+            };
+            let Ok((_, build)) = gameui() else { return };
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let get_selected: ListIntFn = slot(list, LIST_SLOT_GET_SELECTED_ITEM);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let row = get_item(list, get_selected(list, 0) as i32);
+            if let (false, Ok(path)) = (row.is_null(), std::ffi::CString::new(path)) {
+                let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
+                set_string(row, ROW_KEY.as_ptr(), path.as_ptr());
+            }
+        }
     }
 
     /// The selected row's `key` in a hidden Load Demo window's list.
@@ -1441,7 +1628,9 @@ mod hook {
                     };
                     return;
                 }
-                Some(_) => {}
+                // A folder: #409's handler opens it, reading the path from
+                // the column the tab gave a display name.
+                Some(_) => unsafe { restore_selected_path(this) },
                 None => {
                     crate::commands::console_print(&format!(
                         "{NAME}: pick a demo in the list first\n"
@@ -1461,6 +1650,17 @@ mod hook {
     /// What the search box held when the list was last filtered, and
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+    /// [`folder_settings`] as the Demos tab's list was last filled with them.
+    static LISTED_FOLDERS: std::sync::atomic::AtomicU8 =
+        std::sync::atomic::AtomicU8::new(SETTINGS_UNSEEN);
+
+    /// The Demos page whose hint last got [`demos_hint`]'s text, so a rebuilt
+    /// window gets it too.
+    static HINTED_PAGE: AtomicUsize = AtomicUsize::new(0);
+
+    /// The text last put on the line above the list, and on which page.
+    static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
 
     /// Shows only the demos matching the Demos tab's search box. Runs every
     /// frame; does work only when the text (or the list) changed.
@@ -1554,6 +1754,47 @@ mod hook {
             if page == 0 || !vgui.visible(page) {
                 return;
             }
+            // The list is filled when the tab opens. Changing a folder
+            // setting (#409) while it shows lists it again, so the folders
+            // appear, go or recount without reopening the window.
+            let folders = folder_settings();
+            let last = LISTED_FOLDERS.swap(folders, Ordering::AcqRel);
+            if folders_changed(last, folders) || crate::folder_counts::take_finished() {
+                refill_demo_list();
+            }
+            // The hint says whether folders are on, not just the command.
+            let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
+            // The line above the list says which folder the list is in, and
+            // is empty while folders are off.
+            let line_text = match folders & 1 {
+                1 => res_dir().parent().map_or_else(String::new, |dod| {
+                    folder_line(dod, &crate::demo_list_folders::current_folder())
+                }),
+                _ => String::new(),
+            };
+            let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
+            if *headed != (page as usize, line_text.clone()) {
+                if let Some(line) = vgui.child_named(page, FOLDER_LINE)
+                    && let Ok(text) = std::ffi::CString::new(line_text.clone())
+                {
+                    let object = vgui.object(line);
+                    if !object.is_null() {
+                        let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                        set_text(object, text.as_ptr());
+                    }
+                }
+                *headed = (page as usize, line_text);
+            }
+            drop(headed);
+            if (last != folders || new_page)
+                && let Some(hint) = vgui.child_named(page, DEMOS_HINT)
+            {
+                let object = vgui.object(hint);
+                if !object.is_null() {
+                    let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                    set_text(object, demos_hint(folders & 1 == 1).as_ptr());
+                }
+            }
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -1602,15 +1843,7 @@ mod hook {
             let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
             let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
             let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
-            let get_string_of = |row: *mut c_void| -> String {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
-                if raw.is_null() {
-                    String::new()
-                } else {
-                    text(raw)
-                }
-            };
+            let get_string_of = |row: *mut c_void| -> String { row_path_text(row) };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
@@ -1794,7 +2027,15 @@ mod hook {
                 let row = get_item(list, id);
                 if !row.is_null() {
                     let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
-                    if let Some(info) = info_for(&get(row, ROW_KEY))
+                    // The path moves to the hidden key the first time, and
+                    // the first column gets the short name (end of the loop).
+                    let path = row_path_text(row);
+                    if get(row, PATH_KEY).is_empty()
+                        && let Ok(c_path) = std::ffi::CString::new(path.clone())
+                    {
+                        set_string(row, PATH_KEY.as_ptr(), c_path.as_ptr());
+                    }
+                    if let Some(info) = info_for(&path)
                         && let Ok(map) = std::ffi::CString::new(info.map.clone())
                         && let Ok(date) = std::ffi::CString::new(local_date(info.modified))
                     {
@@ -1803,13 +2044,35 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), kind.as_ptr());
                         set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
                     }
-                    if let Some(info) = info_for(&get(row, ROW_KEY)) {
+                    // A folder row (#409) says so in the Type column, so it
+                    // can't be mistaken for a demo, and its demo count goes
+                    // in brackets after its name (`display_name`), leaving
+                    // the Map column to maps.
+                    let name = path.clone();
+                    let mut folder_count = None;
+                    if is_folder_row(&name) {
+                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
+                        // Counted in the background: "counting..." until
+                        // then, and the tab lists again when it is done.
+                        let count = res_dir()
+                            .parent()
+                            .map(|dod| dod.join(name.trim().trim_matches('"')))
+                            .and_then(|folder| {
+                                crate::folder_counts::count(
+                                    &folder,
+                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                                )
+                            });
+                        folder_count =
+                            Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                    }
+                    if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
                         // POV demo not analysed yet.
                         let player = if info.hltv {
                             "-".to_string()
                         } else {
-                            row_path(&get(row, ROW_KEY))
+                            row_path(&path)
                                 .and_then(|path| crate::demo_rosters::players_for(&path))
                                 .and_then(|d| d.players.into_iter().find(|p| p.recorder))
                                 .map(|p| p.name.replace('\0', ""))
@@ -1818,6 +2081,11 @@ mod hook {
                         if let Ok(player) = std::ffi::CString::new(player) {
                             set_string(row, DEMO_COLUMNS[2].0.as_ptr(), player.as_ptr());
                         }
+                    }
+                    if let Ok(shown) =
+                        std::ffi::CString::new(display_name(&path, folder_count.as_deref()))
+                    {
+                        set_string(row, ROW_KEY.as_ptr(), shown.as_ptr());
                     }
                     set_string(row, STAMP_KEY.as_ptr(), stamp.as_ptr());
                     // Each column keeps its rows sorted as they were added;
@@ -2603,7 +2871,12 @@ mod hook {
                 }
                 let Some(size) = design.size else { continue };
                 for &(control, at) in &design.controls {
-                    let want = crate::window_layout::fit_rect(at, size, (w, h));
+                    // A tab's list fills whatever height the tab gains (#612).
+                    let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
+                        crate::window_layout::fit_rect_tall(at, size, (w, h))
+                    } else {
+                        crate::window_layout::fit_rect(at, size, (w, h))
+                    };
                     vgui.place(control, want);
                 }
             }
@@ -2729,6 +3002,12 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
+                if shown_with_folders(cvar) {
+                    let want = crate::demo_list_folders::enabled();
+                    if vgui.visible(control) != want {
+                        vgui.set_visible(control, want);
+                    }
+                }
                 let object = vgui.object(control);
                 if object.is_null()
                     || *(object as *const usize) != base + build.check_button_vftable
@@ -3044,6 +3323,7 @@ mod hook {
                     streaks_tab::update(&vgui);
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
+                    folder_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {
                     // Closed some other way than the console key (its X,
@@ -3733,6 +4013,130 @@ mod tests {
         assert!(shows_type("", true) && shows_type("", false));
         assert!(shows_type("HLTV", true) && !shows_type("HLTV", false));
         assert!(!shows_type("POV", true) && shows_type("pov", false));
+    }
+
+    #[test]
+    fn the_demos_list_refills_only_when_folder_listing_flips() {
+        // Not seen yet: the tab just filled its list on opening.
+        assert!(!folders_changed(SETTINGS_UNSEEN, 1));
+        assert!(!folders_changed(SETTINGS_UNSEEN, 0));
+        assert!(folders_changed(1, 3), "hide empty turned on");
+        assert!(folders_changed(0, 1));
+        assert!(folders_changed(1, 0));
+        assert!(!folders_changed(1, 1));
+        assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn a_long_folder_path_keeps_its_end() {
+        assert_eq!(keep_the_end("a/b/", 70), "a/b/");
+        let deep = "D:/Games/Library/Mine/Steam/steamapps/common/Half-Life - PRE/dod/temp demos/";
+        let short = keep_the_end(deep, 40);
+        assert!(
+            short.starts_with(".../") && short.ends_with("dod/temp demos/"),
+            "{short}"
+        );
+        assert!(short.chars().count() <= 40, "{short}");
+        // A single long last folder is kept whole.
+        let one = format!("x/{}/", "y".repeat(80));
+        assert!(keep_the_end(&one, 40).ends_with(&format!("{}/", "y".repeat(80))));
+    }
+
+    #[test]
+    fn the_line_above_the_list_names_the_folder() {
+        let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
+        assert_eq!(folder_line(dod, ""), "Currently in Half-Life - PRE/dod/");
+        assert_eq!(
+            folder_line(dod, "temp demos/"),
+            "Currently in Half-Life - PRE/dod/temp demos/"
+        );
+        assert_eq!(folder_line(dod, "../"), "Currently in Half-Life - PRE/");
+        // The installs' own folder: nothing under it to show, so in full.
+        assert_eq!(folder_line(dod, "../../"), "Currently in C:/Steam/common/");
+        assert_eq!(
+            folder_line(dod, "temp demos/../"),
+            "Currently in Half-Life - PRE/dod/"
+        );
+        // Above the installs: the whole path.
+        assert_eq!(folder_line(dod, "../../../"), "Currently in C:/Steam/");
+    }
+
+    #[test]
+    fn rows_show_names_not_paths() {
+        let demo = |n: &str| format!("{DEMO_MARK}{n}");
+        let folder = |n: &str| format!("{FOLDER_MARK}{n}");
+        let up = format!("{UP_MARK}.. up one folder");
+        assert_eq!(
+            display_name("temp demos/m3_h1.dem", None),
+            demo("m3_h1.dem")
+        );
+        assert_eq!(
+            display_name("\"temp demos/my clip.dem\"", None),
+            demo("my clip.dem")
+        );
+        assert_eq!(display_name("a.dem", None), demo("a.dem"));
+        assert_eq!(display_name("temp demos/", None), folder("temp demos/"));
+        assert_eq!(display_name("../../steamapps/", None), folder("steamapps/"));
+        assert_eq!(display_name("../", None), up);
+        assert_eq!(display_name("temp demos/../", None), up);
+        assert_eq!(display_name("../../../", None), up);
+        // A folder's count in brackets after its name; a demo never gets one.
+        assert_eq!(
+            display_name("temp demos/", Some("73 demos")),
+            folder("temp demos/ (73 demos)")
+        );
+        assert_eq!(
+            display_name("../", Some("572 demos")),
+            format!("{up} (572 demos)")
+        );
+        assert_eq!(display_name("a.dem", Some("1 demo")), demo("a.dem"));
+    }
+
+    #[test]
+    fn folder_rows_are_told_from_demos() {
+        for folder in [
+            "../",
+            "temp demos/",
+            "\"temp demos/\"",
+            "test/../",
+            " sub/ ",
+        ] {
+            assert!(is_folder_row(folder), "{folder}");
+        }
+        for demo in ["a.dem", "test/a.dem", "\"temp demos/a b.dem\"", ""] {
+            assert!(!is_folder_row(demo), "{demo}");
+        }
+    }
+
+    #[test]
+    fn a_folder_count_reads_as_text() {
+        use crate::folder_counts::FolderCount;
+        let c = |demos, complete| FolderCount { demos, complete };
+        assert_eq!(demo_count_text(c(0, true)), "0 demos");
+        assert_eq!(demo_count_text(c(1, true)), "1 demo");
+        assert_eq!(demo_count_text(c(12, true)), "12 demos");
+        assert_eq!(demo_count_text(c(1, false)), "1+ demos");
+        assert_eq!(demo_count_text(c(500, false)), "500+ demos");
+    }
+
+    #[test]
+    fn the_folder_sub_options_show_only_with_folders() {
+        assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
+        assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
+        assert!(!shown_with_folders("dodstudio_demo_list_folders"));
+        assert!(!shown_with_folders("hud_draw"));
+    }
+
+    #[test]
+    fn the_demos_hint_says_whether_folders_are_on() {
+        let on = demos_hint(true).to_str().unwrap();
+        let off = demos_hint(false).to_str().unwrap();
+        assert!(on.contains("Folders: on"));
+        assert!(off.contains("Folders: off") && off.contains("dodstudio_demo_list_folders 1"));
+        // The layout's own text fits its label; neither may run longer.
+        let first =
+            "Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1";
+        assert!(on.len() <= first.len() && off.len() <= first.len());
     }
 
     #[test]
