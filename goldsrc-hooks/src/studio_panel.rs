@@ -708,13 +708,15 @@ fn display_name(path: &str) -> String {
 
 /// The Demos tab's Demo File heading, naming the folder the list is in: as a
 /// path under the install folder's parent (`Half-Life - PRE-Anniversary for
-/// Movies/dod/temp demos/`) when it is under it, otherwise in full.
+/// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
+/// parent itself included, where the path under it would be empty.
 fn folder_heading(dod: &std::path::Path, folder: &str) -> String {
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
         .parent()
         .and_then(std::path::Path::parent)
         .and_then(|common| here.strip_prefix(common).ok())
+        .filter(|under| !under.as_os_str().is_empty())
         .map_or_else(|| here.to_path_buf(), std::path::Path::to_path_buf);
     let mut shown = shown.to_string_lossy().replace('\\', "/");
     if !shown.is_empty() && !shown.ends_with('/') {
@@ -3997,6 +3999,11 @@ mod tests {
             "Demo File in Half-Life - PRE/dod/temp demos/"
         );
         assert_eq!(folder_heading(dod, "../"), "Demo File in Half-Life - PRE/");
+        // The installs' own folder: nothing under it to show, so in full.
+        assert_eq!(
+            folder_heading(dod, "../../"),
+            "Demo File in C:/Steam/common/"
+        );
         assert_eq!(
             folder_heading(dod, "temp demos/../"),
             "Demo File in Half-Life - PRE/dod/"
