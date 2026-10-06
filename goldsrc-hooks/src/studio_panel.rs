@@ -284,6 +284,9 @@ const LIST_SLOT_GET_ITEM: usize = 153;
 const KEYVALUES_SLOT_GET_STRING: usize = 12;
 /// The key each row's demo name is stored under.
 const ROW_KEY: &CStr = c"demoname";
+/// Where the Demos tab keeps a row's real path from `dod/` once
+/// [`ROW_KEY`], the list's own first column, shows just the name (#409).
+const PATH_KEY: &CStr = c"dodstudio_path";
 
 /// The `viewdemo` line for a row of the Load Demo list: the row as is when it
 /// is already quoted or has no space, quoted otherwise.
@@ -672,6 +675,24 @@ struct DemoFilters {
 /// What a folder row shows in the Demos tab's Type column, where a demo says
 /// POV or HLTV.
 const FOLDER_TYPE: &CStr = c"Folder";
+
+/// What the Demos tab's Demo File column shows for a row's `path` from
+/// `dod/`: a demo's file name, a folder's name and a slash, and the up row as
+/// `.. (up one folder)`, not the whole path (#409). The path itself stays on
+/// the row, under [`PATH_KEY`], for loading.
+fn display_name(path: &str) -> String {
+    let path = path.trim().trim_matches('"');
+    if let Some(folder) = path.strip_suffix('/') {
+        let last = folder.rsplit('/').next().unwrap_or(folder);
+        if last == ".." {
+            ".. (up one folder)".to_string()
+        } else {
+            format!("{last}/")
+        }
+    } else {
+        path.rsplit('/').next().unwrap_or(path).to_string()
+    }
+}
 
 /// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
 /// when the name has a space) rather than a demo.
@@ -1447,7 +1468,47 @@ mod hook {
 
     /// The selected row's `demoname` in our Load Demo window's list.
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
-        unsafe { selected_value(dialog, ROW_KEY) }
+        unsafe { selected_value(dialog, PATH_KEY).or_else(|| selected_value(dialog, ROW_KEY)) }
+    }
+
+    /// A row's path from `dod/`: the hidden [`PATH_KEY`] once the tab has
+    /// given it a display name, otherwise the list's own [`ROW_KEY`].
+    unsafe fn row_path_text(row: *mut c_void) -> String {
+        unsafe {
+            let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+            for key in [PATH_KEY, ROW_KEY] {
+                let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                if !raw.is_null() {
+                    let value = text(raw);
+                    if !value.is_empty() {
+                        return value;
+                    }
+                }
+            }
+            String::new()
+        }
+    }
+
+    /// Puts the selected row's path back in [`ROW_KEY`], for the window's
+    /// own handler (#409's folder opening reads it there).
+    unsafe fn restore_selected_path(dialog: *mut c_void) {
+        unsafe {
+            let Some(path) = selected_value(dialog, PATH_KEY) else {
+                return;
+            };
+            let Ok((_, build)) = gameui() else { return };
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let get_selected: ListIntFn = slot(list, LIST_SLOT_GET_SELECTED_ITEM);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let row = get_item(list, get_selected(list, 0) as i32);
+            if let (false, Ok(path)) = (row.is_null(), std::ffi::CString::new(path)) {
+                let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
+                set_string(row, ROW_KEY.as_ptr(), path.as_ptr());
+            }
+        }
     }
 
     /// The selected row's `key` in a hidden Load Demo window's list.
@@ -1499,7 +1560,9 @@ mod hook {
                     };
                     return;
                 }
-                Some(_) => {}
+                // A folder: #409's handler opens it, reading the path from
+                // the column the tab gave a display name.
+                Some(_) => unsafe { restore_selected_path(this) },
                 None => {
                     crate::commands::console_print(&format!(
                         "{NAME}: pick a demo in the list first\n"
@@ -1687,15 +1750,7 @@ mod hook {
             let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
             let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
             let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
-            let get_string_of = |row: *mut c_void| -> String {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
-                if raw.is_null() {
-                    String::new()
-                } else {
-                    text(raw)
-                }
-            };
+            let get_string_of = |row: *mut c_void| -> String { row_path_text(row) };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
@@ -1879,7 +1934,15 @@ mod hook {
                 let row = get_item(list, id);
                 if !row.is_null() {
                     let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
-                    if let Some(info) = info_for(&get(row, ROW_KEY))
+                    // The path moves to the hidden key the first time, and
+                    // the first column gets the short name (end of the loop).
+                    let path = row_path_text(row);
+                    if get(row, PATH_KEY).is_empty()
+                        && let Ok(c_path) = std::ffi::CString::new(path.clone())
+                    {
+                        set_string(row, PATH_KEY.as_ptr(), c_path.as_ptr());
+                    }
+                    if let Some(info) = info_for(&path)
                         && let Ok(map) = std::ffi::CString::new(info.map.clone())
                         && let Ok(date) = std::ffi::CString::new(local_date(info.modified))
                     {
@@ -1892,7 +1955,7 @@ mod hook {
                     // can't be mistaken for a demo, and how many demos sit
                     // directly in it in the Map column, as the Demo
                     // Analyzer's folder view counts them (not subfolders).
-                    let name = get(row, ROW_KEY);
+                    let name = path.clone();
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
@@ -1911,13 +1974,13 @@ mod hook {
                             set_string(row, DEMO_COLUMNS[0].0.as_ptr(), text.as_ptr());
                         }
                     }
-                    if let Some(info) = info_for(&get(row, ROW_KEY)) {
+                    if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
                         // POV demo not analysed yet.
                         let player = if info.hltv {
                             "-".to_string()
                         } else {
-                            row_path(&get(row, ROW_KEY))
+                            row_path(&path)
                                 .and_then(|path| crate::demo_rosters::players_for(&path))
                                 .and_then(|d| d.players.into_iter().find(|p| p.recorder))
                                 .map(|p| p.name.replace('\0', ""))
@@ -1926,6 +1989,9 @@ mod hook {
                         if let Ok(player) = std::ffi::CString::new(player) {
                             set_string(row, DEMO_COLUMNS[2].0.as_ptr(), player.as_ptr());
                         }
+                    }
+                    if let Ok(shown) = std::ffi::CString::new(display_name(&path)) {
+                        set_string(row, ROW_KEY.as_ptr(), shown.as_ptr());
                     }
                     set_string(row, STAMP_KEY.as_ptr(), stamp.as_ptr());
                     // Each column keeps its rows sorted as they were added;
@@ -3860,6 +3926,18 @@ mod tests {
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
         assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn rows_show_names_not_paths() {
+        assert_eq!(display_name("temp demos/m3_h1.dem"), "m3_h1.dem");
+        assert_eq!(display_name("\"temp demos/my clip.dem\""), "my clip.dem");
+        assert_eq!(display_name("a.dem"), "a.dem");
+        assert_eq!(display_name("temp demos/"), "temp demos/");
+        assert_eq!(display_name("../../steamapps/"), "steamapps/");
+        assert_eq!(display_name("../"), ".. (up one folder)");
+        assert_eq!(display_name("temp demos/../"), ".. (up one folder)");
+        assert_eq!(display_name("../../../"), ".. (up one folder)");
     }
 
     #[test]
