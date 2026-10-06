@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, demo_seek, ex_interp, fire_sounds, hand_signals, hudelement,
-    missing_shots, overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target,
-    texture_hires, voice, window_layout,
+    anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
+    hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
+    spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -515,6 +515,9 @@ pub fn poll() {
     crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
+    // one atomic load.
+    demo_list_folders::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::frame_esc::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
@@ -1118,6 +1121,34 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when `dodstudio_demo_list_folders` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_folders() {
+    handle_toggle(
+        demo_list_folders::NAME,
+        &demo_list_folders::ENABLED,
+        demo_list_folders::status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_hide_empty() {
+    handle_toggle(
+        demo_list_folders::HIDE_EMPTY.name,
+        &demo_list_folders::HIDE_EMPTY.fallback,
+        demo_list_folders::hide_empty_status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_list_count_subfolders` could not be
+/// a cvar.
+unsafe extern "C" fn cmd_demo_list_count_subfolders() {
+    handle_toggle(
+        demo_list_folders::COUNT_SUBFOLDERS.name,
+        &demo_list_folders::COUNT_SUBFOLDERS.fallback,
+        demo_list_folders::count_subfolders_status,
+    );
+}
+
 /// Only registered when the window-layout cvars could not be registered.
 /// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
@@ -1373,6 +1404,26 @@ pub fn install() {
         crate::spectator_follow::TARGET_NAME,
         crate::spectator_follow::target_command,
     );
+
+    // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
+    // Load Demo window asks for its list, so it needs no poll, and a failed
+    // registration costs only this one setting's type-ahead -- a plain toggle
+    // stands in for it.
+    match register(demo_list_folders::NAME, "1") {
+        Some(cvar) => demo_list_folders::set_cvar(cvar),
+        None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
+    match register(demo_list_folders::HIDE_EMPTY.name, "1") {
+        Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
+        None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
+    }
+    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "1") {
+        Some(cvar) => demo_list_folders::COUNT_SUBFOLDERS.set_cvar(cvar),
+        None => add_command(
+            demo_list_folders::COUNT_SUBFOLDERS.name,
+            cmd_demo_list_count_subfolders,
+        ),
+    }
 
     // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
     // it walks the windows, so they need no poll here, and a failed
