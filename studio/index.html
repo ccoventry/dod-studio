@@ -665,24 +665,35 @@
         <section id="pane-demo-auditor" class="content-pane" style="display: none;">
           <div class="egui-panel">
             <div class="panel-header">
-              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor (Deduplication)</h3>
+              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
               <div class="input-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
-                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder to scan for duplicate demos..." style="flex: 1;" />
+                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <div class="row-inputs">
-                <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
-                <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <div class="auditor-tabs" role="tablist">
+                <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
+                <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
               </div>
-              <p id="audit-status" class="status-indicator">
-                <span id="audit-spinner" class="spinner" style="display: none;"></span>
-                <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
-              </p>
             </div>
           </div>
+
+          <div class="auditor-tab-panel" data-auditor-panel="duplicates">
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-body">
+                <div class="row-inputs">
+                  <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
+                  <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+                </div>
+                <p id="audit-status" class="status-indicator">
+                  <span id="audit-spinner" class="spinner" style="display: none;"></span>
+                  <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                </p>
+              </div>
+            </div>
 
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
@@ -708,6 +719,27 @@
               </table>
             </div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          </div>
+          </div>
+
+          <!-- Split Maps (#624): split_pane.js. Demos that recorded more than
+               one map, split into one demo per map. -->
+          <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h3 data-str="SPLIT.TITLE">Demos With More Than One Map</h3>
+              </div>
+              <div class="panel-body">
+                <p class="split-hint" data-str="SPLIT.HINT">A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.</p>
+                <div class="row-inputs">
+                  <label class="split-recursive-label"><input type="checkbox" id="split-recursive" checked /> <span data-str="SPLIT.RECURSIVE">Include subfolders</span></label>
+                  <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
+                  <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="split-status" class="status-indicator"></p>
+                <div id="split-list" class="split-list"></div>
+              </div>
+            </div>
           </div>
         </section>
 

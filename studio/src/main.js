@@ -25,6 +25,8 @@ import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGua
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { initAuditorTabs } from './auditor_tabs.js';
+import { initSplitPane } from './split_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
@@ -386,6 +388,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initAuditorTabs();
+  initSplitPane();
   initHdPane();
 
   async function pickTargetDrive() {
