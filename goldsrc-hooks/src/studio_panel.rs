@@ -722,7 +722,32 @@ fn folder_heading(dod: &std::path::Path, folder: &str) -> String {
     if !shown.is_empty() && !shown.ends_with('/') {
         shown.push('/');
     }
-    format!("Demo File in {shown}")
+    format!("Demo File in {}", keep_the_end(&shown, HEADING_PATH_CHARS))
+}
+
+/// How much of a folder path the Demo File heading shows. The heading clips
+/// on the right at its column's width, which would cut off the folder's own
+/// name; a long path loses folders from the left instead. (The label's own
+/// limit is about 1,023 characters, so nothing overflows either way.)
+const HEADING_PATH_CHARS: usize = 70;
+
+/// `path` (folders, each ending in `/`) cut to at most about `max` characters
+/// by dropping whole folders from the left behind `.../`. The last folder is
+/// always kept, however long.
+fn keep_the_end(path: &str, max: usize) -> String {
+    if path.chars().count() <= max {
+        return path.to_string();
+    }
+    let parts: Vec<&str> = path.split_inclusive('/').collect();
+    let mut kept = String::new();
+    for part in parts.iter().rev() {
+        let would = part.chars().count() + kept.chars().count() + 4;
+        if !kept.is_empty() && would > max {
+            break;
+        }
+        kept.insert_str(0, part);
+    }
+    format!(".../{kept}")
 }
 
 /// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
@@ -3988,6 +4013,21 @@ mod tests {
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
         assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn a_long_heading_path_keeps_its_end() {
+        assert_eq!(keep_the_end("a/b/", 70), "a/b/");
+        let deep = "D:/Games/Library/Mine/Steam/steamapps/common/Half-Life - PRE/dod/temp demos/";
+        let short = keep_the_end(deep, 40);
+        assert!(
+            short.starts_with(".../") && short.ends_with("dod/temp demos/"),
+            "{short}"
+        );
+        assert!(short.chars().count() <= 40, "{short}");
+        // A single long last folder is kept whole.
+        let one = format!("x/{}/", "y".repeat(80));
+        assert!(keep_the_end(&one, 40).ends_with(&format!("{}/", "y".repeat(80))));
     }
 
     #[test]
