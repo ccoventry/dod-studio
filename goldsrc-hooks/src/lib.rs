@@ -109,6 +109,9 @@
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_text`: the `dodstudio_hide_map_text` cvar -- hide the text a map
+//!   puts on screen itself (the anzio mortar warning, the round result), and
+//!   pass DoD's own `HudText` prompts through (issue #287).
 //! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -162,6 +165,7 @@ mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
+mod map_text;
 mod missing_shots;
 mod msglog;
 mod names;
