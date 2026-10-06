@@ -5,6 +5,7 @@ mod chat;
 mod clan_match;
 pub mod entity_replay;
 mod kill;
+pub mod kill_moment;
 mod localization;
 mod mortality;
 mod objective;
@@ -40,6 +41,7 @@ pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
+    kill_moment::{KillMoment, PoseSample, ShooterView},
     localization::{get_active_language, set_active_language, translate_key},
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
@@ -124,6 +126,12 @@ pub struct AnalyzerState {
     /// Working state for `kill_positions`; never serialized.
     #[serde(skip)]
     positions: position::PositionTracker,
+    /// Every kill, with what was happening around it (R&D, highlight
+    /// detection). Defaulted so an older cache entry still loads.
+    #[serde(default)]
+    pub kill_moments: Vec<KillMoment>,
+    #[serde(skip)]
+    moments: kill_moment::MomentTracker,
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
@@ -388,6 +396,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         state.rounds.clear();
         state.team_scores.reset();
         state.kill_positions.clear();
+        state.kill_moments.clear();
         state.objectives = Objectives::default();
         state.clan_match_detected = false;
         state.clan_match_detection = ClanMatchDetection::WaitingForReset;
@@ -681,6 +690,7 @@ impl Analysis {
             use_timing_updates(state, event);
             use_player_updates(state, event);
             use_position_updates(state, event);
+            kill_moment::use_kill_moment_updates(state, event);
             with_mortality_detection(state, event);
             use_scoreboard_updates(state, event);
             use_kill_streak_updates(state, event);
