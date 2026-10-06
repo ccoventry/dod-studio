@@ -95,7 +95,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 7] = [
+pub const PAGES: [Page; 8] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -157,6 +157,15 @@ pub const PAGES: [Page; 7] = [
             c"dodstudio_ui/Studio.res",
             "Studio.res",
             include_str!("../ui/Studio.res"),
+        ),
+    },
+    Page {
+        name: c"Review",
+        title: c"Review",
+        res: (
+            c"dodstudio_ui/Review.res",
+            "Review.res",
+            include_str!("../ui/Review.res"),
         ),
     },
 ];
@@ -490,6 +499,8 @@ const FILL_HEIGHT: [&str; 2] = ["DemoListSlot", "StreakListSlot"];
 const STREAKS_PAGE: usize = 2;
 const CONSOLE_PAGE: usize = 3;
 const SETTINGS_PAGE: usize = 4;
+/// The review mode's tab (#623).
+const REVIEW_PAGE: usize = 7;
 /// A check box named `cvar_<name>` on the Settings tab is bound to cvar
 /// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
 /// layout can add more in build mode.
@@ -1451,6 +1462,8 @@ mod hook {
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
+    /// The Review tab (#623).
+    pub(super) mod review_tab;
     /// The Highlights tab (#565).
     mod streaks_tab;
 
@@ -3321,6 +3334,7 @@ mod hook {
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
                     streaks_tab::update(&vgui);
+                    review_tab::update(&vgui);
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
                     folder_progress::update(&vgui);
@@ -3735,6 +3749,15 @@ pub fn poll() {
     apply_saved_settings();
     #[cfg(target_arch = "x86")]
     hook::poll();
+}
+
+/// The Review tab's From, To and Note boxes (#623), when they belong to the
+/// highlight the review is on.
+pub(crate) fn review_inputs() -> Option<(String, String, String)> {
+    #[cfg(target_arch = "x86")]
+    return hook::review_tab::inputs();
+    #[cfg(not(target_arch = "x86"))]
+    None
 }
 
 fn argument() -> Option<String> {

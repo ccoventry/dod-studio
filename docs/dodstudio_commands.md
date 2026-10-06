@@ -139,6 +139,18 @@ No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
 
+### `dodstudio_review`
+
+DoD Studio's **Review highlights** (#623): plays each queued highlight at
+normal speed, from 4 s before its first kill to 2 s after its last, pauses,
+and opens the window's Review tab. `start "<queue file>"` begins (Studio
+sends it over the game's pipe); `yes` and `no` answer with the Review tab's
+kill range and note and move on; `replay`, `next` (skip without answering),
+`back` and `stop` move around. `range <from> <to>` and `note <text>` set the
+answer from the console, for key binds. Bare prints where the review is.
+Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
+pipe. See `src/review.rs`.
+
 ### `dodstudio_overviewmap`
 
 `dodstudio_overviewmap <full|mini> <x> <y> <w> <h>` places and sizes DoD's
@@ -236,7 +248,7 @@ is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
