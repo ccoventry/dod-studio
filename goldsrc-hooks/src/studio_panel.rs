@@ -2353,6 +2353,8 @@ mod hook {
         size: Option<(i32, i32)>,
         /// Each control where the `.res` put it, read straight after loading.
         controls: Vec<(Vpanel, (i32, i32, i32, i32))>,
+        /// The tab size last logged, so the log gets one line per size.
+        logged: Option<(i32, i32)>,
     }
 
     thread_local! {
@@ -2543,6 +2545,7 @@ mod hook {
                         .into_iter()
                         .map(|c| (c, vgui.rect(c)))
                         .collect(),
+                    logged: None,
                 });
                 add_page(sheet, object, page.title.as_ptr());
                 stored.store(object as usize, Ordering::Release);
@@ -2870,12 +2873,31 @@ mod hook {
                     design.size = Some((w - (fw - dw), h - (fh - dh)));
                 }
                 let Some(size) = design.size else { continue };
+                // Measured from where the controls end, so a tab that came out
+                // bigger than drawn still keeps its bottom row at the bottom
+                // (#609).
+                let rects: Vec<_> = design.controls.iter().map(|&(_, at)| at).collect();
+                let (fit_design, fit_now) =
+                    crate::window_layout::content_frame(&rects, size, (w, h));
+                if design.logged != Some((w, h)) {
+                    design.logged = Some((w, h));
+                    crate::debug::report(&format!(
+                        "studio_panel: tab {} is {w}x{h}, laid out for {}x{}, fitted as {}x{} of {}x{}",
+                        vgui.name(page),
+                        size.0,
+                        size.1,
+                        fit_now.0,
+                        fit_now.1,
+                        fit_design.0,
+                        fit_design.1
+                    ));
+                }
                 for &(control, at) in &design.controls {
                     // A tab's list fills whatever height the tab gains (#612).
                     let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
-                        crate::window_layout::fit_rect_tall(at, size, (w, h))
+                        crate::window_layout::fit_rect_tall(at, fit_design, fit_now)
                     } else {
-                        crate::window_layout::fit_rect(at, size, (w, h))
+                        crate::window_layout::fit_rect(at, fit_design, fit_now)
                     };
                     vgui.place(control, want);
                 }
