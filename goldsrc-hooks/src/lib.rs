@@ -162,6 +162,7 @@ mod engine;
 mod events;
 mod ex_interp;
 mod fire_sounds;
+mod folder_counts;
 mod frame_esc;
 mod hand_signals;
 mod hide_sprite;

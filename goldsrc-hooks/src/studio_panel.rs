@@ -679,9 +679,12 @@ fn is_folder_row(row: &str) -> bool {
     row.trim().trim_matches('"').ends_with('/')
 }
 
+/// A folder row's Map column before its count is in.
+const COUNTING: &str = "counting...";
+
 /// A folder row's Map column: its demo count, `+` when the count stopped
 /// short of the whole folder.
-fn demo_count_text(count: crate::demo_list_folders::FolderCount) -> String {
+fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
     let more = if count.complete { "" } else { "+" };
     match count.demos {
         1 if count.complete => "1 demo".to_string(),
@@ -1355,6 +1358,7 @@ mod hook {
     use super::*;
 
     /// The Playback tab's loading progress (#465).
+    mod folder_progress;
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
@@ -1621,7 +1625,7 @@ mod hook {
             // appear, go or recount without reopening the window.
             let folders = folder_settings();
             let last = LISTED_FOLDERS.swap(folders, Ordering::AcqRel);
-            if folders_changed(last, folders) {
+            if folders_changed(last, folders) || crate::folder_counts::take_finished() {
                 refill_demo_list();
             }
             // The hint says whether folders are on, not just the command.
@@ -1891,10 +1895,20 @@ mod hook {
                     let name = get(row, ROW_KEY);
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
-                        if let Some(count) = crate::demo_list_folders::folder_count(&name)
-                            && let Ok(count) = std::ffi::CString::new(demo_count_text(count))
-                        {
-                            set_string(row, DEMO_COLUMNS[0].0.as_ptr(), count.as_ptr());
+                        // Counted in the background: "counting..." until
+                        // then, and the tab lists again when it is done.
+                        let count = res_dir()
+                            .parent()
+                            .map(|dod| dod.join(name.trim().trim_matches('"')))
+                            .and_then(|folder| {
+                                crate::folder_counts::count(
+                                    &folder,
+                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                                )
+                            });
+                        let text = count.map_or_else(|| COUNTING.to_string(), demo_count_text);
+                        if let Ok(text) = std::ffi::CString::new(text) {
+                            set_string(row, DEMO_COLUMNS[0].0.as_ptr(), text.as_ptr());
                         }
                     }
                     if let Some(info) = info_for(&get(row, ROW_KEY)) {
@@ -3144,6 +3158,7 @@ mod hook {
                     streaks_tab::update(&vgui);
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
+                    folder_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {
                     // Closed some other way than the console key (its X,
@@ -3865,7 +3880,7 @@ mod tests {
 
     #[test]
     fn a_folder_count_reads_as_text() {
-        use crate::demo_list_folders::FolderCount;
+        use crate::folder_counts::FolderCount;
         let c = |demos, complete| FolderCount { demos, complete };
         assert_eq!(demo_count_text(c(0, true)), "0 demos");
         assert_eq!(demo_count_text(c(1, true)), "1 demo");

@@ -243,6 +243,18 @@
 		"labelText"		"Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1"
 		"textAlignment"		"west"
 	}
+	"FolderProgress"
+	{
+		"ControlName"		"ProgressBar"
+		"fieldName"		"FolderProgress"
+		"xpos"		"112"
+		"ypos"		"213"
+		"wide"		"416"
+		"tall"		"14"
+		"visible"		"0"
+		"enabled"		"1"
+		"helptext"		"Counting the demos in each folder, off the game thread."
+	}
 	"PlayerNote"
 	{
 		"ControlName"		"Label"
