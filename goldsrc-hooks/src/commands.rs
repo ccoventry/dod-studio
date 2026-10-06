@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, demo_seek, ex_interp, fire_sounds, hand_signals, hudelement,
-    missing_shots, overview_map, scoreboard, spectator_crosshair, spectator_eye, spectator_target,
-    texture_hires, voice, window_layout,
+    anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
+    hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
+    spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -506,11 +506,20 @@ pub fn poll() {
     spectator_target::poll();
     // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
     crate::msglog::poll();
+    // Reads the map's own on-screen strings once per level while
+    // dodstudio_hide_map_text is on, and keeps its HudText handler prepended.
+    crate::map_text::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
+    crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
+    // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
+    // one atomic load.
+    demo_list_folders::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::engine_buttons::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
@@ -520,14 +529,20 @@ pub fn poll() {
     crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
+    // Only until connect is wrapped, normally already done at install.
+    crate::connect_guard::poll();
     crate::events::poll();
+    crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
     crate::missing_shots::poll();
     crate::spectator_bars::poll();
+    // After spectator_bars::poll, so it lays out by this frame's bar state.
+    crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    crate::studio_panel::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -657,11 +672,17 @@ fn status_text() -> String {
     }
     // Always shown once installed: it is on by default, and "did it ever
     // catch anything?" is the question a crash-free session raises.
+    if let Some(lighting) = crate::lightmap_gamma::status_line() {
+        lines.push(lighting);
+    }
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    if let Some(esc) = crate::frame_esc::status_line() {
+        lines.push(esc);
     }
     if let Some(pmove) = crate::pmove_guard::status_line() {
         lines.push(pmove);
@@ -692,6 +713,9 @@ fn status_text() -> String {
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
+    }
+    if let Some(map_text) = crate::map_text::status_line() {
+        lines.push(map_text);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1099,7 +1123,53 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
+/// Only registered when `dodstudio_demo_list_folders` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_folders() {
+    handle_toggle(
+        demo_list_folders::NAME,
+        &demo_list_folders::ENABLED,
+        demo_list_folders::status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+unsafe extern "C" fn cmd_demo_list_hide_empty() {
+    handle_toggle(
+        demo_list_folders::HIDE_EMPTY.name,
+        &demo_list_folders::HIDE_EMPTY.fallback,
+        demo_list_folders::hide_empty_status,
+    );
+}
+
+/// Only registered when `dodstudio_demo_list_count_subfolders` could not be
+/// a cvar.
+unsafe extern "C" fn cmd_demo_list_count_subfolders() {
+    handle_toggle(
+        demo_list_folders::COUNT_SUBFOLDERS.name,
+        &demo_list_folders::COUNT_SUBFOLDERS.fallback,
+        demo_list_folders::count_subfolders_status,
+    );
+}
+
 /// Only registered when the window-layout cvars could not be registered.
+/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_viewdemo_in_panel() {
+    handle_toggle(
+        crate::studio_panel::VIEWDEMO_NAME,
+        &crate::studio_panel::VIEWDEMO_IN_PANEL,
+        crate::studio_panel::viewdemo_status,
+    );
+}
+
+/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+unsafe extern "C" fn cmd_console_in_panel() {
+    handle_toggle(
+        crate::studio_panel::CONSOLE_NAME,
+        &crate::studio_panel::CONSOLE_IN_PANEL,
+        crate::studio_panel::console_status,
+    );
+}
+
 unsafe extern "C" fn cmd_resizable_windows() {
     handle_toggle(
         window_layout::RESIZABLE_NAME,
@@ -1318,10 +1388,12 @@ pub fn install() {
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
+    crate::connect_guard::install();
     crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
+    add_command(crate::studio_panel::NAME, crate::studio_panel::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1335,6 +1407,26 @@ pub fn install() {
         crate::spectator_follow::target_command,
     );
 
+    // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
+    // Load Demo window asks for its list, so it needs no poll, and a failed
+    // registration costs only this one setting's type-ahead -- a plain toggle
+    // stands in for it.
+    match register(demo_list_folders::NAME, "1") {
+        Some(cvar) => demo_list_folders::set_cvar(cvar),
+        None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
+    match register(demo_list_folders::HIDE_EMPTY.name, "1") {
+        Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
+        None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
+    }
+    match register(demo_list_folders::COUNT_SUBFOLDERS.name, "1") {
+        Some(cvar) => demo_list_folders::COUNT_SUBFOLDERS.set_cvar(cvar),
+        None => add_command(
+            demo_list_folders::COUNT_SUBFOLDERS.name,
+            cmd_demo_list_count_subfolders,
+        ),
+    }
+
     // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
     // it walks the windows, so they need no poll here, and a failed
     // registration costs only their type-ahead -- plain toggles stand in.
@@ -1347,6 +1439,17 @@ pub fn install() {
             add_command(window_layout::RESIZABLE_NAME, cmd_resizable_windows);
             add_command(window_layout::REMEMBER_NAME, cmd_remember_window_layout);
         }
+    }
+
+    // Both on by default (the user, 2026-10-03): the window is how DoD
+    // Studio's console and playback controls are reached.
+    match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
+        None => add_command(crate::studio_panel::VIEWDEMO_NAME, cmd_viewdemo_in_panel),
+    }
+    match register(crate::studio_panel::CONSOLE_NAME, "1") {
+        Some(cvar) => crate::studio_panel::set_console_cvar(cvar),
+        None => add_command(crate::studio_panel::CONSOLE_NAME, cmd_console_in_panel),
     }
 
     let bit = |flag: bool| if flag { "1" } else { "0" };
@@ -1390,6 +1493,10 @@ pub fn install() {
     // it is independent of every other setting here.
     if let Some(shaders) = register(crate::world_shaders::NAME, "0") {
         crate::world_shaders::set_cvar(shaders);
+    }
+    // Same: independent of every other setting, so outside the tuple.
+    if let Some(map_text) = register(crate::map_text::NAME, "0") {
+        crate::map_text::set_cvar(map_text);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.

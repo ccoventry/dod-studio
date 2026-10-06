@@ -58,6 +58,10 @@
 //!   different y while spectating than it does in a POV demo. Full design
 //!   write-up in `docs/goldsrc_objective_icons.md`.
 //!
+//! - `lightmap_gamma`: the first demo of a session no longer renders with its
+//!   lighting far too dark (issue #365): the gamma tables are refreshed from the
+//!   current cvars before a map's lightmaps are built. On by default;
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
 //! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
 //!   effect entity to give it (issue #374). On by default, since it only acts
 //!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
@@ -65,6 +69,9 @@
 //! - `hull_trace_guard`: stop the engine crashing when a player-movement trace
 //!   walks a previous map's collision data (issue #384). On by default for the
 //!   same reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off.
+//! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
+//!   Demo window lists folders (and `../`) as well as demos, and opens them,
+//!   so `viewdemo` can reach demos outside `dod/` (issue #408).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
@@ -73,13 +80,23 @@
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
 //!   yet; they are there for a live test.
+//! - `frame_esc`: keep GameUI's windows -- the VCR bar, the events list, the
+//!   Load Demo window, the console -- open when ESC is pressed on the 25th
+//!   Anniversary build (issues #369, #408). Does nothing on the pre-Anniversary
+//!   build, which never closed them; `GOLDSRC_HOOKS_FRAME_ESC=0` turns it off.
 //! - `window_layout`: the `dodstudio_resizable_windows` and
 //!   `dodstudio_remember_window_layout` cvars -- every GameUI window can be
 //!   resized, and each comes back where it was left after a restart (#408).
+//! - `studio_panel`: `dodstudio_panel` -- DoD Studio's own window in the game,
+//!   a GameUI `Frame` with real tabs (a `PropertySheet` of `PropertyPage`s)
+//!   and VCR buttons, each tab laid out by its own `.res` (#408, plan item 4).
 //! - `events`: the game tells DoD Studio what a capture batch is doing over a
 //!   second local named pipe, `\\.\pipe\dodstudio-hl-<pid>-events` (issue #434,
 //!   step 1), instead of Studio reading `qconsole.log`. `GOLDSRC_HOOKS_EVENTS=0`
 //!   turns it off.
+//! - `batch_end`: when a batch's `BATCH_COMPLETE` goes by and no Studio is on
+//!   the events pipe, the game quits itself after a few seconds instead of
+//!   sitting there (issue #545). On with the events pipe.
 //! - `pmove_guard`: stop the session's first demo crashing when it sends
 //!   `InitHUD` before the engine has pointed `pmove` anywhere (issue #546).
 //!   One pointer write at start-up, both builds. On by default;
@@ -92,9 +109,16 @@
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
 //!   off.
+//! - `connect_guard`: refuse `connect`, `retry`, `reconnect` and `listen`
+//!   while the DLL is loaded, since joining a VAC-secured server with it
+//!   loaded is a ban risk (issue #451). `connect local` (`map`) still works;
+//!   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off.
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
+//! - `map_text`: the `dodstudio_hide_map_text` cvar -- hide the text a map
+//!   puts on screen itself (the anzio mortar warning, the round result), and
+//!   pass DoD's own `HudText` prompts through (issue #287).
 //! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -102,6 +126,9 @@
 //!   two dark bands a spectator sees and everything on them, on screen and
 //!   without a capture running (issue #328). A filter on vgui2's `IPanel::PaintTraverse`;
 //!   see `docs/goldsrc_spectator_bars.md`.
+//! - `spectator_hud`: no command of its own -- while spectating, keeps the
+//!   objectives, the objective timer, the kill feed and the minimap just below
+//!   the spectator bar, or at the top as in a POV demo while the bar is hidden.
 //!
 //! The scoreboard/voice/crosshair/spectator_crosshair four are all in
 //! `docs/goldsrc_hud_suppression.md`.
@@ -120,14 +147,19 @@
 //! the command that started the session.
 
 mod anim_fix;
+mod batch_end;
 mod cmd_list;
 mod commands;
+mod connect_guard;
 mod crash;
 mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_file;
+mod demo_list_folders;
 mod demo_reload;
+mod demo_rosters;
 mod demo_seek;
 mod detour;
 mod engine;
@@ -135,11 +167,15 @@ mod engine_buttons;
 mod events;
 mod ex_interp;
 mod fire_sounds;
+mod folder_counts;
+mod frame_esc;
 mod hand_signals;
 mod hide_sprite;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
+mod lightmap_gamma;
+mod map_text;
 mod missing_shots;
 mod msglog;
 mod names;
@@ -151,13 +187,17 @@ mod pmove_guard;
 mod remote;
 mod scan;
 mod scoreboard;
+mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
+mod spectator_hud;
 mod spectator_target;
 mod sprite_blend;
+mod streaks;
+mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
@@ -207,8 +247,18 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // First, so the file is there before GameUI reads the main menu.
+    if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
+        studio_panel::write_game_menu();
+    }
     anim_fix::LEVEL.store(
         env_level("GOLDSRC_HOOKS_SPEC_MATCH_POV", SPEC_MATCH_POV_DEFAULT),
+        Ordering::Relaxed,
+    );
+    // Only makes the first map's lighting match every later map's, so on
+    // unless asked not to.
+    lightmap_gamma::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_LIGHTMAP_GAMMA", true),
         Ordering::Relaxed,
     );
     // A crash fix rather than a capture setting, so on unless asked not to.
@@ -220,6 +270,9 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
         env_flag("GOLDSRC_HOOKS_HULL_TRACE_GUARD", true),
         Ordering::Relaxed,
     );
+    // Restores the pre-Anniversary behaviour on the Anniversary build and
+    // does nothing on the pre-Anniversary one, so on unless asked not to.
+    frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
     // Only acts on commands a window would otherwise drop, so on unless asked
     // not to.
     engine_buttons::ENABLED.store(
@@ -240,6 +293,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // Only this user's own processes can reach the pipe, and only a game
     // Studio launched has it, so on unless asked not to.
     remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
+    // VAC safety (#451), so on unless asked not to.
+    connect_guard::ENABLED.store(
+        !connect_guard::allowed_by_env(std::env::var(connect_guard::ALLOW_ENV).ok().as_deref()),
+        Ordering::Relaxed,
+    );
     // Studio falls back to qconsole.log without it, so on unless asked not to.
     events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,
@@ -317,6 +375,9 @@ fn install_fixes() {
     // The dodstudio_* console surface. dodstudio_spec_match_pov drives the same
     // flag the env var above set as its starting value.
     commands::install();
+
+    // hw.dll, once; before the first map loads, which is the one it's for.
+    lightmap_gamma::install();
 
     // Studio's console commands can only run once the engine's function
     // table is live, which is now.

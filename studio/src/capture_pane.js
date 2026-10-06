@@ -7,6 +7,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
+import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
@@ -15,6 +16,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -28,6 +30,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+
+/** Whether a capture batch is running right now (#545's close prompt). */
+export function isCaptureRunning() {
+  return capturingInFlight;
+}
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
 // drive is added, or detail_pane.js after a streak selection changes).
@@ -414,6 +421,11 @@ export async function refreshLaunchGuard(state) {
     0
   );
   const noHighlightsSelected = selectedHighlights === 0;
+  // Every capture launches hl.exe through HLAE, so with either path blank
+  // Start could only fail at click time (BOTH_PATHS_REQUIRED). A first-time
+  // user hit that before anything else; now the button says so up front.
+  const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
+    || !document.querySelector('#hlae-path-input')?.value?.trim();
 
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
@@ -439,11 +451,14 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
   }
+  // Every change that can block Start comes through here, so the strip
+  // (#443) follows it: banned commands, destinations, commands edits.
+  renderCaptureSummary();
 
   if (warningEl) {
     // First of all, ahead of even the calm cases below: a banned command is
@@ -451,6 +466,10 @@ export async function refreshLaunchGuard(state) {
     if (bannedCommandsPresent) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
+      warningEl.style.display = 'block';
+    } else if (pathsMissing) {
+      warningEl.style.color = '#f44336';
+      warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = '#f44336';
@@ -517,6 +536,24 @@ let customCommandsEditor = null;
 /** Scrapes the current Init/Custom Commands state for settings persistence
  *  (raw, untrimmed — mirrors in-progress edits rather than the filtered
  *  shape `buildCapturePayload` sends to `start_capture_batch`). */
+/** The live capture setup, for the summary strip (#443). */
+function currentCaptureSetup() {
+  const state = (currentGetState ? currentGetState() : null) || {};
+  const codecEl = document.querySelector('#config-capture-codec');
+  return {
+    mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
+    obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    scheduledCount: getCommandsState().custom_commands.length,
+    bannedCount: bannedCommandCount(),
+    decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+    destinations: (state.targetDrives || []).filter(Boolean).length > 0,
+  };
+}
+
 export function getCommandsState() {
   return {
     init_commands: [...initCommands],
@@ -792,6 +829,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   };
 
   currentGetState = getState;
+  initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
   currentGetTakeIndex = getTakeIndex || null;
@@ -800,7 +838,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initCommandsEditor = createListEditor({
     container: document.querySelector('#init-commands-list'),
     getItems: () => initCommands,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER }],
+    fields: [{
+      key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
+    }],
     onChange: () => {
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
@@ -813,7 +854,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     container: document.querySelector('#custom-commands-list'),
     getItems: () => customCommands,
     fields: [
-      { key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER },
+      {
+        key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true }),
+      },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],
