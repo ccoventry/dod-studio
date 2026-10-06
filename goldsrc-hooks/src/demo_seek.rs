@@ -227,6 +227,15 @@ fn run(name: &str, relative: bool) {
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
 }
 
+/// While a `viewdemo` demo is still being read (#465): how many seconds of
+/// it the player holds so far. `None` once loaded, or with no demo player.
+pub fn buffered_while_loading() -> Option<f64> {
+    #[cfg(target_arch = "x86")]
+    return player::buffered_while_loading();
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
 /// `dodstudio_seek_to <seconds>`: an absolute world time, the clock the events
 /// list shows and the analysis calls `viewdemo_offset`.
 pub unsafe extern "C" fn seek_to() {
@@ -299,6 +308,23 @@ mod player {
         unsafe {
             let vftable = *(object as *const *const usize);
             std::mem::transmute_copy(&*vftable.add(index))
+        }
+    }
+
+    /// While a `viewdemo` demo is still being read: how much of it the
+    /// player holds, in seconds (end minus start of the buffered world).
+    pub(super) fn buffered_while_loading() -> Option<f64> {
+        let (player, _) = find().ok()?;
+        // Safety: the same slots `seek` uses, checked against both builds.
+        unsafe {
+            let is_active: ByteFn = slot(player, SLOT_IS_ACTIVE);
+            let is_loading: ByteFn = slot(player, SLOT_IS_LOADING);
+            if !is_set(is_active(player)) || !is_set(is_loading(player)) {
+                return None;
+            }
+            let get_start: TimeFn = slot(player, SLOT_GET_START_TIME);
+            let get_end: TimeFn = slot(player, SLOT_GET_END_TIME);
+            Some(get_end(player) - get_start(player))
         }
     }
 
