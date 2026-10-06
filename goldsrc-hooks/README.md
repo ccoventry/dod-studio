@@ -39,7 +39,7 @@ joins this switch rather than adding a command:
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
-Plus twenty control surfaces, always available and doing nothing until used:
+Plus twenty-one control surfaces, always available and doing nothing until used:
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -129,6 +129,19 @@ Plus twenty control surfaces, always available and doing nothing until used:
   the engine surface's popups through vgui2's own interfaces; only
   `Frame::SetSizeable`/`IsSizeable` are per-build addresses. See
   `src/window_layout.rs`.
+- **DoD Studio window** (`dodstudio_panel`): our own window in the game, a
+  GameUI `Frame` with a `PropertySheet` of tabs, like the Options window; its
+  Playback buttons drive the demo player like the VCR bar's, and the tab
+  borrows the bar's own time slider and label. By default
+  (`dodstudio_viewdemo_in_panel 1`), `viewdemo` opens it on Playback and parks
+  the bar off screen. A Console tab holds the real console's history and
+  input line, and the console key opens it (`dodstudio_console_in_panel 1`,
+  also on by default; `0` brings back the stock console).
+  A Highlights tab lists the playing demo's streaks, from Studio's analyzer
+  cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
+  crate; a demo too big for the game's address space is refused, not tried).
+  One `.res` per tab in `dod\dodstudio_ui\`, editable in
+  build mode; never narrower than its tabs. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
   to it as a console command on the next frame. Launch Preview uses it when
@@ -155,6 +168,15 @@ Plus twenty control surfaces, always available and doing nothing until used:
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
+- **Refuses to join a server, except an HLTV proxy** (on by default):
+  `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
+  the game thread, `src/server_query.rs`) and only join an HLTV proxy that
+  says VAC is off; anything else is refused, with a console message and a log
+  line, because joining a VAC-secured server with the DLL loaded is a ban
+  risk. `connect local` (what `map` runs) still works.
+  `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
+  server. Wraps the engine commands the same way as the demo reload. See
+  `src/connect_guard.rs` and `docs/vac_safety.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   ten elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
@@ -198,8 +220,9 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 > **Only ever inject into a separate movie copy of Half-Life, never the one
 > you play online with, and never join a server afterwards.** This DLL patches
 > the game in memory, which is what VAC detects. Injecting by hand skips the
-> connect warning HLAE shows in every DoD Studio launch, so nothing will stop
-> you. See [`docs/vac_safety.md`](../docs/vac_safety.md).
+> connect warning HLAE shows in every DoD Studio launch. The DLL refuses
+> `connect` once it has hooked the engine, but don't rely on that alone. See
+> [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 1. Launch DoD 1.3 (with or without HLAE) from your movie copy and load an HLTV/POV demo.
 2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
@@ -209,6 +232,25 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 4. `inject.exe <pid> path\to\dodstudio_goldsrc_hooks.dll`
 5. Check `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log` for its own diagnostics (never pops a
    dialog -- this is meant to run inside an unattended capture pipeline).
+
+## Scripted in-game tests
+
+`tools/game_probe.py` runs one in-game test end to end and writes a report:
+it launches the game the way Studio does (HLAE plus this DLL, windowed,
+`-condebug`), plays a demo, then runs steps -- console commands over the
+remote pipe, waits, `waitfor`/`expect` checks against the console and hook
+logs, and screenshots (a frame recorded by HLAE, so the game can stay behind
+other windows). It always ends the game it started. Reports and screenshots
+go to `local/game-probe/<timestamp>/`.
+
+It refuses to run unless Steam is signed into the one account in-game tests
+may use -- named in a local file outside the repo,
+`%APPDATA%\dod-studio\game_probe.json`, and checked in the registry right
+before launch; no file, no test -- no `hl.exe` is
+already running, and the install is one of the two movie installs. See the
+script's docstring for the steps and flags; `--check` runs only the refusal
+checks. `--at-launch` starts the demo from the launch command line, as a
+capture batch starts its primer, which matters for first-demo bugs (#546).
 
 ## Status
 
