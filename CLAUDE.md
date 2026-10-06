@@ -60,6 +60,16 @@ The tree is rustfmt-formatted and CI's Clippy job gates on `cargo fmt --all --ch
 
 The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone so `git blame` skips it.
 
+Clippy is pinned the same way; your default toolchain misses lints CI catches:
+
+    rustup run 1.98.1 cargo clippy --workspace --all-targets -- -D warnings
+
+### Build traps
+
+- **Build the hook DLL first in a fresh checkout or worktree.** `studio`'s build script checks that `target\i686-pc-windows-msvc\release\dodstudio_goldsrc_hooks.dll` exists (a Tauri bundle resource); without it the whole workspace fails to build, far from any code. Give each worktree its own `CARGO_TARGET_DIR`: a shared one silently reuses another worktree's artifacts.
+- **`npm run tauri dev` watches the workspace.** Any file write in that checkout restarts Studio, and every child process (Steam, HLAE, `hl.exe`) dies with it, because they run inside cargo's kill-on-close job object. While the app is running from a checkout, edit in a separate worktree.
+- **JS unit tests:** `npm run test:unit` (Vitest, `studio/src/*.test.js`) runs in CI alongside the Playwright e2e suite.
+
 ---
 
 ## System Guardrails & Agent Directives
@@ -88,6 +98,8 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
         }' -f prId="$PR_ID" -f issueId="$ISSUE_ID"
   Still include `Closes #NN` in the PR body too — the GraphQL call is in addition to that, not a replacement for it.
 - **Issues close when their PR merges into `dev`**, not at release — `close_issues_on_dev.yml` does it from that same link data, since GitHub's own keywords only fire on the default branch (`main`). `[R&D]` issues and bare `(#NN)` commit-subject matches get the `on-dev` label instead, for a human call. So only link a PR as closing an issue when it finishes it; for partial work write "Part of #NN", which links nothing.
+- **Before starting an issue**, search open PRs for it (`gh pr list -S "#NN"`) and grep open PR bodies: a PR's title often hides which issues it closes.
+- **Merging into `dev`:** the ruleset requires the branch to be up to date, so `gh pr update-branch N`, wait for CI, then merge, one PR at a time (each merge puts the rest behind). A PR stacked on another feature branch gets no CI (`ci.yml` only runs for PRs into `dev`/`main`): say so on the PR and post local results. Head branches auto-delete on merge and GitHub retargets stacked PRs, but a manual `git push --delete` of a base branch closes the PRs stacked on it.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
 ---
@@ -99,6 +111,9 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
 - **Telemetry Throttling:** Background progress channels must throttle update traffic to ~30fps (~33ms) using an `Arc<AtomicU32>` debouncer to prevent event loop flooding.
 - **Memory Safety:** Never use fixed-size stack buffers (`[u8; N]`) for binary stream slicing. Use heap-allocated `Vec<u8>` gated by explicit 2MB payload limits.
 - **Process Lifecycles:** External processes (HLAE, `hl.exe`, FFmpeg) must use non-blocking polling (`child.try_wait()`) matched with a ~16ms sleep. Verify an `Arc<AtomicBool>` cancellation token every cycle and chain `.kill_on_drop(true)`.
+- **Release builds use `panic = "abort"`.** `catch_unwind` never catches anything in a shipped build, and a panic in the hook DLL takes `hl.exe` down with it. Handle bad input with bounds checks at the read site, not by catching panics.
+- **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
+- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes. Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber.
 
 ---
 
@@ -117,7 +132,9 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
   - `MID_DEMO_HAZARDS` — shadowed with a warning, not refused, because each corresponds to a real setting.
   - `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`) and `NOOP_IN_INIT_COMMANDS` (`mirv_movie_filename`) — reported as doing nothing. The engine drops the first pair from a demo's message stream; the pipeline overwrites the second before anything reads it.
 
-  Adding a new pipeline-internal command that Initial/Scheduled Commands could reach: decide which list it belongs to before shipping it unprotected. Do not describe this set from memory — it has been re-tiered more than once (`mirv_movie_filename` moved in #161; `mirv_movie_separate_hud` disappeared with #214); read `cfg_scan.rs`.
-- **User Config Files:** The game's own `.cfg` files are the user's. **Detect and warn, never write.** They override nothing the app assumes — a `config.cfg` ending in `exec movie.cfg` can set `mirv_fov` or `r_decals` behind the pipeline entirely. `native/src/patch/cfg_scan.rs` is read-only by construction; keep it that way.
+  Adding a new pipeline-internal command that Initial/Scheduled Commands could reach: decide which list it belongs to before shipping it unprotected. Do not describe this set from memory — it has been re-tiered more than once (`mirv_movie_filename` moved in #161; `mirv_movie_separate_hud` disappeared with #214); read `cfg_scan.rs`. A tier change must be mirrored in `studio/src/command_suggest.js`.
+- **User Config Files:** The game's own `.cfg` files are the user's. **Detect and warn, never write.** They override nothing the app assumes — a `config.cfg` ending in `exec movie.cfg` can set `mirv_fov` or `r_decals` behind the pipeline entirely. `native/src/patch/cfg_scan.rs` is read-only by construction; keep it that way. Studio's own commands are the last word: configs are never blocked, and the app never flips `config.cfg`'s read-only attribute (#478). The game's `.res` files are the user's too; the app ships its own in `dod_addon` (needs `-addons`) or `dod\dodstudio_ui`, never over `dod\resource`.
+- **Both engine builds:** DoD Studio supports the pre-Anniversary and the 25th Anniversary `hw.dll`. A `goldsrc-hooks` module that touches `hw.dll` carries a per-build table (signature, stolen bytes, offsets; the pattern is `hull_trace_guard.rs`'s `BUILDS`) and a `tools/verify_*_offsets.py` that checks both (`--anniversary`). `client.dll` is byte-identical across installs, so client.dll modules need one table. Never drop pre-Anniversary support while adding Anniversary.
+- **Console names (`goldsrc-hooks`):** every name comes from `console_name!` (prefix `dodstudio_`). Settings are cvars, not commands, named after the action so `1` does what the name says, default `0`. No name may be the whole start of another (the console's autocomplete swaps it on space). Diagnostics go under `dodstudio_debug_`; any fix that makes the spectated view match POV joins `dodstudio_spec_match_pov` rather than adding a cvar. A PR that adds a name must also add it to `goldsrc-hooks/ui/Commands.txt` and regenerate `studio/src/console_commands_data.js` (`goldsrc-hooks/tools/console_names.py`), or tests fail once `dev` is merged in.
 - **Tauri IPC:** Every frontend `invoke()` call in `ipc_bridge.js` must implement a `.catch()` block to prevent swallowed Rust backend errors.
 - **Filesystem Picking:** Force the use of `@tauri-apps/plugin-dialog` native pickers instead of text input paths to prevent string escaping vulnerabilities.
