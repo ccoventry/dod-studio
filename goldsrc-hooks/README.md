@@ -51,8 +51,8 @@ Plus these control surfaces, always available and doing nothing until used:
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
-- **Hide an entity** (`dodstudio_hide_entity <model-path>...`, old name
-  `dodstudio_hide_sprite`): suppresses specific world entities by model path
+- **Hide an entity** (`dodstudio_hide_entity add <model-path>...`, with
+  `list`, `del` and `clear`): suppresses specific world entities by model path
   (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`) -- an allow-list,
   not a blanket toggle, since most map sprites are meaningful (smoke, fire,
   tracers). `dodstudio_debug_status` says whether each path has matched

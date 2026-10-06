@@ -194,11 +194,9 @@ number (a path stays the same across demos):
 - `dodstudio_hide_entity add <model-path>...`: hide these too.
 - `dodstudio_hide_entity del <model-path>...`: stop hiding these.
 - `dodstudio_hide_entity clear`: stop hiding anything.
-- `dodstudio_hide_entity <model-path>...`: hide exactly these, replacing the
-  list (the original form, kept for existing configs).
 
-It is an allow-list, not a blanket toggle: `all` is refused. The old name,
-`dodstudio_hide_sprite`, still works for now (#333).
+It is an allow-list, not a blanket toggle: `all` is refused. It was
+`dodstudio_hide_sprite` before #333; that name is gone.
 
 It reaches only entities rendered through the engine's normal entity list
 (`HUD_AddEntity`). DoD draws some sprite-looking things -- the crosshair, the

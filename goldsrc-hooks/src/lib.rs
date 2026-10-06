@@ -37,8 +37,8 @@
 //! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_entity`: the `dodstudio_hide_entity <model-path>...` command (old
-//!   name `dodstudio_hide_sprite`, #333) -- suppress specific world entities
+//! - `hide_entity`: the `dodstudio_hide_entity list|add|del|clear` command
+//!   (renamed from `dodstudio_hide_sprite`, #333) -- suppress specific world entities
 //!   by model path, an allow-list rather than a blanket toggle. Full design
 //!   write-up in the module doc itself (issue #315).
 //! - `spectator_follow`: `dodstudio_spec_lock`, which keeps the camera on a

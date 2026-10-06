@@ -7,8 +7,10 @@
 //! `HUD_AddEntity` fires for every entity the engine is about to draw, and the
 //! match has only ever been on the model path, so the command was never
 //! sprite-only; the old name promised a restriction the code didn't have.
-//! `dodstudio_hide_sprite` stays registered as a second name for the same
-//! command for a release (`COMMAND_NAMES`), so configs using it keep working.
+//! The old name and the old "plain paths replace the list" form are gone,
+//! not kept as aliases: neither was ever in a released build (the user's
+//! call, 2026-10-06). The command keeps a list like HLAE's
+//! `mirv_matte_entities`: `list`, `add`, `del`, `clear`.
 //!
 //! Each entry records whether the engine has drawn anything by that path this
 //! session, and the status says so, so a typo stops failing silently.
@@ -85,8 +87,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::names::console_name;
 
-/// The new name first (it is the one usage and replies use), then the old one.
-pub const COMMAND_NAMES: &[&str] = &[COMMAND, console_name!("hide_sprite")];
+/// The one name it answers to.
+pub const COMMAND_NAMES: &[&str] = &[COMMAND];
 const COMMAND: &str = console_name!("hide_entity");
 
 /// One model path to suppress, and whether the engine has drawn anything by
@@ -177,7 +179,6 @@ fn usage() -> String {
          \x20                                    e.g. {COMMAND} add sprites/mapsprites/flames.spr\n\
          \x20 {COMMAND} del <model-path>...      stop hiding these\n\
          \x20 {COMMAND} clear                    stop hiding anything\n\
-         \x20 {COMMAND} <model-path>...          hide exactly these, replacing the list\n\
          \x20 no \"all\" -- deliberately an allow-list, not a blanket toggle; see the module doc\n"
     )
 }
@@ -238,14 +239,10 @@ fn apply(list: &mut Vec<Entry>, rest: &[String]) -> String {
             reply
         }
         "add" | "del" | "remove" => format!("{COMMAND}: {verb} needs at least one model path\n"),
-        // Anything else is a list of model paths, replacing whatever was
-        // hidden before -- the "each call restates the whole set" shape
-        // `dodstudio_deathmsg block <id>...` uses, kept for configs that
-        // already use it.
-        _ => {
-            *list = rest.iter().map(|path| Entry::new(path)).collect();
-            format!("{COMMAND}: hiding {}\n", rest.join(", "))
-        }
+        _ => format!(
+            "{COMMAND}: \"{verb}\" isn't list, add, del or clear -- e.g. {COMMAND} add {}\n",
+            rest[0]
+        ),
     }
 }
 
@@ -344,11 +341,8 @@ mod tests {
     }
 
     #[test]
-    fn the_old_name_still_works() {
-        assert_eq!(
-            COMMAND_NAMES,
-            ["dodstudio_hide_entity", "dodstudio_hide_sprite"]
-        );
+    fn only_the_new_name_is_registered() {
+        assert_eq!(COMMAND_NAMES, ["dodstudio_hide_entity"]);
     }
 
     fn strings(v: &[&str]) -> Vec<String> {
@@ -376,16 +370,24 @@ mod tests {
     }
 
     #[test]
-    fn plain_paths_still_replace_the_list() {
+    fn a_bare_path_is_not_a_command() {
         let mut list = vec![Entry::new("old.spr")];
-        apply(&mut list, &strings(&["a.spr", "b.spr"]));
-        assert_eq!(paths(&list), ["a.spr", "b.spr"]);
+        let reply = apply(&mut list, &strings(&["a.spr", "b.spr"]));
+        assert!(
+            reply.contains("isn't list, add, del or clear") && reply.contains("add a.spr"),
+            "{reply}"
+        );
+        assert_eq!(paths(&list), ["old.spr"], "unchanged");
     }
 
     #[test]
     fn all_is_refused_and_changes_nothing() {
         let mut list = vec![Entry::new("flames.spr")];
-        for args in [&["all"][..], &["add", "all"][..], &["a.spr", "ALL"][..]] {
+        for args in [
+            &["all"][..],
+            &["add", "all"][..],
+            &["add", "a.spr", "ALL"][..],
+        ] {
             let reply = apply(&mut list, &strings(args));
             assert!(reply.contains("no \"all\""), "{reply}");
             assert_eq!(paths(&list), ["flames.spr"]);
