@@ -692,14 +692,18 @@ const UP_MARK: &str = "\u{2191}  ";
 /// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
 /// `.. (up one folder)` for the up row, not the whole path (#409). The path
 /// itself stays on the row, under [`PATH_KEY`], for loading.
-fn display_name(path: &str) -> String {
+///
+/// A folder's demo count goes in brackets after its name, `count` (the
+/// user's call, 2026-10-05: the Map column is for maps only).
+fn display_name(path: &str, count: Option<&str>) -> String {
     let path = path.trim().trim_matches('"');
+    let count = count.map_or_else(String::new, |c| format!(" ({c})"));
     if let Some(folder) = path.strip_suffix('/') {
         let last = folder.rsplit('/').next().unwrap_or(folder);
         if last == ".." {
-            format!("{UP_MARK}.. (up one folder)")
+            format!("{UP_MARK}.. up one folder{count}")
         } else {
-            format!("{FOLDER_MARK}{last}/")
+            format!("{FOLDER_MARK}{last}/{count}")
         }
     } else {
         format!("{DEMO_MARK}{}", path.rsplit('/').next().unwrap_or(path))
@@ -759,10 +763,10 @@ fn is_folder_row(row: &str) -> bool {
     row.trim().trim_matches('"').ends_with('/')
 }
 
-/// A folder row's Map column before its count is in.
+/// A folder row's count, in brackets after its name, before it is in.
 const COUNTING: &str = "counting...";
 
-/// A folder row's Map column: its demo count, `+` when the count stopped
+/// A folder row's demo count, in brackets after its name; `+` when the count stopped
 /// short of the whole folder.
 fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
     let more = if count.complete { "" } else { "+" };
@@ -2036,10 +2040,11 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
                     }
                     // A folder row (#409) says so in the Type column, so it
-                    // can't be mistaken for a demo, and how many demos sit
-                    // directly in it in the Map column, as the Demo
-                    // Analyzer's folder view counts them (not subfolders).
+                    // can't be mistaken for a demo, and its demo count goes
+                    // in brackets after its name (`display_name`), leaving
+                    // the Map column to maps.
                     let name = path.clone();
+                    let mut folder_count = None;
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
@@ -2053,10 +2058,8 @@ mod hook {
                                     crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
                                 )
                             });
-                        let text = count.map_or_else(|| COUNTING.to_string(), demo_count_text);
-                        if let Ok(text) = std::ffi::CString::new(text) {
-                            set_string(row, DEMO_COLUMNS[0].0.as_ptr(), text.as_ptr());
-                        }
+                        folder_count =
+                            Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
                     }
                     if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
@@ -2074,7 +2077,9 @@ mod hook {
                             set_string(row, DEMO_COLUMNS[2].0.as_ptr(), player.as_ptr());
                         }
                     }
-                    if let Ok(shown) = std::ffi::CString::new(display_name(&path)) {
+                    if let Ok(shown) =
+                        std::ffi::CString::new(display_name(&path, folder_count.as_deref()))
+                    {
                         set_string(row, ROW_KEY.as_ptr(), shown.as_ptr());
                     }
                     set_string(row, STAMP_KEY.as_ptr(), stamp.as_ptr());
@@ -4050,18 +4055,31 @@ mod tests {
     fn rows_show_names_not_paths() {
         let demo = |n: &str| format!("{DEMO_MARK}{n}");
         let folder = |n: &str| format!("{FOLDER_MARK}{n}");
-        let up = format!("{UP_MARK}.. (up one folder)");
-        assert_eq!(display_name("temp demos/m3_h1.dem"), demo("m3_h1.dem"));
+        let up = format!("{UP_MARK}.. up one folder");
         assert_eq!(
-            display_name("\"temp demos/my clip.dem\""),
+            display_name("temp demos/m3_h1.dem", None),
+            demo("m3_h1.dem")
+        );
+        assert_eq!(
+            display_name("\"temp demos/my clip.dem\"", None),
             demo("my clip.dem")
         );
-        assert_eq!(display_name("a.dem"), demo("a.dem"));
-        assert_eq!(display_name("temp demos/"), folder("temp demos/"));
-        assert_eq!(display_name("../../steamapps/"), folder("steamapps/"));
-        assert_eq!(display_name("../"), up);
-        assert_eq!(display_name("temp demos/../"), up);
-        assert_eq!(display_name("../../../"), up);
+        assert_eq!(display_name("a.dem", None), demo("a.dem"));
+        assert_eq!(display_name("temp demos/", None), folder("temp demos/"));
+        assert_eq!(display_name("../../steamapps/", None), folder("steamapps/"));
+        assert_eq!(display_name("../", None), up);
+        assert_eq!(display_name("temp demos/../", None), up);
+        assert_eq!(display_name("../../../", None), up);
+        // A folder's count in brackets after its name; a demo never gets one.
+        assert_eq!(
+            display_name("temp demos/", Some("73 demos")),
+            folder("temp demos/ (73 demos)")
+        );
+        assert_eq!(
+            display_name("../", Some("572 demos")),
+            format!("{up} (572 demos)")
+        );
+        assert_eq!(display_name("a.dem", Some("1 demo")), demo("a.dem"));
     }
 
     #[test]
