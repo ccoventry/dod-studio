@@ -676,6 +676,17 @@ fn folders_changed(last: u8, now: u8) -> bool {
     last != 2 && last != now
 }
 
+/// The Demos tab's hint: how to load, and whether folders are listed, as a
+/// state rather than a command that reads like one.
+fn demos_hint(folders: bool) -> &'static CStr {
+    // No longer than the layout's first text, which fits its 416-wide label.
+    if folders {
+        c"Double-click a demo, or a folder to open it. Folders: on"
+    } else {
+        c"Double-click a demo to play it. Folders: off (dodstudio_demo_list_folders 1)"
+    }
+}
+
 /// Whether a row passes every filter. `info` is `None` for a row whose
 /// header couldn't be read (or a folder): only the search applies to it.
 fn passes(row: &str, info: Option<&DemoInfo>, f: &DemoFilters, now: u64) -> bool {
@@ -1473,6 +1484,10 @@ mod hook {
     /// with it: 0 off, 1 on, 2 not yet seen.
     static LISTED_FOLDERS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
 
+    /// The Demos page whose hint last got [`demos_hint`]'s text, so a rebuilt
+    /// window gets it too.
+    static HINTED_PAGE: AtomicUsize = AtomicUsize::new(0);
+
     /// Shows only the demos matching the Demos tab's search box. Runs every
     /// frame; does work only when the text (or the list) changed.
     /// A text box's text on `page`, or "" when the layout has none.
@@ -1569,8 +1584,20 @@ mod hook {
             // (#409) on or off while it shows lists it again, so the folders
             // appear (or go) without reopening the window.
             let folders = crate::demo_list_folders::enabled() as u8;
-            if folders_changed(LISTED_FOLDERS.swap(folders, Ordering::AcqRel), folders) {
+            let last = LISTED_FOLDERS.swap(folders, Ordering::AcqRel);
+            if folders_changed(last, folders) {
                 refill_demo_list();
+            }
+            // The hint says whether folders are on, not just the command.
+            let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
+            if (last != folders || new_page)
+                && let Some(hint) = vgui.child_named(page, DEMOS_HINT)
+            {
+                let object = vgui.object(hint);
+                if !object.is_null() {
+                    let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                    set_text(object, demos_hint(folders == 1).as_ptr());
+                }
             }
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
@@ -3762,6 +3789,18 @@ mod tests {
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
         assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn the_demos_hint_says_whether_folders_are_on() {
+        let on = demos_hint(true).to_str().unwrap();
+        let off = demos_hint(false).to_str().unwrap();
+        assert!(on.contains("Folders: on"));
+        assert!(off.contains("Folders: off") && off.contains("dodstudio_demo_list_folders 1"));
+        // The layout's own text fits its label; neither may run longer.
+        let first =
+            "Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1";
+        assert!(on.len() <= first.len() && off.len() <= first.len());
     }
 
     #[test]
