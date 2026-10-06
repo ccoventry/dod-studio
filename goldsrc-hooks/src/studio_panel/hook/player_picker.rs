@@ -11,9 +11,19 @@
 //!
 //! Picking a name sets the box's text to it, which the Player filter reads
 //! like anything typed; a text that is exactly a name doesn't reopen it.
+//!
+//! One entry per player, not per name (#579): everyone with a SteamID is
+//! listed once, by the name they used in the most demos, with their other
+//! names after it -- `dyelife (also: dyeL!fe[dd])`. Picking that entry
+//! filters by the SteamID, which [`crate::demo_rosters::has_player`] matches
+//! whatever name was used. A player with no SteamID (a demo without `*sid`,
+//! LAN) stays one entry per name.
 
+use std::collections::HashMap;
 use std::ffi::{CString, c_void};
 use std::sync::Mutex;
+
+use analysis::cache::DemoPlayers;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::*;
@@ -24,9 +34,26 @@ const MAX_SHOWN: usize = 40;
 /// them off the picked line again. Plain ASCII, which every font has.
 const REMOVE: &str = "[x] ";
 
-/// Every player name in the listed demos, with what it was built from (the
+/// The most other names an entry shows after its main one.
+const MAX_ALSO: usize = 3;
+
+/// One entry in the Player list.
+#[derive(Debug, Clone, PartialEq)]
+struct Choice {
+    /// What the list shows.
+    label: String,
+    /// What the picked line shows: the main name.
+    name: String,
+    /// What picking it adds to the filter: the SteamID64, or the name for a
+    /// player with none.
+    term: String,
+    /// Every name and the SteamID, lowercased, for what is typed.
+    search: String,
+}
+
+/// Every player in the listed demos, with what it was built from (the
 /// players files' generation and the list's row count).
-type Names = Option<((u64, usize), Vec<String>)>;
+type Names = Option<((u64, usize), Vec<Choice>)>;
 static NAMES: Mutex<Names> = Mutex::new(None);
 /// The text the list was last built for.
 static BUILT_FOR: Mutex<Option<String>> = Mutex::new(None);
@@ -75,13 +102,23 @@ fn fit_names(picked: &[String], room: usize) -> String {
     line
 }
 
+/// What the picked line calls a picked term: its player's main name.
+fn shown_name(choices: &[Choice], term: &str) -> String {
+    choices
+        .iter()
+        .find(|c| c.term.eq_ignore_ascii_case(term))
+        .map_or_else(|| term.to_string(), |c| c.name.clone())
+}
+
 /// The picked-players line beside the box, cut to fit its width.
-unsafe fn show_picked(vgui: &Vgui, page: Vpanel) {
+unsafe fn show_picked(vgui: &Vgui, page: Vpanel, choices: &[Choice]) {
     unsafe {
-        let picked = PICKED_PLAYERS
+        let picked: Vec<String> = PICKED_PLAYERS
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .clone();
+            .iter()
+            .map(|t| shown_name(choices, t))
+            .collect();
         let Some(vp) = vgui.child_named(page, PLAYER_CHOSEN) else {
             return;
         };
@@ -104,14 +141,99 @@ unsafe fn show_picked(vgui: &Vgui, page: Vpanel) {
     }
 }
 
-/// Distinct player names in the demos `list` holds, sorted, case ignored.
-unsafe fn names_in(list: *mut c_void) -> Vec<String> {
+/// The Player list's entries for these demos' players, sorted by label.
+fn choices(demos: &[DemoPlayers]) -> Vec<Choice> {
+    // Per SteamID: each name, as first spelled, and how many demos used it.
+    let mut by_id: HashMap<String, Vec<(String, usize)>> = HashMap::new();
+    let mut nameless: Vec<String> = Vec::new();
+    for demo in demos {
+        let mut counted: Vec<(String, String)> = Vec::new();
+        for p in &demo.players {
+            let name = p.name.replace('\0', "").trim().to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let Some(id) = p.steam_id.as_ref().filter(|id| !id.is_empty()) else {
+                nameless.push(name);
+                continue;
+            };
+            let key = (id.clone(), name.to_ascii_lowercase());
+            if counted.contains(&key) {
+                continue;
+            }
+            counted.push(key);
+            let names = by_id.entry(id.clone()).or_default();
+            match names
+                .iter_mut()
+                .find(|(n, _)| n.eq_ignore_ascii_case(&name))
+            {
+                Some((_, count)) => *count += 1,
+                None => names.push((name, 1)),
+            }
+        }
+    }
+    let mut out: Vec<Choice> = by_id
+        .into_iter()
+        .map(|(id, mut names)| {
+            names.sort_by(|a, b| {
+                b.1.cmp(&a.1)
+                    .then_with(|| a.0.to_ascii_lowercase().cmp(&b.0.to_ascii_lowercase()))
+            });
+            let name = names[0].0.clone();
+            let others: Vec<&str> = names[1..].iter().map(|(n, _)| n.as_str()).collect();
+            let label = match others.len() {
+                0 => name.clone(),
+                n if n <= MAX_ALSO => format!("{name} (also: {})", others.join(", ")),
+                n => format!(
+                    "{name} (also: {} +{})",
+                    others[..MAX_ALSO].join(", "),
+                    n - MAX_ALSO
+                ),
+            };
+            let search = names
+                .iter()
+                .map(|(n, _)| n.as_str())
+                .chain(std::iter::once(id.as_str()))
+                .collect::<Vec<_>>()
+                .join(" ")
+                .to_ascii_lowercase();
+            Choice {
+                label,
+                name,
+                term: id,
+                search,
+            }
+        })
+        .collect();
+    nameless.sort_by_key(|n| n.to_ascii_lowercase());
+    nameless.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
+    for name in nameless {
+        // A name someone with a SteamID also uses gets its own label, so
+        // the two entries can be told apart (and picked apart).
+        let taken = out.iter().any(|c| c.label.eq_ignore_ascii_case(&name));
+        out.push(Choice {
+            label: if taken {
+                format!("{name} (no SteamID)")
+            } else {
+                name.clone()
+            },
+            search: name.to_ascii_lowercase(),
+            term: name.clone(),
+            name,
+        });
+    }
+    out.sort_by_key(|c| c.label.to_ascii_lowercase());
+    out
+}
+
+/// The Player list's entries for the demos `list` holds.
+unsafe fn names_in(list: *mut c_void) -> Vec<Choice> {
     unsafe {
         let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
         let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
         let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
         let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
-        let mut names: Vec<String> = Vec::new();
+        let mut demos: Vec<DemoPlayers> = Vec::new();
         let mut id = first(list);
         let mut guard = 0;
         while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
@@ -122,37 +244,26 @@ unsafe fn names_in(list: *mut c_void) -> Vec<String> {
                 if let Some(players) =
                     row_path(&name).and_then(|path| crate::demo_rosters::players_for(&path))
                 {
-                    names.extend(
-                        players
-                            .players
-                            .into_iter()
-                            .map(|p| p.name.replace('\0', "").trim().to_string())
-                            .filter(|n| !n.is_empty()),
-                    );
+                    demos.push(players);
                 }
             }
             id = next(list, id);
         }
-        names.sort_by_key(|n| n.to_ascii_lowercase());
-        names.dedup_by(|a, b| a.eq_ignore_ascii_case(b));
-        names
+        choices(&demos)
     }
 }
 
-/// The names to offer for `typed`: every word in the name, case ignored,
-/// and not one already picked.
-fn matching<'a>(names: &'a [String], typed: &str, picked: &[String]) -> Vec<&'a String> {
+/// The entries to offer for `typed`: every word in one of the player's names
+/// (or their SteamID), case ignored, and not one already picked.
+fn matching<'a>(choices: &'a [Choice], typed: &str, picked: &[String]) -> Vec<&'a Choice> {
     let words: Vec<String> = typed
         .split_whitespace()
         .map(|w| w.to_ascii_lowercase())
         .collect();
-    names
+    choices
         .iter()
-        .filter(|n| !picked.iter().any(|p| p.eq_ignore_ascii_case(n)))
-        .filter(|n| {
-            let lower = n.to_ascii_lowercase();
-            words.iter().all(|w| lower.contains(w))
-        })
+        .filter(|c| !picked.iter().any(|p| p.eq_ignore_ascii_case(&c.term)))
+        .filter(|c| words.iter().all(|w| c.search.contains(w)))
         .take(MAX_SHOWN)
         .collect()
 }
@@ -197,7 +308,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         };
 
         let typed = box_text(vgui, page, PLAYER_FILTER);
-        show_picked(vgui, page);
+        show_picked(vgui, page, all);
         let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
         if menu.is_null() {
             return;
@@ -214,18 +325,20 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             PICKED_PLAYERS
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .retain(|p| !p.eq_ignore_ascii_case(name.trim()));
+                .retain(|p| !shown_name(all, p).eq_ignore_ascii_case(name.trim()));
             let set_text: SetTextFn = slot(combo, TEXT_ENTRY_SLOT_SET_TEXT);
             set_text(combo, c"".as_ptr());
             return;
         }
         if was_open
             && !open
-            && let Some(name) = all.iter().find(|n| n.eq_ignore_ascii_case(typed.trim()))
+            && let Some(choice) = all
+                .iter()
+                .find(|c| c.label.eq_ignore_ascii_case(typed.trim()))
         {
             let mut picked = PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner());
-            if !picked.iter().any(|p| p.eq_ignore_ascii_case(name)) {
-                picked.push(name.clone());
+            if !picked.iter().any(|p| p.eq_ignore_ascii_case(&choice.term)) {
+                picked.push(choice.term.clone());
             }
             drop(picked);
             let set_text: SetTextFn = slot(combo, TEXT_ENTRY_SLOT_SET_TEXT);
@@ -256,8 +369,9 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             .split_whitespace()
             .map(|w| w.to_ascii_lowercase())
             .collect();
-        let picked_rows: Vec<&String> = picked
+        let picked_rows: Vec<String> = picked
             .iter()
+            .map(|t| shown_name(all, t))
             .filter(|n| {
                 let lower = n.to_ascii_lowercase();
                 words.iter().all(|w| lower.contains(w))
@@ -268,8 +382,8 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 add_item(combo, c.as_ptr(), std::ptr::null());
             }
         }
-        for name in &shown {
-            if let Ok(c) = CString::new(name.as_str()) {
+        for choice in &shown {
+            if let Ok(c) = CString::new(choice.label.as_str()) {
                 add_item(combo, c.as_ptr(), std::ptr::null());
             }
         }
@@ -322,20 +436,87 @@ mod tests {
         assert!(fit_names(&[], 30).starts_with("none"));
     }
 
+    fn demo(players: &[(&str, Option<&str>)]) -> DemoPlayers {
+        DemoPlayers {
+            demo_type: "HLTV".to_string(),
+            players: players
+                .iter()
+                .map(|(name, id)| analysis::cache::DemoPlayer {
+                    id: id.map_or_else(|| format!("PLAYER_{name}"), str::to_string),
+                    steam_id: id.map(str::to_string),
+                    name: name.to_string(),
+                    recorder: false,
+                })
+                .collect(),
+        }
+    }
+
+    fn labels(choices: &[Choice]) -> Vec<&str> {
+        choices.iter().map(|c| c.label.as_str()).collect()
+    }
+
     #[test]
     fn every_typed_word_narrows_the_names() {
-        let names: Vec<String> = ["dyelife", "m00cat <3", "Candyman", "gorilla[bc]"]
+        let all = choices(&[demo(&[
+            ("dyelife", None),
+            ("m00cat <3", None),
+            ("Candyman", None),
+            ("gorilla[bc]", None),
+        ])]);
+        let got: Vec<&str> = matching(&all, "CAT", &[])
             .iter()
-            .map(|s| s.to_string())
+            .map(|c| c.label.as_str())
             .collect();
-        let got: Vec<&String> = matching(&names, "CAT", &[]);
         assert_eq!(got, vec!["m00cat <3"]);
-        assert_eq!(matching(&names, "", &[]).len(), 4);
-        assert_eq!(matching(&names, "y man", &[]).len(), 1);
-        assert!(matching(&names, "nobody", &[]).is_empty());
+        assert_eq!(matching(&all, "", &[]).len(), 4);
+        assert_eq!(matching(&all, "y man", &[]).len(), 1);
+        assert!(matching(&all, "nobody", &[]).is_empty());
         // A picked name is no longer offered.
         let picked = vec!["DYELIFE".to_string()];
-        assert_eq!(matching(&names, "", &picked).len(), 3);
-        assert!(matching(&names, "dye", &picked).is_empty());
+        assert_eq!(matching(&all, "", &picked).len(), 3);
+        assert!(matching(&all, "dye", &picked).is_empty());
+    }
+
+    /// #579: one entry per SteamID, by the name most demos used, the others
+    /// after it; picking it filters by the SteamID.
+    #[test]
+    fn a_steamid_is_one_entry_named_by_its_most_used_name() {
+        let id = Some("76561197960265729");
+        let all = choices(&[
+            demo(&[("dyelife", id), ("m00cat", Some("76561197960265730"))]),
+            demo(&[("dyelife", id)]),
+            demo(&[("dyeL!fe[dd]", id), ("lanplayer", None)]),
+        ]);
+        assert_eq!(
+            labels(&all),
+            vec!["dyelife (also: dyeL!fe[dd])", "lanplayer", "m00cat"]
+        );
+        assert_eq!(all[0].term, "76561197960265729");
+        assert_eq!(all[0].name, "dyelife");
+        assert_eq!(all[1].term, "lanplayer");
+        // An old name finds them too, and so does the SteamID.
+        assert_eq!(matching(&all, "dd", &[]).len(), 1);
+        assert_eq!(matching(&all, "265729", &[]).len(), 1);
+        // The picked line names them, not their SteamID.
+        assert_eq!(shown_name(&all, "76561197960265729"), "dyelife");
+        assert_eq!(shown_name(&all, "someone typed"), "someone typed");
+    }
+
+    #[test]
+    fn many_other_names_are_cut_short() {
+        let id = Some("1");
+        let all = choices(&[
+            demo(&[("a", id)]),
+            demo(&[("a", id)]),
+            demo(&[("b", id), ("c", id), ("d", id), ("e", id)]),
+        ]);
+        assert_eq!(labels(&all), vec!["a (also: b, c, d +1)"]);
+    }
+
+    #[test]
+    fn a_name_without_a_steamid_that_someone_else_uses_is_told_apart() {
+        let all = choices(&[demo(&[("dyelife", Some("1"))]), demo(&[("dyelife", None)])]);
+        assert_eq!(labels(&all), vec!["dyelife", "dyelife (no SteamID)"]);
+        assert_eq!(all[1].term, "dyelife");
     }
 }
