@@ -8,6 +8,7 @@ import { STRINGS } from './strings.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
+import { escapeHtml } from './html.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -439,7 +440,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
+        <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
     </thead>
@@ -530,7 +531,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
-        <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
+        <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
       <td class="details-cell" title="${timelineText}">${timelineText}</td>
     `;
