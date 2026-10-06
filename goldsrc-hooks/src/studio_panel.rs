@@ -679,8 +679,10 @@ const FOLDER_TYPE: &CStr = c"Folder";
 /// The marks in front of a Demos tab row's name. The font has none of them:
 /// the game draws them from a fallback font but spaces them by its own font's
 /// narrower width, so each is followed by enough spaces to clear it
-/// (measured on PRE, 2026-10-05).
-const FOLDER_MARK: &str = "\u{1F4C1}    ";
+/// (measured on PRE, 2026-10-05). The folder mark is a plain square: the 25th
+/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
+/// it draws these shapes and arrows.
+const FOLDER_MARK: &str = "\u{25A0}  ";
 const DEMO_MARK: &str = "\u{25B6}  ";
 const UP_MARK: &str = "\u{2191}  ";
 
@@ -700,6 +702,23 @@ fn display_name(path: &str) -> String {
     } else {
         format!("{DEMO_MARK}{}", path.rsplit('/').next().unwrap_or(path))
     }
+}
+
+/// The Demos tab's Demo File heading, naming the folder the list is in: as a
+/// path under the install folder's parent (`Half-Life - PRE-Anniversary for
+/// Movies/dod/temp demos/`) when it is under it, otherwise in full.
+fn folder_heading(dod: &std::path::Path, folder: &str) -> String {
+    let here = crate::folder_counts::normalize(&dod.join(folder));
+    let shown = dod
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(|common| here.strip_prefix(common).ok())
+        .map_or_else(|| here.to_path_buf(), std::path::Path::to_path_buf);
+    let mut shown = shown.to_string_lossy().replace('\\', "/");
+    if !shown.is_empty() && !shown.ends_with('/') {
+        shown.push('/');
+    }
+    format!("Demo File in {shown}")
 }
 
 /// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
@@ -1599,6 +1618,9 @@ mod hook {
     /// window gets it too.
     static HINTED_PAGE: AtomicUsize = AtomicUsize::new(0);
 
+    /// The heading text last put on the Demo File column, and on which page.
+    static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
+
     /// Shows only the demos matching the Demos tab's search box. Runs every
     /// frame; does work only when the text (or the list) changed.
     /// A text box's text on `page`, or "" when the layout has none.
@@ -1701,6 +1723,34 @@ mod hook {
             }
             // The hint says whether folders are on, not just the command.
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
+            // The Demo File heading says which folder the list is in, or is
+            // plain "Demo File" while folders are off.
+            let heading_text = match folders & 1 {
+                1 => res_dir().parent().map_or_else(
+                    || "Demo File".to_string(),
+                    |dod| folder_heading(dod, &crate::demo_list_folders::current_folder()),
+                ),
+                _ => "Demo File".to_string(),
+            };
+            let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
+            if *headed != (page as usize, heading_text.clone()) {
+                let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
+                if let (false, Ok((_, build))) = (dialog.is_null(), gameui()) {
+                    let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+                    if !list.is_null()
+                        && let Some(heading) = vgui.child_named(vpanel_of(list), "demoname")
+                        && let Ok(text) = std::ffi::CString::new(heading_text.clone())
+                    {
+                        let object = vgui.object(heading);
+                        if !object.is_null() {
+                            let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                            set_text(object, text.as_ptr());
+                        }
+                    }
+                }
+                *headed = (page as usize, heading_text);
+            }
+            drop(headed);
             if (last != folders || new_page)
                 && let Some(hint) = vgui.child_named(page, DEMOS_HINT)
             {
@@ -3934,6 +3984,23 @@ mod tests {
         assert!(folders_changed(1, 0));
         assert!(!folders_changed(1, 1));
         assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn the_heading_names_the_folder_under_the_installs() {
+        let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
+        assert_eq!(folder_heading(dod, ""), "Demo File in Half-Life - PRE/dod/");
+        assert_eq!(
+            folder_heading(dod, "temp demos/"),
+            "Demo File in Half-Life - PRE/dod/temp demos/"
+        );
+        assert_eq!(folder_heading(dod, "../"), "Demo File in Half-Life - PRE/");
+        assert_eq!(
+            folder_heading(dod, "temp demos/../"),
+            "Demo File in Half-Life - PRE/dod/"
+        );
+        // Above the installs: the whole path.
+        assert_eq!(folder_heading(dod, "../../../"), "Demo File in C:/Steam/");
     }
 
     #[test]

@@ -60,7 +60,7 @@ static FINISHED: AtomicBool = AtomicBool::new(false);
 
 /// `path` with its `.` and `..` worked out, as written (no disk access):
 /// the up row's `temp demos/../` is `dod/`.
-fn normalize(path: &Path) -> PathBuf {
+pub(crate) fn normalize(path: &Path) -> PathBuf {
     use std::path::Component;
     let mut out = PathBuf::new();
     for part in path.components() {

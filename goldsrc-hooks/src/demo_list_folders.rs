@@ -132,6 +132,14 @@ pub fn count_subfolders_status() -> String {
     }
 }
 
+/// The folder the lists show, as a path from `dod/` (`""` for `dod/`).
+static CURRENT_FOLDER: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// The folder the Load Demo window and the Demos tab are in.
+pub fn current_folder() -> String {
+    CURRENT_FOLDER.lock().map(|f| f.clone()).unwrap_or_default()
+}
+
 /// For the fallback toggle command's bare-name query.
 pub fn status() -> String {
     if enabled() {
@@ -489,6 +497,9 @@ mod hook {
                 let folder = resolve(&row);
                 if let Ok(mut browser) = BROWSER.lock() {
                     browser.folder.clone_from(&folder);
+                }
+                if let Ok(mut current) = super::CURRENT_FOLDER.lock() {
+                    current.clone_from(&folder);
                 }
                 crate::debug::report(&format!("demo_list_folders: opened dod/{folder}"));
                 let fill: FillFn = cast(FILL.load(Ordering::Relaxed));
