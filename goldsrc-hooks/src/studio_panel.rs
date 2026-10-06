@@ -669,6 +669,13 @@ struct DemoFilters {
     days: Option<u64>,
 }
 
+/// Whether folder listing (#409) changed since the Demos tab's list was last
+/// filled: `last` and `now` are 0 off, 1 on; `last` 2 is not yet seen, when
+/// the tab has only just filled it.
+fn folders_changed(last: u8, now: u8) -> bool {
+    last != 2 && last != now
+}
+
 /// Whether a row passes every filter. `info` is `None` for a row whose
 /// header couldn't be read (or a folder): only the search applies to it.
 fn passes(row: &str, info: Option<&DemoInfo>, f: &DemoFilters, now: u64) -> bool {
@@ -1462,6 +1469,10 @@ mod hook {
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
+    /// `dodstudio_demo_list_folders` as the Demos tab's list was last filled
+    /// with it: 0 off, 1 on, 2 not yet seen.
+    static LISTED_FOLDERS: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
     /// Shows only the demos matching the Demos tab's search box. Runs every
     /// frame; does work only when the text (or the list) changed.
     /// A text box's text on `page`, or "" when the layout has none.
@@ -1553,6 +1564,13 @@ mod hook {
             let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
             if page == 0 || !vgui.visible(page) {
                 return;
+            }
+            // The list is filled when the tab opens. Turning folder listing
+            // (#409) on or off while it shows lists it again, so the folders
+            // appear (or go) without reopening the window.
+            let folders = crate::demo_list_folders::enabled() as u8;
+            if folders_changed(LISTED_FOLDERS.swap(folders, Ordering::AcqRel), folders) {
+                refill_demo_list();
             }
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
@@ -3733,6 +3751,17 @@ mod tests {
         assert!(shows_type("", true) && shows_type("", false));
         assert!(shows_type("HLTV", true) && !shows_type("HLTV", false));
         assert!(!shows_type("POV", true) && shows_type("pov", false));
+    }
+
+    #[test]
+    fn the_demos_list_refills_only_when_folder_listing_flips() {
+        // 2 = not seen yet: the tab just filled its list on opening.
+        assert!(!folders_changed(2, 1));
+        assert!(!folders_changed(2, 0));
+        assert!(folders_changed(0, 1));
+        assert!(folders_changed(1, 0));
+        assert!(!folders_changed(1, 1));
+        assert!(!folders_changed(0, 0));
     }
 
     #[test]

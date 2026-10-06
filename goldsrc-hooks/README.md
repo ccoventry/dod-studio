@@ -134,7 +134,9 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   double-click) on a folder opens it. Each demo row is its path from `dod/`,
   which is what `viewdemo` takes. Two vftable swaps -- the file system's
   `Find*` for the window's own `"*.dem"` call, and the window's `OnCommand`
-  -- on both builds; off, the list is stock. See `src/demo_list_folders.rs`.
+  -- on both builds; off, the list is stock. The DoD Studio window's Demos
+  tab borrows the same window's list, so it browses folders too, and lists
+  again when the setting changes. See `src/demo_list_folders.rs`.
 - **Window layout** (`dodstudio_resizable_windows 1`,
   `dodstudio_remember_window_layout 1`): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart

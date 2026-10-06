@@ -61,7 +61,7 @@ pub fn set_cvar(cvar: *mut CvarSPartial) {
     CVAR.store(cvar, Ordering::Release);
 }
 
-fn enabled() -> bool {
+pub(crate) fn enabled() -> bool {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
         ENABLED.load(Ordering::Relaxed)
