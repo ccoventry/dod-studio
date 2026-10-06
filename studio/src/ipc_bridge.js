@@ -230,6 +230,26 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
     });
 }
 
+/** Review highlights (#623): sends the highlights to the running game, or
+ *  starts one. Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights) {
+  return invoke("start_highlight_review", { highlights })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_highlight_review):", err);
+      showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Ends the review in the game; its answers so far are already in. */
+export async function stopHighlightReview() {
+  return invoke("stop_highlight_review")
+    .catch((err) => {
+      console.error("IPC Execution Error (stop_highlight_review):", err);
+      throw err;
+    });
+}
+
 /** True if an `hl.exe`/`hlae.exe` instance is already running — used as a
  *  pre-flight guard before `launchDemoPreview` so a stale HLAE session
  *  doesn't corrupt the freshly-patched preview demo. */

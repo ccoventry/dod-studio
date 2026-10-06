@@ -6,6 +6,7 @@ mod manifest_file;
 mod map_manager;
 mod messages;
 mod render_manager;
+mod review_manager;
 mod settings_manager;
 mod updater_manager;
 
@@ -619,6 +620,8 @@ pub fn run() {
             steam_state,
             start_steam,
             send_preview_to_running_game,
+            review_manager::start_highlight_review,
+            review_manager::stop_highlight_review,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,

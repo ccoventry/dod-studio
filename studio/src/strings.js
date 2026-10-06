@@ -1347,6 +1347,25 @@ export const STRINGS = {
     BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
     NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
   },
+  // ── Review highlights (#623) ─────────────────────────────────────────────
+  REVIEW: {
+    BUTTON: 'Review highlights',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each, and the answer lands on its row here.',
+    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
+    STOP: 'Stop',
+    startedToast: (count, launched, skipped) =>
+      `Reviewing ${count} highlight${count === 1 ? '' : 's'} in Day of Defeat${launched ? ' (starting the game)' : ''}.`
+      + (skipped > 0 ? ` ${skipped} older highlight${skipped === 1 ? ' needs' : 's need'} a rescan first.` : ''),
+    endedToast: (reason, answers) => {
+      const answered = `${answers} answer${answers === 1 ? '' : 's'} saved`;
+      if (reason === 'done') return `Review finished: ${answered}.`;
+      if (reason === 'stopped') return `Review stopped: ${answered}.`;
+      if (reason === 'closed') return `The game closed: ${answered}.`;
+      return `Review ended (${reason}): ${answered}.`;
+    },
+  },
+
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
@@ -1356,6 +1375,7 @@ export const STRINGS = {
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
+    reviewFailed: (err) => `Could not start the review: ${err}`,
     cfgImportFailed: (err) => `Could not read that config: ${err}`,
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,

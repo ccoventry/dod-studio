@@ -53,6 +53,8 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
+    // A Yes or No from Review highlights (#623).
+    if (previous.review !== undefined) fresh.review = previous.review;
     // Kill Range edits are user edits too, not scan output.
     if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
     if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
@@ -194,6 +196,8 @@ function isHighlightTracked(streak) {
   if (!streak) return false;
   if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
   if (streak.notes && streak.notes.trim()) return true;
+  // Answered in Review highlights (#623): the answer is the user's work too.
+  if (streak.review === 'yes' || streak.review === 'no') return true;
   return isRangeModified(streak);
 }
 
