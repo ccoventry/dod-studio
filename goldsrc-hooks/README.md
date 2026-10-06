@@ -91,6 +91,13 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   the spectated player. `dodstudio_mute_voice_commands` does not cover this:
   `client.dll` has no `hs_` string at all, because the sequence is replicated
   entity state. See `docs/goldsrc_hltv_animation_fix.md` section 12.
+- **Map text** (`dodstudio_hide_map_text 1`): hides the text a map puts on
+  screen itself -- the `dod_anzio` mortar warning, the round result -- and
+  nothing else. It all arrives as the `HudText` user message, which DoD's own
+  clan-match prompts share, so a message is dropped only when its token is a
+  `message` the loaded map's own entities declare (read from the map's BSP once
+  per level). Same prepend/forward hook as `dodstudio_deathmsg`; nothing is
+  patched. See the module doc in `src/map_text.rs` (issue #287).
 - **HLTV text** (`dodstudio_hide_hltv_messages 1`): drops the text an HLTV
   proxy puts on screen during playback -- "You're watching HLTV. Visit
   www.valvesoftware.com", about once a minute, and a proxy operator's own
@@ -164,11 +171,25 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   connects are sent when it does. `GOLDSRC_HOOKS_EVENTS=0` turns it off, and
   Studio then reads the log as before. See `src/events.rs` and
   `native/src/obs/pipe_tail.rs`.
+- **Batch end without Studio** (with the events pipe): if a batch's
+  `BATCH_COMPLETE` goes by and no Studio is reading the events pipe five
+  seconds later -- Studio was closed mid-batch -- the game runs `quit` itself
+  instead of sitting there (issue #545). A connected Studio still ends the
+  game as before. See `src/batch_end.rs`.
 - **Reload the demo** (`dodstudio_reload_demo`): plays the last `playdemo` or
   `viewdemo` again from the start, with the same name. The engine keeps no
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
+- **Refuses to join a server, except an HLTV proxy** (on by default):
+  `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
+  the game thread, `src/server_query.rs`) and only join an HLTV proxy that
+  says VAC is off; anything else is refused, with a console message and a log
+  line, because joining a VAC-secured server with the DLL loaded is a ban
+  risk. `connect local` (what `map` runs) still works.
+  `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
+  server. Wraps the engine commands the same way as the demo reload. See
+  `src/connect_guard.rs` and `docs/vac_safety.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   ten elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
@@ -212,8 +233,9 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 > **Only ever inject into a separate movie copy of Half-Life, never the one
 > you play online with, and never join a server afterwards.** This DLL patches
 > the game in memory, which is what VAC detects. Injecting by hand skips the
-> connect warning HLAE shows in every DoD Studio launch, so nothing will stop
-> you. See [`docs/vac_safety.md`](../docs/vac_safety.md).
+> connect warning HLAE shows in every DoD Studio launch. The DLL refuses
+> `connect` once it has hooked the engine, but don't rely on that alone. See
+> [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 1. Launch DoD 1.3 (with or without HLAE) from your movie copy and load an HLTV/POV demo.
 2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
@@ -269,7 +291,10 @@ docs in `src/engine.rs`, `src/scoreboard.rs`,
 `src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
 still needs a live check. `dodstudio_debug_msglog` reuses `dodstudio_deathmsg`'s
 already-proven prepend/forward mechanism unchanged, so the open question is
-only its own 71-entry name/thunk table, not the hook itself. `tools/` holds
+only its own 71-entry name/thunk table, not the hook itself. `dodstudio_hide_map_text` is
+not live-tested yet either; it rides the same mechanism, and its map-string
+parsing is unit-tested and was checked against the real `dod_anzio`,
+`dod_charlie`, `dod_lennon4` and `dod_avalanche` BSPs. `tools/` holds
 a verifier per patched site, which checks the Rust constants against a real
 `client.dll`.
 
@@ -316,4 +341,4 @@ is untouched. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
-faulting address as `module+RVA` so a crash is diagnosable from the log alone. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.
+faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

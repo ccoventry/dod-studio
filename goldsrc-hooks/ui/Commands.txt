@@ -21,6 +21,8 @@ HUD
       Silence voice commands ('fire in the hole!' and the rest).
   dodstudio_hide_hudelement <name> 0/1
       Hide one HUD element; the bare command lists them.
+  dodstudio_hide_map_text 0/1
+      Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_sprite <model>...
       Hide entities by model path.
   dodstudio_deathmsg (or dodstudio_killfeed)
