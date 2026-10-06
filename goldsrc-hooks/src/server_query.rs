@@ -323,14 +323,15 @@ mod tests {
     }
 
     #[test]
-    fn a_closed_port_gives_no_answer() {
-        // Nothing listens on a port bound and dropped a moment ago.
-        let port = UdpSocket::bind("127.0.0.1:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port();
+    fn a_silent_server_gives_no_answer() {
+        // A socket that is bound and kept open but never replies. Not a port
+        // bound and dropped: the OS can hand that port straight to another
+        // test running in parallel, whose server then answers (seen in CI,
+        // 2026-10-06: Unreadable instead of NoAnswer).
+        let silent = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let port = silent.local_addr().unwrap().port();
         let result = query(&format!("127.0.0.1:{port}"), Duration::from_millis(300));
+        drop(silent);
         assert_eq!(result, Err(QueryError::NoAnswer));
     }
 
