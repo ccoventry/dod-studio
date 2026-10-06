@@ -163,6 +163,15 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
+- **Refuses to join a server, except an HLTV proxy** (on by default):
+  `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
+  the game thread, `src/server_query.rs`) and only join an HLTV proxy that
+  says VAC is off; anything else is refused, with a console message and a log
+  line, because joining a VAC-secured server with the DLL loaded is a ban
+  risk. `connect local` (what `map` runs) still works.
+  `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off, for testing on your own
+  server. Wraps the engine commands the same way as the demo reload. See
+  `src/connect_guard.rs` and `docs/vac_safety.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
   ten elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
@@ -206,8 +215,9 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 > **Only ever inject into a separate movie copy of Half-Life, never the one
 > you play online with, and never join a server afterwards.** This DLL patches
 > the game in memory, which is what VAC detects. Injecting by hand skips the
-> connect warning HLAE shows in every DoD Studio launch, so nothing will stop
-> you. See [`docs/vac_safety.md`](../docs/vac_safety.md).
+> connect warning HLAE shows in every DoD Studio launch. The DLL refuses
+> `connect` once it has hooked the engine, but don't rely on that alone. See
+> [`docs/vac_safety.md`](../docs/vac_safety.md).
 
 1. Launch DoD 1.3 (with or without HLAE) from your movie copy and load an HLTV/POV demo.
 2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
