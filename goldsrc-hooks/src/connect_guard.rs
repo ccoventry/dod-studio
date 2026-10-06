@@ -486,13 +486,15 @@ fn refuse(command: Command, argument: Option<&str>, why: &str) {
     unsafe { crate::debug::report(&format!("connect_guard: refused `{line}`: {why}")) };
 }
 
-/// What the console shows for a refused `line`, and `why`.
+/// What the console shows for a refused `line`, and `why`. It leaves out
+/// `GOLDSRC_HOOKS_ALLOW_CONNECT`: an environment variable set before the game
+/// starts is a developer's escape hatch, documented in `docs/vac_safety.md`,
+/// not something to offer every player who hits this.
 fn refusal_message(line: &str, why: &str) -> String {
     format!(
         "DoD Studio refused `{line}`: {why}. With DoD Studio's hook DLL loaded, the game only \
          joins HLTV proxies that say VAC is off; joining a game server risks a VAC ban. To play \
-         online, close the game and start Day of Defeat from Steam, without DoD Studio. To test \
-         on your own server anyway, start the game with {ALLOW_ENV}=1.\n"
+         online, close the game and start Day of Defeat from Steam, without DoD Studio.\n"
     )
 }
 
@@ -713,7 +715,9 @@ mod tests {
         assert!(message.contains("`connect 1.2.3.4:27015`: it is a game server."));
         assert!(message.contains("HLTV"));
         assert!(message.contains("VAC"));
-        assert!(message.contains(ALLOW_ENV));
+        assert!(message.contains("from Steam"));
+        // The developer's env var stays out of a player's console.
+        assert!(!message.contains(ALLOW_ENV));
         assert!(message.ends_with('\n'));
     }
 
