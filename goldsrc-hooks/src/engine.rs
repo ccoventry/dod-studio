@@ -1111,7 +1111,14 @@ unsafe extern "C" fn tramp_hud_add_entity(
 ) -> i32 {
     if !modelname.is_null() {
         let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
-        if crate::hide_asset::should_hide(&name) {
+        // Type 2 is ET_TEMPENTITY: the engine's tempent callback adds every
+        // temporary effect through here too (#614).
+        let drawn_as = if entity_type == 2 {
+            crate::hide_asset::DrawnAs::Effect
+        } else {
+            crate::hide_asset::DrawnAs::Entity
+        };
+        if crate::hide_asset::should_hide(&name, drawn_as) {
             return 0;
         }
     }
