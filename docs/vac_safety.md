@@ -14,15 +14,21 @@ rules below are deliberately cautious.
 
 ## The rules
 
-1. **Keep a separate copy of Half-Life just for movies.** Copy the whole
-   `Half-Life` folder from `steamapps\common` to a new folder (for example
-   `Half-Life - Movies`) and point DoD Studio at that copy's `hl.exe`. Play
-   online only with Steam's own install, and never point DoD Studio at it.
-2. **Only play demos in the movie copy.** Never join a server with it, not even
-   a friend's or an insecure one. If HLAE's "You are about to connect to a
-   server" warning appears, answer **No**.
-3. **Never inject the hook DLL by hand into a game you play online with.**
+1. **Only play demos in a game DoD Studio started.** Never join a game server
+   from it, not even a friend's or an insecure one. The one exception is
+   watching through an HLTV proxy, which the hook DLL checks and allows (see
+   below). If HLAE's "You are about to connect to a server" warning appears
+   for anything else, answer **No**. To play online, close the game and start
+   Day of Defeat from Steam, without DoD Studio.
+2. **Never inject the hook DLL by hand into a game you then play online with.**
    `inject.exe` (below) skips every safeguard DoD Studio has.
+
+**Recommended, not required: a separate copy of Half-Life for movies.** Copy
+the whole `Half-Life` folder from `steamapps\common` to a new folder (for
+example `Half-Life - Movies`) and point DoD Studio at that copy's `hl.exe`.
+It keeps movie-only edits (configs, models, sprites, sounds, `.res` files) out
+of the game you play online. It is not a VAC safeguard: what matters is what is
+loaded into the game when it joins a server, whichever folder it runs from.
 
 ## Every way the game is started
 
@@ -138,7 +144,8 @@ Limits:
   play online with; this route skips HLAE's warning.
 - **`inject.exe`** prints the same warning every time it runs.
 - **`goldsrc-hooks/tools/hd/README.md`:** the HD images are plain files, but
-  the hook that loads them is the ban risk, so build them into the movie copy.
+  the hook that loads them is the ban risk, so only use them in a game DoD
+  Studio started.
 
 ## Proposed: a hard stop
 
