@@ -483,6 +483,10 @@ fn lends(source: &str) -> bool {
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const DEMOS_PAGE: usize = 1;
+
+/// The slots whose borrowed lists take all the height their tab gains,
+/// whatever their share of the tab's design height (#612).
+const FILL_HEIGHT: [&str; 2] = ["DemoListSlot", "StreakListSlot"];
 const STREAKS_PAGE: usize = 2;
 const CONSOLE_PAGE: usize = 3;
 const SETTINGS_PAGE: usize = 4;
@@ -2867,7 +2871,12 @@ mod hook {
                 }
                 let Some(size) = design.size else { continue };
                 for &(control, at) in &design.controls {
-                    let want = crate::window_layout::fit_rect(at, size, (w, h));
+                    // A tab's list fills whatever height the tab gains (#612).
+                    let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
+                        crate::window_layout::fit_rect_tall(at, size, (w, h))
+                    } else {
+                        crate::window_layout::fit_rect(at, size, (w, h))
+                    };
                     vgui.place(control, want);
                 }
             }
