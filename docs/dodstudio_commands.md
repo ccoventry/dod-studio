@@ -183,20 +183,23 @@ was left alone on purpose (tool textures, blank sprites, per-player skins). A
 texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
 shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
-### `dodstudio_hide_entity`
+### `dodstudio_hide_asset`
 
-`dodstudio_hide_entity` suppresses specific world entities by exact model
+`dodstudio_hide_asset` stops the game drawing an asset -- a sprite, model
+or brush entity, named by its file path -- here, specific world entities by exact model
 path: map sprites, props (`.mdl`), brush entities (`*12`). It keeps a list,
 shaped like HLAE's `mirv_matte_entities` but by model path rather than entity
 number (a path stays the same across demos):
 
-- `dodstudio_hide_entity list` (or no arguments): what is hidden.
-- `dodstudio_hide_entity add <model-path>...`: hide these too.
-- `dodstudio_hide_entity del <model-path>...`: stop hiding these.
-- `dodstudio_hide_entity clear`: stop hiding anything.
+- `dodstudio_hide_asset list` (or no arguments): what is hidden.
+- `dodstudio_hide_asset add <model-path>...`: hide these too.
+- `dodstudio_hide_asset del <model-path>...`: stop hiding these.
+- `dodstudio_hide_asset clear`: stop hiding anything.
 
 It is an allow-list, not a blanket toggle: `all` is refused. It was
-`dodstudio_hide_sprite` before #333; that name is gone.
+`dodstudio_hide_sprite`, then `dodstudio_hide_entity` (#333); neither was in
+a release, and both names are gone. "Asset" because #614 extends it to the
+same paths drawn as temporary effects (bullet-impact dust and the like).
 
 It reaches only entities rendered through the engine's normal entity list
 (`HUD_AddEntity`). DoD draws some sprite-looking things -- the crosshair, the
@@ -205,7 +208,7 @@ can never reach regardless of path spelling
 (`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
 status, bare or in `dodstudio_debug_status`, says whether each path has
 matched anything this session, so a typo no longer fails silently. See
-`src/hide_entity.rs`'s module doc.
+`src/hide_asset.rs`'s module doc.
 
 ### `dodstudio_panel`
 

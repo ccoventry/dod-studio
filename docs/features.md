@@ -259,7 +259,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
-| `dodstudio_hide_entity` | command | — | Hides world entities (sprites, props, brush entities) by model path, and says whether each path matched anything (`list`, `add`, `del`, `clear`, like HLAE's `mirv_matte_entities`) | both |
+| `dodstudio_hide_asset` | command | — | Hides world entities (sprites, props, brush entities) by model path, and says whether each path matched anything (`list`, `add`, `del`, `clear`, like HLAE's `mirv_matte_entities`) | both |
 | `dodstudio_hide_hltv_messages` | cvar | 0 | Hides the HLTV proxy's on-screen text ("You're watching HLTV...") during playback | both |
 | `dodstudio_hide_hudelement` | command | — | Hides one of nine HUD elements: `deathnotice`, `icons`, `menu`, `message`, `objectives`, `saytext`, `statusbar`, `train`, `vgui2print` | both |
 | `dodstudio_hide_scoreboard` | cvar | 0 | Stops `+showscores` opening the scoreboard | both |

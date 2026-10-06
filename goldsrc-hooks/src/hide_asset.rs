@@ -1,4 +1,5 @@
-//! `dodstudio_hide_entity` — suppress specific world entities by their model
+//! `dodstudio_hide_asset` — stop the game drawing an asset (a sprite, model or
+//! brush entity, named by its file path). Today: specific world entities by their model
 //! path (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`, a brush
 //! entity's `*12`).
 //!
@@ -7,7 +8,10 @@
 //! `HUD_AddEntity` fires for every entity the engine is about to draw, and the
 //! match has only ever been on the model path, so the command was never
 //! sprite-only; the old name promised a restriction the code didn't have.
-//! The old name and the old "plain paths replace the list" form are gone,
+//! Then `dodstudio_hide_entity`, and now `dodstudio_hide_asset` (the user's
+//! pick, 2026-10-06): what is named is a game file, and #614 extends the same
+//! list to temporary effects, which aren't world entities to a user.
+//! The old names and the old "plain paths replace the list" form are gone,
 //! not kept as aliases: neither was ever in a released build (the user's
 //! call, 2026-10-06). The command keeps a list like HLAE's
 //! `mirv_matte_entities`: `list`, `add`, `del`, `clear`.
@@ -89,7 +93,7 @@ use crate::names::console_name;
 
 /// The one name it answers to.
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
-const COMMAND: &str = console_name!("hide_entity");
+const COMMAND: &str = console_name!("hide_asset");
 
 /// One model path to suppress, and whether the engine has drawn anything by
 /// that path since it was set.
@@ -290,7 +294,7 @@ pub unsafe extern "C" fn command() {
     crate::commands::console_print(&reply);
     unsafe {
         crate::debug::report(&format!(
-            "hide_entity: {} -> {}",
+            "hide_asset: {} -> {}",
             argv.join(" "),
             reply.trim()
         ))
@@ -342,7 +346,7 @@ mod tests {
 
     #[test]
     fn only_the_new_name_is_registered() {
-        assert_eq!(COMMAND_NAMES, ["dodstudio_hide_entity"]);
+        assert_eq!(COMMAND_NAMES, ["dodstudio_hide_asset"]);
     }
 
     fn strings(v: &[&str]) -> Vec<String> {
@@ -410,7 +414,7 @@ mod tests {
 
     #[test]
     fn bare_invocation_is_a_status_query_not_a_mutation() {
-        let reply = dispatch(&["hide_entity".to_string()]);
+        let reply = dispatch(&["hide_asset".to_string()]);
         assert!(reply.contains("usage"), "{reply}");
     }
 

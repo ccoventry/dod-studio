@@ -1,6 +1,6 @@
 //! Captures the engine's `cl_enginefuncs_s` table (`pEngfuncs`), the
 //! `engine_studio_api_s` table (`pstudio`), a genuine per-frame callback, and
-//! a per-entity suppress-or-forward hook for `hide_entity.rs`, by
+//! a per-entity suppress-or-forward hook for `hide_asset.rs`, by
 //! intercepting how `hw.dll` resolves `client.dll`'s entry points in the
 //! first place.
 //!
@@ -1102,7 +1102,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
 }
 
 /// Called once per entity the engine is about to add to the render list.
-/// Returning 0 suppresses that one entity; see `hide_entity.rs`'s module doc
+/// Returning 0 suppresses that one entity; see `hide_asset.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
 unsafe extern "C" fn tramp_hud_add_entity(
     entity_type: i32,
@@ -1111,7 +1111,7 @@ unsafe extern "C" fn tramp_hud_add_entity(
 ) -> i32 {
     if !modelname.is_null() {
         let name = unsafe { std::ffi::CStr::from_ptr(modelname) }.to_string_lossy();
-        if crate::hide_entity::should_hide(&name) {
+        if crate::hide_asset::should_hide(&name) {
             return 0;
         }
     }
