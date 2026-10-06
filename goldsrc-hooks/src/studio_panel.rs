@@ -706,11 +706,11 @@ fn display_name(path: &str) -> String {
     }
 }
 
-/// The Demos tab's Demo File heading, naming the folder the list is in: as a
-/// path under the install folder's parent (`Half-Life - PRE-Anniversary for
+/// The Demos tab's line above the list, naming the folder the list is in: as
+/// a path under the install folder's parent (`Half-Life - PRE-Anniversary for
 /// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
 /// parent itself included, where the path under it would be empty.
-fn folder_heading(dod: &std::path::Path, folder: &str) -> String {
+fn folder_line(dod: &std::path::Path, folder: &str) -> String {
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
         .parent()
@@ -722,14 +722,17 @@ fn folder_heading(dod: &std::path::Path, folder: &str) -> String {
     if !shown.is_empty() && !shown.ends_with('/') {
         shown.push('/');
     }
-    format!("Demo File in {}", keep_the_end(&shown, HEADING_PATH_CHARS))
+    format!("Currently in {}", keep_the_end(&shown, FOLDER_LINE_CHARS))
 }
 
-/// How much of a folder path the Demo File heading shows. The heading clips
-/// on the right at its column's width, which would cut off the folder's own
-/// name; a long path loses folders from the left instead. (The label's own
-/// limit is about 1,023 characters, so nothing overflows either way.)
-const HEADING_PATH_CHARS: usize = 70;
+/// The Demos tab's line above the list (`ui/Demos.res`).
+const FOLDER_LINE: &str = "FolderPath";
+
+/// How much of a folder path the line above the list shows. A label clips on
+/// the right at its width, which would cut off the folder's own name; a long
+/// path loses folders from the left instead. (The label's own limit is about
+/// 1,023 characters, so nothing overflows either way.)
+const FOLDER_LINE_CHARS: usize = 90;
 
 /// `path` (folders, each ending in `/`) cut to at most about `max` characters
 /// by dropping whole folders from the left behind `.../`. The last folder is
@@ -1647,7 +1650,7 @@ mod hook {
     /// window gets it too.
     static HINTED_PAGE: AtomicUsize = AtomicUsize::new(0);
 
-    /// The heading text last put on the Demo File column, and on which page.
+    /// The text last put on the line above the list, and on which page.
     static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
 
     /// Shows only the demos matching the Demos tab's search box. Runs every
@@ -1752,32 +1755,26 @@ mod hook {
             }
             // The hint says whether folders are on, not just the command.
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
-            // The Demo File heading says which folder the list is in, or is
-            // plain "Demo File" while folders are off.
-            let heading_text = match folders & 1 {
-                1 => res_dir().parent().map_or_else(
-                    || "Demo File".to_string(),
-                    |dod| folder_heading(dod, &crate::demo_list_folders::current_folder()),
-                ),
-                _ => "Demo File".to_string(),
+            // The line above the list says which folder the list is in, and
+            // is empty while folders are off.
+            let line_text = match folders & 1 {
+                1 => res_dir().parent().map_or_else(String::new, |dod| {
+                    folder_line(dod, &crate::demo_list_folders::current_folder())
+                }),
+                _ => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
-            if *headed != (page as usize, heading_text.clone()) {
-                let dialog = DEMO_DIALOG.load(Ordering::Acquire) as *mut c_void;
-                if let (false, Ok((_, build))) = (dialog.is_null(), gameui()) {
-                    let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
-                    if !list.is_null()
-                        && let Some(heading) = vgui.child_named(vpanel_of(list), "demoname")
-                        && let Ok(text) = std::ffi::CString::new(heading_text.clone())
-                    {
-                        let object = vgui.object(heading);
-                        if !object.is_null() {
-                            let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
-                            set_text(object, text.as_ptr());
-                        }
+            if *headed != (page as usize, line_text.clone()) {
+                if let Some(line) = vgui.child_named(page, FOLDER_LINE)
+                    && let Ok(text) = std::ffi::CString::new(line_text.clone())
+                {
+                    let object = vgui.object(line);
+                    if !object.is_null() {
+                        let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                        set_text(object, text.as_ptr());
                     }
                 }
-                *headed = (page as usize, heading_text);
+                *headed = (page as usize, line_text);
             }
             drop(headed);
             if (last != folders || new_page)
@@ -4016,7 +4013,7 @@ mod tests {
     }
 
     #[test]
-    fn a_long_heading_path_keeps_its_end() {
+    fn a_long_folder_path_keeps_its_end() {
         assert_eq!(keep_the_end("a/b/", 70), "a/b/");
         let deep = "D:/Games/Library/Mine/Steam/steamapps/common/Half-Life - PRE/dod/temp demos/";
         let short = keep_the_end(deep, 40);
@@ -4031,25 +4028,22 @@ mod tests {
     }
 
     #[test]
-    fn the_heading_names_the_folder_under_the_installs() {
+    fn the_line_above_the_list_names_the_folder() {
         let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
-        assert_eq!(folder_heading(dod, ""), "Demo File in Half-Life - PRE/dod/");
+        assert_eq!(folder_line(dod, ""), "Currently in Half-Life - PRE/dod/");
         assert_eq!(
-            folder_heading(dod, "temp demos/"),
-            "Demo File in Half-Life - PRE/dod/temp demos/"
+            folder_line(dod, "temp demos/"),
+            "Currently in Half-Life - PRE/dod/temp demos/"
         );
-        assert_eq!(folder_heading(dod, "../"), "Demo File in Half-Life - PRE/");
+        assert_eq!(folder_line(dod, "../"), "Currently in Half-Life - PRE/");
         // The installs' own folder: nothing under it to show, so in full.
+        assert_eq!(folder_line(dod, "../../"), "Currently in C:/Steam/common/");
         assert_eq!(
-            folder_heading(dod, "../../"),
-            "Demo File in C:/Steam/common/"
-        );
-        assert_eq!(
-            folder_heading(dod, "temp demos/../"),
-            "Demo File in Half-Life - PRE/dod/"
+            folder_line(dod, "temp demos/../"),
+            "Currently in Half-Life - PRE/dod/"
         );
         // Above the installs: the whole path.
-        assert_eq!(folder_heading(dod, "../../../"), "Demo File in C:/Steam/");
+        assert_eq!(folder_line(dod, "../../../"), "Currently in C:/Steam/");
     }
 
     #[test]
