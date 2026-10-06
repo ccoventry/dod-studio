@@ -512,6 +512,7 @@ pub fn poll() {
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
+    crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
     crate::hull_trace_guard::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
@@ -523,7 +524,10 @@ pub fn poll() {
     crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
+    // Only until connect is wrapped, normally already done at install.
+    crate::connect_guard::poll();
     crate::events::poll();
+    crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
@@ -663,6 +667,9 @@ fn status_text() -> String {
     }
     // Always shown once installed: it is on by default, and "did it ever
     // catch anything?" is the question a crash-free session raises.
+    if let Some(lighting) = crate::lightmap_gamma::status_line() {
+        lines.push(lighting);
+    }
     if let Some(tempent) = crate::tempent_fix::status_line() {
         lines.push(tempent);
     }
@@ -1348,6 +1355,7 @@ pub fn install() {
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
+    crate::connect_guard::install();
     crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
