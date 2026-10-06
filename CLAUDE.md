@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) and offline IDE agents when working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
@@ -75,9 +75,8 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 ## System Guardrails & Agent Directives
 
 ### Context & Execution Boundaries
-- **Context Scope:** Rely strictly on active chat code and files inside `docs/`. Strictly ignore any open files in hidden dot-directories to prevent prompt contamination. Do not index `target/`, `local/` (demos and screenshots), or `Cargo.lock`.
+- **Context Scope:** Don't scan `target/` or `Cargo.lock`. `local/` (gitignored) holds large demos, screenshots and review files: read only the files you're pointed at.
 - **Locked Files:** Do not modify build/deployment configs, environment files, lint rules, or public APIs unless explicitly requested.
-- **Behavior:** Be concise. Suppress conversational filler, apologies, and requirement summaries.
 - **Code Edits:** Apply minimal changes directly to files. Never rewrite unchanged lines or entire files unnecessarily.
 - **Ambiguity:** State critical technical assumptions once and proceed. Fail loudly on blocking errors.
 
@@ -106,10 +105,9 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 
 ## Concurrency, Rust & Memory Constraints
 
-- **WASM Protection:** The codebase carries legacy `wasm32-unknown-unknown` compilation gates. Isolate native multi-threading, direct file I/O (`std::fs`), and process spawning (`std::process::Command`) behind `#[cfg(not(target_arch = "wasm32"))]`.
-- **Hot-Path Locking:** Never introduce blocking mutexes on the UI frame loop. Wrap shared catalogs in `std::sync::RwLock` and use atomics/channels for cross-thread signaling.
+- **WASM Protection:** `web-analyzer` compiles `analysis` (and the `dod`/`dem-patch` parsers under it) to `wasm32-unknown-unknown`, so in those crates keep threads, `std::fs` and `std::process` behind `#[cfg(not(target_arch = "wasm32"))]`. `native`'s many wasm gates are legacy from the old egui web build; nothing compiles `native` for wasm32, so they are unchecked. Before deleting anything that looks unused, read the `#[cfg]` lines around it.
+- **Hot-Path Locking:** No blocking mutexes in code that runs every game frame (`goldsrc-hooks`: `HUD_Frame`, `HUD_AddEntity`, render detours) or in Tauri event handlers. Use `std::sync::RwLock` for shared lists and atomics/channels for cross-thread signaling.
 - **Telemetry Throttling:** Background progress channels must throttle update traffic to ~30fps (~33ms) using an `Arc<AtomicU32>` debouncer to prevent event loop flooding.
-- **Memory Safety:** Never use fixed-size stack buffers (`[u8; N]`) for binary stream slicing. Use heap-allocated `Vec<u8>` gated by explicit 2MB payload limits.
 - **Process Lifecycles:** External processes (HLAE, `hl.exe`, FFmpeg) must use non-blocking polling (`child.try_wait()`) matched with a ~16ms sleep. Verify an `Arc<AtomicBool>` cancellation token every cycle and chain `.kill_on_drop(true)`.
 - **Release builds use `panic = "abort"`.** `catch_unwind` never catches anything in a shipped build, and a panic in the hook DLL takes `hl.exe` down with it. Handle bad input with bounds checks at the read site, not by catching panics.
 - **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
@@ -119,11 +117,9 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 
 ## Domain & Engine Quirks (GoldSrc & HLAE)
 
-- **Terminology:** Strictly enforce the naming convention **"HLAE Game Capture"** (never "Native Game Capture").
 - **Frame Order:** `DemoStart` (Type 2) frames must be processed *before* any `ConsoleCommand` (Type 3) frames are written, or the GoldSrc engine reads uninitialized memory.
 - **64-byte Command Frames:** Command strings injected per tick must stay strictly under 64 bytes, because a demo's Type-3 `ConsoleCommand` frame carries a fixed `char command[64]` (`dem-patch`'s `parse_console_command` takes exactly 64 bytes). Stagger long absolute paths across multiple ticks. **This is not a `Cbuf_AddTextToBuffer` limit**, as this file used to say and as several error strings still do: GoldSrc's command buffer is 16,384 bytes (`Cbuf_Init`, `hw.dll+0x272b0`) and `hw.dll` contains no "Cbuf" string at all. The distinction matters because it means the limit is a file-format property and cannot be raised — see `docs/goldsrc_hw_dll_survey.md` §3.1.
 - **Packet Integrity:** Never interleave injected frames inside existing `NetworkMessage` payloads. Injected bookmarks/director frames must be written as complete, standalone frames ahead of the original packet to prevent `svc_bad` buffer overflows.
-- **Path Escaping:** All runtime paths passed to HLAE console inputs must replace forward slashes with double-escaped backslashes (`.replace("/", "\\\\")`).
 - **Decal Ring:** `r_decals` bounds the rotating decal index and evicts nothing, so lowering it strands every decal above the new limit. Set it exactly once, at demo load, from `init_commands` — never mid-demo, never as an injected `ConsoleCommand` frame (that shifts every later frame ordinal by +1). See `docs/goldsrc_dod_quirks.md`.
 - **`client.dll` does not reload between demos.** Measured (five game sessions, five `LoadLibraryA("client.dll")` log lines, zero mid-session): a plain demo-to-demo transition never reloads it. `hw.dll`/`hl.exe` itself never reloads either — `goldsrc-hooks` hooks its IAT once at injection, and that hook keeps observing every later `client.dll` load for the rest of the process's life, which a reloading `hw.dll` would break. Several `goldsrc-hooks` modules were written assuming the opposite; their defensive re-check-every-frame design is still correct (and still needed for whatever *does* reload `client.dll` — untested), only the "between demos" justification was wrong. See `docs/goldsrc_dod_quirks.md`.
 - **Command Tiers:** A command a user types into Initial or Scheduled Commands falls into one of five lists in `native::patch::cfg_scan`. Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s report, and again in `capture_manager::start_capture_batch_impl`.
