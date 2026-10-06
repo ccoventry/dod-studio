@@ -381,7 +381,14 @@ mod hook {
             to_count.borrow_mut().push(full);
             true
         });
-        crate::folder_counts::count_later(folder, to_count.into_inner());
+        // The up row's count too: this folder's total from its parts, plus
+        // the rest of the parent, so nothing is counted twice.
+        let here = dod.join(folder);
+        crate::folder_counts::count_later(
+            folder,
+            to_count.into_inner(),
+            Some((here.join(".."), here)),
+        );
         listed
             .into_iter()
             .filter_map(|row| CString::new(row).ok())

@@ -58,9 +58,32 @@ static RUNNING: AtomicBool = AtomicBool::new(false);
 /// Set when a job finishes, for the Demos tab to list again.
 static FINISHED: AtomicBool = AtomicBool::new(false);
 
+/// `path` with its `.` and `..` worked out, as written (no disk access):
+/// the up row's `temp demos/../` is `dod/`.
+fn normalize(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for part in path.components() {
+        match part {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if matches!(out.components().next_back(), Some(Component::Normal(_))) {
+                    out.pop();
+                } else {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
+}
+
 fn key(path: &Path) -> String {
-    path.to_string_lossy()
+    normalize(path)
+        .to_string_lossy()
         .replace('\\', "/")
+        .trim_end_matches('/')
         .to_ascii_lowercase()
 }
 
@@ -104,6 +127,81 @@ pub fn count_demos(folder: &Path, subfolders: bool, budget: usize) -> FolderCoun
     }
 }
 
+/// The `.dem` files in `folder` at any depth, leaving out the folder `skip`
+/// and everything in it. Reads at most `budget` entries.
+pub fn count_demos_except(folder: &Path, skip: &Path, budget: usize) -> FolderCount {
+    let skip = key(skip);
+    let mut queue = std::collections::VecDeque::from([normalize(folder)]);
+    let (mut demos, mut read) = (0usize, 0usize);
+    while let Some(dir) = queue.pop_front() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            read += 1;
+            if read > budget {
+                return FolderCount {
+                    demos,
+                    complete: false,
+                };
+            }
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
+            if kind.is_dir() {
+                if key(&entry.path()) != skip {
+                    queue.push_back(entry.path());
+                }
+            } else if entry
+                .file_name()
+                .to_string_lossy()
+                .to_ascii_lowercase()
+                .ends_with(".dem")
+            {
+                demos += 1;
+            }
+        }
+    }
+    FolderCount {
+        demos,
+        complete: true,
+    }
+}
+
+/// `here`'s whole count, from what is already counted: the demos directly in
+/// it plus each subfolder's total (counted now if it wasn't lately).
+fn total_from_parts(here: &Path) -> FolderCount {
+    let mut total = count_demos(here, false, BUDGET);
+    for entry in std::fs::read_dir(here)
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+    {
+        if entry.file_type().is_ok_and(|t| t.is_dir()) {
+            let sub = entry.path();
+            let part = fresh(&sub).map_or_else(|| count_demos(&sub, true, BUDGET), |c| c.all);
+            total.demos += part.demos;
+            total.complete &= part.complete;
+        }
+    }
+    total
+}
+
+/// The parent's counts for the up row, without counting `here` twice: `here`'s
+/// total from its parts, plus everything else in the parent.
+fn count_parent(parent: &Path, here: &Path) -> Counted {
+    let mine = total_from_parts(here);
+    let rest = count_demos_except(parent, here, BUDGET);
+    Counted {
+        direct: count_demos(&normalize(parent), false, BUDGET),
+        all: FolderCount {
+            demos: mine.demos + rest.demos,
+            complete: mine.complete && rest.complete,
+        },
+        at: Instant::now(),
+    }
+}
+
 fn fresh(path: &Path) -> Option<Counted> {
     let counted = COUNTED.lock().ok()?;
     let c = *counted.as_ref()?.get(&key(path))?;
@@ -122,12 +220,14 @@ pub fn known_empty(path: &Path) -> bool {
     fresh(path).is_some_and(|c| c.all.complete && c.all.demos == 0)
 }
 
-/// Counts, on a worker thread, whichever of `folders` aren't counted lately.
+/// Counts, on a worker thread, whichever of `folders` aren't counted lately,
+/// then `up = (parent, here)`'s parent for the up row (see [`count_parent`]).
 /// `listing` names the folder they are in: a fill of the same folder while
 /// its job runs leaves that job alone, and any other stops it.
-pub fn count_later(listing: &str, folders: Vec<PathBuf>) {
+pub fn count_later(listing: &str, folders: Vec<PathBuf>, up: Option<(PathBuf, PathBuf)>) {
     let todo: Vec<PathBuf> = folders.into_iter().filter(|f| fresh(f).is_none()).collect();
-    if todo.is_empty() {
+    let up = up.filter(|(parent, _)| fresh(parent).is_none());
+    if todo.is_empty() && up.is_none() {
         return;
     }
     {
@@ -140,7 +240,7 @@ pub fn count_later(listing: &str, folders: Vec<PathBuf>) {
         *job_for = listing.to_string();
     }
     let job = JOB.fetch_add(1, Ordering::AcqRel) + 1;
-    TOTAL.store(todo.len(), Ordering::Release);
+    TOTAL.store(todo.len() + up.is_some() as usize, Ordering::Release);
     DONE.store(0, Ordering::Release);
     RUNNING.store(true, Ordering::Release);
     let listing = listing.to_string();
@@ -158,6 +258,16 @@ pub fn count_later(listing: &str, folders: Vec<PathBuf>) {
             if let Ok(mut map) = COUNTED.lock() {
                 map.get_or_insert_with(HashMap::new)
                     .insert(key(folder), counted);
+            }
+            DONE.fetch_add(1, Ordering::AcqRel);
+        }
+        if let Some((parent, here)) = &up
+            && JOB.load(Ordering::Acquire) == job
+        {
+            let counted = count_parent(parent, here);
+            if let Ok(mut map) = COUNTED.lock() {
+                map.get_or_insert_with(HashMap::new)
+                    .insert(key(parent), counted);
             }
             DONE.fetch_add(1, Ordering::AcqRel);
         }
@@ -231,12 +341,58 @@ mod tests {
     }
 
     #[test]
+    fn dots_are_worked_out_without_the_disk() {
+        assert_eq!(
+            key(Path::new("C:/a/dod/temp demos/../")),
+            key(Path::new("C:/a/dod"))
+        );
+        assert_eq!(
+            key(Path::new("C:/a/dod/./x/")),
+            key(Path::new("c:/A/DOD/x"))
+        );
+        assert_eq!(key(Path::new("C:/a/dod/../../")), key(Path::new("C:/")));
+    }
+
+    #[test]
+    fn the_up_row_counts_the_parent_without_counting_here_twice() {
+        let root = scratch("up");
+        std::fs::create_dir_all(root.join("sibling")).unwrap();
+        std::fs::write(root.join("sibling/s.dem"), b"").unwrap();
+        let here = root.join("rounds");
+        // Without here: a.dem and sibling/s.dem.
+        assert_eq!(count_demos_except(&root, &here, 1000).demos, 2);
+        let parent = count_parent(&here.join(".."), &here);
+        assert_eq!(
+            parent.all,
+            FolderCount {
+                demos: 4,
+                complete: true
+            }
+        );
+        assert_eq!(
+            parent.direct,
+            FolderCount {
+                demos: 1,
+                complete: true
+            }
+        );
+        assert_eq!(
+            parent.all,
+            FolderCount {
+                demos: count_demos(&root, true, 1000).demos,
+                complete: true
+            }
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_job_counts_in_the_background_then_says_so() {
         let root = scratch("job");
         let (rounds, empty) = (root.join("rounds"), root.join("empty"));
         assert_eq!(count(&rounds, true), None, "not counted yet");
         assert!(!known_empty(&empty), "not counted is not empty");
-        count_later("test", vec![rounds.clone(), empty.clone()]);
+        count_later("test", vec![rounds.clone(), empty.clone()], None);
         let deadline = Instant::now() + Duration::from_secs(10);
         while !take_finished() {
             assert!(Instant::now() < deadline, "the job never finished");
@@ -260,7 +416,7 @@ mod tests {
         assert!(known_empty(&empty));
         assert!(!known_empty(&rounds));
         // Counted lately: a second fill starts nothing.
-        count_later("test", vec![rounds, empty]);
+        count_later("test", vec![rounds, empty], None);
         assert_eq!(progress(), None);
         let _ = std::fs::remove_dir_all(&root);
     }
