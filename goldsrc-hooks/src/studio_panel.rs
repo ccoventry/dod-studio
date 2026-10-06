@@ -679,6 +679,31 @@ fn is_folder_row(row: &str) -> bool {
     row.trim().trim_matches('"').ends_with('/')
 }
 
+/// How many `.dem` files sit directly in `folder`, not in its subfolders:
+/// one directory read, as the Demo Analyzer's folder view counts.
+fn demos_directly_in(folder: &std::path::Path) -> usize {
+    std::fs::read_dir(folder).map_or(0, |entries| {
+        entries
+            .filter_map(Result::ok)
+            .filter(|e| {
+                e.file_type().is_ok_and(|t| t.is_file())
+                    && e.file_name()
+                        .to_string_lossy()
+                        .to_ascii_lowercase()
+                        .ends_with(".dem")
+            })
+            .count()
+    })
+}
+
+/// A folder row's Map column: its demo count.
+fn demo_count_text(count: usize) -> String {
+    match count {
+        1 => "1 demo".to_string(),
+        n => format!("{n} demos"),
+    }
+}
+
 /// Whether folder listing (#409) changed since the Demos tab's list was last
 /// filled: `last` and `now` are 0 off, 1 on; `last` 2 is not yet seen, when
 /// the tab has only just filled it.
@@ -1859,9 +1884,19 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
                     }
                     // A folder row (#409) says so in the Type column, so it
-                    // can't be mistaken for a demo.
-                    if is_folder_row(&get(row, ROW_KEY)) {
+                    // can't be mistaken for a demo, and how many demos sit
+                    // directly in it in the Map column, as the Demo
+                    // Analyzer's folder view counts them (not subfolders).
+                    let name = get(row, ROW_KEY);
+                    if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
+                        let folder = res_dir()
+                            .parent()
+                            .map(|dod| dod.join(name.trim().trim_matches('"')));
+                        let count = folder.map_or(0, |f| demos_directly_in(&f));
+                        if let Ok(count) = std::ffi::CString::new(demo_count_text(count)) {
+                            set_string(row, DEMO_COLUMNS[0].0.as_ptr(), count.as_ptr());
+                        }
                     }
                     if let Some(info) = info_for(&get(row, ROW_KEY)) {
                         // A dash for HLTV (nobody recorded it); blank for a
@@ -3820,6 +3855,22 @@ mod tests {
         for demo in ["a.dem", "test/a.dem", "\"temp demos/a b.dem\"", ""] {
             assert!(!is_folder_row(demo), "{demo}");
         }
+    }
+
+    #[test]
+    fn a_folder_counts_only_the_demos_directly_in_it() {
+        let root = std::env::temp_dir().join(format!("dodstudio_count_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        for f in ["a.dem", "B.DEM", "notes.txt", "sub/c.dem"] {
+            std::fs::write(root.join(f), b"").unwrap();
+        }
+        assert_eq!(demos_directly_in(&root), 2);
+        assert_eq!(demos_directly_in(&root.join("missing")), 0);
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(demo_count_text(0), "0 demos");
+        assert_eq!(demo_count_text(1), "1 demo");
+        assert_eq!(demo_count_text(12), "12 demos");
     }
 
     #[test]

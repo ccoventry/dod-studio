@@ -178,10 +178,22 @@ fn resolve(folder: &str) -> String {
 /// The rows for `folder`: `../` first, then subfolders, then demos, each a
 /// path from `dod/`. The window sorts them itself; the order here only
 /// decides which duplicate (the same name in two search paths) is kept.
-fn rows(folder: &str, entries: impl IntoIterator<Item = (String, bool)>) -> Vec<String> {
+///
+/// The file system's listing merges every search path (`dod/`, `valve/`, the
+/// install folder), so `dod/` would list `valve/` and `WindowsCrashDumps/`.
+/// `on_disk(path, is_dir)` keeps only what really is at `dod/<path>`, as the
+/// Demo Analyzer's folder view shows the disk (user's call, 2026-10-05).
+fn rows(
+    folder: &str,
+    entries: impl IntoIterator<Item = (String, bool)>,
+    on_disk: impl Fn(&str, bool) -> bool,
+) -> Vec<String> {
     let mut out = vec![format!("{folder}../")];
     let mut demos = Vec::new();
     for (name, is_dir) in entries {
+        if !on_disk(&format!("{folder}{name}"), is_dir) && name != "." && name != ".." {
+            continue;
+        }
         if is_dir {
             if name != "." && name != ".." {
                 out.push(format!("{folder}{name}/"));
@@ -291,10 +303,18 @@ mod hook {
             }
             find_close(fs, handle);
         }
-        rows(folder, entries)
-            .into_iter()
-            .filter_map(|row| CString::new(row).ok())
-            .collect()
+        let dod = crate::texture_hires::game_dir();
+        rows(folder, entries, |path, is_dir| {
+            let path = dod.join(path);
+            if is_dir {
+                path.is_dir()
+            } else {
+                path.is_file()
+            }
+        })
+        .into_iter()
+        .filter_map(|row| CString::new(row).ok())
+        .collect()
     }
 
     unsafe extern "thiscall" fn find_first(
@@ -532,7 +552,7 @@ mod tests {
             ("my clip.dem".to_string(), false),
         ];
         assert_eq!(
-            rows("test/", entries),
+            rows("test/", entries, |_, _| true),
             vec![
                 "test/../",
                 "test/temp demos/",
@@ -551,7 +571,23 @@ mod tests {
             ("A.dem".to_string(), false),
             ("sub".to_string(), true),
         ];
-        assert_eq!(rows("", entries), vec!["../", "sub/", "a.dem"]);
+        assert_eq!(rows("", entries, |_, _| true), vec!["../", "sub/", "a.dem"]);
+    }
+
+    #[test]
+    fn only_what_is_on_disk_under_dod_is_listed() {
+        let entries = [
+            ("valve".to_string(), true),
+            ("WindowsCrashDumps".to_string(), true),
+            ("temp demos".to_string(), true),
+            ("root.dem".to_string(), false),
+            ("mine.dem".to_string(), false),
+        ];
+        let on_disk = |path: &str, _: bool| matches!(path, "temp demos" | "mine.dem");
+        assert_eq!(
+            rows("", entries, on_disk),
+            vec!["../", "temp demos/", "mine.dem"]
+        );
     }
 
     #[test]

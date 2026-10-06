@@ -136,7 +136,11 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   `Find*` for the window's own `"*.dem"` call, and the window's `OnCommand`
   -- on both builds; off, the list is stock. The DoD Studio window's Demos
   tab borrows the same window's list, so it browses folders too, and lists
-  again when the setting changes. See `src/demo_list_folders.rs`.
+  again when the setting changes; there a folder row says Folder and how many
+  demos sit directly in it. Only what is really under `dod/` is listed, not
+  the other folders the game's file system merges in (`valve/`, the install
+  folder's). On by default; a Settings-tab box turns it off. See
+  `src/demo_list_folders.rs`.
 - **Window layout** (`dodstudio_resizable_windows 1`,
   `dodstudio_remember_window_layout 1`): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart
