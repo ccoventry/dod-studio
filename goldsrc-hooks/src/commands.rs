@@ -521,6 +521,8 @@ pub fn poll() {
     crate::remote::poll();
     // Only until playdemo is wrapped, normally already done at install.
     crate::demo_reload::poll();
+    // Only until connect is wrapped, normally already done at install.
+    crate::connect_guard::poll();
     crate::events::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
@@ -1346,6 +1348,7 @@ pub fn install() {
     add_command(CLEAR_DECALS_NAME, cmd_clear_decals);
     add_command(crate::demo_reload::NAME, crate::demo_reload::command);
     crate::demo_reload::install();
+    crate::connect_guard::install();
     crate::events::install();
     add_command(OVERVIEWMAP_NAME, cmd_overviewmap);
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);

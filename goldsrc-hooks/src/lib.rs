@@ -99,6 +99,10 @@
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
 //!   off.
+//! - `connect_guard`: refuse `connect`, `retry`, `reconnect` and `listen`
+//!   while the DLL is loaded, since joining a VAC-secured server with it
+//!   loaded is a ban risk (issue #451). `connect local` (`map`) still works;
+//!   `GOLDSRC_HOOKS_ALLOW_CONNECT=1` turns it off.
 //! - `world_shaders`: the `dodstudio_allow_shaders` cvar -- let the 25th
 //!   Anniversary engine draw the world through `platform/gl_shaders` during
 //!   demo playback, which its `sv_allow_shaders` gate otherwise forbids.
@@ -132,6 +136,7 @@
 mod anim_fix;
 mod cmd_list;
 mod commands;
+mod connect_guard;
 mod crash;
 mod crosshair;
 mod deathmsg;
@@ -164,6 +169,7 @@ mod pmove_guard;
 mod remote;
 mod scan;
 mod scoreboard;
+mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
 mod spectator_eye;
@@ -263,6 +269,11 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // Only this user's own processes can reach the pipe, and only a game
     // Studio launched has it, so on unless asked not to.
     remote::ENABLED.store(env_flag("GOLDSRC_HOOKS_REMOTE", true), Ordering::Relaxed);
+    // VAC safety (#451), so on unless asked not to.
+    connect_guard::ENABLED.store(
+        !connect_guard::allowed_by_env(std::env::var(connect_guard::ALLOW_ENV).ok().as_deref()),
+        Ordering::Relaxed,
+    );
     // Studio falls back to qconsole.log without it, so on unless asked not to.
     events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
     // HD textures: on when there's a dod/dodstudio_hd folder to load from,

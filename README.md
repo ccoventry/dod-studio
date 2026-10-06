@@ -71,8 +71,11 @@ Tests:
 DoD Studio loads HLAE and its own hook DLL into the game and patches it in
 memory, which is exactly what VAC looks for. So:
 
-- **Only play demos in a game DoD Studio started.** Never join a server from it.
-  If HLAE asks "You are about to connect to a server", answer No.
+- **Only play demos in a game DoD Studio started.** Never join a game server
+  from it. If HLAE asks "You are about to connect to a server", answer No,
+  unless it's an HLTV proxy you chose to watch. DoD Studio's hook DLL refuses
+  `connect` itself while it is loaded, except to an HLTV proxy that says VAC
+  is off.
 - **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
   play online with.
 - **To play online, start Day of Defeat from Steam, without DoD Studio.** A
