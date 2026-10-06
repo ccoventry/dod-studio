@@ -220,6 +220,11 @@ pub struct Build {
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
     pub combo_menu: usize,
+    /// Where a `ListPanel` keeps its sort column (`int`, -1 for none) and its
+    /// ascending flag (a byte), as its `OnSetSortColumn` reads them; the
+    /// secondary column and its flag follow each (#611).
+    pub list_sort_column: usize,
+    pub list_sort_ascending: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -244,6 +249,8 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_1dcc,
         combo_box_vftable: 0x9_fbbc,
         combo_menu: 0x13c,
+        list_sort_column: 0xfc,
+        list_sort_ascending: 0x104,
     },
     Build {
         name: "25th Anniversary",
@@ -266,6 +273,8 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_bbd4,
         combo_box_vftable: 0xa_8f10,
         combo_menu: 0x140,
+        list_sort_column: 0x100,
+        list_sort_ascending: 0x108,
     },
 ];
 
@@ -1451,6 +1460,8 @@ mod hook {
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
+    /// The sort arrow in the lists' headings (#611).
+    mod sort_arrows;
     /// The Highlights tab (#565).
     mod streaks_tab;
 
@@ -3324,6 +3335,7 @@ mod hook {
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
                     folder_progress::update(&vgui);
+                    sort_arrows::update();
                 }
                 if !vgui.visible(vp) {
                     // Closed some other way than the console key (its X,

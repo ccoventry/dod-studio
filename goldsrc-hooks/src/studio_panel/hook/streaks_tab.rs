@@ -17,6 +17,11 @@ use super::*;
 use crate::streaks::{self, Found, Status, Streak};
 
 static DIALOG: AtomicUsize = AtomicUsize::new(0);
+
+/// The hidden Load Demo window lending the list, or 0 before the tab is built.
+pub(super) fn dialog() -> usize {
+    DIALOG.load(Ordering::Acquire)
+}
 static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
 /// What the status line and the list show now, so each is redrawn only when
 /// it changes.
