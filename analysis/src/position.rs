@@ -49,6 +49,21 @@ pub(crate) struct PositionTracker {
     recorder: ClientDataReplay<PlayerPose>,
 }
 
+impl PositionTracker {
+    /// Every player the latest snapshot places, by entity index.
+    pub(crate) fn player_origins(&self) -> impl Iterator<Item = (u16, [f32; 3])> + '_ {
+        self.players
+            .entities()
+            .iter()
+            .filter_map(|(i, p)| p.known_origin().map(|o| (*i, o)))
+    }
+
+    /// The recording player's position, from `svc_clientdata`.
+    pub(crate) fn recorder_origin(&self) -> Option<[f32; 3]> {
+        self.recorder.current().and_then(PlayerPose::known_origin)
+    }
+}
+
 impl EntityFields for PlayerPose {
     fn apply(&mut self, delta: &Delta) {
         // A walk over the keys, not three `get`s: hashing three `String`
