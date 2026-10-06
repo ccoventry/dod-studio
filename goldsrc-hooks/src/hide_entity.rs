@@ -171,13 +171,82 @@ fn status() -> String {
 
 fn usage() -> String {
     format!(
-        "usage:\n\
-         \x20 {COMMAND}                         what is being hidden\n\
-         \x20 {COMMAND} <model-path>...          hide these entities by exact model path\n\
-         \x20                                    e.g. {COMMAND} sprites/mapsprites/flames.spr\n\
+        "usage (like HLAE's mirv_matte_entities, by model path):\n\
+         \x20 {COMMAND} list                     what is being hidden (also: no arguments)\n\
+         \x20 {COMMAND} add <model-path>...      hide these too\n\
+         \x20                                    e.g. {COMMAND} add sprites/mapsprites/flames.spr\n\
+         \x20 {COMMAND} del <model-path>...      stop hiding these\n\
          \x20 {COMMAND} clear                    stop hiding anything\n\
+         \x20 {COMMAND} <model-path>...          hide exactly these, replacing the list\n\
          \x20 no \"all\" -- deliberately an allow-list, not a blanket toggle; see the module doc\n"
     )
+}
+
+/// What `rest` (the arguments after the command) does to `list`, and the
+/// reply. Pure, so it is tested without the shared [`HIDDEN`] list.
+fn apply(list: &mut Vec<Entry>, rest: &[String]) -> String {
+    let (verb, paths) = match rest.split_first() {
+        Some((first, more)) => (first.to_ascii_lowercase(), more),
+        None => return String::new(),
+    };
+    let named = |paths: &[String]| -> bool { !paths.is_empty() };
+    // "all" anywhere is refused: it would be taken as a model path that
+    // matches nothing, and silently hide nothing (found live 2026-10-06).
+    if rest.iter().any(|a| a.eq_ignore_ascii_case("all")) {
+        return format!(
+            "{COMMAND}: no \"all\" -- name the model paths to hide, e.g. {COMMAND} add sprites/mapsprites/flames.spr\n"
+        );
+    }
+    let on_list =
+        |list: &[Entry], path: &str| list.iter().any(|e| e.path.eq_ignore_ascii_case(path));
+    match verb.as_str() {
+        "list" | "show" => String::new(),
+        "clear" => {
+            list.clear();
+            format!("{COMMAND}: hiding nothing\n")
+        }
+        "add" if named(paths) => {
+            let mut added = Vec::new();
+            for path in paths {
+                if !on_list(list, path) {
+                    list.push(Entry::new(path));
+                    added.push(path.as_str());
+                }
+            }
+            if added.is_empty() {
+                format!("{COMMAND}: already hiding {}\n", paths.join(", "))
+            } else {
+                format!("{COMMAND}: now also hiding {}\n", added.join(", "))
+            }
+        }
+        "del" | "remove" if named(paths) => {
+            let (gone, missing): (Vec<&String>, Vec<&String>) =
+                paths.iter().partition(|p| on_list(list, p));
+            list.retain(|e| !paths.iter().any(|p| e.path.eq_ignore_ascii_case(p)));
+            let mut reply = String::new();
+            if !gone.is_empty() {
+                let names: Vec<&str> = gone.iter().map(|p| p.as_str()).collect();
+                reply.push_str(&format!(
+                    "{COMMAND}: no longer hiding {}\n",
+                    names.join(", ")
+                ));
+            }
+            if !missing.is_empty() {
+                let names: Vec<&str> = missing.iter().map(|p| p.as_str()).collect();
+                reply.push_str(&format!("{COMMAND}: wasn't hiding {}\n", names.join(", ")));
+            }
+            reply
+        }
+        "add" | "del" | "remove" => format!("{COMMAND}: {verb} needs at least one model path\n"),
+        // Anything else is a list of model paths, replacing whatever was
+        // hidden before -- the "each call restates the whole set" shape
+        // `dodstudio_deathmsg block <id>...` uses, kept for configs that
+        // already use it.
+        _ => {
+            *list = rest.iter().map(|path| Entry::new(path)).collect();
+            format!("{COMMAND}: hiding {}\n", rest.join(", "))
+        }
+    }
 }
 
 fn args() -> Vec<String> {
@@ -210,19 +279,12 @@ fn dispatch(argv: &[String]) -> String {
     if rest.is_empty() {
         return format!("{}{}", status(), usage());
     }
-    if rest.len() == 1 && rest[0].eq_ignore_ascii_case("clear") {
-        if let Ok(mut list) = HIDDEN.write() {
-            list.clear();
-        }
-        return format!("{COMMAND}: hiding nothing\n");
-    }
-    // Anything else is a list of model paths, replacing whatever was hidden
-    // before -- the same "each call restates the whole set" shape
-    // `dodstudio_deathmsg block <id>...` and `dodstudio_debug_msglog <name>...` use.
-    if let Ok(mut list) = HIDDEN.write() {
-        *list = rest.iter().map(|path| Entry::new(path)).collect();
-    }
-    format!("{COMMAND}: hiding {}\n", rest.join(", "))
+    let reply = match HIDDEN.write() {
+        Ok(mut list) => apply(&mut list, rest),
+        Err(_) => return format!("{COMMAND} = (lock poisoned)\n"),
+    };
+    // `list` (and every change) ends with the list as it is now.
+    format!("{reply}{}", status())
 }
 
 pub unsafe extern "C" fn command() {
@@ -287,6 +349,56 @@ mod tests {
             COMMAND_NAMES,
             ["dodstudio_hide_entity", "dodstudio_hide_sprite"]
         );
+    }
+
+    fn strings(v: &[&str]) -> Vec<String> {
+        v.iter().map(|s| s.to_string()).collect()
+    }
+
+    fn paths(list: &[Entry]) -> Vec<String> {
+        list.iter().map(|e| e.path.clone()).collect()
+    }
+
+    #[test]
+    fn add_and_del_change_the_list_like_mirv_matte_entities() {
+        let mut list = Vec::new();
+        apply(&mut list, &strings(&["add", "a.spr"]));
+        apply(&mut list, &strings(&["add", "b.spr", "A.SPR"]));
+        assert_eq!(paths(&list), ["a.spr", "b.spr"], "added once, case ignored");
+        let reply = apply(&mut list, &strings(&["del", "a.spr", "c.spr"]));
+        assert_eq!(paths(&list), ["b.spr"]);
+        assert!(
+            reply.contains("no longer hiding a.spr") && reply.contains("wasn't hiding c.spr"),
+            "{reply}"
+        );
+        apply(&mut list, &strings(&["clear"]));
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn plain_paths_still_replace_the_list() {
+        let mut list = vec![Entry::new("old.spr")];
+        apply(&mut list, &strings(&["a.spr", "b.spr"]));
+        assert_eq!(paths(&list), ["a.spr", "b.spr"]);
+    }
+
+    #[test]
+    fn all_is_refused_and_changes_nothing() {
+        let mut list = vec![Entry::new("flames.spr")];
+        for args in [&["all"][..], &["add", "all"][..], &["a.spr", "ALL"][..]] {
+            let reply = apply(&mut list, &strings(args));
+            assert!(reply.contains("no \"all\""), "{reply}");
+            assert_eq!(paths(&list), ["flames.spr"]);
+        }
+    }
+
+    #[test]
+    fn add_or_del_without_a_path_says_so() {
+        let mut list = vec![Entry::new("flames.spr")];
+        assert!(apply(&mut list, &strings(&["add"])).contains("needs at least one"));
+        assert!(apply(&mut list, &strings(&["del"])).contains("needs at least one"));
+        assert_eq!(paths(&list), ["flames.spr"]);
+        assert_eq!(apply(&mut list, &strings(&["list"])), "");
     }
 
     #[test]

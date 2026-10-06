@@ -185,10 +185,19 @@ shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
 ### `dodstudio_hide_entity`
 
-`dodstudio_hide_entity <model-path>...` suppresses specific world entities
-by exact model path: map sprites, props (`.mdl`), brush entities (`*12`).
-It is an allow-list, not a blanket toggle, replacing the whole set on each
-call (not additive). `clear` stops hiding anything. The old name,
+`dodstudio_hide_entity` suppresses specific world entities by exact model
+path: map sprites, props (`.mdl`), brush entities (`*12`). It keeps a list,
+shaped like HLAE's `mirv_matte_entities` but by model path rather than entity
+number (a path stays the same across demos):
+
+- `dodstudio_hide_entity list` (or no arguments): what is hidden.
+- `dodstudio_hide_entity add <model-path>...`: hide these too.
+- `dodstudio_hide_entity del <model-path>...`: stop hiding these.
+- `dodstudio_hide_entity clear`: stop hiding anything.
+- `dodstudio_hide_entity <model-path>...`: hide exactly these, replacing the
+  list (the original form, kept for existing configs).
+
+It is an allow-list, not a blanket toggle: `all` is refused. The old name,
 `dodstudio_hide_sprite`, still works for now (#333).
 
 It reaches only entities rendered through the engine's normal entity list

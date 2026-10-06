@@ -23,8 +23,8 @@ HUD
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
-  dodstudio_hide_entity <model>...
-      Hide entities by model path (the old name, dodstudio_hide_sprite, still works).
+  dodstudio_hide_entity list|add|del|clear <model>...
+      Hide entities by model path, like mirv_matte_entities (old name: dodstudio_hide_sprite).
   dodstudio_deathmsg (or dodstudio_killfeed)
       Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
   dodstudio_objectives
