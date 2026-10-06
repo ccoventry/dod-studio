@@ -1,7 +1,8 @@
 //! The HD texture files, as the app sees them (#372).
 //!
 //! `goldsrc-hooks`' `texture_hires` swaps in upscaled textures from
-//! `<game>\dod\dodstudio_hd\<type>\<style>\`, and `goldsrc-hooks/tools/hd/`'s
+//! `<game>\dod_addon\dodstudio_hd\<type>\<style>\` (or `dod\dodstudio_hd`
+//! for an install from before #415, see [`hd_root`]), and `goldsrc-hooks/tools/hd/`'s
 //! scripts build them. This module is the app's side of that: what is built
 //! ([`scan`]), and fetching the upscaler the build needs ([`setup`]). Building
 //! itself is still the scripts' job; the Rust port is #372's second step.
@@ -143,9 +144,20 @@ pub struct HdStatus {
     pub large_address_aware: Option<bool>,
 }
 
-/// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
+/// Where the HD files are, from the `hl.exe` path the app launches:
+/// `<game>\dod_addon\dodstudio_hd` (#415), or `<game>\dod\dodstudio_hd`
+/// while that one exists and the `dod_addon` one doesn't -- where an install
+/// built before #415 has them. The hook and `tools/hd/hdcommon.py` pick the
+/// same way, so a build lands where the game reads.
 pub fn hd_root(game_exe: &Path) -> Option<PathBuf> {
-    Some(game_exe.parent()?.join("dod").join("dodstudio_hd"))
+    let game = game_exe.parent()?;
+    let addon = game.join("dod_addon").join("dodstudio_hd");
+    let dod = game.join("dod").join("dodstudio_hd");
+    Some(if dod.is_dir() && !addon.is_dir() {
+        dod
+    } else {
+        addon
+    })
 }
 
 /// Reads what is built under `hd_root` and what is set up in `tools_dir`.
@@ -248,9 +260,19 @@ mod tests {
     use crate::test_support::Scratch;
 
     #[test]
-    fn the_hd_folder_sits_in_dod_beside_hl_exe() {
-        let root = hd_root(Path::new("C:/Games/Half-Life/hl.exe")).unwrap();
-        assert_eq!(root, Path::new("C:/Games/Half-Life/dod/dodstudio_hd"));
+    fn the_hd_folder_is_in_dod_addon_unless_only_dod_has_one() {
+        let game = Scratch::new("hd_root_pick");
+        let exe = game.join("hl.exe");
+        let addon = game.join("dod_addon").join("dodstudio_hd");
+        let dod = game.join("dod").join("dodstudio_hd");
+        // Nothing built yet: a new build goes in dod_addon.
+        assert_eq!(hd_root(&exe).unwrap(), addon);
+        // Built before #415: still read from dod.
+        std::fs::create_dir_all(&dod).unwrap();
+        assert_eq!(hd_root(&exe).unwrap(), dod);
+        // Moved, or built again after: dod_addon wins.
+        std::fs::create_dir_all(&addon).unwrap();
+        assert_eq!(hd_root(&exe).unwrap(), addon);
     }
 
     #[test]

@@ -255,7 +255,7 @@ Every name starts `dodstudio_`. None is saved into `config.cfg`. `docs/dodstudio
 | `dodstudio_debug_msglog` | command | — | Hex-dumps chosen DoD user messages to the log | both |
 | `dodstudio_debug_status` | command | — | Prints the state of every fix and setting | both |
 | `dodstudio_ex_interp_max` | cvar | 100 | Raises the engine's `ex_interp` ceiling (51–1000) | PRE (PR #398 adds Anniversary) |
-| `dodstudio_hd_enabled` | cvar | 1 if `dod\dodstudio_hd` exists | HD texture replacement on or off | PRE only (PR #399 adds Anniversary) |
+| `dodstudio_hd_enabled` | cvar | 1 if `dodstudio_hd` exists | HD texture replacement on or off | PRE only (PR #399 adds Anniversary) |
 | `dodstudio_hd_style` | cvar | `ultrasharp` | Which HD style folder to read | PRE only |
 | `dodstudio_hide_crosshair` | cvar | 0 | Hides the POV and spectator crosshair | both |
 | `dodstudio_hide_hand_signals` | cvar | 0 | Replaces hand-signal animations with the player's normal pose | both |
@@ -287,7 +287,7 @@ Not compiled on `dev`: `spectator_bars.rs` (both approaches failed live; issue #
 
 ## 6. HD textures
 
-**In the game:** the DLL replaces textures as the engine uploads them, from `dod\dodstudio_hd\<type>\<style>\`, where type is `world`, `models`, `sprites`, `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
+**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
 
 **The page** (HD Textures tab):
 
@@ -296,7 +296,7 @@ Not compiled on `dev`: `spectator_bars.rs` (both approaches failed live; issue #
 - **Tools:** finds or downloads the Real-ESRGAN upscaler, its models, and a private Python 3.12 with numpy, Pillow and SciPy. You can also point it at your own copies.
 - **Build:** tick styles and asset types, then Build. It runs `goldsrc-hooks/tools/hd/build_all.py` with live step progress; Cancel keeps finished files.
 
-**Built-in styles:** `ultrasharp` (default), `remacri`, `siax`, `generalv3`, `x4plus` (all Real-ESRGAN models), `plain` (Lanczos plus sharpening) and `blend` (x4plus and plain mixed). Your own styles go in `dod\dodstudio_hd\my_styles.txt`, and `hd_maps.txt` limits which maps are built.
+**Built-in styles:** `ultrasharp` (default), `remacri`, `siax`, `generalv3`, `x4plus` (all Real-ESRGAN models), `plain` (Lanczos plus sharpening) and `blend` (x4plus and plain mixed). Your own styles go in `dodstudio_hd\my_styles.txt`, and `hd_maps.txt` limits which maps are built.
 
 Command-line only: `compare.py` (a side-by-side sheet of styles), `setup_tools.py`, the per-type scripts, `--also` and `--extra-models`. Batched writing (`HD_BATCH`, PR #404), the misses view, custom-style form, comparison, and map picker (PRs #390, #391, #392, #422) are not on `dev` yet.
 
@@ -371,7 +371,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_primer.dem`, `dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`) |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
-| HD files | `<game>\dod\dodstudio_hd\` |
+| HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |
 | OBS | a `[DoD-Studio]` profile and scene inside your OBS |
 

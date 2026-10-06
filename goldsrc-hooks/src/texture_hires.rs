@@ -90,8 +90,10 @@
 //!
 //! ## Replacement files
 //!
-//! Everything lives under one folder, `<game>\dod\dodstudio_hd\`, so it can be
-//! backed up, copied or deleted as a unit:
+//! Everything lives under one folder, `<game>\dod_addon\dodstudio_hd\` (#415),
+//! so it can be backed up, copied or deleted as a unit. An install whose files
+//! are still in the older `<game>\dod\dodstudio_hd\`, and that has none in
+//! `dod_addon`, keeps using them there ([`hd_base`]):
 //!
 //! ```text
 //! dodstudio_hd\
@@ -397,7 +399,7 @@ pub fn set_hd_cvar(cvar: *mut crate::engine::CvarSPartial) {
 
 /// Whether HD starts on, and so whether `lib.rs` installs the hook at
 /// startup: `GOLDSRC_HOOKS_TEXTURE_HIRES=1` or `0` decides outright; unset,
-/// it's on when there's a `dod/dodstudio_hd` folder to load from.
+/// it's on when there's a `dodstudio_hd` folder to load from ([`hd_base`]).
 ///
 /// Startup is when it has to be decided: the engine loads a few sprites
 /// (muzzle flashes, shell casings) while the game starts, before any `.cfg`
@@ -407,7 +409,7 @@ pub fn starts_on() -> bool {
     match std::env::var("GOLDSRC_HOOKS_TEXTURE_HIRES") {
         Ok(v) if v.trim() == "1" => true,
         Ok(v) if v.trim() == "0" => false,
-        _ => game_dir().join("dodstudio_hd").is_dir(),
+        _ => hd_base().join("dodstudio_hd").is_dir(),
     }
 }
 
@@ -1289,7 +1291,57 @@ pub(crate) fn game_dir() -> PathBuf {
         .join("dod")
 }
 
+/// Which mod folder holds `dodstudio_hd` (#415).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HdHome {
+    /// `dod_addon`: DoD Studio's own place, and where a new build goes.
+    Addon,
+    /// `dod`: where the files were before #415, used while `dod_addon` has
+    /// none.
+    Dod,
+}
+
+fn hd_home(in_addon: bool, in_dod: bool) -> HdHome {
+    if in_dod && !in_addon {
+        HdHome::Dod
+    } else {
+        HdHome::Addon
+    }
+}
+
+/// The folder holding `dodstudio_hd`: `<game>\dod_addon` once it has one,
+/// `<game>\dod` while only that does. Every path the HD code builds is
+/// relative to this, so `dodstudio_hd/...` names the same file in either.
+///
+/// The detail textures are the one kind the engine opens itself, through its
+/// own search paths. `-addons` (every DoD Studio launch, #412) puts
+/// `dod_addon` on them, ahead of `dod`.
+pub(crate) fn hd_base() -> PathBuf {
+    let dod = game_dir();
+    let addon = dod.with_file_name("dod_addon");
+    match hd_home(
+        addon.join("dodstudio_hd").is_dir(),
+        dod.join("dodstudio_hd").is_dir(),
+    ) {
+        HdHome::Addon => addon,
+        HdHome::Dod => dod,
+    }
+}
+
+/// Whether the game was started with `-addons`, which the detail textures in
+/// `dod_addon` need.
+fn addons_on() -> bool {
+    std::env::args_os().any(|a| a.to_string_lossy().eq_ignore_ascii_case("-addons"))
+}
+
 fn build_detail_index() -> HashMap<String, String> {
+    if hd_base().ends_with("dod_addon") && !addons_on() {
+        unsafe {
+            crate::debug::report(
+                "texture_hires: the HD files are in dod_addon but the game has no -addons, so the engine won't find the HD detail textures (DoD Studio's launches pass it)",
+            )
+        };
+    }
     build_folder_index(DETAIL_DIR, "HD detail texture(s)")
 }
 
@@ -1299,7 +1351,7 @@ fn build_sky_index() -> HashMap<String, String> {
 
 /// Every file in `<type_dir>/<style>` and `<type_dir>/overrides` (overrides
 /// winning), keyed by its lowercased path relative to that folder, mapped to
-/// its path relative to the game directory.
+/// its path relative to [`hd_base`] (and so to the engine's search paths).
 fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
     fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
@@ -1318,7 +1370,7 @@ fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for sub in style_dirs(type_dir) {
         let mut found = std::collections::HashSet::new();
-        walk(&game_dir().join(&sub), "", &mut found);
+        walk(&hd_base().join(&sub), "", &mut found);
         unsafe {
             crate::debug::report(&format!(
                 "texture_hires: indexed {} {what} in {sub}",
@@ -1408,7 +1460,7 @@ unsafe extern "C" fn sky_face(frame: *const u8, buffer: *mut u8) {
         record_miss(Miss::NoFile, "sky", &original, || "no HD face".to_string());
         return stock();
     };
-    let file = game_dir().join(engine_path);
+    let file = hd_base().join(engine_path);
     let decoded = std::fs::read(&file)
         .map_err(|e| e.to_string())
         .and_then(|b| decode_tga(&b));
@@ -1583,7 +1635,7 @@ unsafe extern "C" fn redirect_detail_path(path: *mut u8) {
         }
         return;
     };
-    if !detail_fits(&game_dir().join(&new), max) {
+    if !detail_fits(&hd_base().join(&new), max) {
         record_miss(Miss::Failed, "detail", &original, || {
             format!("{new} is over the loader's {max}-byte limit")
         });
@@ -1674,7 +1726,7 @@ fn build_index_in(type_dir: &str) -> Index {
     let mut files = HashMap::new();
     let dirs = style_dirs(type_dir);
     for sub in &dirs {
-        let dir = game_dir().join(sub);
+        let dir = hd_base().join(sub);
         let mut found = 0;
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for entry in entries.flatten() {
@@ -1696,7 +1748,7 @@ fn build_index_in(type_dir: &str) -> Index {
         };
     }
     Index {
-        dir: game_dir().join(&dirs[0]),
+        dir: hd_base().join(&dirs[0]),
         files,
     }
 }
@@ -2816,6 +2868,16 @@ pub fn has_observed() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #415: a new build goes in dod_addon; an install built before it keeps
+    /// reading dod until dod_addon has its own.
+    #[test]
+    fn the_hd_files_are_in_dod_addon_unless_only_dod_has_them() {
+        assert_eq!(hd_home(false, false), HdHome::Addon);
+        assert_eq!(hd_home(false, true), HdHome::Dod);
+        assert_eq!(hd_home(true, false), HdHome::Addon);
+        assert_eq!(hd_home(true, true), HdHome::Addon);
+    }
 
     fn tokens(pattern: &str) -> Vec<String> {
         pattern.split_whitespace().map(str::to_string).collect()
