@@ -304,7 +304,7 @@ export const STRINGS = {
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder, usually the one you play online with. DoD Studio loads HLAE and its hook DLL into the game, which VAC detects. Use a separate copy of Half-Life for movies and never join a server with it.",
+        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the

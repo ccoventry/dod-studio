@@ -71,12 +71,14 @@ Tests:
 DoD Studio loads HLAE and its own hook DLL into the game and patches it in
 memory, which is exactly what VAC looks for. So:
 
-- **Use a separate copy of Half-Life for movies**, and point DoD Studio at that
-  copy's `hl.exe`, never at the Steam install you play online with.
-- **Only play demos in it.** Never join a server from a game DoD Studio started.
+- **Only play demos in a game DoD Studio started.** Never join a server from it.
   If HLAE asks "You are about to connect to a server", answer No.
-- **Never inject the hook DLL by hand** (`inject.exe`) into a game you play
-  online with.
+- **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
+  play online with.
+- **To play online, start Day of Defeat from Steam, without DoD Studio.** A
+  separate copy of Half-Life for movies is recommended but never required: it
+  keeps your movie configs, models, sprites and sounds out of the game you
+  play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 
