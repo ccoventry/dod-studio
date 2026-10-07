@@ -17,6 +17,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
+- [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
 
 ## The hook DLL (`goldsrc-hooks`)
 - [dodstudio_commands.md](dodstudio_commands.md) — every `dodstudio_*` cvar and command. Also the source of the wiki's Commands page.
