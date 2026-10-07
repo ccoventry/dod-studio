@@ -9,8 +9,11 @@
 //! `OnCommand("ButtonClicked")`, what its arrow button sends, which toggles
 //! it; so it is only sent while the list is closed.
 //!
-//! Picking a name sets the box's text to it, which the Player filter reads
-//! like anything typed; a text that is exactly a name doesn't reopen it.
+//! Picking a name adds it to the picked players, shown on the line beside
+//! the box, and empties the box for the next; the Player filter reads only
+//! the picked players, so what is typed searches the list, not the demos.
+//! A picked player's row comes first in the list, marked `[x] `, and
+//! clicking it takes them off again.
 
 use std::ffi::{CString, c_void};
 use std::sync::Mutex;
