@@ -40,6 +40,7 @@ pub mod demo_parser;
 pub mod demo_writer;
 pub mod netmsg_doer;
 pub mod prelude;
+pub mod progress;
 pub mod types;
 
 pub use utils::bitslice_to_string;
@@ -83,6 +84,15 @@ pub fn open_demo(demo_path: impl AsRef<Path> + AsRef<OsStr>) -> eyre::Result<Dem
 
 pub fn open_demo_from_bytes(demo_bytes: &[u8]) -> eyre::Result<Demo> {
     Demo::parse_from_bytes(demo_bytes, types::MessageDataParseMode::Parse)
+}
+
+/// [`open_demo_from_bytes`], calling `progress(bytes_read, bytes_total)` as
+/// it goes (see [`progress`]).
+pub fn open_demo_from_bytes_with_progress(
+    demo_bytes: &[u8],
+    progress: &mut dyn FnMut(usize, usize),
+) -> eyre::Result<Demo> {
+    progress::with_progress(progress, || open_demo_from_bytes(demo_bytes))
 }
 
 /// Writes a [`u32`] into [`types::BitVec`]
@@ -226,6 +236,48 @@ mod test {
                 })
             })
             .unwrap_or_else(|e| panic!("could not read the test fixture directory: {e}"));
+    }
+
+    /// A real recording (`test-fixtures/ci_fixture.dem`, see its README):
+    /// every network frame's messages parse, and re-encoding the whole demo
+    /// from the parsed messages gives back the original bytes. That is the
+    /// message parsers and writers checked against what the game really sent,
+    /// which `demotest.dem` (no network frames) cannot do.
+    #[test]
+    fn a_real_recording_parses_and_re_encodes_byte_for_byte() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let demo = open_demo_from_bytes(&bytes).unwrap();
+
+        let (mut network_frames, mut messages) = (0, 0);
+        for frame in demo.directory.entries.iter().flat_map(|e| &e.frames) {
+            if let types::FrameData::NetworkMessage(network) = &frame.frame_data {
+                network_frames += 1;
+                match &network.1.messages {
+                    types::MessageData::Parsed(parsed) => messages += parsed.len(),
+                    other => panic!("frame {} not parsed: {other:?}", frame.frame),
+                }
+            }
+        }
+        assert!(network_frames > 10_000, "{network_frames} network frames");
+        assert!(messages > 50_000, "{messages} messages");
+
+        // The writer recomputes each directory entry's frame count from the
+        // frames it wrote rather than trusting the stored one, which the
+        // engine leaves at 0 for the LOADING entry.
+        let mut expected = bytes.clone();
+        let directory = i32::from_le_bytes(bytes[540..544].try_into().unwrap()) as usize;
+        for (k, entry) in demo.directory.entries.iter().enumerate() {
+            let at = directory + 4 + k * 92 + 80;
+            expected[at..at + 4].copy_from_slice(&(entry.frames.len() as i32).to_le_bytes());
+        }
+        assert!(
+            demo.write_to_bytes() == expected,
+            "re-encoding the parsed demo changed its bytes"
+        );
     }
 
     /// A malformed demo must come back as `Err`, never as a panic.

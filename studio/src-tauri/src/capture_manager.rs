@@ -596,6 +596,23 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// What the take folder holds on disk, for the batch results panel (#172).
+    pub bytes: u64,
+}
+
+/// Everything under `path`, in bytes. 0 for a folder that isn't there.
+fn folder_bytes(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => folder_bytes(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 fn take_folder_has_content(path: &Path) -> bool {
@@ -630,6 +647,7 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
             source_streak_indices: block.source_streak_indices.clone(),
             captured: take_folder_has_content(&block.take_folder),
             renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+            bytes: 0,
         })
         .collect();
 
@@ -645,6 +663,9 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
                 v.renderable = native::hlcr::scanner::is_renderable_take(&block.take_folder);
             }
         }
+    }
+    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
+        v.bytes = folder_bytes(&block.take_folder);
     }
 
     verified
@@ -2049,9 +2070,23 @@ pub async fn launch_demo_preview(
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
+    // The saved resolution, as Launch Game uses it (#358): the preview
+    // config otherwise keeps PatcherConfig's 1280x720 default.
+    let resolution = {
+        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings_state
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (guard.resolution_width, guard.resolution_height)
+    };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) =
+        let (mut patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        (
+            patcher_config.resolution_width,
+            patcher_config.resolution_height,
+        ) = resolution;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()
@@ -2269,7 +2304,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Standalone Game Launch ──────────────────────────────────────────────────────
@@ -2577,6 +2612,16 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn a_take_folders_size_counts_its_subfolders() {
+        let dir = Scratch::new("take_folder_bytes");
+        std::fs::create_dir_all(dir.path().join("hud")).unwrap();
+        std::fs::write(dir.path().join("sound.wav"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("hud").join("00000.tga"), vec![0u8; 50]).unwrap();
+        assert_eq!(folder_bytes(dir.path()), 150);
+        assert_eq!(folder_bytes(&dir.path().join("missing")), 0);
+    }
 
     #[test]
     fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
@@ -2971,7 +3016,7 @@ mod tests {
         let payload = sample_payload();
         let cfg = config_from_payload(&payload);
         // Capture Output's first entry is the sole source of primary_media_dir —
-        // there's no separate "Primary Media Dir" field anymore (removed 2026-08-17).
+        // there's no separate "Primary Media Dir" field.
         assert_eq!(cfg.primary_media_dir, Some(PathBuf::from("D:/capture")));
     }
 
@@ -3094,7 +3139,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_filename_is_no_longer_refused_in_init_commands() {
-        // Re-tiered 2026-09-05: inert in Initial Commands (see
+        // Inert in Initial Commands (see
         // cfg_scan::NOOP_IN_INIT_COMMANDS), only dangerous once scheduled.
         let err = first_banned_command_error(&["mirv_movie_filename foo".to_string()], &[]);
         assert!(err.is_none(), "{:?}", err);

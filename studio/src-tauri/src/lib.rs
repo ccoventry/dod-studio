@@ -77,16 +77,32 @@ async fn save_settings(
 }
 
 // ── Project Session IPC Commands ───────────────────────────────────────────────
-// `fs:default` (capabilities/default.json) only grants read access to the app's
-// own AppConfig/AppData dirs — it does NOT scope arbitrary user-picked paths, so
-// the JS `@tauri-apps/plugin-fs` read/writeTextFile calls fail for every path a
-// save/open dialog can return. Do the actual I/O in Rust (std::fs, unscoped)
-// instead, same as `save_settings`/`get_settings` above.
+// File I/O for paths the user picked happens here in Rust (std::fs), same as
+// `save_settings`/`get_settings` above. Tauri's fs plugin was dropped: its
+// default scope covers only the app's own config/data dirs, so it could never
+// reach a path a save/open dialog returns.
 
 #[tauri::command]
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+    }))
+    .await
+}
+
+/// `Documents\dod-studio\projects`, made if it's missing: where Save and
+/// Load Project start (#354), so project files don't land wherever the last
+/// file dialog happened to be.
+#[tauri::command]
+async fn default_projects_dir() -> Result<String, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        let dir = dirs::document_dir()
+            .ok_or_else(|| messages::NO_DOCUMENTS_FOLDER.to_string())?
+            .join("dod-studio")
+            .join("projects");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| messages::failed_to_write_file(&dir.to_string_lossy(), e))?;
+        Ok(dir.to_string_lossy().to_string())
     }))
     .await
 }
@@ -569,7 +585,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
@@ -590,6 +605,10 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
+            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // for the game's own memory (#565).
+            #[cfg(windows)]
+            native::sys::analysis_server::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -640,6 +659,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            default_projects_dir,
             locate_missing_demos,
             changed_demos,
             system_memory_bytes,
@@ -665,6 +685,7 @@ pub fn run() {
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
             updater_manager::is_debug_build,
+            updater_manager::local_git_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
