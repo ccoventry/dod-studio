@@ -46,7 +46,8 @@
 //! ## The layout files
 //!
 //! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
-//! tab (`Playback.res`, `Demos.res`, `Studio.res`). Our own folder beside
+//! tab in [`PAGES`] (`Playback.res`, `Demos.res`, `Highlights.res`,
+//! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
 //! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
 //! later DLL with a changed default replaces a file only while it is still
@@ -56,7 +57,7 @@
 //!
 //! ## Per build
 //!
-//! Eight `GameUI.dll` addresses and sizes differ between the pre-Anniversary
+//! Sixteen `GameUI.dll` addresses and sizes differ between the pre-Anniversary
 //! and 25th Anniversary builds, and the Anniversary `Frame::Frame` takes a
 //! fourth argument. [`BUILDS`] names each build by PE timestamp and image
 //! size, and anything else is refused. `tools/verify_studio_panel.py` checks
@@ -212,10 +213,12 @@ pub struct Build {
     pub keyvalues_new: usize,
     pub keyvalues_ctor: usize,
     /// `ProgressBar`'s vftable: only a control with exactly this one gets the
-    /// Highlights tab's progress.
+    /// Highlights tab's, the Playback tab's loading or the Demos tab's
+    /// counting progress.
     pub progress_bar_vftable: usize,
     /// `ComboBox`'s vftable: only a control with exactly this one is filled
-    /// as the Demos tab's Type dropdown.
+    /// as the Demos tab's Type or Player match dropdown, or driven as its
+    /// Player box.
     pub combo_box_vftable: usize,
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
@@ -1207,8 +1210,8 @@ const HELP_LINE: &str = "HelpLine";
 const HELP_TALL: i32 = 22;
 
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
-/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box)
-/// help line shows for it. (GameUI reads the key but shows no tooltip, so
+/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box):
+/// what the help line shows for it. (GameUI reads the key but shows no tooltip, so
 /// the window shows it itself.)
 fn tooltips(res: &str) -> Vec<(String, String)> {
     #[derive(Clone, PartialEq)]
@@ -1446,8 +1449,9 @@ mod hook {
 
     use super::*;
 
-    /// The Playback tab's loading progress (#465).
+    /// The Demos tab's counting bar (#409).
     mod folder_progress;
+    /// The Playback tab's loading progress (#465).
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
@@ -1534,7 +1538,8 @@ mod hook {
     /// Our own Load Demo window, or 0.
     static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
 
-    /// The selected row's `demoname` in our Load Demo window's list.
+    /// The selected row's path in our Load Demo window's list ([`row_path_text`]'s
+    /// keys, in the same order).
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
         unsafe { selected_value(dialog, PATH_KEY).or_else(|| selected_value(dialog, ROW_KEY)) }
     }
@@ -1662,8 +1667,6 @@ mod hook {
     /// The text last put on the line above the list, and on which page.
     static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
 
-    /// Shows only the demos matching the Demos tab's search box. Runs every
-    /// frame; does work only when the text (or the list) changed.
     /// A text box's text on `page`, or "" when the layout has none.
     unsafe fn box_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
         unsafe {
@@ -1748,6 +1751,8 @@ mod hook {
         info
     }
 
+    /// Shows only the demos matching the Demos tab's filters. Runs every
+    /// frame; does work only when a filter (or the list) changed.
     unsafe fn filter_demo_list(vgui: &Vgui) {
         unsafe {
             let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
@@ -1918,7 +1923,7 @@ mod hook {
         }
     }
 
-    /// Gives our Load Demo window's list Map and Date columns after the
+    /// Gives our Load Demo window's list [`DEMO_COLUMNS`] after the
     /// demo's name, every column sortable by a click on its heading. The name
     /// column stays the window's own (as wide as its `.res` list, so it is
     /// narrowed through its heading, which is a panel named after the column):
@@ -1989,8 +1994,9 @@ mod hook {
         date_text((year, month, day, hour, minute))
     }
 
-    /// Fills in every row's Map, Type and Date, when the list was (re)filled since
-    /// the last time. Returns whether it did.
+    /// Fills in every row's Map, Type, Player and Date, and its short name, when
+    /// the list was (re)filled or the players files changed since the last
+    /// time. Returns whether it did.
     unsafe fn stamp_demo_rows(list: *mut c_void) -> bool {
         unsafe {
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
