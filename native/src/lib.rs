@@ -60,12 +60,12 @@ where
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
-        .map_err(|e| format!("Could not open the file: {}", e))?;
+        .map_err(|e| format!("Could not open {}: {}", demo_path.display(), e))?;
 
     let mut bytes: Vec<u8> = vec![];
 
     file.read_to_end(&mut bytes)
-        .map_err(|e| format!("Could not read the file: {}", e))?;
+        .map_err(|e| format!("Could not read {}: {}", demo_path.display(), e))?;
 
     let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
     let file_info = FileInfo::of(demo_path)?;

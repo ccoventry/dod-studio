@@ -1,9 +1,8 @@
 # The HLTV viewmodel animation fix
 
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
-> Lives in `goldsrc-hooks/src/anim_fix/`, on branch
-> `feat/goldsrc-hooks-companion-dll`. Tracked by
-> [#204](https://github.com/ccoventry/dod-studio/issues/204).
+> Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
+> [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
 > Defaults **off**. It is one of the things `dodstudio_spec_match_pov` turns
 > on (with the lost gunshots and the POV crosshair): `dodstudio_spec_match_pov 1` in
 > the console, `+dodstudio_spec_match_pov 1` on the launch line, or from any `.cfg`

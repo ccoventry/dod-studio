@@ -46,7 +46,8 @@
 //! ## The layout files
 //!
 //! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
-//! tab (`Playback.res`, `Demos.res`, `Studio.res`). Our own folder beside
+//! tab in [`PAGES`] (`Playback.res`, `Demos.res`, `Highlights.res`,
+//! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
 //! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
 //! later DLL with a changed default replaces a file only while it is still
@@ -56,7 +57,7 @@
 //!
 //! ## Per build
 //!
-//! Eight `GameUI.dll` addresses and sizes differ between the pre-Anniversary
+//! Sixteen `GameUI.dll` addresses and sizes differ between the pre-Anniversary
 //! and 25th Anniversary builds, and the Anniversary `Frame::Frame` takes a
 //! fourth argument. [`BUILDS`] names each build by PE timestamp and image
 //! size, and anything else is refused. `tools/verify_studio_panel.py` checks
@@ -221,10 +222,12 @@ pub struct Build {
     pub keyvalues_new: usize,
     pub keyvalues_ctor: usize,
     /// `ProgressBar`'s vftable: only a control with exactly this one gets the
-    /// Highlights tab's progress.
+    /// Highlights tab's, the Playback tab's loading or the Demos tab's
+    /// counting progress.
     pub progress_bar_vftable: usize,
     /// `ComboBox`'s vftable: only a control with exactly this one is filled
-    /// as the Demos tab's Type dropdown.
+    /// as the Demos tab's Type or Player match dropdown, or driven as its
+    /// Player box.
     pub combo_box_vftable: usize,
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
@@ -709,8 +712,8 @@ const UP_MARK: &str = "\u{2191}   ";
 /// `.. (up one folder)` for the up row, not the whole path (#409). The path
 /// itself stays on the row, under [`PATH_KEY`], for loading.
 ///
-/// A folder's demo count goes in brackets after its name, `count` (the
-/// user's call, 2026-10-05: the Map column is for maps only).
+/// A folder's demo count goes in brackets after its name, `count` (the Map
+/// column is for maps only).
 fn display_name(path: &str, count: Option<&str>) -> String {
     let path = path.trim().trim_matches('"');
     let count = count.map_or_else(String::new, |c| format!(" ({c})"));
@@ -1022,7 +1025,7 @@ unsafe extern "C" fn wrapped_toggleconsole() {
         if hook::back_to_game_if_on_console() {
             // The game closes its console window its own way, which also
             // closes the menu. That also keeps ESC on the main menu from
-            // bringing the stock console back (2026-10-03).
+            // bringing the stock console back.
             unsafe {
                 crate::debug::report("studio_panel: the console key went back to the game");
                 crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
@@ -1218,8 +1221,8 @@ const HELP_LINE: &str = "HelpLine";
 const HELP_TALL: i32 = 22;
 
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
-/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box)
-/// help line shows for it. (GameUI reads the key but shows no tooltip, so
+/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box):
+/// what the help line shows for it. (GameUI reads the key but shows no tooltip, so
 /// the window shows it itself.)
 fn tooltips(res: &str) -> Vec<(String, String)> {
     #[derive(Clone, PartialEq)]
@@ -1457,8 +1460,9 @@ mod hook {
 
     use super::*;
 
-    /// The Playback tab's loading progress (#465).
+    /// The Demos tab's counting bar (#409).
     mod folder_progress;
+    /// The Playback tab's loading progress (#465).
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
@@ -1547,7 +1551,8 @@ mod hook {
     /// Our own Load Demo window, or 0.
     static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
 
-    /// The selected row's `demoname` in our Load Demo window's list.
+    /// The selected row's path in our Load Demo window's list ([`row_path_text`]'s
+    /// keys, in the same order).
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
         unsafe { selected_value(dialog, PATH_KEY).or_else(|| selected_value(dialog, ROW_KEY)) }
     }
@@ -1675,8 +1680,6 @@ mod hook {
     /// The text last put on the line above the list, and on which page.
     static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
 
-    /// Shows only the demos matching the Demos tab's search box. Runs every
-    /// frame; does work only when the text (or the list) changed.
     /// A text box's text on `page`, or "" when the layout has none.
     unsafe fn box_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
         unsafe {
@@ -1761,6 +1764,8 @@ mod hook {
         info
     }
 
+    /// Shows only the demos matching the Demos tab's filters. Runs every
+    /// frame; does work only when a filter (or the list) changed.
     unsafe fn filter_demo_list(vgui: &Vgui) {
         unsafe {
             let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
@@ -1931,7 +1936,7 @@ mod hook {
         }
     }
 
-    /// Gives our Load Demo window's list Map and Date columns after the
+    /// Gives our Load Demo window's list [`DEMO_COLUMNS`] after the
     /// demo's name, every column sortable by a click on its heading. The name
     /// column stays the window's own (as wide as its `.res` list, so it is
     /// narrowed through its heading, which is a panel named after the column):
@@ -2002,8 +2007,9 @@ mod hook {
         date_text((year, month, day, hour, minute))
     }
 
-    /// Fills in every row's Map, Type and Date, when the list was (re)filled since
-    /// the last time. Returns whether it did.
+    /// Fills in every row's Map, Type, Player and Date, and its short name, when
+    /// the list was (re)filled or the players files changed since the last
+    /// time. Returns whether it did.
     unsafe fn stamp_demo_rows(list: *mut c_void) -> bool {
         unsafe {
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
@@ -2305,7 +2311,7 @@ mod hook {
         /// Whether `vp`, kept from an earlier frame, is still GameUI's popup
         /// `name`. A kept handle can outlive its panel: on the 25th Anniversary
         /// build the VCR bar went away after ESC closed it, and asking vgui2
-        /// about the old one, `object` included, crashed the game (2026-10-04).
+        /// about the old one, `object` included, crashed the game.
         unsafe fn still(&self, name: &str, vp: Vpanel) -> bool {
             unsafe { self.popup(name) == Some(vp) }
         }
@@ -3137,7 +3143,7 @@ mod hook {
     /// Whether our window is on screen showing its Console tab. If so, the
     /// window stays open (ESC brings it back with the menu) and the console
     /// window is made visible for the caller's `toggleconsole` to close the
-    /// game's way, which goes back to the game (2026-10-04, the user's call).
+    /// game's way, which goes back to the game.
     pub(super) fn back_to_game_if_on_console() -> bool {
         let Ok(vgui) = Vgui::get() else {
             return false;
@@ -3159,7 +3165,7 @@ mod hook {
                 // The menu is closed around our window (ESC, or this key's
                 // own trip back to the game): it is still open on the Console
                 // tab, but not on screen, so the key opens it afresh. Without
-                // this check, it took two presses (2026-10-04). A console the
+                // this check, it took two presses. A console the
                 // key left open behind the tab is closed the game's way first.
                 if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
                     if let Some(window) = vgui.popup(CONSOLE) {
@@ -3214,8 +3220,8 @@ mod hook {
     static LAST_STATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 
     /// Logs the menu, our window and the console window each time one of them
-    /// opens or closes: for the report of the DoD Studio menu item going back
-    /// to the game (2026-10-04), which nothing else in the log explains.
+    /// opens or closes: for a report of the DoD Studio menu item going back
+    /// to the game, which nothing else in the log explains.
     unsafe fn log_state_changes(vgui: &Vgui, vp: Vpanel) {
         unsafe {
             let menu = vgui.shown(vgui.parent_of(vp));
@@ -3236,7 +3242,7 @@ mod hook {
     /// The main menu's DoD Studio item (`ui/GameMenu.res`). GameUI runs an
     /// `engine ...` item by queueing the command and then closing the menu,
     /// as Resume Game does, so the window opened behind a closed menu and the
-    /// menu flashed back (2026-10-04). Taken in [`taskbar_on_command`] instead,
+    /// menu flashed back. Taken in [`taskbar_on_command`] instead,
     /// it opens at once, the way Options does.
     const MENU_COMMAND: &str = "engine dodstudio_panel 1";
     /// GameUI's `CTaskbar`, whose `OnCommand` runs the main menu's items,
@@ -3353,7 +3359,7 @@ mod hook {
                     give_back(&vgui, &mut lent, None);
                     // The bar stays off screen while the setting is on, even
                     // with our window closed: closing it by its X brought the
-                    // stock bar back (2026-10-03). ESC -> DoD Studio, or
+                    // stock bar back. ESC -> DoD Studio, or
                     // viewdemo, opens the window again.
                     match vgui.bar() {
                         Some(bar) if viewdemo_in_panel() => park(&vgui, bar, &mut lent),
@@ -3716,7 +3722,7 @@ mod hook {
             } else {
                 // The main menu's DoD Studio item is an `engine` command, and
                 // GameUI closes the menu after running one, as Resume Game
-                // does (2026-10-04). The window lives in the menu, so bring
+                // does. The window lives in the menu, so bring
                 // the menu back up.
                 if !vgui.shown(vgui.parent_of(vp)) {
                     notes.push(activate_game_ui());

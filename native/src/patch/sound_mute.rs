@@ -303,7 +303,7 @@ fn svc_sound_index(sound: &dem::types::SvcSound) -> Option<u32> {
 /// Replaces every `svc_sound` and triggered `svc_spawnstaticsound` naming one of
 /// `names` with `SvcNop`.
 ///
-/// `names` are compared in [`normalise`]d form; [`map_sounds`] already returns
+/// `names` are compared in `normalise`d form; [`map_sounds`] already returns
 /// them that way.
 pub fn mute_sounds(demo: &mut Demo, names: &BTreeSet<String>) -> MuteStats {
     let mut stats = MuteStats::default();

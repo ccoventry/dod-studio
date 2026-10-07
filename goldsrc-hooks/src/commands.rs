@@ -1441,7 +1441,7 @@ pub fn install() {
         }
     }
 
-    // Both on by default (the user, 2026-10-03): the window is how DoD
+    // Both on by default: the window is how DoD
     // Studio's console and playback controls are reached.
     match register(crate::studio_panel::VIEWDEMO_NAME, "1") {
         Some(cvar) => crate::studio_panel::set_viewdemo_cvar(cvar),
@@ -1587,6 +1587,7 @@ mod tests {
         // one of those can flip LEVEL mid-assertion here (issue #321).
         // anim_fix's tests already take the same lock for the same reason.
         let _statics = anim_fix::tests::lock_statics();
+        let _hidden = hudelement::tests::lock_hidden();
 
         let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
 
