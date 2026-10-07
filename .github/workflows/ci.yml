@@ -27,6 +27,11 @@ on:
   push:
     branches: [dev]
 
+# Checkout only. The Rust cache is saved with the runner's own token, not
+# GITHUB_TOKEN, so read access is all this needs.
+permissions:
+  contents: read
+
 jobs:
   rust-tests:
     name: Rust workspace tests
@@ -38,7 +43,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -67,7 +72,7 @@ jobs:
     name: Clippy
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned, unlike the test job above, which stays on `stable` on purpose --
       # a new Rust breaking the build is something we want to hear about. A lint
@@ -130,9 +135,9 @@ jobs:
       run:
         working-directory: studio
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
@@ -165,7 +170,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: "0"
       CARGO_PROFILE_TEST_DEBUG: "0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pinned for clippy, as in the Clippy job. The tests run on it too: the
       # Rust workspace tests job already builds goldsrc-hooks on `stable`.
@@ -192,7 +197,7 @@ jobs:
     name: Web analyzer and Python
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Syntax only, so it needs no packages. All of tools/, not just hd/:
       # it costs nothing and catches a broken probe too.
