@@ -12,9 +12,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [hlae_protocols.md](hlae_protocols.md) — launching HLAE, how a batch ends, checking a take.
 - [command_tiers.md](command_tiers.md) — which commands Initial and Scheduled Commands refuse, warn about or ignore, and why.
 - [direct_to_video_capture.md](direct_to_video_capture.md) — capturing straight to video with `mirv_movie_ffmpeg`.
-- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method.
-- [render_studio_hlcr_parity.md](render_studio_hlcr_parity.md) — Render Studio compared with the HLCR tool it replaced.
-- [capture-render-ux-audit.md](capture-render-ux-audit.md) — UX audit of the capture and render pages (2026-08).
+- [obs_alternate_capture.md](obs_alternate_capture.md) — OBS as a capture method: how it is driven, measurements, failure modes, open questions.
 
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
@@ -33,16 +31,17 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_ex_interp.md](goldsrc_ex_interp.md) — raising the interpolation ceiling.
 - [goldsrc_hltv_animation_fix.md](goldsrc_hltv_animation_fix.md) — gun animations in HLTV demos.
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV demos lose.
-- [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — hiding HUD elements, sprites and text.
+- [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
+- [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
+- [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — hiding any HUD element by name (`dodstudio_hide_hudelement`), and why some are not offered.
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.
-- [goldsrc_spectator_eye_height.md](goldsrc_spectator_eye_height.md) — the in-eye camera on a prone player.
-- [goldsrc_spectator_follow.md](goldsrc_spectator_follow.md) — keeping the camera on one player.
+- [goldsrc_spectator_camera.md](goldsrc_spectator_camera.md) — keeping the camera on one player, and the in-eye camera on a prone player.
 
 ## Project
 - [versioning_and_releases.md](versioning_and_releases.md) — version numbers, channels and how a release is cut.
 
 ## Folders
 - [wiki/](wiki/) — source for the GitHub wiki, published when `main` changes.
-- [archive/](archive/) — finished design records that code still cites. History, not current state.
+- [archive/](archive/) — finished design records that code still cites, and superseded research (spectator bars R&D, the OBS design, the 2026-08 capture/render UX audit, the HLCR parity notes). History, not current state.

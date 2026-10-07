@@ -94,7 +94,7 @@ patched demos with `+viewdemo`.
 `viewdemo` does not compute the view for an HLTV demo, so it does not get
 around DoD's client discarding `DRC_CMD_CHASE`/`DRC_CMD_INEYE` (#222), and it
 is no route to #206 (closed since: `dodstudio_spec_lock`, see
-`docs/goldsrc_spectator_follow.md`).
+`docs/goldsrc_spectator_camera.md`).
 
 - `Server::ParseHLTV` marks an HLTV demo (`HLTV_ACTIVE`), and an HLTV world's
   frames get no `demoInfo` (the recording client's view).

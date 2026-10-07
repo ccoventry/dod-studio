@@ -1,11 +1,15 @@
+> **Archived 2026-10.** Done: aggregate progress bar and sortable columns (#496, #40 closed), Open Take Folder, per-job codec snapshot, hardware-capped concurrency.
+> Still GAP and untracked as their own issues: delete take folder, Clear Queue; partly tracked: skip-previously-rendered (#438 history, #70 take selection) and table multi-select (#70).
+> The "Status" line below is the 2026-08-17 original ("research only"); `dod-studio'` typos fixed to `dod-studio's`.
+
 # Render Studio ↔ HLCR Parity Notes
 
 Status (2026-08-17): **research only, nothing implemented yet.** The user's
 independent Python/PySide6 rewrite of the render tool lives in the sibling
 repo `../HLCR` (`ui/main_window.py`, `ui/styles.py`, `workers/render_job.py`,
 `workers/scanner.py`, `core/*.py`) and is referenced once already in
-`archive/tauri_parity_audit.md` (§5, the H.264 codec-default decision). The user
-wants dod-studio' Render Studio tab (`studio/index.html`'s
+`docs/archive/tauri_parity_audit.md` (§5, the H.264 codec-default decision). The user
+wants dod-studio's Render Studio tab (`studio/index.html`'s
 `#render-studio-panel`, `studio/src/render_pane.js`, backed by
 `native/src/hlcr/` + `studio/src-tauri`'s `render_manager.rs`) to
 move closer to what HLCR does. This doc is the field-by-field diff a
@@ -13,7 +17,7 @@ research pass produced, so whoever picks this up doesn't have to re-derive
 it. Not triaged into Medium/Low priority yet — do that once the user picks
 which of these they actually want.
 
-Classification borrows `archive/tauri_parity_audit.md`'s convention: **GAP** (HLCR
+Classification borrows `docs/archive/tauri_parity_audit.md`'s convention: **GAP** (HLCR
 has it, dod-studio doesn't), **DELTA** (both have it, shaped/behaving
 differently), **DOD-STUDIO-ONLY** (dod-studio has something HLCR lacks —
 don't regress these while porting).
@@ -26,7 +30,7 @@ don't regress these while porting).
   marker into each take folder on successful render (`workers/render_job.py:158-176`)
   and offers a checkbox to skip already-rendered takes on a re-scan
   (`ui/main_window.py:286-291`, `680-685`; scanner check at
-  `workers/scanner.py:123-176`). dod-studio' scanner
+  `workers/scanner.py:123-176`). dod-studio's scanner
   (`native/src/hlcr/scanner.rs`) has no equivalent — nothing marks a take as
   done, so re-scanning a folder always re-queues everything in it.
 - **GAP — Global aggregate progress bar.** HLCR shows one fixed-width
@@ -35,7 +39,7 @@ don't regress these while porting).
   (`studio/src/render_pane.js:156-161`), no at-a-glance batch total.
 - **GAP — Table checkbox multi-select + bulk actions.** HLCR's queue table
   has a checkbox column plus Select All/Deselect All/Delete Selected
-  (`ui/main_window.py:265-268`, `929-1007`). dod-studio' render jobs table
+  (`ui/main_window.py:265-268`, `929-1007`). dod-studio's render jobs table
   (`index.html:339-357`) has per-row actions only, no multi-select.
 - **GAP — Per-row Delete Take Folder / Open Take Folder.** HLCR has a 🗑
   button per row (`send2trash` + confirm dialog,
@@ -44,7 +48,7 @@ don't regress these while porting).
   reveal a take's source folder from the render queue.
 - **GAP — Sortable columns + Reset Sort.** HLCR's table is fully sortable
   with a hidden `OrigOrder` column and a "Reset Sort" button
-  (`ui/main_window.py:236`, `274-278`). dod-studio' table has no `data-sort`
+  (`ui/main_window.py:236`, `274-278`). dod-studio's table has no `data-sort`
   wiring (`index.html:340-351`).
 - **GAP — Clear Queue button.** HLCR has a dedicated one
   (`ui/main_window.py:261-263`, `396-403`); dod-studio only supports removing
@@ -55,7 +59,7 @@ don't regress these while porting).
   time to the Render Folders list.
 - **GAP — Take Path column.** HLCR shows the source take folder path as its
   own table column (`ui/main_window.py:202`, `447-450`); not present in
-  dod-studio' table.
+  dod-studio's table.
 - **DELTA — Codec set.** HLCR: ProRes / CineForm / H.264 / DNxHR
   (`core/constants.py:1-26`). dod-studio: ProRes / DNxHR / H.264 (Software) /
   H.264 (NVENC GPU) (`native/src/hlcr/config.rs:6-16`). Neither is a subset
@@ -142,6 +146,7 @@ don't regress these while porting).
 Don't implement all of this at once — it's a large surface. Once the user
 picks a subset (the multi-select/delete/sort/skip-rendered table upgrades
 are probably the highest-value, most self-contained slice), file those
-as GitHub issues individually (the open ones today are #40 and #70),
+as GitHub issues individually (as of 2026-10: #40 is closed, #70 "choose which takes to render" is open, and
+#438 render history covers part of Skip Previously Rendered),
 the same way the Capture Studio parity gaps were triaged from
-`archive/tauri_parity_audit.md`.
+`docs/archive/tauri_parity_audit.md`.

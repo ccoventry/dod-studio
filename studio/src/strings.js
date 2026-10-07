@@ -74,7 +74,7 @@ export const STRINGS = {
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
-    CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
+    CLEAR_UNTRACKED_TITLE: 'Remove demos with no Pending/Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
     CLEAR_SELECTED_TITLE_DEFAULT: 'Check one or more rows first.',
     CLEAR_ALL_BUTTON: 'Clear All',
@@ -100,7 +100,7 @@ export const STRINGS = {
     USE_FOUND_COPY_BUTTON: 'Use found copy',
     useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
-    removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
+    removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
     TRACKED_NOTE_SUFFIX: ' (had tracked work; user confirmed)',
@@ -159,7 +159,7 @@ export const STRINGS = {
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
     secondsSuffix: (n) => `${n}s`,
-    HLAE_PATH_REQUIRED: 'Configure the HLAE and Half-Life executable paths in Batch Capture Config before previewing.',
+    HLAE_PATH_REQUIRED: 'Set the HLAE and Half-Life executable paths in Configuration → Paths before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
     generatedPreviews: (count) => count === 0
       ? 'Every demo already had a preview — nothing new to generate.'
@@ -217,13 +217,12 @@ export const STRINGS = {
     CAPTURE_MODE_VIDEO: 'Video',
     CAPTURE_MODE_VIDEO_TITLE:
         'HLAE pipes frames straight to FFmpeg as one lossless video per take. Same picture, roughly half the disk, and far fewer files. Needs the HLAE FFmpeg row above to be set.',
-    CAPTURE_MODE_SWITCH_TITLE: 'Switch between capturing a bitmap frame sequence and a video file',
     CAPTURE_MODE_LABEL: 'Capture Mode:',
     CAPTURE_MODE_TITLE:
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
-        'OBS records the game window while dod-studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible. Separate HUD is not available on this path.',
+        'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
     // Shown beside the progress bar while a batch runs, not in the settings —
     // there is nothing to configure and no mode it does not apply to. The
     // throttle is the engine's: GoldSrc slows its frame loop when the window is
@@ -252,14 +251,14 @@ export const STRINGS = {
     OBS_UNREACHABLE: 'Could not reach OBS.',
     obsConnectedSummary: (obsVersion, websocketVersion) =>
         `Connected — OBS ${obsVersion} (obs-websocket ${websocketVersion})`,
-    // Read-only — dod-studio always targets its own fixed profile/scene, there
+    // Read-only — DoD Studio always targets its own fixed profile/scene, there
     // is nothing here for the user to change.
     obsUsingSummary: (profile, scene) => `Using OBS profile "${profile}", scene "${scene}"`,
     obsCanvasSummary: (canvas, output, fps) => `Canvas ${canvas}, output ${output} @ ${Math.round(fps)} fps`,
     obsRecordingToSummary: (directory) => `Recording to ${directory}`,
     obsMissingRequests: (requests) => `This OBS is missing: ${requests.join(', ')} — capture cannot run.`,
     OBS_ALREADY_RECORDING: 'OBS is already recording — stop it before starting a batch.',
-    OBS_ALREADY_STREAMING: 'OBS is streaming — dod-studio will not drive its recorder.',
+    OBS_ALREADY_STREAMING: 'OBS is streaming — DoD Studio will not drive its recorder.',
     obsTestFailed: (err) => `OBS test failed: ${err}`,
     OBS_CAPTURE_FPS_LABEL: 'OBS Capture FPS:',
     OBS_CAPTURE_FPS_TITLE:
@@ -269,11 +268,11 @@ export const STRINGS = {
     OBS_ENABLE_HINT:
         'OBS 28+: enable this under Tools → WebSocket Server Settings (the checkbox, not the Connect Info panel).',
     OBS_PROVISION_HINT:
-        'dod-studio manages its own OBS profile/scene ([DoD-Studio]) — your own setup is never touched.',
+        'DoD Studio manages its own OBS profile/scene ([DoD-Studio]) — your own setup is never touched.',
     // ── Orphaned recording left by a previous run ───────────────────────────
     OBS_ORPHAN_TITLE: 'OBS is still recording',
     obsOrphanPrompt: (directory) =>
-        `OBS is still recording into a dod-studio take folder:\n\n${directory}\n\nA previous session ended without stopping it — a crash, a force-quit or a power cut. It will keep recording until the drive fills.\n\nStop it and keep the clip?`,
+        `OBS is still recording into a DoD Studio take folder:\n\n${directory}\n\nA previous session ended without stopping it — a crash, a force-quit or a power cut. It will keep recording until the drive fills.\n\nStop it and keep the clip?`,
     OBS_ORPHAN_STOP: 'Stop and keep',
     OBS_ORPHAN_LEAVE: 'Leave it',
     obsOrphanRecovered: (video) => `Stopped OBS and kept the recording: ${video}`,
@@ -333,7 +332,7 @@ export const STRINGS = {
     // several, and needs a route through rather than a raw OS error.
     HLAE_FFMPEG_ELEVATE_TITLE: 'Administrator rights needed',
     HLAE_FFMPEG_ELEVATE_PROMPT: (ini) =>
-        `${ini} is inside a protected folder, so Windows won't let dod-studio write there directly.\n\nContinue and Windows will ask for permission, then write a two-line file pointing HLAE at your FFmpeg. Nothing else is changed, and an existing ffmpeg.ini is never replaced.`,
+        `${ini} is inside a protected folder, so Windows won't let DoD Studio write there directly.\n\nContinue and Windows will ask for permission, then write a two-line file pointing HLAE at your FFmpeg. Nothing else is changed, and an existing ffmpeg.ini is never replaced.`,
     HLAE_FFMPEG_ELEVATE_CONFIRM: 'Ask Windows for permission',
     HLAE_FFMPEG_ELEVATE_REFUSED: 'Permission was declined, so nothing was written.',
     FFMPEG_OVERRIDE_LABEL: 'FFmpeg Override Path:',
@@ -438,11 +437,10 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
-    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
+    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Capture tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
-    OBS_CHECKING_WARNING: 'Checking the OBS connection…',
     bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
@@ -577,7 +575,6 @@ export const STRINGS = {
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
-    BATCH_FINISHED_WITH_ERRORS: 'Render batch finished with errors — check job rows for details.',
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
     // Mixed-outcome batches report every non-zero count instead of one label,
@@ -598,14 +595,12 @@ export const STRINGS = {
     scanDirError: (err) => `Error scanning render directories: ${err}`,
     STATUS_SCAN_FAILED: 'Status: Scan failed',
     INITIALIZING_RENDER_BATCH: 'Initializing render batch...',
-    STATUS_SCANNING_FOR_TAKES: 'Status: Scanning for takes...',
     RENDER_BATCH_QUEUED: 'Render batch queued successfully!',
     renderBatchError: (err) => `Error executing render batch: ${err}`,
     CANCELLING_RENDER_BATCH: 'Cancelling render batch...',
     nvencWarning: (n) => `${n} concurrent NVENC renders may exceed your GPU's encoder session limit (often 3-5 on consumer GeForce cards). If renders start failing, lower Max Concurrent Renders.`,
     highlightsMarkedRendered: (n) => `${n} highlight(s) marked Rendered.`,
     UNKNOWN_SOURCE_FOLDER: '(unknown)',
-    frameCountLabel: (n) => `${n} frames`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
@@ -926,10 +921,10 @@ export const STRINGS = {
     CANCEL_BUTTON: 'Cancel',
   },
 
-  // ── Unsaved-changes prompt on window close (Capture Studio) ─────────────
+  // ── Unsaved-changes prompt on window close ─────────────
   UNSAVED_CHANGES_MODAL: {
     TITLE: 'Unsaved Changes',
-    MESSAGE: 'Capture Studio has unsaved changes. Save your session before closing?',
+    MESSAGE: 'DoD Studio has unsaved changes. Save your session before closing?',
     SAVE_BUTTON: 'Save & Close',
     DISCARD_BUTTON: 'Close Without Saving',
     CANCEL_BUTTON: 'Cancel',
@@ -961,16 +956,10 @@ export const STRINGS = {
     demoCount: (n) => (n === 1 ? '1 demo' : `${n} demos`),
     missingSummary: (maps, demos) =>
       `${maps === 1 ? '1 map' : `${maps} maps`} needed by ${demos === 1 ? '1 demo' : `${demos} demos`}`,
-    wrongBuildDetail: (map, wanted, found) =>
-      `${map} — these demos need build ${wanted}, the installed map is ${found}`,
-    missingDetail: (map, demos) => `${map} — not installed, needed by ${demos}`,
     installedToast: (map) => `Installed ${map}`,
     alreadyCorrectToast: (map) => `${map} was already the right build`,
     replacedNote: (path) => `Previous map kept at ${path}`,
     downloadFailedToast: (map, err) => `Could not install ${map}: ${err}`,
-    checkFailed: (err) => `Could not check demo maps: ${err}`,
-    UNVERIFIABLE_NOTE:
-      'HLTV demos do not record which map build they need, so those can only be checked for the map being present.',
   },
 
   // The game's own config files setting cvars this app reads. Advisory only —
@@ -1203,7 +1192,7 @@ export const STRINGS = {
     DEMO_SINGULAR: 'demo',
     DEMO_PLURAL: 'demos',
     VERB_REMOVES: 'removes',
-    clearSummaryTracked: (verb, count, plural, trackedCount) => `This ${verb} ${count} ${plural} — ${trackedCount} of them have tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost. This cannot be undone.`,
+    clearSummaryTracked: (verb, count, plural, trackedCount) => `This ${verb} ${count} ${plural} — ${trackedCount} of them have tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost. This cannot be undone.`,
     clearSummaryUntracked: (verb, count, plural) => `This ${verb} ${count} ${plural}. None currently have tracked work on them. This cannot be undone.`,
 
     NO_DEMOS_SELECTED: 'No demos selected — check rows in the queue first.',

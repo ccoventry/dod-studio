@@ -1195,7 +1195,7 @@ fn usage() -> String {
     format!(
         "usage:\n\
          \x20 {COMMAND} max <{STOCK_MAX}..{MAX_LINES}>      lines of kill feed shown at once (default {STOCK_MAX})\n\
-         \x20 {COMMAND} offset <0..{MAX_OFFSET}>     y the feed starts at (default {STOCK_OFFSET})\n\
+         \x20 {COMMAND} offset <{MIN_OFFSET}..{MAX_OFFSET}> y the feed starts at (default {STOCK_OFFSET})\n\
          \x20 {COMMAND} offset default      hand y back to the default layout: while\n\
          \x20                               spectating, just below the spectator bar (at the\n\
          \x20                               top while it is hidden; under the minimap\n\

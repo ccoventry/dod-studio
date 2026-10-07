@@ -1,21 +1,26 @@
 # Silencing and hiding things DoD draws, without editing game files
 
-`dodstudio_mute_voice_commands` and `dodstudio_hide_crosshair`, and why each needed a
-patch rather than a setting. Companion to `docs/goldsrc_scoreboard.md`, which
-covers `dodstudio_hide_scoreboard`.
+The shared pattern behind the `client.dll` patches in `goldsrc-hooks` that hide
+or silence something DoD draws, and why each needed a patch rather than a
+setting. This doc keeps the pattern, `dodstudio_mute_voice_commands` and the
+per-frame re-apply loop; the other topics have their own docs:
+
+| topic | command(s) | doc |
+|---|---|---|
+| scoreboard | `dodstudio_hide_scoreboard` | `docs/goldsrc_scoreboard.md` |
+| crosshair, and the spectator crosshair under `spec_match_pov` | `dodstudio_hide_crosshair`, `dodstudio_spec_match_pov` | `docs/goldsrc_crosshair.md` |
+| any HUD element by name, and the notes on the `CHudDoD*` elements that are not offered | `dodstudio_hide_hudelement` | `docs/goldsrc_hud_elements.md` |
+| the spectator bars (VGUI2 panel) | `dodstudio_hide_spectator_bars` | `docs/goldsrc_spectator_bars.md` |
+| objective icons and timer position | `dodstudio_objectives` | `docs/goldsrc_objective_icons.md` |
 
 Everything here is from offline analysis of DoD 1.3's `client.dll` (`pefile` +
 `capstone`, the house method in `docs/goldsrc_client_dll_internals.md` §10),
 checked by `goldsrc-hooks/tools/verify_voice_crosshair_offsets.py` and
 `verify_spectator_crosshair_offsets.py`.
 
-§6 is the odd one out: it puts something *back* rather than taking it away. It
-lives here because it patches the same function, and because the reason it is
-needed at all is the fork §3 had to map.
-
 ---
 
-## 1. The pattern all three share
+## 1. The pattern they all share
 
 Each of these was already solvable by editing a file the game ships:
 
@@ -113,81 +118,12 @@ are untouched, as is player voice chat (`voice_modenable`) and its
 `sprites/voiceicon.spr` speaker icon, which is `CVoiceStatus` — a separate
 system that has nothing to do with these callbacks.
 
----
-
-## 3. `dodstudio_hide_crosshair`
-
-### Why the stock cvar is not enough
-
-DoD registers a `crosshair` cvar. Setting it to 0 appears to work for one
-frame. `CHud::Redraw` **silently forces the value back** every frame — it is
-one of three cvars in that enforcement block
-(`docs/goldsrc_client_dll_survey.md` §8, step 3). The other two in the same
-block, `r_drawentities` and `cl_lw`, do not merely reset: they quit the game,
-which is why `native/src/patch/cfg_scan.rs` refuses them as typed commands.
-
-So the gap is not "there is no setting". It is "the setting is overwritten
-before it can take effect".
-
-### The patch
-
-`CHudDoDCrossHair` is an ordinary HUD element, reached through `CHud::Redraw`'s
-element walk with `Draw` in vftable slot 3. Its `Draw` begins:
-
-```asm
-client+0x2cd20  mov  eax, [esp+4]      ; 8B 44 24 04
-client+0x2cd24  push esi               ; 56
-client+0x2cd25  push eax
-client+0x2cd26  mov  esi, ecx
-client+0x2cd28  call client+0x2d2b0
-```
-
-Writing `33 C0 C2 04 00` over the first five bytes makes it
-`xor eax, eax; ret 4` — **byte-for-byte `CHudBase::Draw`**, the do-nothing base
-implementation at `client+0x21940` that every element inherits and most
-override. The element stays in the list, still gets called, and does what an
-element that draws nothing does. Reverting restores the five bytes the
-signature already proved were there.
-
-### Why the function and not the vftable
-
-Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — is
-one dword and cheaper. It also needs the vftable's address at runtime, which
-means resolving RTTI in the loaded module or signature-matching the constructor
-that stores it. Patching the function needs neither. The general
-`dodstudio_hudelement` command in #265 is still worth having; this is not it and
-does not block it.
-
-### Both the POV and the spectator crosshair
-
-One function draws both, and the stub is at its first instruction, so both die.
-`Draw` branches on the observer-mode global at `client+0x1e88d4`:
-
-| observer mode | what happens |
-|---|---|
-| `0` (not spectating) | the POV crosshair — **the only path that reads the `crosshair` cvar** |
-| `3` or `4` | `client+0x2d1f0`, the spectator crosshair (roaming and in-eye in HL's numbering) |
-| anything else | nothing is drawn |
-
-**This answers the open question in #219.** POV and HLTV first-person differ
-because the spectator branch never consults the `crosshair` cvar. Even if
-`CHud::Redraw` were not forcing the value back every frame, `crosshair 0` could
-not have hidden the spectator crosshair — no code path reads it there.
-
-### What is not covered
-
-DoD also calls the engine's own `pfnSetCrosshair` (`gEngfuncs[13]`) from its
-weapon-sprite code, once with a null sprite (clearing it) and once with a real
-one. That is a second, engine-drawn crosshair, this does not touch it, and
-whether it is ever visible has **not** been established. A live test settles it
-in seconds: if anything is still on screen with this set to 0, that is what it
-is.
 
 ---
 
-## 4. Re-applied every frame, from the bytes
+## 3. Re-applied every frame, from the bytes
 
-All four settings (including `dodstudio_hide_scoreboard`) are handed to their
+Every one of these settings (the scoreboard, voice, crosshair, spectator crosshair and HUD element hides, and the spectator bars filter) is handed to its
 `apply` every frame rather than compared against a cached flag.
 
 That is not defensive habit. **If the engine ever unloads and reloads
@@ -204,385 +140,16 @@ nothing either way.
 `commands.rs`'s `poll_code_patch` is that shared loop; `apply` returns whether
 it wrote, so the log line stays change-triggered.
 
-For §6 the same loop earns its keep twice over: polling is also how it notices
+For the spectator crosshair (`docs/goldsrc_crosshair.md` §2) the same loop earns its keep twice over: polling is also how it notices
 `cl_xhair_style` being changed under it, with no cvar callback needed.
 
----
-
-## 5. The spectator bars
-
-> **Done since (2026-09-30):** `dodstudio_hide_spectator_bars`, by the route
-> the last paragraph of this section guessed at, one level down: vgui2's own `IPanel::PaintTraverse`
-> rather than the panel's vtable. See `docs/goldsrc_spectator_bars.md`. The
-> rest of this section is the state before that.
-
-`mirv_disable_specmenu` is HLAE's equivalent, and it fails on DoD with
-`"Error: Hook not installed."` — its per-game
-`TeamFortressViewport_UpdateSpecatorPanel` address exists for `tfc` and `valve`
-and not for `dod`. (`AfxHookGoldSrc.dll` contains no `"dod"` string at all;
-its pattern database is cstrike 14 entries, tfc 7, valve 1, dod 0.)
-
-DoD has the machinery: `CDoDSpectatorGUI` (vftables `+0x1aab84`/`+0x1aab3c`),
-`CSpectatorGUI`, `ISpectatorInterface`, `DoDViewport`, `TeamFortressViewport`,
-`CBackGroundPanel@TeamFortressViewport`, and the two `.res` files above.
-
-What has **not** been established is the per-frame function that decides the
-panel is visible — DoD's equivalent of `UpdateSpectatorPanel`. The construction
-path is known (`+0x82df9` loads `Spectator.res`; the constructor is at
-`+0x1d9ec`), but that runs once, and something re-shows the panel afterwards.
-
-The likely shape is stubbing `PaintTraverse` on the spectator GUI's vgui2
-panel vftable, which paints a panel *and its children* and so would take the
-bars, the dropdowns and the buttons together in one dword. That needs the
-vgui2 `Panel` vtable layout for this build, which is the remaining work.
-
-Lower priority than it looks: unlike the voice commands, the spectator bars
-already have a working `.res` workaround.
 
 ---
 
-## 6. The spectator crosshair (`dodstudio_spec_match_pov`)
-
-> This had a cvar of its own, `dodstudio_match_pov_crosshair`, until
-> 2026-10-01. It is now one of the things `dodstudio_spec_match_pov` turns
-> on. Where the text below says `dodstudio_match_pov_crosshair`, read
-> `dodstudio_spec_match_pov`.
-
-The other half of §3's finding. Mapping the fork to prove the hide covered both
-crosshairs also showed *why* they never look alike:
-
-```text
-mode 0        POV. Reads cl_xhair_style. Non-zero -> client+0x2ced0, which
-              draws a 64x64 tile out of customXHair.spr. Zero -> the HUD
-              sprite list's crosshair at client+0x2cda0.
-mode 3 or 4   client+0x2d1f0. Hardcodes crosshairs.spr and a 24x24 rect, and
-              reads no cvar at all.
-```
-
-So a custom crosshair set up for play is simply absent while spectating, and
-what you get instead is a 24x24 tile of a 128x128 sprite — 576 pixels to make a
-crosshair out of.
-
-### Nothing needs loading
-
-`CHudDoDCrossHair::VidInit` loads **both** sprites unconditionally:
-
-```asm
-client+0x2cc82  call pfnSPR_Load     ; "sprites/crosshairs.spr"
-client+0x2cc88  mov [esi+0x60], eax
-client+0x2cca0  call pfnSPR_Load     ; "sprites/customXHair.spr"
-client+0x2cca6  mov [esi+0x74], eax
-```
-
-The custom sprite's handle is already on the object, unused on this path.
-
-### Five fields in one 57-byte span
-
-```asm
-client+0x2d205  mov dword [ecx+0x64], 0x18   ; left   = 24
-client+0x2d20c  mov dword [ecx+0x6c], 0      ; top    = 0
-client+0x2d213  mov dword [ecx+0x68], 0x30   ; right  = 48
-client+0x2d21a  mov dword [ecx+0x70], 0x18   ; bottom = 24
-...
-client+0x2d23b  mov eax, [ecx+0x60]          ; the sprite handle
-```
-
-`0x60` becomes `0x74`, and the four immediates become the selected tile.
-Swapping the handle alone would sample a 24x24 corner out of a 256x256 sprite;
-changing the rect alone would sample off the end of a 128x128 one. One change,
-one patch, one signature.
-
-### The grid is DoD's, not ours
-
-`client+0x2ced0` — the POV path — computes its rect as:
-
-```text
-if (style > 16) style = 16;
-style--;
-col = style % 4;  row = style / 4;
-left = col << 6;  right  = (col + 1) << 6;
-top  = row << 6;  bottom = (row + 1) << 6;
-```
-
-A 4x4 grid of 64x64 tiles, which is exactly how the shipped `customXHair.spr`
-is laid out (256x256, one frame, sixteen crosshairs — read straight out of the
-`.spr`). `spectator_crosshair::tile_rect` reproduces that arithmetic rather
-than inventing a layout, so the spectator view gets the *same* tile the player
-sees, whatever they set.
-
-`cl_xhair_style 0` is not tile 0: zero sends the POV path to a different
-function entirely, so there is no custom crosshair to match and this leaves the
-stock rect alone rather than guessing.
-
-### When it is hidden
-
-The spectator branch draws its crosshair whenever the camera is in a player's
-eyes. The player's own view does not: `ShouldDrawCrossHair` (`client+0x2d0e0`)
-hides it while the gun is lowered and for weapons that have none. With
-`dodstudio_spec_match_pov 1` the spectated view hides it in the same states
-(#310).
-
-**The reference is the game being played, not a POV demo.** The two differ.
-Recording POV demos to frames and looking for the crosshair in each one
-(about 13,000 frames, six demos) gives:
-
-| state | playing live | in a POV demo | spectated, with the switch |
-| --- | --- | --- | --- |
-| sprint key held and moving | hidden | hidden, to the frame | hidden |
-| in the air after a jump (not a plain fall) | hidden | **shown** (2 of 35) | hidden |
-| going prone, getting up | hidden | hidden 1.53s from the start | hidden 1.5s |
-| prone and moving | hidden | hidden, to the frame | hidden |
-| on a ladder | hidden | hidden | hidden |
-| knife, spade, Springfield, scoped K98, scoped Enfield | hidden | hidden | hidden |
-| MG42, MG34, .30 cal not deployed | hidden | hidden, back the instant it deploys | hidden |
-| dead | hidden | hidden | hidden |
-| 0.5s after drawing a weapon (0.8s K43, 0.68s Colt, 1s Webley and rockets) | hidden | **shown** (4 of 706 frames hidden) | hidden |
-| switching to or from a grenade | shown | shown | shown |
-| reloading | hidden | **shown** (0 of 75) | hidden |
-| 1.6s after a bolt rifle's shot | hidden | **shown** (0 of 132) | hidden |
-
-The four that differ are driven by the player's own client predicting his
-weapon and his jump (`flBoltHideXHair`, `g_iinjump`), and none of that runs
-while a demo plays. Shown both, the user chose live play (2026-10-01). Until
-then this matched the POV demo; that version is #556's second commit.
-
-The switch times come from dod13-client's `dlls/wpn_shared/*.cpp`: most
-weapons deploy through `DefaultDeploy` (0.5s), and the `TimedDeploy` ones set
-their own. Switching *from* a grenade would start the timer by the code, but
-the user saw no hide either way when playing, so neither direction starts it.
-
-Every state it does hide is read from what an HLTV demo carries for each
-player (`anim_fix/crosshair_rule.rs`):
-
-| POV's test | read from |
-| --- | --- |
-| sprint key and a move key | gait `dod_sprint`. On the same player in his POV demo and the HLTV demo of that half, the HLTV gait matched his sprint key 99.7% of the time |
-| jump | body `jump`, from take-off until landing |
-| weapon switch | the viewmodel changing, plus the weapon's switch time |
-| reload | the body playing a `*_reload` sequence |
-| bolt cycle | a shot from the K98 or Enfield, then 1.6s |
-| prone transition | 1.5s from the body entering `get_down` / `get_up` (those run 1.3s and 2.0s, so neither length is the answer) |
-| prone and a move key | gait `prone_forward`. Gait `dod_crawl` is the *crouched* walk and hides nothing |
-| ladder | `movetype` 5 |
-| weapon | the third-person model held |
-| machine gun deployed | body `sandbag_*` / `bipod_*` |
-
-Where it is not exact: crawling can read up to half a second long (the gait
-stays `prone_forward` while the player slides to a stop); fully underwater
-and the scoped FG42 while zoomed are left out, because nothing replicated says
-so reliably.
-
-The hide costs no new hook. The spectator draw (`client+0x2d1f0`) already has
-a gate of its own, 13 bytes just before the rect: it skips the crosshair while
-the view is zoomed (`0 < fov < 90`). While the player's own view would have no
-crosshair, those 13 bytes become a jump to the same exit; when the state ends,
-the stock bytes go back.
-
-An empty rect does **not** work, and was the first attempt: the engine takes a
-rect with no size to mean the whole sprite, so all sixteen tiles of
-`customXHair.spr` appeared below and right of the screen centre.
-
-To check it against a recording: `goldsrc-hooks/tools/crosshair_frames.py`
-finds the crosshair in recorded frames, and compares them with the hook's own
-trail (`hook`) or with a POV demo's state from
-`analysis/examples/crosshair_pov_probe.rs` (`pov`). It looks at the screen
-centre only, which is how the whole-sheet draw got past it at first; look at a
-frame too. On `monday-wsod25_r07_m1_h1_hltv`, in a stretch where the spectated
-player sprints, goes prone, crawls and gets up, the frames and the trail agree
-on 884 of 919 (pre-Anniversary) and 929 of 967 (25th Anniversary); every miss
-is the one frame at a change.
-
-### It loses to §3, by construction
-
-`dodstudio_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
-patches instructions *inside* a function that is then never reached, so hiding
-wins with no interlock written anywhere.
-
-### What this does not answer
-
-#219 asks why the POV and HLTV first-person crosshairs differ. §3 found half of
-it — the spectator branch never reads the `crosshair` cvar. This is the other
-half: it never reads `cl_xhair_style` either. The third was *when* it draws,
-answered above. Still open: accuracy spread, which the POV crosshair shows and
-a spectator cannot know (it comes from the player's own prediction).
-
----
-
-## 7. `dodstudio_hide_hudelement` -- the general case
-
-Sections 2, 3 and 6 each patch one function for one purpose, and section 3's
-own module doc says why it is not this: patching a function needs no vftable
-address and reverts to bytes its own signature already proved were there. Fine
-for one element; not a plan for twelve.
-
-`CHud::Redraw` walks a linked list and calls each element's **vftable slot 3**,
-`Draw`. `CHudBase::Draw` is `xor eax, eax; ret 4` -- a complete no-op with the
-right calling convention, which five of the twenty-two elements already use
-unchanged because they never override it.
-
-So hiding any element is **writing that one address into its slot 3**. No
-signature, no detour, no stub, no relocation, nothing left mid-instruction.
-Showing it again is writing back the dword that was there.
-
-### Why the vftable and not `m_iFlags`
-
-Clearing bit 0 of an element's `m_iFlags` is per-*instance*, which sounds
-better. The game writes that field itself from `Init`, `VidInit`, `Reset` and
-in some cases `Draw`, so it would have to be re-applied against the game's own
-writes. A vftable is written once by the constructor and never touched again.
-
-### Fixed RVAs, verified by name
-
-This is the one module here built on fixed offsets rather than a signature,
-because a vftable has no code to sign. What replaces the signature is better
-than one: DoD's `client.dll` ships **MSVC RTTI**, so `vftable[-1]` is a
-complete object locator whose type descriptor carries the class' decorated
-name. Every entry in the table names the class it expects
-(`.?AVCHudSayText@@`), and nothing is written until the loaded module agrees.
-A wrong build fails loudly, by name.
-
-`goldsrc-hooks/tools/verify_hudelements.py` checks the same thing offline, and
-adds the check the DLL cannot make for itself: **completeness**. It finds every
-class in the image whose `Init` calls `CHud::AddHudElem` and which overrides
-`Draw`, and fails if any of them is missing from the table (or a documented
-exclusion). On the shipped `client.dll` that is 22 registering classes, 17 of
-which draw -- 10 in the table, plus seven deliberately excluded below.
-
-### The five that are not listed
-
-`CClientEnvModel`, `CHudTextMessage`, `CParticleShooter`, `CVoiceStatusHud` and
-`CWeatherManager` do not override `Draw`. They are on the list to receive user
-messages and to be ticked, not to draw, so hiding them is already true and
-offering it would only invite the question of why it did nothing.
-
-`CVoiceStatusHud` is also the one element with **two** vftables (`+0xabb48` and
-`+0xabb24`), because it inherits from both `IVoiceHud` and `CHudBase`; only the
-second is the element's. Worth knowing before anyone adds an entry.
-
-### The seven that override `Draw` and still aren't listed
-
-Each of these registers itself and overrides `Draw`, so each would fail the
-completeness check above like a genuine miss unless named as an exception.
-None of them is a miss, but for three different reasons.
-
-`CHudAmmo` draws (the ammo counter and the weapon-select menu) for real:
-disassembly of `client+0x28b00` (`CHudAmmo::Draw`, 2604 bytes) shows every
-`FillRGBA`/`SPR_Draw` pair in the function landing after one of its four
-`CHud::ShouldDraw(3)` calls, and nothing drawing before the first one. The
-stock `cl_hud_ammo` cvar already hides all of it -- unlike
-`crosshair`/`r_drawentities`/`cl_lw`, `cl_hud_ammo` is not one of the cvars
-`CHud::Redraw` forces back every frame (§3 above), so setting it from a config
-actually sticks. `objectives` and `icons` below were checked the same way and
-kept, because both draw something *before* their own `ShouldDraw` gate that no
-stock cvar reaches.
-
-The other five don't draw anything at all, in this build, regardless of any
-cvar or hook:
-
-- `CHudDoDCommon::Draw` (`client+0x2c6f0`, 412 bytes) is not the "shared HUD
-  backdrop" the name implies. No `FillRGBA`/`SPR_Draw` call anywhere in it --
-  instead it fires `+attack;wait;-attack` four seconds after the player you're
-  spectating dies (cycling the observer target), copies two per-team gameplay
-  flags (paratrooper mode, infinite lives) other elements read, and clears the
-  sniper scope after a server-driven camera-view event ends. Confirmed against
-  the real DoD 1.3 client source, `whamemer/dod13-client`'s
-  `cl_dll/dod_common.cpp` -- `CHudDoDCommon::Draw` there matches the
-  disassembly instruction for instruction. Live testing this element bore
-  that out: nothing observable changed either way, because there was nothing
-  to see.
-- `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight bytes,
-  no calls. The overview map is rendered some other way entirely; not yet
-  found, plausibly VGUI2 like the scoreboard.
-- `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks a
-  flag byte and an observer sub-mode value, then returns a plain boolean.
-  Neither function contains a `FillRGBA` or `SPR_Draw` call. There is no
-  mortar aiming HUD in this build to hide.
-- `CHudSpectator::Draw` (`client+0x38000`) is 45 bytes ending in a real
-  `ret 4` immediately followed, with no padding, by an unrelated function --
-  a naive linear disassembly scan folds the two together and badly overstates
-  the size, so measure carefully if re-checking this one. The real function
-  checks observer mode and conditionally calls a method on what looks like a
-  VGUI2 interface pointer, plausibly telling a panel to hide, but never draws.
-- `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
-  observer-mode global, then unconditionally returns 1. The actual scope
-  vignette is a `ScreenFade` engine call inside `CHudScope::Think` (vftable
-  slot 4, not 3), gated on the *local* player's own current weapon -- never
-  populated while spectating, live-confirmed: no scope overlay appears in a
-  demo, matching the disassembly exactly.
-
-Writing `CHudBase::Draw` over a function that already draws nothing changes
-nothing observable, so offering these five would only mislead.
-
-One more is excluded for a third reason -- it draws for real, but nothing has
-ever been seen to make it draw:
-
-- `CHudStatusIcons::Draw` (`client+0x471c0`) loops over four icon slots and
-  calls `SPR_DrawAdditive` for any that hold a sprite handle -- a genuine
-  draw, unlike the five above. What populates a slot is the `StatusIcon` user
-  message (`(enable byte, icon-name string, [r,g,b] if enabling)`, confirmed
-  against `client.dll` itself via `MsgFunc_StatusIcon`/`EnableIcon`, not just
-  source). That message never appeared in 661 real demos checked: the local
-  test library, four demos purpose-recorded trying to trigger it, and 622
-  more from a full install scan. The one lead disassembly turned up --
-  `EnableIcon`'s `strstr(name, "grenade")` hack that plays `weapons/timer.wav`,
-  suggesting a grenade-cook countdown icon -- doesn't hold up: that sound file
-  doesn't exist in any install, and `sprites/hud.txt` has no sprite registered
-  under the plain name `"grenade"` for `GetSpriteIndex` to resolve against.
-  Excluded because there is nothing left to test it against, not because it
-  is proven dead the way the five above are.
-
-### `vgui2print` is narrower than its name suggests
-
-`CHudVGUI2Print` has three real callers, but only one goes through the
-vtable slot this element hides:
-
-- `CHudDoDCommon` (key `Dod_mg_reload` -- "Deploy your machine gun to
-  Reload!") calls a *queueing* method (`client+0x3a990`) that only writes
-  text/position/color/expiry into `CHudVGUI2Print`'s own fields. The pixels
-  are drawn later, when `CHudVGUI2Print::Draw` itself runs and reads that
-  state -- the vtable-dispatched path this element's hide actually
-  intercepts. Live-confirmed.
-- `CObjectiveIcons` (key `clan_warmup_mode` -- "Warmup Mode") calls a
-  *drawing* method (`client+0x3a3f0`) that renders immediately via a shared
-  low-level helper (`client+0x3a4b0`) at a fixed address, never touching
-  `CHudVGUI2Print::Draw` or its vtable slot. Hiding `vgui2print` does not
-  hide this banner.
-- `CHudMenu::Draw` calls that same low-level helper directly too, for its
-  own rich-text menu list (`\`-prefixed color/newline escape codes,
-  word-wrapped one call per word). Also untouched by hiding `vgui2print` --
-  `menu`'s own vftable hide is what stops this, by not letting
-  `CHudMenu::Draw` run at all.
-
-So `vgui2print` only ever hides queued, timed prompts like the MG-reload
-message. Anything drawn immediately through the shared helper is a different
-code path this element's vtable slot cannot see.
-
-### `all 1` is refused
-
-`all 0` shows everything again, which is what a way out looks like. `all 1` is
-refused on purpose: it would hide `CHudMenu` too, and a session that cannot see
-the class menu is a support question rather than a feature.
-
-### What it reaches that nothing else did
-
-Chat, the kill feed, the status bar under the crosshair, the team and class
-menus, the tram controls, the objective icons, and `CHudDodIcons` -- which
-owns **both** the MG-deploy icon (#288) and the capture-area icon (#289),
-along with blood and bandage. Those two were filed
-separately because the icons look unrelated; one element draws all four, so
-they are one switch, and separating them would mean patching inside a
-1507-byte `Draw`.
-
-The objective-icons element (`objectives`) is coarser than its name suggests
-too: `CObjectiveIcons::Draw` also owns the reinforcement-wave countdown clock
-(a separate, internally-gated block inside the same function, distinct from
-`CHudDodIcons`'s own reinforcement icon), so hiding `objectives` hides that
-clock along with the flags/capture-progress row it's named for -- there is no
-way to keep one and drop the other without patching inside the function.
-
-It does **not** reach the VGUI2 spectator bars (§5) or the auto-help panel
-(#286). Those are not HUD elements and are not on this list. It also does not
-reach the overview map, a mortar aiming HUD, or the sniper scope vignette --
-see the five exclusions above, none of which turned out to be drawn by any
-`Draw` override at all.
-
+## 4. The spectator bars
+
+Done: `dodstudio_hide_spectator_bars` (2026-09-30), by vgui2's own
+`IPanel::PaintTraverse`. See `docs/goldsrc_spectator_bars.md`. This section used
+to hold the pre-shipping guesswork; the durable parts of it (HLAE's
+`mirv_disable_specmenu` failing on DoD with `"Error: Hook not installed."`, and
+the `AfxHookGoldSrc.dll` pattern counts) moved to that doc's history.

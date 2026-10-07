@@ -439,7 +439,7 @@ pub async fn run_render_job(
         ));
         // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
         // during a large copy (Custom Output/lossless OBS captures — see
-        // docs/obs_alternate_capture.md — can run tens of GB) instead of
+        // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
         // being silently ignored until the whole file has already moved.
         match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
             Ok(true) => {
