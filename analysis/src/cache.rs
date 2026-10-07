@@ -6,7 +6,7 @@
 //! `%APPDATA%\dod-studio\analyzer_cache`; callers pass it in, so this crate
 //! needs no app-data lookup of its own.
 //!
-//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`]: who is
+//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`](crate::cache::DemoPlayers): who is
 //! in the demo and who recorded it, a few hundred bytes, so a list of
 //! hundreds of demos can be filtered by player without loading whole analyses
 //! (#437, #174).
@@ -345,8 +345,8 @@ mod tests {
     #[test]
     fn only_a_17_digit_id_is_a_steam_id() {
         assert_eq!(
-            steam_id_of("76561197977930126"),
-            Some("76561197977930126".to_string())
+            steam_id_of("76561197975574370"),
+            Some("76561197975574370".to_string())
         );
         assert_eq!(steam_id_of("PLAYER_2761379"), None);
         assert_eq!(steam_id_of("CONNECTION_4"), None);
@@ -355,7 +355,7 @@ mod tests {
     /// The layout PR #486's `native::player_index` reads and writes.
     #[test]
     fn the_players_file_is_486s_layout() {
-        let json = r#"{"size_bytes":1,"modified_unix_secs":2,"demo":{"demo_type":"POV","players":[{"id":"76561197977930126","steam_id":"76561197977930126","name":"chris","recorder":true}]}}"#;
+        let json = r#"{"size_bytes":1,"modified_unix_secs":2,"demo":{"demo_type":"POV","players":[{"id":"76561197975574370","steam_id":"76561197975574370","name":"chris","recorder":true}]}}"#;
         let entry: PlayersEntry = serde_json::from_str(json).unwrap();
         assert!(entry.demo.players[0].recorder);
         assert_eq!(serde_json::to_string(&entry).unwrap(), json);

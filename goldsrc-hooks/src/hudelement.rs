@@ -35,7 +35,7 @@
 //! string `.?AVCHudAmmo@@` and friends before anything is written. A wrong
 //! build fails loudly and by name.
 //!
-//! (All three of the user's Half-Life installs ship a byte-identical
+//! (All three Half-Life installs it was checked against ship a byte-identical
 //! `client.dll`, so this is insurance rather than portability.)
 //!
 //! ## What is not listed
@@ -78,7 +78,8 @@
 //!   nothing changing for exactly this reason -- there was nothing to see.
 //! - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight
 //!   bytes, no calls. The overview map is rendered some other way entirely
-//!   (not yet found; likely VGUI2, like the scoreboard).
+//!   (its draw call is not traced; `overview_map` moves it through
+//!   the rectangles `CHud::ComputeOverviewMapRects` caches).
 //! - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks
 //!   a flag and an observer sub-mode, then returns a plain boolean. Neither
 //!   function contains a single `FillRGBA`/`SPR_Draw` call. There is no mortar
@@ -464,9 +465,20 @@ pub fn status() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    /// Serialises the tests that set bits in `HIDDEN`: cargo runs tests in
+    /// parallel, and one test's `show_all()` could otherwise clear the bit
+    /// another had just set. `pub(crate)`: `commands.rs`'s status test sets
+    /// one too.
+    static HIDDEN_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn lock_hidden() -> std::sync::MutexGuard<'static, ()> {
+        // A poisoned lock means another test already failed; take it anyway.
+        HIDDEN_TESTS.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     /// `STOCK_DRAW` is a fixed-size array indexed by position in `ELEMENTS`.
     /// A table that outgrew it would index out of bounds on the eighteenth
@@ -556,6 +568,7 @@ mod tests {
 
     #[test]
     fn hiding_and_showing_move_only_the_one_bit() {
+        let _statics = lock_hidden();
         show_all();
         let crosshair = find("crosshair").unwrap();
         let chat = find("saytext").unwrap();
@@ -581,6 +594,7 @@ mod tests {
     /// the test that says that was deliberate.
     #[test]
     fn setting_the_same_state_twice_is_idempotent() {
+        let _statics = lock_hidden();
         show_all();
         let train = find("train").unwrap();
         set_hidden(train, true);
@@ -594,6 +608,7 @@ mod tests {
 
     #[test]
     fn the_listing_names_every_element_and_its_state() {
+        let _statics = lock_hidden();
         show_all();
         set_hidden(find("saytext").unwrap(), true);
         let listing = listing();
@@ -619,6 +634,7 @@ mod tests {
 
     #[test]
     fn status_names_what_is_hidden() {
+        let _statics = lock_hidden();
         show_all();
         assert!(status().contains("draws normally"), "{}", status());
         set_hidden(find("deathnotice").unwrap(), true);

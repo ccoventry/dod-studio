@@ -20,7 +20,7 @@ Four files carry a `version` field, but they don't all mean the same thing:
 
 ## Stable channel — automatic
 
-`.github/workflows/release_stable.yml` fires on every push to `main`. Since `main` is ruleset-protected (PR-only, no direct pushes), every push here really is a `dev` → `main` release-cutover merge — there's no other kind of push that lands on `main`.
+`.github/workflows/release_stable.yml` fires on every push to `main`. Since `main` is ruleset-protected (PR-only, no direct pushes), every push here really is a `dev` → `main` release-cutover merge — there's no other kind of push that lands on `main`. `.github/workflows/main_only_from_dev.yml` enforces the other half: a PR into `main` from any branch but `dev` fails its required check.
 
 **Version is auto-computed, no manual entry required:**
 1. Read `Cargo.toml`'s checked-in version, take just the `major.minor` (e.g. `0.1`).
@@ -31,7 +31,7 @@ So a routine merge to `main` just becomes the next patch automatically — `0.1.
 
 The workflow also accepts an optional `workflow_dispatch` `version` input — a manual override for the rare case that needs one (e.g. skipping a patch number, or re-cutting a release). Leave it blank for the normal auto-computed path.
 
-Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version>`. The `stable` update channel polls this via GitHub's `/releases/latest` alias, which only ever resolves to a release like this one.
+Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version>` and named `DoD Studio v<version>` (releases up to v0.1.3 were named "DoD Tools Studio"). The body is GitHub's generated release notes, built from the titles of the PRs merged since the last release (`generateReleaseNotes`, #490). The `stable` update channel polls this via GitHub's `/releases/latest` alias, which only ever resolves to a release like this one.
 
 ## Experimental channel — manual, on-demand
 
@@ -44,11 +44,13 @@ Published as a real (non-draft, non-prerelease) GitHub Release tagged `v<version
   2. The run number is monotonically increasing across dispatches, unlike a git short-SHA (which sorts alphabetically, not chronologically) — so a second experimental build always looks newer than the first.
   3. The MSI/WiX bundler Tauri uses on Windows only accepts a single, purely-numeric pre-release segment. `-dev.<sha>` and `-dev.<run number>` were both tried and rejected by real builds before landing on the current bare `-<run number>` — see the workflow's own comment and [this Tauri discussion](https://github.com/tauri-apps/tauri/discussions/7600) for the failure mode.
 
-Published as a **prerelease**, always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
+Published as a **prerelease** named `DoD Studio <version> (experimental)`, with the same generated release notes, always overwriting the same fixed tag `experimental-latest` (the previous `experimental-latest` release+tag is deleted first). The `experimental` update channel polls this via the fixed URL `.../releases/download/experimental-latest/latest.json` — a direct tag reference, not `/releases/latest`, since GitHub's `/latest` alias never resolves to a prerelease.
 
 ## Bumping to a new minor or major version
 
 Not automatic on either channel — deliberately a human decision. Edit `studio/src-tauri/Cargo.toml`'s `version` field (e.g. `0.1.0` → `0.2.0`) as part of whatever PR is landing the milestone that justifies it, same as any other code change. The next push to `main` after that lands will have no existing `v0.2.*` tags yet, so `release_stable.yml`'s patch computation naturally starts that new line at `0.2.0`.
+
+A push to `main` also runs `.github/workflows/sync_wiki.yml`, which publishes `docs/wiki/` and the generated Commands page to the GitHub wiki (#493); that is separate from the releases.
 
 ## Open questions (not yet decided — your call)
 

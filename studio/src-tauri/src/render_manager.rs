@@ -207,7 +207,7 @@ pub struct RenderManager {
     /// drive check accounts for what other in-flight jobs have already
     /// claimed instead of only seeing the drive's live free-space number
     /// (which several jobs starting in the same scheduler tick would all
-    /// see as identical). See docs/capture-render-studio-merge-scope.md §4.
+    /// see as identical).
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
 }
 
