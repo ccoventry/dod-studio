@@ -1,3 +1,7 @@
+> **Archived 2026-10.** Done: friction points 2, 3, 4, 5, 7, 8; #1 (per-clip progress, #36) shipped; Reveal (idea 1) shipped; #9 is addressed (hand-set status shows a mark and an Undo toast, features.md 2.x).
+> Still open: friction 6 (the 500 ms poll) and ideas 3, 5, 7 ([#107](https://github.com/ccoventry/dod-studio/issues/107), [#108](https://github.com/ccoventry/dod-studio/issues/108), [#110](https://github.com/ccoventry/dod-studio/issues/110)).
+> Ideas 2, 6, 8 now live only in the parking-lot issue [#452](https://github.com/ccoventry/dod-studio/issues/452) (was #106/#109/#111, folded in 2026-09-28); the code excerpts and line numbers below are historical.
+
 # Capture / Render / Movie-Making UX Audit
 
 Scope: the capture → patch → render → movie-making pipeline only (Capture Studio,
@@ -12,27 +16,27 @@ current as of `audit/capture-render-ux` (branched from `feature/capture-block-ma
 **Section 1 — Friction Points**
 | # | Finding | Status |
 |---|---|---|
-| 1 | Capture progress is a black box | Open — tracked as [issue #36](https://github.com/ccoventry/dod-studio/issues/36) |
+| 1 | Capture progress is a black box | ✅ Fixed — [issue #36](https://github.com/ccoventry/dod-studio/issues/36) closed (per-clip progress; #506 added a summary strip) |
 | 2 | Three disagreeing disk-space gates | ✅ Fixed 2026-08-23 (`fix/capture-disk-space-gates`) |
 | 3 | Settings written to disk on every keystroke | ✅ Fixed |
 | 4 | Export-dir fallback computed three times | ✅ Fixed |
 | 5 | `export_manager.rs` is dead code | ✅ Fixed |
-| 6 | hl.exe liveness polling sleeps 500ms | Open — not yet tracked as an issue |
+| 6 | hl.exe liveness polling sleeps 500ms | Partly open — still 500 ms outside OBS mode (16 ms in OBS mode, `capture_engine.rs`); process-list reads throttled to 250 ms (#516). Not tracked as an issue |
 | 7 | Render concurrency isn't hardware-aware | ✅ Fixed |
 | 8 | Render Studio folder scan has no incremental/progress path | ✅ Fixed |
-| 9 | Manual "Rendered" status bypasses the verified-take pipeline | Open — not yet tracked as an issue |
+| 9 | Manual "Rendered" status bypasses the verified-take pipeline | ✅ Addressed — a hand-set status shows a ✎ mark and an Undo toast, and a verified capture/render replaces it (`docs/features.md`) |
 
 **Section 2 — Feature Ideas**
 | # | Idea | Status |
 |---|---|---|
 | 1 | "Reveal in Explorer" on render jobs/takes | ✅ Fixed |
-| 2 | Burn kill-timeline label into rendered clip | Open — not yet tracked as an issue |
-| 3 | Concatenate selected rendered clips into one movie | Open — not yet tracked as an issue |
-| 4 | Live capture progress with current-clip name and ETA | Partially covered by [issue #36](https://github.com/ccoventry/dod-studio/issues/36) (progress/current-clip; ETA not explicitly scoped there) |
-| 5 | Named render presets | Open — not yet tracked as an issue |
-| 6 | Watch-folder auto-import for new demos | Open — not yet tracked as an issue |
-| 7 | Export a highlight/take manifest (EDL-style) | Open — not yet tracked as an issue |
-| 8 | Contact-sheet/scrub preview of a take | Open — not yet tracked as an issue |
+| 2 | Burn kill-timeline label into rendered clip | Parking lot — [#452](https://github.com/ccoventry/dod-studio/issues/452) (was #106, closed not planned) |
+| 3 | Concatenate selected rendered clips into one movie | Open — [#107](https://github.com/ccoventry/dod-studio/issues/107) |
+| 4 | Live capture progress with current-clip name and ETA | Mostly shipped ([issue #36](https://github.com/ccoventry/dod-studio/issues/36) closed); ETA was not scoped there and has no issue |
+| 5 | Named render presets | Open — [#108](https://github.com/ccoventry/dod-studio/issues/108) |
+| 6 | Watch-folder auto-import for new demos | Parking lot — [#452](https://github.com/ccoventry/dod-studio/issues/452) (was #109) |
+| 7 | Export a highlight/take manifest (EDL-style) | Open — [#110](https://github.com/ccoventry/dod-studio/issues/110) (Export Marker List CSV, #501, is part of it) |
+| 8 | Contact-sheet/scrub preview of a take | Parking lot — [#452](https://github.com/ccoventry/dod-studio/issues/452) (was #111) |
 
 ---
 

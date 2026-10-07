@@ -7,7 +7,7 @@
 //! shows the crosshair in four of the states below -- the switch timer, the
 //! reload, the bolt cycle and the jump -- because the client's own weapon and
 //! jump prediction does not run during playback (measured on about 13,000
-//! frames of six POV demos; `docs/goldsrc_hud_suppression.md` section 6).
+//! frames of six POV demos; `docs/goldsrc_crosshair.md` section 2).
 //! Shown both ways, the user chose live play (2026-10-01).
 //!
 //! ## DoD's rule

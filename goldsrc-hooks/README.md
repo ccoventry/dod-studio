@@ -29,10 +29,10 @@ joins this switch rather than adding a command:
   crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt
   rifle, holding a knife, spade or sniper rifle, or a machine gun that is not
   deployed. Loses to `dodstudio_hide_crosshair`, which stubs the whole
-  function. See `docs/goldsrc_hud_suppression.md` section 6.
+  function. See `docs/goldsrc_crosshair.md` section 2.
 - **Prone eye height**: the camera drops to the ground when the spectated
   player goes prone. The game's in-eye camera has no prone case and leaves it
-  at crouch height. See `docs/goldsrc_spectator_eye_height.md`.
+  at crouch height. See `docs/goldsrc_spectator_camera.md`.
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
   ladder, as his own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
@@ -78,7 +78,7 @@ is the complete list):
 - **Spectator lock** (`dodstudio_spec_lock 1`): in an HLTV demo the camera
   stays on the player being watched when he dies; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
-  switch. See `docs/goldsrc_spectator_follow.md`.
+  switch. See `docs/goldsrc_spectator_camera.md`.
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
@@ -210,7 +210,7 @@ is the complete list):
   never fires while spectating either way.) Run it with no
   arguments to list them. `dodstudio_hide_hudelement all 0` puts everything
   back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
-  dword, no code patch -- see `docs/goldsrc_hud_suppression.md` section 7.
+  dword, no code patch -- see `docs/goldsrc_hud_elements.md`.
 - **Objective icons** (`dodstudio_objectives`): places the territory-flag icon
   row in the top-left corner, and the objective timer beside it. The game draws
   both ~117 pixels lower at 1080p while spectating than it does in a POV demo,
