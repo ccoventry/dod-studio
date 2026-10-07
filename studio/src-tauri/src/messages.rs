@@ -64,8 +64,8 @@ pub fn failed_to_read_file(path: &str, err: impl Display) -> String {
     format!("Failed to read {}: {}", path, err)
 }
 
-pub const HLAE_EXECUTABLE_NOT_FOUND: &str = "HLAE executable not found at specified path.";
-pub const HL_EXECUTABLE_NOT_FOUND: &str = "Half-Life executable not found at specified path.";
+pub const HLAE_EXECUTABLE_NOT_FOUND: &str = "HLAE executable not found at the specified path.";
+pub const HL_EXECUTABLE_NOT_FOUND: &str = "Half-Life executable not found at the specified path.";
 pub const STEAM_NOT_FOUND: &str =
     "Couldn't find Steam to start it. Start Steam yourself, then try again.";
 
@@ -229,7 +229,7 @@ pub fn path_no_longer_exists(path: &str) -> String {
 }
 
 pub fn failed_to_open_explorer(err: impl Display) -> String {
-    format!("Failed to open explorer: {}", err)
+    format!("Failed to open Explorer: {}", err)
 }
 
 // These three are the macOS and Linux arms of `audit_manager::reveal_in_explorer`
@@ -291,7 +291,7 @@ pub fn failed_to_build_updater(err: impl Display) -> String {
 }
 
 pub const NO_UPDATE_AVAILABLE_TO_INSTALL: &str =
-    "No update available to install — call check_for_update first";
+    "No update available to install — check for updates first";
 
 pub const LOCAL_BUILD_CANNOT_INSTALL_UPDATE: &str = "This is a local or debug build, so updates aren't installed from here: installing would replace your installed DoD Studio, not this copy";
 
@@ -301,8 +301,8 @@ pub fn failed_to_serialize_settings(err: impl Display) -> String {
     format!("Failed to serialize settings: {}", err)
 }
 
-pub fn failed_to_write_settings_file(path: impl std::fmt::Debug, err: impl Display) -> String {
-    format!("Failed to write settings file {:?}: {}", path, err)
+pub fn failed_to_write_settings_file(path: &std::path::Path, err: impl Display) -> String {
+    format!("Failed to write settings file {}: {}", path.display(), err)
 }
 
 /// Pins every function/constant above against the exact `format!`/literal it
@@ -329,11 +329,11 @@ mod tests {
         );
         assert_eq!(
             HLAE_EXECUTABLE_NOT_FOUND,
-            "HLAE executable not found at specified path."
+            "HLAE executable not found at the specified path."
         );
         assert_eq!(
             HL_EXECUTABLE_NOT_FOUND,
-            "Half-Life executable not found at specified path."
+            "Half-Life executable not found at the specified path."
         );
         assert_eq!(
             demo_file_not_found("demo.dem"),
@@ -516,7 +516,7 @@ mod tests {
         );
         assert_eq!(
             failed_to_open_explorer("not found"),
-            format!("Failed to open explorer: {}", "not found")
+            format!("Failed to open Explorer: {}", "not found")
         );
         assert_eq!(
             failed_to_open_finder("not found"),
@@ -572,7 +572,7 @@ mod tests {
         );
         assert_eq!(
             NO_UPDATE_AVAILABLE_TO_INSTALL,
-            "No update available to install — call check_for_update first"
+            "No update available to install — check for updates first"
         );
     }
 
@@ -583,11 +583,8 @@ mod tests {
             format!("Failed to serialize settings: {}", "bad value")
         );
         assert_eq!(
-            failed_to_write_settings_file("C:/settings.json", "disk full"),
-            format!(
-                "Failed to write settings file {:?}: {}",
-                "C:/settings.json", "disk full"
-            )
+            failed_to_write_settings_file(std::path::Path::new("C:/settings.json"), "disk full"),
+            "Failed to write settings file C:/settings.json: disk full"
         );
     }
 
