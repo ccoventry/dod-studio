@@ -6,7 +6,7 @@ use nom::{
     IResult, Parser,
     branch::alt,
     bytes::complete::{tag, take, take_until},
-    combinator::{all_consuming, eof, fail, opt, success},
+    combinator::{all_consuming, eof, fail, map_opt, opt, success},
     error::context,
     multi::{length_count, many0},
     number::complete::{le_f32, le_i8, le_i16, le_i32, le_u8, le_u16},
@@ -15,6 +15,9 @@ use nom::{
 use std::convert::Infallible;
 use std::str::from_utf8;
 use std::time::Duration;
+
+#[cfg(test)]
+mod tests;
 
 pub enum Error {
     ParserError,
@@ -790,7 +793,7 @@ pub struct StartProg {
     pub cap_duration: Duration, // u16
 }
 
-/// - Length: 4
+/// - Length: 6
 #[derive(Debug)]
 pub struct StartProgF {
     pub area_index: u8,
@@ -1656,7 +1659,10 @@ fn show_menu(i: &[u8]) -> IResult<&[u8], ShowMenu> {
 }
 
 fn start_prog_f(i: &[u8]) -> IResult<&[u8], StartProgF> {
-    all_consuming((le_u8, team, le_f32.map(Duration::from_secs_f32)))
+    // `try_`: a negative, NaN or huge f32 in a corrupt demo is a parse error,
+    // not a panic (which aborts a release build, #225).
+    let cap_duration = map_opt(le_f32, |s| Duration::try_from_secs_f32(s).ok());
+    all_consuming((le_u8, team, cap_duration))
         .map(|(area_index, team, cap_duration)| StartProgF {
             area_index,
             team,

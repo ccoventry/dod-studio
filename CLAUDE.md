@@ -106,6 +106,16 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Merging into `dev`:** the ruleset requires the branch to be up to date, so `gh pr update-branch N`, wait for CI, then merge, one PR at a time (each merge puts the rest behind). A PR stacked on another feature branch gets no CI (`ci.yml` only runs for PRs into `dev`/`main`): say so on the PR and post local results. Head branches auto-delete on merge and GitHub retargets stacked PRs, but a manual `git push --delete` of a base branch closes the PRs stacked on it.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
+### Changing CI (`.github/workflows/`, rulesets)
+Keep checks thorough and wall-clock short; the reasons live as comments in `ci.yml` (#346, #348, #334, #654).
+- **New checks go in their own parallel job**, not appended to an existing one: CI time is the longest job (~3 min), not the sum.
+- **Cache Rust with `Swatinem/rust-cache`, saved only from dev** (`save-if: github.ref == 'refs/heads/dev'`). A PR can only restore its base branch's cache, so PR-saved caches are dead weight that evicts the useful ones.
+- **Every cargo command takes `--locked`.** Test builds set `CARGO_PROFILE_{DEV,TEST}_DEBUG=0`. Clippy and rustfmt stay pinned to the toolchain in `ci.yml`.
+- **Prefer prebuilt tools to building them** (`taiki-e/install-action` over `cargo install`), and skip installers that are slow for no gain (Playwright's `--with-deps` on Windows). Don't cache a download that is faster than restoring the cache.
+- **Use ubuntu for jobs that don't need Windows.** Anything touching the app, the hooks or `#[cfg(windows)]` code stays on windows.
+- **No `paths-ignore` on a workflow with required checks.** A PR it skips never gets the check and can't merge.
+- **A new required check:** add it to both rulesets (`dev-protection`, `main-protection`) only after the workflow that produces it is on dev, with the exact job `name:`. Put before/after job times in the PR body.
+
 ---
 
 ## Concurrency, Rust & Memory Constraints
@@ -114,8 +124,10 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Hot-Path Locking:** No blocking mutexes in code that runs every game frame (`goldsrc-hooks`: `HUD_Frame`, `HUD_AddEntity`, render detours) or in Tauri event handlers. Use `std::sync::RwLock` for shared lists and atomics/channels for cross-thread signaling.
 - **Telemetry Throttling:** Background progress channels must throttle update traffic to ~30fps (~33ms) using an `Arc<AtomicU32>` debouncer to prevent event loop flooding.
 - **Process Lifecycles:** Never block on an external process (HLAE, `hl.exe`, FFmpeg). Poll it (`child.try_wait()`, or the process list for `hl.exe`, which HLAE starts and Studio does not own) with a sleep matched to what you are waiting for: ~16 ms when acting on timing-critical signals (OBS mode's console markers), up to ~500 ms when only watching a process stay alive. Check the `Arc<AtomicBool>` cancellation token every cycle. Make sure a child cannot outlive Studio: `.kill_on_drop(true)` for tokio children (FFmpeg), the process-tree guard in `hd/build.rs` for build tools, and `taskkill` by PID for `hl.exe`.
-- **Release builds use `panic = "abort"`.** `catch_unwind` never catches anything in a shipped build, and a panic in the hook DLL takes `hl.exe` down with it. Handle bad input with bounds checks at the read site, not by catching panics.
+- **Release builds use `panic = "abort"`.** `catch_unwind` never catches anything in a shipped build, and a panic in the hook DLL takes `hl.exe` down with it. Handle bad input with bounds checks at the read site, not by catching panics. That includes conversions of wire values: `Duration::from_secs_f32` panics on a negative or NaN float, so parsers use the `try_` form and return a parse error (#655).
 - **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
+- **Tests that need a real demo:** take the path from an env var with the PRE install's `dod\` folder as the fallback (`DOD_ANALYSIS_DEMOS`, `DOD_ROUNDTRIP_DEMO`), never a file in `local/` (it gets cleaned, and #652's test silently lost its four demos that way). An `#[ignore]`d test fails loudly when it finds no demo; a non-ignored one prints `skipped:` and returns. CI has no demos, so such a test is never the only coverage of its logic.
+- **Error text names what failed and prints paths with `.display()`,** not `{:?}`, which quotes them and doubles every backslash (#648).
 - **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes. Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber.
 
 ---
