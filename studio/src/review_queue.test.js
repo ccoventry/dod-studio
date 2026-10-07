@@ -27,7 +27,7 @@ describe('Review highlights queue (#623)', () => {
   });
 
   it('carries the kill range from 1, the note and an earlier answer', () => {
-    const s = streak({ start_index: 1, end_index: 2, notes: 'flick', review: 'no' });
+    const s = streak({ start_index: 1, end_index: 2, notes: 'flick', curation: 'Skip' });
     const [h] = buildReviewQueue([demo('a.dem', [s])], ['a.dem']).highlights;
     expect(h).toMatchObject({ from: 2, to: 3, note: 'flick', answered: 'no', kill_times: [40.5, 42.5, 45.5] });
     expect(h.key).toBe(streakUid('a.dem', s));
@@ -50,22 +50,34 @@ describe('Review highlights answers (#623)', () => {
     demo: d.path, key: streakUid(d.path, s), verdict: 'yes', from: 2, to: 3, note: 'nice', ...overrides,
   });
 
-  it('Yes sets Pending by hand, the kill range and the note', () => {
-    const s = streak();
+  it('Yes marks Keep with the kill range and note, and leaves Status and the tick alone', () => {
+    const s = streak({ status: 'None' });
     const d = demo('a.dem', [s]);
     expect(applyReviewAnswer([d], answerFor(d, s))).toBe(s);
-    expect(s).toMatchObject({ status: 'Pending', statusByHand: true, start_index: 1, end_index: 2, notes: 'nice', review: 'yes' });
+    expect(s).toMatchObject({ curation: 'Keep', status: 'None', start_index: 1, end_index: 2, notes: 'nice' });
+    expect(s.selected).toBeUndefined();
+    expect(s.statusByHand).toBeUndefined();
   });
 
-  it('No takes a Pending back to None but leaves a Captured row alone', () => {
-    const pending = streak({ status: 'Pending' });
-    const captured = streak({ status: 'Captured', kills: [[5, 1, 'K98'], [6, 2, 'K98'], [7, 3, 'K98']] });
-    const d = demo('a.dem', [pending, captured]);
-    applyReviewAnswer([d], answerFor(d, pending, { verdict: 'no' }));
-    applyReviewAnswer([d], answerFor(d, captured, { verdict: 'no' }));
-    expect(pending.status).toBe('None');
-    expect(captured.status).toBe('Captured');
-    expect(captured.review).toBe('no');
+  it('Yes ticks the row only when asked to', () => {
+    const s = streak();
+    const d = demo('a.dem', [s]);
+    applyReviewAnswer([d], answerFor(d, s), { tickYes: true });
+    expect(s.selected).toBe(true);
+  });
+
+  it('No marks Skip and unticks, even with tick Yes on, and keeps a Captured status', () => {
+    const s = streak({ status: 'Captured', selected: true });
+    const d = demo('a.dem', [s]);
+    applyReviewAnswer([d], answerFor(d, s, { verdict: 'no' }), { tickYes: true });
+    expect(s).toMatchObject({ curation: 'Skip', selected: false, status: 'Captured' });
+  });
+
+  it('a mark set in either place is the answer the game is sent', () => {
+    const kept = streak({ curation: 'Keep' });
+    const fresh = streak({ kills: [[5, 1, 'K98'], [6, 2, 'K98'], [7, 3, 'K98']] });
+    const answered = buildReviewQueue([demo('a.dem', [kept, fresh])], ['a.dem']).highlights.map((h) => h.answered);
+    expect(answered).toEqual(['yes', null]);
   });
 
   it('a range past the kills is pulled in', () => {
@@ -80,6 +92,6 @@ describe('Review highlights answers (#623)', () => {
     const d = demo('a.dem', [s]);
     expect(applyReviewAnswer([d], { ...answerFor(d, s), demo: 'gone.dem' })).toBeNull();
     expect(applyReviewAnswer([d], { ...answerFor(d, s), key: 'nope' })).toBeNull();
-    expect(s.review).toBeUndefined();
+    expect(s.curation).toBeUndefined();
   });
 });

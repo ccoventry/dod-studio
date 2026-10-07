@@ -3,19 +3,19 @@
 // and what an answer the game sends back changes on its row.
 //
 // What an answer changes on the row:
-//  - review: 'yes' or 'no', so a second review starts where this one stopped
+//  - Review mark (#44): Yes = Keep, No = Skip. A second review starts at the
+//    first row with no mark.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
-//  - Status: Yes sets Pending (by hand, as picking it from the dropdown
-//    does); No takes a Pending back to None. A Captured or Rendered row
-//    keeps its status either way.
+//  - Ticked for capture: only when the user turned on "tick Yes" (people who
+//    only time demos don't want rows ticked). Skip always unticks.
+// Status is left alone: it records what the pipeline did, not the user's call.
 
 import { recordingPlayerStreaks } from './queue_filters.js';
-import { streakUid, setStatusByHand } from './take_index.js';
-import { STRINGS } from './strings.js';
+import { streakUid, setCuration, CURATION } from './take_index.js';
 
-/** Statuses an answer never moves a row away from. */
-const KEPT_STATUSES = ['Captured', 'Rendered'];
+/** The game speaks yes/no; the row keeps Keep/Skip. */
+const ANSWER_FOR_MARK = { [CURATION.KEEP]: 'yes', [CURATION.SKIP]: 'no' };
 
 /**
  * The highlights to review, in queue order: each ticked demo's recording-
@@ -49,7 +49,7 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1) {
         kill_times: times,
         from: from + 1,
         to: to + 1,
-        answered: streak.review === 'yes' || streak.review === 'no' ? streak.review : null,
+        answered: ANSWER_FOR_MARK[streak.curation] ?? null,
         note: streak.notes || '',
       });
     }
@@ -60,10 +60,11 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1) {
 }
 
 /**
- * Puts one answer on its row. Returns the streak changed, or null when the
- * demo or highlight is no longer in the queue.
+ * Puts one answer on its row; `tickYes` also ticks a Yes row for capture.
+ * Returns the streak changed, or null when the demo or highlight is no longer
+ * in the queue.
  */
-export function applyReviewAnswer(demos, answer) {
+export function applyReviewAnswer(demos, answer, { tickYes = false } = {}) {
   const demo = (demos || []).find((d) => d.path === answer.demo);
   if (!demo) return null;
   const streak = (demo.streaks || []).find((s) => streakUid(demo.path, s) === answer.key);
@@ -74,13 +75,8 @@ export function applyReviewAnswer(demos, answer) {
   streak.start_index = start;
   streak.end_index = end;
   streak.notes = answer.note || '';
-  streak.review = answer.verdict;
-  if (!KEPT_STATUSES.includes(streak.status)) {
-    if (answer.verdict === 'yes') {
-      setStatusByHand(streak, 'Pending');
-    } else if (streak.status === 'Pending') {
-      setStatusByHand(streak, STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT);
-    }
-  }
+  const yes = answer.verdict === 'yes';
+  setCuration(streak, yes ? CURATION.KEEP : CURATION.SKIP);
+  if (yes && tickYes) streak.selected = true;
   return streak;
 }

@@ -1364,7 +1364,9 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each, and the answer lands on its row here.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TICK_YES_LABEL: 'Tick Yes for capture',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
     NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',

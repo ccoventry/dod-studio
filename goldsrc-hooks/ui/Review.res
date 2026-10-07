@@ -133,7 +133,7 @@
 		"labelText"		"Yes"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_review yes"
-		"helptext"		"Keep it: the row becomes Pending, with this kill range and note. Then the next highlight."
+		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight."
 	}
 	"NoButton"
 	{
@@ -190,7 +190,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Skip"
+		"labelText"		"Next"
 		"textAlignment"		"center"
 		"Command"		"engine dodstudio_review next"
 		"helptext"		"The next highlight, without answering this one."

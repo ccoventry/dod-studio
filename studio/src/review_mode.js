@@ -25,7 +25,9 @@ export function initReviewMode({ getDemos, getCheckedPaths, onChanged }) {
   listen('review_event', (event) => {
     const e = event.payload || {};
     if (e.kind === 'answer') {
-      if (applyReviewAnswer(getDemos(), e)) {
+      // Read per answer, so the box can be changed mid-review.
+      const tickYes = document.querySelector('#review-tick-yes-cb')?.checked === true;
+      if (applyReviewAnswer(getDemos(), e, { tickYes })) {
         answers += 1;
         onChanged();
       } else {
