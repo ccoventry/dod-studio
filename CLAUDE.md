@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) and offline IDE agents when working in this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
 
 ## Project Overview
 
@@ -60,20 +60,28 @@ The tree is rustfmt-formatted and CI's Clippy job gates on `cargo fmt --all --ch
 
 The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git config blame.ignoreRevsFile .git-blame-ignore-revs` once per clone so `git blame` skips it.
 
+Clippy is pinned the same way; your default toolchain misses lints CI catches:
+
+    rustup run 1.98.1 cargo clippy --workspace --all-targets -- -D warnings
+
+### Build traps
+
+- **Build the hook DLL first in a fresh checkout or worktree.** `studio`'s build script checks that `target\i686-pc-windows-msvc\release\dodstudio_goldsrc_hooks.dll` exists (a Tauri bundle resource); without it the whole workspace fails to build, far from any code. Give each worktree its own `CARGO_TARGET_DIR`: a shared one silently reuses another worktree's artifacts.
+- **`npm run tauri dev` watches the workspace.** Any file write in that checkout restarts Studio, and every child process (Steam, HLAE, `hl.exe`) dies with it, because they run inside cargo's kill-on-close job object. While the app is running from a checkout, edit in a separate worktree.
+- **JS unit tests:** `npm run test:unit` (Vitest, `studio/src/*.test.js`) runs in CI alongside the Playwright e2e suite.
+
 ---
 
 ## System Guardrails & Agent Directives
 
 ### Context & Execution Boundaries
-- **Context Scope:** Rely strictly on active chat code and files inside `docs/`. Strictly ignore any open files in hidden dot-directories to prevent prompt contamination. Do not index `target/`, `local/` (demos and screenshots), or `Cargo.lock`.
+- **Context Scope:** Don't scan `target/` or `Cargo.lock`. `local/` (gitignored) holds large demos, screenshots and review files: read only the files you're pointed at.
 - **Locked Files:** Do not modify build/deployment configs, environment files, lint rules, or public APIs unless explicitly requested.
-- **Behavior:** Be concise. Suppress conversational filler, apologies, and requirement summaries.
 - **Code Edits:** Apply minimal changes directly to files. Never rewrite unchanged lines or entire files unnecessarily.
 - **Ambiguity:** State critical technical assumptions once and proceed. Fail loudly on blocking errors.
 
 ### Terminal & Shell Rules
 - **Diagnostics:** Never output raw compiler logs. Provide concise, single-sentence failure summaries and direct mechanical fixes.
-- **Execution Bypass:** Use `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` for blocked scripts. For unsigned binaries blocked by WDAC, execute via `build-and-launch.ps1` to sequence process stops, build steps, and signature updates.
 
 ### GitHub Issues & PRs
 - **Every PR targets `dev`** — always pass `gh pr create -B dev`. `main` is the default branch, so omitting `-B` opens the PR against `main`, which is how #325 skipped `dev`. The only PR into `main` is a `dev` → `main` release; the `Main only from dev` check refuses anything else. When syncing `main` back into `dev`, use a merge commit, never squash (#340 → #341).
@@ -88,36 +96,34 @@ The one-time whole-tree reformat is listed in `.git-blame-ignore-revs`; run `git
         }' -f prId="$PR_ID" -f issueId="$ISSUE_ID"
   Still include `Closes #NN` in the PR body too — the GraphQL call is in addition to that, not a replacement for it.
 - **Issues close when their PR merges into `dev`**, not at release — `close_issues_on_dev.yml` does it from that same link data, since GitHub's own keywords only fire on the default branch (`main`). `[R&D]` issues and bare `(#NN)` commit-subject matches get the `on-dev` label instead, for a human call. So only link a PR as closing an issue when it finishes it; for partial work write "Part of #NN", which links nothing.
+- **Before starting an issue**, search open PRs for it (`gh pr list -S "#NN"`) and grep open PR bodies: a PR's title often hides which issues it closes.
+- **Merging into `dev`:** the ruleset requires the branch to be up to date, so `gh pr update-branch N`, wait for CI, then merge, one PR at a time (each merge puts the rest behind). A PR stacked on another feature branch gets no CI (`ci.yml` only runs for PRs into `dev`/`main`): say so on the PR and post local results. Head branches auto-delete on merge and GitHub retargets stacked PRs, but a manual `git push --delete` of a base branch closes the PRs stacked on it.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
 ---
 
 ## Concurrency, Rust & Memory Constraints
 
-- **WASM Protection:** The codebase carries legacy `wasm32-unknown-unknown` compilation gates. Isolate native multi-threading, direct file I/O (`std::fs`), and process spawning (`std::process::Command`) behind `#[cfg(not(target_arch = "wasm32"))]`.
-- **Hot-Path Locking:** Never introduce blocking mutexes on the UI frame loop. Wrap shared catalogs in `std::sync::RwLock` and use atomics/channels for cross-thread signaling.
+- **WASM Protection:** `web-analyzer` compiles `analysis` (and the `dod`/`dem-patch` parsers under it) to `wasm32-unknown-unknown`, so in those crates keep threads, `std::fs` and `std::process` behind `#[cfg(not(target_arch = "wasm32"))]`. `native`'s many wasm gates are legacy from the old egui web build; nothing compiles `native` for wasm32, so they are unchecked. Before deleting anything that looks unused, read the `#[cfg]` lines around it.
+- **Hot-Path Locking:** No blocking mutexes in code that runs every game frame (`goldsrc-hooks`: `HUD_Frame`, `HUD_AddEntity`, render detours) or in Tauri event handlers. Use `std::sync::RwLock` for shared lists and atomics/channels for cross-thread signaling.
 - **Telemetry Throttling:** Background progress channels must throttle update traffic to ~30fps (~33ms) using an `Arc<AtomicU32>` debouncer to prevent event loop flooding.
-- **Memory Safety:** Never use fixed-size stack buffers (`[u8; N]`) for binary stream slicing. Use heap-allocated `Vec<u8>` gated by explicit 2MB payload limits.
 - **Process Lifecycles:** External processes (HLAE, `hl.exe`, FFmpeg) must use non-blocking polling (`child.try_wait()`) matched with a ~16ms sleep. Verify an `Arc<AtomicBool>` cancellation token every cycle and chain `.kill_on_drop(true)`.
+- **Release builds use `panic = "abort"`.** `catch_unwind` never catches anything in a shipped build, and a panic in the hook DLL takes `hl.exe` down with it. Handle bad input with bounds checks at the read site, not by catching panics.
+- **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
+- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes. Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber.
 
 ---
 
 ## Domain & Engine Quirks (GoldSrc & HLAE)
 
-- **Terminology:** Strictly enforce the naming convention **"HLAE Game Capture"** (never "Native Game Capture").
 - **Frame Order:** `DemoStart` (Type 2) frames must be processed *before* any `ConsoleCommand` (Type 3) frames are written, or the GoldSrc engine reads uninitialized memory.
 - **64-byte Command Frames:** Command strings injected per tick must stay strictly under 64 bytes, because a demo's Type-3 `ConsoleCommand` frame carries a fixed `char command[64]` (`dem-patch`'s `parse_console_command` takes exactly 64 bytes). Stagger long absolute paths across multiple ticks. **This is not a `Cbuf_AddTextToBuffer` limit**, as this file used to say and as several error strings still do: GoldSrc's command buffer is 16,384 bytes (`Cbuf_Init`, `hw.dll+0x272b0`) and `hw.dll` contains no "Cbuf" string at all. The distinction matters because it means the limit is a file-format property and cannot be raised — see `docs/goldsrc_hw_dll_survey.md` §3.1.
 - **Packet Integrity:** Never interleave injected frames inside existing `NetworkMessage` payloads. Injected bookmarks/director frames must be written as complete, standalone frames ahead of the original packet to prevent `svc_bad` buffer overflows.
-- **Path Escaping:** All runtime paths passed to HLAE console inputs must replace forward slashes with double-escaped backslashes (`.replace("/", "\\\\")`).
 - **Decal Ring:** `r_decals` bounds the rotating decal index and evicts nothing, so lowering it strands every decal above the new limit. Set it exactly once, at demo load, from `init_commands` — never mid-demo, never as an injected `ConsoleCommand` frame (that shifts every later frame ordinal by +1). See `docs/goldsrc_dod_quirks.md`.
-- **`client.dll` does not reload between demos.** Measured (five game sessions, five `LoadLibraryA("client.dll")` log lines, zero mid-session): a plain demo-to-demo transition never reloads it. `hw.dll`/`hl.exe` itself never reloads either — `goldsrc-hooks` hooks its IAT once at injection, and that hook keeps observing every later `client.dll` load for the rest of the process's life, which a reloading `hw.dll` would break. Several `goldsrc-hooks` modules were written assuming the opposite; their defensive re-check-every-frame design is still correct (and still needed for whatever *does* reload `client.dll` — untested), only the "between demos" justification was wrong. See `docs/goldsrc_dod_quirks.md`.
-- **Command Tiers:** A command a user types into Initial or Scheduled Commands falls into one of five lists in `native::patch::cfg_scan`. Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s report, and again in `capture_manager::start_capture_batch_impl`.
-  - `BANNED_COMMANDS` — refused **everywhere**, Initial and Scheduled alike. Two different reasons land a command here: *the pipeline owns it outright* (`mirv_recordmovie_start`/`_stop`, `mirv_movie_ffmpeg`, `host_framerate` — no setting corresponds to any of them, and a user's own value misroutes footage or desyncs playback with no visible failure), or *DoD's client quits the game over it* (`r_drawentities`, `cl_lw` — `CHud::Redraw` forces the value back, prints an error and calls `quit` if either is not `1`). Reachability differs between those two and `FATAL_CVARS` encodes it: `cl_lw` always takes the value it is given, whereas GoldSrc itself clamps `r_drawentities` back to `1.0` while `sv_cheats` is `0`, making a config line setting it inert. Both stay refused as *typed commands* — cheap, and `cfg_scan` cannot see what else a user's configs did — but only `cl_lw` is reported as a fatal config cvar unconditionally.
-  - `SCHEDULED_BANNED_COMMANDS` — fine at demo load, refused **only when scheduled**: `r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename`.
-  - `MID_DEMO_HAZARDS` — shadowed with a warning, not refused, because each corresponds to a real setting.
-  - `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`) and `NOOP_IN_INIT_COMMANDS` (`mirv_movie_filename`) — reported as doing nothing. The engine drops the first pair from a demo's message stream; the pipeline overwrites the second before anything reads it.
-
-  Adding a new pipeline-internal command that Initial/Scheduled Commands could reach: decide which list it belongs to before shipping it unprotected. Do not describe this set from memory — it has been re-tiered more than once (`mirv_movie_filename` moved in #161; `mirv_movie_separate_hud` disappeared with #214); read `cfg_scan.rs`.
-- **User Config Files:** The game's own `.cfg` files are the user's. **Detect and warn, never write.** They override nothing the app assumes — a `config.cfg` ending in `exec movie.cfg` can set `mirv_fov` or `r_decals` behind the pipeline entirely. `native/src/patch/cfg_scan.rs` is read-only by construction; keep it that way.
+- **`client.dll` does not reload between demos** (measured), and `hw.dll` never reloads. `goldsrc-hooks` modules still re-check every frame, which stays correct; only their "between demos" justification was wrong. Evidence and the log-reading trap: `docs/goldsrc_dod_quirks.md`.
+- **Command Tiers:** every command a user can type into Initial or Scheduled Commands falls into one of five lists in `native::patch::cfg_scan` (refused everywhere, refused only when scheduled, warned, or reported as a no-op). Read `cfg_scan.rs` for the current set, never describe it from memory, and see `docs/command_tiers.md` for why each list exists. A new pipeline-internal command the user could reach needs a tier before it ships, mirrored in `studio/src/command_suggest.js`.
+- **User Config Files:** The game's own `.cfg` files are the user's. **Detect and warn, never write.** They override nothing the app assumes — a `config.cfg` ending in `exec movie.cfg` can set `mirv_fov` or `r_decals` behind the pipeline entirely. `native/src/patch/cfg_scan.rs` is read-only by construction; keep it that way. Studio's own commands are the last word: configs are never blocked, and the app never flips `config.cfg`'s read-only attribute (#478). The game's `.res` files are the user's too; the app ships its own in `dod_addon` (needs `-addons`) or `dod\dodstudio_ui`, never over `dod\resource`.
+- **Both engine builds:** DoD Studio supports the pre-Anniversary and the 25th Anniversary `hw.dll`. A `goldsrc-hooks` module that touches `hw.dll` carries a per-build table (signature, stolen bytes, offsets; the pattern is `hull_trace_guard.rs`'s `BUILDS`) and a `tools/verify_*_offsets.py` that checks both (`--anniversary`). `client.dll` is byte-identical across installs, so client.dll modules need one table. Never drop pre-Anniversary support while adding Anniversary.
+- **Console names (`goldsrc-hooks`):** every name comes from `console_name!` (prefix `dodstudio_`). Settings are cvars, not commands, named after the action so `1` does what the name says, default `0`. No name may be the whole start of another (the console's autocomplete swaps it on space). Diagnostics go under `dodstudio_debug_`; any fix that makes the spectated view match POV joins `dodstudio_spec_match_pov` rather than adding a cvar. A PR that adds a name must also add it to `goldsrc-hooks/ui/Commands.txt` and regenerate `studio/src/console_commands_data.js` (`goldsrc-hooks/tools/console_names.py`), or tests fail once `dev` is merged in.
 - **Tauri IPC:** Every frontend `invoke()` call in `ipc_bridge.js` must implement a `.catch()` block to prevent swallowed Rust backend errors.
 - **Filesystem Picking:** Force the use of `@tauri-apps/plugin-dialog` native pickers instead of text input paths to prevent string escaping vulnerabilities.
