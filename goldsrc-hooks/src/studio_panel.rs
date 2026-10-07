@@ -336,6 +336,8 @@ const FRAME_SLOT_ACTIVATE: usize = 160;
 /// after every `engine ...` menu command, and slot 8 (`+0x20`) to bring the
 /// menu up; the same in both builds' `GameUI.dll`.
 const BASEUI_SLOT_ACTIVATE_GAME_UI: usize = 8;
+/// `IBaseUI::HideGameUI()`: closes the menu (slot 7, above).
+const BASEUI_SLOT_HIDE_GAME_UI: usize = 7;
 /// `Frame::GetClientArea(int &x, int &y, int &wide, int &tall)`, which
 /// `PropertyDialog::PerformLayout` sizes its sheet by.
 const FRAME_SLOT_GET_CLIENT_AREA: usize = 186;
@@ -3744,6 +3746,34 @@ mod hook {
         }
         "brought the menu up".to_string()
     }
+
+    /// Closes the window and, when the menu around it is up, the menu too, as
+    /// Resume Game does.
+    pub(super) fn close_for_playback() {
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            let Some((_, vp)) = window(&vgui) else { return };
+            vgui.set_visible(vp, false);
+            if !vgui.shown(vgui.parent_of(vp)) {
+                return;
+            }
+            let Some(base_ui) = module(c"hw.dll").and_then(|hw| interface(hw, c"BaseUI001")) else {
+                return;
+            };
+            let hide: ActivateFn = slot(base_ui, BASEUI_SLOT_HIDE_GAME_UI);
+            hide(base_ui);
+        }
+    }
+}
+
+/// Set by the review (#623) when a highlight starts playing; the next
+/// [`poll`] closes the window and the menu, outside the review's lock.
+static CLOSE_FOR_PLAYBACK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Gets the window and the menu out of the way of playback on the next frame.
+pub(crate) fn close_for_playback() {
+    CLOSE_FOR_PLAYBACK.store(true, Ordering::Release);
 }
 
 /// Keeps the tab strip sized to the window, swaps in our window after
@@ -3754,7 +3784,12 @@ pub fn poll() {
     wrap_toggleconsole();
     apply_saved_settings();
     #[cfg(target_arch = "x86")]
-    hook::poll();
+    {
+        hook::poll();
+        if CLOSE_FOR_PLAYBACK.swap(false, Ordering::AcqRel) {
+            hook::close_for_playback();
+        }
+    }
 }
 
 /// The Review tab's From, To and Note boxes (#623), when they belong to the

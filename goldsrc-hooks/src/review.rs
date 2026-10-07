@@ -364,8 +364,8 @@ fn play(review: &mut Review) {
     match started {
         Ok(()) => {
             review.phase = Phase::Playing { until };
-            // Out of the way while it plays.
-            run(&format!("{} 0\n", crate::studio_panel::NAME));
+            // Out of the way while it plays: the window and the menu.
+            crate::studio_panel::close_for_playback();
         }
         Err(why) => fail(review, why),
     }
