@@ -1073,7 +1073,7 @@ pub fn bare_viewdemo() -> bool {
     }
     #[cfg(target_arch = "x86")]
     {
-        let line = match hook::open_on(PLAYBACK_PAGE) {
+        let line = match hook::open_on(PLAYBACK_PAGE, false) {
             Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
             Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
         };
@@ -3695,13 +3695,19 @@ mod hook {
         }
     }
 
-    /// Opens the window on tab `page`, building it if needed.
-    pub(super) fn open_on(page: usize) -> Result<String, String> {
+    /// Opens the window on tab `page`, building it if needed. With
+    /// `bring_menu_up`, a menu that is down comes up around it: a tab named
+    /// by a bind or by the review (#623) runs during play, with the menu
+    /// closed.
+    pub(super) fn open_on(page: usize, bring_menu_up: bool) -> Result<String, String> {
         let vgui = Vgui::get()?;
         unsafe {
             let (object, vp, _) = ensure_window(&vgui, false)?;
             if page == DEMOS_PAGE {
                 refill_demo_list();
+            }
+            if bring_menu_up && !vgui.shown(vgui.parent_of(vp)) {
+                activate_game_ui();
             }
             show(&vgui, object, vp, Some(page))
         }
@@ -3851,7 +3857,7 @@ pub unsafe extern "C" fn command() {
     let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
         #[cfg(target_arch = "x86")]
         if let Request::Tab(page) = request {
-            return hook::open_on(page);
+            return hook::open_on(page, true);
         }
         #[cfg(target_arch = "x86")]
         return hook::toggle(request);
