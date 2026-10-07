@@ -1090,7 +1090,9 @@ pub fn spawn_capture_engine(
                     log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
                 }
             } else {
-                log::info!("[autosave] Lockfile removed after clean completion");
+                // Nothing writes `.autosave.json` yet (#20), so a file found
+                // here is a stray, not recovery state: removed quietly (#352).
+                log::debug!("[autosave] removed a stray .autosave.json");
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);
