@@ -37,6 +37,8 @@ hlcr_config.json
 *.dem
 !/dem-patch/src/tests/*.dem
 /dem-patch/src/tests/demo2test.dem
+# The real recording CI tests parse (see test-fixtures/README.md).
+!/test-fixtures/ci_fixture.dem
 
 # === IDEs and Editors ===
 .vs/
