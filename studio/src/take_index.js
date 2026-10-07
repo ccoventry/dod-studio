@@ -195,22 +195,14 @@ export function isRangeModified(streak) {
 /**
  * True if this highlight carries anything the user did on purpose — real
  * pipeline-earned status (Pending/Captured/Rendered), a note, or a narrowed
- * kill range. This is deliberately a wide net (per user, 2026-08-19): any
- * one of the three is enough to protect the row from Clear Untracked in
- * Workspace mode.
+ * kill range. This is deliberately a wide net: any one of the three is
+ * enough to protect the row from Clear Untracked in Workspace mode.
  *
- * `Pending` used to deliberately NOT count (revised 2026-08-19, was
- * originally "status !== None"): back then `streak.status` started as
- * `undefined` and the status dropdown *displayed* undefined as "Pending"
- * purely for convenience, without ever writing to the field — so an
- * explicit "Pending" selection looked identical to an untouched row, and
- * counting it as tracked could silently flip a row's protection with no
- * visible change. That premise is gone now that an unset status displays
- * (and counts, master_pane.js's countByStatus) as "None" instead —
- * "Pending" only ever appears once the user deliberately sets it, e.g. to
- * flag a highlight for a later capture pass without selecting it yet — so
- * it is exactly the kind of on-purpose signal this predicate exists to
- * protect, and the 2026-08-19 restriction no longer applies.
+ * `Pending` counts because an unset status displays (and counts,
+ * master_pane.js's countByStatus) as "None" — "Pending" only ever appears
+ * once the user deliberately sets it, e.g. to flag a highlight for a later
+ * capture pass without selecting it yet — so it is exactly the kind of
+ * on-purpose signal this predicate exists to protect.
  */
 function isHighlightTracked(streak) {
   if (!streak) return false;

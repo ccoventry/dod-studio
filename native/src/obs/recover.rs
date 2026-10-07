@@ -149,8 +149,8 @@ mod tests {
     #[test]
     fn refuses_everything_else() {
         for path in [
-            r"C:\Users\chris\Videos",
-            r"C:\Users\chris\Videos\take0000",
+            r"C:\Users\someone\Videos",
+            r"C:\Users\someone\Videos\take0000",
             // The stream folder without a take folder above it.
             r"C:\all",
             // Right names, wrong order.

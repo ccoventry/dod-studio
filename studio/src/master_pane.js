@@ -7,6 +7,9 @@ import { logFrontendEvent } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { makeClearable } from './clearable_input.js';
+import { statusCountColor } from './status_colors.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -51,6 +54,8 @@ let currentOnLocateDemo = null;
 // main.js's handler for a missing demo's Use found copy button (#21).
 let currentOnUseFoundCopy = null;
 let currentSearchTerm = '';
+// #54: the header's quick filters.
+const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false };
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
@@ -73,7 +78,7 @@ function matchesSearch(demo, term) {
  *  existing scoping — a search filter should narrow what a bulk action
  *  touches, not just what's on screen. */
 export function getVisibleDemos() {
-  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm));
+  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesQuickFilters(d, quickFilters));
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy) {
@@ -99,7 +104,17 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
       currentSearchTerm = (e.target.value || '').toLowerCase().trim();
       renderMasterList(currentDemos, null, currentOnSelectDemo);
     });
+    makeClearable(searchInput, STRINGS.WORKSPACE.SEARCH_CLEAR_TITLE);
   }
+
+  document.querySelector('#master-kills-filter')?.addEventListener('change', (e) => {
+    quickFilters.kills = e.target.value || KILLS_FILTER.ALL;
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
+  document.querySelector('#master-owner-only-cb')?.addEventListener('change', (e) => {
+    quickFilters.ownerOnly = e.target.checked;
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
 
   const selectAllCb = document.querySelector('#master-select-all-cb');
   if (selectAllCb) {
@@ -141,30 +156,9 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-/**
- * Streaks belong to whichever player got the kills, not just the demo's
- * recording player — `demo.streaks` covers every player in the match. The
- * Highlight Details table (detail_pane.js) filters down to the recording
- * player's own streaks before displaying rows; mirror that same filter here
- * so the queue's counts agree with what the table actually shows instead of
- * summing every player in the match.
- *
- * Gate on whether local_player_index actually resolved, not on demo.is_pov
- * — is_pov reflects any SvcHltv/SvcDirector message anywhere in the file,
- * which also fires on an ordinary player-recorded demo whenever an HLTV
- * caster was merely spectating the live match (server-broadcast messages
- * every connected client picks up), so it's not a reliable "no single
- * owner" signal. True HLTV proxy files are already rejected earlier in the
- * pipeline (scan_demo_for_highlights), so None here means "no resolvable
- * owner", not "is_pov".
- */
-export function recordingPlayerStreaks(demo) {
-  const streaks = demo.streaks || [];
-  const recPlayer = demo.local_player_index;
-  if (recPlayer === null || recPlayer === undefined) return streaks;
-
-  return streaks.filter((s) => s.player_index === recPlayer);
-}
+// recordingPlayerStreaks lives in queue_filters.js now, beside the quick
+// filters that share it; re-exported for main.js and detail callers.
+export { recordingPlayerStreaks };
 
 /** Count streaks matching a given status string. An unset status (still
  *  `undefined` — see take_index.js's isHighlightTracked doc comment) counts
@@ -377,21 +371,21 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdPending = document.createElement('td');
     tdPending.style.padding = '6px 8px';
     tdPending.style.textAlign = 'center';
-    tdPending.style.color = pending > 0 ? '#ffa726' : '#555';
+    tdPending.style.color = statusCountColor('Pending', pending);
     tdPending.textContent = pending;
 
     // Col 6: Captured count  [M4]
     const tdCaptured = document.createElement('td');
     tdCaptured.style.padding = '6px 8px';
     tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = captured > 0 ? '#4caf50' : '#555';
+    tdCaptured.style.color = statusCountColor('Captured', captured);
     tdCaptured.textContent = captured;
 
     // Col 7: Rendered count  [M4]
     const tdRendered = document.createElement('td');
     tdRendered.style.padding = '6px 8px';
     tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = rendered > 0 ? '#2196f3' : '#555';
+    tdRendered.style.color = statusCountColor('Rendered', rendered);
     tdRendered.textContent = rendered;
 
     // Col 8: Actions — remove-from-queue only, no status badge  [M3]

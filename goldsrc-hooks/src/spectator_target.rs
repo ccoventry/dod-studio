@@ -13,7 +13,7 @@
 //! `spec_next`/`spec_prev` and the auto-director's `DRC_CMD_EVENT` handling
 //! all read and write.
 //!
-//! A from-scratch static pass tonight (chasing #206 after #269's survey
+//! A from-scratch static pass (chasing #206 after #269's survey
 //! found the mode global's real writer, `CHudSpectator::SetMode`)
 //! exhaustively found **every** site in `client.dll` that writes
 //! `g_iUser2` -- a whole-image byte search, not a guess -- and every one of
@@ -33,14 +33,15 @@
 //! cheaply, the next time someone can reproduce the wander live: if
 //! `g_iUser2` stays constant while the viewmodel entity keeps changing, the
 //! engine hypothesis is confirmed and `client.dll` patching is the wrong
-//! layer to work in.
+//! layer to work in. #206 itself has since been fixed by `spectator_follow`
+//! (`dodstudio_spec_lock`); this stays as a diagnostic.
 //!
 //! ## Caveats
 //!
 //! The viewmodel-entity half piggybacks on `anim_fix`'s own per-frame
 //! `GetViewModel()` read rather than duplicating that engine call, so it
-//! only has fresh data while `dodstudio_hltv_show_viewmodel_animations` is
-//! on (any level). Turn that on too when using this to investigate #206 --
+//! only has fresh data while `dodstudio_spec_match_pov` is on. Turn that on too
+//! when using this to investigate #206 --
 //! `g_iUser1`/`g_iUser2` are read directly here either way.
 //!
 //! This module's `poll` runs from `commands.rs`'s per-frame *prologue*,
@@ -61,7 +62,7 @@ use crate::engine;
 /// `docs/goldsrc_client_dll_survey.md` §10.
 const MODE_RVA: usize = 0xe8_8d4;
 /// `g_iUser2` -- the followed player's entity index, or 0 when none is set.
-/// Exhaustively confirmed tonight as the only global the seven writers in
+/// Exhaustively confirmed as the only global the seven writers in
 /// `client.dll` ever touch for this purpose.
 const TARGET_RVA: usize = 0xe8_8d8;
 
@@ -75,6 +76,25 @@ fn read_i32(base: usize, rva: usize) -> Option<i32> {
     // Safety: rva is a fixed, confirmed offset into client.dll's own
     // .data section, read-only here.
     Some(unsafe { *((base + rva) as *const i32) })
+}
+
+/// `g_iUser1`'s value for the in-eye camera (`OBS_IN_EYE`).
+const OBS_IN_EYE: i32 = 4;
+
+/// The player the in-eye camera is on, or `None` when the spectator camera is
+/// in any other mode (or not up at all).
+pub fn in_eye_target() -> Option<i32> {
+    let base = engine::client_module_base()?;
+    if read_i32(base, MODE_RVA)? != OBS_IN_EYE {
+        return None;
+    }
+    read_i32(base, TARGET_RVA).filter(|target| *target > 0)
+}
+
+/// The spectator interface mode (`g_iUser1`): 0 while not spectating, 1..4
+/// while the spectator camera is up.
+pub fn mode() -> Option<i32> {
+    read_i32(engine::client_module_base()?, MODE_RVA)
 }
 
 /// Called once per frame from `commands.rs`'s per-frame prologue. Cheap: two
@@ -125,7 +145,7 @@ mod tests {
     fn offsets_are_four_bytes_apart() {
         // g_iUser1 and g_iUser2 are adjacent dwords -- confirmed independently
         // across CHudSpectator::Reset, ::SetMode and the DRC_CMD_EVENT
-        // handler tonight, not just asserted once.
+        // handler, not just asserted once.
         assert_eq!(TARGET_RVA - MODE_RVA, 4);
     }
 }

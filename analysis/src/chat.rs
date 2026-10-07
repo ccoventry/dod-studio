@@ -589,28 +589,4 @@ mod tests {
         );
         assert_eq!(res3, "This is a test with multiple lines");
     }
-
-    #[test]
-    #[ignore]
-    fn test_find_untranslated_chat_keys() {
-        use std::fs;
-        let dir = std::path::Path::new("../local/demos");
-        if let Ok(entries) = fs::read_dir(dir) {
-            for entry in entries.filter_map(Result::ok) {
-                let path = entry.path();
-                if path.extension().map(|e| e == "dem").unwrap_or(false) {
-                    println!("Analyzing chat for untranslated keys in {:?}", path);
-                    if let Ok(bytes) = fs::read(&path)
-                        && let Ok(analysis) = crate::Analysis::try_from_bytes(&bytes)
-                    {
-                        for msg in &analysis.state.chat_messages {
-                            if msg.text.contains('#') {
-                                println!("  [UNTRANSLATED] {:?}", msg.text);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
 }

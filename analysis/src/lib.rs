@@ -1,3 +1,6 @@
+/// The on-disk analysis cache Studio and the hook DLL share (#565).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod cache;
 mod chat;
 mod clan_match;
 mod kill;
@@ -7,6 +10,8 @@ mod objective;
 mod player;
 mod round;
 mod scoreboard;
+#[cfg(test)]
+mod tests_fixture;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
@@ -25,10 +30,7 @@ use crate::{
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
-use dem::{
-    open_demo_from_bytes,
-    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
-};
+use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -214,6 +216,21 @@ impl From<&Demo> for DemoInfo {
             map_checksum: value.header.map_checksum,
         }
     }
+}
+
+/// What [`Analysis::try_from_bytes_with_progress`] reports progress out of.
+pub const PROGRESS_SCALE: usize = 1000;
+/// The part of [`PROGRESS_SCALE`] reading the demo's structure takes.
+pub const PARSE_SHARE: usize = 850;
+
+/// `done` of `total`, placed between `from` and `to` on [`PROGRESS_SCALE`].
+/// In u128: a byte count times 850 passes 2^32 in the 32-bit game DLL.
+fn scaled(done: usize, total: usize, from: usize, to: usize) -> usize {
+    if total == 0 {
+        return to;
+    }
+    let done = (done as u128).min(total as u128);
+    from + (done * (to - from) as u128 / total as u128) as usize
 }
 
 #[derive(Default, serde::Serialize, serde::Deserialize)]
@@ -597,6 +614,32 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
     }
 }
 
+/// Feeds one event through every analyzer, in order. Shared with the
+/// optimised-vs-unoptimised test so its reference pass can't drift from this.
+fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if !state.map_changed {
+        use_segment_boundary(state, event);
+    }
+    if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
+        return;
+    }
+    use_timing_updates(state, event);
+    use_player_updates(state, event);
+    with_mortality_detection(state, event);
+    use_scoreboard_updates(state, event);
+    use_kill_streak_updates(state, event);
+    use_weapon_breakdown_updates(state, event);
+    use_teamkill_and_suicide_updates(state, event);
+    use_team_score_updates(state, event);
+    use_rounds_updates(state, event);
+    use_objective_updates(state, event);
+    use_chat_updates(state, event);
+    use_clan_match_detection_updates(Duration::from_secs(30), state, event);
+    use_pov_stats_updates(state, event);
+    use_general_finalization(state, event);
+    check_and_promote_british(state);
+}
+
 impl Analysis {
     fn new(demo_info: DemoInfo, state: AnalyzerState) -> Self {
         Self { demo_info, state }
@@ -606,6 +649,11 @@ impl Analysis {
         Self::try_from_bytes_with_progress(value, |_, _| {})
     }
 
+    /// Analyses a demo, calling `progress_cb(done, total)` as it goes. Only
+    /// the ratio means anything: reading the demo's structure is the first
+    /// [`PARSE_SHARE`] of [`PROGRESS_SCALE`] (it is ~85% of the time, measured
+    /// on a 72 MB demo), going through its frames the rest, and the last call
+    /// is `(PROGRESS_SCALE, PROGRESS_SCALE)`.
     pub fn try_from_bytes_with_progress<F>(value: &[u8], mut progress_cb: F) -> Result<Self, String>
     where
         F: FnMut(usize, usize),
@@ -619,8 +667,11 @@ impl Analysis {
         // `BitReader::is_bad_read` turns an overrun into a parse error. See
         // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
         // proves it.
-        let demo_res =
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| open_demo_from_bytes(value)));
+        let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            dem::open_demo_from_bytes_with_progress(value, &mut |read, total| {
+                progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
+            })
+        }));
         let demo = match demo_res {
             Ok(Ok(d)) => d,
             Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
@@ -628,30 +679,7 @@ impl Analysis {
         };
 
         let mut state = AnalyzerState::default();
-
-        let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-            if !state.map_changed {
-                use_segment_boundary(state, event);
-            }
-            if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                return;
-            }
-            use_timing_updates(state, event);
-            use_player_updates(state, event);
-            with_mortality_detection(state, event);
-            use_scoreboard_updates(state, event);
-            use_kill_streak_updates(state, event);
-            use_weapon_breakdown_updates(state, event);
-            use_teamkill_and_suicide_updates(state, event);
-            use_team_score_updates(state, event);
-            use_rounds_updates(state, event);
-            use_objective_updates(state, event);
-            use_chat_updates(state, event);
-            use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-            use_pov_stats_updates(state, event);
-            use_general_finalization(state, event);
-            check_and_promote_british(state);
-        };
+        let process_event = run_analyzers;
 
         process_event(&mut state, &AnalyzerEvent::Initialization);
 
@@ -691,7 +719,10 @@ impl Analysis {
 
                 processed_frames += 1;
                 if processed_frames % 500 == 0 || processed_frames == total_frames {
-                    progress_cb(processed_frames, total_frames);
+                    progress_cb(
+                        scaled(processed_frames, total_frames, PARSE_SHARE, PROGRESS_SCALE),
+                        PROGRESS_SCALE,
+                    );
                 }
             }
         }
@@ -1014,128 +1045,131 @@ mod tests {
         assert!(!is_relevant_message(b"NotARealMessage"));
     }
 
+    /// Demos for [`test_optimized_vs_unoptimized`]: every `.dem` in
+    /// `DOD_ANALYSIS_DEMOS` (a folder, or one file), else an even spread of up
+    /// to six from the PRE install's `dod` folder. Empty when neither exists.
+    fn comparison_demos() -> Vec<std::path::PathBuf> {
+        let from_env = std::env::var_os("DOD_ANALYSIS_DEMOS").map(std::path::PathBuf::from);
+        let source = from_env.clone().unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+            )
+        });
+        if source.is_file() {
+            return vec![source];
+        }
+        let Ok(entries) = fs::read_dir(&source) else {
+            return Vec::new();
+        };
+        let mut demos: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        if from_env.is_some() || demos.len() <= 6 {
+            return demos;
+        }
+        let step = demos.len() / 6;
+        demos.into_iter().step_by(step).take(6).collect()
+    }
+
+    /// Analyses each demo twice -- the way [`Analysis::try_from_bytes`] does,
+    /// skipping user messages `is_relevant_message` rejects, and again feeding
+    /// every message through -- and asserts the two states match. Catches a
+    /// speed-up that skips something an analyzer needed. Ignored because CI has
+    /// no demos: `cargo test -p analysis -- --ignored test_optimized_vs_unoptimized`.
     #[test]
     #[ignore]
     fn test_optimized_vs_unoptimized() {
-        let paths = [
-            "../local/demos/bb-scrim-harr-h1.dem",
-            "local/demos/bb-scrim-harr-h1.dem",
-            "../local/demos/bb-scrim-harr-h2.dem",
-            "local/demos/bb-scrim-harr-h2.dem",
-            "../local/demos/bb-scrim-railyard-h1.dem",
-            "local/demos/bb-scrim-railyard-h1.dem",
-            "../local/demos/bewton-playoffs-round1-armory-allied.dem",
-            "local/demos/bewton-playoffs-round1-armory-allied.dem",
-        ];
+        let paths = comparison_demos();
+        assert!(
+            !paths.is_empty(),
+            "no demos found: set DOD_ANALYSIS_DEMOS to a folder or a .dem file"
+        );
 
-        let mut tested_any = false;
-
-        for path in paths {
-            if !std::path::Path::new(path).exists() {
-                continue;
-            }
-
-            println!("Testing optimized vs unoptimized parsing on: {}", path);
+        for path in &paths {
+            println!(
+                "Testing optimized vs unoptimized parsing on: {}",
+                path.display()
+            );
             let file_bytes = fs::read(path).expect("failed to read demo");
+            assert_optimized_matches_unoptimized(&file_bytes);
+        }
 
-            // Unoptimized parse
-            let demo = open_demo_from_bytes(&file_bytes).unwrap();
-            let mut state_unopt = AnalyzerState::default();
-            let mut last_live_frame = None;
-            let mut processed_frames = 0;
-            let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-                if !state.map_changed {
-                    use_segment_boundary(state, event);
-                }
-                if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                    return;
-                }
-                use_timing_updates(state, event);
-                use_player_updates(state, event);
-                with_mortality_detection(state, event);
-                use_scoreboard_updates(state, event);
-                use_kill_streak_updates(state, event);
-                use_weapon_breakdown_updates(state, event);
-                use_teamkill_and_suicide_updates(state, event);
-                use_team_score_updates(state, event);
-                use_rounds_updates(state, event);
-                use_objective_updates(state, event);
-                use_chat_updates(state, event);
-                use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-                use_pov_stats_updates(state, event);
-                use_general_finalization(state, event);
-            };
-            process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
-            for entry in &demo.directory.entries {
-                for frame in &entry.frames {
-                    let old_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
-                    if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                        && let MessageData::Parsed(msgs) = &box_type.1.messages
-                    {
-                        for net_msg in msgs {
-                            match net_msg {
-                                NetMessage::EngineMessage(engine_msg) => {
+        println!("All existing demos match perfectly!");
+    }
+
+    /// The comparison itself, also run on the checked-in fixture in CI
+    /// (`tests_fixture.rs`).
+    pub(crate) fn assert_optimized_matches_unoptimized(file_bytes: &[u8]) {
+        // Unoptimized parse
+        let demo = dem::open_demo_from_bytes(file_bytes).unwrap();
+        let mut state_unopt = AnalyzerState::default();
+        let mut last_live_frame = None;
+        let mut processed_frames = 0;
+        let process_event = run_analyzers;
+        process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
+        for entry in &demo.directory.entries {
+            for frame in &entry.frames {
+                let old_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
+                if let FrameData::NetworkMessage(box_type) = &frame.frame_data
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state_unopt,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if let Ok(msg) = UserMessage::new(&user_msg.name, &user_msg.data) {
                                     process_event(
                                         &mut state_unopt,
-                                        &AnalyzerEvent::EngineMessage(engine_msg),
+                                        &AnalyzerEvent::UserMessage(msg),
                                     );
-                                }
-                                NetMessage::UserMessage(user_msg) => {
-                                    if let Ok(msg) =
-                                        UserMessage::new(&user_msg.name, &user_msg.data)
-                                    {
-                                        process_event(
-                                            &mut state_unopt,
-                                            &AnalyzerEvent::UserMessage(msg),
-                                        );
-                                    }
                                 }
                             }
                         }
                     }
-                    let new_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    if !old_live && new_live {
-                        last_live_frame = Some(processed_frames);
-                    }
-                    processed_frames += 1;
                 }
+                let new_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                if !old_live && new_live {
+                    last_live_frame = Some(processed_frames);
+                }
+                processed_frames += 1;
             }
-            process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
-
-            // Optimized parse
-            let opt_analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
-            let state_opt = opt_analysis.state;
-
-            // Compare debug print representation
-            let total_frames: usize = demo
-                .directory
-                .entries
-                .iter()
-                .map(|entry| entry.frames.len())
-                .sum();
-            println!(
-                "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
-                total_frames,
-                last_live_frame,
-                last_live_frame.unwrap_or(0)
-            );
-
-            assert_states_eq(&state_unopt, &state_opt);
-            tested_any = true;
         }
+        process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
 
-        assert!(
-            tested_any,
-            "No demo files were found to run the comparison test!"
+        // Optimized parse
+        let opt_analysis = Analysis::try_from_bytes(file_bytes).unwrap();
+        let state_opt = opt_analysis.state;
+
+        // Compare debug print representation
+        let total_frames: usize = demo
+            .directory
+            .entries
+            .iter()
+            .map(|entry| entry.frames.len())
+            .sum();
+        println!(
+            "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
+            total_frames,
+            last_live_frame,
+            last_live_frame.unwrap_or(0)
         );
-        println!("All existing demos match perfectly!");
+
+        assert_states_eq(&state_unopt, &state_opt);
     }
 
     fn assert_states_eq(left: &AnalyzerState, right: &AnalyzerState) {
@@ -1630,5 +1664,20 @@ mod tests {
                 recorder_id
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod progress_tests {
+    use super::*;
+
+    #[test]
+    fn progress_is_placed_on_one_scale() {
+        assert_eq!(scaled(0, 100, 0, PARSE_SHARE), 0);
+        assert_eq!(scaled(100, 100, 0, PARSE_SHARE), PARSE_SHARE);
+        assert_eq!(scaled(50, 100, PARSE_SHARE, PROGRESS_SCALE), 925);
+        assert_eq!(scaled(5, 0, PARSE_SHARE, PROGRESS_SCALE), PROGRESS_SCALE);
+        // A 4 GB file's worth of bytes still scales without overflow.
+        assert_eq!(scaled(usize::MAX / 2, usize::MAX, 0, 1000), 499);
     }
 }

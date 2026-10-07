@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<!--
+  Harness for batch_results.js (#172): the Last Batch panel on its own.
+  Tests call window.__started(), __ended(kind, text) and __verified(payload,
+  dispatch) the way capture_pane.js does.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>batch_results.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="batch-results" class="batch-results" hidden></div>
+  <script type="module">
+    import { batchStarted, batchEnded, batchVerified } from '/src/batch_results.js';
+    window.__started = batchStarted;
+    window.__ended = batchEnded;
+    window.__verified = batchVerified;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
