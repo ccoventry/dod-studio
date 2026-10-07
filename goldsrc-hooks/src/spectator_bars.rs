@@ -58,7 +58,7 @@
 //! A redirect of `CDoDSpectatorGUI`'s and `CBottomBar`'s "`SetVisible`"
 //! vtable slot, live-tested twice in 2026-09 and never called. Slot 8 of a
 //! vgui2 `Panel` is `OnChildAdded`; `SetVisible` is slot 29, and neither
-//! class paints the bands anyway. `docs/goldsrc_spectator_bars.md` keeps
+//! class paints the bands anyway. `docs/archive/goldsrc_spectator_bars_rnd.md` keeps
 //! that history.
 
 // The hook itself is 32-bit only; a host build compiles the rest for the tests.

@@ -305,7 +305,7 @@ overlay should do and a useful sanity signal that the streams are what they clai
 **`nb_frames` is in the container.** The scanner reports `frame_count: 0` for video takes because
 `count_bmps` finds no bitmaps, and that gap blocks both the render progress percentage and any move
 to HLCR-style frame-count pairing. FFprobe reads 1218 straight off the stream, so the number is
-available without decoding — see `docs/render_studio_hlcr_parity.md`.
+available without decoding — see `docs/archive/render_studio_hlcr_parity.md`.
 
 ### Separate HUD does not survive `mirv_movie_ffmpeg`
 
