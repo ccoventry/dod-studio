@@ -1030,6 +1030,13 @@ button.primary-btn:hover:not(:disabled) {
   justify-content: center;
 }
 
+/* A confirmation opens on top of whichever modal asked for it (#356). With
+   every .modal at 1000, DOM order decided, and a modal declared after this
+   one (Clear Previews) covered the confirm it opened. */
+#themed-confirm-modal {
+  z-index: 1100;
+}
+
 .modal-content {
   width: 80%;
   max-width: 900px;
