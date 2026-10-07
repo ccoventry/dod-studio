@@ -11,9 +11,9 @@ describe('steamIdForms (#536)', () => {
   });
 
   it('matches the deathmsg docs example', () => {
-    const forms = steamIdForms('76561197977930126');
-    expect(forms.classic).toBe('STEAM_0:0:8832199');
-    expect(forms.id3).toBe('[U:1:17664398]');
+    const forms = steamIdForms('76561197975574370');
+    expect(forms.classic).toBe('STEAM_0:0:7654321');
+    expect(forms.id3).toBe('[U:1:15308642]');
   });
 
   it('refuses ids that are not a user account', () => {

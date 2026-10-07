@@ -1519,8 +1519,8 @@ mod tests {
         Who::slot(slot)
     }
 
-    /// The example from #468: STEAM_0:0:8832199.
-    const ME: u64 = 76_561_197_977_930_126;
+    /// The example from #468: STEAM_0:0:7654321.
+    const ME: u64 = 76_561_197_975_574_370;
 
     #[test]
     fn a_block_list_hides_only_the_listed_players() {
@@ -1617,18 +1617,18 @@ mod tests {
                 "1",
                 ":",
                 "1234567",
-                "!76561197977930126",
+                "!76561197975574370",
                 "![U",
                 ":",
                 "1",
                 ":",
-                "17664398]",
+                "15308642]",
             ])),
             Ok((
                 vec![
                     Player::SteamId(me),
-                    Player::SteamId(76_561_197_977_930_126),
-                    Player::SteamId(76_561_197_977_930_126),
+                    Player::SteamId(76_561_197_975_574_370),
+                    Player::SteamId(76_561_197_975_574_370),
                 ],
                 true
             ))
@@ -1662,19 +1662,19 @@ mod tests {
 
     #[test]
     fn steam_ids_parse_in_both_forms() {
-        assert_eq!(parse_steam_id("76561197977930126"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:0:8832199"), Some(ME));
-        assert_eq!(parse_steam_id("steam_1:0:8832199"), Some(ME));
-        assert_eq!(parse_steam_id("STEAM_0:1:8832199"), Some(ME + 1));
-        assert_eq!(parse_steam_id("STEAM_0:2:8832199"), None);
+        assert_eq!(parse_steam_id("76561197975574370"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:0:7654321"), Some(ME));
+        assert_eq!(parse_steam_id("steam_1:0:7654321"), Some(ME));
+        assert_eq!(parse_steam_id("STEAM_0:1:7654321"), Some(ME + 1));
+        assert_eq!(parse_steam_id("STEAM_0:2:7654321"), None);
         assert_eq!(parse_steam_id("STEAM_0:0"), None);
-        // SteamID3: account number 17664398 = 2 * 8832199.
-        assert_eq!(parse_steam_id("[U:1:17664398]"), Some(ME));
-        assert_eq!(parse_steam_id("U:1:17664398"), Some(ME));
-        assert_eq!(parse_steam_id("[u:1:17664398]"), Some(ME));
+        // SteamID3: account number 15308642 = 2 * 7654321.
+        assert_eq!(parse_steam_id("[U:1:15308642]"), Some(ME));
+        assert_eq!(parse_steam_id("U:1:15308642"), Some(ME));
+        assert_eq!(parse_steam_id("[u:1:15308642]"), Some(ME));
         assert_eq!(parse_steam_id("[U:1:]"), None);
         assert_eq!(
-            parse_steam_id("[G:1:17664398]"),
+            parse_steam_id("[G:1:15308642]"),
             None,
             "a group, not a user"
         );
@@ -1688,8 +1688,8 @@ mod tests {
         assert_eq!(parse_player("3"), Some(Player::Slot(3)));
         assert_eq!(parse_player("self"), Some(Player::OwnPov));
         assert_eq!(parse_player("SELF"), Some(Player::OwnPov));
-        assert_eq!(parse_player("76561197977930126"), Some(Player::SteamId(ME)));
-        assert_eq!(parse_player("STEAM_0:0:8832199"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("76561197975574370"), Some(Player::SteamId(ME)));
+        assert_eq!(parse_player("STEAM_0:0:7654321"), Some(Player::SteamId(ME)));
         assert_eq!(parse_player("pov"), None);
         assert_eq!(parse_player("12345"), None, "neither a slot nor a SteamID");
         assert_eq!(parse_player(""), None);

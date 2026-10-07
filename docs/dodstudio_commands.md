@@ -95,8 +95,8 @@ A `block` id is any of:
 
 - **A slot number**, as before. It only holds for one demo, because the same
   player gets a different slot in every demo.
-- **A SteamID**: the 17-digit SteamID64 (`76561197977930126`),
-  `STEAM_0:0:8832199`, or SteamID3 `[U:1:17664398]`. Paste it as is: the
+- **A SteamID**: the 17-digit SteamID64 (`76561197975574370`),
+  `STEAM_0:0:7654321`, or SteamID3 `[U:1:15308642]`. Paste it as is: the
   console splits it at each `:`, and the hook joins it back. It is matched
   against each player's userinfo `*sid` at every death notice, so one command
   works across a whole batch of demos and survives reconnects.
@@ -105,7 +105,7 @@ A `block` id is any of:
   recording player, so there `self` matches nobody, and the console says so
   once.
 
-Mix them freely. `dodstudio_deathmsg block !self !76561197977930126` shows
+Mix them freely. `dodstudio_deathmsg block !self !76561197975574370` shows
 only your own frags in both kinds of demo: in a POV demo both entries point
 at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
