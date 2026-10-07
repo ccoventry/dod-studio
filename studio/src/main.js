@@ -1565,7 +1565,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // the app while a field still has focus (never blurred) would otherwise
   // silently drop that edit even though it's already reflected in the
   // in-memory state persistAppSettings() reads from. Confirmed as a real,
-  // reproducible data-loss case 2026-08-23 (see engineering_backlog.md).
+  // reproducible data-loss case 2026-08-23.
   const appWindow = getCurrentWindow();
   appWindow.onCloseRequested(async (event) => {
     event.preventDefault();

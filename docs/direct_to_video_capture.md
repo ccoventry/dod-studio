@@ -1,13 +1,14 @@
 # Direct-to-Video Capture (`mirv_movie_ffmpeg`)
 
-> **Status 2026-08-28 — shipped and verified in game. Merged to `dev` in PR #68.**
-> Tracks [#42](https://github.com/ccoventry/dod-studio/issues/42), which stays open for what remains.
+> **Status 2026-10-07 — shipped and verified in game. Merged to `dev` in PR #68.**
+> [#42](https://github.com/ccoventry/dod-studio/issues/42) is closed.
 >
-> **Working end to end:** capture through `mirv_movie_ffmpeg`, take verification, Render Studio
-> scanning and rendering, frame counts and render progress from the AVI header, a lossless capture
-> codec dropdown, and **Separate HUD in both capture modes** — including a real HUD alpha matte,
-> which needed `-afxForceAlpha8 1` (see "Separate HUD does not survive `mirv_movie_ffmpeg`" below;
-> that section title is now historical, the fault is fixed).
+> **Working end to end:** capture through `mirv_movie_ffmpeg` (Video capture mode), take verification,
+> Render Studio scanning and rendering, frame counts and render progress from the AVI header, and a
+> lossless capture codec dropdown. The Separate HUD checkbox was removed in PR #214: the
+> `-afxForceAlpha8 1` launch flags are now sent on every launch, so a HUD alpha stream still works if
+> `mirv_movie_separate_hud 1` is typed into Initial Commands (see "Separate HUD does not survive
+> `mirv_movie_ffmpeg`" below; those sections stay as the measurements behind that decision).
 >
 > **Still open:** the stream-copy fast path — remuxing instead of re-encoding for the simple
 > non-HUD case, which was the headline win — is not built; every take still goes through a full
@@ -17,12 +18,10 @@
 > Read `docs/goldsrc_dod_quirks.md` and `docs/hlae_protocols.md` first — the engine and HLAE facts
 > this rests on are recorded there and must not be re-derived.
 >
-> The sibling direction, OBS as an alternate capture method, is
-> [#65](https://github.com/ccoventry/dod-studio/issues/65) and is next. Scoped 2026-08-28 as a
-> lower-quality convenience option rather than a replacement, with **Separate HUD explicitly out**.
-> It still has to answer how a non-BMP capture artefact flows through take verification, Render
-> Studio's admission predicate and export routing — questions this document already answers for the
-> FFmpeg path, and whose answers likely transfer. Written up in `docs/obs_alternate_capture.md`.
+> The sibling direction, OBS as an alternate capture method, shipped too
+> ([#65](https://github.com/ccoventry/dod-studio/issues/65), closed; `native/src/obs/`), as a
+> lower-quality convenience option rather than a replacement, with Separate HUD out. How it
+> answered the take-verification and Render Studio questions is in `docs/obs_alternate_capture.md`.
 
 ---
 
@@ -244,7 +243,7 @@ capture that runs and produces no video.
 
 ---
 
-## Staging
+## Staging (historical: steps 1 to 4 shipped, step 5 and the measuring in step 6 did not)
 
 1. **Answer the four unknowns with one capture.** A single clip, `-c:v rawvideo`, everything else
    left alone. Record exactly where the video lands, whether `sound.wav` is beside it, whether a
@@ -262,7 +261,7 @@ capture that runs and produces no video.
 
 ---
 
-## Open questions
+## Open questions (as of the design; the stream-copy and wall-clock ones are still open)
 
 - **Does it help capture wall-clock, or only disk?** Assumed, unmeasured. Worth knowing before it
   is described to anyone as a speed feature.
@@ -306,7 +305,7 @@ overlay should do and a useful sanity signal that the streams are what they clai
 **`nb_frames` is in the container.** The scanner reports `frame_count: 0` for video takes because
 `count_bmps` finds no bitmaps, and that gap blocks both the render progress percentage and any move
 to HLCR-style frame-count pairing. FFprobe reads 1218 straight off the stream, so the number is
-available without decoding — see `docs/render_studio_hlcr_parity.md`.
+available without decoding — see `docs/archive/render_studio_hlcr_parity.md`.
 
 ### Separate HUD does not survive `mirv_movie_ffmpeg`
 

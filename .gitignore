@@ -72,3 +72,5 @@ studio/src-tauri/gen/
 
 # === Claude Code harness state ===
 .claude/scheduled_tasks.lock
+# Personal, per-machine instructions Claude Code loads beside CLAUDE.md
+CLAUDE.local.md

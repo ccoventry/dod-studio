@@ -1978,3 +1978,28 @@ tr.keyboard-selected {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* Highlight Details' Notes (#605): notes are clip descriptions of a sentence
+   or two, so the column takes the room and the box wraps; drag its corner
+   to make it bigger. A class, not a column position, so a new column doesn't
+   move the width onto the wrong one. */
+#detail-streaks-table th.col-notes {
+  width: 45%;
+}
+
+.streak-notes-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 260px;
+  min-height: 3.2em;
+  resize: both;
+  padding: 2px 4px;
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+}
