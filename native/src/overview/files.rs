@@ -131,36 +131,61 @@ fn safe(map: &str) -> String {
         .to_string()
 }
 
-/// Every map in an install's `dod/maps`, and what overview each has.
+/// The folders the game reads maps from, highest priority first:
+/// `dod_addon` (with `-addons`), `dod`, then `dod_downloads`, where the
+/// 25th Anniversary game saves maps downloaded from a server.
+const MAP_DIRS: [&str; 3] = ["dod_addon", "dod", "dod_downloads"];
+
+/// Where `map`'s `.bsp` is in `install`, looking where the game does
+/// ([`MAP_DIRS`]); `dod/maps` when it is nowhere, so the error names the
+/// usual place.
+pub fn bsp_path(install: &Path, map: &str) -> PathBuf {
+    let file = format!("{}.bsp", safe(map));
+    MAP_DIRS
+        .iter()
+        .map(|dir| install.join(dir).join("maps").join(&file))
+        .find(|p| p.is_file())
+        .unwrap_or_else(|| install.join("dod").join("maps").join(&file))
+}
+
+/// Every map in an install's map folders ([`MAP_DIRS`]), and what overview
+/// each has. A map in more than one folder is listed once, from the folder
+/// the game would load it from.
 pub fn maps(install: &Path) -> Vec<MapEntry> {
     let dod = install.join("dod");
     let addon = install.join("dod_addon");
-    let mut out = Vec::new();
-    let Ok(entries) = std::fs::read_dir(dod.join("maps")) else {
-        return out;
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path
-            .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("bsp"))
-        {
+    let mut out: Vec<MapEntry> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for dir in MAP_DIRS {
+        let Ok(entries) = std::fs::read_dir(install.join(dir).join("maps")) else {
             continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("bsp"))
+            {
+                continue;
+            }
+            let name = path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            if !seen.insert(name.to_ascii_lowercase()) {
+                continue;
+            }
+            let txt = format!("{name}.txt");
+            let game_txt = dod.join("overviews").join(&txt);
+            let addon_txt = addon.join("overviews").join(&txt);
+            out.push(MapEntry {
+                has_overview: game_txt.is_file(),
+                has_ours: is_ours(&game_txt) || is_ours(&addon_txt),
+                has_edits: edits_path(&name).is_file() || sidecar_path(install, &name).is_file(),
+                bsp: path.to_string_lossy().into_owned(),
+                name,
+            });
         }
-        let name = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
-        let txt = format!("{name}.txt");
-        let game_txt = dod.join("overviews").join(&txt);
-        let addon_txt = addon.join("overviews").join(&txt);
-        out.push(MapEntry {
-            has_overview: game_txt.is_file(),
-            has_ours: is_ours(&game_txt) || is_ours(&addon_txt),
-            has_edits: edits_path(&name).is_file() || sidecar_path(install, &name).is_file(),
-            bsp: path.to_string_lossy().into_owned(),
-            name,
-        });
     }
     out.sort_by(|a, b| {
         a.name
@@ -559,6 +584,39 @@ mod tests {
         // Nothing of ours in the game's .txt beyond its one comment line.
         let txt = std::fs::read_to_string(dir.path().join("dod/overviews/dod_u.txt")).unwrap();
         assert!(!txt.contains("Church"));
+    }
+
+    #[test]
+    fn maps_are_listed_from_addon_dod_and_downloads_once_each() {
+        let dir = Scratch::new("overview_map_dirs");
+        let install = dir.path();
+        for (folder, map) in [
+            ("dod", "dod_anzio"),
+            ("dod", "dod_both"),
+            ("dod_addon", "dod_both"),
+            ("dod_downloads", "dod_saints2_b5e"),
+        ] {
+            let maps = install.join(folder).join("maps");
+            std::fs::create_dir_all(&maps).unwrap();
+            std::fs::write(maps.join(format!("{map}.bsp")), folder).unwrap();
+        }
+
+        let listed = maps(install);
+        let names: Vec<&str> = listed.iter().map(|m| m.name.as_str()).collect();
+        assert_eq!(names, ["dod_anzio", "dod_both", "dod_saints2_b5e"]);
+        // A map in two folders comes from the one the game loads first.
+        let both = listed.iter().find(|m| m.name == "dod_both").unwrap();
+        assert!(both.bsp.contains("dod_addon"));
+
+        assert_eq!(
+            std::fs::read_to_string(bsp_path(install, "dod_saints2_b5e")).unwrap(),
+            "dod_downloads"
+        );
+        assert_eq!(
+            std::fs::read_to_string(bsp_path(install, "dod_both")).unwrap(),
+            "dod_addon"
+        );
+        assert!(bsp_path(install, "dod_missing").ends_with("dod/maps/dod_missing.bsp"));
     }
 
     #[test]

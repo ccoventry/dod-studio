@@ -34,8 +34,9 @@ pub mod transform;
 
 use std::path::Path;
 
-/// The scene for one map of an install: `<install>/dod/maps/<map>.bsp`,
-/// flags named from the install's own `dod/resource/dod_english.txt`.
+/// The scene for one map of an install (its `.bsp` from `dod_addon`, `dod`
+/// or `dod_downloads`, [`files::bsp_path`]), flags named from the install's
+/// own `dod/resource/dod_english.txt`.
 pub fn scene_for(install: &Path, map: &str) -> Result<scene::Scene, String> {
     scene_for_until(install, map, &|_| false)
 }
@@ -47,7 +48,7 @@ pub fn scene_for_until(
     map: &str,
     progress: &dyn Fn(f32) -> bool,
 ) -> Result<scene::Scene, String> {
-    let bsp = install.join("dod").join("maps").join(format!("{map}.bsp"));
+    let bsp = files::bsp_path(install, map);
     let level = level::Level::from_file(&bsp)?;
     let strings =
         scene::read_strings(&install.join("dod").join("resource").join("dod_english.txt"));

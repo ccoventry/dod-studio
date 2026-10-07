@@ -76,7 +76,7 @@ pub async fn overview_flag_icons(
 ) -> Result<Vec<native::overview::flag_icons::FlagIcon>, String> {
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         let install = Path::new(&install);
-        let bsp = install.join("dod").join("maps").join(format!("{map}.bsp"));
+        let bsp = native::overview::files::bsp_path(install, &map);
         let level = native::overview::level::Level::from_file(&bsp)?;
         Ok(native::overview::flag_icons::flag_icons(install, &level))
     }))
