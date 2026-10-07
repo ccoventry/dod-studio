@@ -14,18 +14,18 @@ current as of `audit/capture-render-ux` (branched from `feature/capture-block-ma
 |---|---|---|
 | 1 | Capture progress is a black box | Open — tracked as [issue #36](https://github.com/ccoventry/dod-studio/issues/36) |
 | 2 | Three disagreeing disk-space gates | ✅ Fixed 2026-08-23 (`fix/capture-disk-space-gates`) |
-| 3 | Settings written to disk on every keystroke | ✅ Fixed — `sprint_history_archive.md` §4 |
-| 4 | Export-dir fallback computed three times | ✅ Fixed — `sprint_history_archive.md` §3 |
-| 5 | `export_manager.rs` is dead code | ✅ Fixed — `sprint_history_archive.md` §2 |
+| 3 | Settings written to disk on every keystroke | ✅ Fixed |
+| 4 | Export-dir fallback computed three times | ✅ Fixed |
+| 5 | `export_manager.rs` is dead code | ✅ Fixed |
 | 6 | hl.exe liveness polling sleeps 500ms | Open — not yet tracked as an issue |
-| 7 | Render concurrency isn't hardware-aware | ✅ Fixed — `sprint_history_archive.md` §5 |
-| 8 | Render Studio folder scan has no incremental/progress path | ✅ Fixed — `sprint_history_archive.md` §6 |
+| 7 | Render concurrency isn't hardware-aware | ✅ Fixed |
+| 8 | Render Studio folder scan has no incremental/progress path | ✅ Fixed |
 | 9 | Manual "Rendered" status bypasses the verified-take pipeline | Open — not yet tracked as an issue |
 
 **Section 2 — Feature Ideas**
 | # | Idea | Status |
 |---|---|---|
-| 1 | "Reveal in Explorer" on render jobs/takes | ✅ Fixed — `sprint_history_archive.md` §1 |
+| 1 | "Reveal in Explorer" on render jobs/takes | ✅ Fixed |
 | 2 | Burn kill-timeline label into rendered clip | Open — not yet tracked as an issue |
 | 3 | Concatenate selected rendered clips into one movie | Open — not yet tracked as an issue |
 | 4 | Live capture progress with current-clip name and ETA | Partially covered by [issue #36](https://github.com/ccoventry/dod-studio/issues/36) (progress/current-clip; ETA not explicitly scoped there) |
