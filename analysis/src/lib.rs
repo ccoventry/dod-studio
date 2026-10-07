@@ -10,6 +10,8 @@ mod objective;
 mod player;
 mod round;
 mod scoreboard;
+#[cfg(test)]
+mod tests_fixture;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
@@ -1092,79 +1094,82 @@ mod tests {
                 path.display()
             );
             let file_bytes = fs::read(path).expect("failed to read demo");
+            assert_optimized_matches_unoptimized(&file_bytes);
+        }
 
-            // Unoptimized parse
-            let demo = dem::open_demo_from_bytes(&file_bytes).unwrap();
-            let mut state_unopt = AnalyzerState::default();
-            let mut last_live_frame = None;
-            let mut processed_frames = 0;
-            let process_event = run_analyzers;
-            process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
-            for entry in &demo.directory.entries {
-                for frame in &entry.frames {
-                    let old_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
-                    if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                        && let MessageData::Parsed(msgs) = &box_type.1.messages
-                    {
-                        for net_msg in msgs {
-                            match net_msg {
-                                NetMessage::EngineMessage(engine_msg) => {
+        println!("All existing demos match perfectly!");
+    }
+
+    /// The comparison itself, also run on the checked-in fixture in CI
+    /// (`tests_fixture.rs`).
+    pub(crate) fn assert_optimized_matches_unoptimized(file_bytes: &[u8]) {
+        // Unoptimized parse
+        let demo = dem::open_demo_from_bytes(file_bytes).unwrap();
+        let mut state_unopt = AnalyzerState::default();
+        let mut last_live_frame = None;
+        let mut processed_frames = 0;
+        let process_event = run_analyzers;
+        process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
+        for entry in &demo.directory.entries {
+            for frame in &entry.frames {
+                let old_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
+                if let FrameData::NetworkMessage(box_type) = &frame.frame_data
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state_unopt,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if let Ok(msg) = UserMessage::new(&user_msg.name, &user_msg.data) {
                                     process_event(
                                         &mut state_unopt,
-                                        &AnalyzerEvent::EngineMessage(engine_msg),
+                                        &AnalyzerEvent::UserMessage(msg),
                                     );
-                                }
-                                NetMessage::UserMessage(user_msg) => {
-                                    if let Ok(msg) =
-                                        UserMessage::new(&user_msg.name, &user_msg.data)
-                                    {
-                                        process_event(
-                                            &mut state_unopt,
-                                            &AnalyzerEvent::UserMessage(msg),
-                                        );
-                                    }
                                 }
                             }
                         }
                     }
-                    let new_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    if !old_live && new_live {
-                        last_live_frame = Some(processed_frames);
-                    }
-                    processed_frames += 1;
                 }
+                let new_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                if !old_live && new_live {
+                    last_live_frame = Some(processed_frames);
+                }
+                processed_frames += 1;
             }
-            process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
-
-            // Optimized parse
-            let opt_analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
-            let state_opt = opt_analysis.state;
-
-            // Compare debug print representation
-            let total_frames: usize = demo
-                .directory
-                .entries
-                .iter()
-                .map(|entry| entry.frames.len())
-                .sum();
-            println!(
-                "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
-                total_frames,
-                last_live_frame,
-                last_live_frame.unwrap_or(0)
-            );
-
-            assert_states_eq(&state_unopt, &state_opt);
         }
+        process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
 
-        println!("All existing demos match perfectly!");
+        // Optimized parse
+        let opt_analysis = Analysis::try_from_bytes(file_bytes).unwrap();
+        let state_opt = opt_analysis.state;
+
+        // Compare debug print representation
+        let total_frames: usize = demo
+            .directory
+            .entries
+            .iter()
+            .map(|entry| entry.frames.len())
+            .sum();
+        println!(
+            "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
+            total_frames,
+            last_live_frame,
+            last_live_frame.unwrap_or(0)
+        );
+
+        assert_states_eq(&state_unopt, &state_opt);
     }
 
     fn assert_states_eq(left: &AnalyzerState, right: &AnalyzerState) {
