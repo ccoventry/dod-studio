@@ -1307,6 +1307,23 @@ export const STRINGS = {
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
   },
 
+  // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
+  BATCH_RESULTS: {
+    title: (time) => `Last batch, ended ${time}`,
+    DISMISS: 'Hide until the next batch',
+    outcome: (kind, text) => ({
+      completed: 'Completed.',
+      cancelled: 'Cancelled.',
+      error: `Stopped: ${text || 'see the activity log'}.`,
+    })[kind] || '',
+    totals: (captured, takes, size, notRenderable) => `${captured} of ${takes} take${takes === 1 ? '' : 's'} on disk, ${size}${notRenderable > 0 ? `; ${notRenderable} Render Studio can't use yet` : ''}.`,
+    CHECKING: 'Checking the takes on disk…',
+    kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
+    merged: (n) => `(+${n} more, recorded as one take)`,
+    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    OPEN_FOLDER: 'Open folder',
+  },
+
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
   COMMAND_SUGGEST: {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",

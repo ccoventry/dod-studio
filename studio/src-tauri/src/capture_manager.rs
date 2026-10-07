@@ -596,6 +596,23 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// What the take folder holds on disk, for the batch results panel (#172).
+    pub bytes: u64,
+}
+
+/// Everything under `path`, in bytes. 0 for a folder that isn't there.
+fn folder_bytes(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => folder_bytes(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 fn take_folder_has_content(path: &Path) -> bool {
@@ -630,6 +647,7 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
             source_streak_indices: block.source_streak_indices.clone(),
             captured: take_folder_has_content(&block.take_folder),
             renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+            bytes: 0,
         })
         .collect();
 
@@ -645,6 +663,9 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
                 v.renderable = native::hlcr::scanner::is_renderable_take(&block.take_folder);
             }
         }
+    }
+    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
+        v.bytes = folder_bytes(&block.take_folder);
     }
 
     verified
@@ -2591,6 +2612,16 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn a_take_folders_size_counts_its_subfolders() {
+        let dir = Scratch::new("take_folder_bytes");
+        std::fs::create_dir_all(dir.path().join("hud")).unwrap();
+        std::fs::write(dir.path().join("sound.wav"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("hud").join("00000.tga"), vec![0u8; 50]).unwrap();
+        assert_eq!(folder_bytes(dir.path()), 150);
+        assert_eq!(folder_bytes(&dir.path().join("missing")), 0);
+    }
 
     #[test]
     fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
