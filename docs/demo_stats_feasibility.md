@@ -24,7 +24,7 @@ the thing to read and update, not this file. This file just anchors it in the re
 fresh session (or a different AI) knows the artifact exists and what's true about the
 codebase as of the last time it was checked against reality.
 
-There's also a stale standalone copy at `C:\Users\chris\Downloads\ktp-demo-stats-spec.html`
+There's also a stale standalone copy in a local Downloads folder (`ktp-demo-stats-spec.html`)
 (944 KB, fonts inlined) — it predates the fixes below and should not be treated as current.
 
 ## Headline findings (verified across 624 real demos)
