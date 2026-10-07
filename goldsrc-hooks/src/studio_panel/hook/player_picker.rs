@@ -118,13 +118,7 @@ unsafe fn names_in(list: *mut c_void) -> Vec<String> {
             guard += 1;
             let row = get_item(list, id);
             if !row.is_null() {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
-                let name = if raw.is_null() {
-                    String::new()
-                } else {
-                    text(raw)
-                };
+                let name = row_path_text(row);
                 if let Some(players) =
                     row_path(&name).and_then(|path| crate::demo_rosters::players_for(&path))
                 {

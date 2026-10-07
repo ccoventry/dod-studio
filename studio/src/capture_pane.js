@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
@@ -959,6 +960,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listen('capture_status', (event) => {
       const payload = event.payload || {};
       if (payload.running) {
+        // The first running report of a batch: the last one's results go.
+        if (!capturingInFlight) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         if (progressBar) {
@@ -979,6 +982,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
         if (currentOnBatchFinished) currentOnBatchFinished();
+        batchEnded(
+          payload.error ? 'error' : payload.status === 'Cancelled' ? 'cancelled' : 'completed',
+          uiStatusText(payload.status),
+        );
 
         if (payload.error) {
           // Without the engine's pointers at the log (#534); the log has them.
@@ -1072,6 +1079,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   if (!unlistenTakesVerified) {
     listen('capture_takes_verified', (event) => {
       const payload = event.payload || {};
+      batchVerified(payload, lastDispatch);
       const blocks = payload.blocks || [];
       const total = payload.total_count ?? blocks.length;
       const captured = payload.captured_count ?? 0;
@@ -1106,7 +1114,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // Status only ever moves forward. Re-capturing something already
           // rendered must not knock it back down to Captured -- unless that
           // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105, decided 2026-09-29).
+          // claim (#105).
           if (streak.status === 'Rendered' && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
           if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
@@ -1338,8 +1346,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // until after it has patched every demo in the queue — the engine's own
       // "Only one instance of this game can be run at a time" box appears at
       // the end of all that work, with nothing captured. The preview and
-      // standalone launches have been guarded against this all along; the batch
-      // was the one path that went straight through. Observed 2026-08-28.
+      // standalone launches are guarded against this the same way.
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();

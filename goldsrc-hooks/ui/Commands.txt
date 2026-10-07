@@ -4,7 +4,7 @@ SPECTATING (HLTV demos)
   dodstudio_spec_lock 0/1
       Keep the camera on the player you are watching when he dies.
   dodstudio_spec_target <player>
-      Put the camera on a player (number or name).
+      Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
       Hide the spectator bars and everything on them.
   dodstudio_hide_hltv_messages 0/1
@@ -21,9 +21,11 @@ HUD
       Silence voice commands ('fire in the hole!' and the rest).
   dodstudio_hide_hudelement <name> 0/1
       Hide one HUD element; the bare command lists them.
+  dodstudio_hide_map_text 0/1
+      Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_sprite <model>...
       Hide entities by model path.
-  dodstudio_deathmsg (or dodstudio_killfeed)
+  dodstudio_deathmsg
       Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
   dodstudio_objectives
       Move the objective icons and the objective timer.
@@ -53,6 +55,12 @@ DOD STUDIO WINDOW
       The console key opens this window on the Console tab.
   dodstudio_resizable_windows 0/1
       Every game window can be resized by its edges.
+  dodstudio_demo_list_folders 0/1
+      The Load Demo window and the Demos tab also list and open folders.
+  dodstudio_demo_list_hide_empty 0/1
+      Folders with no demo anywhere inside them aren't listed.
+  dodstudio_demo_list_count_subfolders 0/1
+      A folder's demo count includes its subfolders.
   dodstudio_remember_window_layout 0/1
       Game windows come back where you left them.
 
