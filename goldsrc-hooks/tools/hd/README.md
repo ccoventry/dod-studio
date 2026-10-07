@@ -114,6 +114,16 @@ python compare.py compare.png
 
 `plain` needs none of the above except Python: it's a plain enlargement with light sharpening, no AI.
 
+3. **Optional: the second upscaler backend**, for the newer models. Real-ESRGAN ncnn-vulkan runs only ESRGAN-shaped networks; the stronger current models on [OpenModelDB](https://openmodeldb.info/) use newer architectures (DAT, SPAN, RealPLKSR, HAT, ATD), which load through [spandrel](https://github.com/chaiNNer-org/spandrel), the library chaiNNer uses. `python setup_tools.py --spandrel` makes a `spandrel\` folder here with a Python venv (PyTorch's CUDA build and spandrel, about 3 GB) and these three models (about 310 MB). It needs an NVIDIA card; without one it runs on the CPU, slowly.
+
+   | Style | Model | Architecture | What it's for | Licence |
+   |---|---|---|---|---|
+   | `ultrasharpv2` | [4x-UltraSharpV2](https://openmodeldb.info/models/4x-UltraSharpV2) | DAT2 | UltraSharp's successor, by the same author | CC BY-NC-SA 4.0 (non-commercial) |
+   | `pbrify` | [4x-PBRify_UpscalerV4](https://openmodeldb.info/models/4x-PBRify-UpscalerV4) | DAT2 | made for old game textures | CC0 |
+   | `webphoto` | [4xNomosWebPhoto_RealPLKSR](https://openmodeldb.info/models/4x-NomosWebPhoto-RealPLKSR) | RealPLKSR | photo surfaces; a fifth the size, about twice as fast | CC BY 4.0 |
+
+   Without the backend, these three styles say what they need and the rest build as before. The DAT2 models take a few times longer than ultrasharp per texture (see the timings in `docs/hd_spandrel_evaluation.md`).
+
 ## Which game folder
 
 The scripts write into the Half-Life folder that DoD Studio launches. They look for it in this order:
@@ -194,6 +204,7 @@ The game loads whatever style folder you name, so you can make as many as you li
 
    ```
    anime   = realesrgan-x4plus-anime        an AI model (file name in realesrgan\models, no extension)
+   atd     = spandrel 4xNomos8k_atd_jpg.pth an AI model through the second backend (file in spandrel\models, with its extension)
    crisp   = plain 150                      no AI, sharpened 0 (none) to 500 (very strong); plain is 60
    sharp70 = blend ultrasharp plain 70      two styles you've built, mixed: 70% ultrasharp, 30% plain
    ```
@@ -206,7 +217,7 @@ The game loads whatever style folder you name, so you can make as many as you li
 
    Then put `dodstudio_hd_style crisp` in `movie.cfg` and restart the game. `python compare.py compare.png` includes your styles too.
 
-**Other AI models.** Anything in ncnn format works (a `.param` + `.bin` pair): drop the two files into `realesrgan\models\` and name the file in a line. [Upscayl's custom models](https://github.com/upscayl/custom-models) has dozens ready to use. Models from [OpenModelDB](https://openmodeldb.info/) come as `.pth` or `.safetensors`, and [chaiNNer](https://chainner.app/) can convert them to ncnn. Use 4x models: the scripts expect 4x.
+**Other AI models.** Anything in ncnn format works (a `.param` + `.bin` pair): drop the two files into `realesrgan\models\` and name the file in a line. [Upscayl's custom models](https://github.com/upscayl/custom-models) has dozens ready to use. Models from [OpenModelDB](https://openmodeldb.info/) come as `.pth` or `.safetensors`: with the second backend set up, drop the file into `spandrel\models\` and write `name = spandrel <file>`; that covers every architecture spandrel loads. Use 4x models: the scripts expect 4x. Diffusion-based restorers (SUPIR, StableSR, DiffBIR) are a different thing: they invent detail rather than sharpen it, need a lot more GPU, and aren't wired in.
 
 **Blends** take no GPU time: they mix files that already exist, so build both of their styles first. `build_all.py` always builds blends last, so `python build_all.py ultrasharp plain sharp70` works in one go.
 
@@ -229,8 +240,9 @@ Lists saved in this folder by an older version still work while the install has 
 | `detail_hd.py` | detail textures |
 | `sky_hd.py` | skybox faces |
 | `compare.py` | the style comparison sheet |
-| `setup_tools.py` | downloads the upscaler and the style models |
-| `styles.py` | the style list and the upscaler call |
+| `setup_tools.py` | downloads the upscaler and the style models (`--spandrel`: the second backend too) |
+| `styles.py` | the style list and the upscaler calls |
+| `spandrel_run.py` | the second backend: 4x through a PyTorch model, run under its venv |
 | `my_styles.example.txt` | template for your own styles (copy it to `dodstudio_hd\my_styles.txt`) |
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |

@@ -36,45 +36,82 @@ pub const DEFAULT_STYLE: &str = "ultrasharp";
 pub const ENABLED_CVAR: &str = "dodstudio_hd_enabled";
 pub const STYLE_CVAR: &str = "dodstudio_hd_style";
 
+/// What runs a style's model, if it has one (`styles.py`'s kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Backend {
+    /// Real-ESRGAN ncnn-vulkan (`ai` in `styles.py`): a `.param` + `.bin` pair.
+    Ncnn,
+    /// `spandrel_run.py` under the spandrel venv: a `.pth`/`.safetensors`.
+    Spandrel,
+    /// No model: `plain` and `blend`.
+    None,
+}
+
 /// A style the scripts know without `my_styles.txt`.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct BuiltInStyle {
     pub name: &'static str,
-    /// The Real-ESRGAN model file stem, for the AI styles.
+    pub backend: Backend,
+    /// The model: a Real-ESRGAN file stem, or a spandrel file name with its
+    /// extension.
     pub model: Option<&'static str>,
 }
 
 /// `tools/hd/styles.py`'s `BUILT_IN`, in the same order.
-pub const BUILT_IN_STYLES: [BuiltInStyle; 7] = [
+pub const BUILT_IN_STYLES: [BuiltInStyle; 10] = [
     BuiltInStyle {
         name: "ultrasharp",
+        backend: Backend::Ncnn,
         model: Some("ultrasharp-4x"),
     },
     BuiltInStyle {
         name: "remacri",
+        backend: Backend::Ncnn,
         model: Some("remacri-4x"),
     },
     BuiltInStyle {
         name: "siax",
+        backend: Backend::Ncnn,
         model: Some("4x_NMKD-Siax_200k"),
     },
     BuiltInStyle {
         name: "generalv3",
+        backend: Backend::Ncnn,
         model: Some("RealESRGAN_General_x4_v3"),
     },
     BuiltInStyle {
         name: "x4plus",
+        backend: Backend::Ncnn,
         model: Some("realesrgan-x4plus"),
     },
     // A plain enlargement with sharpening: no AI, no model.
     BuiltInStyle {
         name: "plain",
+        backend: Backend::None,
         model: None,
     },
     // Made from x4plus and plain, never upscaled on its own.
     BuiltInStyle {
         name: "blend",
+        backend: Backend::None,
         model: None,
+    },
+    // The second backend's styles (`setup_tools.py --spandrel`).
+    BuiltInStyle {
+        name: "ultrasharpv2",
+        backend: Backend::Spandrel,
+        model: Some("4x-UltraSharpV2.safetensors"),
+    },
+    BuiltInStyle {
+        name: "pbrify",
+        backend: Backend::Spandrel,
+        model: Some("4x-PBRify_UpscalerV4.pth"),
+    },
+    BuiltInStyle {
+        name: "webphoto",
+        backend: Backend::Spandrel,
+        model: Some("4xNomosWebPhoto_RealPLKSR.pth"),
     },
 ];
 
@@ -106,7 +143,10 @@ pub struct ToolsStatus {
     pub chosen: Option<String>,
     pub upscaler: String,
     pub upscaler_present: bool,
+    /// The Real-ESRGAN styles' models.
     pub models: Vec<ModelStatus>,
+    /// The second backend.
+    pub spandrel: SpandrelStatus,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -114,6 +154,35 @@ pub struct ModelStatus {
     pub style: &'static str,
     pub model: &'static str,
     pub present: bool,
+}
+
+impl ToolsStatus {
+    /// Whether a built-in style has what it runs on: for a Real-ESRGAN
+    /// style the upscaler and its model, for a spandrel style the venv and
+    /// its model, and nothing for the rest.
+    pub fn tools_present_for(&self, style: &str) -> bool {
+        let Some(built_in) = BUILT_IN_STYLES.iter().find(|s| s.name == style) else {
+            return true;
+        };
+        let model_present =
+            |models: &[ModelStatus]| models.iter().any(|m| m.style == style && m.present);
+        match built_in.backend {
+            Backend::Ncnn => self.upscaler_present && model_present(&self.models),
+            Backend::Spandrel => {
+                self.spandrel.python_present && model_present(&self.spandrel.models)
+            }
+            Backend::None => true,
+        }
+    }
+}
+
+/// The spandrel backend: `setup_tools.py --spandrel`'s folder, whether its
+/// venv is there, and each spandrel style's model file.
+#[derive(Debug, Clone, Serialize)]
+pub struct SpandrelStatus {
+    pub dir: String,
+    pub python_present: bool,
+    pub models: Vec<ModelStatus>,
 }
 
 /// Everything the HD page's status panel shows.
@@ -223,15 +292,31 @@ fn count_files(dir: &Path) -> (u64, u64) {
 
 fn tools_status(tools_dir: &Path) -> ToolsStatus {
     let upscaler = setup::upscaler_exe(tools_dir);
-    let models = BUILT_IN_STYLES
-        .iter()
-        .filter_map(|s| s.model.map(|model| (s.name, model)))
+    let with_backend = move |backend: Backend| {
+        BUILT_IN_STYLES
+            .iter()
+            .filter(move |s| s.backend == backend)
+            .filter_map(|s| s.model.map(|model| (s.name, model)))
+    };
+    let models = with_backend(Backend::Ncnn)
         .map(|(style, model)| ModelStatus {
             style,
             model,
             present: setup::model_present(tools_dir, model),
         })
         .collect();
+    let spandrel = setup::spandrel_dir(tools_dir);
+    let spandrel = SpandrelStatus {
+        dir: spandrel.to_string_lossy().to_string(),
+        python_present: setup::spandrel_python(&spandrel).is_file(),
+        models: with_backend(Backend::Spandrel)
+            .map(|(style, model)| ModelStatus {
+                style,
+                model,
+                present: setup::spandrel_model_present(&spandrel, model),
+            })
+            .collect(),
+    };
     ToolsStatus {
         dir: tools_dir.to_string_lossy().to_string(),
         source: None,
@@ -239,6 +324,7 @@ fn tools_status(tools_dir: &Path) -> ToolsStatus {
         upscaler: upscaler.to_string_lossy().to_string(),
         upscaler_present: upscaler.is_file(),
         models,
+        spandrel,
     }
 }
 
@@ -263,6 +349,29 @@ mod tests {
         assert!(status.built_styles.is_empty());
         assert!(!status.tools.upscaler_present);
         assert!(status.tools.models.iter().all(|m| !m.present));
+        assert!(!status.tools.spandrel.python_present);
+        assert_eq!(status.tools.spandrel.models.len(), 3);
+        assert!(status.tools.spandrel.models.iter().all(|m| !m.present));
+    }
+
+    #[test]
+    fn the_spandrel_backend_sits_beside_the_upscaler_and_is_seen_when_set_up() {
+        let dir = Scratch::new("hd_spandrel");
+        let realesrgan = dir.join("hd_tools").join("realesrgan");
+        let spandrel = setup::spandrel_dir(&realesrgan);
+        assert_eq!(spandrel, dir.join("hd_tools").join("spandrel"));
+        std::fs::create_dir_all(spandrel.join("venv").join("Scripts")).unwrap();
+        std::fs::write(setup::spandrel_python(&spandrel), b"").unwrap();
+        std::fs::create_dir_all(spandrel.join("models")).unwrap();
+        std::fs::write(
+            spandrel.join("models").join("4x-PBRify_UpscalerV4.pth"),
+            b"",
+        )
+        .unwrap();
+        let status = tools_status(&realesrgan);
+        assert!(status.tools_present_for("pbrify"));
+        assert!(!status.tools_present_for("ultrasharpv2"));
+        assert!(status.spandrel.python_present);
     }
 
     #[test]
@@ -326,11 +435,25 @@ mod tests {
         let styles = include_str!("../../../goldsrc-hooks/tools/hd/styles.py");
         assert!(styles.contains(&format!("DEFAULT = \"{DEFAULT_STYLE}\"")));
         for style in BUILT_IN_STYLES {
-            let line = match style.model {
-                Some(model) => format!("\"{}\": (\"ai\", \"{model}\")", style.name),
-                None => format!("\"{}\": (\"", style.name),
+            let line = match (style.backend, style.model) {
+                (Backend::Ncnn, Some(model)) => {
+                    format!("\"{}\": (\"ai\", \"{model}\")", style.name)
+                }
+                (Backend::Spandrel, Some(model)) => {
+                    format!("\"{}\": (\"spandrel\", \"{model}\")", style.name)
+                }
+                _ => format!("\"{}\": (\"", style.name),
             };
             assert!(styles.contains(&line), "{line}");
+        }
+        // setup_tools.py fetches the same spandrel model files.
+        let setup_py = include_str!("../../../goldsrc-hooks/tools/hd/setup_tools.py");
+        for style in BUILT_IN_STYLES
+            .iter()
+            .filter(|s| s.backend == Backend::Spandrel)
+        {
+            let line = format!("\"{}\": (\"{}\",", style.name, style.model.unwrap());
+            assert!(setup_py.contains(&line), "{line}");
         }
     }
 
@@ -339,6 +462,7 @@ mod tests {
         for style in BUILT_IN_STYLES {
             let ai = !matches!(style.name, "plain" | "blend");
             assert_eq!(style.model.is_some(), ai, "{}", style.name);
+            assert_eq!(style.backend != Backend::None, ai, "{}", style.name);
         }
         assert!(BUILT_IN_STYLES.iter().any(|s| s.name == DEFAULT_STYLE));
     }

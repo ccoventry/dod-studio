@@ -57,6 +57,27 @@ pub fn realesrgan_dir(hd_tools: &Path) -> PathBuf {
     hd_tools.join("realesrgan")
 }
 
+/// `%APPDATA%\dod-studio\hd_tools\spandrel`: the second upscaler backend,
+/// `setup_tools.py --spandrel`'s venv and models (`HD_SPANDREL` to the
+/// scripts). Beside the Real-ESRGAN folder, not inside it.
+pub fn spandrel_dir(realesrgan: &Path) -> PathBuf {
+    realesrgan
+        .parent()
+        .map(|hd_tools| hd_tools.join("spandrel"))
+        .unwrap_or_else(|| realesrgan.join("spandrel"))
+}
+
+/// The venv's Python, which runs `spandrel_run.py`.
+pub fn spandrel_python(spandrel: &Path) -> PathBuf {
+    spandrel.join("venv").join("Scripts").join("python.exe")
+}
+
+/// A spandrel style's model file (`.pth` or `.safetensors`, with its
+/// extension) is in `models\`.
+pub fn spandrel_model_present(spandrel: &Path, model: &str) -> bool {
+    spandrel.join("models").join(model).is_file()
+}
+
 pub fn upscaler_exe(tools_dir: &Path) -> PathBuf {
     tools_dir.join(EXE_NAME)
 }
@@ -435,10 +456,12 @@ mod tests {
 
     #[test]
     fn the_models_match_the_ai_styles_that_are_not_in_the_zip() {
-        // x4plus ships in the Real-ESRGAN zip; every other AI style needs one
-        // of these downloads.
+        // x4plus ships in the Real-ESRGAN zip; every other Real-ESRGAN style
+        // needs one of these downloads. The spandrel styles' models are
+        // `setup_tools.py --spandrel`'s, checked against it in hd::tests.
         for style in super::super::BUILT_IN_STYLES {
             if let Some(model) = style.model
+                && style.backend == super::super::Backend::Ncnn
                 && model != "realesrgan-x4plus"
             {
                 assert!(MODELS.iter().any(|(_, m)| *m == model), "{model}");
