@@ -1,4 +1,4 @@
-//! The DoD Studio window's Killstreaks tab (#565): every kill streak in the
+//! The DoD Studio window's Highlights tab (#565): every kill streak in the
 //! demo that is playing, found by the same analysis Studio runs.
 //!
 //! ## Where the analysis comes from
@@ -6,8 +6,10 @@
 //! The analyzer cache Studio shares (`analysis::cache`, under
 //! `%APPDATA%\dod-studio\analyzer_cache`): a demo Studio's Demo Analyzer or
 //! Master Queue scan already read, or one shown here before, is there and
-//! takes a few milliseconds. Anything else is analysed here, on a thread of its
-//! own at below-normal priority, and saved there, for Studio and the next time.
+//! takes a few milliseconds. Anything else is analysed by DoD Studio itself
+//! when it is running (its analysis pipe, `STUDIO_PIPE`), else here, on a thread of its own at
+//! below-normal priority; either way it is saved there, for Studio and the
+//! next time.
 //!
 //! Only on request (the tab asks while it is showing), never because a demo
 //! started: captures play demos too, and an analysis would take CPU from the
@@ -31,7 +33,7 @@ pub const MIN_KILLS: usize = 1;
 /// Go jumps this long before a streak's first kill.
 pub const LEAD_IN_SECS: f32 = 5.0;
 
-/// One row of the Killstreaks tab.
+/// One row of the Highlights tab.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Streak {
     pub player: String,
