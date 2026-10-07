@@ -80,6 +80,12 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Code Edits:** Apply minimal changes directly to files. Never rewrite unchanged lines or entire files unnecessarily.
 - **Ambiguity:** State critical technical assumptions once and proceed. Fail loudly on blocking errors.
 
+### Comments & Docs
+- **Comments say why, in the present tense.** No session narrative ("the user asked…", "per user", "tonight") and no decision dates: cite the issue or PR (`#214`) and let git history hold the story. Keep a date only when it dates a measurement. (#649 removed ~40 such comments.)
+- **Renaming a feature, tab, setting or command:** grep comments, `docs/`, READMEs, `goldsrc-hooks/ui/Commands.txt` and `goldsrc-hooks/tools/` for the old name in the same PR. Most wrong comments found by the 2026-10 audits were left behind by a rename (#653: "Killstreaks" → Highlights).
+- **A new file in `docs/` gets a line in `docs/README.md`.** A plan that's done moves to `docs/archive/` (#638, #642).
+- **No real people's data in the public tree:** tests, fixtures, docs and examples use made-up SteamIDs (`STEAM_0:1:1234567`) and paths, never a player's or the maintainer's (#641). A checked-in demo fixture is recorded on a test account.
+
 ### Terminal & Shell Rules
 - **Diagnostics:** Never output raw compiler logs. Provide concise, single-sentence failure summaries and direct mechanical fixes.
 
