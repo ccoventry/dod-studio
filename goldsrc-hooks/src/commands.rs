@@ -1588,6 +1588,7 @@ mod tests {
         // one of those can flip LEVEL mid-assertion here (issue #321).
         // anim_fix's tests already take the same lock for the same reason.
         let _statics = anim_fix::tests::lock_statics();
+        let _hidden = hudelement::tests::lock_hidden();
 
         let anim = anim_fix::LEVEL.load(Ordering::Relaxed);
 
