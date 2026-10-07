@@ -108,8 +108,7 @@ don't regress these while porting).
   `#master-demo-table` has one, `styles.css:293`), and square table corners.
 - Concrete, portable takeaways: add a hover rule to the render jobs table,
   and consider tokenizing status colors into CSS variables (dovetails with
-  the Theme System backlog item under R&D & Architectural Enhancements in
-  `archive/engineering_backlog.md`, since both need a real color-token system
+  the theme system, issue #49, since both need a real color-token system
   instead of scattered hex literals). The palette-swap-to-Catppuccin
   and rounded-corner styling are aesthetic calls for the user to make, not
   objectively missing functionality.

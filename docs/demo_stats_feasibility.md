@@ -1,7 +1,7 @@
 # Demo-derived stats for KTP League — where this stands
 
 **Start here if you're picking this up cold.** This is a separate work stream from the
-Capture/Render Studio track in `archive/active_sprint_state.md` / `archive/engineering_backlog.md` — it
+Capture/Render Studio track — it
 lives entirely on `dev`/`main` (commits `a86973a`, `8e6c3a5`, `c3b9c88`, `669d9f9`, all
 merged, both branches identical as of 2026-08-22 — hashes corrected 2026-08-24, the
 originally-recorded ones were unreachable from either branch, likely due to a history
@@ -42,7 +42,7 @@ There's also a stale standalone copy at `C:\Users\chris\Downloads\ktp-demo-stats
 - Two real bugs were found and fixed while validating this (see below): a live
   localization bug affecting 1,190 tokens, and a demo-type misclassification
   (`SvcDirector` appears in POV demos too, whenever an HLTV caster spectates — already
-  documented in `archive/bugs.md` from the capture/render side, root cause is the same message).
+  hit on the capture/render side too, root cause is the same message).
 - `CapMsg` only ever names one flag-capper; ~20% of captures are multi-capper and the rest
   are recovered from same-frame `ObjScore` increments. This is scoped to the 126-demo LAN
   HLTV subset specifically, not the full corpus — flagged as a correction after an earlier
@@ -82,7 +82,7 @@ and 0 captures, so its "break" is not a capture at all.
   to resolve. Fixed by normalizing (`trim_start_matches('#').to_lowercase()`) on both
   insert and lookup. `localizations/dod_studio_english.txt` had its 327 keys stripped of
   their `#` prefix to match the convention every other file already used. See
-  `docs/archive/staging_lessons.md`'s "Localization Key Canonicalization" entry.
+  `normalize_key` in `analysis/src/localization.rs`.
 - **Brought `main` current** — it was ~300 commits behind `dev` and still advertised a
   removed `egui` GUI. Fast-forwarded; `main`/`dev` are now identical.
 - **Test suite is green**: 21 passed, 0 failed (was 4 failing before the localization fix
