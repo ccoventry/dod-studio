@@ -68,7 +68,7 @@ pub fn job_reservation_estimate(clip: &ClipData, codec: RenderCodec, custom_args
 
 // ── Learned output sizes (#120) ──────────────────────────────────────────────
 //
-// Decided in the 2026-09-28 review (D12): no per-codec table of guessed
+// No per-codec table of guessed
 // ratios. Each codec's real bytes per frame are measured from renders that
 // finished, per frame size (a 4K ProRes frame is not a 720p one), and later
 // jobs reserve that plus a margin. The first clip of a kind keeps the

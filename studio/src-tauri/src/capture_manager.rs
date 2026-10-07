@@ -2304,7 +2304,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Standalone Game Launch ──────────────────────────────────────────────────────
@@ -3016,7 +3016,7 @@ mod tests {
         let payload = sample_payload();
         let cfg = config_from_payload(&payload);
         // Capture Output's first entry is the sole source of primary_media_dir —
-        // there's no separate "Primary Media Dir" field anymore (removed 2026-08-17).
+        // there's no separate "Primary Media Dir" field.
         assert_eq!(cfg.primary_media_dir, Some(PathBuf::from("D:/capture")));
     }
 
@@ -3139,7 +3139,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_filename_is_no_longer_refused_in_init_commands() {
-        // Re-tiered 2026-09-05: inert in Initial Commands (see
+        // Inert in Initial Commands (see
         // cfg_scan::NOOP_IN_INIT_COMMANDS), only dangerous once scheduled.
         let err = first_banned_command_error(&["mirv_movie_filename foo".to_string()], &[]);
         assert!(err.is_none(), "{:?}", err);

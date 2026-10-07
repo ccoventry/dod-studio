@@ -8,7 +8,7 @@
 //! reload, the bolt cycle and the jump -- because the client's own weapon and
 //! jump prediction does not run during playback (measured on about 13,000
 //! frames of six POV demos; `docs/goldsrc_crosshair.md` section 2).
-//! Shown both ways, the user chose live play (2026-10-01).
+//! Live play was chosen after comparing both.
 //!
 //! ## DoD's rule
 //!
@@ -60,8 +60,8 @@
 //! - **The scoped FG42 while zoomed**: zoom is not replicated for others.
 //! - **Switching to or from a grenade**: grenades do not deploy through
 //!   `DefaultDeploy`, so switching to one starts no timer. Switching *from*
-//!   one to a gun would, by the code, but the user saw no hide either way
-//!   when playing (2026-09-28), so neither direction starts it here.
+//!   one to a gun would, by the code, but live play showed no hide either
+//!   way (2026-09-28), so neither direction starts it here.
 //!
 //! The British knife is the US knife's weapon with another model, and the
 //! paratrooper knife is the German knife's, so both are in the list by model.

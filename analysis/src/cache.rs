@@ -6,7 +6,7 @@
 //! `%APPDATA%\dod-studio\analyzer_cache`; callers pass it in, so this crate
 //! needs no app-data lookup of its own.
 //!
-//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`]: who is
+//! Beside each entry, `<hash>.players.json` holds its [`DemoPlayers`](crate::cache::DemoPlayers): who is
 //! in the demo and who recorded it, a few hundred bytes, so a list of
 //! hundreds of demos can be filtered by player without loading whole analyses
 //! (#437, #174).

@@ -1,5 +1,5 @@
 //! Minimal manual DLL injector for testing goldsrc-hooks against a running
-//! hl.exe, independent of any future DoD Studio capture-pipeline wiring.
+//! hl.exe, independent of DoD Studio's own launch path.
 //!
 //! Usage: `inject <pid> <path-to-dll>`
 //!

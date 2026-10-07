@@ -35,7 +35,7 @@
 //! string `.?AVCHudAmmo@@` and friends before anything is written. A wrong
 //! build fails loudly and by name.
 //!
-//! (All three of the user's Half-Life installs ship a byte-identical
+//! (All three Half-Life installs it was checked against ship a byte-identical
 //! `client.dll`, so this is insurance rather than portability.)
 //!
 //! ## What is not listed
@@ -78,7 +78,8 @@
 //!   nothing changing for exactly this reason -- there was nothing to see.
 //! - `CHudDoDMap::Draw` (`client+0x2e560`) is `mov eax, 1; ret 4` -- eight
 //!   bytes, no calls. The overview map is rendered some other way entirely
-//!   (not yet found; likely VGUI2, like the scoreboard).
+//!   (its draw call is not traced; `overview_map` moves it through
+//!   the rectangles `CHud::ComputeOverviewMapRects` caches).
 //! - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks
 //!   a flag and an observer sub-mode, then returns a plain boolean. Neither
 //!   function contains a single `FillRGBA`/`SPR_Draw` call. There is no mortar

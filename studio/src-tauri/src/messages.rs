@@ -2,7 +2,7 @@
 // Rust-side counterpart to studio/src/strings.js: the Tauri command
 // layer's own authored user-facing error/status text, centralized so the
 // same message can't drift into two different wordings at two call sites
-// (see the "Task join error: {}" cluster below, previously duplicated
+// (see the `background_task_crashed` cluster below, previously duplicated
 // verbatim 13 times across 4 files) and shared boilerplate lives in exactly
 // one place. Scope matches strings.js's own: text that reaches the frontend
 // as a toast/dialog string. Developer-only log::error!/eprintln!
@@ -13,10 +13,9 @@
 //
 // Covers every Tauri command file's error/status strings: lib.rs,
 // capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
-// updater_manager.rs, settings_manager.rs, and dir_browser.rs. Not yet
-// covered: native/analysis errors that bubble straight through Tauri
-// commands unwrapped (a separate crate, out of scope for this pass — see
-// issue #33).
+// hd_manager.rs, updater_manager.rs, settings_manager.rs, and
+// dir_browser.rs. Not covered: native/analysis errors that bubble straight
+// through Tauri commands unwrapped (a separate crate — see issue #650).
 
 use std::fmt::Display;
 
@@ -36,16 +35,19 @@ use std::fmt::Display;
 pub async fn flatten_spawn_blocking<T>(
     handle: tokio::task::JoinHandle<Result<T, String>>,
 ) -> Result<T, String> {
-    handle
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+    handle.await.map_err(background_task_crashed)?
 }
 
 /// For a `spawn_blocking` closure returning a plain `T` (no inner Result).
 /// Awaits the handle and turns a join failure into the same error-string
 /// shape the rest of the command layer uses.
 pub async fn spawn_blocking_result<T>(handle: tokio::task::JoinHandle<T>) -> Result<T, String> {
-    handle.await.map_err(|e| format!("Task join error: {}", e))
+    handle.await.map_err(background_task_crashed)
+}
+
+/// A `spawn_blocking` task that panicked or was cancelled.
+pub fn background_task_crashed(err: impl Display) -> String {
+    format!("Background task crashed: {}", err)
 }
 
 // ── lib.rs ───────────────────────────────────────────────────────────────
@@ -255,21 +257,21 @@ pub fn failed_to_open_folder(err: impl Display) -> String {
 
 pub fn no_map_folder_beside_exe(game_path: &str) -> String {
     format!(
-        "no map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
+        "No map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
         game_path
     )
 }
 
 pub fn map_check_failed(err: impl Display) -> String {
-    format!("map check failed: {}", err)
+    format!("Map check failed: {}", err)
 }
 
 pub fn config_scan_failed(err: impl Display) -> String {
-    format!("config scan failed: {}", err)
+    format!("Config scan failed: {}", err)
 }
 
 pub fn map_download_failed(err: impl Display) -> String {
-    format!("map download failed: {}", err)
+    format!("Map download failed: {}", err)
 }
 
 // ── updater_manager.rs ───────────────────────────────────────────────────
@@ -534,21 +536,21 @@ mod tests {
         assert_eq!(
             no_map_folder_beside_exe("C:/games/dod/hl.exe"),
             format!(
-                "no map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
+                "No map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
                 "C:/games/dod/hl.exe"
             )
         );
         assert_eq!(
             map_check_failed("panic"),
-            format!("map check failed: {}", "panic")
+            format!("Map check failed: {}", "panic")
         );
         assert_eq!(
             config_scan_failed("panic"),
-            format!("config scan failed: {}", "panic")
+            format!("Config scan failed: {}", "panic")
         );
         assert_eq!(
             map_download_failed("panic"),
-            format!("map download failed: {}", "panic")
+            format!("Map download failed: {}", "panic")
         );
     }
 
@@ -594,23 +596,23 @@ mod tests {
     // unique to test here is the join-error text itself, which only surfaces
     // if the spawned closure panics.
     #[tokio::test]
-    async fn flatten_spawn_blocking_reports_a_panic_with_the_original_wording() {
+    async fn flatten_spawn_blocking_reports_a_panic_as_a_crashed_task() {
         let handle: tokio::task::JoinHandle<Result<(), String>> =
             tokio::task::spawn_blocking(|| panic!("boom"));
         let err = flatten_spawn_blocking(handle).await.unwrap_err();
         assert!(
-            err.starts_with("Task join error: "),
-            "expected the original \"Task join error: {{}}\" prefix, got {err:?}"
+            err.starts_with("Background task crashed: "),
+            "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
         );
     }
 
     #[tokio::test]
-    async fn spawn_blocking_result_reports_a_panic_with_the_original_wording() {
+    async fn spawn_blocking_result_reports_a_panic_as_a_crashed_task() {
         let handle: tokio::task::JoinHandle<()> = tokio::task::spawn_blocking(|| panic!("boom"));
         let err = spawn_blocking_result(handle).await.unwrap_err();
         assert!(
-            err.starts_with("Task join error: "),
-            "expected the original \"Task join error: {{}}\" prefix, got {err:?}"
+            err.starts_with("Background task crashed: "),
+            "expected the \"Background task crashed: {{}}\" prefix, got {err:?}"
         );
     }
 }

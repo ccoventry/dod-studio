@@ -309,7 +309,7 @@ pub fn spawn_capture_engine(
             let session_junction_str = session_junction.to_str().unwrap_or_default();
             let session_dir_str = session_dir.to_str().unwrap_or_default();
             if session_junction_str.is_empty() || session_dir_str.is_empty() {
-                log_crash_abort!(tx, "Invalid UTF-8 in session paths");
+                log_crash_abort!(tx, format!("Can't link {} to {}: the path has characters mklink can't take", session_junction.display(), session_dir.display()));
                 return;
             }
 
@@ -345,7 +345,7 @@ pub fn spawn_capture_engine(
                 let junction_str = junction_path.to_str().unwrap_or_default();
                 let target_str = target_dir.to_str().unwrap_or_default();
                 if junction_str.is_empty() || target_str.is_empty() {
-                    log_crash_abort!(tx, "Invalid UTF-8 in pool junction paths");
+                    log_crash_abort!(tx, format!("Can't link {} to capture directory {}: the path has characters mklink can't take", junction_path.display(), target_dir.display()));
                     return;
                 }
                 let status = std::process::Command::new("cmd")
