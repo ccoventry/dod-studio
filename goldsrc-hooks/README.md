@@ -39,7 +39,9 @@ joins this switch rather than adding a command:
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
-Plus twenty-one control surfaces, always available and doing nothing until used:
+Plus these control surfaces, always available and doing nothing until used
+(not every module is listed; [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
+is the complete list):
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
@@ -216,7 +218,9 @@ Plus twenty-one control surfaces, always available and doing nothing until used:
   `docs/goldsrc_objective_icons.md`.
 
 All of them live in one DLL since they share the same engine-interface
-bootstrap; set only the env var for whichever fix you want active.
+bootstrap. Each feature is driven by its `dodstudio_*` cvar or command (see
+[`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)); a few also have
+a `GOLDSRC_HOOKS_*` environment variable that sets the startup state.
 
 ## Building
 
@@ -245,7 +249,7 @@ Produces `target/i686-pc-windows-msvc/release/dodstudio_goldsrc_hooks.dll` and
 
 1. Launch DoD 1.3 (with or without HLAE) from the install you use with DoD Studio and load an HLTV/POV demo.
 2. Find `hl.exe`'s PID (Task Manager, or `Get-Process hl | Select Id`).
-3. Set whichever env var(s) you want *before* launching `hl.exe` --
+3. Set any `GOLDSRC_HOOKS_*` env var(s) you want *before* launching `hl.exe` --
    `inject.exe` only delivers the DLL, it doesn't set environment variables
    for a process that's already running.
 4. `inject.exe <pid> path\to\dodstudio_goldsrc_hooks.dll`
@@ -273,77 +277,28 @@ capture batch starts its primer, which matters for first-demo bugs (#546).
 
 ## Status
 
-The animation fix and all four `dodstudio_deathmsg` subcommands are live-proven
-against a running game, except `block` by SteamID or `self` (#468), which is
-not yet. `dodstudio_ex_interp_max`'s mechanism is live-proven
-too -- the clamp visibly takes effect -- but no specific value is confirmed
-good yet; see `docs/goldsrc_ex_interp.md` §7. `dodstudio_objectives` is
-live-proven too: `offset`/`xoffset` reposition the icon row correctly, and
-`timer` was confirmed on `dod_charlie`, the one DoD 1.3 map with a
-reinforcement timer -- see `docs/goldsrc_objective_icons.md`. `dodstudio_hide_sprite`
-is live-proven as well: `sprites/mapsprites/flames.spr` on `dod_railroad2_s9a`
-(found by scanning the map's own BSP entity lump for `env_sprite` classnames,
-since the command's target has to be a real map-placed entity, not a 2D HUD
-element like the crosshair or the capture-area icon -- see the module doc's
-"Why `dodstudio_hide_hudelement` can't reach this") visibly disappeared and
-came back across a `clear`/re-set cycle, which confirms `HUD_AddEntity`'s
-return-value contract (0 = suppress) actually holds in this build and not
-only in Xash3D's open-source equivalent. The
-`dodstudio_hide_scoreboard`, `dodstudio_mute_voice_commands`,
-`dodstudio_hide_crosshair`, the spectator crosshair and
-`dodstudio_debug_msglog` are confirmed by static analysis only -- see the module
-docs in `src/engine.rs`, `src/scoreboard.rs`,
-`src/voice.rs`, `src/crosshair.rs`, `src/spectator_crosshair.rs` and
-`src/msglog.rs` for what is established from the DoD 1.3 game files vs. what
-still needs a live check. `dodstudio_debug_msglog` reuses `dodstudio_deathmsg`'s
-already-proven prepend/forward mechanism unchanged, so the open question is
-only its own 71-entry name/thunk table, not the hook itself. `dodstudio_hide_map_text` is
-not live-tested yet either; it rides the same mechanism, and its map-string
-parsing is unit-tested and was checked against the real `dod_anzio`,
-`dod_charlie`, `dod_lennon4` and `dod_avalanche` BSPs. `tools/` holds
-a verifier per patched site, which checks the Rust constants against a real
-`client.dll`.
+Per-feature details, and what is live-proven versus established by static
+analysis only, are in each module's `//!` doc and the linked `docs/` pages.
+`tools/` holds a verifier per patched site, which checks the Rust constants
+against a real `client.dll` or `hw.dll`.
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
 detail textures and skies as the game loads them: on when there's a
 `dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
-the scripts that build
-those files; see its README.
+the scripts that build those files; see its README.
 
-`src/tempent_fix.rs` stops a years-old DoD crash (`client.dll+0x225cc`, issue
-#374): six places in DoD's client write into a temporary effect entity without
-checking the engine gave them one. It is on by default, because it only acts
-where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it
-off. `dodstudio_debug_status` shows how many effects it has skipped.
+### Always-on crash guards
 
-`src/hull_trace_guard.rs` stops an engine crash (`hw.dll+0x6c839`, issue #384):
-`playdemo` of an HLTV demo on some maps right after another map can hand the
-player-movement trace a previous map's collision data, and it recurses until
-the stack runs out. The guard refuses any clip node the hull can't have, and
-stops a trace that is about to run out of stack. On by default for the same
-reason; `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off. It knows both the
-pre-Anniversary and the 25th Anniversary `hw.dll`
-(`tools/verify_hull_trace_offsets.py [--anniversary]` checks either).
+Each is on by default, because it only acts where the game would otherwise
+crash. Set the variable to `0` to turn it off.
 
-`src/pmove_guard.rs` stops a crash (`hw.dll+0x3a77c`, issue #546) when the
-session's first demo sends DoD's `InitHUD` in its very first packets: the
-client then drops the map's static models to the ground through
-`EV_SetTraceHull`, which writes through the engine's `pmove` pointer, and
-nothing has set that pointer yet. At start-up the guard points it at the
-engine's own `g_clmove`, the value the engine stores there itself a moment
-later; in that one case the models keep their authored height instead of the
-game closing. On by default; `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off.
-`tools/verify_pmove_guard.py` re-derives both builds.
-
-`src/sprite_blend.rs` stops `gl_spriteblend 0` at the session's first sprite
-load from leaving the crosshair and other sprites dark and dotted until the
-game restarts (issue #467). The engine only fills in the colour around a
-sprite's edges at upload when the cvar is non-zero, and it never uploads the
-same sprite twice. Two bytes in `GL_Upload32` make it always do so, on both
-builds, as if the value were its default of 1. Draw-time handling of the cvar
-is untouched. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off.
-`tools/verify_spriteblend_offsets.py` re-derives both sites.
+| Module | Stops | Off switch |
+| --- | --- | --- |
+| `src/tempent_fix.rs` | `client.dll+0x225cc` crash: DoD writes into a temporary effect entity the engine never gave it (#374). `dodstudio_debug_status` shows how many effects it skipped. | `GOLDSRC_HOOKS_TEMPENT_FIX=0` |
+| `src/hull_trace_guard.rs` | `hw.dll+0x6c839` stack-overflow crash from a previous map's collision data after `playdemo` (#384). Both engine builds. | `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` |
+| `src/pmove_guard.rs` | `hw.dll+0x3a77c` crash when the session's first demo sends `InitHUD` before the engine's `pmove` pointer is set (#546). | `GOLDSRC_HOOKS_PMOVE_GUARD=0` |
+| `src/sprite_blend.rs` | Dark, dotted crosshair and sprites after `gl_spriteblend 0` at the first sprite load (#467). Both builds. | `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` |
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the

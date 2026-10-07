@@ -3,10 +3,8 @@
 **Start here if you're picking this up cold.** This is a separate work stream from the
 Capture/Render Studio track — it
 lives entirely on `dev`/`main` (commits `a86973a`, `8e6c3a5`, `c3b9c88`, `669d9f9`, all
-merged, both branches identical as of 2026-08-22 — hashes corrected 2026-08-24, the
-originally-recorded ones were unreachable from either branch, likely due to a history
-rewrite), not on the capture/render feature
-branches. If you're resuming work on capture/render quick-wins, this doc doesn't affect
+merged; hashes corrected 2026-08-24, the originally-recorded ones were unreachable),
+not on the capture/render feature branches. Tracked by issue #192, which is still open. If you're resuming work on capture/render quick-wins, this doc doesn't affect
 you; if you're resuming the stats/league work, start here instead of re-deriving context.
 
 ## What this is
@@ -69,7 +67,7 @@ attempts are cancelled (28.6% HLTV, 31.5% POV). The artifact's 19.8% / 1.22 are 
 different corpus (the 126 LAN HLTV demos).
 
 Still open from the punch list: half modelling (the CLI only reads `_h1`/`_h2` from the
-file name), the demo-type check (PR #395), and a per-player cap-break column, which needs
+file name), the demo-type check (PR #395, still open), and a per-player cap-break column, which needs
 the league's definition first: the scoreboard it copies credits one player with 2 breaks
 and 0 captures, so its "break" is not a capture at all.
 
@@ -83,20 +81,18 @@ and 0 captures, so its "break" is not a capture at all.
   insert and lookup. `localizations/dod_studio_english.txt` had its 327 keys stripped of
   their `#` prefix to match the convention every other file already used. See
   `normalize_key` in `analysis/src/localization.rs`.
-- **Brought `main` current** — it was ~300 commits behind `dev` and still advertised a
-  removed `egui` GUI. Fast-forwarded; `main`/`dev` are now identical.
-- **Test suite is green**: 21 passed, 0 failed (was 4 failing before the localization fix
+- **Brought `main` current** (2026-08-22) — it was ~300 commits behind `dev` and still
+  advertised a removed `egui` GUI. Fast-forwarded then; `main` now only takes `dev` releases.
+- **Test suite was green** at that point: 21 passed, 0 failed (was 4 failing before the localization fix
   and one stale fixture-dependent test — `test_inspect_lenn_demo` — was changed to skip
   rather than panic when its uncommitted fixture demo is absent).
 - **Seven measurement probes committed** under `analysis/examples/` (with a README) —
   `msg_probe`, `scoreboard_probe`, `batch_probe`, `hltv_probe`, `reconcile_probe`,
   `reconnect_probe`, `capwindow_probe`. These produced every corpus-wide figure in the
   artifact; re-run them against your own demo folder to reproduce or extend the findings.
-  **Note:** as of 2026-08-22 these exist on `dev`/`main` only — they are not present on
-  `feature/capture-render-quick-wins` or other capture/render branches cut before the
-  merge. If you're on one of those branches and want the probes, `git show
-  dev:analysis/examples/<file>` rather than assuming they're in your working tree.
-- **README rewritten** with a component-maturity table (stable: `dod/`, `analysis/`,
+  They are on `dev`/`main`; a branch cut before 2026-08-22 won't have them (`git show
+  dev:analysis/examples/<file>`).
+- **README rewritten** (2026-08-22) with a component-maturity table (stable: `dod/`, `analysis/`,
   `dem-patch/`, `hl-demo-auditor/`; active development: `native/`, `studio/`), the
   `dem`-fork rationale, and the localization key convention.
 

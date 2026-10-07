@@ -15,8 +15,8 @@ them; everything else is a setting you'd use for a capture. No name is the
 start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
-**Scope:** the surface actually on `dev` today: sixteen cvars and nine
-commands. Entries still in open PRs are not listed -- update this file as
+**Scope:** the surface actually on `dev` today: twenty-four cvars and
+fourteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
