@@ -100,6 +100,16 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Merging into `dev`:** the ruleset requires the branch to be up to date, so `gh pr update-branch N`, wait for CI, then merge, one PR at a time (each merge puts the rest behind). A PR stacked on another feature branch gets no CI (`ci.yml` only runs for PRs into `dev`/`main`): say so on the PR and post local results. Head branches auto-delete on merge and GitHub retargets stacked PRs, but a manual `git push --delete` of a base branch closes the PRs stacked on it.
 - **Do not create an issue after every PR as a matter of habit.** A PR that fixes something noticed and resolved in the same pass needs no separate paper trail — the PR description already is that record, and an issue closed minutes later by the very PR that created it is noise. Only file one for work you are deliberately *not* doing right now: something noticed but out of scope for the current PR, or a fix knowingly deferred rather than made. That is the actual signal — deferral, not the mere absence of a pre-existing issue.
 
+### Changing CI (`.github/workflows/`, rulesets)
+Keep checks thorough and wall-clock short; the reasons live as comments in `ci.yml` (#346, #348, #334, #654).
+- **New checks go in their own parallel job**, not appended to an existing one: CI time is the longest job (~3 min), not the sum.
+- **Cache Rust with `Swatinem/rust-cache`, saved only from dev** (`save-if: github.ref == 'refs/heads/dev'`). A PR can only restore its base branch's cache, so PR-saved caches are dead weight that evicts the useful ones.
+- **Every cargo command takes `--locked`.** Test builds set `CARGO_PROFILE_{DEV,TEST}_DEBUG=0`. Clippy and rustfmt stay pinned to the toolchain in `ci.yml`.
+- **Prefer prebuilt tools to building them** (`taiki-e/install-action` over `cargo install`), and skip installers that are slow for no gain (Playwright's `--with-deps` on Windows). Don't cache a download that is faster than restoring the cache.
+- **Use ubuntu for jobs that don't need Windows.** Anything touching the app, the hooks or `#[cfg(windows)]` code stays on windows.
+- **No `paths-ignore` on a workflow with required checks.** A PR it skips never gets the check and can't merge.
+- **A new required check:** add it to both rulesets (`dev-protection`, `main-protection`) only after the workflow that produces it is on dev, with the exact job `name:`. Put before/after job times in the PR body.
+
 ---
 
 ## Concurrency, Rust & Memory Constraints
