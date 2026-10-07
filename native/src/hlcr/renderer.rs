@@ -287,7 +287,7 @@ pub async fn run_render_job(
     // scheduler tick can all see the same live free-space number and all
     // pick the same drive before any of them has written a byte — the flat
     // 20 GiB threshold this replaced was only ever sized to be safe for one
-    // job at a time. See docs/capture-render-studio-merge-scope.md §4.
+    // job at a time.
     const SAFETY_MARGIN_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
     let reservation_estimate =
         job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
@@ -439,7 +439,7 @@ pub async fn run_render_job(
         ));
         // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
         // during a large copy (Custom Output/lossless OBS captures — see
-        // docs/obs_alternate_capture.md — can run tens of GB) instead of
+        // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
         // being silently ignored until the whole file has already moved.
         match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
             Ok(true) => {

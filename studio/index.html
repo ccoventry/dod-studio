@@ -104,6 +104,16 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <!-- #54: quick filters. -->
+                <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
+                  <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
+                  <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
+                </select>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
+                  <input type="checkbox" id="master-owner-only-cb" />
+                  <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
+                </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -162,16 +172,6 @@
               <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
           </div>
-
-          <!-- Advanced Diagnostics Collapsible Block -->
-          <details id="advanced-diagnostics-details" class="egui-panel">
-            <summary style="cursor: pointer; font-weight: bold; color: #ccc;" data-str="HIGHLIGHTS.ADVANCED_DIAGNOSTICS_SUMMARY">Advanced Diagnostics (Canvas Timeline & Telemetry)</summary>
-            <div class="diagnostics-content" style="margin-top: 10px;">
-              <div style="padding: 10px; border-bottom: 1px solid #333; background: #1a1a1a;">
-                <canvas id="streak-timeline-canvas" height="60" style="width: 100%; border-radius: 2px; background: #121212; border: 1px solid #333;"></canvas>
-              </div>
-            </div>
-          </details>
 
           <!-- Export Configuration & Batch Capture -->
           <div id="export-config-panel" class="egui-panel" style="display: none;">
@@ -620,6 +620,7 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
 
@@ -629,15 +630,15 @@
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
-                    <th data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
-                    <th data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
-                    <th data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
-                    <th data-str="RENDER.TABLE_HEADER_DATE">Date</th>
+                    <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
+                    <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
+                    <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
+                    <th data-sort="date" data-str="RENDER.TABLE_HEADER_DATE">Date</th>
                     <th data-str-title="RENDER.TABLE_HEADER_SETTINGS_TITLE" data-str="RENDER.TABLE_HEADER_SETTINGS" title="Codec/FPS this job is queued to render with — its own setting, not necessarily what Configuration currently shows">Settings</th>
-                    <th data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
+                    <th data-sort="status" data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
                     <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
-                    <th data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
@@ -876,6 +877,7 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
@@ -890,6 +892,8 @@
            switchNavTab() (nav.js) the same way the tab panes themselves are. -->
       <footer id="pinned-action-bar">
         <div id="footer-capture-studio" class="pinned-footer-content capture-studio-footer">
+          <!-- #443: how the batch is about to run; each part opens its setting. -->
+          <div id="capture-summary-strip" class="status-text" style="font-size: 0.85em;"></div>
           <!-- Grid, not flex: puts export-pool-free-indicator in a true
                center column regardless of how wide the left/right groups
                are, rather than just being the next item in a packed flex
@@ -934,7 +938,14 @@
              above already uses for the same reason. -->
         <div id="footer-render-studio" class="pinned-footer-content" style="display: none;">
           <div class="footer-row-grid-centered" style="flex: 1;">
-            <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+              <!-- #40: the whole batch at a glance. -->
+              <div id="render-batch-progress" style="display: none; align-items: center; gap: 6px;">
+                <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <span id="render-batch-progress-label"></span>
+              </div>
+            </div>
             <div class="footer-row-center">
               <div id="render-footer-pool-free" data-str="RENDER.RENDER_POOL_FREE_DEFAULT">Export Pool Free: 0.0 GB</div>
               <div id="render-footer-required-space" data-str="RENDER.REQUIRED_ESTIMATED_DEFAULT">Required (Estimated): 0.00 GB</div>
@@ -1002,7 +1013,7 @@
     <div id="unsaved-changes-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="unsaved-changes-title" data-str="UNSAVED_CHANGES_MODAL.TITLE">Unsaved Changes</h2>
-        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">Capture Studio has unsaved changes. Save your session before closing?</p>
+        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
           <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
