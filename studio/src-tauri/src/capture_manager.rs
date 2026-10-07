@@ -2304,7 +2304,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Standalone Game Launch ──────────────────────────────────────────────────────

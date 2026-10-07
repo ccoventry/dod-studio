@@ -311,7 +311,8 @@ fn run_patch_streak_subcommand(
     };
 
     println!("Patching demo highlights...");
-    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)?;
+    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)
+        .map_err(|e| format!("{}: {}", input.display(), e))?;
 
     println!("Writing patched demo to: {}", output.display());
     std::fs::write(&output, patched_bytes)
