@@ -698,8 +698,8 @@ const UP_MARK: &str = "\u{2191}   ";
 /// `.. (up one folder)` for the up row, not the whole path (#409). The path
 /// itself stays on the row, under [`PATH_KEY`], for loading.
 ///
-/// A folder's demo count goes in brackets after its name, `count` (the
-/// user's call, 2026-10-05: the Map column is for maps only).
+/// A folder's demo count goes in brackets after its name, `count` (the Map
+/// column is for maps only).
 fn display_name(path: &str, count: Option<&str>) -> String {
     let path = path.trim().trim_matches('"');
     let count = count.map_or_else(String::new, |c| format!(" ({c})"));
@@ -1011,7 +1011,7 @@ unsafe extern "C" fn wrapped_toggleconsole() {
         if hook::back_to_game_if_on_console() {
             // The game closes its console window its own way, which also
             // closes the menu. That also keeps ESC on the main menu from
-            // bringing the stock console back (2026-10-03).
+            // bringing the stock console back.
             unsafe {
                 crate::debug::report("studio_panel: the console key went back to the game");
                 crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
@@ -2292,7 +2292,7 @@ mod hook {
         /// Whether `vp`, kept from an earlier frame, is still GameUI's popup
         /// `name`. A kept handle can outlive its panel: on the 25th Anniversary
         /// build the VCR bar went away after ESC closed it, and asking vgui2
-        /// about the old one, `object` included, crashed the game (2026-10-04).
+        /// about the old one, `object` included, crashed the game.
         unsafe fn still(&self, name: &str, vp: Vpanel) -> bool {
             unsafe { self.popup(name) == Some(vp) }
         }
@@ -3124,7 +3124,7 @@ mod hook {
     /// Whether our window is on screen showing its Console tab. If so, the
     /// window stays open (ESC brings it back with the menu) and the console
     /// window is made visible for the caller's `toggleconsole` to close the
-    /// game's way, which goes back to the game (2026-10-04, the user's call).
+    /// game's way, which goes back to the game.
     pub(super) fn back_to_game_if_on_console() -> bool {
         let Ok(vgui) = Vgui::get() else {
             return false;
@@ -3146,7 +3146,7 @@ mod hook {
                 // The menu is closed around our window (ESC, or this key's
                 // own trip back to the game): it is still open on the Console
                 // tab, but not on screen, so the key opens it afresh. Without
-                // this check, it took two presses (2026-10-04). A console the
+                // this check, it took two presses. A console the
                 // key left open behind the tab is closed the game's way first.
                 if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
                     if let Some(window) = vgui.popup(CONSOLE) {
@@ -3201,8 +3201,8 @@ mod hook {
     static LAST_STATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 
     /// Logs the menu, our window and the console window each time one of them
-    /// opens or closes: for the report of the DoD Studio menu item going back
-    /// to the game (2026-10-04), which nothing else in the log explains.
+    /// opens or closes: for a report of the DoD Studio menu item going back
+    /// to the game, which nothing else in the log explains.
     unsafe fn log_state_changes(vgui: &Vgui, vp: Vpanel) {
         unsafe {
             let menu = vgui.shown(vgui.parent_of(vp));
@@ -3223,7 +3223,7 @@ mod hook {
     /// The main menu's DoD Studio item (`ui/GameMenu.res`). GameUI runs an
     /// `engine ...` item by queueing the command and then closing the menu,
     /// as Resume Game does, so the window opened behind a closed menu and the
-    /// menu flashed back (2026-10-04). Taken in [`taskbar_on_command`] instead,
+    /// menu flashed back. Taken in [`taskbar_on_command`] instead,
     /// it opens at once, the way Options does.
     const MENU_COMMAND: &str = "engine dodstudio_panel 1";
     /// GameUI's `CTaskbar`, whose `OnCommand` runs the main menu's items,
@@ -3339,7 +3339,7 @@ mod hook {
                     give_back(&vgui, &mut lent, None);
                     // The bar stays off screen while the setting is on, even
                     // with our window closed: closing it by its X brought the
-                    // stock bar back (2026-10-03). ESC -> DoD Studio, or
+                    // stock bar back. ESC -> DoD Studio, or
                     // viewdemo, opens the window again.
                     match vgui.bar() {
                         Some(bar) if viewdemo_in_panel() => park(&vgui, bar, &mut lent),
@@ -3702,7 +3702,7 @@ mod hook {
             } else {
                 // The main menu's DoD Studio item is an `engine` command, and
                 // GameUI closes the menu after running one, as Resume Game
-                // does (2026-10-04). The window lives in the menu, so bring
+                // does. The window lives in the menu, so bring
                 // the menu back up.
                 if !vgui.shown(vgui.parent_of(vp)) {
                     notes.push(activate_game_ui());
