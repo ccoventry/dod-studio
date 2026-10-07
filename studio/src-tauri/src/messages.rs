@@ -13,10 +13,9 @@
 //
 // Covers every Tauri command file's error/status strings: lib.rs,
 // capture_manager.rs, render_manager.rs, audit_manager.rs, map_manager.rs,
-// updater_manager.rs, settings_manager.rs, and dir_browser.rs. Not yet
-// covered: native/analysis errors that bubble straight through Tauri
-// commands unwrapped (a separate crate, out of scope for this pass — see
-// issue #33).
+// hd_manager.rs, updater_manager.rs, settings_manager.rs, and
+// dir_browser.rs. Not covered: native/analysis errors that bubble straight
+// through Tauri commands unwrapped (a separate crate — see issue #33).
 
 use std::fmt::Display;
 
