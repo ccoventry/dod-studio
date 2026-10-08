@@ -10,6 +10,8 @@ mod objective;
 mod player;
 mod round;
 mod scoreboard;
+#[cfg(test)]
+mod tests_fixture;
 mod time;
 #[cfg(not(target_arch = "wasm32"))]
 mod utf16;
@@ -223,10 +225,7 @@ impl From<&Demo> for DemoInfo {
                 {
                     for msg in msgs {
                         if let NetMessage::EngineMessage(eng_msg) = msg
-                            && matches!(
-                                **eng_msg,
-                                EngineMessage::SvcHltv(_) | EngineMessage::SvcDirector(_)
-                            )
+                            && is_hltv_message(eng_msg)
                         {
                             is_hltv = true;
                             break 'outer;
@@ -252,6 +251,26 @@ impl From<&Demo> for DemoInfo {
             map_checksum: value.header.map_checksum,
             peak_packet_entities: Some(peak_packet_entities(value)),
         }
+    }
+}
+
+/// A message only an HLTV proxy's recording carries: `svc_hltv`, or a
+/// director command that drives the auto-director's camera.
+///
+/// Not *any* `svc_director` (#351): DoD Studio injects its own into every
+/// patched preview of a POV demo, and those read as HLTV. Its injections are
+/// only DRC_CMD_MESSAGE (0x06) and DRC_CMD_STUFFTEXT (0x0A) -- bookmarks and
+/// console commands -- and neither moves a camera, so they don't count. The
+/// same rule was worked out in `examples/hltv_shot_gap_probe.rs` (3f3663e).
+fn is_hltv_message(message: &EngineMessage) -> bool {
+    const DRC_CMD_MESSAGE: u8 = 0x06;
+    const DRC_CMD_STUFFTEXT: u8 = 0x0A;
+    match message {
+        EngineMessage::SvcHltv(_) => true,
+        EngineMessage::SvcDirector(d) => {
+            d.command != DRC_CMD_MESSAGE && d.command != DRC_CMD_STUFFTEXT
+        }
+        _ => false,
     }
 }
 
@@ -651,6 +670,32 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
     }
 }
 
+/// Feeds one event through every analyzer, in order. Shared with the
+/// optimised-vs-unoptimised test so its reference pass can't drift from this.
+fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if !state.map_changed {
+        use_segment_boundary(state, event);
+    }
+    if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
+        return;
+    }
+    use_timing_updates(state, event);
+    use_player_updates(state, event);
+    with_mortality_detection(state, event);
+    use_scoreboard_updates(state, event);
+    use_kill_streak_updates(state, event);
+    use_weapon_breakdown_updates(state, event);
+    use_teamkill_and_suicide_updates(state, event);
+    use_team_score_updates(state, event);
+    use_rounds_updates(state, event);
+    use_objective_updates(state, event);
+    use_chat_updates(state, event);
+    use_clan_match_detection_updates(Duration::from_secs(30), state, event);
+    use_pov_stats_updates(state, event);
+    use_general_finalization(state, event);
+    check_and_promote_british(state);
+}
+
 impl Analysis {
     fn new(demo_info: DemoInfo, state: AnalyzerState) -> Self {
         Self { demo_info, state }
@@ -690,30 +735,7 @@ impl Analysis {
         };
 
         let mut state = AnalyzerState::default();
-
-        let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-            if !state.map_changed {
-                use_segment_boundary(state, event);
-            }
-            if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                return;
-            }
-            use_timing_updates(state, event);
-            use_player_updates(state, event);
-            with_mortality_detection(state, event);
-            use_scoreboard_updates(state, event);
-            use_kill_streak_updates(state, event);
-            use_weapon_breakdown_updates(state, event);
-            use_teamkill_and_suicide_updates(state, event);
-            use_team_score_updates(state, event);
-            use_rounds_updates(state, event);
-            use_objective_updates(state, event);
-            use_chat_updates(state, event);
-            use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-            use_pov_stats_updates(state, event);
-            use_general_finalization(state, event);
-            check_and_promote_british(state);
-        };
+        let process_event = run_analyzers;
 
         process_event(&mut state, &AnalyzerEvent::Initialization);
 
@@ -1060,6 +1082,32 @@ mod tests {
     use super::*;
     use std::fs;
 
+    /// #351: DoD Studio's own injections into a POV demo's preview --
+    /// bookmarks (DRC_CMD_MESSAGE) and console commands (DRC_CMD_STUFFTEXT) --
+    /// don't make it HLTV; svc_hltv and a camera-moving director command do.
+    #[test]
+    fn only_a_camera_director_command_or_svc_hltv_means_hltv() {
+        let director = |command: u8| {
+            EngineMessage::SvcDirector(dem::types::SvcDirector {
+                length: 2,
+                command,
+                message: vec![0],
+            })
+        };
+        // Injected by the patcher (builder.rs's build_director_message and
+        // build_director_stufftext).
+        assert!(!is_hltv_message(&director(0x06)));
+        assert!(!is_hltv_message(&director(0x0A)));
+        // DRC_CMD_START, _EVENT, _MODE, _CAMERA: a real auto-director stream.
+        for command in [0x01, 0x02, 0x03, 0x04] {
+            assert!(is_hltv_message(&director(command)), "{command:#x}");
+        }
+        assert!(is_hltv_message(&EngineMessage::SvcHltv(
+            dem::types::SvcHltv { mode: 0 }
+        )));
+        assert!(!is_hltv_message(&EngineMessage::SvcNop));
+    }
+
     #[test]
     fn is_relevant_message_admits_objective_messages() {
         for name in [
@@ -1079,128 +1127,131 @@ mod tests {
         assert!(!is_relevant_message(b"NotARealMessage"));
     }
 
+    /// Demos for [`test_optimized_vs_unoptimized`]: every `.dem` in
+    /// `DOD_ANALYSIS_DEMOS` (a folder, or one file), else an even spread of up
+    /// to six from the PRE install's `dod` folder. Empty when neither exists.
+    fn comparison_demos() -> Vec<std::path::PathBuf> {
+        let from_env = std::env::var_os("DOD_ANALYSIS_DEMOS").map(std::path::PathBuf::from);
+        let source = from_env.clone().unwrap_or_else(|| {
+            std::path::PathBuf::from(
+                r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod",
+            )
+        });
+        if source.is_file() {
+            return vec![source];
+        }
+        let Ok(entries) = fs::read_dir(&source) else {
+            return Vec::new();
+        };
+        let mut demos: Vec<_> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("dem")))
+            .collect();
+        demos.sort();
+        if from_env.is_some() || demos.len() <= 6 {
+            return demos;
+        }
+        let step = demos.len() / 6;
+        demos.into_iter().step_by(step).take(6).collect()
+    }
+
+    /// Analyses each demo twice -- the way [`Analysis::try_from_bytes`] does,
+    /// skipping user messages `is_relevant_message` rejects, and again feeding
+    /// every message through -- and asserts the two states match. Catches a
+    /// speed-up that skips something an analyzer needed. Ignored because CI has
+    /// no demos: `cargo test -p analysis -- --ignored test_optimized_vs_unoptimized`.
     #[test]
     #[ignore]
     fn test_optimized_vs_unoptimized() {
-        let paths = [
-            "../local/demos/bb-scrim-harr-h1.dem",
-            "local/demos/bb-scrim-harr-h1.dem",
-            "../local/demos/bb-scrim-harr-h2.dem",
-            "local/demos/bb-scrim-harr-h2.dem",
-            "../local/demos/bb-scrim-railyard-h1.dem",
-            "local/demos/bb-scrim-railyard-h1.dem",
-            "../local/demos/bewton-playoffs-round1-armory-allied.dem",
-            "local/demos/bewton-playoffs-round1-armory-allied.dem",
-        ];
+        let paths = comparison_demos();
+        assert!(
+            !paths.is_empty(),
+            "no demos found: set DOD_ANALYSIS_DEMOS to a folder or a .dem file"
+        );
 
-        let mut tested_any = false;
-
-        for path in paths {
-            if !std::path::Path::new(path).exists() {
-                continue;
-            }
-
-            println!("Testing optimized vs unoptimized parsing on: {}", path);
+        for path in &paths {
+            println!(
+                "Testing optimized vs unoptimized parsing on: {}",
+                path.display()
+            );
             let file_bytes = fs::read(path).expect("failed to read demo");
+            assert_optimized_matches_unoptimized(&file_bytes);
+        }
 
-            // Unoptimized parse
-            let demo = dem::open_demo_from_bytes(&file_bytes).unwrap();
-            let mut state_unopt = AnalyzerState::default();
-            let mut last_live_frame = None;
-            let mut processed_frames = 0;
-            let process_event = |state: &mut AnalyzerState, event: &AnalyzerEvent| {
-                if !state.map_changed {
-                    use_segment_boundary(state, event);
-                }
-                if state.map_changed && !matches!(event, AnalyzerEvent::Finalization) {
-                    return;
-                }
-                use_timing_updates(state, event);
-                use_player_updates(state, event);
-                with_mortality_detection(state, event);
-                use_scoreboard_updates(state, event);
-                use_kill_streak_updates(state, event);
-                use_weapon_breakdown_updates(state, event);
-                use_teamkill_and_suicide_updates(state, event);
-                use_team_score_updates(state, event);
-                use_rounds_updates(state, event);
-                use_objective_updates(state, event);
-                use_chat_updates(state, event);
-                use_clan_match_detection_updates(Duration::from_secs(30), state, event);
-                use_pov_stats_updates(state, event);
-                use_general_finalization(state, event);
-            };
-            process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
-            for entry in &demo.directory.entries {
-                for frame in &entry.frames {
-                    let old_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
-                    if let FrameData::NetworkMessage(box_type) = &frame.frame_data
-                        && let MessageData::Parsed(msgs) = &box_type.1.messages
-                    {
-                        for net_msg in msgs {
-                            match net_msg {
-                                NetMessage::EngineMessage(engine_msg) => {
+        println!("All existing demos match perfectly!");
+    }
+
+    /// The comparison itself, also run on the checked-in fixture in CI
+    /// (`tests_fixture.rs`).
+    pub(crate) fn assert_optimized_matches_unoptimized(file_bytes: &[u8]) {
+        // Unoptimized parse
+        let demo = dem::open_demo_from_bytes(file_bytes).unwrap();
+        let mut state_unopt = AnalyzerState::default();
+        let mut last_live_frame = None;
+        let mut processed_frames = 0;
+        let process_event = run_analyzers;
+        process_event(&mut state_unopt, &AnalyzerEvent::Initialization);
+        for entry in &demo.directory.entries {
+            for frame in &entry.frames {
+                let old_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                process_event(&mut state_unopt, &AnalyzerEvent::Frame(frame));
+                if let FrameData::NetworkMessage(box_type) = &frame.frame_data
+                    && let MessageData::Parsed(msgs) = &box_type.1.messages
+                {
+                    for net_msg in msgs {
+                        match net_msg {
+                            NetMessage::EngineMessage(engine_msg) => {
+                                process_event(
+                                    &mut state_unopt,
+                                    &AnalyzerEvent::EngineMessage(engine_msg),
+                                );
+                            }
+                            NetMessage::UserMessage(user_msg) => {
+                                if let Ok(msg) = UserMessage::new(&user_msg.name, &user_msg.data) {
                                     process_event(
                                         &mut state_unopt,
-                                        &AnalyzerEvent::EngineMessage(engine_msg),
+                                        &AnalyzerEvent::UserMessage(msg),
                                     );
-                                }
-                                NetMessage::UserMessage(user_msg) => {
-                                    if let Ok(msg) =
-                                        UserMessage::new(&user_msg.name, &user_msg.data)
-                                    {
-                                        process_event(
-                                            &mut state_unopt,
-                                            &AnalyzerEvent::UserMessage(msg),
-                                        );
-                                    }
                                 }
                             }
                         }
                     }
-                    let new_live = matches!(
-                        state_unopt.clan_match_detection,
-                        ClanMatchDetection::MatchIsLive
-                    );
-                    if !old_live && new_live {
-                        last_live_frame = Some(processed_frames);
-                    }
-                    processed_frames += 1;
                 }
+                let new_live = matches!(
+                    state_unopt.clan_match_detection,
+                    ClanMatchDetection::MatchIsLive
+                );
+                if !old_live && new_live {
+                    last_live_frame = Some(processed_frames);
+                }
+                processed_frames += 1;
             }
-            process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
-
-            // Optimized parse
-            let opt_analysis = Analysis::try_from_bytes(&file_bytes).unwrap();
-            let state_opt = opt_analysis.state;
-
-            // Compare debug print representation
-            let total_frames: usize = demo
-                .directory
-                .entries
-                .iter()
-                .map(|entry| entry.frames.len())
-                .sum();
-            println!(
-                "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
-                total_frames,
-                last_live_frame,
-                last_live_frame.unwrap_or(0)
-            );
-
-            assert_states_eq(&state_unopt, &state_opt);
-            tested_any = true;
         }
+        process_event(&mut state_unopt, &AnalyzerEvent::Finalization);
 
-        assert!(
-            tested_any,
-            "No demo files were found to run the comparison test!"
+        // Optimized parse
+        let opt_analysis = Analysis::try_from_bytes(file_bytes).unwrap();
+        let state_opt = opt_analysis.state;
+
+        // Compare debug print representation
+        let total_frames: usize = demo
+            .directory
+            .entries
+            .iter()
+            .map(|entry| entry.frames.len())
+            .sum();
+        println!(
+            "  -> Total frames: {}, Live frame index: {:?} (Warmup frames skipped: {:?})",
+            total_frames,
+            last_live_frame,
+            last_live_frame.unwrap_or(0)
         );
-        println!("All existing demos match perfectly!");
+
+        assert_states_eq(&state_unopt, &state_opt);
     }
 
     fn assert_states_eq(left: &AnalyzerState, right: &AnalyzerState) {
