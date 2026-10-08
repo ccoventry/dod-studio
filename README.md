@@ -26,12 +26,6 @@ If you are here to look at demo parsing or stats extraction, `dod/` and
 `analysis/` are the parts to read, and they are the parts you can rely on.
 The capture and render pipeline is a frag-movie workflow and is unrelated.
 
-> [!NOTE]
-> **The GUI was rewritten.** Earlier revisions shipped an `egui` desktop app
-> with a WebAssembly target. That has been removed. The current frontend is
-> Tauri v2 + Vite under `studio/`, and the old `dod-tools-gui` binary
-> and `trunk serve` workflow no longer exist.
-
 ---
 
 ## Workspace layout

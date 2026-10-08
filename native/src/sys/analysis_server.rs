@@ -19,7 +19,7 @@
 //! The pipe takes local clients only, and a request only ever reads a `.dem`
 //! file and writes its cache entry.
 //!
-//! The hook DLL's side is `goldsrc-hooks/src/streaks.rs`; [`PIPE_NAME`] must
+//! The hook DLL's side is `goldsrc-hooks/src/streaks.rs`; [`PIPE_NAME`](crate::sys::analysis_server::PIPE_NAME) must
 //! match its `STUDIO_PIPE` to the character.
 
 use std::ffi::c_void;
