@@ -1,9 +1,9 @@
 # DoD 1.3 death notices: raising the line count, and the rest of `mirv_deathmsg`
 
 > **Status 2026-09-16 — implemented and live-tested.**
-> Lives in `goldsrc-hooks/src/deathmsg.rs`, on branch
-> `feat/goldsrc-hooks-companion-dll`. One console command,
-> `dodstudio_deathmsg`, with four subcommands.
+> Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
+> `dodstudio_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
+> plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -283,6 +283,9 @@ y differently. DoD's `Draw` starts at y = 20 and accumulates line height
 +0x2af19  add eax, 0x14                    ; else ScreenHeight/480*42 + 20
 ```
 
+(`<spectator mode>` below is really the overview map's size, not a spectator
+mode: see `docs/goldsrc_objective_icons.md` §5.)
+
 `offset` does **not** patch either immediate. It detours, the way HLAE does,
 for a reason the three code paths make obvious:
 
@@ -416,7 +419,9 @@ python goldsrc-hooks/tools/verify_deathmsg_offsets.py [path-to-client.dll]
 ## 4a. The spectator layout
 
 While spectating, the feed's `~95 + 20` starts above the bottom of the spectator
-bar, which is `64 * ScreenHeight / 480` tall. So the feed's first line overlaps
+bar, which is `64 * ScreenHeight / 480` tall (`BAR_UNITS` in `spectator_hud.rs`;
+the `54` the survey docs mention is how far the game pushes the *other*
+elements down, not the bar's height). So the feed's first line overlaps
 the bar. `goldsrc-hooks/src/spectator_hud.rs` sets the feed's y through this
 detour whenever no `offset` has been typed:
 

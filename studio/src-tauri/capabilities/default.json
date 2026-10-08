@@ -9,7 +9,6 @@
     "core:window:allow-set-title",
     "opener:default",
     "dialog:default",
-    "fs:default",
     "notification:default",
     "updater:default"
   ]

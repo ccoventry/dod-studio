@@ -4,7 +4,7 @@ SPECTATING (HLTV demos)
   dodstudio_spec_lock 0/1
       Keep the camera on the player you are watching when he dies.
   dodstudio_spec_target <player>
-      Put the camera on a player (number or name).
+      Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
       Hide the spectator bars and everything on them.
   dodstudio_hide_hltv_messages 0/1
@@ -25,7 +25,7 @@ HUD
       Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_sprite <model>...
       Hide entities by model path.
-  dodstudio_deathmsg (or dodstudio_killfeed)
+  dodstudio_deathmsg
       Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
   dodstudio_objectives
       Move the objective icons and the objective timer.
@@ -45,6 +45,8 @@ DEMO PLAYBACK
       A jump skips the events and commands it passes over.
   dodstudio_reload_demo
       Play the last demo again.
+  dodstudio_review yes|no|replay|next|back|stop
+      Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   dodstudio_clear_decals
       Clear every decal (bullet holes, blood, sprays).
   dodstudio_ex_interp_max <ms>

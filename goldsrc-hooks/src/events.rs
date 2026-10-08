@@ -92,6 +92,15 @@ fn emit(line: String) {
     }
 }
 
+/// Queues one of the hook's own markers (`label`, without the tag) for
+/// Studio: the review mode's answers (#623). A label holding a line break is
+/// dropped, as an `echo` of one would be.
+pub(crate) fn send(label: &str) {
+    if let Some(line) = marker_line(&[TAG.to_string(), label.to_string()]) {
+        emit(line);
+    }
+}
+
 unsafe extern "C" fn wrapped_echo() {
     if let Some(line) = marker_line(&cmd_list::args()) {
         crate::batch_end::on_marker(&line);
