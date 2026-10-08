@@ -15,9 +15,11 @@ facts only the binary can prove:
      node's `next` and `name`.
   3. `Cmd_AddCommand` allocates 16 bytes per node and stores the handler at
      `+8` -- the field the wrap writes.
-  4. The engine registers `playdemo` and `viewdemo` as commands at all.
+  4. The engine registers `playdemo` and `viewdemo` as commands at all, and
+     `connect`, `listen`, `retry` and `reconnect`, which `connect_guard.rs`
+     wraps the same way (issue #451).
 
-The offsets come out of `demo_reload.rs` rather than being restated here.
+The offsets come out of the Rust sources rather than being restated here.
 
 Usage:
     python goldsrc-hooks/tools/verify_cmd_list_slots.py [path-to-hw.dll ...]
@@ -42,14 +44,18 @@ DEFAULT_DLLS = [
     STEAM / "Half-Life - PRE-Anniversary for Movies" / "hw.dll",
     STEAM / "Half-Life" / "hw.dll",
 ]
-RUST = Path(__file__).resolve().parent.parent / "src" / "demo_reload.rs"
+SRC = Path(__file__).resolve().parent.parent / "src"
+RUST = [SRC / "demo_reload.rs", SRC / "connect_guard.rs", SRC / "engine.rs"]
 
 
-def rust_const(name):
-    m = re.search(rf"const {name}: usize = (\d+);", RUST.read_text(encoding="utf-8"))
-    if not m:
-        sys.exit(f"{name} not found in {RUST}")
-    return int(m.group(1))
+def rust_const(name, rust=RUST):
+    """The value of `const <name>`, or `const ENGFUNCS_<name>` (engine.rs's
+    spelling), from the first file that has it."""
+    for path in rust:
+        m = re.search(rf"const (?:ENGFUNCS_)?{name}: usize = (\d+);", path.read_text(encoding="utf-8"))
+        if m:
+            return int(m.group(1))
+    sys.exit(f"{name} not found in {[str(p) for p in rust]}")
 
 
 def verify(path):
@@ -118,6 +124,8 @@ def verify(path):
 
     # -- 2. the list walkers --------------------------------------------------
     first = rust_const("SLOT_GET_FIRST_CMD_FUNCTION_HANDLE")
+    check(rust_const("SLOT_GET_FIRST_CMD_FUNCTION_HANDLE", RUST[1:2]) == first,
+          "connect_guard.rs walks the list from the same slot as demo_reload.rs")
     head = body(slot(first))
     check(len(head) == 2 and re.match(r"mov eax, dword ptr \[0x[0-9a-f]+\]$", head[0]) and head[1] == "ret",
           f"slot {first} returns the list head: {head}")
@@ -151,7 +159,8 @@ def verify(path):
     check(stores_function, "a Cmd_AddCommand allocates a 16-byte node with the handler at +8 on the same list")
 
     # -- 4. the commands exist ------------------------------------------------
-    for command in (b"playdemo", b"viewdemo"):
+    # playdemo/viewdemo for demo_reload.rs; the rest for connect_guard.rs (#451).
+    for command in (b"playdemo", b"viewdemo", b"connect", b"listen", b"retry", b"reconnect"):
         check(img.find(command + b"\0") >= 0, f"`{command.decode()}` is a string in the engine")
 
     return ok

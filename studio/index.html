@@ -104,6 +104,21 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <!-- #54: quick filters. -->
+                <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
+                  <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
+                  <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
+                </select>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
+                  <input type="checkbox" id="master-owner-only-cb" />
+                  <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
+                </label>
+                <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
+                  <input type="checkbox" id="review-tick-yes-cb" />
+                  <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
+                </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -161,17 +176,9 @@
             <div id="detail-streaks-container">
               <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
+            <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
+            <div id="batch-results" class="batch-results" hidden></div>
           </div>
-
-          <!-- Advanced Diagnostics Collapsible Block -->
-          <details id="advanced-diagnostics-details" class="egui-panel">
-            <summary style="cursor: pointer; font-weight: bold; color: #ccc;" data-str="HIGHLIGHTS.ADVANCED_DIAGNOSTICS_SUMMARY">Advanced Diagnostics (Canvas Timeline & Telemetry)</summary>
-            <div class="diagnostics-content" style="margin-top: 10px;">
-              <div style="padding: 10px; border-bottom: 1px solid #333; background: #1a1a1a;">
-                <canvas id="streak-timeline-canvas" height="60" style="width: 100%; border-radius: 2px; background: #121212; border: 1px solid #333;"></canvas>
-              </div>
-            </div>
-          </details>
 
           <!-- Export Configuration & Batch Capture -->
           <div id="export-config-panel" class="egui-panel" style="display: none;">
@@ -620,6 +627,7 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
 
@@ -629,15 +637,15 @@
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
-                    <th data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
-                    <th data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
-                    <th data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
-                    <th data-str="RENDER.TABLE_HEADER_DATE">Date</th>
+                    <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
+                    <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
+                    <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
+                    <th data-sort="date" data-str="RENDER.TABLE_HEADER_DATE">Date</th>
                     <th data-str-title="RENDER.TABLE_HEADER_SETTINGS_TITLE" data-str="RENDER.TABLE_HEADER_SETTINGS" title="Codec/FPS this job is queued to render with — its own setting, not necessarily what Configuration currently shows">Settings</th>
-                    <th data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
+                    <th data-sort="status" data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
                     <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
-                    <th data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
@@ -748,6 +756,31 @@
               </div>
             </div>
 
+            <!-- The style comparison: compare.py's sheet, from the user's own maps. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.PREVIEW_TITLE">Compare styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.PREVIEW_HINT">The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.</p>
+                <div class="input-row">
+                  <label for="hd-preview-map" data-str="HD.PREVIEW_MAP_LABEL">Map:</label>
+                  <select id="hd-preview-map"></select>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-preview-styles" class="hd-choices"></div>
+                </div>
+                <div class="row-inputs">
+                  <button id="hd-preview-btn" class="primary-btn" data-str="HD.PREVIEW_BUTTON">Show comparison</button>
+                </div>
+                <p id="hd-preview-text" class="hd-hint"></p>
+                <div id="hd-preview-wrap" class="hd-preview-wrap" hidden>
+                  <img id="hd-preview-img" alt="">
+                </div>
+              </div>
+            </div>
+
             <div class="egui-panel">
               <div class="panel-header">
                 <h3 data-str="HD.SETUP_TITLE">Upscaler</h3>
@@ -797,6 +830,71 @@
                   <p class="hd-hint" data-str="HD.SCRIPTS_HINT">The same scripts run from goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
                   <pre id="hd-realesrgan-line" class="hd-code"></pre>
                 </details>
+              </div>
+            </div>
+
+            <!-- The custom-style form: lines in the install's my_styles.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MY_STYLES_TITLE">Your own styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MY_STYLES_HINT">Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.</p>
+                <p id="hd-my-styles-text" class="hd-hint"></p>
+                <ul id="hd-my-styles-list" class="hd-my-styles"></ul>
+                <div class="input-row">
+                  <label for="hd-style-name" data-str="HD.STYLE_NAME_LABEL">Name:</label>
+                  <input id="hd-style-name" type="text" maxlength="32" spellcheck="false" data-str-placeholder="HD.STYLE_NAME_PLACEHOLDER">
+                  <label for="hd-style-kind" data-str="HD.STYLE_KIND_LABEL">Made by:</label>
+                  <select id="hd-style-kind">
+                    <option value="plain" data-str="HD.STYLE_KINDS.plain">A plain enlargement, sharpened</option>
+                    <option value="ai" data-str="HD.STYLE_KINDS.ai">An AI model</option>
+                    <option value="blend" data-str="HD.STYLE_KINDS.blend">Mixing two styles</option>
+                  </select>
+                </div>
+                <div class="input-row" data-style-kind="plain">
+                  <label for="hd-style-sharpening" data-str="HD.STYLE_SHARPENING_LABEL">Sharpening (0 to 500; plain is 60):</label>
+                  <input id="hd-style-sharpening" type="number" min="0" max="500" step="10" value="60">
+                </div>
+                <div class="input-row" data-style-kind="ai" hidden>
+                  <label for="hd-style-model" data-str="HD.STYLE_MODEL_LABEL">Model:</label>
+                  <select id="hd-style-model"></select>
+                </div>
+                <p id="hd-style-model-hint" class="hd-hint" data-style-kind="ai" hidden></p>
+                <div class="input-row" data-style-kind="blend" hidden>
+                  <label for="hd-style-percent" data-str="HD.STYLE_MIX_LABEL">Mix:</label>
+                  <input id="hd-style-percent" type="number" min="0" max="100" step="5" value="50">
+                  <span data-str="HD.STYLE_MIX_OF">% of</span>
+                  <select id="hd-style-a"></select>
+                  <span data-str="HD.STYLE_MIX_REST">and the rest</span>
+                  <select id="hd-style-b"></select>
+                </div>
+                <pre id="hd-style-line" class="hd-code"></pre>
+                <div class="row-inputs">
+                  <button id="hd-style-save-btn" class="primary-btn" data-str="HD.STYLE_SAVE_BUTTON">Save style</button>
+                </div>
+                <p id="hd-style-message" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
+                <button id="hd-misses-btn" data-str="HD.MISSES_BUTTON">Read the game's log</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MISSES_HINT">After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.</p>
+                <div class="input-row">
+                  <pre id="hd-misses-command" class="hd-code hd-code-inline"></pre>
+                  <button id="hd-misses-copy-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <p id="hd-misses-text" class="hd-hint"></p>
+                <label class="hd-check">
+                  <input type="checkbox" id="hd-misses-on-purpose">
+                  <span data-str="HD.MISSES_SHOW_ON_PURPOSE">Show textures left alone on purpose</span>
+                </label>
+                <div id="hd-misses-maps"></div>
               </div>
             </div>
           </div>
@@ -876,6 +974,7 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
@@ -890,6 +989,8 @@
            switchNavTab() (nav.js) the same way the tab panes themselves are. -->
       <footer id="pinned-action-bar">
         <div id="footer-capture-studio" class="pinned-footer-content capture-studio-footer">
+          <!-- #443: how the batch is about to run; each part opens its setting. -->
+          <div id="capture-summary-strip" class="status-text" style="font-size: 0.85em;"></div>
           <!-- Grid, not flex: puts export-pool-free-indicator in a true
                center column regardless of how wide the left/right groups
                are, rather than just being the next item in a packed flex
@@ -934,7 +1035,14 @@
              above already uses for the same reason. -->
         <div id="footer-render-studio" class="pinned-footer-content" style="display: none;">
           <div class="footer-row-grid-centered" style="flex: 1;">
-            <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
+              <!-- #40: the whole batch at a glance. -->
+              <div id="render-batch-progress" style="display: none; align-items: center; gap: 6px;">
+                <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+                <span id="render-batch-progress-label"></span>
+              </div>
+            </div>
             <div class="footer-row-center">
               <div id="render-footer-pool-free" data-str="RENDER.RENDER_POOL_FREE_DEFAULT">Export Pool Free: 0.0 GB</div>
               <div id="render-footer-required-space" data-str="RENDER.REQUIRED_ESTIMATED_DEFAULT">Required (Estimated): 0.00 GB</div>
@@ -1002,7 +1110,7 @@
     <div id="unsaved-changes-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="unsaved-changes-title" data-str="UNSAVED_CHANGES_MODAL.TITLE">Unsaved Changes</h2>
-        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">Capture Studio has unsaved changes. Save your session before closing?</p>
+        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
           <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
