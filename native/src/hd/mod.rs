@@ -19,6 +19,7 @@
 pub mod build;
 pub mod misses;
 pub mod my_styles;
+pub mod preview;
 pub mod python;
 pub mod setup;
 pub mod upscaler;
@@ -148,6 +149,9 @@ pub struct HdStatus {
     /// The install's `my_styles.txt`. Filled in by the caller, which knows
     /// the scripts' folder: [`my_styles::read`].
     pub my_styles: Option<my_styles::MyStyles>,
+    /// The maps the style preview can sample ([`preview::map_choices`]),
+    /// filled in by the caller.
+    pub maps: Vec<String>,
     /// Whether the configured `hl.exe` gets 4 GB of address space (true) or
     /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
     /// the caller, which knows the game path.
@@ -194,6 +198,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         python: None,
         scripts: None,
         my_styles: None,
+        maps: Vec::new(),
         large_address_aware: None,
     }
 }
