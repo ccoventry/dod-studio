@@ -250,7 +250,7 @@ fn resolve(folder: &str) -> String {
 /// The file system's listing merges every search path (`dod/`, `valve/`, the
 /// install folder), so `dod/` would list `valve/` and `WindowsCrashDumps/`.
 /// `on_disk(path, is_dir)` keeps only what really is at `dod/<path>`, as the
-/// Demo Analyzer's folder view shows the disk (user's call, 2026-10-05).
+/// Demo Analyzer's folder view shows the disk.
 fn rows(
     folder: &str,
     entries: impl IntoIterator<Item = (String, bool)>,
