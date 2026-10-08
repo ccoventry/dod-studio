@@ -4,17 +4,20 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
+import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -28,6 +31,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+
+/** Whether a capture batch is running right now (#545's close prompt). */
+export function isCaptureRunning() {
+  return capturingInFlight;
+}
 // getState callback captured from initCaptureUI() so refreshLaunchGuard()
 // can be called with no args from other panes (e.g. main.js after a target
 // drive is added, or detail_pane.js after a streak selection changes).
@@ -414,6 +422,11 @@ export async function refreshLaunchGuard(state) {
     0
   );
   const noHighlightsSelected = selectedHighlights === 0;
+  // Every capture launches hl.exe through HLAE, so with either path blank
+  // Start could only fail at click time (BOTH_PATHS_REQUIRED). A first-time
+  // user hit that before anything else; now the button says so up front.
+  const pathsMissing = !document.querySelector('#hl-path-input')?.value?.trim()
+    || !document.querySelector('#hlae-path-input')?.value?.trim();
 
   const noDrivesConfigured = effectiveDrivePool.length === 0;
   const noUsableSpace = !noDrivesConfigured && availableBytes === 0;
@@ -439,11 +452,14 @@ export async function refreshLaunchGuard(state) {
   // every check below it, OBS included.
   const bannedCount = bannedCommandCount();
   const bannedCommandsPresent = bannedCount > 0;
-  const blocked = bannedCommandsPresent || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
+  const blocked = bannedCommandsPresent || pathsMissing || noHighlightsSelected || noDrivesConfigured || noUsableSpace || insufficientSpace;
 
   if (!capturingInFlight) {
     startBtn.disabled = blocked;
   }
+  // Every change that can block Start comes through here, so the strip
+  // (#443) follows it: banned commands, destinations, commands edits.
+  renderCaptureSummary();
 
   if (warningEl) {
     // First of all, ahead of even the calm cases below: a banned command is
@@ -451,6 +467,10 @@ export async function refreshLaunchGuard(state) {
     if (bannedCommandsPresent) {
       warningEl.style.color = '#f44336';
       warningEl.textContent = STRINGS.CAPTURE.bannedCommandsWarning(bannedCount);
+      warningEl.style.display = 'block';
+    } else if (pathsMissing) {
+      warningEl.style.color = '#f44336';
+      warningEl.textContent = STRINGS.CAPTURE.PATHS_MISSING_WARNING;
       warningEl.style.display = 'block';
     } else if (obsNotReady) {
       warningEl.style.color = '#f44336';
@@ -517,6 +537,24 @@ let customCommandsEditor = null;
 /** Scrapes the current Init/Custom Commands state for settings persistence
  *  (raw, untrimmed — mirrors in-progress edits rather than the filtered
  *  shape `buildCapturePayload` sends to `start_capture_batch`). */
+/** The live capture setup, for the summary strip (#443). */
+function currentCaptureSetup() {
+  const state = (currentGetState ? currentGetState() : null) || {};
+  const codecEl = document.querySelector('#config-capture-codec');
+  return {
+    mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
+    obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
+    height: numberField('#config-res-height', 720, { integer: true, positive: true }),
+    fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
+    scheduledCount: getCommandsState().custom_commands.length,
+    bannedCount: bannedCommandCount(),
+    decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+    destinations: (state.targetDrives || []).filter(Boolean).length > 0,
+  };
+}
+
 export function getCommandsState() {
   return {
     init_commands: [...initCommands],
@@ -792,6 +830,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   };
 
   currentGetState = getState;
+  initCaptureSummary(currentCaptureSetup);
   currentOnSettingsChange = onSettingsChange || null;
   currentOnStatusChange = onStatusChange || null;
   currentGetTakeIndex = getTakeIndex || null;
@@ -800,7 +839,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initCommandsEditor = createListEditor({
     container: document.querySelector('#init-commands-list'),
     getItems: () => initCommands,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER }],
+    fields: [{
+      key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
+    }],
     onChange: () => {
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
@@ -813,7 +855,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     container: document.querySelector('#custom-commands-list'),
     getItems: () => customCommands,
     fields: [
-      { key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER },
+      {
+        key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true }),
+      },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],
@@ -915,6 +960,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listen('capture_status', (event) => {
       const payload = event.payload || {};
       if (payload.running) {
+        // The first running report of a batch: the last one's results go.
+        if (!capturingInFlight) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         if (progressBar) {
@@ -935,6 +982,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
         if (currentOnBatchFinished) currentOnBatchFinished();
+        batchEnded(
+          payload.error ? 'error' : payload.status === 'Cancelled' ? 'cancelled' : 'completed',
+          uiStatusText(payload.status),
+        );
 
         if (payload.error) {
           // Without the engine's pointers at the log (#534); the log has them.
@@ -1028,6 +1079,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   if (!unlistenTakesVerified) {
     listen('capture_takes_verified', (event) => {
       const payload = event.payload || {};
+      batchVerified(payload, lastDispatch);
       const blocks = payload.blocks || [];
       const total = payload.total_count ?? blocks.length;
       const captured = payload.captured_count ?? 0;
@@ -1062,7 +1114,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // Status only ever moves forward. Re-capturing something already
           // rendered must not knock it back down to Captured -- unless that
           // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105, decided 2026-09-29).
+          // claim (#105).
           if (streak.status === 'Rendered' && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
           if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
@@ -1115,7 +1167,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (demo.streaks) {
           demo.streaks.forEach(streak => {
             // Opt-in model (detail_pane.js) — see computeRequiredCaptureBytes above.
-            if (streak.selected === true) {
+            // A Skip highlight is locked out even if something ticked it (#44).
+            if (streak.selected === true && !isSkipped(streak)) {
               selectedStreaks.push(streak);
               selectedDemoPaths.push(demo.path);
             }
@@ -1294,8 +1347,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // until after it has patched every demo in the queue — the engine's own
       // "Only one instance of this game can be run at a time" box appears at
       // the end of all that work, with nothing captured. The preview and
-      // standalone launches have been guarded against this all along; the batch
-      // was the one path that went straight through. Observed 2026-08-28.
+      // standalone launches are guarded against this the same way.
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();

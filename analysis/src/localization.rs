@@ -33,7 +33,10 @@ pub fn set_active_language(lang: &'static str) {
 /// own convention, and the game's shipped files (`dod_english.txt`,
 /// `valve_english.txt`, `gameui_english.txt`) all store keys bare. AMXX files
 /// have no prefix by format. Normalizing on both insert and lookup means a file
-/// using either style resolves identically.
+/// using either style resolves identically. (Before this, keys were stored
+/// verbatim and lookups only ever prepended `#`, so every query against the
+/// game's 1,190 bare tokens returned `None`.) Keep `#` out of the key names in
+/// `localizations/dod_studio_english.txt`.
 fn normalize_key(key: &str) -> String {
     key.trim().trim_start_matches('#').to_lowercase()
 }

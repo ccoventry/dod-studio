@@ -45,11 +45,11 @@
     <span id="render-export-pool-free">0.0 GB</span>
   </div>
 
-  <table>
+  <table id="render-jobs-table">
     <thead>
       <tr>
-        <th>Clip Name</th><th>Stream</th><th>Frames</th><th>Date</th>
-        <th>Settings</th><th>Status</th><th>Speed</th><th>Progress</th><th>File Size</th><th>Actions</th>
+        <th data-sort="name">Clip Name</th><th data-sort="stream">Stream</th><th data-sort="frames">Frames</th><th data-sort="date">Date</th>
+        <th>Settings</th><th data-sort="status">Status</th><th>Speed</th><th>Progress</th><th data-sort="size">File Size</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="render-jobs-tbody">
@@ -60,6 +60,10 @@
   <div id="render-footer-pool-free">Export Pool Free: 0.0 GB</div>
   <div id="render-footer-required-space">Required (Over-estimated): 0.00 GB</div>
   <div id="render-footer-queue-summary">0 queued &middot; 0 rendering &middot; 0 done</div>
+  <div id="render-batch-progress" style="display: none;">
+    <div class="progress-bar-container"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+    <span id="render-batch-progress-label"></span>
+  </div>
 
   <div id="render-error-log-modal" class="modal" style="display: none;">
     <h3 id="render-error-log-title">FFmpeg Error Log</h3>
