@@ -88,6 +88,10 @@ pub struct MissReport {
     pub summary: String,
     /// The style the game was using, when the summary names it.
     pub style: Option<String>,
+    /// How many different textures kept their original: 0 when the hook
+    /// says every one was replaced, `None` when the summary doesn't say
+    /// (a one-map list, or a newer hook's wording).
+    pub textures: Option<usize>,
     pub maps: Vec<MapMisses>,
 }
 
@@ -169,6 +173,7 @@ pub fn parse_last(log: &str) -> Option<MissReport> {
         date: String::new(),
         time,
         style: style_of(&summary),
+        textures: textures_of(&summary),
         summary,
         maps: parse_maps(rest),
     })
@@ -178,6 +183,16 @@ pub fn parse_last(log: &str) -> Option<MissReport> {
 fn style_of(summary: &str) -> Option<String> {
     let rest = &summary[summary.find("(style \"")? + 8..];
     Some(rest[..rest.find('"')?].to_string())
+}
+
+/// `..., 5 different texture(s) (style ...` -> 5; `every HD-eligible
+/// texture ... was replaced` -> 0.
+fn textures_of(summary: &str) -> Option<usize> {
+    if summary.starts_with("every HD-eligible texture") {
+        return Some(0);
+    }
+    let head = &summary[..summary.find(" different texture(s)")?];
+    head.rsplit(' ').next()?.parse().ok()
 }
 
 fn parse_maps(lines: &[&str]) -> Vec<MapMisses> {
@@ -300,6 +315,7 @@ dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (styl
         assert_eq!(report.time, "22:05:57");
         assert_eq!(report.style.as_deref(), Some("plain"));
         assert!(report.summary.starts_with("5 miss(es) this session"));
+        assert_eq!(report.textures, Some(4));
         let maps: Vec<_> = report.maps.iter().map(|m| m.map.as_str()).collect();
         assert_eq!(maps, ["dod_anzio", "dod_caen"]);
 
@@ -352,6 +368,7 @@ dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (styl
         let report = parse_last(log).unwrap();
         assert!(report.maps.is_empty());
         assert!(report.summary.starts_with("every HD-eligible texture"));
+        assert_eq!(report.textures, Some(0));
         assert_eq!(report.style.as_deref(), Some("plain"));
         assert!(parse_last("[10:00:00.000] nothing here\n").is_none());
     }
@@ -400,6 +417,8 @@ dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (styl
             "\" ({n} frame loads)\"",
             "\" ({n} loads)\"",
             "(style {style:?})",
+            "\", {} different texture(s)\"",
+            "\"{MISSES_NAME}: every HD-eligible texture loaded {scope}",
         ] {
             assert!(hook.contains(format), "{format}");
         }
