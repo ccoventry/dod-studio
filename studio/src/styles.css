@@ -494,6 +494,11 @@ body {
   margin-bottom: 8px;
 }
 
+/* display: flex above would otherwise beat the hidden attribute. */
+.row-inputs[hidden], .input-row[hidden] {
+  display: none;
+}
+
 .input-row label {
   min-width: 150px;
   font-weight: 500;
@@ -1998,6 +2003,26 @@ tr.keyboard-selected {
   gap: 6px;
   margin: 4px 0;
   font-size: 12px;
+}
+
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
 }
 
 /* Misses view: one collapsible block per map. */

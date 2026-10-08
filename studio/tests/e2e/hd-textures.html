@@ -4,7 +4,7 @@
   general shape. Carries only the elements the pane reads and writes, plus the
   Configuration page's hl.exe field it takes the game path from. A test
   controls the backend by registering `hd_status` / `hd_setup_tools` /
-  `hd_build` / `hd_set_python` / `hd_misses` handlers on window.__mockInvokeHandlers; the
+  `hd_build` / `hd_set_python` / `hd_misses` / `hd_save_style` handlers on window.__mockInvokeHandlers; the
   file picker is `plugin:dialog|open`, which goes through the same mock.
 -->
 <html lang="en">
@@ -38,6 +38,25 @@
   <p id="hd-build-progress"></p>
   <p id="hd-build-line"></p>
   <pre id="hd-realesrgan-line"></pre>
+  <p id="hd-my-styles-text"></p>
+  <ul id="hd-my-styles-list"></ul>
+  <input id="hd-style-name" />
+  <select id="hd-style-kind">
+    <option value="plain">plain</option>
+    <option value="ai">ai</option>
+    <option value="blend">blend</option>
+  </select>
+  <div data-style-kind="plain"><input id="hd-style-sharpening" type="number" value="60" /></div>
+  <div data-style-kind="ai" hidden><select id="hd-style-model"></select></div>
+  <p id="hd-style-model-hint" data-style-kind="ai" hidden></p>
+  <div data-style-kind="blend" hidden>
+    <input id="hd-style-percent" type="number" value="50" />
+    <select id="hd-style-a"></select>
+    <select id="hd-style-b"></select>
+  </div>
+  <pre id="hd-style-line"></pre>
+  <button id="hd-style-save-btn">Save style</button>
+  <p id="hd-style-message"></p>
   <button id="hd-misses-btn">Read the game's log</button>
   <pre id="hd-misses-command"></pre>
   <button id="hd-misses-copy-btn">Copy</button>

@@ -189,6 +189,8 @@ In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read o
 
 The game loads whatever style folder you name, so you can make as many as you like without touching any code:
 
+DoD Studio's HD Textures page has a form for this (Your own styles) that writes the same file. By hand:
+
 1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:
 
