@@ -26,12 +26,6 @@ If you are here to look at demo parsing or stats extraction, `dod/` and
 `analysis/` are the parts to read, and they are the parts you can rely on.
 The capture and render pipeline is a frag-movie workflow and is unrelated.
 
-> [!NOTE]
-> **The GUI was rewritten.** Earlier revisions shipped an `egui` desktop app
-> with a WebAssembly target. That has been removed. The current frontend is
-> Tauri v2 + Vite under `studio/`, and the old `dod-tools-gui` binary
-> and `trunk serve` workflow no longer exist.
-
 ---
 
 ## Workspace layout
@@ -71,12 +65,17 @@ Tests:
 DoD Studio loads HLAE and its own hook DLL into the game and patches it in
 memory, which is exactly what VAC looks for. So:
 
-- **Use a separate copy of Half-Life for movies**, and point DoD Studio at that
-  copy's `hl.exe`, never at the Steam install you play online with.
-- **Only play demos in it.** Never join a server from a game DoD Studio started.
-  If HLAE asks "You are about to connect to a server", answer No.
-- **Never inject the hook DLL by hand** (`inject.exe`) into a game you play
-  online with.
+- **Only play demos in a game DoD Studio started.** Never join a game server
+  from it. If HLAE asks "You are about to connect to a server", answer No,
+  unless it's an HLTV proxy you chose to watch. DoD Studio's hook DLL refuses
+  `connect` itself while it is loaded, except to an HLTV proxy that says VAC
+  is off.
+- **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
+  play online with.
+- **To play online, start Day of Defeat from Steam, without DoD Studio.** A
+  separate copy of Half-Life for movies is recommended but never required: it
+  keeps your movie configs, models, sprites and sounds out of the game you
+  play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 

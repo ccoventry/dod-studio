@@ -7,7 +7,11 @@ are reproducible rather than asserted.
 These are `examples/`, so they are not part of any shipped binary. `cargo build`
 ignores them; `cargo build --examples` and `cargo test` compile them.
 
-## The probes
+## The stats probes
+
+The table covers the probes that measure what statistics a demo can yield.
+Every other example is a one-off R&D tool, listed in the next section and
+documented in its own `//!` header.
 
 | Probe | Question it answers |
 | --- | --- |
@@ -43,6 +47,82 @@ that panics the parser cannot take down the run:
     for f in /path/to/demos/*.dem; do
       timeout 120 ./target/release/examples/batch_probe "$f" >> out.tsv
     done
+
+## Other R&D probes
+
+### Salvaging and bridging damaged demos (#15, #41, #58)
+
+| Probe | What it does |
+| --- | --- |
+| `salvage_probe` | How much of a demo that DoD refuses to play is intact? |
+| `salvage_demo` | Recovers the intact prefix of such a demo. |
+| `resync_probe` | Is the material after a demo's corruption still intact? |
+| `resync_validate` | Finds a resync point that is clean at the message layer. |
+| `bridge_search` | Searches for a working bridge across a demo's damage. |
+| `bridge_best` | Finds the best bridge and cuts in the right place. |
+| `bridge_skip_probe` | Bridges damage by resuming a little after the resync point. |
+| `bridge_ceiling` | Why a bridged demo parses far fewer frames than its bytes contain. |
+| `multi_bridge` | Bridges every hole in a damaged demo, not just the first. |
+| `graft_signon` | Repairs a damaged signon using another demo of the same match. |
+| `same_recording_check` | Cross-checks whether two demo files are the same recording. |
+| `stitch_probe` | Can two distant slices of a healthy demo be stitched into one file? |
+| `reseq_probe` | Renumbers a stitched demo's tail so its delta sequence continues. |
+| `trim_demo` | Trims a demo to its first N seconds, still valid. |
+| `trim_survey_probe` | Where can a demo be cut without breaking delta continuity? |
+| `event_rate` | Are events spread evenly through a recovered demo? |
+
+### Snapshots, deltas and the writer (#224)
+
+| Probe | What it does |
+| --- | --- |
+| `snapshot_inject` | Rebuilds the client's entity table at a join with a synthetic full snapshot. |
+| `snapshot_check` | Does an injected snapshot hold as many entities as the stream expects? |
+| `entset_probe` | How many entities does a snapshot describe, and how does the set evolve? |
+| `entity0_encoding` | How a real `svc_packetentities` encodes entity 0 (world). |
+| `index_encoding_survey` | Every entity-index encoding used across a demo's packets. |
+| `flush_predict` | Predicts offline every entity packet the engine will throw away. |
+| `delta_rewrite_probe` | Can entity fields be rewritten and survive re-serialisation? |
+| `delta_seq_probe` | Do the tail's deltas reference snapshots the client no longer has? |
+| `reencode_diff` | Does a full re-encode change content, not just bit choices? |
+| `reencode_value_diff` | Do a round-trip's values survive for the untouched tail? |
+| `writer_fidelity` | Does dem's writer reproduce GoldSrc's real bytes? |
+| `packet_entity_probe` | Peak packet-entity count against the engine limit that crashes playback. |
+| `map_entity_probe` | Names the entities an HLTV demo puts on the wire, for trimming a map. |
+
+### HLTV, spectating and weapons
+
+| Probe | What it does |
+| --- | --- |
+| `director_probe` | What the HLTV director records, and whether target switching is in the stream (#206). |
+| `iuser_probe` | Where the spectator target comes from during HLTV playback. |
+| `gait_probe` | Which movement states are replicated for other players; can sprint be told apart? |
+| `sprint_viewmodel_probe` | What DoD does to the first-person viewmodel while a player sprints. |
+| `crosshair_pov_probe` | What the recording player was doing, as far as the crosshair rule cares (#310). |
+| `hltv_sound_probe` | Are weapon-fire events present in an HLTV demo's raw stream? |
+| `hltv_shot_gap_probe` | Detects fire events a recording dropped, from that recording alone. |
+| `hltv_shot_evidence_probe` | Does a recording carry any trace of a shot whose fire event it dropped? |
+| `weapon_anim_probe` | What the engine does to the first-person viewmodel, read out of a demo. |
+| `weapon_id_probe` | Tallies the weapon-ID byte of every `DeathMsg` across a folder of demos. |
+| `statusicon_probe` | Every `StatusIcon` message: icon name, enable/disable, colour. |
+| `statusvalue_probe` | Every `StatusValue` message, with the `viewdemo` window's timer. |
+| `grenade_family_probe` | Which of a grenade viewmodel's two sequence families a throw uses. |
+| `grenade_pinpull_tell_probe` | Does a demo carry any signal when a player pulls a pin? |
+| `grenade_pov_timeline_probe` | What a player's own recording shows around a grenade throw. |
+| `grenade_prime_probe` | Can a recording tell a primed grenade from a plain throw? |
+| `grenade_timing_probe` | When a thrower's body animation changes, relative to the throw. |
+
+### Crash hunting and live-test aids
+
+| Probe | What it does |
+| --- | --- |
+| `deathmsg_diag` | Raw `DeathMsg` messages in a time window, typed decode and bytes. |
+| `find_chat_spot` | Locates a chat line's exact frame, time and sequence. |
+| `find_crash_spot` | Dumps every kill/score event with frame index and time. |
+| `injection_context` | Message-type sequence around a demo's injected join frame(s). |
+| `inject_breadcrumbs` | Injects periodic `echo` commands so a tester can read a running timestamp. |
+| `verify_curweapon` | Verifies the join's injected `CurWeapon` message landed, and what it names. |
+| `tempentity_scan` | Every `SvcTempEntity` in a time window, by variant. |
+| `patch_resource_url` | Replaces a demo's recorded `SvcResourceLocation` (download URL). |
 
 ## What they established
 

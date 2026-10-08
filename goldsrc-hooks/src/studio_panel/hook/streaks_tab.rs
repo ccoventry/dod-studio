@@ -1,8 +1,8 @@
 //! The Highlights tab (#565): the playing demo's streaks, found by
 //! [`crate::streaks`], in a list borrowed the way the Demos tab's is. A
 //! second hidden Load Demo window (`STREAK_LIST`) lends its list and Load
-//! button ([`LOANS`]); its demo rows are cleared, its columns become Player,
-//! Kills, Weapons and Time, its Load button is Go, and its `OnCommand` is
+//! button ([`LOANS`]); its demo rows are cleared, its columns become Row #,
+//! Player, Kills, Time, Dur. and Details, its Load button is Go, and its `OnCommand` is
 //! ours: Go, or a double-click, seeks to just before the streak.
 //!
 //! Every life with a kill is listed; a Min kills box narrows the list. A POV

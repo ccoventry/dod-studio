@@ -8,6 +8,12 @@ Written for the question behind #405: can the capture batch move from
 `playdemo` to `viewdemo`, so each clip is reached by a jump rather than a
 `host_framerate` fast-forward?
 
+> **Status 2026-10:** the jump is built as `dodstudio_seek_to` / `_by` /
+> `dodstudio_seek_skip_between` (`goldsrc-hooks/src/demo_seek.rs`), and #405
+> (batch under `viewdemo`) is still open. Long forward jumps drop joins and team
+> picks (#596); a fix that steps them 5 s per frame is the open PR #601, not yet
+> on `dev`.
+
 `goldsrc-hooks/tools/verify_demo_seek_offsets.py` re-checks every binary fact
 below that code depends on.
 
@@ -87,7 +93,8 @@ patched demos with `+viewdemo`.
 
 `viewdemo` does not compute the view for an HLTV demo, so it does not get
 around DoD's client discarding `DRC_CMD_CHASE`/`DRC_CMD_INEYE` (#222), and it
-is no route to #206.
+is no route to #206 (closed since: `dodstudio_spec_lock`, see
+`docs/goldsrc_spectator_camera.md`).
 
 - `Server::ParseHLTV` marks an HLTV demo (`HLTV_ACTIVE`), and an HLTV world's
   frames get no `demoInfo` (the recording client's view).
@@ -195,5 +202,6 @@ Nothing found blocks it. Today's patched chain demos would run under
 `viewdemo` with their commands intact. The design the issue describes -- the
 hook holds the clip list and seeks through it by world time -- is the one that
 needs the skip: without it, a jump over earlier clips replays their
-`mirv_recordmovie_start`/`stop`. Still to measure live: `dodstudio_seek_*` in
-the editor, one batch under `viewdemo`, and the load times above.
+`mirv_recordmovie_start`/`stop`. Still to measure live: one batch under
+`viewdemo`, and the load times above. (`dodstudio_seek_*` is in use; its
+forward-jump problem is #596.)
