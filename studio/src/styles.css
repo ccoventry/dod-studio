@@ -1030,6 +1030,13 @@ button.primary-btn:hover:not(:disabled) {
   justify-content: center;
 }
 
+/* A confirmation opens on top of whichever modal asked for it (#356). With
+   every .modal at 1000, DOM order decided, and a modal declared after this
+   one (Clear Previews) covered the confirm it opened. */
+#themed-confirm-modal {
+  z-index: 1100;
+}
+
 .modal-content {
   width: 80%;
   max-width: 900px;
@@ -1287,6 +1294,136 @@ button.primary-btn:hover:not(:disabled) {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: #ccc;
+}
+
+/* Last Batch (#172). */
+.batch-results {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.batch-results-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.batch-results-close {
+  padding: 0 6px;
+}
+
+.batch-results-summary {
+  margin: 6px 0;
+  font-size: 12px;
+}
+
+.batch-results-error {
+  color: #ef5350;
+}
+
+.batch-results-wrap {
+  max-height: 220px;
+}
+
+.batch-results-row-missing td:first-child {
+  color: #ef5350;
+}
+
+.batch-results-row-unrenderable td:first-child {
+  color: #ffb74d;
+}
+
+.batch-results-row-ok td:first-child {
+  color: #66bb6a;
+}
+
+/* The Commands tab's type-ahead (#215). */
+.command-suggest {
+  position: absolute;
+  z-index: 1200;
+  margin: 0;
+  padding: 2px 0;
+  list-style: none;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 3px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+}
+
+.command-suggest-item {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+
+.command-suggest-item.active,
+.command-suggest-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.command-suggest-name {
+  font-family: monospace;
+  white-space: nowrap;
+}
+
+.command-suggest-meta {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 420px;
+}
+
+.command-suggest-refused .command-suggest-name {
+  color: #ef5350;
+  text-decoration: line-through;
+}
+
+.command-suggest-refused .command-suggest-meta,
+.command-suggest-warned .command-suggest-meta {
+  color: #ffb74d;
+}
+
+.command-suggest-noop .command-suggest-name {
+  opacity: 0.6;
+}
+
+/* #192: the Flags tab. */
+.analyzer-team-dot {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 4px;
+  vertical-align: baseline;
+}
+
+.analyzer-flag-cards {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.analyzer-steam-ids {
+  display: flex;
+  gap: 6px 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 11px;
+  color: #ccc;
+}
+
+.analyzer-copy-btn {
+  padding: 1px 6px;
+  font-size: 10px;
+  margin-left: 4px;
 }
 
 .analyzer-stat-cards {
@@ -1921,4 +2058,29 @@ tr.keyboard-selected {
 
 .hd-miss-detail {
   color: var(--text-muted);
+}
+
+/* Highlight Details' Notes (#605): notes are clip descriptions of a sentence
+   or two, so the column takes the room and the box wraps; drag its corner
+   to make it bigger. A class, not a column position, so a new column doesn't
+   move the width onto the wrong one. */
+#detail-streaks-table th.col-notes {
+  width: 45%;
+}
+
+.streak-notes-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 260px;
+  min-height: 3.2em;
+  resize: both;
+  padding: 2px 4px;
+  background: #1a1a1a;
+  color: #fff;
+  border: 1px solid #444;
+  border-radius: 3px;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.35;
 }

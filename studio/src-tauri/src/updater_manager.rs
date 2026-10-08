@@ -88,6 +88,12 @@ pub async fn download_and_install_update(
     app: AppHandle,
     state: tauri::State<'_, UpdaterState>,
 ) -> Result<(), String> {
+    // A debug build is a `tauri dev` session or a `--debug` bundle made from
+    // the repo. Installing from it would quit it and replace the *installed*
+    // app, so refuse; the frontend never offers it either.
+    if cfg!(debug_assertions) {
+        return Err(crate::messages::LOCAL_BUILD_CANNOT_INSTALL_UPDATE.to_string());
+    }
     let pending = Arc::clone(&state.pending);
     let update = pending
         .lock()
@@ -127,6 +133,124 @@ pub async fn download_and_install_update(
 #[tauri::command]
 pub fn is_debug_build() -> bool {
     cfg!(debug_assertions)
+}
+
+/// The git branch of the source tree this binary was built from, for the
+/// window title of a build made on this PC (e.g. `local build -
+/// test/capture-batch`). Read at call time, so it's the branch checked out
+/// when the app launched.
+///
+/// The path comes from `CARGO_MANIFEST_DIR`, baked in at compile time. On
+/// this PC that's the repo; for a CI-built installer it's a CI runner path
+/// that doesn't exist on the user's machine, so this returns `None` and the
+/// title is unchanged. Plain file reads, no `git` process.
+#[tauri::command]
+pub fn local_git_branch() -> Option<String> {
+    git_branch_from(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
+}
+
+/// Walks up from `start` to the nearest `.git` and reads its `HEAD`.
+/// Handles a worktree, where `.git` is a file holding `gitdir: <path>`.
+/// A detached HEAD gives the short commit id instead of a branch.
+fn git_branch_from(start: &std::path::Path) -> Option<String> {
+    let dot_git = start
+        .ancestors()
+        .map(|d| d.join(".git"))
+        .find(|p| p.exists())?;
+    let git_dir = if dot_git.is_dir() {
+        dot_git
+    } else {
+        let text = std::fs::read_to_string(&dot_git).ok()?;
+        let target = text.trim().strip_prefix("gitdir:")?.trim();
+        let target = std::path::PathBuf::from(target);
+        if target.is_absolute() {
+            target
+        } else {
+            dot_git.parent()?.join(target)
+        }
+    };
+    let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
+    let head = head.trim();
+    if let Some(branch) = head.strip_prefix("ref: refs/heads/") {
+        return (!branch.is_empty()).then(|| branch.to_string());
+    }
+    let is_commit = head.len() >= 7 && head.bytes().all(|b| b.is_ascii_hexdigit());
+    is_commit.then(|| head[..7].to_string())
+}
+
+#[cfg(test)]
+mod git_branch_tests {
+    use super::git_branch_from;
+    use std::path::PathBuf;
+
+    fn scratch(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "dodstudio_git_branch_{name}_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn reads_the_branch_from_a_normal_repo_above_the_start_folder() {
+        let root = scratch("normal");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(
+            root.join(".git/HEAD"),
+            "ref: refs/heads/test/capture-batch\n",
+        )
+        .unwrap();
+        let deep = root.join("studio/src-tauri");
+        std::fs::create_dir_all(&deep).unwrap();
+        assert_eq!(
+            git_branch_from(&deep).as_deref(),
+            Some("test/capture-batch")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn follows_a_worktree_gitdir_file() {
+        let root = scratch("worktree");
+        let gitdir = root.join("main/.git/worktrees/wt");
+        std::fs::create_dir_all(&gitdir).unwrap();
+        std::fs::write(
+            gitdir.join("HEAD"),
+            "ref: refs/heads/feat/title-branch-name\n",
+        )
+        .unwrap();
+        let wt = root.join("wt");
+        std::fs::create_dir_all(&wt).unwrap();
+        std::fs::write(wt.join(".git"), format!("gitdir: {}\n", gitdir.display())).unwrap();
+        assert_eq!(
+            git_branch_from(&wt).as_deref(),
+            Some("feat/title-branch-name")
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_detached_head_gives_the_short_commit() {
+        let root = scratch("detached");
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(
+            root.join(".git/HEAD"),
+            "39230c9c0123456789abcdef0123456789abcdef\n",
+        )
+        .unwrap();
+        assert_eq!(git_branch_from(&root).as_deref(), Some("39230c9"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn no_repo_gives_none() {
+        let root = scratch("none");
+        // temp_dir() itself is not inside a repo on any machine this runs on.
+        assert_eq!(git_branch_from(&root.join("nowhere")), None);
+        let _ = std::fs::remove_dir_all(&root);
+    }
 }
 
 #[tauri::command]
