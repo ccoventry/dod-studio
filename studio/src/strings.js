@@ -1397,7 +1397,11 @@ export const STRINGS = {
     MISSES_HINT: "After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.",
     MISSES_SHOW_ON_PURPOSE: 'Show textures left alone on purpose',
     MISSES_NONE: "No list in the game's log yet. Type the command above in the game's console first.",
-    missesFrom: (date, time, style, summary) => `From ${date} at ${time}${style ? `, style ${style}` : ''}: ${summary}`,
+    // `textures` is null when the hook's summary doesn't give a count: show its own words then.
+    missesFrom: (date, time, style, textures, summary, mapCount) => `From ${date} at ${time}${style ? `, style ${style}` : ''}: ${
+      textures === 0 ? 'every texture was replaced.'
+        : textures == null ? summary
+          : `${textures} texture${textures === 1 ? '' : 's'} kept their original.${mapCount > 1 ? ' One used on several maps is listed under each.' : ''}`}`,
     missesMap: (map, total, onPurpose) => `${map}: ${total} kept their original${onPurpose ? `, ${onPurpose} of them on purpose` : ''}`,
     MISSES_ONLY_ON_PURPOSE: 'Only textures left alone on purpose.',
     missesLoads: (loads, type) => (type === 'sprite' ? `${loads} frames` : `${loads} loads`),
