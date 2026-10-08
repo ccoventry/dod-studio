@@ -231,8 +231,9 @@ enum Phase {
         frames: u32,
         seen_loading: bool,
     },
-    /// Playing the highlight; pauses at `until` on the world clock.
-    Playing { until: f64 },
+    /// Playing the highlight; pauses at `until` on the world clock. `last` is
+    /// the clock a frame ago, to log a jump.
+    Playing { until: f64, last: f64 },
     /// Paused at the end, for an answer.
     Waiting,
     /// This one could not be played; next and back still work.
@@ -264,6 +265,14 @@ fn lock() -> std::sync::MutexGuard<'static, Option<Review>> {
 
 fn say(line: &str) {
     crate::commands::console_print(&format!("{NAME}: {line}\n"));
+    unsafe { crate::debug::report(&format!("review: {line}")) };
+}
+
+/// A clock change between two frames bigger than this is logged as a jump.
+const JUMP_SECONDS: f64 = 2.0;
+
+/// To the hook's log only, not the console.
+fn trace(line: &str) {
     unsafe { crate::debug::report(&format!("review: {line}")) };
 }
 
@@ -358,12 +367,20 @@ fn detail(h: &Highlight, phase: &Phase) -> String {
 fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
-    let started = crate::demo_seek::seek_to_seconds(from)
-        .and_then(|_| crate::demo_seek::set_time_scale(1.0))
-        .and_then(|()| crate::demo_seek::set_paused(false));
+    let started = crate::demo_seek::seek_to_seconds(from).and_then(|seek| {
+        crate::demo_seek::set_time_scale(1.0)?;
+        crate::demo_seek::set_paused(false)?;
+        Ok(seek)
+    });
     match started {
-        Ok(()) => {
-            review.phase = Phase::Playing { until };
+        Ok(seek) => {
+            let now = crate::demo_seek::clock().map_or(-1.0, |c| c.now);
+            trace(&format!(
+                "highlight {} of {}: playing {from:.1}..{until:.1} s, clock {now:.1} after the seek ({seek})",
+                review.at + 1,
+                review.queue.len()
+            ));
+            review.phase = Phase::Playing { until, last: now };
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -473,9 +490,24 @@ pub fn poll() {
             }
             play(review);
         }
-        Phase::Playing { until } => match crate::demo_seek::clock() {
-            Some(c) if c.active && c.now < until => {}
+        Phase::Playing { until, last } => match crate::demo_seek::clock() {
+            Some(c) if c.active && c.now < until => {
+                // A jump the review didn't make (#663's first ESC).
+                if (c.now - last).abs() > JUMP_SECONDS {
+                    trace(&format!(
+                        "highlight {}: the clock jumped from {last:.1} to {:.1} s (playing until {until:.1})",
+                        review.at + 1,
+                        c.now
+                    ));
+                }
+                review.phase = Phase::Playing { until, last: c.now };
+            }
             Some(c) if c.active => {
+                trace(&format!(
+                    "highlight {}: clock {:.1} reached {until:.1} s, waiting for an answer",
+                    review.at + 1,
+                    c.now
+                ));
                 let _ = crate::demo_seek::set_paused(true);
                 review.phase = Phase::Waiting;
                 open_tab();
