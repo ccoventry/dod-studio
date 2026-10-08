@@ -1313,6 +1313,31 @@ export const STRINGS = {
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    MISSES_TITLE: 'Textures that kept their original',
+    MISSES_BUTTON: "Read the game's log",
+    MISSES_READING: 'Reading...',
+    MISSES_HINT: "After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.",
+    MISSES_SHOW_ON_PURPOSE: 'Show textures left alone on purpose',
+    MISSES_NONE: "No list in the game's log yet. Type the command above in the game's console first.",
+    // `textures` is null when the hook's summary doesn't give a count: show its own words then.
+    missesFrom: (date, time, style, textures, summary, mapCount) => `From ${date} at ${time}${style ? `, style ${style}` : ''}: ${
+      textures === 0 ? 'every texture was replaced.'
+        : textures == null ? summary
+          : `${textures} texture${textures === 1 ? '' : 's'} kept their original.${mapCount > 1 ? ' One used on several maps is listed under each.' : ''}`}`,
+    missesMap: (map, total, onPurpose) => `${map}: ${total} kept their original${onPurpose ? `, ${onPurpose} of them on purpose` : ''}`,
+    MISSES_ONLY_ON_PURPOSE: 'Only textures left alone on purpose.',
+    missesLoads: (loads, type) => (type === 'sprite' ? `${loads} frames` : `${loads} loads`),
+    missesAlsoOn: (count) => `also on ${count} other map${count === 1 ? '' : 's'}`,
+    // What to do about each reason, after the hook's own heading.
+    MISSES_ADVICE: {
+      wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
+      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      failed: "A file was found but couldn't be used; each line says why.",
+      on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
+    },
+    // The hook's asset kinds in the miss list (singular, unlike the folders).
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
