@@ -22,7 +22,7 @@ use std::time::SystemTime;
 /// Bump whenever `AnalyzerState`/`Player`/related computed fields change, so
 /// caches written by an older schema are treated as a miss instead of
 /// silently deserializing with new fields missing/defaulted.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 /// The demo file an analysis came from.
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
