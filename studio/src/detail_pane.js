@@ -3,12 +3,12 @@ import { openAnalyzerDemo } from './analyzer_pane.js';
 import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
-import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus } from './take_index.js';
+import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus, isSkipped, setCuration, CURATION } from './take_index.js';
 import { STRINGS } from './strings.js';
-import { numberField } from './number_field.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
+import { escapeHtml } from './html.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
@@ -32,18 +32,6 @@ export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
   currentGetAllDemos = getAllDemos;
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
-
-  // The timeline canvas now lives inside the collapsed-by-default Advanced
-  // Diagnostics <details> block, so it has 0 clientWidth/clientHeight (and
-  // therefore never actually draws) any time renderTimeline() runs while
-  // collapsed. Redraw on expand so it isn't stuck blank the first time the
-  // user opens it.
-  const advancedPanel = document.querySelector('#advanced-diagnostics-details');
-  if (advancedPanel) {
-    advancedPanel.addEventListener('toggle', () => {
-      if (advancedPanel.open) renderTimeline(currentDemo);
-    });
-  }
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -179,7 +167,8 @@ export function updateStreakVisuals(streak) {
 function selectAllVisibleStreaks() {
   if (!currentDemo || !currentDemo.streaks) return;
   currentDemo.streaks.forEach(s => {
-    if (isVisibleStreak(currentDemo, s)) s.selected = true;
+    // A Skip row stays unticked: it's locked out of every batch (#44).
+    if (isVisibleStreak(currentDemo, s) && !isSkipped(s)) s.selected = true;
   });
   renderDetailView(currentDemo, currentDemoIdx);
 }
@@ -452,7 +441,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
-        <th>${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
+        <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
+        <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
       </tr>
     </thead>
@@ -488,6 +478,12 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
+    // #44: a Skip row is dimmed, unticked and locked.
+    const skipped = isSkipped(streak);
+    if (skipped) {
+      tr.style.opacity = '0.5';
+      streak.selected = false;
+    }
 
     // Time matches the demo player's clock; see highlight_time.js (#464).
     const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
@@ -519,7 +515,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     tr.innerHTML = `
       <td style="padding: 8px;">${rowNum}</td>
       <td style="padding: 8px;">
-        <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} />
+        <input type="checkbox" class="streak-select-cb" data-index="${streakIdx}" ${streak.selected ? 'checked' : ''} ${skipped ? `disabled title="${STRINGS.HIGHLIGHTS.SKIPPED_CB_TITLE}"` : ''} />
       </td>
       <td style="padding: 8px;">
         <div style="display:flex;align-items:center;gap:4px;${isRangeModified ? 'color:#ff9800;' : ''}">
@@ -543,7 +539,14 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
-        <input type="text" class="streak-notes-input" placeholder="${STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER}" value="${(streak.notes || '').replace(/"/g, '&quot;')}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%;" />
+        <select class="streak-curation-select" style="font-size: 0.85em;">
+          <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
+          <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
+          <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
+        </select>
+      </td>
+      <td style="padding: 8px;">
+        <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
       <td class="details-cell" title="${timelineText}">${timelineText}</td>
     `;
@@ -551,7 +554,6 @@ export function renderDetailView(demo, selectedDemoIdx) {
     const cb = tr.querySelector('.streak-select-cb');
     cb.addEventListener('change', (e) => {
       streak.selected = e.target.checked;
-      renderTimeline(currentDemo);
       updatePreviewButtonStates();
       if (currentOnSelectionChange) currentOnSelectionChange();
       if (currentOnDirty) currentOnDirty();
@@ -587,6 +589,13 @@ export function renderDetailView(demo, selectedDemoIdx) {
         if (currentOnDirty) currentOnDirty();
       });
     }
+
+    tr.querySelector('.streak-curation-select').addEventListener('change', (e) => {
+      setCuration(streak, e.target.value);
+      renderDetailView(currentDemo, currentDemoIdx);
+      if (currentOnSelectionChange) currentOnSelectionChange();
+      if (currentOnDirty) currentOnDirty();
+    });
 
     const statusSelect = tr.querySelector('.streak-status-select');
     // Free in both directions (#105, D9); the mark and the Undo toast are
@@ -632,7 +641,8 @@ export function renderDetailView(demo, selectedDemoIdx) {
   // for the Master Queue's own header checkbox.
   const selectAllHeaderCb = table.querySelector('#detail-select-all-cb');
   if (selectAllHeaderCb) {
-    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s, minKills));
+    // Skip rows can't be ticked, so they don't count toward "all ticked".
+    const visibleStreaks = demo.streaks.filter(s => isVisibleStreak(demo, s, minKills) && !isSkipped(s));
     const selectedVisible = visibleStreaks.filter(s => s.selected).length;
     selectAllHeaderCb.checked = visibleStreaks.length > 0 && selectedVisible === visibleStreaks.length;
     selectAllHeaderCb.indeterminate = selectedVisible > 0 && selectedVisible < visibleStreaks.length;
@@ -644,126 +654,5 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
-
-  renderTimeline(demo);
-}
-
-function renderTimeline(demo) {
-  const canvas = document.querySelector('#streak-timeline-canvas');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return;
-
-  const width = canvas.clientWidth || 600;
-  const height = canvas.clientHeight || 100;
-  if (canvas.width !== width) canvas.width = width;
-  if (canvas.height !== height) canvas.height = height;
-
-  ctx.fillStyle = '#1e1e1e';
-  ctx.fillRect(0, 0, width, height);
-
-  if (!demo || !demo.streaks || demo.streaks.length === 0) {
-    ctx.fillStyle = '#666666';
-    ctx.font = '12px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(STRINGS.HIGHLIGHTS.TIMELINE_NO_DATA, width / 2, height / 2);
-    return;
-  }
-
-  const preRollSecs = numberField('#config-pre-roll', 2.0);
-  const postRollSecs = numberField('#config-post-roll', 0.6);
-  const tickrate = demo.tickrate || 100;
-  const preRollTicks = preRollSecs * tickrate;
-  const postRollTicks = postRollSecs * tickrate;
-
-  let minTick = Infinity;
-  let maxTick = -Infinity;
-  demo.streaks.forEach(s => {
-    if (s.start_tick - preRollTicks < minTick) minTick = s.start_tick - preRollTicks;
-    if (s.end_tick + postRollTicks > maxTick) maxTick = s.end_tick + postRollTicks;
-  });
-
-  if (minTick === Infinity || maxTick === -Infinity || maxTick <= minTick) {
-    minTick = 0;
-    maxTick = 1000;
-  }
-
-  const padding = 20;
-  const usableWidth = width - (padding * 2);
-  const tickSpan = (maxTick - minTick) || 1;
-
-  // Timeline axis
-  ctx.strokeStyle = '#444444';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(padding, height - 20);
-  ctx.lineTo(width - padding, height - 20);
-  ctx.stroke();
-
-  ctx.fillStyle = '#888888';
-  ctx.font = '10px monospace';
-  ctx.textAlign = 'left';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(minTick), padding, height - 5);
-  ctx.textAlign = 'right';
-  ctx.fillText(STRINGS.HIGHLIGHTS.tickLabel(maxTick), width - padding, height - 5);
-
-  demo.streaks.forEach((streak) => {
-    // Opt-in model, matching the checkbox default and the row-build loop
-    // above — only an explicit `true` counts as selected. `undefined`
-    // covers demos never opened in this view yet (and every streak that
-    // never renders as a checkable row at all, e.g. other players'), and
-    // must render as unselected, not selected.
-    const isSelected = streak.selected === true;
-    const startX = padding + ((streak.start_tick - minTick) / tickSpan) * usableWidth;
-    const endX = padding + ((streak.end_tick - minTick) / tickSpan) * usableWidth;
-    const blockWidth = Math.max(endX - startX, 4);
-
-    const preX = padding + (((streak.start_tick - preRollTicks) - minTick) / tickSpan) * usableWidth;
-    const preWidth = Math.max(startX - preX, 0);
-
-    const postX = endX;
-    const postEndX = padding + (((streak.end_tick + postRollTicks) - minTick) / tickSpan) * usableWidth;
-    const postWidth = Math.max(postEndX - postX, 0);
-
-    // Pre-roll margin
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.15)' : 'rgba(255, 255, 255, 0.02)';
-    ctx.fillRect(preX, 15, preWidth, height - 40);
-
-    // Post-roll margin
-    ctx.fillRect(postX, 15, postWidth, height - 40);
-
-    // Core Span block
-    ctx.fillStyle = isSelected ? 'rgba(76, 175, 80, 0.35)' : 'rgba(255, 255, 255, 0.05)';
-    ctx.fillRect(startX, 15, blockWidth, height - 40);
-
-    ctx.strokeStyle = isSelected ? '#4caf50' : '#444444';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(startX, 15, blockWidth, height - 40);
-    // Draw outer bounds for margins
-    ctx.strokeStyle = isSelected ? 'rgba(76, 175, 80, 0.4)' : '#333333';
-    ctx.strokeRect(preX, 15, preWidth + blockWidth + postWidth, height - 40);
-
-    // Kill timestamp markers — kills are (tick, abs_time_secs, weapon) tuples
-    if (streak.kills && Array.isArray(streak.kills) && streak.kills.length > 0) {
-      streak.kills.forEach(k => {
-        // k[0] = tick (integer), k[1] = abs_time_secs, k[2] = weapon name
-        const kTick = k[0] !== undefined ? k[0] : streak.start_tick;
-        const kX = padding + ((kTick - minTick) / tickSpan) * usableWidth;
-        ctx.strokeStyle = isSelected ? '#ff4444' : '#773333';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(kX, 15);
-        ctx.lineTo(kX, height - 25);
-        ctx.stroke();
-      });
-    } else {
-      ctx.strokeStyle = isSelected ? '#ff9800' : '#664411';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(startX, 15);
-      ctx.lineTo(startX, height - 25);
-      ctx.stroke();
-    }
-  });
 }
 

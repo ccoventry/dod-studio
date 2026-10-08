@@ -87,15 +87,19 @@ fn main() {
             // ── Directory input: scan all .dem files inside ──────────────────
             let output_dir = path.join("previews");
             if let Err(e) = std::fs::create_dir_all(&output_dir) {
-                eprintln!("Error creating output directory: {:?} - {}", output_dir, e);
+                eprintln!(
+                    "Failed to create output directory {}: {}",
+                    output_dir.display(),
+                    e
+                );
                 continue;
             }
-            println!("Created directory: {:?}", output_dir);
+            println!("Output directory: {}", output_dir.display());
 
             let entries = match std::fs::read_dir(&path) {
                 Ok(e) => e,
                 Err(e) => {
-                    eprintln!("Failed to read directory: {:?} - {}", path, e);
+                    eprintln!("Failed to read directory {}: {}", path.display(), e);
                     continue;
                 }
             };
@@ -123,10 +127,7 @@ fn main() {
             // ── Individual file input ────────────────────────────────────────
             let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
             if ext.to_lowercase() != "dem" {
-                eprintln!(
-                    "Skipped: {:?} — Not a .dem file",
-                    path.file_name().unwrap_or_default()
-                );
+                eprintln!("Skipped: {} — not a .dem file", path.display());
                 skipped += 1;
                 continue;
             }
@@ -137,11 +138,15 @@ fn main() {
                 .join("previews");
 
             if let Err(e) = std::fs::create_dir_all(&output_dir) {
-                eprintln!("Error creating output directory: {:?} - {}", output_dir, e);
+                eprintln!(
+                    "Failed to create output directory {}: {}",
+                    output_dir.display(),
+                    e
+                );
                 skipped += 1;
                 continue;
             }
-            println!("Created directory: {:?}", output_dir);
+            println!("Output directory: {}", output_dir.display());
 
             process_demo(
                 &path,
@@ -153,7 +158,7 @@ fn main() {
                 &mut skipped,
             );
         } else {
-            eprintln!("Skipped: {:?} — Path not accessible", path);
+            eprintln!("Skipped: {} — not found or not accessible", path.display());
             skipped += 1;
         }
     }
@@ -265,7 +270,10 @@ fn process_demo(
     ) = match native::patch::scan_demo_for_highlights(path) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("  Skipped: {} — Scan error: {}", original_filename, e);
+            eprintln!(
+                "  Skipped: {} — could not read it as a demo: {}",
+                original_filename, e
+            );
             *skipped += 1;
             return;
         }
@@ -288,7 +296,7 @@ fn process_demo(
     };
 
     if streaks.is_empty() {
-        println!("  Skipped: {} — No highlights found", original_filename);
+        println!("  Skipped: {} — no highlights found", original_filename);
         *skipped += 1;
         return;
     }
@@ -359,7 +367,7 @@ fn process_demo(
                 *processed += 1;
             }
             Err(e) => {
-                eprintln!("  Error writing file {}: {}", new_filename, e);
+                eprintln!("  Failed to write {}: {}", new_filename, e);
                 *skipped += 1;
             }
         }

@@ -152,6 +152,13 @@ pub const BUILDS: [Build; 2] = [
 
 /// `IDemoPlayer` vftable slots, HL SDK order (after `ISystemModule`'s 15).
 const SLOT_SET_WORLD_TIME: usize = 22;
+/// `SetTimeScale(float)`, `SetPaused(bool)`, `IsPaused()` and
+/// `GetTimeScale()`: the review mode (#623) plays each highlight at normal
+/// speed and pauses at its end.
+const SLOT_SET_TIME_SCALE: usize = 23;
+const SLOT_SET_PAUSED: usize = 24;
+const SLOT_IS_PAUSED: usize = 27;
+const SLOT_GET_TIME_SCALE: usize = 37;
 const SLOT_IS_LOADING: usize = 28;
 const SLOT_IS_ACTIVE: usize = 29;
 const SLOT_GET_WORLD_TIME: usize = 34;
@@ -236,6 +243,63 @@ pub fn buffered_while_loading() -> Option<f64> {
     None
 }
 
+/// Where the demo player is, for the review mode (#623).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Clock {
+    /// A `viewdemo` demo is in the player.
+    pub active: bool,
+    /// It is still being read.
+    pub loading: bool,
+    pub paused: bool,
+    /// The world clock, the one [`SEEK_TO_NAME`] takes.
+    pub now: f64,
+    pub start: f64,
+    pub end: f64,
+    pub time_scale: f32,
+}
+
+/// The demo player's clock, or `None` with no demo player (or one of a
+/// build this was not checked against).
+pub fn clock() -> Option<Clock> {
+    #[cfg(target_arch = "x86")]
+    return player::clock();
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
+/// Pauses the demo player, or plays on.
+pub fn set_paused(paused: bool) -> Result<(), String> {
+    #[cfg(target_arch = "x86")]
+    return player::set_paused(paused);
+    #[cfg(not(target_arch = "x86"))]
+    {
+        let _ = paused;
+        Err("only the 32-bit build has a demo player".to_string())
+    }
+}
+
+/// Sets the demo player's speed (1 is normal).
+pub fn set_time_scale(scale: f32) -> Result<(), String> {
+    #[cfg(target_arch = "x86")]
+    return player::set_time_scale(scale);
+    #[cfg(not(target_arch = "x86"))]
+    {
+        let _ = scale;
+        Err("only the 32-bit build has a demo player".to_string())
+    }
+}
+
+/// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
+pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
+    #[cfg(target_arch = "x86")]
+    return player::seek(seconds, false, skip_between());
+    #[cfg(not(target_arch = "x86"))]
+    {
+        let _ = seconds;
+        Err("only the 32-bit build has a demo player".to_string())
+    }
+}
+
 /// `dodstudio_seek_to <seconds>`: an absolute world time, the clock the events
 /// list shows and the analysis calls `viewdemo_offset`.
 pub unsafe extern "C" fn seek_to() {
@@ -263,6 +327,9 @@ mod player {
     type SetWorldTimeFn = unsafe extern "thiscall" fn(*mut c_void, f64, u32);
     type ByteFn = unsafe extern "thiscall" fn(*mut c_void) -> u32;
     type TimeFn = unsafe extern "thiscall" fn(*mut c_void) -> f64;
+    type SetPausedFn = unsafe extern "thiscall" fn(*mut c_void, u32);
+    type SetTimeScaleFn = unsafe extern "thiscall" fn(*mut c_void, f32);
+    type TimeScaleFn = unsafe extern "thiscall" fn(*mut c_void) -> f32;
     type FrameByTimeFn = unsafe extern "thiscall" fn(*mut c_void, f64) -> *const u8;
 
     /// The `IDemoPlayer` singleton, once `DemoPlayer.dll` is loaded and is a
@@ -326,6 +393,50 @@ mod player {
             let get_end: TimeFn = slot(player, SLOT_GET_END_TIME);
             Some(get_end(player) - get_start(player))
         }
+    }
+
+    pub(super) fn clock() -> Option<Clock> {
+        let (player, _) = find().ok()?;
+        // Safety: every slot is checked against both builds by
+        // tools/verify_demo_seek_offsets.py, and `find` refused any other.
+        unsafe {
+            let is_active: ByteFn = slot(player, SLOT_IS_ACTIVE);
+            let is_loading: ByteFn = slot(player, SLOT_IS_LOADING);
+            let is_paused: ByteFn = slot(player, SLOT_IS_PAUSED);
+            let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
+            let get_start: TimeFn = slot(player, SLOT_GET_START_TIME);
+            let get_end: TimeFn = slot(player, SLOT_GET_END_TIME);
+            let get_scale: TimeScaleFn = slot(player, SLOT_GET_TIME_SCALE);
+            Some(Clock {
+                active: is_set(is_active(player)),
+                loading: is_set(is_loading(player)),
+                paused: is_set(is_paused(player)),
+                now: get_now(player),
+                start: get_start(player),
+                end: get_end(player),
+                time_scale: get_scale(player),
+            })
+        }
+    }
+
+    pub(super) fn set_paused(paused: bool) -> Result<(), String> {
+        let (player, _) = find()?;
+        // Safety: as in `clock`.
+        unsafe {
+            let set: SetPausedFn = slot(player, SLOT_SET_PAUSED);
+            set(player, paused as u32);
+        }
+        Ok(())
+    }
+
+    pub(super) fn set_time_scale(scale: f32) -> Result<(), String> {
+        let (player, _) = find()?;
+        // Safety: as in `clock`.
+        unsafe {
+            let set: SetTimeScaleFn = slot(player, SLOT_SET_TIME_SCALE);
+            set(player, scale);
+        }
+        Ok(())
     }
 
     pub(super) fn seek(arg: f64, relative: bool, skip_between: bool) -> Result<String, String> {

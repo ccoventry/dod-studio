@@ -15,9 +15,22 @@
 //! Addresses are resolved to `module+RVA` through `VirtualQuery`, because a raw
 //! address is worthless after the fact — modules land wherever the loader put
 //! them that session, and an RVA is what a disassembler can be pointed at.
+//!
+//! ## Breakpoints get their own, quieter line
+//!
+//! A breakpoint exception (`0x80000003`, an `int3`) is usually harmless: the
+//! engine raises them in normal running, and something always handles them.
+//! But an unhandled one ends the game with that exit code and no other trace.
+//! That happened once on 2026-10-05: an Anniversary launch died 2 s in, and
+//! only Steam's log had the exit code. So each *distinct* breakpoint address is
+//! logged once, as a `BREAKPOINT:` line (not `CRASH:`, so
+//! `tools/crash_report.py` doesn't count it as a crash), for the first
+//! [`MAX_BREAKPOINT_SITES`] addresses. A harmless one that repeats costs one
+//! line; if the game then exits with `0x80000003`, the last `BREAKPOINT:` line
+//! says where.
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use windows_sys::Win32::System::Diagnostics::Debug::{
     AddVectoredExceptionHandler, EXCEPTION_POINTERS,
@@ -31,6 +44,14 @@ const EXCEPTION_CONTINUE_SEARCH: i32 = 0;
 /// A fault can repeat every frame. Cap the noise rather than fill the disk.
 const MAX_REPORTS: u32 = 8;
 static REPORTS: AtomicU32 = AtomicU32::new(0);
+
+/// `EXCEPTION_BREAKPOINT`: an `int3`.
+const BREAKPOINT: u32 = 0x8000_0003;
+
+/// How many distinct breakpoint addresses get a line each.
+const MAX_BREAKPOINT_SITES: usize = 8;
+static BREAKPOINT_SITES: [AtomicUsize; MAX_BREAKPOINT_SITES] =
+    [const { AtomicUsize::new(0) }; MAX_BREAKPOINT_SITES];
 
 /// Reading the faulting thread's stack can itself fault, which would re-enter
 /// this handler. One flag is enough: the handler runs on the faulting thread.
@@ -215,6 +236,21 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
         return EXCEPTION_CONTINUE_SEARCH;
     }
     let code = unsafe { (*record).ExceptionCode } as u32;
+    if code == BREAKPOINT {
+        let address = unsafe { (*record).ExceptionAddress } as usize;
+        if first_sighting(&BREAKPOINT_SITES, address) && !INSIDE.swap(true, Ordering::Acquire) {
+            unsafe {
+                crate::debug::report(&format!(
+                    "BREAKPOINT: int3 ({BREAKPOINT:#010x}) at {} -- usually harmless; if the game \
+                     exits right after with code 0x80000003, this is where it died",
+                    describe_address(address)
+                ))
+            };
+            record_context("BREAKPOINT", info);
+            INSIDE.store(false, Ordering::Release);
+        }
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
     let Some(what) = describe(code) else {
         return EXCEPTION_CONTINUE_SEARCH;
     };
@@ -244,15 +280,65 @@ unsafe extern "system" fn handler(info: *mut EXCEPTION_POINTERS) -> i32 {
         line.push_str(&format!(" -- {operation} {:#x}", params[1]));
     }
     unsafe { crate::debug::report(&line) };
-
-    let (register_dump, esp) = registers(info);
-    if !register_dump.is_empty() {
-        unsafe { crate::debug::report(&format!("CRASH:   {register_dump}")) };
-    }
-    for frame in stack_trail(esp) {
-        unsafe { crate::debug::report(&format!("CRASH:   {frame}")) };
-    }
+    record_context("CRASH", info);
 
     INSIDE.store(false, Ordering::Release);
     EXCEPTION_CONTINUE_SEARCH
+}
+
+/// The registers and the return addresses on the stack, each line under
+/// `prefix` and indented, as `tools/crash_report.py` reads a `CRASH:` block.
+fn record_context(prefix: &str, info: *mut EXCEPTION_POINTERS) {
+    let (register_dump, esp) = registers(info);
+    if !register_dump.is_empty() {
+        unsafe { crate::debug::report(&format!("{prefix}:   {register_dump}")) };
+    }
+    for frame in stack_trail(esp) {
+        unsafe { crate::debug::report(&format!("{prefix}:   {frame}")) };
+    }
+}
+
+/// Whether `address` is new to `seen`, which it then holds; false once every
+/// slot holds another address. Lock-free: a slot is claimed by swapping 0 for
+/// the address, so two threads hitting the same new address log it once.
+fn first_sighting(seen: &[AtomicUsize], address: usize) -> bool {
+    if address == 0 {
+        return false;
+    }
+    for slot in seen {
+        match slot.compare_exchange(0, address, Ordering::AcqRel, Ordering::Acquire) {
+            Ok(_) => return true,
+            Err(held) if held == address => return false,
+            Err(_) => {}
+        }
+    }
+    false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_breakpoint_address_is_logged_once_up_to_the_cap() {
+        let seen: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+        assert!(first_sighting(&seen, 0x1000));
+        assert!(!first_sighting(&seen, 0x1000), "a repeat is quiet");
+        assert!(first_sighting(&seen, 0x2000));
+        assert!(first_sighting(&seen, 0x3000));
+        assert!(!first_sighting(&seen, 0x4000), "past the cap, nothing new");
+        assert!(!first_sighting(&seen, 0x2000));
+    }
+
+    #[test]
+    fn a_null_address_is_never_logged() {
+        let seen: [AtomicUsize; 2] = [const { AtomicUsize::new(0) }; 2];
+        assert!(!first_sighting(&seen, 0));
+        assert!(first_sighting(&seen, 0x10));
+    }
+
+    #[test]
+    fn breakpoints_stay_out_of_the_crash_list() {
+        assert_eq!(describe(BREAKPOINT), None);
+    }
 }
