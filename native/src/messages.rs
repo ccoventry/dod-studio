@@ -142,6 +142,23 @@ pub fn hd_build_failed(status: impl Display, detail: &str) -> String {
     }
 }
 
+// ── hd/preview.rs ────────────────────────────────────────────────────────
+
+pub fn hd_preview_bad_map(map: &str) -> String {
+    format!("{map:?} is not a map name")
+}
+
+pub fn hd_preview_failed(status: impl Display, detail: &str) -> String {
+    if detail.is_empty() {
+        format!("the comparison stopped ({status})")
+    } else {
+        format!(
+            "the comparison stopped ({status}):
+{detail}"
+        )
+    }
+}
+
 // ── hd/my_styles.rs ──────────────────────────────────────────────────────
 // The scripts' own wording (styles.py's load_my_styles), so a file refused
 // on the HD page reads the same as one refused on the command line.
