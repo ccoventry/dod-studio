@@ -41,6 +41,8 @@ DEMO PLAYBACK
       A jump skips the events and commands it passes over.
   dodstudio_reload_demo
       Play the last demo again.
+  dodstudio_review yes|no|replay|next|back|stop
+      Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   dodstudio_clear_decals
       Clear every decal (bullet holes, blood, sprays).
   dodstudio_ex_interp_max <ms>

@@ -31,6 +31,9 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// The review mode's queue and answers (#623).
+pub mod review_queue;
+
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]

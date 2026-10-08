@@ -189,6 +189,12 @@ is the complete list):
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
+- **Review highlights** (`dodstudio_review`, #623): plays each highlight
+  DoD Studio queued at normal speed, pauses at its end on the window's Review
+  tab, and sends each Yes/No, kill range and note back to Studio on the
+  events pipe. Pause and speed go through `DemoPlayer.dll`'s `SetPaused` and
+  `SetTimeScale`, checked by `tools/verify_demo_seek_offsets.py`. See
+  `src/review.rs`.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that

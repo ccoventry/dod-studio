@@ -46,6 +46,7 @@ import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
 import { splitIdenticalCopies } from './demo_copies.js';
+import { initReviewMode } from './review_mode.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -1538,6 +1539,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
     }
   };
+
+  initReviewMode({
+    getDemos: () => currentScannedDemos,
+    getCheckedPaths: getCheckedDemoPaths,
+    onChanged: onHighlightStatusChange,
+  });
 
   initCaptureUI(() => ({
     scanPaths,

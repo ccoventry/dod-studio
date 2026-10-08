@@ -192,6 +192,16 @@ pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview
 pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
     format!("Could not send the preview to the running game: {e}")
 }
+
+// ── review_manager.rs (#623) ────────────────────────────────────────────────
+pub fn failed_to_send_review(e: impl std::fmt::Display) -> String {
+    format!("Could not send the review to the game: {e}")
+}
+pub fn could_not_write_review_queue(e: impl std::fmt::Display) -> String {
+    format!("Could not save the list of highlights to review: {e}")
+}
+pub const REVIEW_GAME_NOT_FROM_STUDIO: &str = "Day of Defeat is open, but DoD Studio didn't start it, so it can't play the review. Close the game and press Review highlights again.";
+pub const REVIEW_GAME_DID_NOT_START: &str = "Day of Defeat didn't open within two minutes. Start it with Launch Game, then press Review highlights again.";
 pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
     "Could not resolve the preview demo's file stem";
 

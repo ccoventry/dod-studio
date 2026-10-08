@@ -96,7 +96,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 7] = [
+pub const PAGES: [Page; 8] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -158,6 +158,15 @@ pub const PAGES: [Page; 7] = [
             c"dodstudio_ui/Studio.res",
             "Studio.res",
             include_str!("../ui/Studio.res"),
+        ),
+    },
+    Page {
+        name: c"Review",
+        title: c"Review",
+        res: (
+            c"dodstudio_ui/Review.res",
+            "Review.res",
+            include_str!("../ui/Review.res"),
         ),
     },
 ];
@@ -327,6 +336,8 @@ const FRAME_SLOT_ACTIVATE: usize = 160;
 /// after every `engine ...` menu command, and slot 8 (`+0x20`) to bring the
 /// menu up; the same in both builds' `GameUI.dll`.
 const BASEUI_SLOT_ACTIVATE_GAME_UI: usize = 8;
+/// `IBaseUI::HideGameUI()`: closes the menu (slot 7, above).
+const BASEUI_SLOT_HIDE_GAME_UI: usize = 7;
 /// `Frame::GetClientArea(int &x, int &y, int &wide, int &tall)`, which
 /// `PropertyDialog::PerformLayout` sizes its sheet by.
 const FRAME_SLOT_GET_CLIENT_AREA: usize = 186;
@@ -493,6 +504,8 @@ const FILL_HEIGHT: [&str; 2] = ["DemoListSlot", "StreakListSlot"];
 const STREAKS_PAGE: usize = 2;
 const CONSOLE_PAGE: usize = 3;
 const SETTINGS_PAGE: usize = 4;
+/// The review mode's tab (#623).
+const REVIEW_PAGE: usize = 7;
 /// A check box named `cvar_<name>` on the Settings tab is bound to cvar
 /// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
 /// layout can add more in build mode.
@@ -1060,7 +1073,7 @@ pub fn bare_viewdemo() -> bool {
     }
     #[cfg(target_arch = "x86")]
     {
-        let line = match hook::open_on(PLAYBACK_PAGE) {
+        let line = match hook::open_on(PLAYBACK_PAGE, false) {
             Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
             Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
         };
@@ -1455,6 +1468,8 @@ mod hook {
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
+    /// The Review tab (#623).
+    pub(super) mod review_tab;
     /// The Highlights tab (#565).
     mod streaks_tab;
 
@@ -3327,6 +3342,7 @@ mod hook {
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
                     streaks_tab::update(&vgui);
+                    review_tab::update(&vgui);
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
                     folder_progress::update(&vgui);
@@ -3679,13 +3695,19 @@ mod hook {
         }
     }
 
-    /// Opens the window on tab `page`, building it if needed.
-    pub(super) fn open_on(page: usize) -> Result<String, String> {
+    /// Opens the window on tab `page`, building it if needed. With
+    /// `bring_menu_up`, a menu that is down comes up around it: a tab named
+    /// by a bind or by the review (#623) runs during play, with the menu
+    /// closed.
+    pub(super) fn open_on(page: usize, bring_menu_up: bool) -> Result<String, String> {
         let vgui = Vgui::get()?;
         unsafe {
             let (object, vp, _) = ensure_window(&vgui, false)?;
             if page == DEMOS_PAGE {
                 refill_demo_list();
+            }
+            if bring_menu_up && !vgui.shown(vgui.parent_of(vp)) {
+                activate_game_ui();
             }
             show(&vgui, object, vp, Some(page))
         }
@@ -3730,6 +3752,34 @@ mod hook {
         }
         "brought the menu up".to_string()
     }
+
+    /// Closes the window and, when the menu around it is up, the menu too, as
+    /// Resume Game does.
+    pub(super) fn close_for_playback() {
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            let Some((_, vp)) = window(&vgui) else { return };
+            vgui.set_visible(vp, false);
+            if !vgui.shown(vgui.parent_of(vp)) {
+                return;
+            }
+            let Some(base_ui) = module(c"hw.dll").and_then(|hw| interface(hw, c"BaseUI001")) else {
+                return;
+            };
+            let hide: ActivateFn = slot(base_ui, BASEUI_SLOT_HIDE_GAME_UI);
+            hide(base_ui);
+        }
+    }
+}
+
+/// Set by the review (#623) when a highlight starts playing; the next
+/// [`poll`] closes the window and the menu, outside the review's lock.
+static CLOSE_FOR_PLAYBACK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Gets the window and the menu out of the way of playback on the next frame.
+pub(crate) fn close_for_playback() {
+    CLOSE_FOR_PLAYBACK.store(true, Ordering::Release);
 }
 
 /// Keeps the tab strip sized to the window, swaps in our window after
@@ -3740,7 +3790,21 @@ pub fn poll() {
     wrap_toggleconsole();
     apply_saved_settings();
     #[cfg(target_arch = "x86")]
-    hook::poll();
+    {
+        hook::poll();
+        if CLOSE_FOR_PLAYBACK.swap(false, Ordering::AcqRel) {
+            hook::close_for_playback();
+        }
+    }
+}
+
+/// The Review tab's From, To and Note boxes (#623), when they belong to the
+/// highlight the review is on.
+pub(crate) fn review_inputs() -> Option<(String, String, String)> {
+    #[cfg(target_arch = "x86")]
+    return hook::review_tab::inputs();
+    #[cfg(not(target_arch = "x86"))]
+    None
 }
 
 fn argument() -> Option<String> {
@@ -3793,7 +3857,7 @@ pub unsafe extern "C" fn command() {
     let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
         #[cfg(target_arch = "x86")]
         if let Request::Tab(page) = request {
-            return hook::open_on(page);
+            return hook::open_on(page, true);
         }
         #[cfg(target_arch = "x86")]
         return hook::toggle(request);

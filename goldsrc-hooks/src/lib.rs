@@ -180,6 +180,7 @@ mod patch;
 mod pe;
 mod pmove_guard;
 mod remote;
+mod review;
 mod scan;
 mod scoreboard;
 mod server_query;
