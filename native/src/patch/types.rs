@@ -242,7 +242,7 @@ pub struct PatchJob {
     pub init_commands: Vec<String>,
     pub scheduled_commands: Vec<(i32, String)>,
     /// (tick, label) pairs — each becomes a named `svc_director` STUFFTEXT event
-    /// in the `viewdemo` Event List labelled "<N> kills: <timeline_string>".
+    /// in the `viewdemo` Event List labelled `"<N> kills: <timeline_string>"`.
     pub director_events: Vec<(i32, String)>,
     pub block_routes: Vec<(i32, i32, usize)>,
     /// Where each block's frames will land, and which payload highlights it

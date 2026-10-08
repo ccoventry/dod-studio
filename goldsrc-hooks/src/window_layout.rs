@@ -241,6 +241,33 @@ fn fit(child: Rect, design: (i32, i32), now: (i32, i32)) -> Rect {
     Rect { x, y, w, h }
 }
 
+/// [`fit`] for a control given as `(x, y, wide, tall)`, for the DoD Studio
+/// window's tabs, which follow their size by the same rule.
+pub(crate) fn fit_rect(
+    child: (i32, i32, i32, i32),
+    design: (i32, i32),
+    now: (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = child;
+    let r = fit(Rect { x, y, w, h }, design, now);
+    (r.x, r.y, r.w, r.h)
+}
+
+/// [`fit_rect`], except that the control always takes all the height the
+/// window gains, whatever its share of the design height. For a tab's list:
+/// by the half rule alone, the Demos tab's (114 of a design height a little
+/// over 228) stretched on pre-Anniversary and stayed 5 rows tall on the
+/// Anniversary build, whose tab came out a few pixels taller (#612).
+pub(crate) fn fit_rect_tall(
+    child: (i32, i32, i32, i32),
+    design: (i32, i32),
+    now: (i32, i32),
+) -> (i32, i32, i32, i32) {
+    let (x, y, w, h) = child;
+    let (x, w) = fit_axis(x, w, design.0, now.0);
+    (x, y, w, (h + now.1 - design.1).max(1))
+}
+
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
 /// `Frame::PerformLayout` places itself. In GameUI they have no name at all
 /// (listed live on both builds, 2026-10-01), while every control a `.res`
@@ -484,6 +511,11 @@ mod hook {
                 if object.is_null() {
                     return None;
                 }
+                // DoD Studio's own window is a GameUI Frame with a copied
+                // vftable, so the range check below would turn it away.
+                if object as usize == crate::studio_panel::object() {
+                    return Some(object);
+                }
                 let vftable = *(object as *const usize);
                 if vftable < self.gameui.0
                     || vftable + (FRAME_SLOT_IS_SIZEABLE + 1) * 4 > self.gameui.1
@@ -600,6 +632,11 @@ mod hook {
                     continue;
                 };
                 present.insert(vp);
+                // Parked off screen while the DoD Studio window stands in for
+                // it: that place is not one to save or restore.
+                if vp == crate::studio_panel::parked_bar() {
+                    continue;
+                }
                 let window = state.windows.entry(vp).or_insert_with(|| Window {
                     key: format!(
                         "{}/{}",
@@ -740,6 +777,17 @@ pub fn poll() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_tab_list_takes_the_height_whatever_its_share() {
+        // Under half the design height: the half rule leaves it alone...
+        assert_eq!(fit_rect((8, 106, 520, 96), (536, 240), (900, 600)).3, 96);
+        // ...the list rule doesn't, and keeps its top and the width rule.
+        let r = fit_rect_tall((8, 106, 520, 96), (536, 240), (900, 600));
+        assert_eq!(r, (8, 106, 520 + 364, 96 + 360));
+        // Shrinking never goes below a pixel.
+        assert_eq!(fit_rect_tall((8, 106, 520, 96), (536, 240), (536, 10)).3, 1);
+    }
 
     #[test]
     fn the_layout_file_round_trips() {

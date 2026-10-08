@@ -19,6 +19,9 @@ name = "dodstudio_goldsrc_hooks"
 crate-type = ["cdylib"]
 
 [dependencies]
+# The DoD Studio window's Killstreaks tab (#565): analyses the playing demo,
+# through the analyzer cache Studio shares (`analysis::cache`).
+analysis = { path = "../analysis" }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Memory",

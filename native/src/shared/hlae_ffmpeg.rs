@@ -49,6 +49,9 @@ const HOOK_DLL: &str = "AfxHookGoldSrc.dll";
 
 /// The header `link` writes, and the marker `authored_by_us` looks for.
 const AUTHORED_MARKER: &str = "Written by dod-studio";
+/// The header builds before the rename to DoD Studio (#260) wrote: a file
+/// carrying it is ours just the same (#357).
+const AUTHORED_MARKER_BEFORE_RENAME: &str = "Written by dod-tools";
 
 /// What HLAE would find if it looked right now.
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
@@ -255,7 +258,7 @@ pub fn detect(hlae_exe: &Path) -> HlaeFfmpeg {
 /// untouchable, makes the first link permanent and leaves no way to re-point
 /// HLAE after changing the app's FFmpeg.
 fn authored_by_us(body: &str) -> bool {
-    body.contains(AUTHORED_MARKER)
+    body.contains(AUTHORED_MARKER) || body.contains(AUTHORED_MARKER_BEFORE_RENAME)
 }
 
 /// Points HLAE at `ffmpeg_exe` by writing `ffmpeg.ini`.
@@ -665,6 +668,17 @@ mod tests {
             state.can_link(),
             "this is exactly the case worth offering to fix"
         );
+    }
+
+    #[test]
+    fn an_ini_written_before_the_rename_is_still_ours() {
+        // #357: `link` wrote "Written by dod-tools" before #260; such a file
+        // must still be offered for re-linking.
+        assert!(authored_by_us(
+            "; Written by dod-tools: points HLAE at FFmpeg\n[Ffmpeg]\nPath=C:\\x\\ffmpeg.exe\n"
+        ));
+        assert!(authored_by_us("; Written by dod-studio\n"));
+        assert!(!authored_by_us("[Ffmpeg]\nPath=C:\\x\\ffmpeg.exe\n"));
     }
 
     #[test]
