@@ -238,6 +238,25 @@ test('build progress, the finished line, and cancel', async ({ page }) => {
   await expect(page.locator('#hd-build-progress')).toHaveText("Done: 10 steps in 3m 20s. Every step's counts are in C:/x/build_all.log.");
 });
 
+test('the build clock counts on between reports, and stops with the build', async ({ page }) => {
+  await page.clock.install();
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await page.check('#hd-build-styles input[value="plain"]');
+  await page.click('#hd-build-btn');
+  await page.evaluate(() => window.__mockEmit('hd_build_progress', {
+    step: 1, steps: 5, style: 'plain', asset_type: 'sky', line: null, elapsed_secs: 0,
+  }));
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (0s so far)');
+  await page.clock.runFor(52_000);
+  await expect(page.locator('#hd-build-progress')).toHaveText('Step 1 of 5: plain, Skies (52s so far)');
+
+  await page.evaluate(() => window.__finishBuild.resolve({ steps: 5, elapsed_secs: 53, log_path: 'C:/x/build_all.log' }));
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+  await page.clock.runFor(5_000);
+  await expect(page.locator('#hd-build-progress')).toHaveText("Done: 5 steps in 53s. Every step's counts are in C:/x/build_all.log.");
+});
+
 test('rows follow the style order, custom styles after, overrides last; nothing built is one row', async ({ page }) => {
   const types = ['world', 'models', 'sprites', 'detail', 'sky'];
   const withFolders = {

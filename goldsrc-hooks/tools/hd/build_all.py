@@ -121,17 +121,32 @@ def main():
             cmd = ["sky_hd.py", out, "--all"]
         before = len(os.listdir(out))
         t = time.time()
-        p = subprocess.Popen([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env,
-                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # Read as it comes, so a long step's `@@progress` lines reach the
+        # console (and DoD Studio's progress line) while it runs. They're
+        # not written to build_all.log: the step's own line has the totals.
+        p = subprocess.Popen([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env, text=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         running.add(p)
-        stdout, stderr = p.communicate()
+        stderr = []
+        drain = threading.Thread(target=lambda: stderr.extend(p.stderr), daemon=True)
+        drain.start()
+        stdout = []
+        for line in p.stdout:
+            if line.startswith("@@progress "):
+                print(f"[{datetime.datetime.now():%H:%M:%S}] {style:10s} {kind:7s} "
+                      f"{line[len('@@progress '):].strip()}", flush=True)
+            else:
+                stdout.append(line)
+        returncode = p.wait()
+        drain.join()
         running.discard(p)
+        stdout, stderr = "".join(stdout), "".join(stderr)
         tail = [l for l in stdout.splitlines() if "not found in any wad" not in l][-3:]
-        log(f"{style:10s} {kind:7s} exit {p.returncode}, {len(os.listdir(out)) - before} new, "
+        log(f"{style:10s} {kind:7s} exit {returncode}, {len(os.listdir(out)) - before} new, "
             f"{len(os.listdir(out))} total, {time.time() - t:.0f}s :: {' | '.join(tail)}")
-        if p.returncode != 0:
+        if returncode != 0:
             log(f"  {(stderr or stdout)[-1500:]}")
-        return p.returncode
+        return returncode
 
     def blend(style, kind):
         """<style>/<file> = <a>/<file> and <b>/<file> mixed, pct% of a."""

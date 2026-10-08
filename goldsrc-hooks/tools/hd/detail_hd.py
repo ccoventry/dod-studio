@@ -16,7 +16,7 @@ brighten or flatten every wall that uses it.
 Files already at 1024 (or whose 4x wouldn't be any bigger) are skipped.
 
 usage: python detail_hd.py <out_dir> [<folder of .tga>]    (default gfx/detail)
-env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
+env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
 """
 import glob, os, sys
 import numpy as np
@@ -58,19 +58,17 @@ def main():
         h, w = a.shape[:2]
         if C.pot(w * 4) <= w and C.pot(h * 4) <= h:
             continue  # already at the cap: nothing to gain
-        jobs[name] = a
-        py, px = margins(w, h)
-        pad = np.pad(a, ((py, py), (px, px), (0, 0)), mode="wrap")
-        Image.fromarray(pad).save(os.path.join(work, "in", name[:-4] + ".png"))
+        jobs[name[:-4]] = (name, a)
     print(f"{len(jobs)} detail textures to build")
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
+    def prepare(key, job):
+        name, a = job
+        h, w = a.shape[:2]
+        py, px = margins(w, h)
+        return Image.fromarray(np.pad(a, ((py, py), (px, px), (0, 0)), mode="wrap"))
 
-    done = 0
-    for name, a in jobs.items():
-        src = os.path.join(work, "out", name[:-4] + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        name, a = job
         h, w = a.shape[:2]
         tw, th = C.pot(w * 4), C.pot(h * 4)
         # The upscaled image is the tile plus 4x the padding each side: resize
@@ -84,7 +82,8 @@ def main():
             om, os_ = o[..., c].mean(), o[..., c].std()
             up[..., c] = (up[..., c] - um) * (os_ / us if us > 1e-3 else 1.0) + om
         C.save_output(Image.fromarray(np.clip(up + 0.5, 0, 255).astype(np.uint8), "RGB"), os.path.join(out_dir, name))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} HD detail texture(s) to {out_dir}")
 
 

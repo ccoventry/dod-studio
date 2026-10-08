@@ -14,10 +14,13 @@ The wrap padding matters: without it the upscaler treats each edge as a
 border, and every place the texture repeats on a wall shows a seam.
 Identical textures shared between maps are built once.
 
+Textures are upscaled and written a batch at a time (styles.upscale_batches),
+so a stopped build keeps what it finished.
+
 usage: python world_hd.py <out_dir> <map> [<map> ...]     e.g. dod_anzio
        python world_hd.py <out_dir> --all                  every map in dod/maps, or
                                                            the ones hd_maps.txt lists
-env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
+env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
 """
 import os, sys
 import numpy as np
@@ -74,7 +77,9 @@ def main():
           + (f" ({len(blank)} blank placeholder(s) skipped)" if blank else ""))
 
     masks = {}
-    for key, (name, w, h, idx, pal) in todo.items():
+
+    def prepare(key, job):
+        name, w, h, idx, pal = job
         ind = np.frombuffer(idx, np.uint8).reshape(h, w)
         rgb = np.frombuffer(pal, np.uint8).reshape(256, 3)[ind].copy()
         if name.startswith("{"):
@@ -85,15 +90,10 @@ def main():
             masks[key] = ~mask
         py, px = margins(w, h)
         rgb = np.pad(rgb, ((py, py), (px, px), (0, 0)), mode="wrap")
-        Image.fromarray(rgb, "RGB").save(os.path.join(work, "in", key + ".png"))
+        return Image.fromarray(rgb, "RGB")
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
-
-    done = 0
-    for key, (name, w, h, idx, pal) in todo.items():
-        src = os.path.join(work, "out", key + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        name, w, h, idx, pal = job
         tw, th = C.pot(w * 4), C.pot(h * 4)
         # The upscaled image is the tile plus 4x the padding each side: resize
         # just the tile's part to the target. Pillow reads past a resize box
@@ -103,13 +103,14 @@ def main():
         box = (px * 4, py * 4, (px + w) * 4, (py + h) * 4)
         img = Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS, box=box)
         if key in masks:
-            m = np.pad(masks[key], ((py, py), (px, px)), mode="wrap")
+            m = np.pad(masks.pop(key), ((py, py), (px, px)), mode="wrap")
             alpha = Image.fromarray(m.astype(np.uint8) * 255, "L").resize(
                 (tw, th), Image.BILINEAR, box=(px, py, px + w, py + h))
             img = img.convert("RGBA")
             img.putalpha(alpha.point(lambda v: 255 if v >= 128 else 0))
         C.save_output(img, os.path.join(out_dir, key + ".tga"))
-        done += 1
+
+    done = S.upscale_batches(work, style, todo, prepare, finish)
     print(f"wrote {done} replacement(s) to {out_dir}")
 
 

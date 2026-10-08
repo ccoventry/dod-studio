@@ -166,6 +166,8 @@ python sky_hd.py     %OUT%\sky\ultrasharp     dod_mymap
 
 Set `HD_STYLE` to build a style other than `ultrasharp` (for example `set HD_STYLE=remacri`). Run any script with no arguments for its usage.
 
+Every script upscales 250 files at a time and writes each batch before starting the next, so a stopped build keeps what it finished. `HD_BATCH` changes the batch size (for example `set HD_BATCH=100`). Each extra batch costs about a second to restart the upscaler.
+
 **Replacing one texture by hand.** Name it the way the hook expects and drop it into `overrides`:
 
 - **Map textures:** `<name>_<hash>.tga`
