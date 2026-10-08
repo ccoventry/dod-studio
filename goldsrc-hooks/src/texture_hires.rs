@@ -1376,7 +1376,7 @@ static DETAIL_INDEX: Cached<HashMap<String, String>> = Cached::new();
 /// Detail textures loaded from [`DETAIL_DIR`] this session.
 static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
 
-fn game_dir() -> PathBuf {
+pub(crate) fn game_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))

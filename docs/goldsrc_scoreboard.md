@@ -196,7 +196,8 @@ could blank them at patch time instead. The command field is a fixed
 added or removed, and therefore **no frame ordinals shift** — the +1 hazard
 `CLAUDE.md` warns about does not apply.
 
-That route needs no companion DLL at all, and is a targeted instance of #30
-(strip pre-existing console commands from a source demo). It is worth doing as
-well, not instead: it bakes the decision in at patch time, where this one is
+That route needs no companion DLL at all, and was a targeted instance of
+stripping pre-existing console commands from a source demo (the original scope
+of #30, which was later retitled and closed as the HLTV text hook). It is no
+longer wanted: #434 is retiring demo patching in favour of the hook, which is
 live-toggleable while reviewing a demo.
