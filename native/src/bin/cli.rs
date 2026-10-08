@@ -281,7 +281,7 @@ fn run_patch_streak_subcommand(
 
     println!("Reading raw demo bytes...");
     let demo_bytes =
-        std::fs::read(&input).map_err(|e| format!("Failed to read input demo file: {}", e))?;
+        std::fs::read(&input).map_err(|e| format!("Failed to read {}: {}", input.display(), e))?;
 
     let hltv_spec_player = if analysis.demo_info.demo_type == "HLTV" {
         Some(player.name.clone())
@@ -311,11 +311,12 @@ fn run_patch_streak_subcommand(
     };
 
     println!("Patching demo highlights...");
-    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)?;
+    let patched_bytes = patch_demo_highlights(&demo_bytes, &intervals, &options)
+        .map_err(|e| format!("{}: {}", input.display(), e))?;
 
     println!("Writing patched demo to: {}", output.display());
     std::fs::write(&output, patched_bytes)
-        .map_err(|e| format!("Failed to write patched demo file: {}", e))?;
+        .map_err(|e| format!("Failed to write {}: {}", output.display(), e))?;
 
     println!("Successfully exported patched demo!");
     Ok(())
