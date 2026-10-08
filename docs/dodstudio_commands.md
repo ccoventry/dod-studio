@@ -15,8 +15,8 @@ them; everything else is a setting you'd use for a capture. No name is the
 start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
-**Scope:** the surface actually on `dev` today: sixteen cvars and nine
-commands. Entries still in open PRs are not listed -- update this file as
+**Scope:** the surface actually on `dev` today: twenty-four cvars and
+fourteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -31,14 +31,14 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 
 | cvar | default | what it does | doc |
 | --- | --- | --- | --- |
-| `dodstudio_spec_match_pov` | `0` (off) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` at launch | one switch for making a spectated first-person view look and sound like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the gunshots an HLTV demo has no fire event for (about 60% of rounds in some recordings), restored with their sound, muzzle flash, tracer and impact; and the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `dodstudio_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while he sprints, jumps, goes prone, crawls or climbs a ladder, as his own does (`goldsrc-hooks/src/spectator_gun.rs`). `2` also logs every restored gunshot. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) §6, [`goldsrc_spectator_eye_height.md`](goldsrc_spectator_eye_height.md) |
+| `dodstudio_spec_match_pov` | `0` (off) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` at launch | one switch for making a spectated first-person view look and sound like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the gunshots an HLTV demo has no fire event for (about 60% of rounds in some recordings), restored with their sound, muzzle flash, tracer and impact; and the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `dodstudio_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while he sprints, jumps, goes prone, crawls or climbs a ladder, as his own does (`goldsrc-hooks/src/spectator_gun.rs`). `2` also logs every restored gunshot. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
 | `dodstudio_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
 | `dodstudio_hide_scoreboard` | `0` | stops a POV demo's recorded TAB presses from putting the scoreboard over the shot | [`goldsrc_scoreboard.md`](goldsrc_scoreboard.md) |
 | `dodstudio_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
-| `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
+| `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_crosshair.md`](goldsrc_crosshair.md) |
 | `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
-| `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_follow.md`](goldsrc_spectator_follow.md) |
+| `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
@@ -95,8 +95,8 @@ A `block` id is any of:
 
 - **A slot number**, as before. It only holds for one demo, because the same
   player gets a different slot in every demo.
-- **A SteamID**: the 17-digit SteamID64 (`76561197977930126`),
-  `STEAM_0:0:8832199`, or SteamID3 `[U:1:17664398]`. Paste it as is: the
+- **A SteamID**: the 17-digit SteamID64 (`76561197975574370`),
+  `STEAM_0:0:7654321`, or SteamID3 `[U:1:15308642]`. Paste it as is: the
   console splits it at each `:`, and the hook joins it back. It is matched
   against each player's userinfo `*sid` at every death notice, so one command
   works across a whole batch of demos and survives reconnects.
@@ -105,7 +105,7 @@ A `block` id is any of:
   recording player, so there `self` matches nobody, and the console says so
   once.
 
-Mix them freely. `dodstudio_deathmsg block !self !76561197977930126` shows
+Mix them freely. `dodstudio_deathmsg block !self !76561197975574370` shows
 only your own frags in both kinds of demo: in a POV demo both entries point
 at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
@@ -115,7 +115,7 @@ at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
 chat, the kill feed, the status bar, the objective icons and the rest.
 `dodstudio_hide_hudelement all 0` puts everything back. See
-[`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) §7.
+[`goldsrc_hud_elements.md`](goldsrc_hud_elements.md).
 
 ### `dodstudio_clear_decals`
 
@@ -140,6 +140,18 @@ No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
 
+### `dodstudio_review`
+
+DoD Studio's **Review highlights** (#623): plays each queued highlight at
+normal speed, from 4 s before its first kill to 2 s after its last, pauses,
+and opens the window's Review tab. `start "<queue file>"` begins (Studio
+sends it over the game's pipe); `yes` and `no` answer with the Review tab's
+kill range and note and move on; `replay`, `next` (skip without answering),
+`back` and `stop` move around. `range <from> <to>` and `note <text>` set the
+answer from the console, for key binds. Bare prints where the review is.
+Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
+pipe. See `src/review.rs`.
+
 ### `dodstudio_overviewmap`
 
 `dodstudio_overviewmap <full|mini> <x> <y> <w> <h>` places and sizes DoD's
@@ -154,7 +166,7 @@ sniper (the engine's own FOV gate, not this command).
 HLTV demo. The number is the one `dodstudio_deathmsg players` lists (1-32).
 With no number it says who the camera is on. It refuses a number with no
 player, and a first-person demo. See
-[`goldsrc_spectator_follow.md`](goldsrc_spectator_follow.md).
+[`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md).
 
 ### `dodstudio_debug_msglog`
 
@@ -237,7 +249,7 @@ is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,

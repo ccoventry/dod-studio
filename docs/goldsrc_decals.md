@@ -3,6 +3,10 @@
 How `dodstudio_clear_decals` works, and why the pipeline's existing decal
 hygiene had to be so much more elaborate. Answers the R&D question in #290.
 
+> **Status 2026-10:** shipped in PR #297 (`goldsrc-hooks/src/decals.rs`).
+> Pre-Anniversary only on `dev`; Anniversary support is the open PR #398. The
+> capture pipeline does not call it yet (§6), and #290 is still open.
+
 Everything here is from offline analysis of the pre-Anniversary `hw.dll`
 (`pefile` + `capstone`, the house method in
 `docs/goldsrc_client_dll_internals.md` §10), checked by
@@ -26,7 +30,7 @@ cvar mid-demo strands every decal sitting above the new limit — the index can
 no longer reach them, so they stay on the wall permanently while new decals
 churn through the small surviving window.
 
-That is the whole reason for `native/src/patch/decal_strip.rs`: pin the ring
+That is the whole reason for `native/src/patch/decal_strip/`: pin the ring
 small at demo load, then inject a full revolution's worth of synthetic decals
 into the gap before each clip so the index walks past every real one. It works.
 It also costs a demo rewrite per capture, forces `r_decals` to be set exactly
