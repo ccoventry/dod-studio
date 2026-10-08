@@ -170,7 +170,8 @@ def verify(game: Path, src: str) -> bool:
     seq_nr = rust_const(src, "FRAME_SEQ_NR")
     by_time = rust_const(src, "WORLD_SLOT_GET_FRAME_BY_TIME") * 4
     slot = {n: rust_const(src, f"SLOT_{n}") for n in
-            ("SET_WORLD_TIME", "IS_LOADING", "IS_ACTIVE", "GET_WORLD_TIME", "GET_START_TIME", "GET_END_TIME")}
+            ("SET_WORLD_TIME", "IS_LOADING", "IS_ACTIVE", "GET_WORLD_TIME", "GET_START_TIME", "GET_END_TIME",
+             "SET_TIME_SCALE", "SET_PAUSED", "IS_PAUSED", "GET_TIME_SCALE")}
 
     ok = True
 
@@ -221,6 +222,17 @@ def verify(game: Path, src: str) -> bool:
           f"slot {slot['IS_LOADING']} IsLoading asks the loader at this+0x150")
     check(has(body["IS_ACTIVE"], r"(mov e\w\w, |cmp )dword ptr \[ecx \+ 0x37c\].*"),
           f"slot {slot['IS_ACTIVE']} IsActive reads the player state at this+0x37c")
+    # The review mode's pause and speed (#623): each setter writes the field
+    # its getter reads.
+    check(has(body["SET_PAUSED"], r"mov byte ptr \[ecx \+ 0x3c8\], al")
+          and first_ret(body["SET_PAUSED"]) == "ret 4"
+          and [t for _, t in body["IS_PAUSED"]][:2] == ["mov al, byte ptr [ecx + 0x3c8]", "ret"],
+          f"slot {slot['SET_PAUSED']} SetPaused(bool) stores the byte at this+0x3c8 that "
+          f"slot {slot['IS_PAUSED']} IsPaused returns")
+    check(has(body["SET_TIME_SCALE"], r"(mov|movss) dword ptr \[e\w\w \+ 0x3a0\], (eax|xmm1)")
+          and [t for _, t in body["GET_TIME_SCALE"]][:2] == ["fld dword ptr [ecx + 0x3a0]", "ret"],
+          f"slot {slot['SET_TIME_SCALE']} SetTimeScale(float) stores the float at this+0x3a0 that "
+          f"slot {slot['GET_TIME_SCALE']} GetTimeScale returns")
     for which, world_slot in (("GET_START_TIME", 0x58), ("GET_END_TIME", 0x54)):
         texts = [t for _, t in body[which]]
         check(texts[:3] == [f"mov ecx, dword ptr [ecx + {world:#x}]", "mov eax, dword ptr [ecx]",

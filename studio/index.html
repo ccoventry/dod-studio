@@ -115,6 +115,11 @@
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
+                <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
+                  <input type="checkbox" id="review-tick-yes-cb" />
+                  <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
+                </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -172,6 +177,8 @@
             <div id="detail-streaks-container">
               <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
+            <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
+            <div id="batch-results" class="batch-results" hidden></div>
           </div>
 
           <!-- Export Configuration & Batch Capture -->
@@ -1172,7 +1179,7 @@
     <div id="unsaved-changes-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 480px; padding: 20px;">
         <h2 id="unsaved-changes-title" data-str="UNSAVED_CHANGES_MODAL.TITLE">Unsaved Changes</h2>
-        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">Capture Studio has unsaved changes. Save your session before closing?</p>
+        <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
           <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>

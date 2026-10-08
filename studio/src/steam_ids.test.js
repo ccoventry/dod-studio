@@ -3,17 +3,17 @@ import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
 
 describe('steamIdForms (#536)', () => {
   it('gives all three forms of a real player', () => {
-    expect(steamIdForms('76561197972576011')).toEqual({
-      id64: '76561197972576011',
-      classic: 'STEAM_0:1:6155141',
-      id3: '[U:1:12310283]',
+    expect(steamIdForms('76561197962734863')).toEqual({
+      id64: '76561197962734863',
+      classic: 'STEAM_0:1:1234567',
+      id3: '[U:1:2469135]',
     });
   });
 
   it('matches the deathmsg docs example', () => {
-    const forms = steamIdForms('76561197977930126');
-    expect(forms.classic).toBe('STEAM_0:0:8832199');
-    expect(forms.id3).toBe('[U:1:17664398]');
+    const forms = steamIdForms('76561197975574370');
+    expect(forms.classic).toBe('STEAM_0:0:7654321');
+    expect(forms.id3).toBe('[U:1:15308642]');
   });
 
   it('refuses ids that are not a user account', () => {
@@ -30,7 +30,7 @@ describe('steamIdForms (#536)', () => {
   });
 
   it('builds the show-only console line from the SteamID64', () => {
-    expect(deathmsgShowOnlyLine(steamIdForms('76561197972576011')))
-      .toBe('dodstudio_deathmsg block !76561197972576011');
+    expect(deathmsgShowOnlyLine(steamIdForms('76561197962734863')))
+      .toBe('dodstudio_deathmsg block !76561197962734863');
   });
 });
