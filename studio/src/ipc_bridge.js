@@ -27,6 +27,17 @@ export async function openActivityLog() {
     });
 }
 
+/** `Documents\dod-studio\projects` (made if missing), where Save and Load
+ *  Project start (#354), or null when it can't be had: the dialogs then open
+ *  wherever they would anyway, so this is logged, not toasted. */
+export async function defaultProjectsDir() {
+  return invoke("default_projects_dir")
+    .catch((err) => {
+      console.error("IPC Execution Error (default_projects_dir):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
@@ -226,6 +237,26 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
     .catch((err) => {
       console.error("IPC Execution Error (send_preview_to_running_game):", err);
       showToast(STRINGS.IPC.previewFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Review highlights (#623): sends the highlights to the running game, or
+ *  starts one. Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights) {
+  return invoke("start_highlight_review", { highlights })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_highlight_review):", err);
+      showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Ends the review in the game; its answers so far are already in. */
+export async function stopHighlightReview() {
+  return invoke("stop_highlight_review")
+    .catch((err) => {
+      console.error("IPC Execution Error (stop_highlight_review):", err);
       throw err;
     });
 }

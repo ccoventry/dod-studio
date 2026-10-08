@@ -235,6 +235,7 @@ Lists saved in this folder by an older version still work while the install has 
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
+| `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
 
 The file name hash is FNV-1a over the original's 8-bit pixels and its 768-byte palette. It must stay byte-for-byte identical to `texture_hires.rs`, or the hook won't find the files.

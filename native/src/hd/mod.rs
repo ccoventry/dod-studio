@@ -4,7 +4,8 @@
 //! `<game>\dod_addon\dodstudio_hd\<type>\<style>\` (or `dod\dodstudio_hd`
 //! for an install from before #415, see [`hd_root`]), and `goldsrc-hooks/tools/hd/`'s
 //! scripts build them. This module is the app's side of that: what is built
-//! ([`scan`]), and fetching the upscaler the build needs ([`setup`]). Building
+//! ([`scan`](crate::hd::scan)), and fetching the upscaler the build needs
+//! ([`setup`](crate::hd::setup)). Building
 //! itself is still the scripts' job; the Rust port is #372's second step.
 //!
 //! The layout and names here mirror the hook's and the scripts', and must stay
