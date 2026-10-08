@@ -249,8 +249,12 @@ fn install_hook(message: &str) {
 /// game's countdown and warm-up flag right on a change, and keeps the hooks in
 /// place.
 ///
-/// The hooks go in on the first frame, on or off, so the last `ClanTimer` and
-/// `GameRules` are already known when the cvar is turned on mid-demo.
+/// The hooks go in on the first frame a level is loaded, on or off, so the
+/// last `ClanTimer` and `GameRules` are already known when the cvar is turned
+/// on mid-demo. Not before: hooks prepended at the main menu never saw a
+/// message (live test, 2026-10-08), while the same handler hooked once a demo
+/// was playing (through `dodstudio_debug_msglog`) saw every one -- the same
+/// timing `map_text`, `deathmsg` and `msglog` use.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
@@ -269,6 +273,9 @@ pub fn poll() {
             ))
         };
         redeliver(wanted);
+    }
+    if crate::map_text::level_name().is_none() {
+        return;
     }
     for message in MESSAGES {
         if !crate::msglog::watching(message) {
