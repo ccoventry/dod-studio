@@ -26,7 +26,7 @@
 //!   the game thread. An HLTV proxy that says VAC is off is joined: `poll`
 //!   reissues the command, approved. Anything else -- a game server, a proxy
 //!   that says VAC is on, no answer -- is refused. Watching a match through
-//!   HLTV is the one online use the user wants with this DLL loaded;
+//!   HLTV is the one online use this DLL is meant to allow;
 //!   checking the proxy's own VAC byte as well keeps that safe if a proxy
 //!   ever reports one. `connect local`, the engine's own listen server
 //!   (`map`), which no one else can be on, goes straight through.
