@@ -232,8 +232,13 @@ enum Phase {
         seen_loading: bool,
     },
     /// Playing the highlight; pauses at `until` on the world clock. `last` is
-    /// the clock a frame ago, to log a jump.
-    Playing { until: f64, last: f64 },
+    /// the clock a frame ago, to log a jump, and `beat` when the log last
+    /// heard where it is.
+    Playing {
+        until: f64,
+        last: f64,
+        beat: Instant,
+    },
     /// Paused at the end, for an answer.
     Waiting,
     /// This one could not be played; next and back still work.
@@ -270,6 +275,8 @@ fn say(line: &str) {
 
 /// A clock change between two frames bigger than this is logged as a jump.
 const JUMP_SECONDS: f64 = 2.0;
+/// How often the log hears where a playing highlight is.
+const HEARTBEAT: Duration = Duration::from_secs(10);
 
 /// To the hook's log only, not the console.
 fn trace(line: &str) {
@@ -380,7 +387,11 @@ fn play(review: &mut Review) {
                 review.at + 1,
                 review.queue.len()
             ));
-            review.phase = Phase::Playing { until, last: now };
+            review.phase = Phase::Playing {
+                until,
+                last: now,
+                beat: Instant::now(),
+            };
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
         }
@@ -490,7 +501,7 @@ pub fn poll() {
             }
             play(review);
         }
-        Phase::Playing { until, last } => match crate::demo_seek::clock() {
+        Phase::Playing { until, last, beat } => match crate::demo_seek::clock() {
             Some(c) if c.active && c.now < until => {
                 // A jump the review didn't make (#663's first ESC).
                 if (c.now - last).abs() > JUMP_SECONDS {
@@ -500,7 +511,23 @@ pub fn poll() {
                         c.now
                     ));
                 }
-                review.phase = Phase::Playing { until, last: c.now };
+                // Where a long highlight is, so a stop that never comes shows.
+                let beat = if beat.elapsed() >= HEARTBEAT {
+                    trace(&format!(
+                        "highlight {}: clock {:.1}, playing until {until:.1}{}",
+                        review.at + 1,
+                        c.now,
+                        if c.paused { ", paused" } else { "" }
+                    ));
+                    Instant::now()
+                } else {
+                    beat
+                };
+                review.phase = Phase::Playing {
+                    until,
+                    last: c.now,
+                    beat,
+                };
             }
             Some(c) if c.active => {
                 trace(&format!(
