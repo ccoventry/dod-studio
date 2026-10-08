@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { setStatusByHand, restoreStatus, setVerifiedStatus, preserveHighlightState } from './take_index.js';
+import { setStatusByHand, restoreStatus, setVerifiedStatus, preserveHighlightState, setCuration, isSkipped, isDemoTracked, CURATION } from './take_index.js';
 
 const streak = (extra = {}) => ({ player_index: 1, kills: [[100, 1.0, 'K98'], [200, 3.0, 'K98']], ...extra });
 
@@ -71,5 +71,30 @@ describe('status source (#105)', () => {
     const previous = { path: 'C:/demos/a.dem', streaks: [streak({ status: 'Captured' })] };
     const fresh = preserveHighlightState(previous, { path: 'C:/demos/a.dem', streaks: [streak()] });
     expect('statusByHand' in fresh.streaks[0]).toBe(false);
+  });
+});
+
+describe('curation (#44)', () => {
+  it('Skip unticks and marks the row; clearing it leaves the tick alone', () => {
+    const s = streak({ selected: true });
+    setCuration(s, CURATION.SKIP);
+    expect(isSkipped(s)).toBe(true);
+    expect(s.selected).toBe(false);
+    setCuration(s, '');
+    expect(s.curation).toBeUndefined();
+    expect(isSkipped(s)).toBe(false);
+  });
+
+  it('Keep does not change the tick, and any mark counts as tracked', () => {
+    const s = streak({ selected: true });
+    setCuration(s, CURATION.KEEP);
+    expect(s.selected).toBe(true);
+    expect(isDemoTracked({ streaks: [s] })).toBe(true);
+  });
+
+  it('survives a re-scan', () => {
+    const before = { path: 'd.dem', streaks: [streak({ curation: CURATION.SKIP })] };
+    const after = preserveHighlightState(before, { path: 'd.dem', streaks: [streak()] });
+    expect(after.streaks[0].curation).toBe(CURATION.SKIP);
   });
 });

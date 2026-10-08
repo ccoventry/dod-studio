@@ -201,13 +201,11 @@ fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
 /// seven degrees too narrow, calling in-shot positions hidden.
 ///
 /// So the order is init commands, then an executed config, then the configured
-/// default. `ring_limit` (r_decals) now follows exactly this same order —
-/// it used to be the one deliberate exception, on the reasoning that adopting
-/// a `movie.cfg`'s `r_decals 0` would silently stand the flush down. That
-/// objection is gone now that a resolved 0 with Flush Decals on is its own
-/// loud, reported fact (`decal_flush_is_noop` in the studio report)
-/// rather than something this function would have hidden by disagreeing with
-/// the config. User-requested symmetry, 2026-09-05.
+/// default. `ring_limit` (r_decals) follows exactly this same order. Adopting
+/// a `movie.cfg`'s `r_decals 0` does not silently stand the flush down: a
+/// resolved 0 with Flush Decals on is its own loud, reported fact
+/// (`decal_flush_is_noop` in the studio report) rather than something this
+/// function would hide by disagreeing with the config.
 ///
 /// Reads config files. Never writes one.
 pub fn capture_fov_resolved(config: &PatcherConfig) -> f32 {
