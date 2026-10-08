@@ -60,29 +60,28 @@ fn count_demo_files(dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
-/// Reads the map name directly out of the demo file header — a 276-byte
-/// `HLDEMO` header read, no demo parsing. Mirrors dev's
-/// `tree.rs::get_demo_map_name` exactly (including its `"-"` fallback).
-fn get_demo_map_name(path: &Path) -> String {
-    if let Ok(mut file) = std::fs::File::open(path) {
-        let mut header = [0u8; 276];
-        if file.read_exact(&mut header).is_ok() && &header[0..6] == b"HLDEMO" {
-            let map_bytes = &header[16..];
-            let len = map_bytes.iter().position(|&c| c == 0).unwrap_or(260);
-            return String::from_utf8_lossy(&map_bytes[..len]).into_owned();
-        }
-    }
-    "-".to_string()
-}
-
-/// Filename heuristic fallback — dev has no header-read equivalent for demo
-/// type either, see `tree.rs:159-164`.
-fn demo_type_from_name(name: &str) -> String {
-    if name.to_lowercase().contains("hltv") {
-        "HLTV".to_string()
+/// The map name and demo type, from the start of the file and no demo
+/// parsing: the map from the `HLDEMO` header (`"-"` when unreadable), the type
+/// from the HLTV proxy's connect message (`native::patch::is_hltv_head`, #566),
+/// falling back to the file name for a file too short to say.
+fn demo_map_and_type(path: &Path, name: &str) -> (String, String) {
+    let mut head = Vec::with_capacity(4096);
+    let read = std::fs::File::open(path)
+        .and_then(|file| file.take(4096).read_to_end(&mut head))
+        .is_ok();
+    let map = if read && head.len() >= 276 && &head[0..6] == b"HLDEMO" {
+        let map_bytes = &head[16..276];
+        let len = map_bytes.iter().position(|&c| c == 0).unwrap_or(260);
+        String::from_utf8_lossy(&map_bytes[..len]).into_owned()
     } else {
-        "POV".to_string()
-    }
+        "-".to_string()
+    };
+    let hltv = if read && head.len() >= 2048 {
+        native::patch::is_hltv_head(&head)
+    } else {
+        name.to_lowercase().contains("hltv")
+    };
+    (map, if hltv { "HLTV" } else { "POV" }.to_string())
 }
 
 fn native_roots() -> Vec<DirEntryLite> {
@@ -162,8 +161,7 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
                 .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                 .map(|d| d.as_secs_f64())
                 .unwrap_or(0.0);
-            let map_name = get_demo_map_name(&entry_path);
-            let demo_type = demo_type_from_name(&name);
+            let (map_name, demo_type) = demo_map_and_type(&entry_path, &name);
             demos.push(DemoFileEntry {
                 name,
                 path: entry_path.to_string_lossy().into_owned(),
@@ -197,6 +195,39 @@ pub fn default_browse_dir() -> Option<String> {
     dirs::document_dir()
         .or_else(dirs::home_dir)
         .map(|p| p.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn demo(dir: &Path, name: &str, connect: &[u8]) -> PathBuf {
+        let mut bytes = vec![0u8; 4096];
+        bytes[..6].copy_from_slice(b"HLDEMO");
+        bytes[16..25].copy_from_slice(b"dod_anzio");
+        bytes[1000..1000 + connect.len()].copy_from_slice(connect);
+        let path = dir.join(name);
+        std::fs::write(&path, bytes).unwrap();
+        path
+    }
+
+    #[test]
+    fn the_type_comes_from_the_demo_not_its_name() {
+        let dir = std::env::temp_dir().join(format!("dir_browser_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let hltv = demo(&dir, "scrim_1790730448.dem", b"Spawn count 19 (HLTV)\n");
+        let pov = demo(&dir, "my_hltv_named_pov.dem", b"BUILD 4319 SERVER (0 CRC)");
+        assert_eq!(
+            demo_map_and_type(&hltv, "scrim_1790730448.dem"),
+            ("dod_anzio".to_string(), "HLTV".to_string())
+        );
+        assert_eq!(demo_map_and_type(&pov, "my_hltv_named_pov.dem").1, "POV");
+        // Too short to say: the name decides.
+        let short = dir.join("short_hltv.dem");
+        std::fs::write(&short, b"HLDEMO").unwrap();
+        assert_eq!(demo_map_and_type(&short, "short_hltv.dem").1, "HLTV");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
 
 /// Non-recursive `.dem` count for a single folder — used by the Explorer

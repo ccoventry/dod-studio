@@ -29,7 +29,7 @@ usage: python build_all.py [--game DIR] [--also DIR]... [--extra-models DIR]...
   style ...       which styles (default: the 7 built-in ones and any in
                   my_styles.txt)
 """
-import argparse, datetime, glob, os, subprocess, sys, time
+import argparse, datetime, glob, os, subprocess, sys, threading, time
 from PIL import Image
 
 import hdcommon as C
@@ -107,13 +107,30 @@ def main():
             cmd = ["sky_hd.py", out, "--all"]
         before = len(os.listdir(out))
         t = time.time()
-        r = subprocess.run([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env, capture_output=True, text=True)
-        tail = [l for l in r.stdout.splitlines() if "not found in any wad" not in l][-3:]
-        log(f"{style:10s} {kind:7s} exit {r.returncode}, {len(os.listdir(out)) - before} new, "
+        # Read as it comes, so a long step's `@@progress` lines reach the
+        # console (and DoD Studio's progress line) while it runs. They're
+        # not written to build_all.log: the step's own line has the totals.
+        p = subprocess.Popen([sys.executable, "-u"] + cmd, cwd=C.HERE, env=env, text=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stderr = []
+        drain = threading.Thread(target=lambda: stderr.extend(p.stderr), daemon=True)
+        drain.start()
+        stdout = []
+        for line in p.stdout:
+            if line.startswith("@@progress "):
+                print(f"[{datetime.datetime.now():%H:%M:%S}] {style:10s} {kind:7s} "
+                      f"{line[len('@@progress '):].strip()}", flush=True)
+            else:
+                stdout.append(line)
+        returncode = p.wait()
+        drain.join()
+        stdout, stderr = "".join(stdout), "".join(stderr)
+        tail = [l for l in stdout.splitlines() if "not found in any wad" not in l][-3:]
+        log(f"{style:10s} {kind:7s} exit {returncode}, {len(os.listdir(out)) - before} new, "
             f"{len(os.listdir(out))} total, {time.time() - t:.0f}s :: {' | '.join(tail)}")
-        if r.returncode != 0:
-            log(f"  {(r.stderr or r.stdout)[-1500:]}")
-            sys.exit(r.returncode)
+        if returncode != 0:
+            log(f"  {(stderr or stdout)[-1500:]}")
+            sys.exit(returncode)
 
     def blend(style, kind):
         """<style>/<file> = <a>/<file> and <b>/<file> mixed, pct% of a."""

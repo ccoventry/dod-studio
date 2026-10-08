@@ -13,8 +13,16 @@
       <span id="current-file"></span>
     </div>
 
-    <div id="dropzone">Drop a .dem file here, or click to browse</div>
-    <input type="file" id="file-input" accept=".dem" style="display:none;" />
+    <div id="dropzone">Drop one or more .dem files here, or click to browse</div>
+    <input type="file" id="file-input" accept=".dem" multiple style="display:none;" />
+
+    <div id="batch-panel" class="egui-panel" hidden>
+      <div class="panel-header batch-header">
+        <h3>Demos <span id="batch-summary"></span></h3>
+        <button type="button" id="batch-download-all" disabled>Download all (JSON)</button>
+      </div>
+      <ul id="batch-list"></ul>
+    </div>
 
     <div class="egui-panel analyzer-report-panel">
       <div class="panel-header">
@@ -28,6 +36,7 @@
         <button type="button" class="analyzer-subtab-btn" data-subtab="team-details">Team Details</button>
         <button type="button" class="analyzer-subtab-btn" data-subtab="timeline">Timeline</button>
         <button type="button" class="analyzer-subtab-btn" data-subtab="rounds">Rounds</button>
+        <button type="button" class="analyzer-subtab-btn" data-subtab="flags">Flags</button>
         <button type="button" class="analyzer-subtab-btn" data-subtab="chat">Chat Log</button>
       </div>
 

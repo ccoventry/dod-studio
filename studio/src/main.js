@@ -13,14 +13,17 @@ import {
   checkHlaeFfmpeg,
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
-  launchObs
+  launchObs,
+  defaultProjectsDir,
+  systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
@@ -36,8 +39,14 @@ import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
 import { initOsNotifications, updateNotificationSettings } from './os_notifications.js';
-import { initUpdater, checkForUpdatesNow } from './updater_pane.js';
+import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
+import { numberField } from './number_field.js';
+import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
+import { fileNameOf, samePath } from './path_display.js';
+import { createProjectDemos } from './project_demos.js';
+import { splitIdenticalCopies } from './demo_copies.js';
+import { initReviewMode } from './review_mode.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -75,6 +84,9 @@ async function refreshPathWarnings() {
       warning: document.querySelector(warning),
     }))
     .filter((r) => r.input && r.warning);
+  // Start stays disabled while the hl.exe or HLAE path is blank: re-check it
+  // whenever a path changes.
+  refreshLaunchGuard();
   if (!rows.length) return;
 
   let states;
@@ -301,6 +313,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initOsNotifications();
 
   let scanPaths = [];
+  // Set when the saved pinned list held single demo files (older builds), so
+  // the cleaned list is written back once after settings load.
+  let pinnedListCleaned = false;
   // Analyzer Explorer sidebar's "Recent" quick-links tier — most-recent-first,
   // capped at 10, pushed via recordDemoFolderVisit() below whenever browsing
   // into a folder yields a non-empty demo listing. Mirrors dev's
@@ -419,19 +434,40 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChange: () => persistAppSettings(),
   });
 
+  // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
+  // holds a whole analysis, so the hint puts the memory next to the number.
+  // Deliberately no clamp to the machine's RAM.
+  function readScanWorkers() {
+    return Math.min(8, Math.max(1, numberField('#config-scan-workers', 2, { integer: true, positive: true })));
+  }
+  let totalMemoryGb = null;
+  function updateScanWorkersHint() {
+    const hint = document.querySelector('#config-scan-workers-hint');
+    if (hint) hint.textContent = STRINGS.CAPTURE_CONFIG.scanWorkersHint(totalMemoryGb);
+  }
+  systemMemoryBytes().then((bytes) => {
+    if (bytes) totalMemoryGb = Math.round(bytes / 1024 ** 3);
+    updateScanWorkersHint();
+  });
+  const scanWorkersInput = document.querySelector('#config-scan-workers');
+  scanWorkersInput?.addEventListener('change', () => {
+    scanWorkersInput.value = readScanWorkers();
+    persistAppSettings();
+  });
+
   // Helper to persist application settings
   async function persistAppSettings() {
     const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim() || "";
     const hlPath = document.querySelector('#hl-path-input')?.value?.trim() || "";
     const ffmpegPath = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
-    const captureFps = parseInt(document.querySelector('#config-capture-fps')?.value, 10) || 300;
-    const obsCaptureFps = parseInt(document.querySelector('#config-obs-capture-fps')?.value, 10) || 120;
-    const preRoll = parseFloat(document.querySelector('#config-pre-roll')?.value) || 2.0;
-    const postRoll = parseFloat(document.querySelector('#config-post-roll')?.value) || 0.6;
+    const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
+    const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    const preRoll = numberField('#config-pre-roll', 2.0);
+    const postRoll = numberField('#config-post-roll', 0.6);
 
-    const resWidth = parseInt(document.querySelector('#config-res-width')?.value, 10) || 1280;
-    const resHeight = parseInt(document.querySelector('#config-res-height')?.value, 10) || 720;
+    const resWidth = numberField('#config-res-width', 1280, { integer: true, positive: true });
+    const resHeight = numberField('#config-res-height', 720, { integer: true, positive: true });
     // Defaults on when the element is missing, matching the backend default —
     // `?? true` rather than `|| false`, which would silently disable it.
     const decalFlush = document.querySelector('#config-decal-flush')?.checked ?? true;
@@ -462,10 +498,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     const updateChannel = document.querySelector('#config-update-channel')?.value || 'stable';
     const autoCheckUpdates = document.querySelector('#config-auto-check-updates')?.checked ?? true;
 
-    const recordStartLead = parseFloat(document.querySelector('#config-record-start-lead')?.value) || 0.0;
-    const recordStopTrail = parseFloat(document.querySelector('#config-record-stop-trail')?.value) || 0.0;
-    const initialDelay = parseFloat(document.querySelector('#config-initial-delay')?.value) || 3.0;
-    const fastForwardSpeed = parseFloat(document.querySelector('#config-fast-forward-speed')?.value) || 0.05;
+    const recordStartLead = numberField('#config-record-start-lead', 0.0);
+    const recordStopTrail = numberField('#config-record-stop-trail', 0.0);
+    const initialDelay = numberField('#config-initial-delay', 3.0);
+    const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
 
@@ -473,6 +509,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
+    const scanWorkers = readScanWorkers();
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -524,6 +561,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      scan_workers: scanWorkers,
       render_export_dirs: renderExportDirs
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
@@ -585,11 +623,13 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
       }
-      if (settings.pre_roll_seconds) {
+      // `!= null`, not truthiness: 0 is a real value for the five timing
+      // fields, and a truthy check skipped restoring it.
+      if (settings.pre_roll_seconds != null) {
         const inputEl = document.querySelector('#config-pre-roll');
         if (inputEl) inputEl.value = settings.pre_roll_seconds;
       }
-      if (settings.post_roll_seconds) {
+      if (settings.post_roll_seconds != null) {
         const inputEl = document.querySelector('#config-post-roll');
         if (inputEl) inputEl.value = settings.post_roll_seconds;
       }
@@ -654,15 +694,15 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
-      if (settings.record_start_lead) {
+      if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
       }
-      if (settings.record_stop_trail) {
+      if (settings.record_stop_trail != null) {
         const inputEl = document.querySelector('#config-record-stop-trail');
         if (inputEl) inputEl.value = settings.record_stop_trail;
       }
-      if (settings.initial_delay) {
+      if (settings.initial_delay != null) {
         const inputEl = document.querySelector('#config-initial-delay');
         if (inputEl) inputEl.value = settings.initial_delay;
       }
@@ -691,8 +731,15 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      if (settings.scan_workers) {
+        const inputEl = document.querySelector('#config-scan-workers');
+        if (inputEl) inputEl.value = settings.scan_workers;
+      }
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
-        scanPaths = [...settings.pinned_folders];
+        // Folders only: older builds added every file picked with
+        // + Add Demo Files, one path per demo. Cleaned up once, here.
+        scanPaths = pinnedFoldersOnly(settings.pinned_folders);
+        if (scanPaths.length !== settings.pinned_folders.length) pinnedListCleaned = true;
       }
       if (Array.isArray(settings.demo_folder_history) && settings.demo_folder_history.length > 0) {
         demoFolderHistory = [...settings.demo_folder_history];
@@ -723,6 +770,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // present. Not awaited: a background check shouldn't block startup.
   initUpdater(settings, persistAppSettings);
   initAppMenu();
+  if (pinnedListCleaned) persistAppSettings();
 
   // Save Project Session — also called from the Clear All modal's "Save
   // Session First" action, so it lives here as a plain function rather than
@@ -744,9 +792,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
+      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
       const filePath = currentSessionPath || await save({
         title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: 'dod_project.json',
+        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
       if (!filePath) return false;
@@ -755,7 +804,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       const hlPath = document.querySelector('#hl-path-input')?.value || "";
       const projectData = JSON.stringify({
         version: "0.12.0",
-        scanPaths: scanPaths,
+        // The folders this project's demos are in, not the app-wide pinned
+        // list (that is every folder ever added, nothing to do with the
+        // project). Read back only to look for demos that have moved (#21).
+        scanPaths: projectFolders(currentScannedDemos),
         demos: currentScannedDemos,
         hlaePath: hlaePath,
         hlPath: hlPath,
@@ -805,8 +857,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         // handler; 'discard' falls through to load over it either way.
       }
       try {
+        const projectsDir = await defaultProjectsDir();
         const selected = await open({
           multiple: false,
+          ...(projectsDir ? { defaultPath: projectsDir } : {}),
           filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
         });
         if (selected) {
@@ -855,6 +909,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               }
               updateDemoFooter(currentScannedDemos);
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
+              await checkMissingDemos(selected, data.scanPaths || []);
             }
           }
         }
@@ -864,6 +919,31 @@ window.addEventListener("DOMContentLoaded", async () => {
       }
     });
   }
+
+  function refreshAfterRelocation(changed) {
+    renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
+    if (!changed) return;
+    if (selectedDemoIdx != null && currentScannedDemos[selectedDemoIdx]) {
+      selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+    }
+    markProjectDirty();
+  }
+
+  // Missing, moved, changed and copied demos (#21): project_demos.js.
+  const {
+    checkMissingDemos,
+    pickedDemosPresent,
+    useFoundCopies,
+    offerIdenticalCopies,
+    locateDemoByHand,
+  } = createProjectDemos({
+    getDemos: () => currentScannedDemos,
+    getTakeIndex: () => takeIndex,
+    getScanPaths: () => scanPaths,
+    refreshQueue: refreshAfterRelocation,
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+  });
 
   // New Session (#122/#149) — resets to the same blank state the app starts
   // in: no session file, no demos, no take index. Reuses replaceScannedDemos
@@ -1155,11 +1235,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
     const masterTableBody = document.querySelector('#master-demo-table-body');
 
+    // Demos the scan could not read (#23). Only the final event carries it.
+    const skipped = Array.isArray(p.skipped) ? p.skipped : [];
+    if (skipped.length > 0) {
+      console.warn('Scan skipped unreadable demos:', skipped);
+      showToast(STRINGS.MAIN.skippedDemosToast(skipped), 'warning', 10000);
+    }
+
     if (p.cancelled) {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else if (p.status === 'Complete') {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found);
+      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else {
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status);
@@ -1182,13 +1269,18 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Scans only the given paths and merges the results into the existing
   // master list (replacing entries with matching `path`, appending new ones).
-  // `scanPaths` itself is a separately-persisted "known library" list reused
-  // by the capture batch payload (`capture_directories`) — it must NOT be
-  // re-walked on every add, or every scan re-processes every folder ever
-  // added across the app's lifetime (dev only ever re-ingests the paths just
-  // picked in that action; see views/capture/workspace.rs Add Files/Add Folder).
-  async function triggerAutoScan(pathsToScan) {
-    if (!pathsToScan || pathsToScan.length === 0) return;
+  // `scanPaths` is the app-wide pinned-folder list (settings' pinned_folders,
+  // also the Demo Analyzer's Pinned tier) -- it must NOT be re-walked on every
+  // add, or every scan re-processes every folder ever added across the app's
+  // lifetime. Capture's output folders are a separate list (targetDrives).
+  //
+  // Resolves true when the scan ran (a cancelled one included), false when it
+  // failed -- e.g. every picked path is gone, which the backend reports (#432).
+  // `pickedFiles`: the paths are files the user picked one by one (+ Add
+  // Demo Files), so a copy of a queued demo is offered in its place rather
+  // than only skipped (#21).
+  async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
+    if (!pathsToScan || pathsToScan.length === 0) return false;
 
     const scanStatusEl = document.querySelector('#scan-status');
     const scanSpinnerEl = document.querySelector('#scan-spinner');
@@ -1207,7 +1299,26 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="8">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
 
     try {
-      const newlyScanned = await scanDirectory(pathsToScan);
+      // Demos already queued and unchanged on disk are skipped, not
+      // re-parsed; ones from an older project (no file_key) are scanned.
+      const known = currentScannedDemos
+        .filter((d) => d.file_key)
+        .map((d) => ({ path: d.path, file_key: d.file_key }));
+      const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
+      // An identical copy under another name would be a second row for the
+      // same demo, capturing every highlight twice (#21). The scan skips them
+      // by key before parsing (`unparsedCopies`, each naming the queued or
+      // scanned demo it copies); the split below is a fallback for any that
+      // reach here parsed.
+      const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
+      unparsedCopies.forEach((c) => {
+        const sameAs = c.queued
+          ? currentScannedDemos.find((d) => samePath(d.path, c.same_as))
+          : newlyScanned.find((d) => samePath(d.path, c.same_as));
+        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs, queued: Boolean(c.queued) });
+      });
+      // The frontend fallback's copies are all of queued demos.
+      copies.forEach((c) => { if (c.queued === undefined) c.queued = currentScannedDemos.includes(c.sameAs); });
 
       // Merge: replace any existing demo with the same path, append new ones.
       // (Prior behavior replaced the whole master list with the result of
@@ -1232,7 +1343,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       // it here in case the event arrives before renderMasterList finishes.
       updateDemoFooter(currentScannedDemos);
       if (newlyScanned.length > 0) markProjectDirty();
-      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length), 'success');
+      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
       selectedDemoIdx = newlyScanned.length > 0
         ? currentScannedDemos.indexOf(newlyScanned[0])
         : (currentScannedDemos.length > 0 ? 0 : null);
@@ -1250,10 +1361,13 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
+      return true;
     } catch (err) {
       console.error("Error scanning directories:", err);
       showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
+      return false;
     } finally {
       if (addFilesBtn) addFilesBtn.disabled = false;
       if (addFolderBtn) addFolderBtn.disabled = false;
@@ -1274,16 +1388,9 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
         if (selected) {
           const files = Array.isArray(selected) ? selected : [selected];
-          files.forEach(f => {
-            if (!scanPaths.includes(f)) {
-              scanPaths.push(f);
-              markProjectDirty();
-            }
-          });
-          await persistAppSettings();
-          // Scan only the files just picked, not the full accumulated
-          // scanPaths history — see triggerAutoScan's doc comment.
-          await triggerAutoScan(files);
+          // Files aren't remembered in the pinned-folder list (only folders
+          // are); the scan itself adds them to the queue and the project.
+          await triggerAutoScan(files, { pickedFiles: true });
         }
       } catch (err) {
         console.error("Error opening demo files dialog:", err);
@@ -1303,11 +1410,17 @@ window.addEventListener("DOMContentLoaded", async () => {
         });
         if (selected) {
           const folder = Array.isArray(selected) ? selected[0] : selected;
-          if (!scanPaths.includes(folder)) {
+          // Always scan (#432): a folder added before, then emptied from the
+          // list (bin icon, Clear All), used to be a silent no-op here.
+          // scanPaths only decides whether to remember it, and a folder that
+          // turned out not to exist is not remembered. The merge in
+          // triggerAutoScan replaces demos by path, so a re-scan adds no
+          // duplicate rows.
+          const scanned = await triggerAutoScan([folder]);
+          if (scanned && !scanPaths.includes(folder)) {
             scanPaths.push(folder);
             markProjectDirty();
             await persistAppSettings();
-            await triggerAutoScan([folder]);
           }
         }
       } catch (err) {
@@ -1382,15 +1495,30 @@ window.addEventListener("DOMContentLoaded", async () => {
       const targetId = btn.getAttribute('data-tab');
       const targetEl = document.getElementById(targetId);
       if (targetEl) targetEl.style.display = 'block';
+      refreshCommandWarningsIfShown();
     });
   });
+
+  // The game's config files change outside the app: the read-only flag on
+  // config.cfg (#478), or lines in config.cfg/movie.cfg. The Commands tab's
+  // warnings are only as fresh as their last check, so it runs again whenever
+  // that tab comes into view: opening it, returning to Configuration on it,
+  // or coming back to this window (from Explorer or an editor) while it shows.
+  function refreshCommandWarningsIfShown() {
+    const tab = document.getElementById('tab-custom-commands');
+    if (tab && tab.offsetParent !== null) refreshInitCommandWarnings();
+  }
+  window.addEventListener('focus', refreshCommandWarningsIfShown);
 
   // Top nav bar view routing (shared with detail_pane.js — see nav.js)
   switchNavTab('workspace');
 
   const navTabBtns = document.querySelectorAll('.nav-tab-btn');
   navTabBtns.forEach(btn => {
-    btn.addEventListener('click', () => switchNavTab(btn.getAttribute('data-nav')));
+    btn.addEventListener('click', () => {
+      switchNavTab(btn.getAttribute('data-nav'));
+      refreshCommandWarningsIfShown();
+    });
   });
 
   // Capture Studio in-workflow phase switch (Highlights <-> Configuration) —
@@ -1412,11 +1540,17 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
+  initReviewMode({
+    getDemos: () => currentScannedDemos,
+    getCheckedPaths: getCheckedDemoPaths,
+    onChanged: onHighlightStatusChange,
+  });
+
   initCaptureUI(() => ({
     scanPaths,
     targetDrives,
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
@@ -1441,11 +1575,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   // writes to disk on 'change' (blur/Enter), not every keystroke — closing
   // the app while a field still has focus (never blurred) would otherwise
   // silently drop that edit even though it's already reflected in the
-  // in-memory state persistAppSettings() reads from. Confirmed as a real,
-  // reproducible data-loss case 2026-08-23 (see engineering_backlog.md).
+  // in-memory state persistAppSettings() reads from (a real, reproducible
+  // data-loss case).
   const appWindow = getCurrentWindow();
   appWindow.onCloseRequested(async (event) => {
     event.preventDefault();
+    // A running batch first: closing leaves it unwatched (#545).
+    if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning, isLocalBuild: isLocalOrDebugBuild }))) return;
     // Capture Studio project state (scanned demos, takeIndex, scanPaths)
     // changed since the last save — offer to save, discard, or cancel the
     // close before losing it. See markProjectDirty() call sites above.
@@ -1758,7 +1894,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm);
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
