@@ -72,6 +72,10 @@
 //! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `engine_buttons`: a button inside a GameUI window whose command is
+//!   `engine <console command>` runs it, as the ESC menu's entries do
+//!   (issue #408). On by default, since it only acts on commands the window
+//!   would drop; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it off.
 //! - `demo_seek`: the `dodstudio_seek_to` / `dodstudio_seek_by` commands --
 //!   jump `viewdemo` playback to a time, as the demo editor's Goto does,
 //!   through `DemoPlayer.dll`'s own interface (issue #405). Nothing calls them
@@ -163,6 +167,7 @@ mod demo_rosters;
 mod demo_seek;
 mod detour;
 mod engine;
+mod engine_buttons;
 mod events;
 mod ex_interp;
 mod fire_sounds;
@@ -184,6 +189,7 @@ mod patch;
 mod pe;
 mod pmove_guard;
 mod remote;
+mod review;
 mod scan;
 mod scoreboard;
 mod server_query;
@@ -272,6 +278,12 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // Restores the pre-Anniversary behaviour on the Anniversary build and
     // does nothing on the pre-Anniversary one, so on unless asked not to.
     frame_esc::ENABLED.store(env_flag("GOLDSRC_HOOKS_FRAME_ESC", true), Ordering::Relaxed);
+    // Only acts on commands a window would otherwise drop, so on unless asked
+    // not to.
+    engine_buttons::ENABLED.store(
+        env_flag("GOLDSRC_HOOKS_ENGINE_BUTTONS", true),
+        Ordering::Relaxed,
+    );
     // A crash fix, so on unless asked not to.
     pmove_guard::ENABLED.store(
         env_flag("GOLDSRC_HOOKS_PMOVE_GUARD", true),
