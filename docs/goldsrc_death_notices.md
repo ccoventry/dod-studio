@@ -1,9 +1,9 @@
 # DoD 1.3 death notices: raising the line count, and the rest of `mirv_deathmsg`
 
 > **Status 2026-09-16 — implemented and live-tested.**
-> Lives in `goldsrc-hooks/src/deathmsg.rs`, on branch
-> `feat/goldsrc-hooks-companion-dll`. One console command,
-> `dodstudio_deathmsg`, with four subcommands.
+> Lives in `goldsrc-hooks/src/deathmsg.rs`, on `dev`. One console command,
+> `dodstudio_deathmsg`, with four subcommands (`max`, `offset`, `block`, `fake`)
+> plus `players`. §5 is a dated session log of the 2026-09-16 measurements.
 
 DoD shows four death notices at once and no console variable changes that.
 `hud_deathnotice_time` (default 6) changes how long each one *lives*, which is
@@ -283,6 +283,9 @@ y differently. DoD's `Draw` starts at y = 20 and accumulates line height
 +0x2af19  add eax, 0x14                    ; else ScreenHeight/480*42 + 20
 ```
 
+(`<spectator mode>` below is really the overview map's size, not a spectator
+mode: see `docs/goldsrc_objective_icons.md` §5.)
+
 `offset` does **not** patch either immediate. It detours, the way HLAE does,
 for a reason the three code paths make obvious:
 
@@ -317,8 +320,11 @@ included.
 > **"Spectator mode" above is the wrong name, established later.** The call at
 > `+0x2aeba` is `client.dll+0x228e0`, which returns `_cl_minimap`'s value — and
 > only while a spectator predicate holds and `gHUD`'s FOV field is still 90. So
-> "mode 2" is **the overview map at full size**, not a spectator mode: the kill
-> feed takes its y from the map's own layout while the full map is up. Nothing
+> "mode 2" is **the minimap** (`_cl_minimap 2`, top right), not a spectator
+> mode: the kill feed starts `round(2 * ScreenHeight / 480)` below the
+> minimap's bottom edge while it is up. (An earlier version of this note said
+> "the full map"; `goldsrc-hooks/src/overview_map.rs` has the arithmetic that
+> settles which is which.) Nothing
 > above changes — the detour sets the result on every path regardless — but the
 > name did. Worked out in `docs/goldsrc_objective_icons.md` §5, where the same
 > branch matters to the objective icons.
@@ -409,6 +415,22 @@ the tables:
 ```
 python goldsrc-hooks/tools/verify_deathmsg_offsets.py [path-to-client.dll]
 ```
+
+## 4a. The spectator layout
+
+While spectating, the feed's `~95 + 20` starts above the bottom of the spectator
+bar, which is `64 * ScreenHeight / 480` tall (`BAR_UNITS` in `spectator_hud.rs`;
+the `54` the survey docs mention is how far the game pushes the *other*
+elements down, not the bar's height). So the feed's first line overlaps
+the bar. `goldsrc-hooks/src/spectator_hud.rs` sets the feed's y through this
+detour whenever no `offset` has been typed:
+
+- bar shown: 20 below the bar;
+- `dodstudio_hide_spectator_bars 1`: 20, as in a POV demo.
+
+The minimap is the exception: while it is up, the game already places the feed
+under it. So the layout leaves the feed alone and moves the minimap instead. A
+typed `offset` wins, and `offset default` returns to this layout.
 
 ## 5. Live findings, 2026-09-16
 

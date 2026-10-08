@@ -303,7 +303,8 @@ crosshair 0            r_drawentities 1   vguicancel    voice_modenable 1
 ```
 
 These are not incidental — they are an **enforcement routine inside `CHud::Redraw`, so it
-runs every rendered frame**, and two of the five cases end by quitting the game.
+runs on every frame the HUD draws** (not while the console is down), and two of the five
+cases end by quitting the game.
 
 Decompiled behaviour (`client.dll` `0x1936e20`, the real `HUD_Redraw` implementation):
 
@@ -318,17 +319,18 @@ Decompiled behaviour (`client.dll` `0x1936e20`, the real `HUD_Redraw` implementa
 The `quit` is assembled byte-by-byte on the stack (`'q','u','i','t','\n'`) rather than
 stored as a literal, which is why no `strings` dump of this binary reveals it.
 
-**This matters to the capture pipeline in two ways**, and neither `r_drawentities` nor
-`cl_lw` is currently in `cfg_scan`'s `BANNED_COMMANDS` or `MID_DEMO_HAZARDS`:
+**This matters to the capture pipeline in two ways:**
 
 1. A user config containing `r_drawentities 0` or `cl_lw 0` — both entirely plausible
    (the first is a moviemaking instinct, the second a long-standing competitive config
    line) — makes `hl.exe` exit as soon as the HUD draws. The batch just sees the process
    vanish.
-2. Because the check is per-frame, the same is true of a *scheduled* injection mid-demo,
-   not only of startup config.
+2. Because the check runs whenever the HUD draws, the same is true of a *scheduled*
+   injection mid-demo, not only of startup config.
 
-Tracked as issue #205.
+Both are now handled (issue #205, closed): the two cvars are in `cfg_scan`'s
+`BANNED_COMMANDS`, and `FATAL_CVARS` warns about a user config that sets them. Which one is
+actually reachable, and why, is in `docs/command_tiers.md`.
 
 ### User messages — `pfnHookUserMsg` (index 18), 71 registered
 
@@ -466,6 +468,11 @@ through 10 are implemented**:
 spectator camera at a chosen player — are **past the end of the table** and
 discarded unread. The bytes following the table are instruction padding, not
 entries.
+
+`goldsrc-hooks` swaps slot 38 too: `dodstudio_hide_hltv_messages 1` drops
+every message whose command byte is 6 before it reaches this function, which
+is how the proxy's "You're watching HLTV" line is hidden without patching the
+demo (issue #30, `goldsrc-hooks/src/hltv_messages.rs`).
 
 ### Why this matters
 

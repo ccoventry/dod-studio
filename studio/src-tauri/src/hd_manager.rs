@@ -1,5 +1,6 @@
 //! The HD Textures page's backend (#372): what is built, finding (or
-//! fetching) the upscaler and a Python, and running the build.
+//! fetching) the upscaler and a Python, running the build, the user's own
+//! styles, the style preview, and the misses the game logged.
 //! The work itself is in `native::hd`; this is the Tauri surface.
 
 use std::path::{Path, PathBuf};
@@ -7,15 +8,18 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use native::hd::build::{BuildOutcome, BuildRequest};
-use native::hd::{self, HdStatus, python, setup::SetupOutcome, upscaler};
+use native::hd::my_styles::{self, StyleDef};
+use native::hd::{self, HdStatus, misses, python, setup::SetupOutcome, upscaler};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 /// One download or build at a time, and a way to stop it. They share the
 /// flag: a build must not start while its Python is still being fetched.
+/// The style preview only reads, so it has its own.
 #[derive(Default)]
 pub struct HdManager {
     running: Arc<AtomicBool>,
     cancel: Arc<AtomicBool>,
+    previewing: Arc<AtomicBool>,
 }
 
 /// The `hl.exe` path from the Configuration page, or the "set it first"
@@ -44,8 +48,8 @@ fn scripts_dir(app: &AppHandle) -> Option<PathBuf> {
 /// `hl.exe` the Configuration page holds.
 #[tauri::command]
 pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, String> {
-    let root = hd::hd_root(&game_exe(&game_path)?)
-        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let exe = game_exe(&game_path)?;
+    let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
     // A big HD folder is tens of thousands of files, and finding Python runs
     // a few processes: neither belongs on the async runtime's own threads.
@@ -57,7 +61,10 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.tools.chosen =
             upscaler::chosen(&hd_tools).map(|dir| dir.to_string_lossy().to_string());
         status.python = Some(python::resolve(&hd_tools));
+        status.my_styles = Some(my_styles::read(&root, scripts.as_deref()));
+        status.maps = hd::preview::map_choices(&exe, &root, scripts.as_deref());
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
+        status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         status
     }))
     .await
@@ -194,4 +201,84 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
         upscaler::set_chosen(&hd_tools, dir.map(Path::new))
     }))
     .await
+}
+
+/// The newest list `dodstudio_debug_hd_misses` wrote to the hook log (none
+/// when no log has one yet), and the command itself.
+#[tauri::command]
+pub async fn hd_misses() -> Result<misses::MissesView, String> {
+    // A day's hook log can be tens of thousands of lines.
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(|| {
+        misses::view(&native::activity_log_dir())
+    }))
+    .await
+}
+
+/// Adds `name` to the install's `my_styles.txt` as `def`, or changes it if
+/// the file has it already.
+#[tauri::command]
+pub async fn hd_save_style(
+    app: AppHandle,
+    game_path: String,
+    name: String,
+    def: StyleDef,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        my_styles::save(&root, scripts.as_deref(), &name, &def)
+    }))
+    .await
+}
+
+/// Takes `name` out of the install's `my_styles.txt`. What it built stays.
+#[tauri::command]
+pub async fn hd_remove_style(
+    app: AppHandle,
+    game_path: String,
+    name: String,
+) -> Result<(), String> {
+    let root = hd::hd_root(&game_exe(&game_path)?)
+        .ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
+    let scripts = scripts_dir(&app);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        my_styles::remove(&root, scripts.as_deref(), &name)
+    }))
+    .await
+}
+
+/// Makes the style comparison sheet with `compare.py`: the chosen maps (or a
+/// few picked for you) in the chosen styles (or all of them).
+#[tauri::command]
+pub async fn hd_preview(
+    app: AppHandle,
+    state: State<'_, HdManager>,
+    game_path: String,
+    request: hd::preview::PreviewRequest,
+) -> Result<hd::preview::Preview, String> {
+    let game = game_exe(&game_path)?;
+    let scripts = scripts_dir(&app).ok_or_else(|| crate::messages::HD_NO_SCRIPTS.to_string())?;
+    if state.previewing.swap(true, Ordering::SeqCst) {
+        return Err(crate::messages::HD_ALREADY_RUNNING.to_string());
+    }
+    let previewing = Arc::clone(&state.previewing);
+    let result = crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let hd_tools = hd::setup::hd_tools_dir();
+        let using = python::resolve(&hd_tools)
+            .using
+            .ok_or_else(|| crate::messages::HD_NO_PYTHON.to_string())?;
+        // Nothing stops a preview but its own timeout: it takes seconds.
+        hd::preview::run(
+            &request,
+            &using,
+            &hd_tools,
+            &scripts,
+            &game,
+            &AtomicBool::new(false),
+        )
+    }))
+    .await;
+    previewing.store(false, Ordering::SeqCst);
+    result
 }

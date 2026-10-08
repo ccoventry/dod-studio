@@ -208,10 +208,15 @@ const BRANCH_STOLEN: &[u8] = &[0x83, 0x7D, 0x0C, 0x05, 0x75, 0x20];
 /// `GL_Upload32`'s entry through its "too big" check. Used to confirm the
 /// `call` in [`LOAD_TEXTURE2_TAIL`] lands where expected, and to locate the
 /// check and the buffer references.
+///
+/// The `jnp` after `test ah, 0x44` (`7B 41`, +0x6a) is a wildcard: that is the
+/// `gl_spriteblend` upload check `sprite_blend` turns into `nop nop` (#467),
+/// and it installs first, so this has to match the function either way. Seen
+/// live 2026-09-30: with it spelled out, HD textures silently turned off.
 const UPLOAD32: &str = "55 8B EC 83 EC 14 53 56 8D 45 FC 57 8D 4D F0 50 8D 55 EC 51 52 E8 ?? ?? ?? ?? \
     8B 5D 0C 8B 4D 10 8B D3 8B 35 ?? ?? ?? ?? 0F AF D1 03 F2 83 C4 0C 89 35 ?? ?? ?? ?? 8B 75 18 \
     83 FE 02 89 55 F8 74 0D A1 ?? ?? ?? ?? 8D 04 50 A3 ?? ?? ?? ?? D9 05 ?? ?? ?? ?? A1 ?? ?? ?? ?? \
-    D8 1D ?? ?? ?? ?? 40 A3 ?? ?? ?? ?? DF E0 F6 C4 44 7B 41 83 FE 01 74 0A 83 FE 03 74 05 83 FE 04 \
+    D8 1D ?? ?? ?? ?? 40 A3 ?? ?? ?? ?? DF E0 F6 C4 44 ?? ?? 83 FE 01 74 0A 83 FE 03 74 05 83 FE 04 \
     75 32 33 F6 85 D2 7E 2C 8B 7D 08 83 3F 00 75 1C 8B C6 99 F7 FB 50 52 51 8B 4D 08 53 51 57 E8 \
     ?? ?? ?? ?? 8B 55 F8 8B 4D 10 83 C4 18 46 83 C7 04 3B F2 7C D7 51 8D 55 F4 53 8D 45 0C 52 50 \
     E8 ?? ?? ?? ?? 8B 75 0C 8B 7D F4 8B C6 83 C4 10 0F AF C7 3D 00 00 08 00 89 45 F4 76 0D";
@@ -1276,7 +1281,7 @@ static DETAIL_INDEX: Cached<HashMap<String, String>> = Cached::new();
 /// Detail textures loaded from [`DETAIL_DIR`] this session.
 static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
 
-fn game_dir() -> PathBuf {
+pub(crate) fn game_dir() -> PathBuf {
     std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))

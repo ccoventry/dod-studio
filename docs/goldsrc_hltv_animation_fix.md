@@ -1,12 +1,13 @@
 # The HLTV viewmodel animation fix
 
 > **Status 2026-09-08 — working and live-proven across every weapon class.**
-> Lives in `goldsrc-hooks/src/anim_fix.rs`, on branch
-> `feat/goldsrc-hooks-companion-dll`. Tracked by
-> [#204](https://github.com/ccoventry/dod-studio/issues/204).
-> Defaults **off**. It is a cvar: turn it on in the console with
-> `dodstudio_hltv_show_viewmodel_animations 1`, on the launch line with
-> `+dodstudio_hltv_show_viewmodel_animations 1`, or from any `.cfg` the session execs.
+> Lives in `goldsrc-hooks/src/anim_fix/`, on `dev`. Built under
+> [#204](https://github.com/ccoventry/dod-studio/issues/204) (closed).
+> Defaults **off**. It is one of the things `dodstudio_spec_match_pov` turns
+> on (with the lost gunshots and the POV crosshair): `dodstudio_spec_match_pov 1` in
+> the console, `+dodstudio_spec_match_pov 1` on the launch line, or from any `.cfg`
+> the session execs. It had a cvar of its own,
+> `dodstudio_hltv_show_viewmodel_animations`, until 2026-10-01.
 
 Watching a DoD demo in first person, the weapon on screen barely moves. It does
 not recoil when the player fires, does not reload when they reload, and does not
@@ -94,7 +95,7 @@ Once running, on each frame it:
 
 | animation | trigger |
 | --- | --- |
-| **shoot** | the body sequence changes to a `*_shoot` (or `*_roll`) label — plus a second, sound-driven trigger, §6 |
+| **shoot** | the body sequence changes to a `*_shoot` (or `*_roll`) label — plus a second, sound-driven trigger, §6. Grenades take their own path, §13 |
 | **reload** | the body sequence changes to a `*_reload` / `*_zoomload` label |
 | **draw** | the viewmodel *settles* on a different weapon, §9 |
 | **idle** | the camera switches to a different player, so the new viewmodel does not inherit whatever sequence the last one was left on |
@@ -115,7 +116,7 @@ after the first has no sequence change to key off, while the *sound* fires per
 round. So there are two triggers:
 
 - **body sequence** — catches semi-auto fire and the first round of a burst.
-- **`EV_PlaySound`** (via `sound_fix`'s hook) — catches every round of automatic
+- **`EV_PlaySound`** (via `fire_sounds`' hook) — catches every round of automatic
   fire. Its `ent` argument is the shooter: verified against 34 matches across
   five different spectated players, with real varying indices.
 
@@ -151,8 +152,8 @@ refinement on top, not the point.
 
 ## 8. Diagnostics
 
-- `dodstudio_hltv_show_viewmodel_animations <0|1>` — a **cvar**, so it also takes
-  `+dodstudio_hltv_show_viewmodel_animations 1` on the launch line or a line in any `.cfg`,
+- `dodstudio_spec_match_pov <0|1>` — a **cvar**, so it also takes
+  `+dodstudio_spec_match_pov 1` on the launch line or a line in any `.cfg`,
   and shows its value in the console type-ahead.
 - `dodstudio_debug_log_weapon_model <0|1>` — cvar. Logs every held-model change *and*
   every body-sequence change, which is the trail to read a session back from.
@@ -216,24 +217,27 @@ across three HLTV halves, 0.461–0.566 s) looked like a pin pull, and the throw
 was deferred by it. Shipped and reverted. The tightness was the tell: the *real*
 cook time, from a POV demo's own `pinpull`→`throw` animations, is 0.065–4.852 s
 with medians of 0.64 and 1.46 — a held button, widened further by players
-"priming" grenades. The 0.49 s is the throw animation's own wind-up before the
-grenade leaves the hand. Play `throw` immediately on the body change. See
-`analysis/examples/grenade_timing_probe`.
+"priming" grenades. The 0.49 s is the server's own wait between the release and
+the grenade leaving the hand, so the right reading was the third one: `pinpull`
+at the body change, as a stand-in for a pull that cannot be seen, and `throw`
+half a second later (§13). See `analysis/examples/grenade_timing_probe`.
 
 ## 10. Where the boundaries are
 
 Three things are *not* missing from the fix, and are settled rather than open:
 
-- **The grenade pin pull is unreachable.** `p_grenade`, `p_stick` and `p_mills`
-  carry one `idle` sequence each, and `weapons/grenpinpull.wav` appears in no
-  demo's `svc_sound`, POV included — it is played client-side for the local
-  player only, exactly like the animation it accompanies.
+- **The moment of the grenade pin pull is unreachable.** `p_grenade`, `p_stick`
+  and `p_mills` carry one `idle` sequence each, and `weapons/grenpinpull.wav`
+  appears in no demo's `svc_sound`, POV included — it is played client-side for
+  the local player only, exactly like the animation it accompanies. The
+  animation plays at the release instead, about 0.1 s late (§13).
 - **Sprint does nothing to the viewmodel.** DoD 1.3 does not lower or hide the
   first-person weapon while sprinting; what changes is the *body*, which the
   engine already animates. See `goldsrc_client_dll_internals.md` §8.
-- **The `exploding_` grenade family is a second weapon class**, and an HLTV
-  recording carries nothing that distinguishes it — same models, same body
-  token. Keep playing the plain family. See §9 of the same document.
+- **The `exploding_` grenade family is a primed grenade**: one rolled out and
+  caught again with USE. The held model and body token are the plain
+  grenade's, but the catch is visible in the world, and the family is played
+  from that (§13).
 
 One genuine `TODO` remains, marked in the source: on a bipod deploy state change
 the viewmodel snaps to the new family's idle rather than playing the model's own
@@ -244,7 +248,7 @@ the viewmodel snaps to the new family's idle rather than playing the model's own
 1. Build for `i686-pc-windows-msvc` and inject into the **PRE-Anniversary for
    Movies** install (never the stock Half-Life one — see
    `docs/goldsrc_dod_quirks.md` and the two-installs rule).
-2. `dodstudio_hltv_show_viewmodel_animations 1`, `dodstudio_debug_log_weapon_model 1`.
+2. `dodstudio_spec_match_pov 1`, `dodstudio_debug_log_weapon_model 1`.
 3. Play an HLTV demo in-eye and let the director move between players.
 4. Read `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks.log`. The lines that matter, in order of value:
    - `now spectating … holding … viewmodel "…"` on every camera switch,
@@ -309,3 +313,74 @@ surviving, the fallback is the one #283 names: the studio renderer's
 Not only the spectated one. That is what clean footage wants, but it is a
 behavioural choice rather than an obvious default, so `dodstudio_status` says so.
 
+---
+
+## 13. Grenades: copied from what a POV demo shows
+
+Code: `goldsrc-hooks/src/anim_fix/grenade.rs`. Probes:
+`analysis/examples/grenade_pov_timeline_probe` (what the thrower's own
+recording plays) and `grenade_prime_probe` (what any recording shows of it).
+
+The fix used to offer four ways to treat the hand after a throw, values 1 to 4
+of the cvar, because nothing said which was right. A POV demo does, so there
+is now one behaviour and the cvar is on/off.
+
+### What the thrower's own view plays
+
+From 145 POV match demos (4730 throws) and one recorded for the purpose with
+every kind of throw in it. Times are from the `throw` animation, which lands
+with `weapons/grenthrow.wav`, 0.50 s after the body enters its grenade attack.
+Before it there is `pinpull`, a median 0.6 s ahead.
+
+| what the player did | hand grenade | stick grenade |
+| --- | --- | --- |
+| plain throw, a grenade left | `draw` at once | `draw` at +0.5 s |
+| plain throw of the last one | next weapon at once | next weapon at +0.5 s |
+| primed it | `draw` at once, then as the stick | `exploding_idle` at the catch, `exploding_pinpull` when fire is pressed again, the next weapon when the live grenade is thrown |
+
+**Priming** is rolling the grenade out in front (right click) and catching it
+again with USE, which starts its fuse; the player then holds it as long as they
+dare and throws it. It is what most throws in a match are: 300 of 322 in one
+HLTV half. The `exploding_` sequences on the grenade viewmodels are the primed
+grenade's.
+
+### What a spectator can see of it
+
+| moment | what an HLTV demo carries | what plays |
+| --- | --- | --- |
+| the release | the body enters `*_gren_shoot`, `*_stick_roll`, … | `pinpull`, and `throw` is booked 0.5 s on |
+| the throw | `grenthrow.wav`, and a world grenade (`w_stick`, `w_grenade`, `w_mills`) beside the thrower in the same update | `throw`; on a hand grenade `draw` right behind it |
+| the catch | that world grenade is gone again, a median 0.13 s later, while the thrower still holds the grenade model — or, when a last hand grenade had already given way to the rifle, the grenade model comes *back* within 1.5 s | `exploding_idle` |
+| the wind-up of the primed grenade | nothing | `exploding_pinpull` at the POV median: 0.7 s after the catch on the stick, 1.1 s on the hand grenade |
+| the primed throw | a new world grenade beside the thrower, no sound, and the held model changing in the same update (299 of 300) | the next weapon's `draw`, from the ordinary weapon-change path |
+| no catch, grenade still held at +0.5 s (stick) | the world grenade is still out | `draw` |
+
+A grenade that was not caught lives 1.5 s or more, to its fuse; the slowest
+catch took 1.5 s, the shortest uncaught one 1.53 s.
+
+The world grenade is found by walking the entity list for a grenade model
+within 96 units of the thrower in the current update, only while a throw is
+being followed. One that was already a world grenade on the previous frame is
+not taken for the primed throw, so a grenade thrown *at* the player is not
+mistaken for theirs.
+
+### What it cannot do
+
+- **Time the pin pull.** It plays at the release, a median 0.1 s later than
+  the thrower saw it, and for a cooked grenade much later than that.
+- **Time the primed wind-up.** The press is not networked. A player who winds
+  up sooner or later than the median is shown at the median.
+- **Speak for the Mills bomb.** It is the hand grenade's class and is treated
+  as one; no British recording was to hand.
+
+### Checked in the game
+
+2026-10-01, pre-Anniversary build, `monday-wsod25_r07_m1_h1_hltv`, in-eye on a
+rifleman priming two hand grenades. First: thrown, world grenade found the
+same frame, gone 0.067 s later, `exploding_idle`, wind-up 1.13 s after the
+catch, rifle up 2.23 s after the catch (the file says the primed throw was
+2.236 s after it). Second, his last: rifle up at the throw, the grenade back in
+hand 0.70 s later (the file: caught after 0.656 s), `exploding_idle`, wind-up,
+rifle up 3.17 s after the catch (the file: 3.170 s). Frame by frame it reads
+as the POV recordings do: pin pull, a grenade back in the hand, the arm drawn
+back out of view, the rifle.

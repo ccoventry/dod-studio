@@ -5,24 +5,28 @@
 use crate::patch::types::{CaptureStreak, HighlightStatus};
 use crate::patch::{MAX_PAYLOAD_LIMIT_BYTES, NETWORK_HEADER_ALIGNMENT, SCANNER_SECTION_BOUNDARY};
 
-// ── HLTV guard ────────────────────────────────────────────────────────────────
+// ── HLTV detection ────────────────────────────────────────────────────────────
 
+/// How much of a demo [`is_hltv_demo`] reads.
+const HLTV_MARKER_WINDOW: u64 = 4096;
+
+/// Whether an HLTV proxy recorded the demo, from its first few KB and no
+/// parse (#566). The proxy's connect message ends `Spawn count N (HLTV)`,
+/// about 1,060 bytes into the file: in all 113 HLTV demos of 984 surveyed,
+/// and in no POV demo. `HLTV Proxy` in the first 512 bytes, what this looked
+/// for before, is in none of them, so it never matched.
 pub fn is_hltv_demo(path: &std::path::Path) -> Result<bool, std::io::Error> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path)?;
-    let mut header = [0_u8; crate::patch::HLTV_HEADER_SIZE];
-    file.read_exact(&mut header)?;
+    let mut head = Vec::with_capacity(HLTV_MARKER_WINDOW as usize);
+    std::fs::File::open(path)?
+        .take(HLTV_MARKER_WINDOW)
+        .read_to_end(&mut head)?;
+    Ok(is_hltv_head(&head))
+}
 
-    if header.len() >= crate::patch::HLTV_HEADER_SIZE {
-        let hltv_proxy_name = b"HLTV Proxy";
-        if header
-            .windows(hltv_proxy_name.len())
-            .any(|window| window == hltv_proxy_name)
-        {
-            return Ok(true);
-        }
-    }
-    Ok(false)
+/// [`is_hltv_demo`] on bytes already read from the start of a demo.
+pub fn is_hltv_head(head: &[u8]) -> bool {
+    head.windows(6).any(|window| window == b"(HLTV)")
 }
 
 // ── Life-bounded highlight scanner ───────────────────────────────────────────
@@ -31,57 +35,31 @@ pub fn is_hltv_demo(path: &std::path::Path) -> Result<bool, std::io::Error> {
 // Segmentation boundaries (death, round reset, map change) are handled by the
 // analysis crate, including the grenade kill-after-death edge case.
 
-pub fn scan_demo_for_highlights(
-    path: &std::path::Path,
-) -> Result<
-    (
-        f32,
-        Vec<CaptureStreak>,
-        bool,
-        Option<usize>,
-        i32,
-        Option<i32>,
-        std::sync::Arc<Vec<f32>>,
-    ),
-    String,
-> {
-    scan_demo_for_highlights_with_analysis(path).map(|(result, _analysis)| result)
+/// How much of a demo the leading-frame walk reads first. The opening segment
+/// it walks is the connection's signon: tens to hundreds of KB, well inside.
+const LEADING_FRAMES_PREFIX_BYTES: usize = 8 * 1024 * 1024;
+
+fn read_prefix(path: &std::path::Path, limit: usize) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::with_capacity(limit);
+    std::fs::File::open(path)?
+        .take(limit as u64)
+        .read_to_end(&mut bytes)?;
+    Ok(bytes)
 }
 
-// Same scan as `scan_demo_for_highlights`, but also hands back the full
-// `Analysis` it already computed internally (previously always discarded)
-// so callers doing a folder-wide scan (e.g. Capture Studio's `scan_directory`)
-// can write it straight into the analyzer cache instead of re-parsing the
-// same demo from scratch the next time it's opened in the Demo Analyzer.
-pub fn scan_demo_for_highlights_with_analysis(
-    path: &std::path::Path,
-) -> Result<
-    (
-        (
-            f32,
-            Vec<CaptureStreak>,
-            bool,
-            Option<usize>,
-            i32,
-            Option<i32>,
-            std::sync::Arc<Vec<f32>>,
-        ),
-        analysis::Analysis,
-    ),
-    String,
-> {
-    match is_hltv_demo(path) {
-        Ok(true) => return Err("Unsupported HLTV proxy demo format".to_string()),
-        Err(e) => return Err(format!("Failed to read demo header: {}", e)),
-        _ => {}
-    }
-
-    let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
-
-    let analysis = analysis::Analysis::try_from_bytes(&bytes)
-        .map_err(|e| format!("Failed to parse demo: {}", e))?;
-
+/// Each frame's time in the demo's opening segment, walked from `bytes` (the
+/// whole file, or its first part; `file_len` is the whole file's length).
+/// The flag says whether the walk finished: `false` means `bytes` ran out
+/// before a stopping frame, so the caller reads the whole file and asks again.
+fn leading_frame_times(
+    bytes: &[u8],
+    file_len: usize,
+    analysis: &analysis::Analysis,
+) -> Result<(Vec<f32>, bool), String> {
     let mut frame_times: Vec<f32> = Vec::with_capacity(analysis.demo_info.playback_frames as usize);
+    let mut stopped = false;
+    let mut truncated = false;
     if bytes.len() >= crate::patch::DEMO_HEADER_SIZE {
         let directory_offset = i32::from_le_bytes(
             bytes[crate::patch::DIRECTORY_OFFSET_POS..crate::patch::DEMO_HEADER_SIZE]
@@ -89,17 +67,23 @@ pub fn scan_demo_for_highlights_with_analysis(
                 .unwrap(),
         ) as usize;
         let mut pos = crate::patch::DEMO_HEADER_SIZE;
-        let end = if directory_offset > 0 && directory_offset <= bytes.len() {
+        let full_end = if directory_offset > 0 && directory_offset <= file_len {
             directory_offset
         } else {
-            bytes.len()
+            file_len
         };
+        // What was actually read; the walk asks for more when it runs out
+        // before a stopping frame.
+        let end = full_end.min(bytes.len());
+        truncated = end < full_end;
         while pos + crate::patch::FRAME_HEADER_SIZE <= end {
             let type_byte = bytes[pos];
             if type_byte > 9 && type_byte != 255 {
+                stopped = true;
                 break;
             }
             if type_byte == SCANNER_SECTION_BOUNDARY {
+                stopped = true;
                 break;
             }
             if type_byte != 255 {
@@ -146,10 +130,78 @@ pub fn scan_demo_for_highlights_with_analysis(
                     let len = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap()) as usize;
                     pos += 4 + len;
                 }
-                _ => break,
+                _ => {
+                    stopped = true;
+                    break;
+                }
             }
         }
     }
+    Ok((frame_times, stopped || !truncated))
+}
+
+pub fn scan_demo_for_highlights(
+    path: &std::path::Path,
+) -> Result<
+    (
+        f32,
+        Vec<CaptureStreak>,
+        bool,
+        Option<usize>,
+        i32,
+        Option<i32>,
+        std::sync::Arc<Vec<f32>>,
+    ),
+    String,
+> {
+    scan_demo_for_highlights_with_analysis(path).map(|(result, _analysis)| result)
+}
+
+// Same scan as `scan_demo_for_highlights`, but also hands back the full
+// `Analysis` it already computed internally (previously always discarded)
+// so callers doing a folder-wide scan (e.g. Capture Studio's `scan_directory`)
+// can write it straight into the analyzer cache instead of re-parsing the
+// same demo from scratch the next time it's opened in the Demo Analyzer.
+pub fn scan_demo_for_highlights_with_analysis(
+    path: &std::path::Path,
+) -> Result<
+    (
+        (
+            f32,
+            Vec<CaptureStreak>,
+            bool,
+            Option<usize>,
+            i32,
+            Option<i32>,
+            std::sync::Arc<Vec<f32>>,
+        ),
+        analysis::Analysis,
+    ),
+    String,
+> {
+    // No HLTV refusal here: the one that stood here looked for a string no
+    // HLTV demo has, so it never refused one, and HLTV demos are to list
+    // every player's streaks (#247, D18). See #566.
+
+    // The analysis comes from the analyzer cache when the Demo Analyzer (or an
+    // earlier scan) already parsed this exact file: ~15 ms instead of a full
+    // parse of up to several seconds. A miss parses and fills the cache.
+    let (_, analysis, _) = crate::run_analyzer_cached(&path.to_path_buf(), |_, _| {})
+        .map_err(|e| format!("Failed to parse demo: {}", e))?;
+
+    // `frame_times` only covers the demo's opening segment (the walk stops at
+    // the first section boundary), so it only needs the start of the file.
+    let file_len = std::fs::metadata(path)
+        .map_err(|e| format!("Failed to read file: {}", e))?
+        .len() as usize;
+    let prefix = read_prefix(path, LEADING_FRAMES_PREFIX_BYTES)
+        .map_err(|e| format!("Failed to read file: {}", e))?;
+    let (mut frame_times, complete) = leading_frame_times(&prefix, file_len, &analysis)?;
+    if !complete {
+        let bytes = std::fs::read(path).map_err(|e| format!("Failed to read file: {}", e))?;
+        frame_times = leading_frame_times(&bytes, file_len, &analysis)?.0;
+    }
+
     let final_demo_frames = if analysis.demo_info.playback_frames > 0 {
         analysis.demo_info.playback_frames
     } else if !frame_times.is_empty() {
@@ -244,4 +296,20 @@ pub fn scan_demo_for_highlights_with_analysis(
         ),
         analysis,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_hltv_demo_is_known_by_the_proxys_connect_message() {
+        let mut head = vec![0u8; 1100];
+        head[..6].copy_from_slice(b"HLDEMO");
+        assert!(!is_hltv_head(&head));
+        head[1030..1051].copy_from_slice(b"Spawn count 19 (HLTV)");
+        assert!(is_hltv_head(&head));
+        // What the old check looked for marks nothing on its own.
+        assert!(!is_hltv_head(b"HLTV Proxy"));
+    }
 }
