@@ -29,6 +29,12 @@ pub fn use_kill_streak_updates(state: &mut AnalyzerState, event: &AnalyzerEvent)
         let victim = state.find_player_by_client_index_mut(death_msg.victim_client_index - 1);
 
         if let Some(victim) = victim {
+            // A life with no kills yet has no record. Give it one first, so
+            // a grenade that kills after this death finds the life it was
+            // thrown in below, not the next one.
+            if victim.kill_streaks.is_empty() {
+                victim.kill_streaks.push(KillStreak::default());
+            }
             // End the victim's current streak by adding a new record
             victim.kill_streaks.push(KillStreak::default());
         }
@@ -186,6 +192,48 @@ mod tests {
             .map(|p| (p.name.as_str(), p.teamkills, p.suicides))
             .collect();
         assert_eq!(stats, [("axis1", 1, 0), ("axis2", 0, 1), ("allies1", 0, 1)]);
+    }
+
+    /// One DeathMsg through mortality and kill streaks, as `run_analyzers`
+    /// feeds them.
+    fn streak_death(state: &mut AnalyzerState, killer: u8, victim: u8, weapon: u8) {
+        let Ok(msg) = UserMessage::new(b"DeathMsg", &[killer, victim, weapon]) else {
+            panic!("DeathMsg did not parse");
+        };
+        let event = AnalyzerEvent::UserMessage(msg);
+        crate::mortality::with_mortality_detection(state, &event);
+        use_kill_streak_updates(state, &event);
+    }
+
+    fn streak_sizes(player: &crate::Player) -> Vec<usize> {
+        player.kill_streaks.iter().map(|s| s.kills.len()).collect()
+    }
+
+    #[test]
+    fn a_grenade_kill_after_dying_in_a_first_life_without_kills_stays_in_that_life() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 2, 1, 10); // allies kills axis: axis's first life ends, no kills
+        streak_death(&mut state, 1, 2, 14); // axis's stick grenade kills allies after that
+        assert_eq!(streak_sizes(&state.players[0]), [1, 0]);
+    }
+
+    #[test]
+    fn a_grenade_kill_after_dying_joins_the_life_it_was_thrown_in() {
+        let mut state = AnalyzerState::default();
+        for (slot, name, team) in [(0, "axis", Team::Axis), (1, "allies", Team::Allies)] {
+            let mut player = Player::new_mock(slot, name);
+            player.team = Some(team);
+            state.players.push(player);
+        }
+        streak_death(&mut state, 1, 2, 10); // axis kills allies
+        streak_death(&mut state, 2, 1, 10); // allies kills axis
+        streak_death(&mut state, 1, 2, 14); // axis's grenade lands after
+        assert_eq!(streak_sizes(&state.players[0]), [2, 0]);
     }
 
     #[test]

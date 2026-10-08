@@ -58,7 +58,7 @@
 //! A redirect of `CDoDSpectatorGUI`'s and `CBottomBar`'s "`SetVisible`"
 //! vtable slot, live-tested twice in 2026-09 and never called. Slot 8 of a
 //! vgui2 `Panel` is `OnChildAdded`; `SetVisible` is slot 29, and neither
-//! class paints the bands anyway. `docs/goldsrc_spectator_bars.md` keeps
+//! class paints the bands anyway. `docs/archive/goldsrc_spectator_bars_rnd.md` keeps
 //! that history.
 
 // The hook itself is 32-bit only; a host build compiles the rest for the tests.
@@ -110,6 +110,13 @@ pub fn set_cvar(cvar: *mut CvarSPartial) {
 
 fn installed() -> bool {
     STOCK_PAINT_TRAVERSE.load(Ordering::Acquire) != 0
+}
+
+/// Whether the spectator panel is hidden right now: the cvar is on and the
+/// filter that does the hiding is in place. `spectator_hud` lays out the top
+/// of the screen by it.
+pub fn hiding() -> bool {
+    HIDE.load(Ordering::Relaxed) && installed()
 }
 
 /// Whether a panel is the one to leave unpainted.
