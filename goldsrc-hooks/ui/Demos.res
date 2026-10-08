@@ -254,7 +254,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1"
+		"labelText"		"Double-click a demo, or pick one and Load."
 		"textAlignment"		"west"
 	}
 	"FolderProgress"
