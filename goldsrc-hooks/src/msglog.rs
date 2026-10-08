@@ -192,8 +192,16 @@ fn hex_dump(bytes: &[u8]) -> String {
     out
 }
 
-/// `client.dll`'s own handler for `name`, which we forward to.
-fn original_thunk(name: &str) -> Option<engine::UserMsgHookFn> {
+/// Whether this is currently re-prepending its own handler for `name` --
+/// `map_text` stands aside when it is, so the two don't take turns at the
+/// head of the engine's list every frame (see `map_text.rs`'s module doc).
+pub(crate) fn watching(name: &str) -> bool {
+    ACTIVE.load(Ordering::Relaxed) && is_wanted(name)
+}
+
+/// `client.dll`'s own handler for `name`, which we forward to. Also
+/// `map_text`'s, for `HudText`.
+pub(crate) fn original_thunk(name: &str) -> Option<engine::UserMsgHookFn> {
     let base = engine::client_module_base()?;
     let rva = find_thunk(name)?;
     // Safety: rva is a code offset into the module taken from `MESSAGES`,
@@ -235,6 +243,22 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
     } else {
         Some(unsafe { CStr::from_ptr(name) }.to_string_lossy())
     };
+    // Logged above either way; hidden here when dodstudio_hide_map_text says
+    // so, since this record sits in front of map_text's own while both want
+    // HudText.
+    if name_str
+        .as_deref()
+        .is_some_and(|n| n.eq_ignore_ascii_case(crate::map_text::MESSAGE))
+    {
+        let payload: &[u8] = if size > 0 && !buf.is_null() {
+            unsafe { std::slice::from_raw_parts(buf as *const u8, size as usize) }
+        } else {
+            &[]
+        };
+        if crate::map_text::hide(payload) {
+            return 1;
+        }
+    }
     match name_str.as_deref().and_then(original_thunk) {
         Some(original) => unsafe { original(name, size, buf) },
         // No thunk on record for this name (should not happen -- we only
@@ -293,8 +317,8 @@ fn status() -> String {
 }
 
 /// Folded into `dodstudio_debug_status`. `None` while logging is off, so that
-/// command's gate on the two other opt-in diagnostics (`anim_fix`,
-/// `sound_fix`) can treat this the same way -- see `commands.rs`.
+/// command's gate on the other opt-in report (`anim_fix`'s, under
+/// `dodstudio_spec_match_pov`) can treat this the same way -- see `commands.rs`.
 pub(crate) fn status_line() -> Option<String> {
     if !ACTIVE.load(Ordering::Relaxed) {
         return None;

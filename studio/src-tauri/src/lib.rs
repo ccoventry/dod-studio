@@ -2,9 +2,11 @@ mod audit_manager;
 mod capture_manager;
 mod dir_browser;
 mod hd_manager;
+mod manifest_file;
 mod map_manager;
 mod messages;
 mod render_manager;
+mod review_manager;
 mod settings_manager;
 mod updater_manager;
 
@@ -18,6 +20,7 @@ use capture_manager::{
     CaptureManager, CapturePayload, check_engine_processes, delete_orphaned_previews,
     generate_all_previews, kill_engine_processes, launch_demo_preview, launch_obs,
     launch_standalone_game, read_cfg_commands, scan_orphaned_previews,
+    send_preview_to_running_game, start_steam, steam_state,
 };
 use render_manager::{
     RenderManager, cancel_render_batch, cancel_render_job, check_render_autosave,
@@ -75,16 +78,56 @@ async fn save_settings(
 }
 
 // ── Project Session IPC Commands ───────────────────────────────────────────────
-// `fs:default` (capabilities/default.json) only grants read access to the app's
-// own AppConfig/AppData dirs — it does NOT scope arbitrary user-picked paths, so
-// the JS `@tauri-apps/plugin-fs` read/writeTextFile calls fail for every path a
-// save/open dialog can return. Do the actual I/O in Rust (std::fs, unscoped)
-// instead, same as `save_settings`/`get_settings` above.
+// File I/O for paths the user picked happens here in Rust (std::fs), same as
+// `save_settings`/`get_settings` above. Tauri's fs plugin was dropped: its
+// default scope covers only the app's own config/data dirs, so it could never
+// reach a path a save/open dialog returns.
 
 #[tauri::command]
 async fn save_project_session(path: String, contents: String) -> Result<(), String> {
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         std::fs::write(&path, contents).map_err(|e| messages::failed_to_write_file(&path, e))
+    }))
+    .await
+}
+
+/// `Documents\dod-studio\projects`, made if it's missing: where Save and
+/// Load Project start (#354), so project files don't land wherever the last
+/// file dialog happened to be.
+#[tauri::command]
+async fn default_projects_dir() -> Result<String, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        let dir = dirs::document_dir()
+            .ok_or_else(|| messages::NO_DOCUMENTS_FOLDER.to_string())?
+            .join("dod-studio")
+            .join("projects");
+        std::fs::create_dir_all(&dir)
+            .map_err(|e| messages::failed_to_write_file(&dir.to_string_lossy(), e))?;
+        Ok(dir.to_string_lossy().to_string())
+    }))
+    .await
+}
+
+/// Which of a loaded project's demos are missing, and where each one moved,
+/// if a file with the same key turns up in `search_dirs` (#21).
+#[tauri::command]
+async fn locate_missing_demos(
+    demos: Vec<capture_manager::KnownDemo>,
+    search_dirs: Vec<String>,
+) -> Result<Vec<capture_manager::MissingDemo>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let dirs: Vec<std::path::PathBuf> =
+            search_dirs.iter().map(std::path::PathBuf::from).collect();
+        Ok(capture_manager::locate_missing_demos(&demos, &dirs))
+    }))
+    .await
+}
+
+/// Which demos are no longer the file they were scanned from (#21).
+#[tauri::command]
+async fn changed_demos(demos: Vec<capture_manager::KnownDemo>) -> Result<Vec<String>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(capture_manager::changed_demos(&demos))
     }))
     .await
 }
@@ -180,13 +223,28 @@ async fn scan_directory(
     app_handle: tauri::AppHandle,
     scan_state: tauri::State<'_, ScanManager>,
     paths: Vec<String>,
-) -> Result<Vec<capture_manager::SerializedDemo>, String> {
+    known: Option<Vec<capture_manager::KnownDemo>>,
+    workers: Option<usize>,
+) -> Result<capture_manager::ScanOutcome, String> {
     capture_manager::scan_directory_impl(
         app_handle,
         Arc::clone(&scan_state.is_scanning),
         Arc::clone(&scan_state.cancel_token),
         paths,
+        known.unwrap_or_default(),
+        workers.unwrap_or(capture_manager::SCAN_CONCURRENCY),
     )
+    .await
+}
+
+/// Total physical RAM in bytes, for the scan worker box's hint line (#246).
+#[tauri::command]
+async fn system_memory_bytes() -> Result<u64, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(|| {
+        let mut sys = sysinfo::System::new();
+        sys.refresh_memory();
+        Ok(sys.total_memory())
+    }))
     .await
 }
 
@@ -528,7 +586,6 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(CaptureManager::new())
@@ -549,6 +606,10 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
+            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // for the game's own memory (#565).
+            #[cfg(windows)]
+            native::sys::analysis_server::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -571,6 +632,11 @@ pub fn run() {
             read_cfg_commands,
             check_engine_processes,
             kill_engine_processes,
+            steam_state,
+            start_steam,
+            send_preview_to_running_game,
+            review_manager::start_highlight_review,
+            review_manager::stop_highlight_review,
             scan_orphaned_previews,
             delete_orphaned_previews,
             cancel_capture_batch,
@@ -596,6 +662,10 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            default_projects_dir,
+            locate_missing_demos,
+            changed_demos,
+            system_memory_bytes,
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
@@ -618,6 +688,7 @@ pub fn run() {
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
             updater_manager::is_debug_build,
+            updater_manager::local_git_branch,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

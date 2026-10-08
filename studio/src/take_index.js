@@ -50,14 +50,74 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     const previous = previousByUid.get(streakUid(freshDemo.path, fresh));
     if (!previous) return;
     if (previous.status !== undefined) fresh.status = previous.status;
+    if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
+    if (previous.curation !== undefined) fresh.curation = previous.curation;
     // Kill Range edits are user edits too, not scan output.
     if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
     if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
   });
 
   return freshDemo;
+}
+
+// ── Curation (#44) ──────────────────────────────────────────────────────────
+//
+// An editorial mark, separate from `status` (which drives what the pipeline
+// does): unset = not reviewed yet, Keep, or Skip. Skip unticks the row and
+// locks it, so no batch can include it. Frontend-only, persisted in the
+// project file with the rest of the streak.
+
+export const CURATION = { KEEP: 'Keep', SKIP: 'Skip' };
+
+/** True for a highlight marked Skip: never selectable, never captured. */
+export function isSkipped(streak) {
+  return streak?.curation === CURATION.SKIP;
+}
+
+/** Sets the mark ('' clears it). Skip also unticks the row. */
+export function setCuration(streak, value) {
+  if (value === CURATION.KEEP || value === CURATION.SKIP) streak.curation = value;
+  else delete streak.curation;
+  if (value === CURATION.SKIP) streak.selected = false;
+}
+
+// ── Status source (#105) ────────────────────────────────────────────────────
+//
+// Status moves freely in both directions from the dropdown, but a status set
+// by hand carries `statusByHand` so it can be told apart from one a verified
+// capture or render set. Enumerable on purpose: it has to survive the project
+// file's JSON round trip, and the Rust side ignores fields it doesn't know.
+
+/**
+ * Sets `status` from the dropdown. Returns what it replaced, for Undo
+ * (restoreStatus).
+ */
+export function setStatusByHand(streak, status) {
+  const previous = { status: streak.status, statusByHand: streak.statusByHand === true };
+  streak.status = status;
+  streak.statusByHand = true;
+  return previous;
+}
+
+/** Puts back what setStatusByHand replaced. */
+export function restoreStatus(streak, previous) {
+  if (previous.status === undefined) delete streak.status;
+  else streak.status = previous.status;
+  if (previous.statusByHand) streak.statusByHand = true;
+  else delete streak.statusByHand;
+}
+
+/**
+ * A verified capture or render confirmed `status` on disk: sets it and
+ * clears the set-by-hand mark. Returns true if the status value changed.
+ */
+export function setVerifiedStatus(streak, status) {
+  const changed = streak.status !== status;
+  streak.status = status;
+  delete streak.statusByHand;
+  return changed;
 }
 
 // ── Durable take index ──────────────────────────────────────────────────────
@@ -80,6 +140,21 @@ export function recordTake(takeIndex, takeKey, uids) {
   if (!takeIndex || !takeKey || !uids || uids.length === 0) return;
   const existing = takeIndex[takeKey] || [];
   takeIndex[takeKey] = Array.from(new Set([...existing, ...uids]));
+}
+
+/**
+ * Points every uid of a relocated demo at its new path (#21). A uid starts
+ * with the demo's path, so without this a moved demo's captured takes would
+ * no longer resolve to its highlights.
+ */
+export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
+  if (!takeIndex) return;
+  const oldPrefix = `${oldPath}#`;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = takeIndex[key].map((uid) =>
+      uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
+    );
+  });
 }
 
 /**
@@ -120,27 +195,20 @@ export function isRangeModified(streak) {
 /**
  * True if this highlight carries anything the user did on purpose — real
  * pipeline-earned status (Pending/Captured/Rendered), a note, or a narrowed
- * kill range. This is deliberately a wide net (per user, 2026-08-19): any
- * one of the three is enough to protect the row from Clear Untracked in
- * Workspace mode.
+ * kill range. This is deliberately a wide net: any one of the three is
+ * enough to protect the row from Clear Untracked in Workspace mode.
  *
- * `Pending` used to deliberately NOT count (revised 2026-08-19, was
- * originally "status !== None"): back then `streak.status` started as
- * `undefined` and the status dropdown *displayed* undefined as "Pending"
- * purely for convenience, without ever writing to the field — so an
- * explicit "Pending" selection looked identical to an untouched row, and
- * counting it as tracked could silently flip a row's protection with no
- * visible change. That premise is gone now that an unset status displays
- * (and counts, master_pane.js's countByStatus) as "None" instead —
- * "Pending" only ever appears once the user deliberately sets it, e.g. to
- * flag a highlight for a later capture pass without selecting it yet — so
- * it is exactly the kind of on-purpose signal this predicate exists to
- * protect, and the 2026-08-19 restriction no longer applies.
+ * `Pending` counts because an unset status displays (and counts,
+ * master_pane.js's countByStatus) as "None" — "Pending" only ever appears
+ * once the user deliberately sets it, e.g. to flag a highlight for a later
+ * capture pass without selecting it yet — so it is exactly the kind of
+ * on-purpose signal this predicate exists to protect.
  */
 function isHighlightTracked(streak) {
   if (!streak) return false;
   if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
   if (streak.notes && streak.notes.trim()) return true;
+  if (streak.curation) return true;
   return isRangeModified(streak);
 }
 

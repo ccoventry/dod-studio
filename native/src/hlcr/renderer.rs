@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
 use tokio::process::Command;
 
-use super::config::RenderConfig;
+use super::config::{RenderCodec, RenderConfig};
 use super::scanner::ClipData;
 
 #[derive(Clone, Debug)]
@@ -40,21 +40,91 @@ fn estimate_reservation_bytes(clip: &ClipData) -> u64 {
 
 /// Best-effort required-bytes estimate for one job, whatever its status —
 /// exact for a SourceCopy job (the source file already exists on disk, so
-/// this just measures it), the same conservative raw-frame estimate as
-/// `estimate_reservation_bytes` above for everything else. Shared by
-/// `run_render_job`'s own JIT drive routing (only ever called there for a
-/// job about to start) and the Render footer's whole-queue "Required
-/// (Estimated)" figure (called for every Queued/Rendering job, not just the
-/// one about to run).
-pub fn job_reservation_estimate(clip: &ClipData, is_source_copy: bool) -> u64 {
-    if is_source_copy {
+/// this just measures it). For every other codec: what finished renders of
+/// the same codec and frame size actually wrote per frame, plus a margin,
+/// once there is one to learn from (#120); until then the same conservative
+/// raw-frame estimate as `estimate_reservation_bytes` above, which also caps
+/// the learned figure. Shared by `run_render_job`'s own JIT drive routing
+/// (only ever called there for a job about to start) and the Render footer's
+/// whole-queue "Required (Estimated)" figure (called for every
+/// Queued/Rendering job, not just the one about to run).
+pub fn job_reservation_estimate(clip: &ClipData, codec: RenderCodec, custom_args: &str) -> u64 {
+    if codec == RenderCodec::SourceCopy {
         let take_folder = PathBuf::from(&clip.take_folder);
         let video_name = clip.video_file.as_deref().unwrap_or_default();
-        std::fs::metadata(take_folder.join(&clip.img_folder).join(video_name))
+        return std::fs::metadata(take_folder.join(&clip.img_folder).join(video_name))
             .map(|m| m.len())
-            .unwrap_or_else(|_| estimate_reservation_bytes(clip))
-    } else {
-        estimate_reservation_bytes(clip)
+            .unwrap_or_else(|_| estimate_reservation_bytes(clip));
+    }
+    let raw = estimate_reservation_bytes(clip);
+    rate_key(clip, codec, custom_args)
+        .and_then(|key| learned_rates().lock().ok()?.get(&key).copied())
+        .map(|bytes_per_frame| {
+            let learned = bytes_per_frame * LEARNED_RATE_MARGIN * clip.frame_count as f64;
+            (learned.ceil() as u64).min(raw)
+        })
+        .unwrap_or(raw)
+}
+
+// ── Learned output sizes (#120) ──────────────────────────────────────────────
+//
+// No per-codec table of guessed
+// ratios. Each codec's real bytes per frame are measured from renders that
+// finished, per frame size (a 4K ProRes frame is not a 720p one), and later
+// jobs reserve that plus a margin. The first clip of a kind keeps the
+// uncompressed estimate. Kept for the whole app session: a codec's rate at a
+// frame size doesn't change between batches.
+
+/// Head-room over the largest rate seen, since footage varies from clip to
+/// clip (smoke and fast motion compress worse).
+const LEARNED_RATE_MARGIN: f64 = 1.5;
+
+/// What a rate is learned per: codec (with its custom args, which can be
+/// anything), the HUD stream (always ProRes 4444 with alpha), frame size.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RateKey {
+    codec: String,
+    hud: bool,
+    width: u32,
+    height: u32,
+}
+
+fn rate_key(clip: &ClipData, codec: RenderCodec, custom_args: &str) -> Option<RateKey> {
+    if clip.width == 0 || clip.height == 0 || clip.frame_count == 0 {
+        return None;
+    }
+    let hud = clip.clip_type == "hud_only";
+    Some(RateKey {
+        codec: if hud {
+            String::new()
+        } else if codec == RenderCodec::Custom {
+            format!("custom:{}", custom_args.trim())
+        } else {
+            codec.to_str_id().to_string()
+        },
+        hud,
+        width: clip.width,
+        height: clip.height,
+    })
+}
+
+/// Largest bytes per frame seen for each key this session.
+fn learned_rates() -> &'static Mutex<HashMap<RateKey, f64>> {
+    static RATES: std::sync::OnceLock<Mutex<HashMap<RateKey, f64>>> = std::sync::OnceLock::new();
+    RATES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Records what a finished render of `clip` actually wrote, for later jobs'
+/// reservations. Keeps the largest rate per key, so one small clip can't
+/// talk the estimate down for a bigger one.
+fn record_output_size(clip: &ClipData, codec: RenderCodec, custom_args: &str, bytes: u64) {
+    let Some(key) = rate_key(clip, codec, custom_args) else {
+        return;
+    };
+    let rate = bytes as f64 / clip.frame_count as f64;
+    if let Ok(mut rates) = learned_rates().lock() {
+        let entry = rates.entry(key).or_insert(rate);
+        *entry = entry.max(rate);
     }
 }
 
@@ -217,9 +287,10 @@ pub async fn run_render_job(
     // scheduler tick can all see the same live free-space number and all
     // pick the same drive before any of them has written a byte — the flat
     // 20 GiB threshold this replaced was only ever sized to be safe for one
-    // job at a time. See docs/capture-render-studio-merge-scope.md §4.
+    // job at a time.
     const SAFETY_MARGIN_BYTES: u64 = 1024 * 1024 * 1024; // 1 GiB
-    let reservation_estimate = job_reservation_estimate(&clip, is_source_copy);
+    let reservation_estimate =
+        job_reservation_estimate(&clip, config.target_codec, &config.custom_codec_args);
 
     let mut selected_export_dir: Option<PathBuf> = None;
     {
@@ -368,7 +439,7 @@ pub async fn run_render_job(
         ));
         // Chunked rather than `tokio::fs::copy`, so Cancel actually lands
         // during a large copy (Custom Output/lossless OBS captures — see
-        // docs/obs_alternate_capture.md — can run tens of GB) instead of
+        // docs/archive/obs_alternate_capture_design.md — can run tens of GB) instead of
         // being silently ignored until the whole file has already moved.
         match copy_cancellable(&source_video, &out_file, &cancel_rx).await {
             Ok(true) => {
@@ -844,6 +915,14 @@ pub async fn run_render_job(
 
     match exit_status {
         Ok(status) if status.success() => {
+            if let Ok(meta) = std::fs::metadata(&out_file_str) {
+                record_output_size(
+                    &clip,
+                    config.target_codec,
+                    &config.custom_codec_args,
+                    meta.len(),
+                );
+            }
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Finished".to_string()));
             let _ = tx.send(RenderUpdate::Progress(job_id.clone(), 100));
             let _ = tx.send(RenderUpdate::OutputPath(
@@ -945,6 +1024,71 @@ mod tests {
 
     fn scratch(name: &str) -> Scratch {
         Scratch::new(format_args!("renderer_test_{name}"))
+    }
+
+    fn sized_clip(width: u32, height: u32, frame_count: usize, clip_type: &str) -> ClipData {
+        ClipData {
+            take_folder: String::new(),
+            clip_type: clip_type.to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "t".to_string(),
+            frame_count,
+            width,
+            height,
+            date: String::new(),
+            video_file: None,
+            alpha_folder: None,
+        }
+    }
+
+    /// #120: the first clip of a kind reserves the raw estimate; once one
+    /// has finished, later ones reserve its real rate plus the margin,
+    /// never more than raw, and only for the same codec and frame size.
+    #[test]
+    fn reservations_learn_from_finished_renders() {
+        // Frame sizes no other test uses, since the rates are session-wide.
+        let first = sized_clip(1234, 567, 100, "single");
+        let raw = 1234 * 567 * 3 * 100;
+        assert_eq!(
+            job_reservation_estimate(&first, RenderCodec::H264Software, ""),
+            raw
+        );
+
+        record_output_size(&first, RenderCodec::H264Software, "", 1_000_000);
+        let later = sized_clip(1234, 567, 200, "single");
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::H264Software, ""),
+            (1_000_000.0 / 100.0 * LEARNED_RATE_MARGIN * 200.0) as u64
+        );
+        // A smaller clip never lowers the rate that's kept.
+        record_output_size(&first, RenderCodec::H264Software, "", 10);
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::H264Software, ""),
+            (1_000_000.0 / 100.0 * LEARNED_RATE_MARGIN * 200.0) as u64
+        );
+        // Another codec, frame size, custom args or the HUD stream: raw.
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::ProRes, ""),
+            raw * 2
+        );
+        let hud = sized_clip(1234, 567, 200, "hud_only");
+        assert_eq!(
+            job_reservation_estimate(&hud, RenderCodec::H264Software, ""),
+            raw * 2
+        );
+        record_output_size(&first, RenderCodec::Custom, "-c:v mpeg4", 1_000);
+        assert_eq!(
+            job_reservation_estimate(&later, RenderCodec::Custom, "-c:v ffv1"),
+            raw * 2
+        );
+        // Never above raw, however much a render wrote.
+        let big = sized_clip(1234, 568, 10, "single");
+        record_output_size(&big, RenderCodec::DnxHr, "", u64::MAX / 4);
+        assert_eq!(
+            job_reservation_estimate(&big, RenderCodec::DnxHr, ""),
+            1234 * 568 * 3 * 10
+        );
     }
 
     fn source_copy_config(export_dir: &Path) -> RenderConfig {
