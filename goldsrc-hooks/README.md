@@ -125,6 +125,13 @@ is the complete list):
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Console commands from window buttons** (on by default): a button added
+  to any GameUI window in build mode (Ctrl+Shift+Alt+B) whose command is
+  `engine <console command>` runs it, as the ESC menu's `GameMenu.res`
+  entries already do. Stock, the window drops it: vgui2's
+  `Panel::OnCommand` is empty here, unlike Source's. One redirected call at
+  the end of `Frame::OnCommand`; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it
+  off. See `src/engine_buttons.rs`.
 - **Seek** (`dodstudio_seek_to <seconds>`, `dodstudio_seek_by <seconds>`):
   jumps `viewdemo` playback to a time, the way the demo editor's Goto does,
   through `DemoPlayer.dll`'s own `IDemoPlayer`. A forward jump normally runs
