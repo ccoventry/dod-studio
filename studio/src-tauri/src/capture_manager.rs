@@ -2445,10 +2445,20 @@ pub async fn steam_state() -> Result<String, String> {
 
 /// Starts Steam from where it recorded its own install. Steam outlives
 /// DoD Studio, so the child is not tracked.
+///
+/// Handed to `explorer.exe`, which passes it to the running shell and exits,
+/// so Steam's parent is the shell rather than DoD Studio. Started directly,
+/// Steam joined any job object DoD Studio runs in -- `cargo run`, under
+/// `npm run tauri dev`, puts it in one that kills every process inside when
+/// cargo exits -- so closing or rebuilding Studio closed Steam too.
 #[tauri::command]
 pub fn start_steam() -> Result<(), String> {
     let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
-    std::process::Command::new(exe)
+    // The registry spells it `c:/program files (x86)/steam/steam.exe`, and
+    // explorer.exe reads a leading `/` in an argument as a switch.
+    let exe = exe.to_string_lossy().replace('/', "\\");
+    std::process::Command::new("explorer.exe")
+        .arg(exe)
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
