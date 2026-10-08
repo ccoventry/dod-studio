@@ -355,7 +355,7 @@ pub fn value_warnings(
 /// `mirv_movie_separate_hud` deliberately is NOT here. It used to be, but the
 /// only reason was that the pipeline always re-appended its own value to
 /// Initial Commands after the user's, making anything the user set — Initial
-/// or Scheduled — moot. That checkbox is gone (removed 2026-09-08; typing the
+/// or Scheduled — moot. That checkbox is gone (#214; typing the
 /// command into Initial Commands directly is the only way to use it now), and
 /// with it the one confirmed reason to flag this cvar at all. Nothing in this
 /// codebase has actually tested what a mid-demo toggle does — unlike
@@ -399,13 +399,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 /// typing that is redundant, not dangerous, so it stays shadowed-with-a-
 /// warning rather than refused. `mirv_movie_separate_hud` is not here either,
 /// and not in `MID_DEMO_HAZARDS`: no setting exists behind it any more
-/// (removed 2026-09-08), Initial Commands is simply the intended way to use
+/// (#214), Initial Commands is simply the intended way to use
 /// it, and typing it in Scheduled Commands instead is untracked rather than
 /// flagged — see `MID_DEMO_HAZARDS`'s own doc comment for why. Also distinct
 /// from `mirv_movie_filename`, which used to be here too — see
-/// `SCHEDULED_BANNED_COMMANDS` for why it moved. User-confirmed tier list,
-/// 2026-09-02 (`mirv_movie_filename` re-tiered 2026-09-05, `r_drawentities`/
-/// `cl_lw` added 2026-09-08).
+/// `SCHEDULED_BANNED_COMMANDS` for why it moved.
 ///
 /// - `mirv_recordmovie_start` / `mirv_recordmovie_stop` — the pipeline's own
 ///   `sys_record_start`/`sys_record_stop` scheduling relies on being the only
@@ -580,11 +578,10 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// resize anything — the flush already decided what counts as on screen for
 /// the entire clip — so a warning banner isn't enough here the way it is for
 /// the rest of `MID_DEMO_HAZARDS`: the capture would complete and look
-/// plausible while quietly being wrong. User-requested escalation from hazard
-/// to refused, 2026-09-05.
+/// plausible while quietly being wrong, hence refused rather than a hazard.
 ///
 /// `mirv_movie_filename` is a different shape of exception, moved here from
-/// `BANNED_COMMANDS` the same day: in Initial Commands (or a config) it is
+/// `BANNED_COMMANDS`: in Initial Commands (or a config) it is
 /// not merely safe, it is inert — `build_batch_queue` schedules a fresh
 /// `<demo>_route_N` alias (which sets it) at the same tick as every block's
 /// own `sys_record_start`, for every block including the first, so a value
@@ -1341,7 +1338,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_separate_hud_is_untracked_everywhere() {
-        // No setting exists behind it any more (removed 2026-09-08), and
+        // No setting exists behind it any more (#214), and
         // nothing in this codebase has verified what a mid-demo toggle does
         // — unlike r_decals/mirv_fov, which are measured. Rather than assert
         // a mechanism nobody has checked, it gets no special treatment at

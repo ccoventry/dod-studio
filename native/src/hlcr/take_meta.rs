@@ -6,7 +6,7 @@
 //! sequence's timing, so a value disagreeing with the capture produces a wrong
 //! computed duration and `-shortest` trims the audio against it: a 120fps take
 //! rendered at 300 comes out 2.5x too fast, silently, and the render reports
-//! success. `docs/engineering_backlog.md` has the full diagnosis — it was found
+//! success. Issue #14 has the full diagnosis — it was found
 //! by ear, from a render that "sounds like a helicopter".
 //!
 //! There was no source of truth to check the render setting against. This is it:

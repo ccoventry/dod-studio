@@ -186,8 +186,21 @@ pub fn status() -> String {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    /// Serialises the tests that store into [`HIDDEN_NOW`].
+    ///
+    /// `spectator_crosshair`'s tests read it through their own `status()`,
+    /// and cargo runs tests in parallel, so one test flipping it could decide
+    /// what another one sees. `pub(crate)` so they take this same lock, not a
+    /// second one that would serialise neither against the other.
+    static HIDDEN_NOW_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    pub(crate) fn lock_hidden_now() -> std::sync::MutexGuard<'static, ()> {
+        // A poisoned lock means another test already failed; take it anyway.
+        HIDDEN_NOW_TESTS.lock().unwrap_or_else(|p| p.into_inner())
+    }
 
     /// The two states must be the same width: this overwrites a prologue in
     /// place, so a shorter or longer replacement would leave a partial
@@ -250,6 +263,7 @@ mod tests {
 
     #[test]
     fn status_explains_why_the_stock_cvar_does_not_work() {
+        let _statics = lock_hidden_now();
         HIDDEN_NOW.store(false, Ordering::Release);
         assert!(status().contains("forces the value back"));
         HIDDEN_NOW.store(true, Ordering::Release);
