@@ -14,6 +14,7 @@ import {
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
   launchObs,
+  defaultProjectsDir,
   systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -46,6 +47,7 @@ import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
 import { splitIdenticalCopies } from './demo_copies.js';
+import { initReviewMode } from './review_mode.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -792,9 +794,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
+      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
       const filePath = currentSessionPath || await save({
         title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: 'dod_project.json',
+        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
       if (!filePath) return false;
@@ -856,8 +859,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         // handler; 'discard' falls through to load over it either way.
       }
       try {
+        const projectsDir = await defaultProjectsDir();
         const selected = await open({
           multiple: false,
+          ...(projectsDir ? { defaultPath: projectsDir } : {}),
           filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
         });
         if (selected) {
@@ -1537,6 +1542,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
+  initReviewMode({
+    getDemos: () => currentScannedDemos,
+    getCheckedPaths: getCheckedDemoPaths,
+    onChanged: onHighlightStatusChange,
+  });
+
   initCaptureUI(() => ({
     scanPaths,
     targetDrives,
@@ -1566,8 +1577,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // writes to disk on 'change' (blur/Enter), not every keystroke — closing
   // the app while a field still has focus (never blurred) would otherwise
   // silently drop that edit even though it's already reflected in the
-  // in-memory state persistAppSettings() reads from. Confirmed as a real,
-  // reproducible data-loss case 2026-08-23 (see engineering_backlog.md).
+  // in-memory state persistAppSettings() reads from (a real, reproducible
+  // data-loss case).
   const appWindow = getCurrentWindow();
   appWindow.onCloseRequested(async (event) => {
     event.preventDefault();
