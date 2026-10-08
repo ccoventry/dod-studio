@@ -509,10 +509,13 @@ test('my styles: the form shows its line, refuses bad names, and saves', async (
 
   await page.selectOption('#hd-style-kind', 'ai');
   await expect(page.locator('#hd-style-model')).toBeVisible();
+  await expect(page.locator('#hd-style-sharpening')).toBeHidden();
+  await expect(page.locator('#hd-style-percent')).toBeHidden();
   await page.selectOption('#hd-style-model', 'realesrgan-x4plus-anime');
   await expect(page.locator('#hd-style-line')).toHaveText('soft = realesrgan-x4plus-anime');
 
   await page.selectOption('#hd-style-kind', 'blend');
+  await expect(page.locator('#hd-style-model')).toBeHidden();
   await page.fill('#hd-style-percent', '30');
   await page.selectOption('#hd-style-a', 'crisp');
   await page.selectOption('#hd-style-b', 'x4plus');
