@@ -3,7 +3,7 @@
 Tooling for **Day of Defeat 1.3** (GoldSrc) demo files: parsing them for match
 analytics, and driving the engine plus HLAE to batch-record highlight clips.
 
-A creative fork of [cgdangelo/dod-studio](https://github.com/cgdangelo/dod-studio).
+A creative fork of [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools).
 
 ---
 
@@ -26,12 +26,6 @@ If you are here to look at demo parsing or stats extraction, `dod/` and
 `analysis/` are the parts to read, and they are the parts you can rely on.
 The capture and render pipeline is a frag-movie workflow and is unrelated.
 
-> [!NOTE]
-> **The GUI was rewritten.** Earlier revisions shipped an `egui` desktop app
-> with a WebAssembly target. That has been removed. The current frontend is
-> Tauri v2 + Vite under `studio/`, and the old `dod-studio-gui` binary
-> and `trunk serve` workflow no longer exist.
-
 ---
 
 ## Workspace layout
@@ -42,7 +36,8 @@ The capture and render pipeline is a frag-movie workflow and is unrelated.
     native/           capture engine, demo patcher, take management, FFmpeg
     hl-demo-auditor/  duplicate-demo detector
     benchmark/        parsing/patching performance harness
-    studio/   Tauri v2 + Vite frontend
+    goldsrc-hooks/    32-bit DLL injected into hl.exe: HLTV fixes, HUD control, HD textures
+    studio/           Tauri v2 + Vite frontend
     web-analyzer/     analysis/ compiled to wasm, browser-based demo viewer
 
 ## Quick start
@@ -70,12 +65,17 @@ Tests:
 DoD Studio loads HLAE and its own hook DLL into the game and patches it in
 memory, which is exactly what VAC looks for. So:
 
-- **Use a separate copy of Half-Life for movies**, and point DoD Studio at that
-  copy's `hl.exe`, never at the Steam install you play online with.
-- **Only play demos in it.** Never join a server from a game DoD Studio started.
-  If HLAE asks "You are about to connect to a server", answer No.
-- **Never inject the hook DLL by hand** (`inject.exe`) into a game you play
-  online with.
+- **Only play demos in a game DoD Studio started.** Never join a game server
+  from it. If HLAE asks "You are about to connect to a server", answer No,
+  unless it's an HLTV proxy you chose to watch. DoD Studio's hook DLL refuses
+  `connect` itself while it is loaded, except to an HLTV proxy that says VAC
+  is off.
+- **Never inject the hook DLL by hand** (`inject.exe`) into a game you then
+  play online with.
+- **To play online, start Day of Defeat from Steam, without DoD Studio.** A
+  separate copy of Half-Life for movies is recommended but never required: it
+  keeps your movie configs, models, sprites and sounds out of the game you
+  play online. It protects those files, not your account.
 
 Every launch route and what protects it: [`docs/vac_safety.md`](docs/vac_safety.md).
 
@@ -99,7 +99,7 @@ still present, so the patch is still required.
 ## Licensing
 
 This project is MIT (see `LICENSE`), which carries two copyright lines.
-Charles D'Angelo's is from [cgdangelo/dod-studio](https://github.com/cgdangelo/dod-studio),
+Charles D'Angelo's is from [cgdangelo/dod-tools](https://github.com/cgdangelo/dod-tools),
 which this is a fork of — MIT requires that notice be retained, so it stays.
 The second covers the work done here since the fork.
 
@@ -120,4 +120,6 @@ above and are themselves LGPL-3.0, being changes to an LGPL work.
 ## Documentation
 
 Engineering notes live in `docs/` — architecture decisions, GoldSrc and DoD
-engine quirks, HLAE protocol constraints, and a running bug log.
+engine quirks, and HLAE protocol constraints. `docs/dodstudio_commands.md`
+lists the in-game `dodstudio_*` console commands. Bugs and planned work are
+tracked in GitHub Issues; retired planning docs are in `docs/archive/`.

@@ -49,6 +49,11 @@ pub fn parse_demo(i: &[u8], netmsg_parse_mode: MessageDataParseMode) -> Result<D
 
     let file_start = i;
 
+    // Every slice the frame parsers see from here on is a suffix of this
+    // buffer, which is what lets a network message work out its payload's
+    // offset from its own remaining length. See `parse_network_messages`.
+    aux2.borrow_mut().parsing_source_len = Some(file_start.len());
+
     let (i, header) = parse_header(i)?;
 
     let (i, directory) = if header.directory_offset == 0 {
@@ -75,6 +80,12 @@ pub fn parse_demo(i: &[u8], netmsg_parse_mode: MessageDataParseMode) -> Result<D
 
         parse_directory(directory_start, file_start, netmsg_parse_mode, aux2.clone())
     }?;
+
+    {
+        let mut aux = aux2.borrow_mut();
+        aux.parsing_source_len = None;
+        aux.parsed_from = Some((file_start.as_ptr() as usize, file_start.len()));
+    }
 
     Ok((
         i,
@@ -283,6 +294,7 @@ pub fn parse_frame(
     netmsg_parse_mode: MessageDataParseMode,
     aux: AuxRefCell,
 ) -> Result<Frame> {
+    let source_len = aux.borrow().parsing_source_len;
     let (i, (type_, time, frame)) = (le_u8, le_f32, le_i32).parse(i)?;
 
     let (i, frame_data) = match type_ {
@@ -305,6 +317,10 @@ pub fn parse_frame(
             )
         }
     };
+
+    if let Some(len) = source_len {
+        crate::progress::report(len.saturating_sub(i.len()), len);
+    }
 
     Ok((
         i,
@@ -460,8 +476,17 @@ pub fn parse_network_messages(
     let the_rest = &i[message_length as usize..];
     // let (i, netmessage_data_chunk) = count(le_u8, message_length as usize)(i)?;
 
+    let mut source_span = None;
     let messages = match netmsg_parse_mode {
         MessageDataParseMode::Parse => {
+            // `i` starts at the payload and, under `parse_demo`, runs to the end
+            // of the buffer, so its length says how far from that end the
+            // payload begins.
+            source_span = aux.borrow().parsing_source_len.and_then(|len| {
+                let start = len.checked_sub(i.len())?;
+                Some(start..start + message_length as usize)
+            });
+
             // only parse the chunk
             // otherwise, it might spill outside, which it will
             let (_, netmessages) = parse_netmsg(netmessage_data_chunk, aux)?;
@@ -479,6 +504,7 @@ pub fn parse_network_messages(
             sequence_info,
             message_length,
             messages,
+            source_span,
         },
     ))
 }

@@ -3,7 +3,8 @@
 //! `goldsrc-hooks`' `texture_hires` swaps in upscaled textures from
 //! `<game>\dod\dodstudio_hd\<type>\<style>\`, and `goldsrc-hooks/tools/hd/`'s
 //! scripts build them. This module is the app's side of that: what is built
-//! ([`scan`]), and fetching the upscaler the build needs ([`setup`]). Building
+//! ([`scan`](crate::hd::scan)), and fetching the upscaler the build needs
+//! ([`setup`](crate::hd::setup)). Building
 //! itself is still the scripts' job; the Rust port is #372's second step.
 //!
 //! The layout and names here mirror the hook's and the scripts', and must stay
@@ -137,6 +138,10 @@ pub struct HdStatus {
     pub python: Option<python::PythonStatus>,
     /// The build scripts' folder, `None` when this copy of the app has none.
     pub scripts: Option<String>,
+    /// Whether the configured `hl.exe` gets 4 GB of address space (true) or
+    /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
+    /// the caller, which knows the game path.
+    pub large_address_aware: Option<bool>,
 }
 
 /// `<game>\dod\dodstudio_hd`, from the `hl.exe` path the app launches.
@@ -178,6 +183,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         tools: tools_status(tools_dir),
         python: None,
         scripts: None,
+        large_address_aware: None,
     }
 }
 

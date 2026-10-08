@@ -34,7 +34,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout main
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: main
           fetch-depth: 0 # full tag history — needed to find the last patch under this major.minor
@@ -55,11 +55,12 @@ jobs:
           echo "RELEASE_VERSION=${MAJOR_MINOR}.${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
         with:
+          toolchain: stable
           targets: i686-pc-windows-msvc
 
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: ". -> target"
 
@@ -69,10 +70,16 @@ jobs:
       # tauri-action so tauri.conf.json's `bundle.resources` entry for it
       # already exists on disk when bundling runs.
       - name: Build goldsrc-hooks (32-bit DoD/GoldSrc companion DLL)
-        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc
+        run: cargo build -p goldsrc-hooks --release --target i686-pc-windows-msvc --locked
+
+      # Nothing is published from a tree that fails its tests. `--locked` here
+      # and above but not on tauri-action's build: the version stamp below
+      # rewrites studio/src-tauri/Cargo.toml, so Cargo.lock no longer matches it.
+      - name: Rust tests
+        run: cargo test --workspace --locked
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: npm
@@ -81,6 +88,10 @@ jobs:
       - name: Install frontend dependencies
         working-directory: studio
         run: npm ci
+
+      - name: Frontend unit tests
+        working-directory: studio
+        run: npm run test:unit
 
       # Stamps this run's version into the two Tauri-side manifests. Not
       # committed back — the repo's checked-in version stays whatever it was;
@@ -107,7 +118,7 @@ jobs:
           sed -i "s/^version = \".*\"/version = \"${RELEASE_VERSION}\"/" studio/src-tauri/Cargo.toml
 
       - name: Build, sign, and publish release
-        uses: tauri-apps/tauri-action@v1
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f # action-v1.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
@@ -117,5 +128,8 @@ jobs:
           tagName: v${{ steps.version.outputs.RELEASE_VERSION }}
           releaseName: "DoD Studio v${{ steps.version.outputs.RELEASE_VERSION }}"
           releaseBody: "See assets below to download."
+          # What changed, from the merged PRs' titles, grouped by .github/release.yml
+          # (#165). releaseBody is prepended to the generated notes.
+          generateReleaseNotes: true
           releaseDraft: false
           prerelease: false
