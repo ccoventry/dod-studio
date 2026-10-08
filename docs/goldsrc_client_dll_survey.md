@@ -1,8 +1,8 @@
 # DoD 1.3 `client.dll`: a survey of what can be controlled
 
-A catalogue, not an implementation. Four features have been built against this
-binary — the HLTV animation fix, the gunshot fix, `dodstudio_deathmsg` and
-`dodstudio_objectives` — and each time the analysis went exactly as deep as the
+A catalogue, not an implementation. When this pass was written, four features
+had been built against this binary — the HLTV animation fix, the gunshot fix,
+`dodstudio_deathmsg` and `dodstudio_objectives` — and each time the analysis went exactly as deep as the
 feature needed and no wider. This is the wide pass: what else is in here, what
 controlling it would let a movie-maker do, and how much work each would be.
 
@@ -10,6 +10,21 @@ Opened as [issue #255](https://github.com/ccoventry/dod-studio/issues/255).
 Companion to `docs/goldsrc_client_dll_internals.md` (how the client library is
 entered at all), `docs/goldsrc_death_notices.md` (the kill feed) and
 `docs/goldsrc_objective_icons.md` (the objective HUD).
+
+**Status of the candidates below** (as of 2026-10; the sections keep their
+original "suggested task" wording):
+
+| Candidate | Built? | Command / module | Issue / PR |
+| --- | --- | --- | --- |
+| Hide or wrap any HUD element (§1) | yes | `dodstudio_hide_hudelement`, `hudelement.rs` | #265, PR #296 |
+| Chat line cap, `SayText` (§3) | no | — | — |
+| Dump chosen user messages (§4) | yes | `dodstudio_debug_msglog`, `msglog.rs` | #267 |
+| Move and size the overview map (§5) | yes | `dodstudio_overviewmap`, `overview_map.rs` | PR #303 |
+| Objective icons / timer position (§6) | yes | `dodstudio_objectives`, `objicons.rs` | #254, PR #263 |
+| The `+0x175c6c` VGUI panel (§6) | no | — | — |
+| `r_drawentities` / `cl_lw` quit check (§8) | handled by refusal, not hooked | `native/src/patch/cfg_scan.rs` | #205 |
+| Spectator bar (§10) | yes | `dodstudio_hide_spectator_bars`, `spectator_bars.rs`, `spectator_hud.rs` | #269, #328 |
+| Keep the spectator camera on one player (§10) | yes | `dodstudio_spec_lock` / `dodstudio_spec_target`, `spectator_follow.rs` | #206 |
 
 **Subject:** `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical across the
 stock, pre-Anniversary and post-Anniversary installs. Every RVA below is for
@@ -136,7 +151,8 @@ sound: walk the list from `gHUD+0`, and for each node compare `*(void**)element`
 against `module + <vftable RVA>` from the table above. That is an exact match on
 a value the compiler emitted, not a heuristic.
 
-> **Suggested task:** a `dodstudio_hudelement <name> <0|1>` command backed by the
+> **Suggested task (built as `dodstudio_hide_hudelement`, #265, PR #296):** a
+> `dodstudio_hudelement <name> <0|1>` command backed by the
 > table above. It subsumes several separate feature requests (hide the ammo
 > counter, hide the status bar, hide the crosshair) into one mechanism, and it
 > is the cheapest thing in this document by a wide margin.
@@ -299,8 +315,9 @@ list — ten sites, found by their `fmul [1/480]`:
 | `+0x308e0` | `sub_0x306a0` | 2 | as above |
 | `+0x4c3a3` | `sub_0x4c250` | 20 | positions the same `+0x175c6c` VGUI panel as the `clan_warmup_mode` row |
 
-Two things worth taking from this. The `54` — DoD's spectator bar height in
-480-space — appears in **exactly four places**, and three of them are now
+Two things worth taking from this. The `54` — the push DoD applies to the
+elements below the spectator bar, in 480-space (the bar itself is `64`; see
+`goldsrc-hooks/src/spectator_hud.rs`) — appears in **exactly four places**, and three of them are now
 controllable (`dodstudio_deathmsg offset`, and `dodstudio_objectives`'s two). The
 fourth, `+0x308af`, is the objective icons' overview-map path, which #254
 deliberately does not reach.
@@ -549,9 +566,9 @@ input, not confirmed which physical bind maps to which bit.
    **Update:** `docs/goldsrc_spectator_bars.md` picks this back up and gets
    further — `CDoDSpectatorGUI` *is* real, RTTI-confirmed, and constructed at
    runtime; `+0x1a9d564` turns out to be a much bigger shared interface
-   (141 xrefs, offsets past `+0x368`) and not the panel itself. Still not
-   finished — the container object's own address isn't resolved yet — but the
-   open questions are narrower than "out of scope."
+   (141 xrefs, offsets past `+0x368`) and not the panel itself. **Resolved:**
+   `dodstudio_hide_spectator_bars` (#328, `spectator_bars.rs`) hides the panel
+   by filtering `PaintTraverse`, not through this interface.
 3. **Whether the `54` is reachable at its source.** Yes, more directly than
    §6 states: all four `54 * ScreenHeight / 480` sites read the *same* single
    `.rdata` float, `+0xab7a8` (confirmed by byte search — one address, four

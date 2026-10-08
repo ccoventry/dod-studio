@@ -272,7 +272,7 @@ pub fn spawn_capture_engine(
             let hl_exe_parent = match hl_path.parent() {
                 Some(parent) => parent,
                 None => {
-                    log_crash_abort!(tx, "Invalid hl.exe path: hl_path has no parent");
+                    log_crash_abort!(tx, "Invalid hl.exe path: it has no parent folder");
                     return;
                 }
             };
@@ -309,17 +309,17 @@ pub fn spawn_capture_engine(
             let session_junction_str = session_junction.to_str().unwrap_or_default();
             let session_dir_str = session_dir.to_str().unwrap_or_default();
             if session_junction_str.is_empty() || session_dir_str.is_empty() {
-                log_crash_abort!(tx, "Invalid UTF-8 in session paths");
+                log_crash_abort!(tx, format!("Can't link {} to {}: the path has characters mklink can't take", session_junction.display(), session_dir.display()));
                 return;
             }
 
             match std::process::Command::new("cmd").args(["/C", "mklink", "/J", session_junction_str, session_dir_str]).output() {
                 Ok(out) if !out.status.success() => {
-                    log_crash_abort!(tx, format!("mklink failed for session_junction: {}", String::from_utf8_lossy(&out.stderr)));
+                    log_crash_abort!(tx, format!("Could not link {} to {} (mklink): {}", session_junction.display(), session_dir.display(), String::from_utf8_lossy(&out.stderr).trim()));
                     return;
                 }
                 Err(e) => {
-                    log_crash_abort!(tx, format!("mklink command failed: {}", e));
+                    log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", session_junction.display(), e));
                     return;
                 }
                 _ => {}
@@ -339,13 +339,13 @@ pub fn spawn_capture_engine(
                 let junction_path = hl_exe_parent.join(format!("dod_pool_{}", idx));
                 let _ = std::fs::remove_dir(&junction_path);
                 if let Err(e) = std::fs::create_dir_all(target_dir) {
-                    log_crash_abort!(tx, format!("Failed to create capture directory {:?}: {}", target_dir, e));
+                    log_crash_abort!(tx, format!("Failed to create capture directory {}: {}", target_dir.display(), e));
                     return;
                 }
                 let junction_str = junction_path.to_str().unwrap_or_default();
                 let target_str = target_dir.to_str().unwrap_or_default();
                 if junction_str.is_empty() || target_str.is_empty() {
-                    log_crash_abort!(tx, "Invalid UTF-8 in pool junction paths");
+                    log_crash_abort!(tx, format!("Can't link {} to capture directory {}: the path has characters mklink can't take", junction_path.display(), target_dir.display()));
                     return;
                 }
                 let status = std::process::Command::new("cmd")
@@ -357,16 +357,16 @@ pub fn spawn_capture_engine(
                     .output();
                 match status {
                     Ok(out) if out.status.success() => {
-                        log_markdown(&format!("[pool] Junction created: {:?} -> {:?}", junction_path, target_dir));
+                        log_markdown(&format!("[pool] Junction created: {} -> {}", junction_path.display(), target_dir.display()));
                         pool_junctions.push(junction_path);
                     }
                     Ok(out) => {
                         let err_msg = String::from_utf8_lossy(&out.stderr);
-                        log_crash_abort!(tx, format!("[pool] mklink failed for dod_pool_{}: {}", idx, err_msg));
+                        log_crash_abort!(tx, format!("Could not link {} to capture directory {} (mklink): {}", junction_path.display(), target_dir.display(), err_msg.trim()));
                         return;
                     }
                     Err(e) => {
-                        log_crash_abort!(tx, format!("[pool] Failed to run mklink for dod_pool_{}: {}", idx, e));
+                        log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", junction_path.display(), e));
                         return;
                     }
                 }
@@ -392,7 +392,7 @@ pub fn spawn_capture_engine(
                 let demo_filename = match job.patched_demo_path.file_name() {
                     Some(name) => name.to_string_lossy().replace("-", "_"),
                     None => {
-                        log_crash_abort!(tx, format!("Invalid demo path: {:?}", job.patched_demo_path));
+                        log_crash_abort!(tx, format!("Invalid demo path: {}", job.patched_demo_path.display()));
                         continue;
                     }
                 };
@@ -436,7 +436,7 @@ pub fn spawn_capture_engine(
                         let mut dest_file = match dest_file_opt {
                             Some(f) => f,
                             None => {
-                                log_crash_abort!(tx, format!("Failed to create dest demo file after retries. Source: {:?}, Dest: {:?}", job.patched_demo_path, dest_demo_path));
+                                log_crash_abort!(tx, format!("Could not create {} after several tries (copying from {}). Is the file open in another program?", dest_demo_path.display(), job.patched_demo_path.display()));
                                 continue;
                             }
                         };
@@ -476,7 +476,7 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {:?}: {}", local_dest, e),
+                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
                     }
                 }
 
@@ -500,8 +500,8 @@ pub fn spawn_capture_engine(
                 if entry.free_bytes < crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES {
                     let required_gb = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES as f64 / (1024.0 * 1024.0 * 1024.0);
                     log_crash_abort!(tx, format!(
-                        "Capture aborted: {:?} has less than {:.1} GB free space.",
-                        entry.path, required_gb
+                        "{} has less than {:.1} GB free space. Free some space or pick another capture directory.",
+                        entry.path.display(), required_gb
                     ));
                     return;
                 }
@@ -528,8 +528,8 @@ pub fn spawn_capture_engine(
             if hl_exe_drive_free < hl_exe_required_bytes {
                 let required_gb = hl_exe_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                 log_crash_abort!(tx, format!(
-                    "Capture aborted: {:?} (hl.exe's own drive) has less than {:.1} GB free space.",
-                    hl_exe_parent, required_gb
+                    "{} (hl.exe's own drive) has less than {:.1} GB free space for the patched demos.",
+                    hl_exe_parent.display(), required_gb
                 ));
                 return;
             }
@@ -544,6 +544,9 @@ pub fn spawn_capture_engine(
             let mut obs_session: Option<crate::obs::ObsSession> = None;
             let (marker_tx, marker_rx) = std::sync::mpsc::channel::<crate::obs::Marker>();
             let tail_cancel = Arc::new(AtomicBool::new(false));
+            // The log feeds the markers until the game's events pipe
+            // connects, then the pipe does (#434); see `MarkerGate`.
+            let marker_gate = Arc::new(crate::obs::MarkerGate::default());
 
             if obs_mode {
                 if obs_take_folders.is_empty() {
@@ -610,12 +613,30 @@ pub fn spawn_capture_engine(
             let log_len_before_launch = console_log_len(&log_path);
             let tailer = crate::obs::LogTailer::at_end(&log_path);
             let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            let log_marker_tx = marker_tx.clone();
             if let Err(e) = std::thread::Builder::new()
                 .name("obs_log_tail".into())
-                .spawn(move || tailer.run(marker_tx, cancel))
+                .spawn(move || tailer.run(log_marker_tx, cancel, gate))
             {
                 log_crash_abort!(tx, format!("could not start the console log reader: {}", e));
                 return;
+            }
+            // The same markers straight from the game, when its hook DLL
+            // serves the events pipe. Not fatal if it can't start: the log
+            // above is still reading.
+            let pipe_tailer = crate::obs::PipeTailer::new(|pid, hello| {
+                log_markdown(&format!(
+                    "[HLAE] Game events pipe connected (hl.exe PID {pid}, `{hello}`) — markers now come from the game directly, not qconsole.log"
+                ));
+            });
+            let cancel = Arc::clone(&tail_cancel);
+            let gate = Arc::clone(&marker_gate);
+            if let Err(e) = std::thread::Builder::new()
+                .name("events_pipe_tail".into())
+                .spawn(move || pipe_tailer.run(marker_tx, cancel, gate))
+            {
+                log_markdown(&format!("[HLAE] Could not start the game events reader ({e}); using qconsole.log only"));
             }
 
             // MUST be embedded here, not appended to `cmd` below: HLAE's own
@@ -646,7 +667,7 @@ pub fn spawn_capture_engine(
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    log_crash_abort!(tx, format!("Failed to spawn HLAE (OS Error): {}", e));
+                    log_crash_abort!(tx, format!("Failed to launch HLAE ({}): {}", cmd.get_program().to_string_lossy(), e));
                     for path in &active_dest_paths {
                         let _ = std::fs::remove_file(path);
                     }
@@ -690,6 +711,10 @@ pub fn spawn_capture_engine(
             // taskkilling right after it means hl.exe is dead before it ever
             // gets to process the command that would restart it. See #obs.
             let mut obs_batch_complete_seen = false;
+            // BATCH_COMPLETE straight from the game (#434): the same "done"
+            // the exit-trigger folder signals, a moment sooner and without the
+            // folder, in every capture mode. The folder stays the fallback.
+            let mut pipe_batch_complete_seen = false;
             // One-shot, so a batch cannot spam the log with it.
             let mut condebug_write_checked = false;
             let mut sys = crate::sys::process::snapshot();
@@ -714,6 +739,9 @@ pub fn spawn_capture_engine(
                     }
                     if obs_mode && marker.kind == crate::obs::MarkerKind::BatchComplete {
                         obs_batch_complete_seen = true;
+                    }
+                    if marker.via_pipe && marker.kind == crate::obs::MarkerKind::BatchComplete {
+                        pipe_batch_complete_seen = true;
                     }
                     if marker.kind == crate::obs::MarkerKind::DemoStart
                         && let Some((job_idx, total, clips)) = marker.demo_progress {
@@ -911,19 +939,17 @@ pub fn spawn_capture_engine(
                     break;
                 }
                 if start_time.elapsed().as_secs() > 10
-                    && (dummy_path.exists() || exit_trigger.exists() || obs_batch_complete_seen)
+                    && (dummy_path.exists()
+                        || exit_trigger.exists()
+                        || obs_batch_complete_seen
+                        || pipe_batch_complete_seen)
                 {
-                    let via = if obs_batch_complete_seen && !exit_trigger.exists() {
-                        // The common OBS-mode case: caught it off the marker,
-                        // ahead of exit_trigger ever needing to be written.
-                        "BATCH_COMPLETE marker".to_string()
-                    } else {
-                        format!(
-                            "done marker: {}, exit trigger: {}",
-                            dummy_path.exists(),
-                            exit_trigger.exists()
-                        )
-                    };
+                    let via = completion_source(
+                        pipe_batch_complete_seen,
+                        obs_batch_complete_seen,
+                        dummy_path.exists(),
+                        exit_trigger.exists(),
+                    );
                     log_markdown(&format!(
                         "[HLAE] Batch complete after {:.1}s (via {}) — taskkilling hl.exe",
                         start_time.elapsed().as_secs_f32(),
@@ -962,7 +988,12 @@ pub fn spawn_capture_engine(
                 // visible from out here separates them from an access violation
                 // — the exit status belongs to the launcher, which handed off
                 // long ago — so the wording covers both rather than guessing.
-                if hl_seen_alive && !hl_alive && !dummy_path.exists() && !exit_trigger.exists() {
+                if hl_seen_alive
+                    && !hl_alive
+                    && !dummy_path.exists()
+                    && !exit_trigger.exists()
+                    && !pipe_batch_complete_seen
+                {
                     log_markdown(&format!(
                         "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
                         start_time.elapsed().as_secs_f32()
@@ -1059,7 +1090,9 @@ pub fn spawn_capture_engine(
                     log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
                 }
             } else {
-                log::info!("[autosave] Lockfile removed after clean completion");
+                // Nothing writes `.autosave.json` yet (#20), so a file found
+                // here is a stray, not recovery state: removed quietly (#352).
+                log::debug!("[autosave] removed a stray .autosave.json");
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);
@@ -1067,8 +1100,47 @@ pub fn spawn_capture_engine(
         .unwrap();
 }
 
+/// How the end of a batch was noticed, for the "Batch complete" log line.
+///
+/// The events pipe's `BATCH_COMPLETE` is named whenever it arrived (#434).
+/// Outside OBS mode the capture loop checks only every 500 ms, and the
+/// exit-trigger folder appears a few frames after the marker, so both are
+/// usually there by the same check; naming the folder then hid that the pipe
+/// had already delivered.
+fn completion_source(pipe_seen: bool, obs_seen: bool, dummy: bool, trigger: bool) -> String {
+    if pipe_seen {
+        "BATCH_COMPLETE from the game events pipe".to_string()
+    } else if obs_seen && !trigger {
+        // The common OBS-mode case: caught it off the marker, ahead of
+        // exit_trigger ever needing to be written.
+        "BATCH_COMPLETE marker".to_string()
+    } else {
+        format!("done marker: {dummy}, exit trigger: {trigger}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::completion_source;
+
+    #[test]
+    fn a_batch_end_names_the_pipe_whenever_its_marker_arrived() {
+        // Marker and exit-trigger folder both there by the same check.
+        assert_eq!(
+            completion_source(true, false, false, true),
+            "BATCH_COMPLETE from the game events pipe"
+        );
+        assert_eq!(
+            completion_source(false, true, false, false),
+            "BATCH_COMPLETE marker"
+        );
+        // No pipe (an old hook DLL, or GOLDSRC_HOOKS_EVENTS=0): the folder.
+        assert_eq!(
+            completion_source(false, false, false, true),
+            "done marker: false, exit trigger: true"
+        );
+    }
+
     use super::*;
     use crate::test_support::Scratch;
     use std::time::Duration;
