@@ -108,15 +108,16 @@ fn listen(app: &AppHandle, pid: u32) {
 }
 
 /// Starts reviewing `highlights` in the running game, or in one DoD Studio
-/// starts for it.
+/// starts for it. `fast_forward_gap`: see [`format_queue`] (#665).
 #[tauri::command]
 pub async fn start_highlight_review(
     app: AppHandle,
     highlights: Vec<ReviewHighlight>,
+    fast_forward_gap: Option<f64>,
 ) -> Result<ReviewStarted, String> {
     let count = highlights.len();
     let queue = native::shared::paths::get_appdata_dir().join(QUEUE_FILE);
-    std::fs::write(&queue, format_queue(&highlights))
+    std::fs::write(&queue, format_queue(&highlights, fast_forward_gap))
         .map_err(crate::messages::could_not_write_review_queue)?;
     let line = start_line(&queue);
 

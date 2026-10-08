@@ -6,7 +6,7 @@
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
-import { buildReviewQueue, applyReviewAnswer } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap } from './review_queue.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -48,7 +48,11 @@ export function initReviewMode({ getDemos, getCheckedPaths, onChanged }) {
     }
     btn.disabled = true;
     try {
-      const started = await startHighlightReview(highlights);
+      const gap = fastForwardGap(
+        document.querySelector('#review-fast-forward-cb')?.checked === true,
+        document.querySelector('#review-fast-forward-gap')?.value,
+      );
+      const started = await startHighlightReview(highlights, gap);
       running = true;
       answers = 0;
       showToast(STRINGS.REVIEW.startedToast(started.count, started.launched, skipped), 'success', 8000, {
