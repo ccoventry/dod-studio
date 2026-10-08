@@ -290,7 +290,7 @@ export function initHdPane() {
       return;
     }
     const r = missReport;
-    missesText.textContent = STRINGS.HD.missesFrom(r.date, r.time, r.style, r.summary);
+    missesText.textContent = STRINGS.HD.missesFrom(r.date, r.time, r.style, r.textures, r.summary, r.maps.length);
     const showOnPurpose = missesOnPurpose.checked;
     const el = (tag, className, text) => {
       const e = document.createElement(tag);
@@ -306,7 +306,8 @@ export function initHdPane() {
       const groups = map.groups.filter((g) => showOnPurpose || g.reason !== 'on_purpose');
       if (!groups.length) details.append(el('p', 'hd-hint', STRINGS.HD.MISSES_ONLY_ON_PURPOSE));
       for (const group of groups) {
-        details.append(el('div', 'hd-miss-heading', `${group.heading} (${group.entries.length})`));
+        const heading = group.heading.charAt(0).toUpperCase() + group.heading.slice(1);
+        details.append(el('div', 'hd-miss-heading', `${heading} (${group.entries.length})`));
         const advice = STRINGS.HD.MISSES_ADVICE[group.reason];
         if (advice) details.append(el('p', 'hd-hint', advice));
         const list = el('ul', 'hd-miss-list');

@@ -370,6 +370,7 @@ const MISSES = {
     time: '22:05:57',
     summary: '4 miss(es) this session, 3 different texture(s) (style "plain"). A texture several maps use is listed under each of them.',
     style: 'plain',
+    textures: 3,
     maps: [
       {
         map: 'dod_anzio', total: 3, on_purpose: 1,
@@ -411,14 +412,14 @@ test('misses: a list is shown map by map, on-purpose ones only when asked', asyn
   await loadHarness(page, { status: STATUS, misses: MISSES });
   await page.click('#hd-misses-btn');
   await expect(page.locator('#hd-misses-text')).toHaveText(
-    `From 2026-09-24 at 22:05:57, style plain: ${MISSES.report.summary}`);
+    'From 2026-09-24 at 22:05:57, style plain: 3 textures kept their original. One used on several maps is listed under each.');
 
   const maps = page.locator('#hd-misses-maps details');
   await expect(maps).toHaveCount(2);
   await expect(maps.nth(0).locator('summary')).toHaveText('dod_anzio: 3 kept their original, 1 of them on purpose');
   // On-purpose groups are hidden by default; a map with nothing else says so.
   await expect(maps.nth(0).locator('.hd-miss-heading')).toHaveText(
-    ['no HD file (1)', 'HD file is for a different version of the texture (1)']);
+    ['No HD file (1)', 'HD file is for a different version of the texture (1)']);
   await expect(maps.nth(1)).toContainText('Only textures left alone on purpose.');
 
   const skin = maps.nth(0).locator('li').nth(0);
