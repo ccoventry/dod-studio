@@ -4,7 +4,7 @@
 //! when the Demo Analyzer opens a demo, so "it takes a few seconds" can be
 //! attributed rather than guessed at:
 //!
-//!   read        fs::read of the whole .dem into a Vec<u8>
+//!   read        fs::read of the whole .dem into a `Vec<u8>`
 //!   structural  Demo::parse_from_bytes(None) — walk directory/frames only
 //!   decode      Demo::parse_from_bytes(Parse) — decode every netmessage
 //!   events      the AnalyzerState event loop over every frame/netmessage
