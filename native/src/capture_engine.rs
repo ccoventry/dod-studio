@@ -272,7 +272,7 @@ pub fn spawn_capture_engine(
             let hl_exe_parent = match hl_path.parent() {
                 Some(parent) => parent,
                 None => {
-                    log_crash_abort!(tx, "Invalid hl.exe path: hl_path has no parent");
+                    log_crash_abort!(tx, "Invalid hl.exe path: it has no parent folder");
                     return;
                 }
             };
@@ -309,17 +309,17 @@ pub fn spawn_capture_engine(
             let session_junction_str = session_junction.to_str().unwrap_or_default();
             let session_dir_str = session_dir.to_str().unwrap_or_default();
             if session_junction_str.is_empty() || session_dir_str.is_empty() {
-                log_crash_abort!(tx, "Invalid UTF-8 in session paths");
+                log_crash_abort!(tx, format!("Can't link {} to {}: the path has characters mklink can't take", session_junction.display(), session_dir.display()));
                 return;
             }
 
             match std::process::Command::new("cmd").args(["/C", "mklink", "/J", session_junction_str, session_dir_str]).output() {
                 Ok(out) if !out.status.success() => {
-                    log_crash_abort!(tx, format!("mklink failed for session_junction: {}", String::from_utf8_lossy(&out.stderr)));
+                    log_crash_abort!(tx, format!("Could not link {} to {} (mklink): {}", session_junction.display(), session_dir.display(), String::from_utf8_lossy(&out.stderr).trim()));
                     return;
                 }
                 Err(e) => {
-                    log_crash_abort!(tx, format!("mklink command failed: {}", e));
+                    log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", session_junction.display(), e));
                     return;
                 }
                 _ => {}
@@ -339,13 +339,13 @@ pub fn spawn_capture_engine(
                 let junction_path = hl_exe_parent.join(format!("dod_pool_{}", idx));
                 let _ = std::fs::remove_dir(&junction_path);
                 if let Err(e) = std::fs::create_dir_all(target_dir) {
-                    log_crash_abort!(tx, format!("Failed to create capture directory {:?}: {}", target_dir, e));
+                    log_crash_abort!(tx, format!("Failed to create capture directory {}: {}", target_dir.display(), e));
                     return;
                 }
                 let junction_str = junction_path.to_str().unwrap_or_default();
                 let target_str = target_dir.to_str().unwrap_or_default();
                 if junction_str.is_empty() || target_str.is_empty() {
-                    log_crash_abort!(tx, "Invalid UTF-8 in pool junction paths");
+                    log_crash_abort!(tx, format!("Can't link {} to capture directory {}: the path has characters mklink can't take", junction_path.display(), target_dir.display()));
                     return;
                 }
                 let status = std::process::Command::new("cmd")
@@ -357,16 +357,16 @@ pub fn spawn_capture_engine(
                     .output();
                 match status {
                     Ok(out) if out.status.success() => {
-                        log_markdown(&format!("[pool] Junction created: {:?} -> {:?}", junction_path, target_dir));
+                        log_markdown(&format!("[pool] Junction created: {} -> {}", junction_path.display(), target_dir.display()));
                         pool_junctions.push(junction_path);
                     }
                     Ok(out) => {
                         let err_msg = String::from_utf8_lossy(&out.stderr);
-                        log_crash_abort!(tx, format!("[pool] mklink failed for dod_pool_{}: {}", idx, err_msg));
+                        log_crash_abort!(tx, format!("Could not link {} to capture directory {} (mklink): {}", junction_path.display(), target_dir.display(), err_msg.trim()));
                         return;
                     }
                     Err(e) => {
-                        log_crash_abort!(tx, format!("[pool] Failed to run mklink for dod_pool_{}: {}", idx, e));
+                        log_crash_abort!(tx, format!("Could not run mklink to link {}: {}", junction_path.display(), e));
                         return;
                     }
                 }
@@ -392,7 +392,7 @@ pub fn spawn_capture_engine(
                 let demo_filename = match job.patched_demo_path.file_name() {
                     Some(name) => name.to_string_lossy().replace("-", "_"),
                     None => {
-                        log_crash_abort!(tx, format!("Invalid demo path: {:?}", job.patched_demo_path));
+                        log_crash_abort!(tx, format!("Invalid demo path: {}", job.patched_demo_path.display()));
                         continue;
                     }
                 };
@@ -436,7 +436,7 @@ pub fn spawn_capture_engine(
                         let mut dest_file = match dest_file_opt {
                             Some(f) => f,
                             None => {
-                                log_crash_abort!(tx, format!("Failed to create dest demo file after retries. Source: {:?}, Dest: {:?}", job.patched_demo_path, dest_demo_path));
+                                log_crash_abort!(tx, format!("Could not create {} after several tries (copying from {}). Is the file open in another program?", dest_demo_path.display(), job.patched_demo_path.display()));
                                 continue;
                             }
                         };
@@ -476,7 +476,7 @@ pub fn spawn_capture_engine(
                     let local_dest = demos_dir.join(&demo_filename);
                     match std::fs::copy(&job.patched_demo_path, &local_dest) {
                         Ok(_) => log_markdown(&format!("- [IO] Saved local copy to demos/{}", demo_filename)),
-                        Err(e) => log::warn!("Failed to save local patched copy to {:?}: {}", local_dest, e),
+                        Err(e) => log::warn!("Failed to save local patched copy to {}: {}", local_dest.display(), e),
                     }
                 }
 
@@ -500,8 +500,8 @@ pub fn spawn_capture_engine(
                 if entry.free_bytes < crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES {
                     let required_gb = crate::sys::disk::MIN_DRIVE_HEADROOM_BYTES as f64 / (1024.0 * 1024.0 * 1024.0);
                     log_crash_abort!(tx, format!(
-                        "Capture aborted: {:?} has less than {:.1} GB free space.",
-                        entry.path, required_gb
+                        "{} has less than {:.1} GB free space. Free some space or pick another capture directory.",
+                        entry.path.display(), required_gb
                     ));
                     return;
                 }
@@ -528,8 +528,8 @@ pub fn spawn_capture_engine(
             if hl_exe_drive_free < hl_exe_required_bytes {
                 let required_gb = hl_exe_required_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
                 log_crash_abort!(tx, format!(
-                    "Capture aborted: {:?} (hl.exe's own drive) has less than {:.1} GB free space.",
-                    hl_exe_parent, required_gb
+                    "{} (hl.exe's own drive) has less than {:.1} GB free space for the patched demos.",
+                    hl_exe_parent.display(), required_gb
                 ));
                 return;
             }
@@ -667,7 +667,7 @@ pub fn spawn_capture_engine(
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
-                    log_crash_abort!(tx, format!("Failed to spawn HLAE (OS Error): {}", e));
+                    log_crash_abort!(tx, format!("Failed to launch HLAE ({}): {}", cmd.get_program().to_string_lossy(), e));
                     for path in &active_dest_paths {
                         let _ = std::fs::remove_file(path);
                     }
@@ -1113,7 +1113,9 @@ pub fn spawn_capture_engine(
                     log::warn!("[autosave] Failed to remove .autosave.json: {}", e);
                 }
             } else {
-                log::info!("[autosave] Lockfile removed after clean completion");
+                // Nothing writes `.autosave.json` yet (#20), so a file found
+                // here is a stray, not recovery state: removed quietly (#352).
+                log::debug!("[autosave] removed a stray .autosave.json");
             }
 
             let _ = tx.send(EngineEvent::AllCompleted);

@@ -74,7 +74,7 @@ export const STRINGS = {
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
-    CLEAR_UNTRACKED_TITLE: 'Remove demos with no Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
+    CLEAR_UNTRACKED_TITLE: 'Remove demos with no Pending/Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
     CLEAR_SELECTED_BUTTON: 'Clear Selected',
     CLEAR_SELECTED_TITLE_DEFAULT: 'Check one or more rows first.',
     CLEAR_ALL_BUTTON: 'Clear All',
@@ -100,12 +100,13 @@ export const STRINGS = {
     USE_FOUND_COPY_BUTTON: 'Use found copy',
     useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
-    removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
+    removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
     TRACKED_NOTE_SUFFIX: ' (had tracked work; user confirmed)',
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
+    REASON_REVIEW: 'a Keep/Skip review mark',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
@@ -138,6 +139,13 @@ export const STRINGS = {
     COL_KILLS: 'Kills',
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
+    // #44: an editorial mark, separate from Status.
+    COL_REVIEW: 'Review',
+    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, or Skip. Skip unticks the row and locks it out of every capture batch.',
+    CURATION_UNREVIEWED: '–',
+    CURATION_KEEP: 'Keep',
+    CURATION_SKIP: 'Skip',
+    SKIPPED_CB_TITLE: 'Marked Skip in the Review column, so it can\'t be captured. Set Review back to use it.',
     COL_STATUS: 'Status',
     COL_NOTES: 'Notes',
     COL_DETAILS: 'Details',
@@ -159,7 +167,7 @@ export const STRINGS = {
     mergedTakeBadge: (takeName) => `merged → ${takeName}`,
     mergedBadgeTitle: (mergedCount) => `Merged with ${mergedCount - 1} other highlight(s) into one take — they were recorded together and share this take folder.`,
     secondsSuffix: (n) => `${n}s`,
-    HLAE_PATH_REQUIRED: 'Configure the HLAE and Half-Life executable paths in Batch Capture Config before previewing.',
+    HLAE_PATH_REQUIRED: 'Set the HLAE and Half-Life executable paths in Configuration → Paths before previewing.',
     PREVIEW_LAUNCHING_TOAST: 'Preview launching in HLAE...',
     generatedPreviews: (count) => count === 0
       ? 'Every demo already had a preview — nothing new to generate.'
@@ -217,13 +225,12 @@ export const STRINGS = {
     CAPTURE_MODE_VIDEO: 'Video',
     CAPTURE_MODE_VIDEO_TITLE:
         'HLAE pipes frames straight to FFmpeg as one lossless video per take. Same picture, roughly half the disk, and far fewer files. Needs the HLAE FFmpeg row above to be set.',
-    CAPTURE_MODE_SWITCH_TITLE: 'Switch between capturing a bitmap frame sequence and a video file',
     CAPTURE_MODE_LABEL: 'Capture Mode:',
     CAPTURE_MODE_TITLE:
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
-        'OBS records the game window while dod-studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible. Separate HUD is not available on this path.',
+        'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
     // Shown beside the progress bar while a batch runs, not in the settings —
     // there is nothing to configure and no mode it does not apply to. The
     // throttle is the engine's: GoldSrc slows its frame loop when the window is
@@ -252,14 +259,14 @@ export const STRINGS = {
     OBS_UNREACHABLE: 'Could not reach OBS.',
     obsConnectedSummary: (obsVersion, websocketVersion) =>
         `Connected — OBS ${obsVersion} (obs-websocket ${websocketVersion})`,
-    // Read-only — dod-studio always targets its own fixed profile/scene, there
+    // Read-only — DoD Studio always targets its own fixed profile/scene, there
     // is nothing here for the user to change.
     obsUsingSummary: (profile, scene) => `Using OBS profile "${profile}", scene "${scene}"`,
     obsCanvasSummary: (canvas, output, fps) => `Canvas ${canvas}, output ${output} @ ${Math.round(fps)} fps`,
     obsRecordingToSummary: (directory) => `Recording to ${directory}`,
     obsMissingRequests: (requests) => `This OBS is missing: ${requests.join(', ')} — capture cannot run.`,
     OBS_ALREADY_RECORDING: 'OBS is already recording — stop it before starting a batch.',
-    OBS_ALREADY_STREAMING: 'OBS is streaming — dod-studio will not drive its recorder.',
+    OBS_ALREADY_STREAMING: 'OBS is streaming — DoD Studio will not drive its recorder.',
     obsTestFailed: (err) => `OBS test failed: ${err}`,
     OBS_CAPTURE_FPS_LABEL: 'OBS Capture FPS:',
     OBS_CAPTURE_FPS_TITLE:
@@ -269,11 +276,11 @@ export const STRINGS = {
     OBS_ENABLE_HINT:
         'OBS 28+: enable this under Tools → WebSocket Server Settings (the checkbox, not the Connect Info panel).',
     OBS_PROVISION_HINT:
-        'dod-studio manages its own OBS profile/scene ([DoD-Studio]) — your own setup is never touched.',
+        'DoD Studio manages its own OBS profile/scene ([DoD-Studio]) — your own setup is never touched.',
     // ── Orphaned recording left by a previous run ───────────────────────────
     OBS_ORPHAN_TITLE: 'OBS is still recording',
     obsOrphanPrompt: (directory) =>
-        `OBS is still recording into a dod-studio take folder:\n\n${directory}\n\nA previous session ended without stopping it — a crash, a force-quit or a power cut. It will keep recording until the drive fills.\n\nStop it and keep the clip?`,
+        `OBS is still recording into a DoD Studio take folder:\n\n${directory}\n\nA previous session ended without stopping it — a crash, a force-quit or a power cut. It will keep recording until the drive fills.\n\nStop it and keep the clip?`,
     OBS_ORPHAN_STOP: 'Stop and keep',
     OBS_ORPHAN_LEAVE: 'Leave it',
     obsOrphanRecovered: (video) => `Stopped OBS and kept the recording: ${video}`,
@@ -304,7 +311,7 @@ export const STRINGS = {
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
     // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder, usually the one you play online with. DoD Studio loads HLAE and its hook DLL into the game, which VAC detects. Use a separate copy of Half-Life for movies and never join a server with it.",
+        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -333,7 +340,7 @@ export const STRINGS = {
     // several, and needs a route through rather than a raw OS error.
     HLAE_FFMPEG_ELEVATE_TITLE: 'Administrator rights needed',
     HLAE_FFMPEG_ELEVATE_PROMPT: (ini) =>
-        `${ini} is inside a protected folder, so Windows won't let dod-studio write there directly.\n\nContinue and Windows will ask for permission, then write a two-line file pointing HLAE at your FFmpeg. Nothing else is changed, and an existing ffmpeg.ini is never replaced.`,
+        `${ini} is inside a protected folder, so Windows won't let DoD Studio write there directly.\n\nContinue and Windows will ask for permission, then write a two-line file pointing HLAE at your FFmpeg. Nothing else is changed, and an existing ffmpeg.ini is never replaced.`,
     HLAE_FFMPEG_ELEVATE_CONFIRM: 'Ask Windows for permission',
     HLAE_FFMPEG_ELEVATE_REFUSED: 'Permission was declined, so nothing was written.',
     FFMPEG_OVERRIDE_LABEL: 'FFmpeg Override Path:',
@@ -438,11 +445,10 @@ export const STRINGS = {
     },
     andNMore: (n) => `...and ${n} more`,
     PATHS_MISSING_WARNING: 'Set where Half-Life (hl.exe) and HLAE (hlae.exe) are, on Configuration → Paths, before starting a capture.',
-    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — pick at least one in the Highlights tab before starting a capture.',
+    NO_HIGHLIGHTS_SELECTED_WARNING: 'No highlights selected — tick at least one in Highlight Details on the Capture tab before starting a capture.',
     DEMOS_MISSING_NOT_STARTED: "Capture not started: a demo with picked highlights is missing. Use its row's Locate… button, or untick its highlights.",
     NO_DRIVES_CONFIGURED_WARNING: 'No Capture Output directories configured — add at least one with free space before starting a capture.',
     OBS_NOT_CONNECTED_WARNING: 'Not connected to OBS — capture mode is OBS, but the last connection check failed. Fix the connection in Configuration → Output Format before starting a capture.',
-    OBS_CHECKING_WARNING: 'Checking the OBS connection…',
     bannedCommandsWarning: (n) => `${n} command${n === 1 ? '' : 's'} in Initial or Scheduled Commands can't be used — fix or remove ${n === 1 ? 'it' : 'them'} in the Commands tab before starting a capture.`,
     // Measured 2026-08-28, see docs/direct_to_video_capture.md. Spelled out
     // because both halves report success and the broken output only shows up
@@ -577,7 +583,6 @@ export const STRINGS = {
     recoveredJobsToast: (completed, pending) => `Recovered ${completed} completed, ${pending} pending render job(s).`,
     recoverFailed: (err) => `Failed to recover render batch: ${err}`,
     renderingStatus: (done, total) => `Status: Rendering (${done}/${total} done)`,
-    BATCH_FINISHED_WITH_ERRORS: 'Render batch finished with errors — check job rows for details.',
     BATCH_CANCELLED: 'Render batch cancelled.',
     BATCH_COMPLETED: 'Render batch completed successfully!',
     // Mixed-outcome batches report every non-zero count instead of one label,
@@ -598,14 +603,12 @@ export const STRINGS = {
     scanDirError: (err) => `Error scanning render directories: ${err}`,
     STATUS_SCAN_FAILED: 'Status: Scan failed',
     INITIALIZING_RENDER_BATCH: 'Initializing render batch...',
-    STATUS_SCANNING_FOR_TAKES: 'Status: Scanning for takes...',
     RENDER_BATCH_QUEUED: 'Render batch queued successfully!',
     renderBatchError: (err) => `Error executing render batch: ${err}`,
     CANCELLING_RENDER_BATCH: 'Cancelling render batch...',
     nvencWarning: (n) => `${n} concurrent NVENC renders may exceed your GPU's encoder session limit (often 3-5 on consumer GeForce cards). If renders start failing, lower Max Concurrent Renders.`,
     highlightsMarkedRendered: (n) => `${n} highlight(s) marked Rendered.`,
     UNKNOWN_SOURCE_FOLDER: '(unknown)',
-    frameCountLabel: (n) => `${n} frames`,
   },
 
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
@@ -926,10 +929,10 @@ export const STRINGS = {
     CANCEL_BUTTON: 'Cancel',
   },
 
-  // ── Unsaved-changes prompt on window close (Capture Studio) ─────────────
+  // ── Unsaved-changes prompt on window close ─────────────
   UNSAVED_CHANGES_MODAL: {
     TITLE: 'Unsaved Changes',
-    MESSAGE: 'Capture Studio has unsaved changes. Save your session before closing?',
+    MESSAGE: 'DoD Studio has unsaved changes. Save your session before closing?',
     SAVE_BUTTON: 'Save & Close',
     DISCARD_BUTTON: 'Close Without Saving',
     CANCEL_BUTTON: 'Cancel',
@@ -961,16 +964,10 @@ export const STRINGS = {
     demoCount: (n) => (n === 1 ? '1 demo' : `${n} demos`),
     missingSummary: (maps, demos) =>
       `${maps === 1 ? '1 map' : `${maps} maps`} needed by ${demos === 1 ? '1 demo' : `${demos} demos`}`,
-    wrongBuildDetail: (map, wanted, found) =>
-      `${map} — these demos need build ${wanted}, the installed map is ${found}`,
-    missingDetail: (map, demos) => `${map} — not installed, needed by ${demos}`,
     installedToast: (map) => `Installed ${map}`,
     alreadyCorrectToast: (map) => `${map} was already the right build`,
     replacedNote: (path) => `Previous map kept at ${path}`,
     downloadFailedToast: (map, err) => `Could not install ${map}: ${err}`,
-    checkFailed: (err) => `Could not check demo maps: ${err}`,
-    UNVERIFIABLE_NOTE:
-      'HLTV demos do not record which map build they need, so those can only be checked for the map being present.',
   },
 
   // The game's own config files setting cvars this app reads. Advisory only —
@@ -1203,7 +1200,7 @@ export const STRINGS = {
     DEMO_SINGULAR: 'demo',
     DEMO_PLURAL: 'demos',
     VERB_REMOVES: 'removes',
-    clearSummaryTracked: (verb, count, plural, trackedCount) => `This ${verb} ${count} ${plural} — ${trackedCount} of them have tracked work (Captured/Rendered status, a note, or an edited kill range) that will be lost. This cannot be undone.`,
+    clearSummaryTracked: (verb, count, plural, trackedCount) => `This ${verb} ${count} ${plural} — ${trackedCount} of them have tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost. This cannot be undone.`,
     clearSummaryUntracked: (verb, count, plural) => `This ${verb} ${count} ${plural}. None currently have tracked work on them. This cannot be undone.`,
 
     NO_DEMOS_SELECTED: 'No demos selected — check rows in the queue first.',
@@ -1316,6 +1313,91 @@ export const STRINGS = {
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+    // The style comparison: compare.py's sheet.
+    PREVIEW_TITLE: 'Compare styles',
+    PREVIEW_HINT: 'The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.',
+    PREVIEW_MAP_LABEL: 'Map:',
+    PREVIEW_AUTO_MAP: 'A few of your maps, picked for you',
+    PREVIEW_BUTTON: 'Show comparison',
+    PREVIEW_WORKING: 'Making the sheet...',
+    PREVIEW_NOTHING_BUILT: 'Build a style first: the sheet compares built files.',
+    previewDone: (samples, maps) => `${samples} sample${samples === 1 ? '' : 's'}${maps.length ? `, from ${maps.join(', ')}` : ''}.`,
+    previewSkipped: (skipped) => `Left out: ${skipped.join('; ')}.`,
+    // The custom-style form: lines in the install's my_styles.txt.
+    MY_STYLES_TITLE: 'Your own styles',
+    MY_STYLES_HINT: 'Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.',
+    myStylesFile: (path, exists) => (exists ? `Saved in ${path}.` : `Saved in ${path}, made on the first save.`),
+    myStylesOldPlace: (old, path) => `Builds read ${old} for now; the first save copies it to ${path}, and builds use that from then on.`,
+    myStylesError: (error) => `my_styles.txt can't be read, so builds won't start until it's fixed: ${error}`,
+    MY_STYLES_NONE: 'None yet.',
+    STYLE_NAME_LABEL: 'Name:',
+    STYLE_NAME_PLACEHOLDER: 'e.g. crisp',
+    STYLE_KIND_LABEL: 'Made by:',
+    STYLE_KINDS: { plain: 'A plain enlargement, sharpened', ai: 'An AI model', blend: 'Mixing two styles' },
+    STYLE_SHARPENING_LABEL: 'Sharpening (0 to 500; plain is 60):',
+    STYLE_MODEL_LABEL: 'Model:',
+    styleModelHint: (dir) => `To use another model, put its .param and .bin files in ${dir}\\models, then Refresh.`,
+    STYLE_NO_MODELS: '(no models found)',
+    STYLE_MIX_LABEL: 'Mix:',
+    STYLE_MIX_OF: '% of',
+    STYLE_MIX_REST: 'and the rest',
+    STYLE_SAVE_BUTTON: 'Save style',
+    STYLE_EDIT_BUTTON: 'Edit',
+    STYLE_REMOVE_BUTTON: 'Remove',
+    STYLE_BAD_NAME: 'Names are 1 to 32 lowercase letters, digits, - and _.',
+    styleBuiltIn: (name) => `${name} is a built-in style; pick another name.`,
+    STYLE_BLENDS_ITSELF: "A style can't mix itself.",
+    styleSaved: (name) => `Saved ${name}. Build it above to make its files.`,
+    styleRemoved: (name) => `Removed ${name} from my_styles.txt. Files it already built are kept.`,
+    // How each kind of custom style reads in the list.
+    styleDescription: (def) => ({
+      ai: () => `AI model ${def.model}`,
+      plain: () => `plain enlargement, sharpening ${def.sharpening}`,
+      blend: () => `${def.percent}% ${def.a}, ${100 - def.percent}% ${def.b}`,
+    })[def.kind](),
+    STYLE_NEEDS_MODEL: ' (needs its model)',
+    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    MISSES_TITLE: 'Textures that kept their original',
+    MISSES_BUTTON: "Read the game's log",
+    MISSES_READING: 'Reading...',
+    MISSES_HINT: "After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.",
+    MISSES_SHOW_ON_PURPOSE: 'Show textures left alone on purpose',
+    MISSES_NONE: "No list in the game's log yet. Type the command above in the game's console first.",
+    // `textures` is null when the hook's summary doesn't give a count: show its own words then.
+    missesFrom: (date, time, style, textures, summary, mapCount) => `From ${date} at ${time}${style ? `, style ${style}` : ''}: ${
+      textures === 0 ? 'every texture was replaced.'
+        : textures == null ? summary
+          : `${textures} texture${textures === 1 ? '' : 's'} kept their original.${mapCount > 1 ? ' One used on several maps is listed under each.' : ''}`}`,
+    missesMap: (map, total, onPurpose) => `${map}: ${total} kept their original${onPurpose ? `, ${onPurpose} of them on purpose` : ''}`,
+    MISSES_ONLY_ON_PURPOSE: 'Only textures left alone on purpose.',
+    missesLoads: (loads, type) => (type === 'sprite' ? `${loads} frames` : `${loads} loads`),
+    missesAlsoOn: (count) => `also on ${count} other map${count === 1 ? '' : 's'}`,
+    // What to do about each reason, after the hook's own heading.
+    MISSES_ADVICE: {
+      wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
+      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      failed: "A file was found but couldn't be used; each line says why.",
+      on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
+    },
+    // The hook's asset kinds in the miss list (singular, unlike the folders).
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
+  },
+
+  // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
+  BATCH_RESULTS: {
+    title: (time) => `Last batch, ended ${time}`,
+    DISMISS: 'Hide until the next batch',
+    outcome: (kind, text) => ({
+      completed: 'Completed.',
+      cancelled: 'Cancelled.',
+      error: `Stopped: ${text || 'see the activity log'}.`,
+    })[kind] || '',
+    totals: (captured, takes, size, notRenderable) => `${captured} of ${takes} take${takes === 1 ? '' : 's'} on disk, ${size}${notRenderable > 0 ? `; ${notRenderable} Render Studio can't use yet` : ''}.`,
+    CHECKING: 'Checking the takes on disk…',
+    kills: (n) => `${n} kill${n === 1 ? '' : 's'}`,
+    merged: (n) => `(+${n} more, recorded as one take)`,
+    STATUS: { ok: 'Captured', unrenderable: "Captured, can't render yet", missing: 'Missing' },
+    OPEN_FOLDER: 'Open folder',
   },
 
   // ── crash_map_warnings.js: maps a session crashed on (#207) ────────────
@@ -1356,15 +1438,39 @@ export const STRINGS = {
     BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
     NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
   },
+  // ── Review highlights (#623) ─────────────────────────────────────────────
+  REVIEW: {
+    BUTTON: 'Review highlights',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TICK_YES_LABEL: 'Tick Yes for capture',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
+    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
+    STOP: 'Stop',
+    startedToast: (count, launched, skipped) =>
+      `Reviewing ${count} highlight${count === 1 ? '' : 's'} in Day of Defeat${launched ? ' (starting the game)' : ''}.`
+      + (skipped > 0 ? ` ${skipped} older highlight${skipped === 1 ? ' needs' : 's need'} a rescan first.` : ''),
+    endedToast: (reason, answers) => {
+      const answered = `${answers} answer${answers === 1 ? '' : 's'} saved`;
+      if (reason === 'done') return `Review finished: ${answered}.`;
+      if (reason === 'stopped') return `Review stopped: ${answered}.`;
+      if (reason === 'closed') return `The game closed: ${answered}.`;
+      return `Review ended (${reason}): ${answered}.`;
+    },
+  },
+
   IPC: {
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
+    hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,
+    hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
     previewFailed: (err) => `Preview failed: ${err}`,
+    reviewFailed: (err) => `Could not start the review: ${err}`,
     cfgImportFailed: (err) => `Could not read that config: ${err}`,
     processCheckFailed: (err) => `Process check failed: ${err}`,
     launchFailed: (err) => `Launch failed: ${err}`,

@@ -32,5 +32,6 @@ tested under plain Node (not wired into CI):
     node --test web-analyzer/tests/export.test.mjs
 
 The `wasm-bindgen` crate dependency and CLI version **must match exactly** —
-a mismatch fails at the bindgen step. Bump both together (see the pinning
-comment in `Cargo.toml`).
+a mismatch fails at the bindgen step. Bump both together (the pin and its
+comment are in the root `Cargo.toml`, and the CLI version is also set in
+`.github/workflows/deploy_web.yml`).
