@@ -46,7 +46,7 @@ pub struct ClipData {
     /// which only works while HLAE spells the folder exactly that way. Carrying
     /// the name the scanner actually saw on disk means the renderer is told its
     /// partner rather than guessing it, and is the one piece of the standalone
-    /// HLCR's design (see `docs/render_studio_hlcr_parity.md`) that does not
+    /// HLCR's design (see `docs/archive/render_studio_hlcr_parity.md`) that does not
     /// depend on frame counts.
     ///
     /// `#[serde(default)]` for the same reason as `video_file`: autosaves
@@ -359,7 +359,7 @@ pub fn scan_folder_background(
             // noticing. Windows resolves the paths case-insensitively either
             // way, so only this lookup was ever at risk.
             //
-            // `docs/render_studio_hlcr_parity.md` notes the standalone HLCR
+            // `docs/archive/render_studio_hlcr_parity.md` notes the standalone HLCR
             // pairs folders generically instead — any `alpha`/`mask` folder with
             // a same-frame-count `color`/`rgb` one — which is more robust than
             // literal names and remains the better long-term shape.

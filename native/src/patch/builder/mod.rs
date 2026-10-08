@@ -292,7 +292,8 @@ pub fn build_batch_queue(
         ));
     }
 
-    // 1. Primer Job
+    // 1. Primer Job. Always first when there is any work, so a test asserting
+    // on this queue gets one job more than the streak groups it passed in.
     if total_jobs > 0 {
         let first_source = sorted_groups[0].0.0.to_string();
         let mut primer_init = config.init_commands.clone();

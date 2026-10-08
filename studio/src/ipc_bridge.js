@@ -27,6 +27,17 @@ export async function openActivityLog() {
     });
 }
 
+/** `Documents\dod-studio\projects` (made if missing), where Save and Load
+ *  Project start (#354), or null when it can't be had: the dialogs then open
+ *  wherever they would anyway, so this is logged, not toasted. */
+export async function defaultProjectsDir() {
+  return invoke("default_projects_dir")
+    .catch((err) => {
+      console.error("IPC Execution Error (default_projects_dir):", err);
+      return null;
+    });
+}
+
 /**
  * Resolves `{ demos, unchanged }`. `known` is `[{ path, file_key }]` for demos
  * already in the queue: the backend skips each one whose file is unchanged on
@@ -226,6 +237,26 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
     .catch((err) => {
       console.error("IPC Execution Error (send_preview_to_running_game):", err);
       showToast(STRINGS.IPC.previewFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Review highlights (#623): sends the highlights to the running game, or
+ *  starts one. Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights) {
+  return invoke("start_highlight_review", { highlights })
+    .catch((err) => {
+      console.error("IPC Execution Error (start_highlight_review):", err);
+      showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);
+      throw err;
+    });
+}
+
+/** Ends the review in the game; its answers so far are already in. */
+export async function stopHighlightReview() {
+  return invoke("stop_highlight_review")
+    .catch((err) => {
+      console.error("IPC Execution Error (stop_highlight_review):", err);
       throw err;
     });
 }
@@ -597,6 +628,17 @@ export async function countDemoFiles(path) {
 /** Bounded background scan (depth-4, 2000-folder cap) for folders containing
  *  at least one `.dem` file, rooted at `root` (or the default browse dir).
  *  Feeds the Explorer sidebar's "Local" Quick Links tier. */
+/** Writes a text file the user picked a path for (#110's marker list).
+ *  Goes through the same unscoped Rust write as Save Project, since the fs
+ *  plugin can't reach paths a save dialog returns. */
+export async function writeTextFile(path, contents) {
+  return invoke("save_project_session", { path, contents })
+    .catch((err) => {
+      console.error("IPC Execution Error (save_project_session, text export):", err);
+      throw err;
+    });
+}
+
 export async function scanDemoFolders(root) {
   return invoke("scan_demo_folders", { root: root ?? null })
     .catch((err) => {
@@ -651,6 +693,16 @@ export async function isDebugBuild() {
   return invoke("is_debug_build").catch((err) => {
     console.error("IPC Execution Error (is_debug_build):", err);
     return false;
+  });
+}
+
+/** The git branch of the source tree this build came from, or null when it
+ *  wasn't built on this PC (every published installer). Best-effort, like
+ *  isDebugBuild(): a missing branch only leaves it out of the window title. */
+export async function localGitBranch() {
+  return invoke("local_git_branch").catch((err) => {
+    console.error("IPC Execution Error (local_git_branch):", err);
+    return null;
   });
 }
 
