@@ -453,6 +453,13 @@ body {
   color: #ffffff;
 }
 
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;

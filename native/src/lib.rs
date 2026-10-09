@@ -23,12 +23,17 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// Caching many demos ahead of time (#569).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_cache;
+
 /// Which demos in a folder recorded more than one map (#624).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_maps_scan;
 /// Splitting a demo that recorded more than one map (#624).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
