@@ -38,6 +38,13 @@
 //! still left) and the `GameRules` with or without the bit. Only on the level
 //! they arrived on, so another map's flags are never replayed.
 //!
+//! Stopping the countdown is not enough on its own: `DrawClanTimer` posts its
+//! line every frame to a centre-text object (`+0x175c6c`, through
+//! `+0x3a830`), which keeps the last line it got on screen until 4 s after
+//! the post (client time + 4.0 at the object's `+0x14`). So turning the cvar
+//! on mid-countdown left the last second frozen there for 4 s (live test,
+//! 2026-10-09). The re-delivery also ends that line's hold.
+//!
 //! ## Mechanism
 //!
 //! `map_text`'s: `pfnHookUserMsg` prepends, the game's handler is called
@@ -65,6 +72,15 @@ const CLAN_KEY_PREFIX: &[u8] = b"#clan_";
 
 /// `GameRules`' second byte: the warm-up mode flag.
 const WARMUP_BIT: u8 = 4;
+
+/// The end of `DrawClanTimer` (`+0x2d3e3`): `push 1.0; push ebx; push -1;
+/// push 0; push 0; push edx; push eax; push ecx; mov ecx, <centre-text
+/// object>; call`. Unique in `client.dll`, the same on both installs.
+const POST_PATTERN: &str = "68 00 00 80 3F 53 6A FF 6A 00 6A 00 52 50 51 B9";
+/// Where the object's address sits in [`POST_PATTERN`]'s `mov ecx`.
+const POST_OBJECT_AT: usize = 16;
+/// The object's hold: the client time its line stops showing, an `f32`.
+const HOLD_UNTIL: usize = 0x14;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 /// The cvar's value as last seen: what the message handler reads.
@@ -197,6 +213,29 @@ fn remember(update: impl FnOnce(&mut Last)) {
     }
 }
 
+/// Ends the hold on the countdown's last line, so it goes the moment the
+/// countdown stops instead of 4 s later. Only called while the countdown is
+/// running, when that line is the one the object shows.
+fn end_countdown_line() -> Result<(), String> {
+    let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
+    // Safety: `client_module_base` only returns a base for a mapped module,
+    // and it stays mapped for the session.
+    let at = unsafe { crate::scan::find_unique(base, POST_PATTERN) }
+        .map_err(|why| format!("could not find DrawClanTimer's post -- {why}"))?;
+    // Safety: the pattern matched, so the `mov ecx, imm32` operand is there;
+    // the loader has already relocated it to the object's live address.
+    let object = unsafe { std::ptr::read_unaligned((at + POST_OBJECT_AT) as *const u32) } as usize;
+    if !(base..base + 0x0100_0000).contains(&object) {
+        return Err(format!(
+            "the centre-text object {object:#x} is outside client.dll"
+        ));
+    }
+    // Safety: a static object inside client.dll's image; the game writes this
+    // `f32` from the same thread, in the same frame loop.
+    unsafe { std::ptr::write_volatile((object + HOLD_UNTIL) as *mut f32, 0.0) };
+    Ok(())
+}
+
 /// Re-delivers what the game already holds, as it should now look.
 fn redeliver(hide: bool) {
     let level = level();
@@ -211,9 +250,17 @@ fn redeliver(hide: bool) {
                 // 0 makes `DrawClanTimer`'s "still running" test false at once.
                 let sent = if hide { 0 } else { left };
                 let result = deliver(CLAN_TIMER, &mut [sent]);
+                let line = if hide {
+                    match end_countdown_line() {
+                        Ok(()) => ", its last line cleared".to_string(),
+                        Err(why) => format!(", its last line stays up to 4 s: {why}"),
+                    }
+                } else {
+                    String::new()
+                };
                 unsafe {
                     crate::debug::report(&format!(
-                        "clan_text: re-delivered ClanTimer {sent} ({left} s of {seconds} left, handler returned {result})"
+                        "clan_text: re-delivered ClanTimer {sent} ({left} s of {seconds} left, handler returned {result}){line}"
                     ))
                 };
             }
