@@ -48,6 +48,7 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
@@ -584,6 +585,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       notify_updates: notifyUpdates,
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
+      clip_name_template: getClipNameTemplate(),
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -737,6 +739,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+      setClipNameTemplate(settings.clip_name_template);
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
@@ -1352,10 +1355,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key, or no teams:
-      // #445) are scanned.
+      // re-parsed; ones from an older project (no file_key, no map_name:
+      // saved before clip names, #441, or no teams: #445) are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key && demoHasTeams(d))
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1973,6 +1976,25 @@ window.addEventListener("DOMContentLoaded", async () => {
     markDemosOverLimit();
     hlPathInput.addEventListener('change', markDemosOverLimit);
   }
+  // #441: the preview uses the selected demo's first checked highlight (its
+  // first highlight when none is checked); a settled template change is
+  // saved and redraws the automatic names in Highlight Details.
+  initClipNameSettings({
+    getHighlight: () => {
+      const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
+      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const streak = own.find((s) => s.selected) || own[0];
+      return streak ? { demo, streak } : null;
+    },
+    getExportDirList: () => renderExportDirs,
+    onChange: () => {
+      persistAppSettings();
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+    },
+  });
+
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
     // switching the selected demo, or after a capture/render completes) —
@@ -1982,6 +2004,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Must NOT mark the project dirty — see onDirty below for that.
     refreshLaunchGuard({ targetDrives, currentScannedDemos });
     renderMasterList(currentScannedDemos, selectedDemoIdx);
+    refreshClipNamePreview();
   }, () => {
     // Fired only from an actual highlights-table field edit (selection,
     // kill range, status, notes) — all of it is part of the `demos` written

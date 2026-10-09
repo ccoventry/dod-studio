@@ -286,6 +286,15 @@ pub struct SerializedStreak {
     /// native patch engine.
     #[serde(default)]
     pub frame_times: Vec<f32>,
+    /// For the clip name (#441): the killer's side, and each kill's victim
+    /// and victim's side. Empty on a demo from a project saved before these
+    /// existed, until it is scanned again.
+    #[serde(default)]
+    pub faction: Option<String>,
+    #[serde(default)]
+    pub victims: Vec<String>,
+    #[serde(default)]
+    pub victim_factions: Vec<String>,
     /// The scanned file's size and start hash, checked against the file on
     /// disk before a batch or preview patches it (#196). Absent from
     /// projects saved before it existed.
@@ -1509,6 +1518,13 @@ pub struct SerializedDemo {
     /// simply scanned again.
     #[serde(default)]
     pub file_key: Option<String>,
+    /// The map, from the demo header, for the clip name's `{map}` and the
+    /// Master Queue's search (#441).
+    #[serde(default)]
+    pub map_name: Option<String>,
+    /// The file's modified time, for the clip name's `{date}` (#441).
+    #[serde(default)]
+    pub modified_unix_secs: Option<u64>,
     /// The most entities in one snapshot (#207): over the engine's
     /// `MAX_PACKET_ENTITIES` the game closes to the desktop. `None` for a
     /// demo from a project saved before it was counted.
@@ -1579,6 +1595,9 @@ impl From<CaptureStreak> for SerializedStreak {
             // The inbound From<SerializedStreak> impl re-wraps it in Arc::new().
             frame_times: (*c.frame_times).clone(),
             match_start_tick: c.match_start_tick,
+            faction: None,
+            victims: Vec::new(),
+            victim_factions: Vec::new(),
             source_key: c.source_key,
         }
     }
@@ -2102,7 +2121,18 @@ pub async fn scan_directory_impl(
                                     .map(|mut s| {
                                         s.match_start_tick = match_start_tick;
                                         s.frame_times = frame_times_arc.clone();
-                                        SerializedStreak::from(s)
+                                        let facts = native::clip_facts::streak_facts(
+                                            &analysis,
+                                            s.player_index,
+                                            s.kills.first().map_or(s.start_tick, |k| k.0),
+                                        )
+                                        .unwrap_or_default();
+                                        let mut serialized = SerializedStreak::from(s);
+                                        serialized.faction =
+                                            Some(facts.faction).filter(|f| !f.is_empty());
+                                        serialized.victims = facts.victims;
+                                        serialized.victim_factions = facts.victim_factions;
+                                        serialized
                                     })
                                     .collect();
 
@@ -2115,6 +2145,13 @@ pub async fn scan_directory_impl(
                                     playback_frames,
                                     streaks: serialized_streaks,
                                     file_key: file_keys[idx].clone(),
+                                    map_name: Some(analysis.demo_info.map_name.clone())
+                                        .filter(|m| !m.is_empty()),
+                                    modified_unix_secs: std::fs::metadata(file)
+                                        .and_then(|m| m.modified())
+                                        .ok()
+                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                        .map(|d| d.as_secs()),
                                     peak_packet_entities: analysis.demo_info.peak_packet_entities,
                                     recorder_id: recorder.as_ref().map(|p| p.id.clone()),
                                     recorder_name: recorder.map(|p| p.name),

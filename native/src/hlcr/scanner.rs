@@ -53,6 +53,11 @@ pub struct ClipData {
     /// written before this field existed must keep loading.
     #[serde(default)]
     pub alpha_folder: Option<String>,
+    /// The highlight's clip name (#441), which the finished file is named
+    /// after. Set by Render Studio's queue from the project; `None` for a take
+    /// no loaded project knows, which keeps the `<demo>_<take>` name.
+    #[serde(default)]
+    pub clip_name: Option<String>,
 }
 
 /// Whether a clip is eligible for "Skip (keep original)" — no FFmpeg pass at
@@ -403,6 +408,7 @@ pub fn scan_folder_background(
 
                 if all_has_audio {
                     let clip_all = ClipData {
+                        clip_name: None,
                         take_folder: take_folder.to_string_lossy().into_owned(),
                         clip_type: "single".to_string(),
                         img_folder: on_disk_name(all_folder),
@@ -419,6 +425,7 @@ pub fn scan_folder_background(
 
                     if wav_to_use.is_some() {
                         let clip_hud = ClipData {
+                            clip_name: None,
                             take_folder: take_folder.to_string_lossy().into_owned(),
                             clip_type: "hud_only".to_string(),
                             // Both halves of the pair are named from what is actually on
@@ -478,6 +485,7 @@ pub fn scan_folder_background(
                     .into_owned();
                 let date = get_clip_date(&img_folder);
                 let clip = ClipData {
+                    clip_name: None,
                     take_folder: take_folder.to_string_lossy().into_owned(),
                     clip_type: "single".to_string(),
                     img_folder: folder_name,

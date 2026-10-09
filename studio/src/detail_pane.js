@@ -5,6 +5,8 @@ import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus, isSkipped, setCuration, CURATION } from './take_index.js';
 import { STRINGS } from './strings.js';
+import { automaticClipName } from './clip_name.js';
+import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
 import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
 import { refreshAfterTyping } from './input_refresh.js';
@@ -444,6 +446,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
+        <th>${STRINGS.HIGHLIGHTS.COL_CLIP_NAME}</th>
         <th title="${STRINGS.HIGHLIGHTS.COL_REVIEW_TITLE}">${STRINGS.HIGHLIGHTS.COL_REVIEW}</th>
         <th class="col-notes">${STRINGS.HIGHLIGHTS.COL_NOTES}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DETAILS}</th>
@@ -542,6 +545,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </select>${byHandMark}${mergedBadge}
       </td>
       <td style="padding: 8px;">
+        <input type="text" class="streak-clip-name-input" spellcheck="false" title="${STRINGS.HIGHLIGHTS.CLIP_NAME_INPUT_TITLE}" style="background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; padding: 2px; width: 100%; min-width: 14em;" />
+      </td>
+      <td style="padding: 8px;">
         <select class="streak-curation-select" style="font-size: 0.85em;">
           <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
           <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
@@ -620,6 +626,23 @@ export function renderDetailView(demo, selectedDemoIdx) {
           },
         },
       });
+    });
+
+    // #441: the automatic name shows greyed until a typed one replaces it.
+    const clipNameInput = tr.querySelector('.streak-clip-name-input');
+    clipNameInput.value = streak.clipName || '';
+    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate()).name;
+    clipNameInput.addEventListener('input', (e) => {
+      streak.clipName = e.target.value;
+    });
+    clipNameInput.addEventListener('change', (e) => {
+      const typed = e.target.value.trim();
+      if (typed) streak.clipName = typed;
+      else delete streak.clipName;
+      e.target.value = typed;
+      refreshClipNamePreview();
+      if (currentOnSelectionChange) currentOnSelectionChange();
+      if (currentOnDirty) currentOnDirty();
     });
 
     const notesInput = tr.querySelector('.streak-notes-input');

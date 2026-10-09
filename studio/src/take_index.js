@@ -53,6 +53,7 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
+    if (previous.clipName !== undefined) fresh.clipName = previous.clipName;
     if (previous.curation !== undefined) fresh.curation = previous.curation;
     // Kill Range edits are user edits too, not scan output.
     if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
@@ -208,6 +209,7 @@ function isHighlightTracked(streak) {
   if (!streak) return false;
   if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
   if (streak.notes && streak.notes.trim()) return true;
+  if (streak.clipName && streak.clipName.trim()) return true;
   if (streak.curation) return true;
   return isRangeModified(streak);
 }
