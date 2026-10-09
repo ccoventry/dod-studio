@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
@@ -1142,9 +1143,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // rendered must not knock it back down to Captured -- unless that
           // Rendered was set by hand: a verified capture beats an unverified
           // claim (#105).
-          if (streak.status === 'Rendered' && !streak.statusByHand) return;
+          if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
-          if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
+          if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
         });
         // Recorded even when the take isn't renderable yet — a future render
         // still needs to resolve this take_key back to these highlights once
