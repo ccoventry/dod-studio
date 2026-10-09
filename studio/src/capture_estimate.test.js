@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { streakSeconds, computeRequiredCaptureBytes } from './capture_estimate.js';
+import { streakSeconds, computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 
 const opts = {
   preRollSeconds: 2, postRollSeconds: 0.6,
@@ -42,5 +42,11 @@ describe('computeRequiredCaptureBytes', () => {
   it('ignores unselected highlights', () => {
     const demos = [{ streaks: [{ ...streak(10, 14), selected: false }] }];
     expect(computeRequiredCaptureBytes(demos, opts)).toBe(0);
+  });
+
+  it('bills AGR mode by its own bytes per frame, not the resolution', () => {
+    const demos = [{ streaks: [streak(10, 14)] }];
+    const agr = { ...opts, bytesPerFrame: AGR_BYTES_PER_FRAME };
+    expect(computeRequiredCaptureBytes(demos, agr)).toBe(4 * AGR_BYTES_PER_FRAME);
   });
 });

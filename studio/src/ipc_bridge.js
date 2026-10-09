@@ -557,6 +557,33 @@ export async function cancelAudit() {
     });
 }
 
+// ── Combine Clips (#107) ───────────────────────────────────────────────────
+
+export async function combinePlan(clips, ffmpegPath) {
+  return invoke("combine_plan", { clips, ffmpegPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_plan):", err);
+      throw err;
+    });
+}
+
+export async function combineClips(clips, output, ffmpegPath) {
+  return invoke("combine_clips", { clips, output, ffmpegPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_clips):", err);
+      if (String(err) !== 'cancelled') showToast(STRINGS.IPC.combineFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function combineCancel() {
+  return invoke("combine_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_cancel):", err);
+      throw err;
+    });
+}
+
 export async function revealInExplorer(path) {
   return invoke("reveal_in_explorer", { path })
     .catch((err) => {
@@ -599,6 +626,23 @@ export async function deleteOrphanedPreviews(filePaths) {
  *  widgets. Errors (e.g. permission denied) are surfaced inline by the
  *  caller rather than as a global toast, since browsing into an
  *  inaccessible folder is an expected, recoverable event. */
+// The Demo Analyzer's Cache all (#569). Starts a background run; progress
+// comes as `demo_cache_progress` events.
+export async function cacheDemos(paths) {
+  return invoke("cache_demos", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (cache_demos):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoCache() {
+  return invoke("cancel_demo_cache")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_cache):", err);
+    });
+}
+
 export async function browseDirectory(path) {
   return invoke("browse_directory", { path: path ?? null })
     .catch((err) => {
@@ -804,6 +848,17 @@ export async function hdSaveStyle(gamePath, name, def) {
     });
 }
 
+/** Puts `text` in effect as the install's hd_maps.txt, or with `null`
+ *  builds every map again (the list is set aside, not deleted). */
+export async function hdSaveMapList(gamePath, text) {
+  return invoke("hd_save_map_list", { gamePath, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_save_map_list):", err);
+      showToast(STRINGS.IPC.hdMapListFailed(err), 'error');
+      throw err;
+    });
+}
+
 /** Takes `name` out of the install's my_styles.txt. */
 export async function hdRemoveStyle(gamePath, name) {
   return invoke("hd_remove_style", { gamePath, name })
@@ -822,6 +877,40 @@ export async function hdPreview(gamePath, request) {
     .catch((err) => {
       console.error("IPC Execution Error (hd_preview):", err);
       showToast(STRINGS.IPC.hdPreviewFailed(err), 'error');
+      throw err;
+    });
+}
+
+// ── Demo Auditor: Split Maps (#624) ─────────────────────────────────────────
+
+export async function findMultiMapDemos(folder, recursive) {
+  return invoke("find_multi_map_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_multi_map_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelMultiMapScan() {
+  return invoke("cancel_multi_map_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_multi_map_scan):", err);
+      throw err;
+    });
+}
+
+export async function demoMapSegments(path) {
+  return invoke("demo_map_segments", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_map_segments):", err);
+      throw err;
+    });
+}
+
+export async function splitDemoMaps(path, keep) {
+  return invoke("split_demo_maps", { path, keep })
+    .catch((err) => {
+      console.error("IPC Execution Error (split_demo_maps):", err);
       throw err;
     });
 }

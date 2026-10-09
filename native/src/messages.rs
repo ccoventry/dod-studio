@@ -159,6 +159,10 @@ pub fn hd_preview_failed(status: impl Display, detail: &str) -> String {
     }
 }
 
+// ── hd/map_list.rs ───────────────────────────────────────────────────────
+
+pub const HD_MAP_LIST_EMPTY: &str = "The map list picks no maps, so a build would make no map textures. Add a map, or choose Every map.";
+
 // ── hd/my_styles.rs ──────────────────────────────────────────────────────
 // The scripts' own wording (styles.py's load_my_styles), so a file refused
 // on the HD page reads the same as one refused on the command line.
@@ -214,6 +218,25 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     format!(
         "the Real-ESRGAN zip didn't contain realesrgan-ncnn-vulkan.exe; unzip it into {dir} by hand"
     )
+}
+
+// ── hlcr/combine.rs (#107) ────────────────────────────────────────────────
+
+pub const COMBINE_NEEDS_TWO: &str = "pick at least two clips to combine";
+pub const COMBINE_OUTPUT_IS_INPUT: &str =
+    "the combined video can't be saved over one of the clips going into it";
+pub const COMBINE_CANCELLED: &str = "cancelled";
+
+pub fn combine_unreadable_clip(path: &str) -> String {
+    format!("FFmpeg can't read {path} as a video")
+}
+
+pub fn combine_failed(log: &str) -> String {
+    if log.is_empty() {
+        "FFmpeg stopped without saying why".to_string()
+    } else {
+        format!("FFmpeg failed: {log}")
+    }
 }
 
 /// Pins every function above against the exact `format!`/literal it replaced

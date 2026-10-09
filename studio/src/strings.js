@@ -14,6 +14,14 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
+function cacheCounts(already, failed) {
+  const parts = [];
+  if (already) parts.push(`${already} already cached`);
+  if (failed) parts.push(`${failed} failed`);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
 export const STRINGS = {
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
@@ -228,6 +236,12 @@ export const STRINGS = {
     CAPTURE_MODE_LABEL: 'Capture Mode:',
     CAPTURE_MODE_TITLE:
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
+    CAPTURE_MODE_AGR: 'AGR for Blender (no video)',
+    CAPTURE_MODE_AGR_TITLE:
+        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes.',
+    AGR_FPS_LABEL: 'AGR FPS:',
+    AGR_FPS_TITLE:
+        'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
@@ -629,10 +643,41 @@ export const STRINGS = {
   },
 
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
+  // Demo Auditor's Split Maps tab (#624).
+  SPLIT: {
+    TITLE: 'Demos With More Than One Map',
+    HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
+    RECURSIVE: 'Include subfolders',
+    FIND_BUTTON: 'Find Multi-Map Demos',
+    CANCEL_BUTTON: 'Cancel',
+    CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
+    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    CANCELLING: 'Cancelling...',
+    found: (n, total) => n === 0
+      ? 'No demo here has more than one map.'
+      : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
+    scanFailed: (e) => `Couldn't check the folder: ${e}`,
+    mapsCount: (n) => `${n} maps`,
+    LOADING_DETAILS: 'Reading lengths...',
+    detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
+    startsAt: (start, length) => `${start} · ${length} long`,
+    SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
+    SPLIT_BUTTON: 'Split Checked Maps',
+    SHOW_IN_FOLDER: 'Show in folder',
+    NOTHING_TICKED: 'Tick at least one map.',
+    SPLITTING: 'Splitting...',
+    wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
+    writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
+    splitFailed: (e) => `Split failed: ${e}`,
+    SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
+  },
+
   AUDITOR: {
-    PANEL_TITLE: 'Demo Auditor (Deduplication)',
+    PANEL_TITLE: 'Demo Auditor',
     TARGET_FOLDER_LABEL: 'Target Folder:',
-    TARGET_FOLDER_PLACEHOLDER: 'Folder to scan for duplicate demos...',
+    TARGET_FOLDER_PLACEHOLDER: 'Folder of demos...',
+    TAB_DUPLICATES: 'Duplicates',
+    TAB_SPLIT: 'Split Maps',
     BROWSE_BUTTON: 'Browse',
     START_AUDIT_BUTTON: 'Start Audit',
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
@@ -686,6 +731,27 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
   },
 
+  // ── Teams list (#445) — clan tags found in the project's demos ──────────
+  TEAMS: {
+    BUTTON: 'Teams',
+    BUTTON_TITLE: "The clan tags found in this project's demos, and the team names clip names use for them",
+    TITLE: 'Teams',
+    INTRO: "Tags found in players' names, one per side of each demo. Type the name you want a team to go by, or pick another tag it is the same team as.",
+    HEADER_TAG: 'Tag',
+    HEADER_DEMOS: 'Demos',
+    HEADER_NAME: 'Name',
+    HEADER_SAME_AS: 'Same team as',
+    SAME_AS_NONE: '—',
+    EMPTY: 'No tags found yet. They appear once demos with tagged players are in the queue.',
+    unreadNote: (count) => `${count} demo(s) in the queue were scanned before teams were read.`,
+    READ_BUTTON: 'Read Their Teams',
+    READ_BUTTON_TITLE: 'Scan those demos again. Statuses, notes and kill ranges are kept.',
+    READING_BUTTON: 'Reading...',
+    alsoTag: (tag) => `also ${tag}`,
+    splitTitle: (tag) => `Split ${tag} back out into a team of its own`,
+    CLOSE_BUTTON: 'Close',
+  },
+
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
   ANALYZER: {
     EXPLORER_TITLE: 'Explorer',
@@ -696,6 +762,16 @@ export const STRINGS = {
     ADD_PIN_BUTTON: '➕ Add Pin…',
     RESIZE_HANDLE_TITLE: 'Drag to resize',
     DEMOS_TITLE: 'Demos',
+    CACHE_ALL_BUTTON: 'Cache all',
+    CACHE_STOP_BUTTON: 'Stop',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Killstreaks tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_NOTHING: 'No demos in this folder to cache.',
+    CACHE_STOPPING: 'Stopping after the demos in progress…',
+    cacheProgress: ({ done, total, already, failed }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed),
+    cacheDone: ({ done, total, already, failed, cancelled }) =>
+      (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
+      cacheCounts(already, failed),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',
@@ -1012,6 +1088,9 @@ export const STRINGS = {
       mirv_recordmovie_start: 'the app schedules this itself; a manual one will break the automation',
       mirv_recordmovie_stop: 'the app schedules this itself; a manual one will break the automation',
       mirv_movie_filename: 'set the save location in the Destinations tab instead',
+      // Only ever reported for Scheduled Commands (it is fine in Initial
+      // Commands), like the three below.
+      mirv_agr: 'set Capture Mode to AGR in the Output Format tab instead -- it saves one file per clip',
       r_drawentities:
         "the engine resets this to 1 by itself, so it does nothing -- and if cheats are on instead, DoD's client closes the game",
       cl_lw: "DoD's client quits the game outright if this is not 1 -- there is no other value",
@@ -1230,6 +1309,7 @@ export const STRINGS = {
     MODE_FRAMES: 'Frame sequence',
     modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
     modeObs: (fps) => `OBS @ ${fps} fps`,
+    modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
     scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
     banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
@@ -1287,6 +1367,21 @@ export const STRINGS = {
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
+    // #426: how much of the game a style covers.
+    cellSummaryOf: (files, most, size) => `${files.toLocaleString()} of ${most.toLocaleString()} files, ${size}`,
+    CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
+    largestSize: (width, height) => `up to ${width}×${height}`,
+    LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    someOf: (files, most, type) => `${files} of ${most} ${type}`,
+    styleGaps: (style, none, some) => {
+      const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
+      const parts = [];
+      if (none.length) parts.push(`no ${list(none, 'or')}`);
+      if (some.length) parts.push(`only ${list(some, 'and')}`);
+      return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
+    },
+    cfgGapsComment: (sentence) => `// ${sentence}`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
@@ -1323,6 +1418,40 @@ export const STRINGS = {
     PREVIEW_NOTHING_BUILT: 'Build a style first: the sheet compares built files.',
     previewDone: (samples, maps) => `${samples} sample${samples === 1 ? '' : 's'}${maps.length ? `, from ${maps.join(', ')}` : ''}.`,
     previewSkipped: (skipped) => `Left out: ${skipped.join('; ')}.`,
+    // The map list: the install's hd_maps.txt.
+    MAPS_TITLE: 'Maps to build',
+    MAPS_HINT: "Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.",
+    mapsFile: (path, active) => (active ? `The list is ${path}.` : `Saved as ${path} when you pick maps.`),
+    mapsOldPlace: (old, path) => `Builds read ${old} for now; saving moves the list to ${path}.`,
+    MAPS_EVERY: 'Every map',
+    mapsEvery: (count) => `Every map (${count})`,
+    MAPS_SOME: 'Only the maps I pick',
+    MAPS_LIST_LABEL: 'Picked by:',
+    MAPS_LIST_EMPTY: 'Nothing yet: tick maps below, or add a pattern.',
+    MAPS_ADD_BUTTON: 'Add as a line',
+    MAPS_PATTERN_HELP: 'The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.',
+    patternCount: (count) => (count ? `${count} map${count === 1 ? '' : 's'}` : 'matches no map'),
+    PATTERN_ALREADY: 'Already in the list.',
+    PATTERN_BAD: "A map name can't hold # or spaces.",
+    patternAdded: (pattern, count) => `Added ${pattern} as a line${count ? '' : ' (it matches no map yet)'}. Save to keep it.`,
+    MAPS_REMOVE_BUTTON: 'Remove',
+    MAPS_SEARCH_LABEL: 'Your maps:',
+    MAPS_SEARCH_PLACEHOLDER: 'Search as a line: *anzio*',
+    MAPS_PICKED_ONLY: 'Picked only',
+    // `patterns`: every wildcard line matching the map; `own`: it has a line of its own too.
+    mapPickedByTitle: (patterns, own) => `Matched by ${own ? 'its own line and by ' : ''}the pattern${patterns.length > 1 ? 's' : ''} ${patterns.join(' and ')}. To leave this map out, change or remove ${patterns.length > 1 ? 'those lines' : 'that line'}${own ? '; unticking alone would not' : ''}.`,
+    MAPS_NONE_FOUND: 'No maps found in dod\\maps. Check the Half-Life Executable on the Configuration page.',
+    MAPS_NO_MATCH: 'No map matches the search.',
+    mapsSummaryEvery: (count) => `All ${count} maps get map textures and skies.`,
+    mapsSummary: (picked, count) => `${picked} of ${count} maps get map textures and skies.`,
+    MAPS_UNSAVED: 'Not saved yet: builds still use the saved list.',
+    MAPS_TICK_OWN: 'its own line',
+    MAPS_TICK_PATTERN: 'a pattern',
+    MAPS_SAVE_BUTTON: 'Save',
+    MAPS_UNDO_BUTTON: 'Undo changes',
+    MAPS_SAVED_EVERY: 'Saved: every map is built. Your list is kept, and comes back when you pick maps again.',
+    mapsSaved: (picked) => `Saved: ${picked} map${picked === 1 ? '' : 's'} picked.`,
+    MAPS_EMPTY: 'Pick at least one map, or choose Every map.',
     // The custom-style form: lines in the install's my_styles.txt.
     MY_STYLES_TITLE: 'Your own styles',
     MY_STYLES_HINT: 'Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.',
@@ -1400,6 +1529,35 @@ export const STRINGS = {
     OPEN_FOLDER: 'Open folder',
   },
 
+  // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
+  COMBINE: {
+    OPEN_BUTTON: 'Combine Clips…',
+    OPEN_TITLE: 'Join rendered clips into one video',
+    TITLE: 'Combine Clips',
+    HINT: 'Join rendered clips into one video, in the order listed. Clips that all match are joined as they are, in seconds; mixed ones are fitted to the first clip and re-encoded.',
+    ADD_FINISHED_BUTTON: 'Add finished renders',
+    ADD_FILES_BUTTON: 'Add files…',
+    ADD_FILES_TITLE: 'Choose clips to combine',
+    CLEAR_BUTTON: 'Clear',
+    VIDEO_FILTER: 'Video',
+    MOVE_UP: 'Move up',
+    MOVE_DOWN: 'Move down',
+    REMOVE: 'Remove from the list',
+    EMPTY: 'No clips yet. Add finished renders, or add files.',
+    NO_FINISHED: 'No finished renders in this session yet.',
+    NEED_TWO: 'Add at least two clips.',
+    CHECKING: 'Checking the clips…',
+    planCopy: (length) => `They match, so they're joined as they are: a few seconds, no quality lost. ${length} in all.`,
+    planEncode: (length, width, height, fps) => `They differ in size, frame rate or format, so the video is re-encoded to MP4 at ${width}×${height}, ${fps} fps (the first clip's): this takes a while. ${length} in all.`,
+    planFailed: (err) => `Can't combine these: ${err}`,
+    START_BUTTON: 'Combine…',
+    SAVE_TITLE: 'Save the combined video as',
+    CANCEL_BUTTON: 'Cancel',
+    CLOSE_BUTTON: 'Close',
+    saved: (name) => `Saved ${name}.`,
+    SHOW_FILE: 'Show',
+  },
+
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
   COMMAND_SUGGEST: {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
@@ -1456,6 +1614,7 @@ export const STRINGS = {
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
     hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,
+    hdMapListFailed: (err) => `Could not change hd_maps.txt: ${err}`,
     hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
@@ -1471,6 +1630,7 @@ export const STRINGS = {
     settingsLoadFailed: (err) => `Failed to load settings: ${err}`,
     settingsSaveFailed: (err) => `Failed to save settings: ${err}`,
     auditFailed: (err) => `Audit failed: ${err}`,
+    combineFailed: (err) => `Combining the clips failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
@@ -1483,7 +1643,7 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
-    somethingWentWrong: (message) => `Something went wrong (${message}). Details logged to crash_log.md.`,
+    somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
   // ── Footer ────────────────────────────────────────────────────────────

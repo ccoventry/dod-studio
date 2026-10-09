@@ -17,6 +17,7 @@
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
 pub mod build;
+pub mod map_list;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
@@ -90,6 +91,11 @@ pub struct FolderStatus {
     pub name: String,
     pub files: u64,
     pub bytes: u64,
+    /// Width and height of the folder's biggest file, from its TGA header
+    /// (#426): the largest size this style built for the type. The build
+    /// writes uncompressed TGAs, so the biggest file is the biggest image;
+    /// one header read per folder instead of one per file.
+    pub largest_px: Option<[u32; 2]>,
 }
 
 /// One asset type's folder.
@@ -152,6 +158,9 @@ pub struct HdStatus {
     /// The maps the style preview can sample ([`preview::map_choices`]),
     /// filled in by the caller.
     pub maps: Vec<String>,
+    /// The install's `hd_maps.txt` and every map it can pick from. Filled in
+    /// by the caller, which knows the scripts' folder: [`map_list::read`].
+    pub map_list: Option<map_list::MapList>,
     /// Whether the configured `hl.exe` gets 4 GB of address space (true) or
     /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
     /// the caller, which knows the game path.
@@ -199,6 +208,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         scripts: None,
         my_styles: None,
         maps: Vec::new(),
+        map_list: None,
         large_address_aware: None,
     }
 }
@@ -212,11 +222,12 @@ fn folders_in(type_dir: &Path) -> Vec<FolderStatus> {
         .flatten()
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .map(|e| {
-            let (files, bytes) = count_files(&e.path());
+            let (files, bytes, biggest) = count_files(&e.path());
             FolderStatus {
                 name: e.file_name().to_string_lossy().to_string(),
                 files,
                 bytes,
+                largest_px: biggest.as_deref().and_then(tga_size),
             }
         })
         .collect();
@@ -224,18 +235,48 @@ fn folders_in(type_dir: &Path) -> Vec<FolderStatus> {
     folders
 }
 
-/// Files and bytes under `dir`, all the way down.
-fn count_files(dir: &Path) -> (u64, u64) {
-    walkdir::WalkDir::new(dir)
+/// Files and bytes under `dir`, all the way down, and the biggest file.
+fn count_files(dir: &Path) -> (u64, u64, Option<PathBuf>) {
+    let mut files = 0;
+    let mut bytes = 0;
+    let mut biggest: Option<(u64, PathBuf)> = None;
+    for e in walkdir::WalkDir::new(dir)
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())
-        .fold((0, 0), |(files, bytes), e| {
-            (
-                files + 1,
-                bytes + e.metadata().map(|m| m.len()).unwrap_or(0),
-            )
-        })
+    {
+        let len = e.metadata().map(|m| m.len()).unwrap_or(0);
+        files += 1;
+        bytes += len;
+        if biggest.as_ref().is_none_or(|(most, _)| len > *most) {
+            biggest = Some((len, e.into_path()));
+        }
+    }
+    (files, bytes, biggest.map(|(_, path)| path))
+}
+
+/// A TGA's width and height, from bytes 12..16 of its 18-byte header.
+/// `None` for anything that isn't a TGA or can't be read.
+fn tga_size(path: &Path) -> Option<[u32; 2]> {
+    use std::io::Read;
+    let is_tga = path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("tga"));
+    if !is_tga {
+        return None;
+    }
+    let mut header = Vec::with_capacity(18);
+    std::fs::File::open(path)
+        .ok()?
+        .take(18)
+        .read_to_end(&mut header)
+        .ok()?;
+    if header.len() < 18 {
+        return None;
+    }
+    let width = u16::from_le_bytes([header[12], header[13]]);
+    let height = u16::from_le_bytes([header[14], header[15]]);
+    (width > 0 && height > 0).then_some([u32::from(width), u32::from(height)])
 }
 
 fn tools_status(tools_dir: &Path) -> ToolsStatus {
@@ -349,12 +390,14 @@ mod tests {
                 FolderStatus {
                     name: "overrides".into(),
                     files: 1,
-                    bytes: 5
+                    bytes: 5,
+                    largest_px: None,
                 },
                 FolderStatus {
                     name: "ultrasharp".into(),
                     files: 2,
-                    bytes: 30
+                    bytes: 30,
+                    largest_px: None,
                 },
             ]
         );
@@ -362,6 +405,54 @@ mod tests {
         let sky = status.types.iter().find(|t| t.asset_type == "sky").unwrap();
         assert_eq!(sky.folders[0].files, 1);
         assert_eq!(status.built_styles, vec!["plain", "ultrasharp"]);
+    }
+
+    /// A TGA header: 12 bytes, then width and height as little-endian u16s.
+    fn tga(width: u16, height: u16, pixel_bytes: usize) -> Vec<u8> {
+        let mut file = vec![0u8, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+        file.extend(width.to_le_bytes());
+        file.extend(height.to_le_bytes());
+        file.extend([32, 8]);
+        file.resize(18 + pixel_bytes, 0);
+        file
+    }
+
+    #[test]
+    fn largest_size_comes_from_the_biggest_file() {
+        let dir = Scratch::new("hd_largest");
+        let root = dir.join("dodstudio_hd");
+        let style = root.join("detail/ultrasharp");
+        std::fs::create_dir_all(style.join("sub")).unwrap();
+        std::fs::write(style.join("small.tga"), tga(256, 256, 64)).unwrap();
+        std::fs::write(style.join("sub/big.tga"), tga(2048, 1024, 512)).unwrap();
+        // Not a TGA, however big, says nothing about sizes.
+        std::fs::create_dir_all(root.join("sky/plain")).unwrap();
+        std::fs::write(root.join("sky/plain/notes.txt"), vec![b'x'; 4096]).unwrap();
+
+        let status = scan(&root, &dir.join("tools"));
+        let folder = |t: &str| {
+            &status
+                .types
+                .iter()
+                .find(|s| s.asset_type == t)
+                .unwrap()
+                .folders[0]
+        };
+        assert_eq!(folder("detail").largest_px, Some([2048, 1024]));
+        assert_eq!(folder("sky").largest_px, None);
+    }
+
+    #[test]
+    fn a_short_or_empty_tga_has_no_size() {
+        let dir = Scratch::new("hd_bad_tga");
+        std::fs::create_dir_all(&*dir).unwrap();
+        let short = dir.join("short.tga");
+        std::fs::write(&short, [0u8; 10]).unwrap();
+        assert_eq!(tga_size(&short), None);
+        let zero = dir.join("zero.tga");
+        std::fs::write(&zero, tga(0, 64, 0)).unwrap();
+        assert_eq!(tga_size(&zero), None);
+        assert_eq!(tga_size(&dir.join("missing.tga")), None);
     }
 
     /// The names here are copies of the hook's and the scripts'. Neither can be

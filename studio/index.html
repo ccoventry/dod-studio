@@ -104,6 +104,7 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
                 <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
                   <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
@@ -279,6 +280,8 @@
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_VIDEO_TITLE">Video</option>
                     <option value="obs" data-str="CAPTURE_CONFIG.CAPTURE_MODE_OBS"
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_OBS_TITLE">OBS (real time)</option>
+                    <option value="agr" data-str="CAPTURE_CONFIG.CAPTURE_MODE_AGR"
+                            data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_AGR_TITLE">AGR for Blender (no video)</option>
                   </select>
                   <input type="checkbox" id="config-ffmpeg-capture" hidden />
                 </div>
@@ -289,6 +292,13 @@
                      Every entry is also RGB/4:4:4 because hudAlpha carries the
                      HUD matte in its red channel. Disabled unless Video is on;
                      it has no meaning for a frame sequence. -->
+                <!-- Shown only in AGR mode (#450). Empty means "the same as
+                     Capture FPS", which is hidden in this mode, so the
+                     placeholder names the number it will use. -->
+                <div class="control-group" id="agr-fps-group" style="display: none;">
+                  <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
+                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
                          data-str-title="CAPTURE_CONFIG.CAPTURE_CODEC_TITLE">Capture Codec:</label>
@@ -627,6 +637,7 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
@@ -672,24 +683,35 @@
         <section id="pane-demo-auditor" class="content-pane" style="display: none;">
           <div class="egui-panel">
             <div class="panel-header">
-              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor (Deduplication)</h3>
+              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
               <div class="input-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
-                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder to scan for duplicate demos..." style="flex: 1;" />
+                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <div class="row-inputs">
-                <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
-                <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <div class="auditor-tabs" role="tablist">
+                <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
+                <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
               </div>
-              <p id="audit-status" class="status-indicator">
-                <span id="audit-spinner" class="spinner" style="display: none;"></span>
-                <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
-              </p>
             </div>
           </div>
+
+          <div class="auditor-tab-panel" data-auditor-panel="duplicates">
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-body">
+                <div class="row-inputs">
+                  <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
+                  <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+                </div>
+                <p id="audit-status" class="status-indicator">
+                  <span id="audit-spinner" class="spinner" style="display: none;"></span>
+                  <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                </p>
+              </div>
+            </div>
 
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
@@ -715,6 +737,27 @@
               </table>
             </div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+          </div>
+          </div>
+
+          <!-- Split Maps (#624): split_pane.js. Demos that recorded more than
+               one map, split into one demo per map. -->
+          <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h3 data-str="SPLIT.TITLE">Demos With More Than One Map</h3>
+              </div>
+              <div class="panel-body">
+                <p class="split-hint" data-str="SPLIT.HINT">A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.</p>
+                <div class="row-inputs">
+                  <label class="split-recursive-label"><input type="checkbox" id="split-recursive" checked /> <span data-str="SPLIT.RECURSIVE">Include subfolders</span></label>
+                  <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
+                  <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="split-status" class="status-indicator"></p>
+                <div id="split-list" class="split-list"></div>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -752,6 +795,7 @@
                   <select id="hd-style-select"></select>
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
+                <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
               </div>
             </div>
@@ -802,6 +846,54 @@
                   <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-setup-progress" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- Which maps get HD map textures and skies: the install's hd_maps.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MAPS_TITLE">Maps to build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MAPS_HINT">Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.</p>
+                <p id="hd-maps-file" class="hd-hint"></p>
+                <div class="hd-maps-mode">
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every">
+                    <span id="hd-maps-every-label" data-str="HD.MAPS_EVERY">Every map</span>
+                  </label>
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some">
+                    <span data-str="HD.MAPS_SOME">Only the maps I pick</span>
+                  </label>
+                </div>
+                <div id="hd-maps-editor">
+                  <div class="hd-choice-group">
+                    <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
+                    <ul id="hd-maps-patterns" class="hd-map-patterns"></ul>
+                  </div>
+                </div>
+                <div class="input-row">
+                  <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
+                  <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search as a line: *anzio*">
+                  <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add as a line</button>
+                  <label class="hd-check">
+                    <input type="checkbox" id="hd-maps-picked-only">
+                    <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
+                  </label>
+                  <span id="hd-maps-legend" class="hd-map-legend" hidden>
+                    <span class="hd-tick hd-tick-own"></span><span data-str="HD.MAPS_TICK_OWN">its own line</span>
+                    <span class="hd-tick hd-tick-pattern"></span><span data-str="HD.MAPS_TICK_PATTERN">a pattern</span>
+                  </span>
+                </div>
+                <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.</p>
+                <ul id="hd-maps-available" class="hd-map-list"></ul>
+                <p id="hd-maps-summary" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-maps-save-btn" class="primary-btn" data-str="HD.MAPS_SAVE_BUTTON">Save</button>
+                  <button id="hd-maps-undo-btn" data-str="HD.MAPS_UNDO_BUTTON">Undo changes</button>
+                </div>
+                <p id="hd-maps-message" class="hd-hint"></p>
               </div>
             </div>
 
@@ -929,8 +1021,12 @@
                docked above the report tabs. -->
           <div class="analyzer-main-column">
             <div class="egui-panel analyzer-demos-panel">
-              <div class="panel-header">
+              <div class="panel-header flex-between">
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
+                <div class="analyzer-cache-controls">
+                  <span id="analyzer-cache-status" class="status-text"></span>
+                  <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
+                </div>
               </div>
               <div class="analyzer-filter-bar">
                 <input type="text" id="analyzer-filter-search" data-str-placeholder="ANALYZER.SEARCH_NAME_MAP_PLACEHOLDER" placeholder="Search name/map..." />
@@ -1135,6 +1231,27 @@
     </div>
 
     <!-- FFmpeg Error Log — shown via a render job row's "View Log" action. -->
+    <!-- Combine Clips (#107): combine_clips.js. -->
+    <div id="combine-modal" class="modal" style="display: none;">
+      <div class="modal-content combine-content">
+        <h2 data-str="COMBINE.TITLE">Combine Clips</h2>
+        <p class="combine-hint" data-str="COMBINE.HINT">Join rendered clips into one video, in the order listed.</p>
+        <div class="combine-toolbar">
+          <button id="combine-add-finished-btn" data-combine-edit data-str="COMBINE.ADD_FINISHED_BUTTON">Add finished renders</button>
+          <button id="combine-add-files-btn" data-combine-edit data-str="COMBINE.ADD_FILES_BUTTON">Add files…</button>
+          <button id="combine-clear-btn" data-combine-edit data-str="COMBINE.CLEAR_BUTTON">Clear</button>
+        </div>
+        <ol id="combine-list" class="combine-list"></ol>
+        <p id="combine-plan" class="combine-plan"></p>
+        <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <div class="combine-actions">
+          <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
+          <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>
+          <button id="combine-close-btn" data-str="COMBINE.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>
@@ -1192,6 +1309,36 @@
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teams list (#445) — the clan tags found in the project's demos, each
+         with the name clip names use for it. Filled by teams_pane.js; the
+         names and merges are saved in the project file. -->
+    <div id="teams-modal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+        <h2 data-str="TEAMS.TITLE">Teams</h2>
+        <p class="status-text" data-str="TEAMS.INTRO"></p>
+        <div id="teams-unread-row" class="teams-unread-row" hidden>
+          <span id="teams-unread-note"></span>
+          <button id="teams-read-btn" data-str="TEAMS.READ_BUTTON" data-str-title="TEAMS.READ_BUTTON_TITLE">Read Their Teams</button>
+        </div>
+        <div class="table-wrapper" style="max-height: 360px;">
+          <table id="teams-table">
+            <thead>
+              <tr>
+                <th data-str="TEAMS.HEADER_TAG">Tag</th>
+                <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th data-str="TEAMS.HEADER_NAME">Name</th>
+                <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
+              </tr>
+            </thead>
+            <tbody id="teams-table-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="teams-close-btn" data-str="TEAMS.CLOSE_BUTTON">Close</button>
         </div>
       </div>
     </div>

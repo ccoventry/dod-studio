@@ -23,14 +23,18 @@ HUD
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
-  dodstudio_hide_sprite <model>...
-      Hide entities by model path.
+  dodstudio_hide_asset list|add|del|clear <model>...
+      Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
       Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
   dodstudio_objectives
       Move the objective icons and the objective timer.
   dodstudio_overviewmap
       Move or resize the overview map.
+  dodstudio_hud_map_players 0-4
+      Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
+  dodstudio_hud_map_team_marker 0/1
+      HLTV: mark the watched player on the overview map with his team's camera icon.
 
 DEMO PLAYBACK
   dodstudio_seek_to <time>
@@ -77,6 +81,8 @@ HD TEXTURES
 DEBUG
   dodstudio_debug_status
       Print everything DoD Studio's hook is doing to the console.
+  dodstudio_debug_position
+      Print where the view and the watched player are.
   dodstudio_debug_msglog <name>...
       Log chosen game messages to the hook log.
   dodstudio_debug_hd_misses
