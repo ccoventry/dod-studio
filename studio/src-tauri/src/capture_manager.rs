@@ -1509,6 +1509,14 @@ pub struct SerializedDemo {
     /// simply scanned again.
     #[serde(default)]
     pub file_key: Option<String>,
+    /// Who recorded this POV demo (#174): the analyzer's global id (a
+    /// SteamID64 when the demo has one) and name. `None` for an HLTV demo,
+    /// and for demos from a project saved before this existed, which the
+    /// Master Queue looks up through the player index instead.
+    #[serde(default)]
+    pub recorder_id: Option<String>,
+    #[serde(default)]
+    pub recorder_name: Option<String>,
     /// Each playing side and the clan tag its players' names share (#445),
     /// feeding the project's Teams list. Missing from demos in a project
     /// saved before it existed; the frontend scans those again.
@@ -2079,6 +2087,10 @@ pub async fn scan_directory_impl(
                                 // Best-effort/silent, and safe under concurrency:
                                 // keyed per demo path, not one shared cache.
                                 native::warm_analyzer_cache(file, &analysis);
+                                let recorder = native::player_index::players_in(&analysis)
+                                    .players
+                                    .into_iter()
+                                    .find(|p| p.recorder);
 
                                 let serialized_streaks: Vec<SerializedStreak> = streaks
                                     .into_iter()
@@ -2098,6 +2110,8 @@ pub async fn scan_directory_impl(
                                     playback_frames,
                                     streaks: serialized_streaks,
                                     file_key: file_keys[idx].clone(),
+                                    recorder_id: recorder.as_ref().map(|p| p.id.clone()),
+                                    recorder_name: recorder.map(|p| p.name),
                                     teams: ::analysis::team_tags(&analysis.state),
                                 }
                             },
