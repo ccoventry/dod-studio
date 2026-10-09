@@ -22,6 +22,7 @@ import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
 import { STRINGS } from './strings.js';
+import { historySummary, historyLines } from './render_history.js';
 import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -253,6 +254,7 @@ function createJobRow(j) {
     <td class="rj-speed"></td>
     <td><div class="progress-bar-container" style="margin-top:0;"><div class="progress-bar-fill rj-progress-fill" style="width:0%;"></div></div></td>
     <td class="rj-file-size"></td>
+    <td class="rj-history"></td>
     <td class="rj-actions"></td>`;
   updateJobRow(row, j);
   return row;
@@ -308,6 +310,14 @@ function updateJobRow(row, j) {
     row.dataset.settingsKey = settingsKey;
   }
 
+  // #438: rebuilt only when the history changes; the open/closed state is
+  // kept on the row, so a rebuild doesn't fold it shut.
+  const historyKey = JSON.stringify(j.history || []);
+  if (historyKey !== row.dataset.historyKey) {
+    renderHistoryCell(row, j.history || []);
+    row.dataset.historyKey = historyKey;
+  }
+
   const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}`;
   if (actionsKey !== row.dataset.actionsKey) {
     const cell = row.querySelector('.rj-actions');
@@ -317,13 +327,49 @@ function updateJobRow(row, j) {
   }
 }
 
+/** The History cell (#438): the summary, and a ▸ that lists every attempt. */
+function renderHistoryCell(row, history) {
+  const cell = row.querySelector('.rj-history');
+  const { label, bytes } = historySummary(history);
+  const summary = document.createElement('span');
+  summary.textContent = bytes > 0 ? `${label}, ${formatFileSize(bytes)}` : label;
+  if (!history.length) {
+    cell.replaceChildren(summary);
+    return;
+  }
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'rj-history-toggle';
+  toggle.title = STRINGS.RENDER.HISTORY_TOGGLE_TITLE;
+  toggle.style.cssText = 'background: transparent; border: none; color: inherit; cursor: pointer; padding: 0 4px 0 0;';
+  const list = document.createElement('div');
+  list.className = 'rj-history-list';
+  list.style.cssText = 'font-size: 0.85em; opacity: 0.85; margin-top: 2px; white-space: nowrap;';
+  historyLines(history, formatFileSize).forEach((line) => {
+    const div = document.createElement('div');
+    div.textContent = line;
+    list.appendChild(div);
+  });
+  const sync = () => {
+    const open = row.dataset.historyOpen === '1';
+    toggle.textContent = open ? '▾' : '▸';
+    list.style.display = open ? '' : 'none';
+  };
+  toggle.addEventListener('click', () => {
+    row.dataset.historyOpen = row.dataset.historyOpen === '1' ? '0' : '1';
+    sync();
+  });
+  sync();
+  cell.replaceChildren(toggle, summary, list);
+}
+
 function renderJobsTable() {
   updateFooterQueueSummary();
   const tbody = document.querySelector('#render-jobs-tbody');
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
     return;
   }
 
