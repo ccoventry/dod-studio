@@ -56,6 +56,9 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `dodstudio_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
 
+The HD rows work the same on the pre-Anniversary and the 25th Anniversary
+`hw.dll` (#370).
+
 ## Commands
 
 Always a command rather than a cvar when it has subcommands or a variable

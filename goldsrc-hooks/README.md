@@ -299,7 +299,10 @@ against a real `client.dll` or `hw.dll`.
 detail textures and skies as the game loads them: on when there's a
 `dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
-the scripts that build those files; see its README.
+the scripts that build
+those files; see its README. It works the same on the 25th Anniversary
+`hw.dll` (#370), from that build's own offsets
+(`tools/verify_texture_hires_offsets.py --anniversary`).
 
 ### Always-on crash guards
 
