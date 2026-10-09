@@ -13,7 +13,7 @@
 //! `spec_next`/`spec_prev` and the auto-director's `DRC_CMD_EVENT` handling
 //! all read and write.
 //!
-//! A from-scratch static pass tonight (chasing #206 after #269's survey
+//! A from-scratch static pass (chasing #206 after #269's survey
 //! found the mode global's real writer, `CHudSpectator::SetMode`)
 //! exhaustively found **every** site in `client.dll` that writes
 //! `g_iUser2` -- a whole-image byte search, not a guess -- and every one of
@@ -33,7 +33,8 @@
 //! cheaply, the next time someone can reproduce the wander live: if
 //! `g_iUser2` stays constant while the viewmodel entity keeps changing, the
 //! engine hypothesis is confirmed and `client.dll` patching is the wrong
-//! layer to work in.
+//! layer to work in. #206 itself has since been fixed by `spectator_follow`
+//! (`dodstudio_spec_lock`); this stays as a diagnostic.
 //!
 //! ## Caveats
 //!
@@ -61,7 +62,7 @@ use crate::engine;
 /// `docs/goldsrc_client_dll_survey.md` §10.
 const MODE_RVA: usize = 0xe8_8d4;
 /// `g_iUser2` -- the followed player's entity index, or 0 when none is set.
-/// Exhaustively confirmed tonight as the only global the seven writers in
+/// Exhaustively confirmed as the only global the seven writers in
 /// `client.dll` ever touch for this purpose.
 const TARGET_RVA: usize = 0xe8_8d8;
 
@@ -144,7 +145,7 @@ mod tests {
     fn offsets_are_four_bytes_apart() {
         // g_iUser1 and g_iUser2 are adjacent dwords -- confirmed independently
         // across CHudSpectator::Reset, ::SetMode and the DRC_CMD_EVENT
-        // handler tonight, not just asserted once.
+        // handler, not just asserted once.
         assert_eq!(TARGET_RVA - MODE_RVA, 4);
     }
 }

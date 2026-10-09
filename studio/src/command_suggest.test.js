@@ -80,7 +80,9 @@ describe('kept in step with the code', () => {
       const p = path.join(dir, e.name);
       if (e.isDirectory()) walk(p);
       else if (p.endsWith('.rs')) {
-        for (const m of fs.readFileSync(p, 'utf8').matchAll(/console_name!\("([a-z0-9_]+)"\)/g)) names.add(`dodstudio_${m[1]}`);
+        // Code only, as console_names.py reads it: names.rs's doc comment shows the macro with made-up names.
+        const code = fs.readFileSync(p, 'utf8').split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
+        for (const m of code.matchAll(/console_name!\("([a-z0-9_]+)"\)/g)) names.add(`dodstudio_${m[1]}`);
       }
     });
     walk(path.join(repo, 'goldsrc-hooks', 'src'));

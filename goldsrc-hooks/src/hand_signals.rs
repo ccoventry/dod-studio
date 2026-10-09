@@ -16,8 +16,8 @@
 //!
 //! #283 measured the sequence indices: 54 `hs_*` sequences per player model,
 //! in two contiguous runs at 212-238 and 287-313, identical across all five
-//! stock models. It also flagged the risk in using them -- 17 of the user's 41
-//! viewmodels are custom, and a custom *player* model could reorder its
+//! stock models. It also flagged the risk in using them -- 17 of the 41
+//! viewmodels in the install it surveyed are custom, and a custom *player* model could reorder its
 //! sequence list.
 //!
 //! So this does not use the indices. It reads the model's own sequence labels

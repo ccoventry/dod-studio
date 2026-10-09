@@ -6,7 +6,7 @@
 //! sequence's timing, so a value disagreeing with the capture produces a wrong
 //! computed duration and `-shortest` trims the audio against it: a 120fps take
 //! rendered at 300 comes out 2.5x too fast, silently, and the render reports
-//! success. `docs/engineering_backlog.md` has the full diagnosis — it was found
+//! success. Issue #14 has the full diagnosis — it was found
 //! by ear, from a render that "sounds like a helicopter".
 //!
 //! There was no source of truth to check the render setting against. This is it:
@@ -73,9 +73,18 @@ pub struct SessionMeta {
     /// take captured before this file existed gets one the first time it is
     /// rendered, to hold its history.
     pub capture_fps: i32,
-    /// Every render of this take, oldest first (#438).
-    #[serde(default)]
+    /// Every render of this take, oldest first (#438). Left out while empty,
+    /// so a take that was never rendered keeps the same file as before.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub renders: Vec<RenderAttempt>,
+    /// `CaptureMode::to_str_id` of a take that is not a video — today only
+    /// `"agr"`. Absent for the movie modes, so their file is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capture_mode: Option<String>,
+    /// The rate an AGR take was recorded at (`host_framerate 1/agr_fps`).
+    /// Absent unless `capture_mode` is `"agr"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agr_fps: Option<i32>,
 }
 
 impl SessionMeta {
@@ -85,6 +94,18 @@ impl SessionMeta {
             session_id: session_id.into(),
             capture_fps,
             renders: Vec::new(),
+            capture_mode: None,
+            agr_fps: None,
+        }
+    }
+
+    /// An AGR take (#450): the same record, plus the mode and the rate the
+    /// `.agr` was recorded at, which is the number the Blender page needs.
+    pub fn agr(session_id: impl Into<String>, capture_fps: i32, agr_fps: i32) -> Self {
+        Self {
+            capture_mode: Some("agr".to_string()),
+            agr_fps: Some(agr_fps),
+            ..Self::new(session_id, capture_fps)
         }
     }
 }
@@ -474,6 +495,23 @@ mod tests {
         .expect("write");
         assert!(read_history(&take2).is_empty());
         assert!(fps_mismatch_warning(&take2, 300).is_some());
+    }
+
+    #[test]
+    fn a_movie_take_file_is_unchanged_and_an_agr_take_says_what_it_is() {
+        // The two new fields are left out entirely for a movie take, so a file
+        // written today is byte-identical to one written before AGR mode.
+        let movie = serde_json::to_value(SessionMeta::new("s", 120)).unwrap();
+        assert_eq!(
+            movie,
+            serde_json::json!({"format": FORMAT, "session_id": "s", "capture_fps": 120})
+        );
+
+        let (_root, block, take) = block_with_take("agr", "session_x", "dodstudio_chain_01_b0");
+        write(&block, &SessionMeta::agr("s", 300, 60)).expect("write");
+        let read = read_for_take(&take).expect("an AGR take reads back");
+        assert_eq!(read.capture_mode.as_deref(), Some("agr"));
+        assert_eq!(read.agr_fps, Some(60));
     }
 
     #[test]
