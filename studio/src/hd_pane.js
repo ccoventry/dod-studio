@@ -419,9 +419,9 @@ export function initHdPane() {
   // 1:1 by default (the point of the sheet); a click fits it to the page.
   previewImg?.addEventListener('click', () => previewWrap.classList.toggle('hd-preview-fit'));
 
-  // The custom-style form. `lastStatus` is the newest status report: the
-  // form's model and blend lists come from it.
-  let lastStatus = null;
+  // The custom-style form. `lastStatus` (declared above, shared with the
+  // coverage line) is the newest status report: the form's model and blend
+  // lists come from it.
   const STYLE_NAME = /^[a-z0-9_-]{1,32}$/;
 
   function renderMyStyles(status) {
