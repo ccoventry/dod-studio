@@ -21,6 +21,11 @@ const PIPE_WAIT: Duration = Duration::from_secs(90);
 /// After the pipe answers, how long before the window is opened: the pipe
 /// opens while the engine is still starting.
 const SETTLE: Duration = Duration::from_secs(5);
+/// After `viewdemo`, how long before the Highlights tab is opened. With
+/// `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens the window on its
+/// Playback tab a frame after the command runs, so a tab command sent in
+/// the same message loses to it.
+const TAB_AFTER: Duration = Duration::from_secs(3);
 
 /// The `viewdemo` argument for previewing `streaks`' demo in place, or
 /// `None` when this preview has to be patched.
@@ -52,15 +57,27 @@ pub fn launch(app: tauri::AppHandle, config: &PatcherConfig, arg: &str) -> Resul
         .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
     log::info!("[preview] in place: launched the game for \"{arg}\" (no patched copy)");
     crate::capture_manager::watch_for_error_dialogs(app, launcher);
-    let lines = vec![viewdemo_line(arg), OPEN_HIGHLIGHTS.to_string()];
-    std::thread::spawn(move || send_when_ready(&before, &lines));
+    let line = viewdemo_line(arg);
+    std::thread::spawn(move || {
+        if let Some(pid) = send_when_ready(&before, &[line]) {
+            open_highlights_later(pid);
+        }
+    });
     Ok(())
+}
+
+/// Opens the Highlights tab in `pid`'s game once `viewdemo` has opened the
+/// window (`TAB_AFTER`).
+fn open_highlights_later(pid: u32) {
+    std::thread::sleep(TAB_AFTER);
+    let sent = send_console_commands(pid, &[OPEN_HIGHLIGHTS.to_string()]);
+    log::info!("[preview] in place: {OPEN_HIGHLIGHTS} -> pid {pid}: {sent:?}");
 }
 
 /// Sends the preview to a running game. `Ok(Some(line))` when one took it,
 /// `Ok(None)` when none takes commands.
 pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String> {
-    let lines = [viewdemo_line(arg), OPEN_HIGHLIGHTS.to_string()];
+    let lines = [viewdemo_line(arg)];
     for &pid in pids {
         match send_console_commands(pid, &lines)
             .map_err(crate::messages::failed_to_send_to_running_game)?
@@ -70,6 +87,7 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
                     "[preview] in place: sent \"{}\" to the running game (pid {pid})",
                     lines[0]
                 );
+                std::thread::spawn(move || open_highlights_later(pid));
                 return Ok(Some(lines[0].clone()));
             }
             Sent::NotListening => continue,
@@ -79,8 +97,8 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
 }
 
 /// Waits for the game launched after `before` was listed to open its pipe,
-/// then sends it `lines`.
-fn send_when_ready(before: &[u32], lines: &[String]) {
+/// then sends it `lines`. Returns the game's pid once they were sent.
+fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < PIPE_WAIT {
         std::thread::sleep(Duration::from_millis(500));
@@ -96,11 +114,12 @@ fn send_when_ready(before: &[u32], lines: &[String]) {
                 std::thread::sleep(SETTLE);
                 let sent = send_console_commands(pid, lines);
                 log::info!("[preview] in place: {lines:?} -> pid {pid}: {sent:?}");
-                return;
+                return matches!(sent, Ok(Sent::Delivered)).then_some(pid);
             }
         }
     }
     log::warn!(
         "[preview] in place: the game never opened its command pipe; the preview was not started"
     );
+    None
 }
