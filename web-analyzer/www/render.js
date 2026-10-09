@@ -6,6 +6,8 @@
 // in the web port planning conversation. Report shape (demo_info + state) is
 // identical to what desktop's analyze_demo_full Tauri command returns, so
 // these functions are a near-verbatim copy of their analyzer_pane.js source.
+// studio/src/web_analyzer_copy.test.js fails when a shared function drifts,
+// and lists the deliberate differences (#238).
 import { STRINGS } from './strings.js';
 import { renderFlagsTab } from './analyzer_flags.js';
 import { steamIdForms, deathmsgShowOnlyLine } from './steam_ids.js';
@@ -277,6 +279,9 @@ function renderSummaryTab(container) {
       ${section(STRINGS.ANALYZER.TECH_SPECS_SECTION, [
         [STRINGS.ANALYZER.DEMO_PROTOCOL_LABEL, String(di.demo_protocol)],
         [STRINGS.ANALYZER.NETWORK_PROTOCOL_LABEL, String(di.network_protocol)],
+        [STRINGS.ANALYZER.PEAK_ENTITIES_LABEL, Number.isInteger(di.peak_packet_entities)
+          ? esc(STRINGS.ANALYZER.peakEntitiesValue(di.peak_packet_entities))
+          : STRINGS.ANALYZER.EMPTY_DASH],
       ])}
     </div>`;
 }
@@ -292,6 +297,7 @@ function buildScoreboardGroups() {
     else if (p.team === 'Spectators') groups.spec.push(p);
     else groups.unassigned.push(p);
   });
+  // Score DESC, Kills DESC, Deaths ASC, Name ASC, id ASC — matches dev's ScoreboardCache sort key.
   const sortFn = (a, b) => {
     if (b.stats[0] !== a.stats[0]) return b.stats[0] - a.stats[0];
     if (b.stats[1] !== a.stats[1]) return b.stats[1] - a.stats[1];
@@ -361,6 +367,9 @@ function renderScoreboardTab(container) {
     tr.addEventListener('click', () => {
       const id = tr.dataset.playerId;
       highlightedPlayerId = highlightedPlayerId === id ? null : id;
+      // Keep the Player Details dropdown in sync so selection works both
+      // ways (dropdown -> scoreboard already did via renderPlayerDetailsTab).
+      if (highlightedPlayerId) selectedPlayerId = highlightedPlayerId;
       renderScoreboardTab(container);
     });
   });
@@ -397,6 +406,8 @@ function renderPlayerDetailsTab(container) {
     selectedId = highlightedPlayerId && players.find((p) => p.id === highlightedPlayerId) ? highlightedPlayerId : players[0].id;
   }
   selectedPlayerId = selectedId;
+  // Any change in the effective selected player (dropdown, scoreboard click,
+  // or a kill-streak victim jump) clears the per-player weapon filter state.
   if (selectedId !== previousSelectedId) disabledWeapons = new Set();
 
   const options = players.map((p) => `<option value="${esc(p.id)}" ${p.id === selectedId ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
@@ -643,6 +654,8 @@ function renderTeamWeaponSections(players, alliesAreBritish) {
   const axisColor = teamColor('Axis');
 
   const sections = [];
+  // Matches dev exactly: show the Allies/US section unless there's British
+  // data present with no pure-Allies data at all.
   if (alliesPlayers.length > 0 || britishPlayers.length === 0) {
     const label = alliesAreBritish ? STRINGS.ANALYZER.ALLIES_US_LABEL : STRINGS.ANALYZER.ALLIES_LABEL;
     sections.push(`<details open class="analyzer-collapsible"><summary style="color:${alliesColor};">${esc(label)}</summary>${weaponBreakdownTable(alliesPlayers)}</details>`);
@@ -924,7 +937,7 @@ function renderChatTab(container) {
       <label>${STRINGS.ANALYZER.TEAM_LABEL}
         <select id="chat-filter-team">
           ${[
-            ['All', STRINGS.ANALYZER.TYPE_ALL || 'All'],
+            ['All', STRINGS.ANALYZER.TYPE_ALL],
             ['Allies', STRINGS.ANALYZER.ALLIES_LABEL],
             ['British', STRINGS.ANALYZER.BRITISH_LABEL],
             ['Axis', STRINGS.ANALYZER.AXIS_LABEL],
