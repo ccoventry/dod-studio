@@ -4,6 +4,18 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+/// A named set of Initial and Scheduled Commands (#442). Same shape as
+/// `AppSettings`' two lists; the frontend (`command_profiles.js`) trims them
+/// and drops blank rows before saving.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommandProfile {
+    pub name: String,
+    #[serde(default)]
+    pub init_commands: Vec<String>,
+    #[serde(default)]
+    pub custom_commands: Vec<CustomCommandPayload>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppSettings {
     pub hlae_path: String,
@@ -125,6 +137,15 @@ pub struct AppSettings {
     pub init_commands: Vec<String>,
     #[serde(default)]
     pub custom_commands: Vec<CustomCommandPayload>,
+    /// Named sets of both command lists (#442), applied from Configuration >
+    /// Commands. Applying one only fills the two lists above, so the commands
+    /// are checked exactly like typed ones.
+    #[serde(default)]
+    pub command_profiles: Vec<CommandProfile>,
+    /// The profile the lists were last applied from or saved to, so the
+    /// "(edited)" mark survives a restart. Empty when there is none.
+    #[serde(default)]
+    pub command_profile_active: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
     #[serde(default = "default_render_codec")]
@@ -136,6 +157,11 @@ pub struct AppSettings {
     pub render_fps: i32,
     #[serde(default = "default_render_max_concurrent")]
     pub render_max_concurrent: i32,
+    /// Named render setups (#108), applied from Configuration > Render
+    /// Output. Each carries a codec, its custom args, source FPS and
+    /// concurrency; the frontend owns the shape (`render_presets.js`).
+    #[serde(default)]
+    pub render_presets: Vec<serde_json::Value>,
     /// How many demos a scan parses at once (#246). Each worker holds a
     /// whole analysis, roughly 1.2 GB at peak; see `SCAN_CONCURRENCY`.
     #[serde(default = "default_scan_workers")]
@@ -182,6 +208,10 @@ pub struct AppSettings {
     pub finish_codec_video: String,
     #[serde(default = "default_finish_codec_render_tab")]
     pub finish_codec_frames: String,
+    /// How a highlight's clip name is built (#441), in the placeholder syntax
+    /// of `studio/src/clip_name.js`. Configuration > Render Output.
+    #[serde(default = "default_clip_name_template")]
+    pub clip_name_template: String,
 }
 
 fn default_resolution_width() -> i32 {
@@ -257,6 +287,10 @@ fn default_notify_updates() -> bool {
 fn default_update_channel() -> String {
     "stable".to_string()
 }
+/// Keep in step with `DEFAULT_TEMPLATE` in `studio/src/clip_name.js`.
+fn default_clip_name_template() -> String {
+    "{map}_{player}_{kills}k_{weapons}_{time}".to_string()
+}
 fn default_auto_check_updates() -> bool {
     true
 }
@@ -317,11 +351,14 @@ impl Default for AppSettings {
             // flush follows.
             init_commands: vec!["r_decals 256".to_string(), "mirv_fov 90".to_string()],
             custom_commands: Vec::new(),
+            command_profiles: Vec::new(),
+            command_profile_active: String::new(),
             save_local_patched_copy: false,
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
             render_max_concurrent: default_render_max_concurrent(),
+            render_presets: Vec::new(),
             scan_workers: default_scan_workers(),
             render_export_dirs: Vec::new(),
             notify_patching: default_notify_patching(),
@@ -337,6 +374,7 @@ impl Default for AppSettings {
             finish_codec_obs: default_finish_codec_obs(),
             finish_codec_video: default_finish_codec_render_tab(),
             finish_codec_frames: default_finish_codec_render_tab(),
+            clip_name_template: default_clip_name_template(),
         }
     }
 }
@@ -438,6 +476,48 @@ mod tests {
         let json = serde_json::to_string(&original).expect("settings must serialize");
         let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
         assert_eq!(restored.scan_workers, 5);
+    }
+
+    /// Settings saved before #442 load with no profiles; saved ones round-trip.
+    #[test]
+    fn test_command_profiles_roundtrip() {
+        let legacy_json = r#"{
+            "hlae_path": "C:/hlae/hlae.exe",
+            "hl_path": "C:/dod/hl.exe",
+            "ffmpeg_path": null,
+            "pinned_folders": [],
+            "language": "en",
+            "capture_fps": 300,
+            "pre_roll_seconds": 2.0,
+            "post_roll_seconds": 0.6
+        }"#;
+        let legacy: AppSettings =
+            serde_json::from_str(legacy_json).expect("settings without profiles must deserialize");
+        assert!(legacy.command_profiles.is_empty());
+        assert_eq!(legacy.command_profile_active, "");
+
+        let original = AppSettings {
+            command_profiles: vec![CommandProfile {
+                name: "FOTW".to_string(),
+                init_commands: vec!["mirv_fov 90".to_string()],
+                custom_commands: vec![CustomCommandPayload {
+                    command: "host_timescale 0.5".to_string(),
+                    relation: "Before".to_string(),
+                    offset_seconds: 1.5,
+                }],
+            }],
+            command_profile_active: "FOTW".to_string(),
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.command_profile_active, "FOTW");
+        assert_eq!(restored.command_profiles.len(), 1);
+        assert_eq!(restored.command_profiles[0].init_commands, ["mirv_fov 90"]);
+        assert_eq!(
+            restored.command_profiles[0].custom_commands[0].offset_seconds,
+            1.5
+        );
     }
 
     #[test]

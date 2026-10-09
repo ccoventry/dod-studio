@@ -43,7 +43,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 ### 2.1 Always present
 
-- **File menu:** New Session (Ctrl+N), Load Session (Ctrl+O), Save Session (Ctrl+S). A session is a JSON project file holding the queue, highlight statuses, notes and the take index. There is no project autosave.
+- **File menu:** New Session (Ctrl+N), Load Session (Ctrl+O), Save Session (Ctrl+S). A session is a JSON project file holding the queue, highlight statuses, notes, the take index and the Teams list's names and merges. There is no project autosave.
 - **Help menu:** Check for Updates, View Logs (reveals today's activity log), About.
 - **Updates:** two channels, Stable (from `main`) and Experimental (from `dev`). Switching channel counts as an update, so it can downgrade. The startup check is skipped in local and debug builds, and a local build's Check for Updates only reports versions, never installs. The window title of a local build names the git branch and dev-server port.
 - **Unsaved-changes prompt** on close. Closing while a capture batch runs asks first too; the game keeps capturing without Studio. F5 and Ctrl+R are swallowed. Ctrl+W is swallowed and does nothing.
@@ -60,9 +60,10 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 **Master Demo Queue.** One row per demo with counts: Highlights, Selected, Pending, Captured, Rendered. Counts include only the recording player's streaks. A search box (with an × and Esc to clear it) filters by name, path or map, and quick filters narrow the list to demos with kills or to POV demos only. Every bulk action works on the visible rows only:
 
-- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
+- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. **Fast-forward gaps over N s** (on, 8 s by default, #665) plays the stretch between two kills further apart than that at 4x, from 2 s after one kill to 4 s before the next. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
 - **Clear Untracked** removes demos with no statuses, notes, narrowed ranges or review answers.
 - **Clear Selected** and **Clear All** ask to save first when tracked work would be lost.
+- **Teams** lists the clan tags found in the queue's demos (issue #445), with how many demos each is in. A tag is the longest start or end that at least 60% and at least 3 of a side's player names share, kept to letters, digits and spaces. Each row takes a display name and a **Same team as** pick that merges it into another row (× on the merged tag splits it out). Names and merges are saved in the project file. Demos from a project saved before this have no teams until **Read Their Teams** scans them again. These feed the clip-name `{team_name}` and `{opponent}` placeholders (#441).
 - A demo that has moved, or was deleted, is marked missing; **Locate…** points the row at where it is now, and a project that is loaded again looks for moved demos on its own. Start Capture Batch refuses while a demo with picked highlights is missing.
 - A **Maps needed** banner lists maps that are missing or a different build than the demo expects, with a Download button that fetches from the KTP mirror, verifies the checksum, and never overwrites a map in place. HLTV demos are skipped because their map cannot be verified.
 
@@ -104,12 +105,16 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 ### 2.5 Demo Auditor
 
-Finds byte-identical duplicate demos under one folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+One folder picker, then a tab per tool:
+
+- **Duplicates:** finds byte-identical duplicate demos under the folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+- **Split Maps (#624):** lists every demo under the folder that recorded more than one map, with each map's start and length. Ticked maps are written as demos of their own next to the original, which is never changed. A map under a minute starts unticked (usually the next map loading as the recording stopped). The list comes from a remembered answer, the analyzer cache's `signon_maps`, or a quick byte scan, in that order (`native::demo_maps_scan`); the split itself is `native::demo_split`.
 
 ### 2.6 Demo Analyzer
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
+- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
 - **Report**, eight sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
@@ -121,6 +126,20 @@ There is no export from the page. The CLI can export Markdown or JSON (section 8
 ### 2.7 HD Textures
 
 Covered in section 6.
+
+### 2.8 Overviews
+
+Makes the image the game draws for its overview map (`overviews/<map>.tga` or `.bmp`, with its `.txt`) from the map itself (#371). `native::overview` works out every floor a player can reach from the spawns and groups it into areas. The page draws them in the colours of a hand-made overview and lets you:
+
+- recolour an area or a single piece of floor;
+- hide an area;
+- rename flags;
+- add labels and drag them;
+- turn flags, capture zones, spawns, white stairs and water on or off.
+
+Edits are saved per map as you go. **Save overview** writes a TGA (full colour, the background left transparent) or an 8-bit BMP at the game's 1024x768. It goes into `dod_addon/overviews` (read when the game runs with `-addons`) or `dod/overviews`. A user's own overview there is copied to `overviews/dodstudio_backup` first. The `.txt` uses the game's own placement maths, so the game's player icons land on the right spot.
+
+The game itself shows at most 1024x768 (its loader reads the image into a fixed 3 MB buffer and cuts it into 128-pixel tiles). Ticking **Also save a high-quality copy** writes `<map>_hd.tga` at 4096x3072 beside it. With DoD Studio's hook DLL in the game (`goldsrc-hooks/src/overview_hd.rs`), each tile is re-uploaded from that copy at 512x512.
 
 ---
 
@@ -344,6 +363,8 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod\dodstudio_hd\` |
+| Overview edits | `%APPDATA%\dod-studio\overviews\<map>.json` |
+| Saved overviews | `<install>\dod_addon\overviews\` or `<install>\dod\overviews\`; a user's own copied to `overviews\dodstudio_backup\` first |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |
 | OBS | a `[DoD-Studio]` profile and scene inside your OBS |
 

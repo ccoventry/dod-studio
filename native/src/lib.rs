@@ -11,6 +11,9 @@ use std::path::PathBuf;
 
 pub mod patch;
 
+/// What a highlight's clip name can say beyond the streak itself (#441).
+pub mod clip_facts;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
@@ -23,6 +26,22 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// Maps a session crashed on with a known cause, for the next batch's warning
+/// (#207).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_maps;
+
+/// Caching many demos ahead of time (#569).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_cache;
+
+/// Which demos in a folder recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_maps_scan;
+/// Splitting a demo that recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
@@ -31,6 +50,13 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// Map overviews made from the BSP, for the Overviews page (#371).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod overview;
+
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
 /// The review mode's queue and answers (#623).
 pub mod review_queue;
 
@@ -75,7 +101,7 @@ where
 
 /// Where the analyzer cache lives: `analysis::cache` holds the format.
 #[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_root() -> PathBuf {
+pub fn analyzer_cache_root() -> PathBuf {
     crate::shared::paths::get_appdata_dir().join("analyzer_cache")
 }
 

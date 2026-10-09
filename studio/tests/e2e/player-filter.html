@@ -1,0 +1,34 @@
+<!doctype html>
+<!--
+  Minimal harness for the Master Queue's player filter (#174) — see
+  tests/e2e/README.md for the general shape.
+
+  Carries just the queue's search box, player select and table body, and
+  calls initMasterPane/renderMasterList directly. A test answers the
+  `index_demo_players` lookup itself by emitting `demo_players` through
+  window.__mockEmit, the way the backend would.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>master_pane.js player filter harness</title>
+</head>
+<body>
+  <input type="text" id="demo-search-input" />
+  <select id="master-player-filter"><option value="">All players</option></select>
+  <table>
+    <thead><tr><th><input type="checkbox" id="master-select-all-cb" /></th></tr></thead>
+    <tbody id="master-demo-table-body"></tbody>
+  </table>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList, getVisibleDemos } from '/src/master_pane.js';
+
+    initMasterPane();
+    window.__render = (demos) => renderMasterList(demos, null, () => {});
+    window.__visibleNames = () => getVisibleDemos().map((d) => d.name);
+
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
