@@ -1329,6 +1329,11 @@ pub struct SerializedDemo {
     /// demo from a project saved before it was counted.
     #[serde(default)]
     pub peak_packet_entities: Option<u32>,
+    /// Each playing side and the clan tag its players' names share (#445),
+    /// feeding the project's Teams list. Missing from demos in a project
+    /// saved before it existed; the frontend scans those again.
+    #[serde(default)]
+    pub teams: Vec<analysis::TeamTag>,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -1913,6 +1918,7 @@ pub async fn scan_directory_impl(
                                     streaks: serialized_streaks,
                                     file_key: file_keys[idx].clone(),
                                     peak_packet_entities: analysis.demo_info.peak_packet_entities,
+                                    teams: ::analysis::team_tags(&analysis.state),
                                 }
                             },
                         );

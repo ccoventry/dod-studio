@@ -1,5 +1,8 @@
 mod audit_manager;
 mod capture_manager;
+mod combine_manager;
+mod demo_cache_cmd;
+mod demo_split_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -594,6 +597,8 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(demo_split_manager::DemoSplitManager::default())
+        .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
@@ -607,13 +612,15 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
-            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // The game's Highlights tab asks Studio to analyse a demo too big
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            demo_cache_cmd::cache_demos,
+            demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
             validate_paths,
@@ -668,9 +675,16 @@ pub fn run() {
             changed_demos,
             system_memory_bytes,
             run_demo_audit,
+            demo_split_manager::find_multi_map_demos_cmd,
+            demo_split_manager::cancel_multi_map_scan,
+            demo_split_manager::demo_map_segments,
+            demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
             packet_limit_manager::engine_packet_entity_limit,
+            combine_manager::combine_plan,
+            combine_manager::combine_clips,
+            combine_manager::combine_cancel,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,

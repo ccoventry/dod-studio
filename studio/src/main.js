@@ -24,9 +24,12 @@ import { initRollFloors } from './roll_floors.js';
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
-import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { refreshPacketEntityLimit } from './packet_entity_limit.js';
+import { initAuditorTabs } from './auditor_tabs.js';
+import { initSplitPane } from './split_pane.js';
+import { initCombineClips } from './combine_clips.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
@@ -34,6 +37,8 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
 import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
+import { emptyProjectTeams, normalizeProjectTeams, demoHasTeams } from './project_teams.js';
+import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -352,6 +357,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // rendering, so status can auto-advance even after a restart or re-scan
   // replaced the original streak objects. Persisted in the project file.
   let takeIndex = {};
+  // The Teams list's user-owned half (#445): display names and merges, keyed
+  // on the detected tag (project_teams.js). Project state rather than demo
+  // state, so a re-scan never touches it. Persisted in the project file.
+  let projectTeams = emptyProjectTeams();
   // True whenever project state (scanned demos, takeIndex, scanPaths) has
   // changed since the last successful save or load — gates the "unsaved
   // changes" prompt on window close. Cleared by saveProjectSession() and
@@ -400,7 +409,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initAuditorTabs();
+  initSplitPane();
   initHdPane();
+  initTeamsPane({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: markProjectDirty,
+    // triggerAutoScan is a hoisted declaration further down this scope.
+    onReadMissing: (paths) => triggerAutoScan(paths),
+  });
 
   async function pickTargetDrive() {
     try {
@@ -834,6 +852,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(takeIndex, collectAllUids()),
+        teams: projectTeams,
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
@@ -913,6 +932,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             // what makes it possible to prove a later auto-Rendered flip
             // came from this loaded data and not a leftover in-memory state.
             console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
+            // Tolerant the same way: a project saved before the Teams list
+            // (#445) has no `teams`, and loads with none named or merged.
+            projectTeams = normalizeProjectTeams(data.teams);
             if (data.demos) {
               currentScannedDemos = data.demos;
               // timeline_string is a derived field, saved as a convenience
@@ -931,6 +953,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
               await checkMissingDemos(selected, data.scanPaths || []);
             }
+            refreshTeamsPane();
           }
         }
       } catch (err) {
@@ -978,6 +1001,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     replaceScannedDemos([]);
     currentSessionPath = null;
     takeIndex = {};
+    projectTeams = emptyProjectTeams();
+    refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
     switchNavTab('workspace');
@@ -1320,9 +1345,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key) are scanned.
+      // re-parsed; ones from an older project (no file_key, or no teams:
+      // #445) are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key)
+        .filter((d) => d.file_key && demoHasTeams(d))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1381,6 +1407,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      refreshTeamsPane();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
@@ -1574,6 +1601,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initCombineClips({
+    finishedRenders: () => finishedRenderOutputs(),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,

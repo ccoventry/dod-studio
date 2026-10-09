@@ -9,6 +9,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
 import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { initDemoCache } from './demo_cache.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
 import { renderFlagsTab } from './analyzer_flags.js';
@@ -976,6 +977,7 @@ export function initAnalyzerPane({
 
   loadWeaponDisplayNames();
   initExplorerResize();
+  initDemoCache({ getDemoPaths: () => currentFolderDemos.map((demo) => demo.path) });
 
   const browseBtn = document.querySelector('#analyzer-browse-btn');
   if (browseBtn) {

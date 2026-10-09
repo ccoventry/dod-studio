@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<!--
+  Harness for the Demo Auditor's tabs and Split Maps tab (#624): the folder
+  picker, the tab bar, both panels, and mocked IPC replies for a folder with
+  one two-map demo (a 12 s tail on the second map) and one three-map demo.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>split_pane.js harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <input type="text" id="audit-target-folder-input" />
+  <button id="audit-browse-folder-btn">Browse</button>
+  <div class="auditor-tabs">
+    <button class="auditor-tab-btn active" data-auditor-tab="duplicates">Duplicates</button>
+    <button class="auditor-tab-btn" data-auditor-tab="split">Split Maps</button>
+  </div>
+  <div class="auditor-tab-panel" data-auditor-panel="duplicates"><p id="dup-content">duplicates here</p></div>
+  <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
+    <input type="checkbox" id="split-recursive" checked />
+    <button id="split-find-btn" disabled>Find</button>
+    <button id="split-cancel-btn" disabled>Cancel</button>
+    <p id="split-status"></p>
+    <div id="split-list"></div>
+  </div>
+
+  <script type="module">
+    window.__mockInvokeHandlers = {
+      find_multi_map_demos_cmd: () => [
+        { path: 'C:\\demos\\two.dem', size_bytes: 88000000, maps: ['dod_lennon2', 'dod_lennon2'], source: 'scan' },
+        { path: 'C:\\demos\\sub\\three.dem', size_bytes: 90000000, maps: ['dod_armory_b6', 'dod_avalanche', 'dod_armory_b6'], source: 'cache' },
+      ],
+      demo_map_segments: ({ path }) => path.endsWith('two.dem')
+        ? [
+          { index: 0, map: 'dod_lennon2', map_checksum: 1, start_seconds: 0, end_seconds: 1288.3, frames: 1 },
+          { index: 1, map: 'dod_lennon2', map_checksum: 2, start_seconds: 1288.3, end_seconds: 1300.6, frames: 1 },
+        ]
+        : [
+          { index: 0, map: 'dod_armory_b6', map_checksum: 1, start_seconds: 0, end_seconds: 300, frames: 1 },
+          { index: 1, map: 'dod_avalanche', map_checksum: 2, start_seconds: 300, end_seconds: 1500, frames: 1 },
+          { index: 2, map: 'dod_armory_b6', map_checksum: 3, start_seconds: 1500, end_seconds: 1520, frames: 1 },
+        ],
+      split_demo_maps: ({ path, keep }) => keep.map((k) => ({
+        path: path.replace('.dem', `_part${k + 1}.dem`), map: 'm', seconds: 1200, size_bytes: 5e6,
+      })),
+    };
+    const { initAuditorTabs } = await import('/src/auditor_tabs.js');
+    const { initSplitPane } = await import('/src/split_pane.js');
+    initAuditorTabs();
+    initSplitPane();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
