@@ -189,6 +189,7 @@ mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
+mod overview_hd;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
