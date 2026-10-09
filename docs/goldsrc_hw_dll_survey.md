@@ -25,7 +25,9 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 >
 > §1–§5 are the first pass; §7–§11 are later passes (#273, closed) that resolved
 > most of what §3.3–§3.5 and §4 leave open. Where the two disagree, trust the
-> later section; §11 is what is still not surveyed.
+> later section; §11 is what is still not surveyed. §12–§13 are #300: §12
+> redoes the HLAE map against HLAE 2.192.4 for **both** engine builds, and
+> supersedes §1–§2's counts.
 >
 > | Candidate | Built? | Command / module | Issue / PR |
 > | --- | --- | --- | --- |
@@ -597,3 +599,216 @@ Shorter than §5, and deliberately not empty.
   it was the only one.
 - **The engine's own read of the demo `ConsoleCommand` field** (§3.1), and the
   **`ex_interp` flag at `+0x2d5df84`** (§3.2). Both unchanged.
+
+*(#300 picks these up. §12 answers the HLAE items — the eight keys and the
+census of writes — for both builds; §13 is the demo reader; §3.2's flag is
+answered by `docs/goldsrc_ex_interp.md` §2–§2b.)*
+
+---
+
+## 12. Every HLAE write, per build (#300)
+
+#300 asked two things of HLAE, and the 2026-09-28 review (D6) narrowed it to
+exactly those, **per build**: how HLAE uses `R_PushDlights`, `SND_PickChannel`
+and the six `UnkDrawHud*` keys, which it resolves but never `DetourAttach`es;
+and whether the 34 `DetourAttach` sites plus §10's span patch are all of its
+writes.
+
+**Subjects:** `AfxHookGoldSrc.dll` from **HLAE 2.192.4** (449,536 bytes, the
+one install on this machine), against both engines: the pre-Anniversary
+`hw.dll` (§1–§11's subject) and the 25th Anniversary `hw.dll` from the
+*POST-Anniversary for Movies* install (3,598,176 bytes, `ImageBase
+0x10000000`). Offline, `pefile` + `capstone`; `survey_hw_dll.py writes` and
+`spans` reproduce it.
+
+### 12.1 First: §1's HLAE was an older build
+
+§1–§2 and §10 read a different `AfxHookGoldSrc.dll`, and HLAE has moved. Against
+2.192.4:
+
+| §1 says | 2.192.4 has |
+| --- | --- |
+| 68 keys, 46 engine-side, 22 game-client | **69**: 50 engine-side, 19 game-client |
+| 34 `DetourAttach` sites | **40** |
+| `R_DrawEntitiesOnList_In`/`_Out`, `R_DrawSkyBox_Begin`/`_End`, `S_StartDynamicSound`, `S_Update_`, `CL_ParseServerMessage_CmdRead_MsgReadByte_CallAddrOfs` do not exist | all seven exist |
+| `SND_PickChannel`, `GetSoundtime` are keys | **neither is** |
+
+So §1's "the issue guessed / actually" table was right about the build it read
+and is wrong about this one. **The `SND_PickChannel` half of item 2 has no
+answer to give: 2.192.4 does not resolve it at all.**
+
+The reason for most of the drift is that this HLAE supports both engines. It
+picks a branch per key from one test, made once at `hw.dll` load: **does
+`hw.dll` contain the string `A3D.DLL`?** The pre-Anniversary build does, the
+Anniversary build does not. (Proven: the resolver stores the result of that
+search in the flag every two-branch key reads.) Most keys carry one pattern per
+branch, which is why `collide` reports so many `0 matches` lines — each is the
+*other* build's pattern, not a miss.
+
+### 12.2 The census (item 3)
+
+The question was whether a `VirtualProtect`-and-write exists outside the
+`DetourAttach` count. The way to close it is from the API side: `VirtualProtect`
+is imported once, and everything that changes a page's protection has to reach
+it.
+
+It is referenced from **8 direct call sites and one jump thunk, in 9
+functions**. Four are statically linked Microsoft Detours (transaction begin,
+commit, `DetourAttachEx`, and the thunk they share). The other five are HLAE's
+own, and they are the complete list of its write primitives:
+
+| primitive | what it writes | call sites |
+| --- | --- | --- |
+| Detours `DetourAttach` | rewrites a function's first ≥5 bytes, trampoline elsewhere | **40** |
+| trampolined jump | copies a span to a new trampoline, NOPs it, writes `E9 rel32` over its start | **2** |
+| in-place jump | NOPs a span and writes `E9 rel32`; no trampoline — HLAE re-creates the displaced instructions in a stub of its own | **11** (6 into `hw.dll`, the rest into its own stubs) |
+| bracketed write | unprotect *n* bytes, plain store, restore | **12** |
+| import-table slot | one pointer, through an import-hook manager | 2, which the manager runs over **4** modules |
+| executable allocation | HLAE's own heap, never foreign memory | 4 |
+
+Every call site of every one of those is attributed in §12.3. **That closes item
+3 for protection-changing writes, proven:** there is no `VirtualProtect` call in
+the module that is not one of these, and none of these has an unattributed
+caller.
+
+What a `VirtualProtect` census *cannot* see is a store into memory that is
+already writable. Two kinds turned up by following the key slots, and they are
+in the table too: **console command handlers** (a `cmd_function_t` node's
+handler field, heap) and **slots of the engine's `cldll_func_t` copy** (`.data`;
+HLAE brackets these anyway). A scan for every `mov [reg+disp], <AfxHookGoldSrc
+code address>` finds only six, all inside one of HLAE's own objects. *Not
+proven:* a store into writable memory through a pointer HLAE computes at run
+time from something that is not a key would not show in either search. Nothing
+suggests one exists.
+
+### 12.3 The map
+
+`hw.dll` addresses, per build. "At load" means HLAE's `hw.dll` installer, which
+runs once when `hw.dll` is loaded, before `client.dll` exists; "lazy" means on
+the first use of a console command, and never otherwise.
+
+**Prologue detours in `hw.dll`** — the §2 model, unchanged:
+
+| target | builds | when |
+| --- | --- | --- |
+| `CL_Disconnect`, `Host_Init`, `_Host_Frame`, `Mod_LeafPVS`, `R_DrawParticles`, `R_DrawViewModel`, `R_PolyBlend`, `R_RenderView` | both | at load |
+| the function `cl_enginefuncs` slot 69 points at (`pfnHookEvent`) | both | at load |
+| `R_DrawEntitiesOnList`, `R_DrawSkyBoxEx` | **pre-Anniversary only** | at load |
+| `R_StudioSetHeader`, `R_SetRenderModel`, `R_SetupRenderer` (`engine_studio_api_t`) | both | when the engine asks `client.dll` for its studio interface |
+| `S_PaintChannels`, `S_TransferPaintBuffer`, `S_StartDynamicSound` | both | lazy: when HLAE starts recording sound |
+| `Draw_DecalMaterial` | both | lazy: `mirv_decalfilter` or `mirv_noadverts` |
+| `CL_EmitEntities` | both | lazy: `dem_forcehltv` |
+| the function `cl_enginefuncs` slot 66 points at (`pfnWeaponAnim`) | both | its installer is named for `cstrike`; the gate was not traced |
+
+That is 20 of the 40 call sites. The other 20 are 19 in `client.dll`
+(`cstrike_*`, `tfc_*`, `valve_*`, all game-gated) and one on the game window's
+procedure in `SDL2.dll`. The three studio-interface targets are named by HLAE's
+own failure messages, not by anything in `hw.dll`.
+
+**Span patches in `hw.dll` `.text`** — the shape §10 found, and it was not
+alone. Each overwrites the listed span in the middle of a function:
+
+| key | pre-Anniversary | 25th Anniversary | span | when |
+| --- | --- | --- | --- | --- |
+| `UnkDrawHudIn` | `hw+0xb75b4` | `hw+0x25d2d2` | 5 (a `call`) | at load |
+| `UnkDrawHudOut` | `hw+0xb7639` | `hw+0x25d34f` | 5 (a `call`) | at load |
+| `R_DrawEntitiesOnList_In` | — | `hw+0x244354` | 9 | at load |
+| `R_DrawEntitiesOnList_Out` | — | `hw+0x244492` | 12 | at load |
+| `R_DrawSkyBox_Begin` | — | `hw+0x251521` | 8 | at load |
+| `R_DrawSkyBox_End` | — | `hw+0x2516e6` | 6 | at load |
+| `CL_ParseServerMessage_CmdRead` | `hw+0x1d3e6` | `hw+0x1a7ddc` | 7 / 11 | lazy: `mirv_voice_block` |
+
+The containing functions: pre-Anniversary `hw+0xb74e0` (both `UnkDrawHud*`) and
+`hw+0x1d300` (`CL_ParseServerMessage`); Anniversary `hw+0x25d1f0`,
+`hw+0x244130` (`R_DrawEntitiesOnList`), `hw+0x2513c0` (`R_DrawSkyBox`) and
+`hw+0x1a7cb0`.
+
+The pattern is a substitution: **where the Anniversary engine's function cannot
+take a prologue detour cleanly, HLAE swaps it for two span patches** —
+`R_DrawEntitiesOnList` and `R_DrawSkyBoxEx` are detoured on the old engine and
+span-patched on the new one. So the per-build collision maps differ in kind,
+not just in address.
+
+§10's span patch, for the record, **is lazy**: it is installed the first time
+`mirv_voice_block` runs, which strips voice data from blocked players by
+advancing `msg_readcount` past it. In a session where nobody types that command,
+`hw+0x1d3e6` is untouched. On the Anniversary build the span is 11 bytes, not 7
+— a `mov [ebp-0x10c], ebx` ahead of the same `call MSG_ReadByte`.
+
+**Data writes** (writable already):
+
+| what | where | when |
+| --- | --- | --- |
+| `cldll_func_t` slot 19 (`V_CalcRefdef`) | the engine's copy of the client table | lazy: `__mirv_force_players_solid` |
+| slot 15 (`CL_IsThirdPerson`) | same | lazy: `dem_forcehltv` |
+| slot 6 (`HUD_PlayerMove`) | same | lazy: `__mirv_moveto` |
+| `skytextures[6]` (24 bytes) | `hw.dll` `.data` | swapped around each sky draw, from the sky hooks |
+| `msg_readcount` | `hw.dll` `.data` | per message, after `mirv_voice_block` |
+| handler of `connect`, `dem_forcehltv`, `startmovie`, `endmovie` | `cmd_function_t` nodes | once, right after `Host_Init` returns (from HLAE's `Host_Init` hook) |
+
+**Import-table slots in `hw.dll`:** `KERNEL32!LoadLibraryA`,
+`KERNEL32!GetProcAddress` and `SDL2!SDL_GL_GetProcAddress`, at load. The same
+manager hooks imports of `hl.exe`, `SDL2.dll` (`GetProcAddress`,
+`CreateWindowExW`, `DestroyWindow`, `SetCursorPos`, `SwapBuffers`) and
+`client.dll`.
+
+**One write in `client.dll`, and it is DoD's too.** `__mirv_demozoom` puts a
+trampolined jump over `client.dll`'s exported `Demo_ReadBuffer` (6 bytes, lazy).
+Every GoldSrc client exports that, so §1's "on the DoD client side we have the
+module entirely to ourselves" is true of HLAE's *patterns* — there is still no
+`dod_` key — but not of every HLAE write. It needs a command nobody types.
+
+### 12.4 Item 2, answered
+
+- **`R_PushDlights` — read, never written.** HLAE stores its address beside
+  `R_RenderView`'s and calls it from its own `R_RenderView` hook (an indirect
+  `call` through the stored pointer), presumably to rebuild dynamic lights for a
+  second render pass. Pre-Anniversary `hw+0x433a0`; Anniversary `hw+0x241cd0`,
+  one match each.
+- **`SND_PickChannel` — gone** from 2.192.4 (§12.1).
+- **The six `UnkDrawHud*` keys — two span patches**, and the names explain
+  themselves once the offsets are read. `In` and `Out` are two 5-byte `call`
+  instructions in the same function, `0x85` bytes apart on the old engine and
+  `0x7d` on the new; `InCall`/`OutCall` are those calls' targets and
+  `InContinue`/`OutContinue` are the addresses just after them. Each `call` is
+  replaced by a jump into a stub that runs HLAE's code, makes the original call
+  itself, and jumps back to `Continue` — a bracket around one piece of HUD
+  drawing. Installed at load, on both builds, in every HLAE session. Same shape
+  as §10, so item 2's hunch was right for six of the eight.
+
+### 12.5 What it means for `goldsrc-hooks`
+
+**Three shared slots, all safe by chaining.** `goldsrc-hooks` and HLAE write the
+same location in three places:
+
+| location | ours | HLAE's |
+| --- | --- | --- |
+| `hw.dll` IAT `LoadLibraryA`, `GetProcAddress` | `engine.rs` | at load |
+| the `connect` command's handler | `connect_guard.rs` | after `Host_Init` |
+| `cldll_func_t` slot 19 | `engine.rs` (`SLOT_CALC_REFDEF`) | only after `__mirv_force_players_solid` |
+
+In every one, **both sides save the slot's current value and call through it**
+— `hook_import` stores `*slot` as the real function, `connect_guard`'s `wrap`
+keeps the handler it replaces, and HLAE's three writers do the same — so either
+install order gives a working chain. *Inferred, not traced:* that neither side
+restores its saved value while the other's hook is above it. Restoring would
+silently unhook the other.
+
+`pfnHookEvent` is a near miss rather than a collision: HLAE detours the
+*function* slot 69 points at, at load; `missing_shots.rs` swaps the *slot*,
+later. Ours calls through what it found, which is the engine's function, whose
+prologue now jumps to HLAE. Also chain-safe.
+
+**No byte overlap with any span.** None of the six `hw.dll` span sites, nor
+their containing functions, has an address of ours within 32 bytes: checked
+against everything the `verify_*` tools print — twelve for the pre-Anniversary
+build, the four that take `--anniversary` for the other. That second list is not
+complete, so on the Anniversary build this is "nothing found", not "proven
+disjoint". `detour.rs`'s byte check is still the backstop: an `E9` where a stub
+expected the original bytes fails loudly.
+
+The practical rule §10 gave for the message stream — don't touch the
+`CmdRead` span, watch `msg_readcount` instead — holds on both builds, with the
+Anniversary span 11 bytes long. And there is now a second region with the same
+warning on the Anniversary build only: **`R_DrawEntitiesOnList` and
+`R_DrawSkyBox` are not detour targets there; their insides are HLAE's.**
