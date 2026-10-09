@@ -8,8 +8,8 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, demoMapSegments, splitDemoMaps } from './ipc_bridge.js';
-import { renderMultiMapBanner, mapsToKeep } from './analyzer_multimap.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { renderMultiMapBanner } from './analyzer_multimap.js';
 import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
 import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
@@ -1093,6 +1093,8 @@ async function loadAnalyzerDemo(path) {
   const container = document.querySelector('#analyzer-tab-content');
   if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
+  // The last demo's multi-map notice isn't about this one.
+  renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   analyzerLoadInProgress = true;
   try {
     report = await analyzeDemoFull(path);
@@ -1102,24 +1104,31 @@ async function loadAnalyzerDemo(path) {
     browserSelectedDemo = path;
     renderDemoTable();
     renderActiveTab();
-    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, () => splitAnalyzedDemo(path));
+    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
   } catch (err) {
     if (container) {
       container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
-    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   } finally {
     analyzerLoadInProgress = false;
   }
 }
 
 // #217: Split now on a demo that recorded more than one map. Writes each map
-// (but the stub of a next map) as a demo next to this one, lists them in the
-// Explorer when it shows that folder, and opens the first.
-async function splitAnalyzedDemo(path) {
-  const segments = await demoMapSegments(path);
-  const written = await splitDemoMaps(path, mapsToKeep(segments, SHORT_MAP_SECONDS));
+// (but the stub of a next map) as a demo next to this one, with `update`
+// fed native's progress, lists them in the Explorer when it shows that
+// folder, and opens the first.
+async function splitAnalyzedDemo(path, update) {
+  const unlisten = await listen('split_progress', (event) => {
+    if (event.payload?.path === path) update(event.payload.progress);
+  });
+  let written;
+  try {
+    written = await splitDemoAuto(path, SHORT_MAP_SECONDS);
+  } finally {
+    unlisten();
+  }
   showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
   if (currentDir && currentDir === parentDirOf(path)) await setCurrentDir(currentDir);
   if (written.length) await loadAnalyzerDemo(written[0].path);

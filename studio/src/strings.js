@@ -718,6 +718,10 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    // split_progress.js: a split's progress line (#217).
+    progressReading: (pct) => `Reading the demo… ${pct}%`,
+    progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
+    progressChecking: (map, part, parts, pct) => `Checking ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
     TITLE: 'Demos With More Than One Map',
     HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
     RECURSIVE: 'Include subfolders',
@@ -738,7 +742,6 @@ export const STRINGS = {
     SPLIT_BUTTON: 'Split Checked Maps',
     SHOW_IN_FOLDER: 'Show in folder',
     NOTHING_TICKED: 'Tick at least one map.',
-    SPLITTING: 'Splitting...',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -904,7 +907,6 @@ export const STRINGS = {
     MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
       + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
       + 'the Demo Auditor\'s Split Maps tab lets you pick.',
-    MULTI_MAP_SPLITTING: 'Splitting…',
     multiMapSplitDone: (names) => `Split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
     multiMapSplitFailed: (err) => `Could not split it: ${err}`,
 

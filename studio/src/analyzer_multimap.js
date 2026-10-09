@@ -4,10 +4,11 @@
 // says so above every tab and offers Split now: the Demo Auditor's Split
 // Maps (#624) on this one demo, after which each map is a demo of its own.
 //
-// Pure, apart from the banner it fills in: the IPC (finding the maps,
-// splitting, opening the result) is the caller's, through `onSplit`.
+// Pure, apart from the banner it fills in: the IPC (splitting, opening the
+// result) is the caller's, through `onSplit`.
 
 import { escapeHtml as esc } from './html.js';
+import { splitProgressBar } from './split_progress.js';
 import { STRINGS } from './strings.js';
 
 /** The maps a report's demo recorded, when there is more than one; else null.
@@ -18,22 +19,10 @@ export function multiMapList(report) {
 }
 
 /**
- * Which maps (`MapSegment.index`) a split keeps: every map at least
- * `minSeconds` long. A shorter one is almost always the next map loading as
- * the recording stopped, so Split Maps leaves it unticked too. When that
- * leaves nothing, every map is kept.
- */
-export function mapsToKeep(segments, minSeconds) {
-  const long = segments
-    .filter((s) => s.end_seconds - s.start_seconds >= minSeconds)
-    .map((s) => s.index);
-  return long.length ? long : segments.map((s) => s.index);
-}
-
-/**
  * Fills `el` with the notice for `report`, or hides it for a one-map demo.
- * `onSplit()` runs on Split now; while it runs the button is disabled, and
- * if it throws, the banner says why.
+ * `onSplit(update)` runs on Split now, with `update(SplitProgress)` for the
+ * banner's progress bar. While it runs the button is disabled and the bar
+ * shows; if it throws, the banner says why.
  */
 export function renderMultiMapBanner(el, report, onSplit) {
   if (!el) return;
@@ -53,10 +42,11 @@ export function renderMultiMapBanner(el, report, onSplit) {
   const status = el.querySelector('.analyzer-multimap-status');
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    status.textContent = STRINGS.ANALYZER.MULTI_MAP_SPLITTING;
+    const bar = splitProgressBar();
+    status.replaceChildren(bar.el);
     try {
-      await onSplit();
-      status.textContent = '';
+      await onSplit(bar.update);
+      status.replaceChildren();
     } catch (err) {
       status.textContent = STRINGS.ANALYZER.multiMapSplitFailed(err);
     } finally {

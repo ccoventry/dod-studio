@@ -762,6 +762,7 @@ pub fn run() {
             demo_split_manager::cancel_multi_map_scan,
             demo_split_manager::demo_map_segments,
             demo_split_manager::split_demo_maps,
+            demo_split_manager::split_demo_auto,
             delete_audit_files,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
