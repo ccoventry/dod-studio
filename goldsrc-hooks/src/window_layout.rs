@@ -268,6 +268,43 @@ pub(crate) fn fit_rect_tall(
     (x, y, w, (h + now.1 - design.1).max(1))
 }
 
+/// Up to this much room past a tab's controls is the tab's own margin, not
+/// space the layout left empty on purpose.
+const MAX_SLACK: i32 = 120;
+/// The margin a tab's `.res` keeps past its last control.
+const LAYOUT_MARGIN: i32 = 8;
+
+/// The design and current tab size to fit a tab's controls against, measured
+/// from where its controls end rather than from the tab's own edge (#609).
+///
+/// A tab can come out taller or wider than its `.res` was drawn for: the
+/// 25th Anniversary build's tabs do (#612). The extra room then sits past the
+/// last control, and [`fit_axis`]'s "near the far edge" test stops seeing the
+/// bottom row as near the bottom: the console's input line stayed put while
+/// its history stretched. Taking that room off both sizes keeps a layout
+/// that fills its tab filling it. A layout that ends well short of its tab
+/// (more than [`MAX_SLACK`] past it, like the Studio tab's two rows) is left
+/// as drawn.
+pub(crate) fn content_frame(
+    controls: &[(i32, i32, i32, i32)],
+    design: (i32, i32),
+    now: (i32, i32),
+) -> ((i32, i32), (i32, i32)) {
+    let right = controls.iter().map(|c| c.0 + c.2).max().unwrap_or(design.0);
+    let bottom = controls.iter().map(|c| c.1 + c.3).max().unwrap_or(design.1);
+    let axis = |extent: i32, design: i32, now: i32| {
+        let slack = design - (extent + LAYOUT_MARGIN);
+        if slack > 0 && slack <= MAX_SLACK {
+            (design - slack, (now - slack).max(1))
+        } else {
+            (design, now)
+        }
+    };
+    let (dw, nw) = axis(right, design.0, now.0);
+    let (dh, nh) = axis(bottom, design.1, now.1);
+    ((dw, dh), (nw, nh))
+}
+
 /// `Frame`'s own pieces -- title bar, caption buttons, resize grips -- which
 /// `Frame::PerformLayout` places itself. In GameUI they have no name at all
 /// (listed live on both builds, 2026-10-01), while every control a `.res`
@@ -777,6 +814,42 @@ pub fn poll() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #609: the Console tab, drawn for 536x240, came out 60 px taller. Its
+    /// input line must still follow the bottom when the window grows, and
+    /// the history above it stretch.
+    #[test]
+    fn a_taller_tab_still_keeps_the_bottom_row_at_the_bottom() {
+        let controls = [(8, 6, 520, 196), (8, 208, 436, 24), (452, 208, 76, 24)];
+        let (design, now) = content_frame(&controls, (536, 300), (536, 400));
+        assert_eq!(design, (536, 240));
+        assert_eq!(now, (536, 340));
+        assert_eq!(fit_rect(controls[1], design, now), (8, 308, 436, 24));
+        assert_eq!(fit_rect(controls[0], design, now), (8, 6, 520, 296));
+        // Without it, the line stays put and the history runs under it.
+        assert_eq!(
+            fit_rect(controls[1], (536, 300), (536, 400)),
+            (8, 208, 436, 24)
+        );
+    }
+
+    #[test]
+    fn a_layout_that_fills_its_tab_is_unchanged() {
+        let controls = [(8, 6, 520, 226)];
+        assert_eq!(
+            content_frame(&controls, (536, 240), (700, 500)),
+            ((536, 240), (700, 500))
+        );
+    }
+
+    /// The Studio tab's two rows end far above its bottom on purpose: its
+    /// height is left as drawn. (Its width ends 40 px short, which is margin.)
+    #[test]
+    fn a_short_layout_is_left_as_drawn() {
+        let controls = [(8, 8, 160, 24), (8, 44, 480, 24)];
+        let ((_, design_h), (_, now_h)) = content_frame(&controls, (536, 240), (536, 400));
+        assert_eq!((design_h, now_h), (240, 400));
+    }
 
     #[test]
     fn a_tab_list_takes_the_height_whatever_its_share() {
