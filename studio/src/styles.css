@@ -675,6 +675,41 @@ button.primary-btn:hover:not(:disabled) {
   padding: 16px !important;
 }
 
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
+}
+
 /* Configuration Tabs */
 .config-tabs-nav {
   display: flex;
