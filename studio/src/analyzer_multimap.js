@@ -1,8 +1,8 @@
 // analyzer_multimap.js
 // A demo that recorded more than one map (#217). The Demo Analyzer covers
-// only one of them (the first with gameplay, #418), so it says so above every
-// tab and offers Split now: the Demo Auditor's Split Maps (#624) on this one
-// demo, after which each map is a demo of its own.
+// only the first (the game's viewdemo stops at the map change too), so it
+// says so above every tab and offers Split now: the Demo Auditor's Split
+// Maps (#624) on this one demo, after which each map is a demo of its own.
 //
 // Pure, apart from the banner it fills in: the IPC (finding the maps,
 // splitting, opening the result) is the caller's, through `onSplit`.

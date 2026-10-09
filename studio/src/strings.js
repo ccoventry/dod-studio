@@ -899,7 +899,7 @@ export const STRINGS = {
     NO_DEMO_LOADED: 'No demo loaded',
     // #217: a demo that recorded more than one map.
     multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
-      + 'Only one is analysed: the first with gameplay, up to the next map.',
+      + 'Only the first is analysed: the game stops playing it at the map change. Split it to use the rest.',
     MULTI_MAP_SPLIT_BUTTON: 'Split now',
     MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
       + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '

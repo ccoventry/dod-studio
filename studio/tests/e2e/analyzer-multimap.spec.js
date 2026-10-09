@@ -69,7 +69,7 @@ test('a demo with two maps says so above the tabs', async ({ page }) => {
   const banner = page.locator('#analyzer-multimap-banner');
   await expect(banner).toBeVisible();
   await expect(banner).toContainText('This demo recorded 2 maps (dod_lennon2, dod_lennon2).');
-  await expect(banner).toContainText('Only one is analysed');
+  await expect(banner).toContainText('Only the first is analysed');
   await expect(banner.locator('button')).toHaveText('Split now');
 });
 
