@@ -204,11 +204,25 @@ fn redeliver(hide: bool) {
         Ok(last) if last.level == level => (last.clan_timer, last.game_rules.clone()),
         _ => return,
     };
-    if let Some((seconds, started)) = clan_timer
-        && let Some(left) = seconds_left(seconds, started, engine::client_time())
-    {
-        // 0 makes `DrawClanTimer`'s "still running" test false at once.
-        deliver(CLAN_TIMER, &mut [if hide { 0 } else { left }]);
+    if let Some((seconds, started)) = clan_timer {
+        let now = engine::client_time();
+        match seconds_left(seconds, started, now) {
+            Some(left) => {
+                // 0 makes `DrawClanTimer`'s "still running" test false at once.
+                let sent = if hide { 0 } else { left };
+                let result = deliver(CLAN_TIMER, &mut [sent]);
+                unsafe {
+                    crate::debug::report(&format!(
+                        "clan_text: re-delivered ClanTimer {sent} ({left} s of {seconds} left, handler returned {result})"
+                    ))
+                };
+            }
+            None => unsafe {
+                crate::debug::report(&format!(
+                    "clan_text: ClanTimer {seconds} not re-delivered: started at {started:.2}, now {now:.2}"
+                ))
+            },
+        }
     }
     if let Some(rules) = game_rules
         && rules.get(1).is_some_and(|flags| flags & WARMUP_BIT != 0)
