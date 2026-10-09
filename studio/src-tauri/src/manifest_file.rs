@@ -138,6 +138,8 @@ mod tests {
             session_id: session_id.to_string(),
             blocks: Vec::new(),
             capture_fps: 300,
+            capture_mode: String::new(),
+            agr_fps: 0,
         }
     }
 
