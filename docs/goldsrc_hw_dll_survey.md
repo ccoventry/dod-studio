@@ -711,7 +711,7 @@ the first use of a console command, and never otherwise.
 | `CL_Disconnect`, `Host_Init`, `_Host_Frame`, `Mod_LeafPVS`, `R_DrawParticles`, `R_DrawViewModel`, `R_PolyBlend`, `R_RenderView` | both | at load |
 | the function `cl_enginefuncs` slot 69 points at (`pfnHookEvent`) | both | at load |
 | `R_DrawEntitiesOnList`, `R_DrawSkyBoxEx` | **pre-Anniversary only** | at load |
-| `R_StudioSetHeader`, `R_SetRenderModel`, `R_SetupRenderer` (`engine_studio_api_t`) | both | when the engine asks `client.dll` for its studio interface |
+| `R_StudioSetHeader`, `R_SetRenderModel`, `R_SetupRenderer` (`engine_studio_api_t`) | both | once the studio interface is handed over (from HLAE's hook on that hand-off; the chain was not traced end to end) |
 | `S_PaintChannels`, `S_TransferPaintBuffer`, `S_StartDynamicSound` | both | lazy: when HLAE starts recording sound |
 | `Draw_DecalMaterial` | both | lazy: `mirv_decalfilter` or `mirv_noadverts` |
 | `CL_EmitEntities` | both | lazy: `dem_forcehltv` |
@@ -740,11 +740,11 @@ The containing functions: pre-Anniversary `hw+0xb74e0` (both `UnkDrawHud*`) and
 `hw+0x244130` (`R_DrawEntitiesOnList`), `hw+0x2513c0` (`R_DrawSkyBox`) and
 `hw+0x1a7cb0`.
 
-The pattern is a substitution: **where the Anniversary engine's function cannot
-take a prologue detour cleanly, HLAE swaps it for two span patches** —
-`R_DrawEntitiesOnList` and `R_DrawSkyBoxEx` are detoured on the old engine and
-span-patched on the new one. So the per-build collision maps differ in kind,
-not just in address.
+The pattern is a substitution: **`R_DrawEntitiesOnList` and `R_DrawSkyBoxEx`
+are prologue-detoured on the old engine and span-patched on the new one** —
+the installer asks "old engine?" and takes one path or the other (proven; why
+HLAE chose spans there is not something the binary says). So the per-build
+collision maps differ in kind, not just in address.
 
 §10's span patch, for the record, **is lazy**: it is installed the first time
 `mirv_voice_block` runs, which strips voice data from blocked players by
@@ -778,10 +778,10 @@ module entirely to ourselves" is true of HLAE's *patterns* — there is still no
 ### 12.4 Item 2, answered
 
 - **`R_PushDlights` — read, never written.** HLAE stores its address beside
-  `R_RenderView`'s and calls it from its own `R_RenderView` hook (an indirect
-  `call` through the stored pointer), presumably to rebuild dynamic lights for a
-  second render pass. Pre-Anniversary `hw+0x433a0`; Anniversary `hw+0x241cd0`,
-  one match each.
+  `R_RenderView`'s and calls it through that pointer from one small helper,
+  which pushes the dynamic lights and then runs HLAE's own `R_RenderView`
+  hook again — an extra render pass, gated on a flag the hook sets.
+  Pre-Anniversary `hw+0x433a0`; Anniversary `hw+0x241cd0`, one match each.
 - **`SND_PickChannel` — gone** from 2.192.4 (§12.1).
 - **The six `UnkDrawHud*` keys — two span patches**, and the names explain
   themselves once the offsets are read. `In` and `Out` are two 5-byte `call`
@@ -816,10 +816,12 @@ silently unhook the other.
 later. Ours calls through what it found, which is the engine's function, whose
 prologue now jumps to HLAE. Also chain-safe.
 
-**No byte overlap with any span.** None of the six `hw.dll` span sites, nor
-their containing functions, has an address of ours within 32 bytes: checked
-against everything the `verify_*` tools print — twelve for the pre-Anniversary
-build, the four that take `--anniversary` for the other. That second list is not
+**No byte overlap with any span.** No address of ours lies within 32 bytes of
+any HLAE span (three on the old build, seven on the new), and the only one
+inside a containing function is `hw+0x1d791`, the unreachable `ex_interp` flag
+write that `verify_ex_interp_offsets.py` checks and nothing of ours writes.
+Checked against everything the `verify_*` tools print — twelve for the
+pre-Anniversary build, the four that take `--anniversary` for the other. That second list is not
 complete, so on the Anniversary build this is "nothing found", not "proven
 disjoint". `detour.rs`'s byte check is still the backstop: an `E9` where a stub
 expected the original bytes fails loudly.
