@@ -1362,6 +1362,7 @@ export const STRINGS = {
     SPLIT_ANYWAY: 'Split Anyway',
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
+    queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
     MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',

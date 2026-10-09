@@ -8,6 +8,7 @@
 // The splitting itself (Split Maps' IPC, the queue swap) is main.js's,
 // through the callbacks passed in here.
 
+import { splitProgressBar } from './split_progress.js';
 import { STRINGS } from './strings.js';
 
 /** Whether a queued demo recorded more than one map. False for a demo from a
@@ -23,7 +24,8 @@ export function pickedMultiMapDemos(demos) {
 }
 
 /** The row's "2 maps · Split" button, or null for a one-map demo. Clicking it
- *  runs `onSplit(demo)` and doesn't select the row. */
+ *  runs `onSplit(demo, update)` and doesn't select the row; the first
+ *  `update(SplitProgress)` swaps the button for a progress bar until it ends. */
 export function multiMapSplitButton(demo, onSplit) {
   if (!isMultiMapDemo(demo) || !onSplit) return null;
   const btn = document.createElement('button');
@@ -34,9 +36,21 @@ export function multiMapSplitButton(demo, onSplit) {
   btn.addEventListener('click', async (e) => {
     e.stopPropagation(); // do not select the row
     btn.disabled = true;
+    let bar = null;
+    const update = (p) => {
+      if (!bar) {
+        bar = splitProgressBar();
+        bar.el.classList.add('multimap-split-progress');
+        btn.after(bar.el);
+        btn.hidden = true;
+      }
+      bar.update(p);
+    };
     try {
-      await onSplit(demo);
+      await onSplit(demo, update);
     } finally {
+      bar?.el.remove();
+      btn.hidden = false;
       btn.disabled = false;
     }
   });

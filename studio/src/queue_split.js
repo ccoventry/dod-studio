@@ -7,10 +7,11 @@
 // Capture Batch refuses picks in such a demo and offers the same split.
 // Which demos and which maps: queue_multimap.js and analyzer_multimap.js.
 
-import { demoMapSegments, splitDemoMaps } from './ipc_bridge.js';
-import { mapsToKeep } from './analyzer_multimap.js';
+import { listen } from '@tauri-apps/api/event';
+import { splitDemoAuto } from './ipc_bridge.js';
 import { pickedMultiMapDemos } from './queue_multimap.js';
 import { SHORT_MAP_SECONDS } from './split_pane.js';
+import { splitProgressView } from './split_progress.js';
 import { isDemoTracked } from './take_index.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
@@ -25,18 +26,38 @@ import { STRINGS } from './strings.js';
  *   pickedDemosPresent() project_demos.js's missing/changed check.
  */
 export function createQueueSplit({ getDemos, removeDemo, scan, confirmTracked, pickedDemosPresent }) {
+  // The queue's status line (beside the scan spinner) says how the split is
+  // going whatever started it; `update(SplitProgress)`, when given, also
+  // feeds the row's own bar.
+  function showStatus(name, progress) {
+    const status = document.querySelector('#scan-status');
+    const spinner = document.querySelector('#scan-spinner');
+    if (status) status.textContent = progress ? STRINGS.MAIN.queueSplitStatus(name, splitProgressView(progress).text) : '';
+    if (spinner) spinner.style.display = progress ? 'inline-block' : 'none';
+  }
+
   // The file is kept; its row, and any work on it, goes. Resolves whether it
   // split.
-  async function splitQueuedDemo(demo, { askIfTracked = true } = {}) {
+  async function splitQueuedDemo(demo, { askIfTracked = true, update } = {}) {
     if (askIfTracked && isDemoTracked(demo) && !(await confirmTracked(demo))) return false;
     const name = fileNameOf(demo.path);
+    const report = (p) => {
+      showStatus(name, p);
+      update?.(p);
+    };
+    report({ fraction: 0, stage: 'reading' });
+    const unlisten = await listen('split_progress', (event) => {
+      if (event.payload?.path === demo.path) report(event.payload.progress);
+    }).catch(() => () => {});
     let written;
     try {
-      const segments = await demoMapSegments(demo.path);
-      written = await splitDemoMaps(demo.path, mapsToKeep(segments, SHORT_MAP_SECONDS));
+      written = await splitDemoAuto(demo.path, SHORT_MAP_SECONDS);
     } catch (err) {
       showToast(STRINGS.MAIN.queueSplitFailed(name, err), 'error', 8000);
       return false;
+    } finally {
+      unlisten();
+      showStatus(name, null);
     }
     removeDemo(demo);
     showToast(STRINGS.MAIN.queueSplitDone(name, written.map((w) => fileNameOf(w.path))), 'success', 6000);

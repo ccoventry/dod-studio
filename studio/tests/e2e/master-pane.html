@@ -36,7 +36,12 @@
       null,
       (demo) => { result.textContent = `locate ${demo.name}`; },
       (demo) => { result.textContent = `use ${demo.name}`; },
-      async (demo) => { result.textContent = `split ${demo.name}`; }
+      // A split reports 30% and then waits for window.__finishRowSplit().
+      async (demo, update) => {
+        result.textContent = `split ${demo.name}`;
+        update({ fraction: 0.3, stage: 'reading', map: '', part: 0, parts: 0 });
+        await new Promise((resolve) => { window.__finishRowSplit = resolve; });
+      }
     );
     renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
     window.__harnessReady = true;

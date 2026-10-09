@@ -48,6 +48,17 @@ test.describe('master_pane multi-map demos (#217)', () => {
     await expect(row(page, 'here.dem')).not.toHaveClass(/table-row-selected/);
   });
 
+  test('while it splits, the row shows a progress bar in place of the button', async ({ page }) => {
+    await gotoHarness(page);
+    const r = row(page, 'here.dem');
+    await r.locator('.multimap-split-btn').click();
+    await expect(r.locator('.multimap-split-progress .split-progress-text')).toHaveText('Reading the demo… 30%');
+    await expect(r.locator('.multimap-split-btn')).toBeHidden();
+    await page.evaluate(() => window.__finishRowSplit());
+    await expect(r.locator('.multimap-split-progress')).toHaveCount(0);
+    await expect(r.locator('.multimap-split-btn')).toBeVisible();
+  });
+
   test('a one-map demo, or one saved before the map list existed, has none', async ({ page }) => {
     await gotoHarness(page);
     await expect(row(page, 'moved.dem').locator('.multimap-split-btn')).toHaveCount(0);

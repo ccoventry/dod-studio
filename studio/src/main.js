@@ -2002,7 +2002,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo) => splitQueuedDemo(demo));
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');

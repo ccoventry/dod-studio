@@ -1410,6 +1410,12 @@ button.primary-btn:hover:not(:disabled) {
   background: rgba(251, 191, 36, 0.15);
 }
 
+.multimap-split-progress {
+  min-width: 160px;
+  flex-shrink: 0;
+  font-weight: normal;
+}
+
 .multimap-split-btn:disabled {
   opacity: 0.5;
   cursor: progress;
