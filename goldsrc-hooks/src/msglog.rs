@@ -193,8 +193,9 @@ fn hex_dump(bytes: &[u8]) -> String {
 }
 
 /// Whether this is currently re-prepending its own handler for `name` --
-/// `map_text` stands aside when it is, so the two don't take turns at the
-/// head of the engine's list every frame (see `map_text.rs`'s module doc).
+/// `map_text` and `clan_text` stand aside when it is, so the two don't take
+/// turns at the head of the engine's list every frame (see `map_text.rs`'s
+/// module doc).
 pub(crate) fn watching(name: &str) -> bool {
     ACTIVE.load(Ordering::Relaxed) && is_wanted(name)
 }
@@ -258,6 +259,13 @@ unsafe extern "C" fn hooked_msg(name: *const c_char, size: i32, buf: *mut c_void
         if crate::map_text::hide(payload) {
             return 1;
         }
+    }
+    // Same for dodstudio_hide_clan_text's three messages.
+    if let Some(result) = name_str
+        .as_deref()
+        .and_then(|n| crate::clan_text::filter(n, size, buf))
+    {
+        return result;
     }
     match name_str.as_deref().and_then(original_thunk) {
         Some(original) => unsafe { original(name, size, buf) },

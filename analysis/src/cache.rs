@@ -1,6 +1,6 @@
 //! The analyzer cache every reader of a demo shares: Studio's Demo Analyzer,
 //! its Master Queue scan and highlight scanner, and the in-game hook DLL's
-//! Killstreaks tab (#565). One JSON file per demo,
+//! Highlights tab (#565). One JSON file per demo,
 //! `<root>/v<SCHEMA_VERSION>/<fnv1a of the canonical path>.json`, valid while
 //! the demo's size and modified time match what it records. `<root>` is
 //! `%APPDATA%\dod-studio\analyzer_cache`; callers pass it in, so this crate

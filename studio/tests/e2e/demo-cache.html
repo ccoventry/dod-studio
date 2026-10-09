@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--
+  Harness for demo_cache.js (#569): the Demos panel header's Cache all button
+  and status, from index.html, with Tauri's IPC mocked (vite.config.e2e.js).
+  `window.__demoPaths` stands in for the analyzer's current folder.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>demo_cache.js test harness</title>
+</head>
+<body>
+  <div class="panel-header flex-between">
+    <h3>Demos</h3>
+    <div class="analyzer-cache-controls">
+      <span id="analyzer-cache-status" class="status-text"></span>
+      <button id="analyzer-cache-all-btn">Cache all</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initDemoCache } from '/src/demo_cache.js';
+
+    window.__demoPaths = ['C:\demos\a.dem', 'C:\demos\b.dem', 'C:\demos\c.dem'];
+    initDemoCache({ getDemoPaths: () => window.__demoPaths });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
