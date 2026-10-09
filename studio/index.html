@@ -279,6 +279,8 @@
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_VIDEO_TITLE">Video</option>
                     <option value="obs" data-str="CAPTURE_CONFIG.CAPTURE_MODE_OBS"
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_OBS_TITLE">OBS (real time)</option>
+                    <option value="agr" data-str="CAPTURE_CONFIG.CAPTURE_MODE_AGR"
+                            data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_AGR_TITLE">AGR for Blender (no video)</option>
                   </select>
                   <input type="checkbox" id="config-ffmpeg-capture" hidden />
                 </div>
@@ -289,6 +291,13 @@
                      Every entry is also RGB/4:4:4 because hudAlpha carries the
                      HUD matte in its red channel. Disabled unless Video is on;
                      it has no meaning for a frame sequence. -->
+                <!-- Shown only in AGR mode (#450). Empty means "the same as
+                     Capture FPS", which is hidden in this mode, so the
+                     placeholder names the number it will use. -->
+                <div class="control-group" id="agr-fps-group" style="display: none;">
+                  <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
+                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
                          data-str-title="CAPTURE_CONFIG.CAPTURE_CODEC_TITLE">Capture Codec:</label>
@@ -756,6 +765,31 @@
               </div>
             </div>
 
+            <!-- The style comparison: compare.py's sheet, from the user's own maps. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.PREVIEW_TITLE">Compare styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.PREVIEW_HINT">The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.</p>
+                <div class="input-row">
+                  <label for="hd-preview-map" data-str="HD.PREVIEW_MAP_LABEL">Map:</label>
+                  <select id="hd-preview-map"></select>
+                </div>
+                <div class="hd-choice-group">
+                  <span class="hd-choice-label" data-str="HD.BUILD_STYLES_LABEL">Styles:</span>
+                  <div id="hd-preview-styles" class="hd-choices"></div>
+                </div>
+                <div class="row-inputs">
+                  <button id="hd-preview-btn" class="primary-btn" data-str="HD.PREVIEW_BUTTON">Show comparison</button>
+                </div>
+                <p id="hd-preview-text" class="hd-hint"></p>
+                <div id="hd-preview-wrap" class="hd-preview-wrap" hidden>
+                  <img id="hd-preview-img" alt="">
+                </div>
+              </div>
+            </div>
+
             <div class="egui-panel">
               <div class="panel-header">
                 <h3 data-str="HD.SETUP_TITLE">Upscaler</h3>
@@ -777,6 +811,54 @@
                   <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-setup-progress" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- Which maps get HD map textures and skies: the install's hd_maps.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MAPS_TITLE">Maps to build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MAPS_HINT">Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.</p>
+                <p id="hd-maps-file" class="hd-hint"></p>
+                <div class="hd-maps-mode">
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every">
+                    <span id="hd-maps-every-label" data-str="HD.MAPS_EVERY">Every map</span>
+                  </label>
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some">
+                    <span data-str="HD.MAPS_SOME">Only the maps I pick</span>
+                  </label>
+                </div>
+                <div id="hd-maps-editor">
+                  <div class="hd-choice-group">
+                    <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
+                    <ul id="hd-maps-patterns" class="hd-map-patterns"></ul>
+                  </div>
+                </div>
+                <div class="input-row">
+                  <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
+                  <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search as a line: *anzio*">
+                  <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add as a line</button>
+                  <label class="hd-check">
+                    <input type="checkbox" id="hd-maps-picked-only">
+                    <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
+                  </label>
+                  <span id="hd-maps-legend" class="hd-map-legend" hidden>
+                    <span class="hd-tick hd-tick-own"></span><span data-str="HD.MAPS_TICK_OWN">its own line</span>
+                    <span class="hd-tick hd-tick-pattern"></span><span data-str="HD.MAPS_TICK_PATTERN">a pattern</span>
+                  </span>
+                </div>
+                <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.</p>
+                <ul id="hd-maps-available" class="hd-map-list"></ul>
+                <p id="hd-maps-summary" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-maps-save-btn" class="primary-btn" data-str="HD.MAPS_SAVE_BUTTON">Save</button>
+                  <button id="hd-maps-undo-btn" data-str="HD.MAPS_UNDO_BUTTON">Undo changes</button>
+                </div>
+                <p id="hd-maps-message" class="hd-hint"></p>
               </div>
             </div>
 
@@ -805,6 +887,71 @@
                   <p class="hd-hint" data-str="HD.SCRIPTS_HINT">The same scripts run from goldsrc-hooks\tools\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:</p>
                   <pre id="hd-realesrgan-line" class="hd-code"></pre>
                 </details>
+              </div>
+            </div>
+
+            <!-- The custom-style form: lines in the install's my_styles.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MY_STYLES_TITLE">Your own styles</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MY_STYLES_HINT">Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.</p>
+                <p id="hd-my-styles-text" class="hd-hint"></p>
+                <ul id="hd-my-styles-list" class="hd-my-styles"></ul>
+                <div class="input-row">
+                  <label for="hd-style-name" data-str="HD.STYLE_NAME_LABEL">Name:</label>
+                  <input id="hd-style-name" type="text" maxlength="32" spellcheck="false" data-str-placeholder="HD.STYLE_NAME_PLACEHOLDER">
+                  <label for="hd-style-kind" data-str="HD.STYLE_KIND_LABEL">Made by:</label>
+                  <select id="hd-style-kind">
+                    <option value="plain" data-str="HD.STYLE_KINDS.plain">A plain enlargement, sharpened</option>
+                    <option value="ai" data-str="HD.STYLE_KINDS.ai">An AI model</option>
+                    <option value="blend" data-str="HD.STYLE_KINDS.blend">Mixing two styles</option>
+                  </select>
+                </div>
+                <div class="input-row" data-style-kind="plain">
+                  <label for="hd-style-sharpening" data-str="HD.STYLE_SHARPENING_LABEL">Sharpening (0 to 500; plain is 60):</label>
+                  <input id="hd-style-sharpening" type="number" min="0" max="500" step="10" value="60">
+                </div>
+                <div class="input-row" data-style-kind="ai" hidden>
+                  <label for="hd-style-model" data-str="HD.STYLE_MODEL_LABEL">Model:</label>
+                  <select id="hd-style-model"></select>
+                </div>
+                <p id="hd-style-model-hint" class="hd-hint" data-style-kind="ai" hidden></p>
+                <div class="input-row" data-style-kind="blend" hidden>
+                  <label for="hd-style-percent" data-str="HD.STYLE_MIX_LABEL">Mix:</label>
+                  <input id="hd-style-percent" type="number" min="0" max="100" step="5" value="50">
+                  <span data-str="HD.STYLE_MIX_OF">% of</span>
+                  <select id="hd-style-a"></select>
+                  <span data-str="HD.STYLE_MIX_REST">and the rest</span>
+                  <select id="hd-style-b"></select>
+                </div>
+                <pre id="hd-style-line" class="hd-code"></pre>
+                <div class="row-inputs">
+                  <button id="hd-style-save-btn" class="primary-btn" data-str="HD.STYLE_SAVE_BUTTON">Save style</button>
+                </div>
+                <p id="hd-style-message" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- What dodstudio_debug_hd_misses last wrote to the hook log, by map. -->
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="HD.MISSES_TITLE">Textures that kept their original</h3>
+                <button id="hd-misses-btn" data-str="HD.MISSES_BUTTON">Read the game's log</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MISSES_HINT">After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.</p>
+                <div class="input-row">
+                  <pre id="hd-misses-command" class="hd-code hd-code-inline"></pre>
+                  <button id="hd-misses-copy-btn" data-str="HD.COPY_BUTTON">Copy</button>
+                </div>
+                <p id="hd-misses-text" class="hd-hint"></p>
+                <label class="hd-check">
+                  <input type="checkbox" id="hd-misses-on-purpose">
+                  <span data-str="HD.MISSES_SHOW_ON_PURPOSE">Show textures left alone on purpose</span>
+                </label>
+                <div id="hd-misses-maps"></div>
               </div>
             </div>
           </div>
