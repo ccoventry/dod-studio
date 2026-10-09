@@ -12,7 +12,7 @@
 //! Verified against **OBS 32.2.2 / obs-websocket 5.7.4**: every request below
 //! is present, `StopRecord` reports the output path, and `SetRecordDirectory`
 //! steers the standard recording output (though *not* Custom Output (FFmpeg),
-//! which keeps its own path — see `docs/obs_alternate_capture.md`).
+//! which keeps its own path — see `docs/archive/obs_alternate_capture_design.md`).
 
 use std::net::TcpStream;
 use std::time::{Duration, Instant};

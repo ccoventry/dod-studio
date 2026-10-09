@@ -17,7 +17,7 @@ usage: python sky_hd.py <out_dir> <map> [<map> ...]   the skies those maps use
                                                        in dod/maps names
                                                        (with hd_maps.txt: only
                                                        the skies its maps use)
-env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
+env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
 """
 import os, sys
 import numpy as np
@@ -60,26 +60,25 @@ def main():
             name = sky + face + ".tga"
             if os.path.exists(os.path.join(out_dir, name)):
                 continue
-            a = np.asarray(Image.open(face_path(name)).convert("RGB"))
-            h, w = a.shape[:2]
-            jobs[name] = (w, h)
-            pad = np.pad(a, ((h // 4, h // 4), (w // 4, w // 4), (0, 0)), mode="reflect")
-            Image.fromarray(pad).save(os.path.join(work, "in", name[:-4] + ".png"))
+            with Image.open(face_path(name)) as im:
+                w, h = im.size
+            jobs[name[:-4]] = (name, w, h)
     print(f"{len(jobs)} sky faces to build")
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
+    def prepare(key, job):
+        name, w, h = job
+        a = np.asarray(Image.open(face_path(name)).convert("RGB"))
+        return Image.fromarray(np.pad(a, ((h // 4, h // 4), (w // 4, w // 4), (0, 0)), mode="reflect"))
 
-    done = 0
-    for name, (w, h) in jobs.items():
-        src = os.path.join(work, "out", name[:-4] + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        name, w, h = job
         tw, th = min(w * 4, C.CAP), min(h * 4, C.CAP)
         # The upscaled image is 1.5 faces wide (a quarter face of padding each
         # side): scale it to 1.5x the target, keep the middle.
         big = Image.open(src).convert("RGB").resize((tw * 3 // 2, th * 3 // 2), Image.LANCZOS)
         C.save_output(big.crop((tw // 4, th // 4, tw // 4 + tw, th // 4 + th)), os.path.join(out_dir, name))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} HD sky face(s) to {out_dir}")
 
 

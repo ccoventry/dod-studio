@@ -1,0 +1,89 @@
+SPECTATING (HLTV demos)
+  dodstudio_spec_match_pov 0/1
+      Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
+  dodstudio_spec_lock 0/1
+      Keep the camera on the player you are watching when he dies.
+  dodstudio_spec_target <player>
+      Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
+  dodstudio_hide_spectator_bars 0/1
+      Hide the spectator bars and everything on them.
+  dodstudio_hide_hltv_messages 0/1
+      Hide the HLTV proxy's on-screen messages.
+
+HUD
+  dodstudio_hide_scoreboard 0/1
+      Stop a POV demo's recorded TAB presses showing the scoreboard.
+  dodstudio_hide_crosshair 0/1
+      Hide the crosshair and keep it hidden.
+  dodstudio_hide_hand_signals 0/1
+      Replace players' hand-signal animations.
+  dodstudio_mute_voice_commands 0/1
+      Silence voice commands ('fire in the hole!' and the rest).
+  dodstudio_hide_hudelement <name> 0/1
+      Hide one HUD element; the bare command lists them.
+  dodstudio_hide_map_text 0/1
+      Hide the text a map puts on screen itself (mortar warnings, round results).
+  dodstudio_hide_sprite <model>...
+      Hide entities by model path.
+  dodstudio_deathmsg
+      Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
+  dodstudio_objectives
+      Move the objective icons and the objective timer.
+  dodstudio_overviewmap
+      Move or resize the overview map.
+
+DEMO PLAYBACK
+  dodstudio_seek_to <time>
+      Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
+  dodstudio_seek_by <seconds>
+      Jump forward (or back, with a minus) by that many seconds.
+  dodstudio_seek_skip_between 0/1
+      A jump skips the events and commands it passes over.
+  dodstudio_reload_demo
+      Play the last demo again.
+  dodstudio_review yes|no|replay|next|back|stop
+      Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  dodstudio_clear_decals
+      Clear every decal (bullet holes, blood, sprays).
+  dodstudio_ex_interp_max <ms>
+      Raise the engine's 100 ms ceiling on ex_interp.
+
+DOD STUDIO WINDOW
+  dodstudio_panel [1|0|reset|<tab>]
+      Open (1) or close (0) this window; bare toggles it; reset restores the default layouts; a tab's name (highlights) opens that tab.
+  dodstudio_viewdemo_in_panel 0/1
+      viewdemo opens this window on Playback instead of the VCR bar.
+  dodstudio_console_in_panel 0/1
+      The console key opens this window on the Console tab.
+  dodstudio_resizable_windows 0/1
+      Every game window can be resized by its edges.
+  dodstudio_demo_list_folders 0/1
+      The Load Demo window and the Demos tab also list and open folders.
+  dodstudio_demo_list_hide_empty 0/1
+      Folders with no demo anywhere inside them aren't listed.
+  dodstudio_demo_list_count_subfolders 0/1
+      A folder's demo count includes its subfolders.
+  dodstudio_remember_window_layout 0/1
+      Game windows come back where you left them.
+
+HD TEXTURES
+  dodstudio_hd_enabled 0/1
+      Load the HD textures built by DoD Studio's HD page.
+  dodstudio_hd_style <name>
+      Which HD style to use (ultrasharp by default).
+  dodstudio_allow_shaders 0/1
+      25th Anniversary only: allow the engine's map-surface shaders during playback.
+
+DEBUG
+  dodstudio_debug_status
+      Print everything DoD Studio's hook is doing to the console.
+  dodstudio_debug_msglog <name>...
+      Log chosen game messages to the hook log.
+  dodstudio_debug_hd_misses
+      List the textures that had no HD version, per map.
+  dodstudio_debug_log_weapon_model 0/1
+      Log the weapon model the spectated player holds.
+  dodstudio_debug_log_spectator_target 0/1
+      Log who the spectator camera follows.
+  dodstudio_debug_log_texture_loads 0/1
+      Log every HD texture load.

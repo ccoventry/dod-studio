@@ -62,7 +62,7 @@
 
 use std::ffi::CStr;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicI32, AtomicU8, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
 use crate::detour;
 use crate::engine;
@@ -184,6 +184,15 @@ static TIMER_DETOUR: Mutex<Option<detour::Detour>> = Mutex::new(None);
 static WANTED_X: AtomicI32 = AtomicI32::new(UNSET);
 static WANTED_Y: AtomicI32 = AtomicI32::new(UNSET);
 static WANTED_TIMER: AtomicI32 = AtomicI32::new(UNSET);
+
+/// Where `spectator_hud` puts the icon row and the timer while nothing has
+/// been typed, or [`UNSET`] while it has no opinion (not spectating). The
+/// row's x has none: only the y collides with the spectator bar.
+static AUTO_Y: AtomicI32 = AtomicI32::new(UNSET);
+static AUTO_TIMER: AtomicI32 = AtomicI32::new(UNSET);
+/// Set once the automatic layout has failed to install a detour, so the
+/// failure is logged once rather than every time the layout changes.
+static AUTO_FAILED: AtomicBool = AtomicBool::new(false);
 
 // ── Stubs ────────────────────────────────────────────────────────────────────
 
@@ -383,6 +392,15 @@ impl Setting {
         }
     }
 
+    /// The automatic layout's value for this setting, if it has one.
+    fn auto(self) -> Option<&'static AtomicI32> {
+        match self {
+            Setting::IconX => None,
+            Setting::IconY => Some(&AUTO_Y),
+            Setting::TimerY => Some(&AUTO_TIMER),
+        }
+    }
+
     /// The detour that has to be in place before this setting does anything.
     fn ensure_detour(self, base: usize) -> Result<(), String> {
         match self {
@@ -415,22 +433,74 @@ fn apply(setting: Setting, value: i32) -> Result<(), String> {
         return Err(format!("expected {MIN_COORD}..={MAX_COORD}, got {value}"));
     }
     setting.ensure_detour(base)?;
-    let (active, current, wanted) = setting.state();
-    current.store(value, Ordering::Release);
-    active.store(1, Ordering::Release);
+    let (_, _, wanted) = setting.state();
     wanted.store(value, Ordering::Release);
-    Ok(())
+    refresh(setting)
 }
 
-/// Hands one coordinate back to the game.
+/// Hands one coordinate back: to the automatic layout while it has a value,
+/// otherwise to the game.
 ///
 /// Nothing is unpatched: the detour stays and simply stops substituting, which
 /// is strictly safer than restoring bytes under a thread that might be
 /// executing them.
 fn clear(setting: Setting) {
     let (active, _, wanted) = setting.state();
-    active.store(0, Ordering::Release);
     wanted.store(UNSET, Ordering::Release);
+    if refresh(setting).is_err() {
+        active.store(0, Ordering::Release);
+    }
+}
+
+/// The value one setting should have now: what was typed, else the automatic
+/// layout's, else [`UNSET`] (the game's own).
+fn effective(setting: Setting) -> i32 {
+    let (_, _, wanted) = setting.state();
+    match wanted.load(Ordering::Acquire) {
+        UNSET => setting
+            .auto()
+            .map_or(UNSET, |auto| auto.load(Ordering::Acquire)),
+        typed => typed,
+    }
+}
+
+/// Points the stub at [`effective`]'s value, installing its detour if needed.
+fn refresh(setting: Setting) -> Result<(), String> {
+    let (active, current, _) = setting.state();
+    let value = effective(setting);
+    if value == UNSET {
+        active.store(0, Ordering::Release);
+        return Ok(());
+    }
+    let Some(base) = engine::client_module_base() else {
+        return Err("client.dll is not loaded yet".to_string());
+    };
+    setting.ensure_detour(base)?;
+    current.store(value, Ordering::Release);
+    active.store(1, Ordering::Release);
+    Ok(())
+}
+
+/// Sets the automatic layout's icon-row and timer y (`None`: no opinion, the
+/// game's own). A value typed with this command still wins over it. Called by
+/// `spectator_hud` every frame; does nothing unless a value changed.
+pub fn set_auto(icon_y: Option<i32>, timer_y: Option<i32>) {
+    for (setting, value) in [(Setting::IconY, icon_y), (Setting::TimerY, timer_y)] {
+        let Some(auto) = setting.auto() else { continue };
+        let value = value.unwrap_or(UNSET);
+        if auto.swap(value, Ordering::AcqRel) == value {
+            continue;
+        }
+        if let Err(why) = refresh(setting)
+            && !AUTO_FAILED.swap(true, Ordering::Relaxed)
+        {
+            unsafe {
+                crate::debug::report(&format!(
+                    "objicons: the spectator layout could not move the objectives -- {why}"
+                ))
+            };
+        }
+    }
 }
 
 // ── Console surface ──────────────────────────────────────────────────────────
@@ -448,10 +518,12 @@ fn usage() -> String {
          \x20 {COMMAND} offset <y>         y the objective icons are drawn at\n\
          \x20 {COMMAND} xoffset <x>        x the icon row starts at\n\
          \x20 {COMMAND} timer <y>          y the objective timer beside them is drawn at\n\
-         \x20 {COMMAND} <any> default      hand that one back to the game\n\
+         \x20 {COMMAND} <any> default      hand that one back to the default layout\n\
          \x20 All are absolute screen positions, and mean the same thing in a POV\n\
          \x20 demo and while spectating -- which the game's own values do not. The\n\
-         \x20 timer has no x: the game draws it at a fixed one.\n"
+         \x20 timer has no x: the game draws it at a fixed one. While spectating,\n\
+         \x20 the default layout puts the icons and timer just below the spectator\n\
+         \x20 bar, or at the top as in a POV demo while the bar is hidden.\n"
     )
 }
 
@@ -459,9 +531,10 @@ fn status() -> String {
     let mut text = format!("{COMMAND}:");
     for (_, setting, label) in SUBCOMMANDS {
         let (_, _, wanted) = setting.state();
-        let value = match wanted.load(Ordering::Acquire) {
-            UNSET => "the game's".to_string(),
-            value => value.to_string(),
+        let value = match (wanted.load(Ordering::Acquire), effective(*setting)) {
+            (UNSET, UNSET) => "the game's".to_string(),
+            (UNSET, auto) => format!("{auto} (spectator layout)"),
+            (typed, _) => typed.to_string(),
         };
         text.push_str(&format!(" {label} = {value},"));
     }
@@ -506,7 +579,7 @@ fn dispatch(argv: &[String]) -> String {
     };
     if value.eq_ignore_ascii_case("default") {
         clear(setting);
-        return format!("{COMMAND}: {label} back to whatever the game computes\n");
+        return format!("{COMMAND}: {label} back to the default layout\n");
     }
     match value.parse::<i32>() {
         Ok(n) => match apply(setting, n) {

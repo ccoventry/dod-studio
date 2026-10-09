@@ -29,6 +29,9 @@ SKIP = {"aaatrigger", "clip", "origin", "null", "skip", "hint", "bevel", "sky", 
 # fnv1a32's results, keyed by a BLAKE2b digest of the same bytes, kept on
 # disk between runs: 16-byte digest + 4-byte hash per record, append-only.
 FNV_CACHE = os.path.join(tempfile.gettempdir(), "dodstudio_hd_work", "fnv1a32.cache")
+# Set (to anything) for a run that reads the cache but leaves writing it to
+# another run going at the same time (build_all.py's plain steps).
+FNV_CACHE_READONLY = "HD_FNV_CACHE_READONLY"
 _fnv_known = None
 _fnv_new = []
 
@@ -79,7 +82,7 @@ def _load_fnv_cache():
 
 
 def _save_fnv_cache():
-    if not _fnv_new:
+    if not _fnv_new or os.environ.get(FNV_CACHE_READONLY):
         return
     try:
         os.makedirs(os.path.dirname(FNV_CACHE), exist_ok=True)

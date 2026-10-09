@@ -27,7 +27,7 @@ Measured on one match half (`monday-wsod25_r07_m1_h1_hltv`, 12 players, about
 | bullet-weapon rounds fired with **no** event | 1812 |
 | share of rounds with no event | **61%** |
 
-The check that those 1844 are real rounds and not an artefact of the method is
+The check that those 1812 are real rounds and not an artefact of the method is
 the kill feed. A kill by gunfire is a shot that certainly happened:
 
 | the killer's shot, in the 0.25 s before the kill | kills |
