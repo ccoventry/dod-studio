@@ -34,6 +34,7 @@ import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } fr
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
@@ -420,6 +421,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     onChange: () => persistAppSettings(),
   });
   initHdPane();
+  initOverviewsPane();
   initTeamsPane({
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,

@@ -81,6 +81,10 @@ is the complete list):
   stays on the player being watched when he dies; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_camera.md`.
+- **High-quality overviews:** when `overviews/<map>_hd.tga` sits beside the
+  overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
+  replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
+  Overviews page writes it. See `src/overview_hd.rs`.
 - **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the

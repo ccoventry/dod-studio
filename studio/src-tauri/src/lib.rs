@@ -10,6 +10,7 @@ mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
+mod overview_manager;
 mod packet_limit_manager;
 mod render_manager;
 mod review_manager;
@@ -765,6 +766,16 @@ pub fn run() {
             hd_manager::hd_build,
             hd_manager::hd_set_python,
             hd_manager::hd_set_upscaler,
+            overview_manager::overview_installs,
+            overview_manager::overview_maps,
+            overview_manager::overview_scene,
+            overview_manager::overview_load_edits,
+            overview_manager::overview_save_edits,
+            overview_manager::overview_reset_edits,
+            overview_manager::overview_export,
+            overview_manager::overview_export_hd,
+            overview_manager::overview_flag_icons,
+            overview_manager::overview_screen_height,
             hd_manager::hd_misses,
             hd_manager::hd_save_style,
             hd_manager::hd_remove_style,
