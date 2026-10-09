@@ -191,6 +191,7 @@ mod objicons;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
+mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
@@ -341,6 +342,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // unhandled exceptions and exits without a dump or an event-log entry,
     // so without this a crash in an engine-thread callback is untraceable.
     crash::install();
+    // The abort that follows a panic skips that handler: log the panic itself.
+    panic_log::install();
 
     // Registered before install() so there's no window in which Initialize
     // could fire before the callback exists.
