@@ -1,13 +1,16 @@
 mod audit_manager;
 mod capture_manager;
 mod combine_manager;
+mod crash_maps_manager;
 mod demo_cache_cmd;
+mod demo_split_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
 mod overview_manager;
+mod packet_limit_manager;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
@@ -482,6 +485,60 @@ pub struct AnalyzerReportPayload {
     pub state: analysis::AnalyzerState,
 }
 
+/// Which request `index_demo_players` is serving, per lane; a newer one stops
+/// an older one between demos (the Demo Analyzer moved to another folder).
+/// Two lanes, so the Master Queue's lookups never cancel the Analyzer's.
+static PLAYER_INDEX_ANALYZER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_QUEUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Who is in each demo (#437, #174), one `demo_players` event per demo as it
+/// is read: from the small player index when it is current (milliseconds), or
+/// from the analyzer cache or a full parse (about a second) when it is not.
+/// Resolves with how many demos were read.
+#[tauri::command]
+async fn index_demo_players(
+    app_handle: tauri::AppHandle,
+    paths: Vec<String>,
+    request_id: u64,
+    lane: String,
+) -> Result<usize, String> {
+    let current: &'static std::sync::atomic::AtomicU64 = if lane == "queue" {
+        &PLAYER_INDEX_QUEUE
+    } else {
+        &PLAYER_INDEX_ANALYZER
+    };
+    current.store(request_id, Ordering::SeqCst);
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use tauri::Emitter;
+        let mut done = 0;
+        for path in paths {
+            if current.load(Ordering::SeqCst) != request_id {
+                break;
+            }
+            let result = native::player_index::demo_players(std::path::Path::new(&path));
+            let payload = match result {
+                Ok((demo, _)) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "demoType": demo.demo_type,
+                    "players": demo.players,
+                }),
+                Err(e) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "error": e,
+                }),
+            };
+            let _ = app_handle.emit("demo_players", payload);
+            done += 1;
+        }
+        Ok(done)
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
@@ -596,6 +653,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
@@ -610,7 +668,7 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
-            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // The game's Highlights tab asks Studio to analyse a demo too big
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
@@ -668,13 +726,21 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            index_demo_players,
             default_projects_dir,
             locate_missing_demos,
             changed_demos,
             system_memory_bytes,
             run_demo_audit,
+            demo_split_manager::find_multi_map_demos_cmd,
+            demo_split_manager::cancel_multi_map_scan,
+            demo_split_manager::demo_map_segments,
+            demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
+            crash_maps_manager::crash_map_warnings,
+            crash_maps_manager::forget_crash_map,
+            packet_limit_manager::engine_packet_entity_limit,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,

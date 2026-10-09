@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<!--
+  Harness for crash_map_warnings.js (#207): the themed confirm, and
+  `window.__confirm(paths)` running confirmCrashMaps with the answer in
+  #result. The backend's crash_map_warnings is a window.__mockInvokeHandlers.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>crash_map_warnings.js test harness</title>
+</head>
+<body>
+  <div id="result"></div>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { confirmCrashMaps } from '/src/crash_map_warnings.js';
+    initThemedConfirm();
+    window.__confirm = async (paths) => {
+      document.querySelector('#result').textContent = String(await confirmCrashMaps(paths));
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

@@ -105,7 +105,10 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 ### 2.5 Demo Auditor
 
-Finds byte-identical duplicate demos under one folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+One folder picker, then a tab per tool:
+
+- **Duplicates:** finds byte-identical duplicate demos under the folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+- **Split Maps (#624):** lists every demo under the folder that recorded more than one map, with each map's start and length. Ticked maps are written as demos of their own next to the original, which is never changed. A map under a minute starts unticked (usually the next map loading as the recording stopped). The list comes from a remembered answer, the analyzer cache's `signon_maps`, or a quick byte scan, in that order (`native::demo_maps_scan`); the split itself is `native::demo_split`.
 
 ### 2.6 Demo Analyzer
 
