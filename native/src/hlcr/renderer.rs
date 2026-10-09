@@ -779,6 +779,7 @@ pub async fn run_render_job(
         "Rendering".to_string(),
     ));
 
+    let existed_before = out_file.exists();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -833,6 +834,7 @@ pub async fn run_render_job(
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -897,6 +899,8 @@ pub async fn run_render_job(
             _ = interval.tick() => {
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -947,6 +951,7 @@ pub async fn run_render_job(
                 exit_code,
                 err_log.as_deref().unwrap_or("")
             );
+            remove_partial_output(&out_file, existed_before).await;
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
             let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
         }
@@ -1009,6 +1014,16 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     }
     writer.flush().await?;
     Ok(false)
+}
+
+/// Removes what FFmpeg wrote of `out_file` before it was stopped or failed:
+/// a truncated file under the pipeline's naming looks like a finished export,
+/// the same reason `copy_cancellable` removes its partial copy. A file that was
+/// there before the job started is never touched.
+async fn remove_partial_output(out_file: &Path, existed_before: bool) {
+    if !existed_before {
+        let _ = tokio::fs::remove_file(out_file).await;
+    }
 }
 
 /// The finished file's name, without its extension, when the take has a clip
@@ -1482,6 +1497,23 @@ mod tests {
         let cancelled = copy_cancellable(&src, &dst, &cancel).await.unwrap();
         assert!(!cancelled);
         assert_eq!(std::fs::read(&dst).unwrap(), b"hello world");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A cancelled or failed FFmpeg render removes the file it was writing,
+    /// but never one that was there before the job started.
+    #[tokio::test]
+    async fn remove_partial_output_only_removes_the_jobs_own_file() {
+        let root = scratch("partial_output");
+        let written = root.join("clip.mp4");
+        std::fs::write(&written, b"48 bytes of a header").unwrap();
+        remove_partial_output(&written, false).await;
+        assert!(!written.exists(), "the job's partial file must go");
+
+        let earlier = root.join("earlier.mp4");
+        std::fs::write(&earlier, b"someone's finished clip").unwrap();
+        remove_partial_output(&earlier, true).await;
+        assert!(earlier.exists(), "a file from before the job must stay");
         let _ = std::fs::remove_dir_all(&root);
     }
 }
