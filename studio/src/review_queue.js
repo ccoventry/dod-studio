@@ -80,3 +80,19 @@ export function applyReviewAnswer(demos, answer, { tickYes = false } = {}) {
   if (yes && tickYes) streak.selected = true;
   return streak;
 }
+
+/** Shortest gap worth fast-forwarding: a highlight's own margins (2 s after
+ *  a kill, 4 s before the next) leave nothing to speed up at 6 s or less. */
+export const MIN_FAST_FORWARD_GAP = 7;
+
+/**
+ * The gap setting to send the game (#665): seconds between kills above which
+ * the stretch plays fast, or null to play every gap at normal speed. A blank
+ * or unreadable box falls back to 8; the value is held to 7..120.
+ */
+export function fastForwardGap(enabled, rawValue) {
+  if (!enabled) return null;
+  const seconds = Number.parseFloat(rawValue);
+  if (!Number.isFinite(seconds)) return 8;
+  return Math.max(MIN_FAST_FORWARD_GAP, Math.min(seconds, 120));
+}

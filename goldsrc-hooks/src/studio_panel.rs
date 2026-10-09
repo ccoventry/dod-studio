@@ -232,6 +232,11 @@ pub struct Build {
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
     pub combo_menu: usize,
+    /// Where a `ListPanel` keeps its sort column (`int`, -1 for none) and its
+    /// ascending flag (a byte), as its `OnSetSortColumn` reads them; the
+    /// secondary column and its flag follow each (#611).
+    pub list_sort_column: usize,
+    pub list_sort_ascending: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -256,6 +261,8 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_1dcc,
         combo_box_vftable: 0x9_fbbc,
         combo_menu: 0x13c,
+        list_sort_column: 0xfc,
+        list_sort_ascending: 0x104,
     },
     Build {
         name: "25th Anniversary",
@@ -278,6 +285,8 @@ pub const BUILDS: [Build; 2] = [
         progress_bar_vftable: 0xa_bbd4,
         combo_box_vftable: 0xa_8f10,
         combo_menu: 0x140,
+        list_sort_column: 0x100,
+        list_sort_ascending: 0x108,
     },
 ];
 
@@ -1470,6 +1479,8 @@ mod hook {
     mod player_picker;
     /// The Review tab (#623).
     pub(super) mod review_tab;
+    /// The sort arrow in the lists' headings (#611).
+    mod sort_arrows;
     /// The Highlights tab (#565).
     mod streaks_tab;
 
@@ -2374,6 +2385,8 @@ mod hook {
         size: Option<(i32, i32)>,
         /// Each control where the `.res` put it, read straight after loading.
         controls: Vec<(Vpanel, (i32, i32, i32, i32))>,
+        /// The tab size last logged, so the log gets one line per size.
+        logged: Option<(i32, i32)>,
     }
 
     thread_local! {
@@ -2564,6 +2577,7 @@ mod hook {
                         .into_iter()
                         .map(|c| (c, vgui.rect(c)))
                         .collect(),
+                    logged: None,
                 });
                 add_page(sheet, object, page.title.as_ptr());
                 stored.store(object as usize, Ordering::Release);
@@ -2891,12 +2905,31 @@ mod hook {
                     design.size = Some((w - (fw - dw), h - (fh - dh)));
                 }
                 let Some(size) = design.size else { continue };
+                // Measured from where the controls end, so a tab that came out
+                // bigger than drawn still keeps its bottom row at the bottom
+                // (#609).
+                let rects: Vec<_> = design.controls.iter().map(|&(_, at)| at).collect();
+                let (fit_design, fit_now) =
+                    crate::window_layout::content_frame(&rects, size, (w, h));
+                if design.logged != Some((w, h)) {
+                    design.logged = Some((w, h));
+                    crate::debug::report(&format!(
+                        "studio_panel: tab {} is {w}x{h}, laid out for {}x{}, fitted as {}x{} of {}x{}",
+                        vgui.name(page),
+                        size.0,
+                        size.1,
+                        fit_now.0,
+                        fit_now.1,
+                        fit_design.0,
+                        fit_design.1
+                    ));
+                }
                 for &(control, at) in &design.controls {
                     // A tab's list fills whatever height the tab gains (#612).
                     let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
-                        crate::window_layout::fit_rect_tall(at, size, (w, h))
+                        crate::window_layout::fit_rect_tall(at, fit_design, fit_now)
                     } else {
-                        crate::window_layout::fit_rect(at, size, (w, h))
+                        crate::window_layout::fit_rect(at, fit_design, fit_now)
                     };
                     vgui.place(control, want);
                 }
@@ -3346,6 +3379,7 @@ mod hook {
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
                     folder_progress::update(&vgui);
+                    sort_arrows::update();
                 }
                 if !vgui.visible(vp) {
                     // Closed some other way than the console key (its X,

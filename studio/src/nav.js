@@ -59,8 +59,9 @@ export function switchNavTab(navKey) {
   const analyzerPane = document.querySelector('#pane-demo-analyzer');
   const hdPane = document.querySelector('#pane-hd-textures');
   const blenderPane = document.querySelector('#pane-blender');
+  const overviewsPane = document.querySelector('#pane-overviews');
 
-  [workspacePane, detailsPane, captureSubtabsBar, detailPane, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane, blenderPane]
+  [workspacePane, detailsPane, captureSubtabsBar, detailPane, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane, blenderPane, overviewsPane]
     .forEach((el) => { if (el) el.style.display = 'none'; });
 
   const footerCaptureStudio = document.querySelector('#footer-capture-studio');
@@ -69,8 +70,9 @@ export function switchNavTab(navKey) {
   const footerDemoAuditor = document.querySelector('#footer-demo-auditor');
   const footerDemoAnalyzer = document.querySelector('#footer-demo-analyzer');
   const footerHdTextures = document.querySelector('#footer-hd-textures');
+  const footerOverviews = document.querySelector('#footer-overviews');
 
-  [footerCaptureStudio, footerRenderStudio, footerConfiguration, footerDemoAuditor, footerDemoAnalyzer, footerHdTextures]
+  [footerCaptureStudio, footerRenderStudio, footerConfiguration, footerDemoAuditor, footerDemoAnalyzer, footerHdTextures, footerOverviews]
     .forEach((el) => { if (el) el.style.display = 'none'; });
 
 
@@ -92,6 +94,10 @@ export function switchNavTab(navKey) {
     if (footerHdTextures) footerHdTextures.style.display = 'flex';
   } else if (navKey === 'blender') {
     if (blenderPane) blenderPane.style.display = 'flex';
+  } else if (navKey === 'overviews') {
+    if (overviewsPane) overviewsPane.style.display = 'flex';
+    if (footerOverviews) footerOverviews.style.display = 'flex';
+    overviewsPane?.dispatchEvent(new CustomEvent('overviews-shown'));
   }
 
   document.querySelectorAll('.nav-tab-btn').forEach((b) => {

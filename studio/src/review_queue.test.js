@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -93,5 +93,23 @@ describe('Review highlights answers (#623)', () => {
     expect(applyReviewAnswer([d], { ...answerFor(d, s), demo: 'gone.dem' })).toBeNull();
     expect(applyReviewAnswer([d], { ...answerFor(d, s), key: 'nope' })).toBeNull();
     expect(s.curation).toBeUndefined();
+  });
+});
+
+describe('Review highlights fast-forward setting (#665)', () => {
+  it('sends nothing when the box is off', () => {
+    expect(fastForwardGap(false, '8')).toBeNull();
+  });
+
+  it('sends the seconds typed, held to 7..120', () => {
+    expect(fastForwardGap(true, '12')).toBe(12);
+    expect(fastForwardGap(true, '3')).toBe(MIN_FAST_FORWARD_GAP);
+    expect(fastForwardGap(true, '999')).toBe(120);
+  });
+
+  it('falls back to 8 for a blank or unreadable box', () => {
+    expect(fastForwardGap(true, '')).toBe(8);
+    expect(fastForwardGap(true, undefined)).toBe(8);
+    expect(fastForwardGap(true, 'abc')).toBe(8);
   });
 });
