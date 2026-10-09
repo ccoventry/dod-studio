@@ -75,7 +75,7 @@ From a Command Prompt, with `B` set to your `blender.exe`:
 
 Some notes on each step:
 
-- **Import** needs Blender's window, because the importer wants a UI context. `--quit` closes Blender when it's done.
+- **Import** needs Blender's window, because the importer wants a UI context. `--quit` closes Blender when it's done. DoD Studio opens that window small and unfocused (`--window-geometry 0 0 640 360 --no-window-focus`) and minimizes it as soon as it appears; a minimized start alone is ignored by Blender.
 - **Build scene** options:
   - `--style <name>` picks an HD style from `dod\dodstudio_hd`. `none` uses the original textures. Without `--style`, it uses the first style built.
   - `--engine cycles` renders one 1080p Cycles frame instead of four EEVEE previews.

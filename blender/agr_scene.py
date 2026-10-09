@@ -73,7 +73,7 @@ SKY_FACES = {
 
 log_lines = []
 def log(m):
-    print(m); log_lines.append(str(m))
+    print(m, flush=True); log_lines.append(str(m))
 
 # ── goldsrc helpers (ported from goldsrc-hooks/tools/hd) ─────────────────────
 SKIP = {"aaatrigger", "clip", "origin", "null", "skip", "hint", "bevel", "sky", "black"}

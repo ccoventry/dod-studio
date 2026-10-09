@@ -47,12 +47,12 @@ def setup_cycles(res, samples):
                 prefs.get_devices()
                 for d in prefs.devices:
                     d.use = True
-                print(f"cycles device: {ct}")
+                print(f"cycles device: {ct}", flush=True)
                 break
             except Exception:
                 continue
     except Exception as e:
-        print(f"GPU setup failed, CPU: {e}")
+        print(f"GPU setup failed, CPU: {e}", flush=True)
     scene.render.resolution_x, scene.render.resolution_y = res
     scene.render.resolution_percentage = 100
     scene.render.image_settings.file_format = 'PNG'
@@ -92,7 +92,7 @@ def render_frames(frames_dir, f0, f1, res, samples):
         print(f"frame {f} ({done}/{total}) {dt:.1f}s  elapsed {elapsed/60:.1f} min  eta {remaining/60:.1f} min", flush=True)
         print(f"@@frame {f} {done} {total} {dt:.1f}", flush=True)
     print(f"@@saved {frames_dir}", flush=True)
-    print("render done")
+    print("render done", flush=True)
 
 
 def encode(frames_dir, mp4, fps):
@@ -123,7 +123,7 @@ def encode(frames_dir, mp4, fps):
     os.makedirs(os.path.dirname(os.path.abspath(mp4)), exist_ok=True)
     sc.render.filepath = mp4
     bpy.ops.render.render(animation=True)
-    print(f"encoded {len(files)} frames -> {mp4}")
+    print(f"encoded {len(files)} frames -> {mp4}", flush=True)
     print(f"@@saved {mp4}", flush=True)
 
 

@@ -1255,7 +1255,7 @@ export const STRINGS = {
     workFolder: (dir) => `Work folder: ${dir}`,
     OPEN_WORK_BUTTON: 'Open folder',
     STEPS_TITLE: 'Steps',
-    STEPS_HINT: "Run them in order; each one picks up the last one's files. Import opens a Blender window while it works.",
+    STEPS_HINT: "Run them in order; each one picks up the last one's files. Import opens Blender minimized in the taskbar while it works.",
     IMPORT_BUTTON: '1. Import',
     SCENE_BUTTON: '2. Build scene',
     RENDER_BUTTON: '3. Render',

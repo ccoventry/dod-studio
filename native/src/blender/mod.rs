@@ -20,11 +20,21 @@ use std::ffi::OsString;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+
+/// Clears the flag when dropped, whichever way `run` returns.
+struct StopOnDrop(Arc<AtomicBool>);
+
+impl Drop for StopOnDrop {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Relaxed);
+    }
+}
 
 /// How often the running Blender is polled, per CLAUDE.md's process rules.
 const POLL: Duration = Duration::from_millis(16);
@@ -407,7 +417,14 @@ pub fn arguments(
     push(&"1");
     match &request.step {
         Step::Import => {
-            // The importer needs a UI context: this one opens a window.
+            // The importer needs a UI context: this one opens a window. A
+            // small one that leaves the app in front, which `run` then
+            // minimizes as soon as it exists.
+            push(&"--window-geometry");
+            for n in ["0", "0", "640", "360"] {
+                push(&n);
+            }
+            push(&"--no-window-focus");
             push(&"--python");
             push(&scripts.join("agr_import.py"));
             push(&"--");
@@ -608,6 +625,18 @@ pub fn run(
         .spawn()
         .map_err(|e| crate::messages::labeled(blender.display(), e))?;
     let mut guard = crate::hd::build::TreeGuard(Some(child.id()));
+    // Ends the minimize wait below if Blender quits (or is cancelled) first.
+    let running = Arc::new(AtomicBool::new(true));
+    let _stop_minimizing = StopOnDrop(running.clone());
+    if matches!(request.step, Step::Import) {
+        let pid = child.id();
+        let running = running.clone();
+        std::thread::spawn(move || {
+            crate::sys::minimize::minimize_when_shown(pid, Duration::from_secs(30), || {
+                running.load(Ordering::Relaxed)
+            })
+        });
+    }
 
     let (tx, rx) = mpsc::channel::<String>();
     let readers: Vec<_> = [
@@ -751,6 +780,15 @@ mod tests {
             "the importer needs a UI context: {a:?}"
         );
         assert_eq!(&a[..2], ["--python-exit-code", "1"]);
+        // A small window that leaves the app in front, before the script's
+        // `--` (Blender reads its own options there).
+        let blender_side: Vec<&String> = a.iter().take_while(|x| *x != "--").collect();
+        let at = blender_side
+            .iter()
+            .position(|x| *x == "--window-geometry")
+            .unwrap();
+        assert_eq!(blender_side[at + 1..at + 5], ["0", "0", "640", "360"]);
+        assert!(blender_side.contains(&&"--no-window-focus".to_string()));
         assert!(a.iter().any(|x| x.ends_with("agr_import.py")));
         let after: Vec<&String> = a.iter().skip_while(|x| *x != "--").collect();
         assert!(after.contains(&&"--quit".to_string()));
