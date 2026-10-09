@@ -1,4 +1,5 @@
 mod audit_manager;
+mod blender_manager;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
@@ -679,6 +680,7 @@ pub fn run() {
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
+        .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -798,6 +800,10 @@ pub fn run() {
             hd_manager::hd_remove_style,
             hd_manager::hd_save_map_list,
             hd_manager::hd_preview,
+            blender_manager::blender_status,
+            blender_manager::blender_set_exe,
+            blender_manager::blender_run,
+            blender_manager::blender_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

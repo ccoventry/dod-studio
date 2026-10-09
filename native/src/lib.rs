@@ -46,6 +46,10 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
 
+/// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod blender;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;

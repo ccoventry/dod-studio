@@ -34,6 +34,7 @@ import { initCombineClips } from './combine_clips.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initBlenderPane } from './blender_pane.js';
 import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
@@ -418,6 +419,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initAuditorTabs();
   initSplitPane();
   initHdPane();
+  initBlenderPane();
   initOverviewsPane();
   initTeamsPane({
     getDemos: () => currentScannedDemos,
