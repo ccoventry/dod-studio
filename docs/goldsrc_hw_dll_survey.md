@@ -349,8 +349,13 @@ python goldsrc-hooks/tools/survey_hw_dll.py parse       # the svc table, and nam
 python goldsrc-hooks/tools/survey_hw_dll.py entities    # the flush and its predicate
 python goldsrc-hooks/tools/survey_hw_dll.py decals      # the decal ring
 python goldsrc-hooks/tools/survey_hw_dll.py pin         # HLAE's ambiguous patterns
+python goldsrc-hooks/tools/survey_hw_dll.py writes      # every HLAE write primitive (§12)
+python goldsrc-hooks/tools/survey_hw_dll.py spans       # HLAE's span patches, this build (§12)
 python goldsrc-hooks/tools/survey_hw_dll.py --hw ... --afx ...
 ```
+
+`spans` picks its build from the `hw.dll` it is given, so pass the
+Anniversary `hw.dll` with `--hw` to check that build's seven.
 
 `parse`, `entities` and `decals` run without HLAE present, as `findings` does.
 `findings` runs without HLAE present and re-checks each address in §3 against
@@ -652,19 +657,26 @@ The question was whether a `VirtualProtect`-and-write exists outside the
 is imported once, and everything that changes a page's protection has to reach
 it.
 
-It is referenced from **8 direct call sites and one jump thunk, in 9
-functions**. Four are statically linked Microsoft Detours (transaction begin,
-commit, `DetourAttachEx`, and the thunk they share). The other five are HLAE's
-own, and they are the complete list of its write primitives:
+It is reached from **14 call sites in 9 functions** — 8 direct, 6 through one
+jump thunk. Three of the functions are the statically linked Microsoft Detours
+(`DetourAttachEx`, transaction begin, transaction commit; they are the thunk's
+callers). The other six are HLAE's own, and with the in-place jump writer —
+which reaches `VirtualProtect` only through the bracketed-write pair — they are
+the complete list of its write primitives:
 
 | primitive | what it writes | call sites |
 | --- | --- | --- |
 | Detours `DetourAttach` | rewrites a function's first ≥5 bytes, trampoline elsewhere | **40** |
 | trampolined jump | copies a span to a new trampoline, NOPs it, writes `E9 rel32` over its start | **2** |
-| in-place jump | NOPs a span and writes `E9 rel32`; no trampoline — HLAE re-creates the displaced instructions in a stub of its own | **11** (6 into `hw.dll`, the rest into its own stubs) |
+| in-place jump | NOPs a span and writes `E9 rel32`; no trampoline — HLAE re-creates the displaced instructions in a stub of its own | **15**: 6 into `hw.dll`, 4 into `cstrike`/`tfc` `client.dll` (`*_Draw_YRes`), 5 into its own stubs |
 | bracketed write | unprotect *n* bytes, plain store, restore | **12** |
-| import-table slot | one pointer, through an import-hook manager | 2, which the manager runs over **4** modules |
+| import-table slot | one pointer | 2 functions of one import-hook manager, entered from **4** places: `hl.exe`, `hw.dll`, `SDL2.dll`, `client.dll` |
 | executable allocation | HLAE's own heap, never foreign memory | 4 |
+
+The twelve bracketed writes, for instance, are: two `cstrike` crosshair factors
+in `client.dll`; one `cldll_func_t` slot (three call paths); four that *read*
+`hw.dll` span bytes out into HLAE's stubs under the bracket; two around
+`skytextures`; one around `msg_readcount`; and one inside each jump writer.
 
 Every call site of every one of those is attributed in §12.3. **That closes item
 3 for protection-changing writes, proven:** there is no `VirtualProtect` call in
