@@ -135,7 +135,7 @@ pressure rather than CPU.
 
 | Probe | Question it answers |
 | --- | --- |
-| `analysis_server_probe` | Can the game's Killstreaks tab be tested against Studio's analysis pipe (#565) without the app? |
+| `analysis_server_probe` | Can the game's Highlights tab be tested against Studio's analysis pipe (#565) without the app? |
 
 Set `DOD_STUDIO_LOG_DIR` to a scratch folder first, then
 `cargo run -p native --release --example analysis_server_probe -- [seconds]`

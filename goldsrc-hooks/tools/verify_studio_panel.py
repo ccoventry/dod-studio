@@ -297,7 +297,7 @@ def verify(game, src):
     got = ui.last_ret(set_string)
     check(got == "ret 8", f"which returns with {got!r} (key, value)")
 
-    # 20: the Killstreaks tab makes its rows as the fill does: KEYVALUES_SIZE
+    # 20: the Highlights tab makes its rows as the fill does: KEYVALUES_SIZE
     # bytes from keyvalues_new, keyvalues_ctor, then AddItem.
     check(kv_ctor == build["keyvalues_ctor"],
           f"the fill's row constructor is keyvalues_ctor +{build['keyvalues_ctor']:#x} (+{kv_ctor:#x})")
@@ -381,7 +381,7 @@ def verify(game, src):
     check(b"ButtonClicked" in pushed,
           f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
 
-    # 21: the Killstreaks tab's progress bar.
+    # 21: the Highlights tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
     check(bar_vt == build["progress_bar_vftable"],
           f"ProgressBar's vftable is progress_bar_vftable +{(bar_vt or 0):#x}")
