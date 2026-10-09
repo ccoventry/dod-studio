@@ -100,7 +100,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 | **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
 | **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Typing the start of a console name lists every name it could be, and says so when Studio refuses or overrides one. Warning banners explain what will not take effect, what is refused, and what your own game configs set (including a `config.cfg` that is not read-only). See 3.5 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
-| **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives. |
+| **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives, and **When a batch finishes** (see 4) with a finish codec per capture mode. |
 | **Notifications** | Six switches: patching started/finished, demo loading, fast-forward to clip, captures done, renders done, errors. |
 
 ### 2.5 Demo Auditor
@@ -240,6 +240,7 @@ Each row shows its own codec and FPS snapshot, status, speed, progress and size,
 - **Scheduling:** up to the max-concurrent limit; each job reserves space on the first export drive with room, and the reservation learns each codec's real size per frame once there is a render to learn from.
 - **Crash recovery:** a lockfile (`.render_autosave.json`) is written at queue time and after each finished job. On the next start, a dialog offers to recover the batch. Recovered rows are stubs until rescanned. Per-job codec choices are lost on recovery until PR #395 lands.
 - **FFmpeg:** the override path, else `local/tools/ffmpeg.exe` beside the app, else `ffmpeg` on PATH.
+- **Finishing clips after a batch (#440):** with **When a batch finishes** set to *Finish clips automatically* (off by default), a capture batch that completes queues and starts its own verified takes here, through the same Scan/Start path, and the Capture footer shows "Finishing clips: 3 of 12". OBS clips default to Skip (a copy); Video and Frame sequence clips default to the Codec above, and a frame sequence is encoded at the batch's own capture FPS. A cancelled batch is not finished, nothing is finished without an export drive, and a busy Render tab (running, or staged but not started) is waited for rather than replaced.
 
 ---
 

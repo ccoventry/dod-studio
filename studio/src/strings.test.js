@@ -52,3 +52,16 @@ describe('bannedCommandsWarning', () => {
     expect(text).toContain('fix or remove them');
   });
 });
+
+describe('finish step (#440)', () => {
+  it('mentions clips in progress only when there are some', () => {
+    expect(STRINGS.FINISH.progressStatus(3, 12, 2)).toBe('Finishing clips: 3 of 12, 2 in progress');
+    expect(STRINGS.FINISH.progressStatus(12, 12, 0)).toBe('Finishing clips: 12 of 12');
+  });
+
+  it('says how many clips are ready, and what went wrong only when something did', () => {
+    expect(STRINGS.FINISH.doneSummary(12, 0, 0)).toBe('12 clips ready.');
+    expect(STRINGS.FINISH.doneSummary(1, 0, 0)).toBe('1 clip ready.');
+    expect(STRINGS.FINISH.doneSummary(10, 1, 1)).toBe('10 clips ready, 1 failed, 1 cancelled — see the Render tab.');
+  });
+});
