@@ -103,7 +103,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
     if pparams.is_null() {
         return;
     }
-    if !crate::anim_fix::enabled() || crate::spectator_target::in_eye_target().is_none() {
+    if !crate::anim_fix::active() || crate::spectator_target::in_eye_target().is_none() {
         reset();
         return;
     }
