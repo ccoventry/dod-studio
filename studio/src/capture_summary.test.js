@@ -19,6 +19,12 @@ describe('summaryParts', () => {
     expect(texts({ ...base, mode: 'obs' })[0]).toBe('OBS @ 120 fps');
   });
 
+  it('names AGR mode with its own FPS, and leaves out the video format', () => {
+    const parts = summaryParts({ ...base, mode: 'agr', agrFps: 30 });
+    expect(parts[0].text).toBe('AGR for Blender @ 30 fps');
+    expect(parts.map((p) => p.key)).not.toContain('format');
+  });
+
   it('marks what blocks Start, and links every part to a setting', () => {
     const parts = summaryParts({ ...base, bannedCount: 2, destinations: false, scheduledCount: 1, decalFlush: false });
     expect(parts.filter((p) => p.blocking).map((p) => p.key)).toEqual(['banned', 'destination']);

@@ -92,7 +92,7 @@ pub struct CapturePayload {
     /// default rather than failing the batch.
     #[serde(default)]
     pub ffmpeg_capture_codec: String,
-    /// `frame_sequence`, `direct_to_video` or `obs`. Absent on payloads from a
+    /// `frame_sequence`, `direct_to_video`, `obs` or `agr`. Absent on payloads from a
     /// frontend predating the selector, in which case `ffmpeg_capture` above
     /// still decides — see `PatcherConfig::normalise_capture_mode`.
     #[serde(default)]
@@ -117,6 +117,10 @@ pub struct CapturePayload {
     /// OBS mode's own capture rate — see `PatcherConfig::obs_capture_fps`.
     #[serde(default = "default_obs_capture_fps_payload")]
     pub obs_capture_fps: i32,
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 (or absent)
+    /// means "the same as `capture_fps`".
+    #[serde(default)]
+    pub agr_fps: i32,
     /// Output drives for AOT capacity simulation and media routing.
     pub drives: Vec<String>,
     #[serde(default)]
@@ -294,6 +298,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
         .collect();
     cfg.capture_fps = payload.capture_fps;
     cfg.obs_capture_fps = payload.obs_capture_fps;
+    cfg.agr_fps = payload.agr_fps;
     cfg.record_start_lead = payload.record_start_lead;
     cfg.record_stop_trail = payload.record_stop_trail;
     cfg.initial_delay = payload.initial_delay;
@@ -589,6 +594,13 @@ pub struct CaptureManifest {
     /// once they verify so Render Studio can tell when its own FPS setting
     /// disagrees. See `native::hlcr::take_meta`.
     pub capture_fps: i32,
+    /// `CaptureMode::to_str_id` of the batch. Only AGR changes what the take
+    /// metadata records (#450).
+    #[serde(default)]
+    pub capture_mode: String,
+    /// The rate an AGR batch recorded at; unused for the movie modes.
+    #[serde(default)]
+    pub agr_fps: i32,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -605,6 +617,23 @@ pub struct VerifiedBlock {
     pub captured: bool,
     /// Tier 2: Render Studio's scanner would actually admit this take.
     pub renderable: bool,
+    /// What the take folder holds on disk, for the batch results panel (#172).
+    pub bytes: u64,
+}
+
+/// Everything under `path`, in bytes. 0 for a folder that isn't there.
+fn folder_bytes(path: &Path) -> u64 {
+    let Ok(entries) = std::fs::read_dir(path) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| match e.file_type() {
+            Ok(t) if t.is_dir() => folder_bytes(&e.path()),
+            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
+            Err(_) => 0,
+        })
+        .sum()
 }
 
 fn take_folder_has_content(path: &Path) -> bool {
@@ -639,6 +668,7 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
             source_streak_indices: block.source_streak_indices.clone(),
             captured: take_folder_has_content(&block.take_folder),
             renderable: native::hlcr::scanner::is_renderable_take(&block.take_folder),
+            bytes: 0,
         })
         .collect();
 
@@ -654,6 +684,9 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
                 v.renderable = native::hlcr::scanner::is_renderable_take(&block.take_folder);
             }
         }
+    }
+    for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
+        v.bytes = folder_bytes(&block.take_folder);
     }
 
     verified
@@ -678,10 +711,15 @@ fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock])
     if manifest.capture_fps <= 0 {
         return;
     }
-    let meta = native::hlcr::take_meta::SessionMeta::new(
-        manifest.session_id.clone(),
-        manifest.capture_fps,
-    );
+    let meta = if manifest.capture_mode == native::patch::CaptureMode::Agr.to_str_id() {
+        native::hlcr::take_meta::SessionMeta::agr(
+            manifest.session_id.clone(),
+            manifest.capture_fps,
+            manifest.agr_fps,
+        )
+    } else {
+        native::hlcr::take_meta::SessionMeta::new(manifest.session_id.clone(), manifest.capture_fps)
+    };
 
     for block in blocks.iter().filter(|b| b.captured) {
         let folder = Path::new(&block.take_folder);
@@ -916,6 +954,8 @@ pub async fn start_capture_batch_impl(
                     .flat_map(|j| j.blocks.iter().cloned())
                     .collect(),
                 capture_fps: patcher_config.capture_fps,
+                capture_mode: patcher_config.capture_mode.to_str_id().to_string(),
+                agr_fps: patcher_config.effective_agr_fps(),
             };
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
@@ -2092,9 +2132,23 @@ pub async fn launch_demo_preview(
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<(), String> {
+    // The saved resolution, as Launch Game uses it (#358): the preview
+    // config otherwise keeps PatcherConfig's 1280x720 default.
+    let resolution = {
+        let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings_state
+            .inner
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        (guard.resolution_width, guard.resolution_height)
+    };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let (patcher_config, dod_dir) =
+        let (mut patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        (
+            patcher_config.resolution_width,
+            patcher_config.resolution_height,
+        ) = resolution;
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()
@@ -2312,7 +2366,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
             .collect())
     })
     .await
-    .map_err(|e| format!("Task join error: {}", e))?
+    .map_err(crate::messages::background_task_crashed)?
 }
 
 // ── Standalone Game Launch ──────────────────────────────────────────────────────
@@ -2453,10 +2507,20 @@ pub async fn steam_state() -> Result<String, String> {
 
 /// Starts Steam from where it recorded its own install. Steam outlives
 /// DoD Studio, so the child is not tracked.
+///
+/// Handed to `explorer.exe`, which passes it to the running shell and exits,
+/// so Steam's parent is the shell rather than DoD Studio. Started directly,
+/// Steam joined any job object DoD Studio runs in -- `cargo run`, under
+/// `npm run tauri dev`, puts it in one that kills every process inside when
+/// cargo exits -- so closing or rebuilding Studio closed Steam too.
 #[tauri::command]
 pub fn start_steam() -> Result<(), String> {
     let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
-    std::process::Command::new(exe)
+    // The registry spells it `c:/program files (x86)/steam/steam.exe`, and
+    // explorer.exe reads a leading `/` in an argument as a switch.
+    let exe = exe.to_string_lossy().replace('/', "\\");
+    std::process::Command::new("explorer.exe")
+        .arg(exe)
         .spawn()
         .map(|_| ())
         .map_err(|e| format!("{} ({e})", crate::messages::STEAM_NOT_FOUND))
@@ -2620,6 +2684,16 @@ pub async fn delete_orphaned_previews(file_paths: Vec<String>) -> Result<u32, St
 mod tests {
     use super::*;
     use crate::test_support::Scratch;
+
+    #[test]
+    fn a_take_folders_size_counts_its_subfolders() {
+        let dir = Scratch::new("take_folder_bytes");
+        std::fs::create_dir_all(dir.path().join("hud")).unwrap();
+        std::fs::write(dir.path().join("sound.wav"), vec![0u8; 100]).unwrap();
+        std::fs::write(dir.path().join("hud").join("00000.tga"), vec![0u8; 50]).unwrap();
+        assert_eq!(folder_bytes(dir.path()), 150);
+        assert_eq!(folder_bytes(&dir.path().join("missing")), 0);
+    }
 
     #[test]
     fn a_skipped_demo_gets_a_plain_reason_from_its_contents() {
@@ -2936,6 +3010,7 @@ mod tests {
             capture_directories: vec!["D:/capture".to_string()],
             capture_fps: 300,
             obs_capture_fps: 120,
+            agr_fps: 0,
             drives: vec!["D:/capture".to_string(), "E:/capture".to_string()],
             record_start_lead: 0.0,
             record_stop_trail: 0.0,
@@ -2992,6 +3067,23 @@ mod tests {
     }
 
     #[test]
+    fn test_config_from_payload_carries_agr_mode_and_its_fps() {
+        let mut payload = sample_payload();
+        payload.capture_mode = "agr".to_string();
+        payload.agr_fps = 60;
+        let cfg = config_from_payload(&payload);
+        assert_eq!(cfg.capture_mode, native::patch::CaptureMode::Agr);
+        assert_eq!(cfg.effective_agr_fps(), 60);
+        assert!(!cfg.ffmpeg_capture);
+
+        // Absent from an older frontend: follows Capture FPS.
+        let mut value = serde_json::to_value(sample_payload()).unwrap();
+        value.as_object_mut().unwrap().remove("agr_fps");
+        let payload: CapturePayload = serde_json::from_value(value).unwrap();
+        assert_eq!(config_from_payload(&payload).effective_agr_fps(), 300);
+    }
+
+    #[test]
     fn test_config_from_payload_decal_flush_overrides_only_when_sent() {
         // Absent means "leave the pipeline default alone", so a frontend that
         // knows nothing about decals still gets the flush.
@@ -3014,7 +3106,7 @@ mod tests {
         let payload = sample_payload();
         let cfg = config_from_payload(&payload);
         // Capture Output's first entry is the sole source of primary_media_dir —
-        // there's no separate "Primary Media Dir" field anymore (removed 2026-08-17).
+        // there's no separate "Primary Media Dir" field.
         assert_eq!(cfg.primary_media_dir, Some(PathBuf::from("D:/capture")));
     }
 
@@ -3137,7 +3229,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_filename_is_no_longer_refused_in_init_commands() {
-        // Re-tiered 2026-09-05: inert in Initial Commands (see
+        // Inert in Initial Commands (see
         // cfg_scan::NOOP_IN_INIT_COMMANDS), only dangerous once scheduled.
         let err = first_banned_command_error(&["mirv_movie_filename foo".to_string()], &[]);
         assert!(err.is_none(), "{:?}", err);

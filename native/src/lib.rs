@@ -38,6 +38,9 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// The review mode's queue and answers (#623).
+pub mod review_queue;
+
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
 /// directory needs a guard rather than a trailing `remove_dir_all` (#253).
 #[cfg(test)]
@@ -64,12 +67,12 @@ where
     let mut file = fs::OpenOptions::new()
         .read(true)
         .open(demo_path)
-        .map_err(|e| format!("Could not open the file: {}", e))?;
+        .map_err(|e| format!("Could not open {}: {}", demo_path.display(), e))?;
 
     let mut bytes: Vec<u8> = vec![];
 
     file.read_to_end(&mut bytes)
-        .map_err(|e| format!("Could not read the file: {}", e))?;
+        .map_err(|e| format!("Could not read {}: {}", demo_path.display(), e))?;
 
     let analysis = Analysis::try_from_bytes_with_progress(bytes.as_slice(), progress_cb)?;
     let file_info = FileInfo::of(demo_path)?;

@@ -689,6 +689,7 @@ mod tests {
 
     #[test]
     fn status_says_which_sprite_is_in_use() {
+        let _statics = crosshair::tests::lock_hidden_now();
         let saved = ACTIVE_STYLE.load(Ordering::Acquire);
 
         ACTIVE_STYLE.store(0, Ordering::Release);
@@ -713,6 +714,7 @@ mod tests {
     /// rather than describe a tile that is not actually visible.
     #[test]
     fn status_notes_when_hide_crosshair_makes_it_moot() {
+        let _statics = crosshair::tests::lock_hidden_now();
         let saved_style = ACTIVE_STYLE.load(Ordering::Acquire);
         let saved_hidden = crosshair::HIDDEN_NOW.load(Ordering::Acquire);
 

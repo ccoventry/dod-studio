@@ -21,17 +21,19 @@ const TRACKED_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="
  *  in sync with isHighlightTracked's own checks. */
 function describeTrackedReasons(demo) {
   const streaks = demo?.streaks || [];
-  let hasStatus = false, hasNotes = false, hasClipName = false, hasRange = false;
+  let hasStatus = false, hasNotes = false, hasClipName = false, hasReview = false, hasRange = false;
   streaks.forEach(s => {
     if (s.status === 'Pending' || s.status === 'Captured' || s.status === 'Rendered') hasStatus = true;
     if (s.notes && s.notes.trim()) hasNotes = true;
     if (s.clipName && s.clipName.trim()) hasClipName = true;
+    if (s.curation) hasReview = true;
     if (isRangeModified(s)) hasRange = true;
   });
   const reasons = [];
   if (hasStatus) reasons.push(STRINGS.WORKSPACE.REASON_STATUS);
   if (hasNotes) reasons.push(STRINGS.WORKSPACE.REASON_NOTE);
   if (hasClipName) reasons.push(STRINGS.WORKSPACE.REASON_CLIP_NAME);
+  if (hasReview) reasons.push(STRINGS.WORKSPACE.REASON_REVIEW);
   if (hasRange) reasons.push(STRINGS.WORKSPACE.REASON_RANGE);
   return reasons;
 }
