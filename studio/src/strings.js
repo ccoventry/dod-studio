@@ -1313,6 +1313,74 @@ export const STRINGS = {
     SETUP_CANCELLED: 'Cancelled. Files that finished downloading are kept.',
     COPIED: 'Copied to the clipboard.',
     footerSummary: (styles, size) => `HD styles built: ${styles || 'none'} | ${size} on disk`,
+    // The style comparison: compare.py's sheet.
+    PREVIEW_TITLE: 'Compare styles',
+    PREVIEW_HINT: 'The original and each built style side by side, at 1:1 pixels so nothing is averaged away: the most detailed textures of your maps, and a few model skins, sprites and detail textures. Click the sheet to fit it to the page.',
+    PREVIEW_MAP_LABEL: 'Map:',
+    PREVIEW_AUTO_MAP: 'A few of your maps, picked for you',
+    PREVIEW_BUTTON: 'Show comparison',
+    PREVIEW_WORKING: 'Making the sheet...',
+    PREVIEW_NOTHING_BUILT: 'Build a style first: the sheet compares built files.',
+    previewDone: (samples, maps) => `${samples} sample${samples === 1 ? '' : 's'}${maps.length ? `, from ${maps.join(', ')}` : ''}.`,
+    previewSkipped: (skipped) => `Left out: ${skipped.join('; ')}.`,
+    // The custom-style form: lines in the install's my_styles.txt.
+    MY_STYLES_TITLE: 'Your own styles',
+    MY_STYLES_HINT: 'Make a style of your own from an AI model, a plain enlargement with more or less sharpening, or a mix of two styles. Build it above like any other style. The command-line scripts read the same file.',
+    myStylesFile: (path, exists) => (exists ? `Saved in ${path}.` : `Saved in ${path}, made on the first save.`),
+    myStylesOldPlace: (old, path) => `Builds read ${old} for now; the first save copies it to ${path}, and builds use that from then on.`,
+    myStylesError: (error) => `my_styles.txt can't be read, so builds won't start until it's fixed: ${error}`,
+    MY_STYLES_NONE: 'None yet.',
+    STYLE_NAME_LABEL: 'Name:',
+    STYLE_NAME_PLACEHOLDER: 'e.g. crisp',
+    STYLE_KIND_LABEL: 'Made by:',
+    STYLE_KINDS: { plain: 'A plain enlargement, sharpened', ai: 'An AI model', blend: 'Mixing two styles' },
+    STYLE_SHARPENING_LABEL: 'Sharpening (0 to 500; plain is 60):',
+    STYLE_MODEL_LABEL: 'Model:',
+    styleModelHint: (dir) => `To use another model, put its .param and .bin files in ${dir}\\models, then Refresh.`,
+    STYLE_NO_MODELS: '(no models found)',
+    STYLE_MIX_LABEL: 'Mix:',
+    STYLE_MIX_OF: '% of',
+    STYLE_MIX_REST: 'and the rest',
+    STYLE_SAVE_BUTTON: 'Save style',
+    STYLE_EDIT_BUTTON: 'Edit',
+    STYLE_REMOVE_BUTTON: 'Remove',
+    STYLE_BAD_NAME: 'Names are 1 to 32 lowercase letters, digits, - and _.',
+    styleBuiltIn: (name) => `${name} is a built-in style; pick another name.`,
+    STYLE_BLENDS_ITSELF: "A style can't mix itself.",
+    styleSaved: (name) => `Saved ${name}. Build it above to make its files.`,
+    styleRemoved: (name) => `Removed ${name} from my_styles.txt. Files it already built are kept.`,
+    // How each kind of custom style reads in the list.
+    styleDescription: (def) => ({
+      ai: () => `AI model ${def.model}`,
+      plain: () => `plain enlargement, sharpening ${def.sharpening}`,
+      blend: () => `${def.percent}% ${def.a}, ${100 - def.percent}% ${def.b}`,
+    })[def.kind](),
+    STYLE_NEEDS_MODEL: ' (needs its model)',
+    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    MISSES_TITLE: 'Textures that kept their original',
+    MISSES_BUTTON: "Read the game's log",
+    MISSES_READING: 'Reading...',
+    MISSES_HINT: "After playing the demos you want to check, type this in the game's console, then press Read the game's log. The game keeps the list only until it closes.",
+    MISSES_SHOW_ON_PURPOSE: 'Show textures left alone on purpose',
+    MISSES_NONE: "No list in the game's log yet. Type the command above in the game's console first.",
+    // `textures` is null when the hook's summary doesn't give a count: show its own words then.
+    missesFrom: (date, time, style, textures, summary, mapCount) => `From ${date} at ${time}${style ? `, style ${style}` : ''}: ${
+      textures === 0 ? 'every texture was replaced.'
+        : textures == null ? summary
+          : `${textures} texture${textures === 1 ? '' : 's'} kept their original.${mapCount > 1 ? ' One used on several maps is listed under each.' : ''}`}`,
+    missesMap: (map, total, onPurpose) => `${map}: ${total} kept their original${onPurpose ? `, ${onPurpose} of them on purpose` : ''}`,
+    MISSES_ONLY_ON_PURPOSE: 'Only textures left alone on purpose.',
+    missesLoads: (loads, type) => (type === 'sprite' ? `${loads} frames` : `${loads} loads`),
+    missesAlsoOn: (count) => `also on ${count} other map${count === 1 ? '' : 's'}`,
+    // What to do about each reason, after the hook's own heading.
+    MISSES_ADVICE: {
+      wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
+      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      failed: "A file was found but couldn't be used; each line says why.",
+      on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
+    },
+    // The hook's asset kinds in the miss list (singular, unlike the folders).
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
@@ -1387,6 +1455,8 @@ export const STRINGS = {
     hdBuildFailed: (err) => `Build failed: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
+    hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,
+    hdPreviewFailed: (err) => `Comparison failed: ${err}`,
     scanError: (err) => `Scan error: ${err}`,
     validationError: (err) => `Validation error: ${err}`,
     analysisError: (err) => `Analysis error: ${err}`,
