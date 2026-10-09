@@ -6,7 +6,9 @@
 //! progress, and stops it on Cancel.
 //!
 //! - **Progress:** `build_all.py` prints `@@step <n> <of> <style> <type>`
-//!   before each step and a log line after it; see [`parse_line`].
+//!   before each step and a log line after it; see [`parse_line`]. The map
+//!   texture step, the long one, also prints a log-shaped "N of M written"
+//!   line after each batch it finishes.
 //! - **Resume:** every step skips files that already exist, so running again
 //!   after a Cancel carries on. The scripts write each file under a `.part`
 //!   name and rename it when whole, so a stopped step never leaves a broken
@@ -24,7 +26,7 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use super::python::{self, PythonSource, Using};
-use super::{ASSET_TYPES, BUILT_IN_STYLES, setup};
+use super::{ASSET_TYPES, BUILT_IN_STYLES, my_styles, setup};
 
 /// How often the running build is polled, per CLAUDE.md's process rules.
 const POLL: Duration = Duration::from_millis(16);
@@ -122,8 +124,13 @@ fn style_name_ok(name: &str) -> bool {
 }
 
 /// Refuses a request the scripts would refuse, and one whose AI styles have
-/// no upscaler or model to run, before anything starts.
-pub fn check(request: &BuildRequest, realesrgan: &Path) -> Result<(), String> {
+/// no upscaler or model to run, before anything starts. `mine` is the
+/// install's `my_styles.txt` ([`my_styles::read`]).
+pub fn check(
+    request: &BuildRequest,
+    realesrgan: &Path,
+    mine: &[my_styles::CustomStyle],
+) -> Result<(), String> {
     if request.styles.is_empty() || request.types.is_empty() {
         return Err(crate::messages::HD_BUILD_NOTHING_CHOSEN.to_string());
     }
@@ -141,15 +148,26 @@ pub fn check(request: &BuildRequest, realesrgan: &Path) -> Result<(), String> {
         return Err(crate::messages::hd_build_bad_cap(request.cap));
     }
     for style in &request.styles {
-        let model = BUILT_IN_STYLES
-            .iter()
-            .find(|s| s.name == style)
-            .and_then(|s| s.model);
-        if let Some(model) = model
-            && !(setup::upscaler_exe(realesrgan).is_file()
-                && setup::model_present(realesrgan, model))
-        {
-            return Err(crate::messages::hd_build_needs_upscaler(style));
+        if let Some(built_in) = BUILT_IN_STYLES.iter().find(|s| s.name == style) {
+            if let Some(model) = built_in.model
+                && !(setup::upscaler_exe(realesrgan).is_file()
+                    && setup::model_present(realesrgan, model))
+            {
+                return Err(crate::messages::hd_build_needs_upscaler(style));
+            }
+            continue;
+        }
+        match mine.iter().find(|s| &s.name == style).map(|s| &s.def) {
+            None => return Err(crate::messages::hd_build_unknown_style(style)),
+            Some(my_styles::StyleDef::Ai { model }) => {
+                if !setup::upscaler_exe(realesrgan).is_file() {
+                    return Err(crate::messages::hd_build_needs_upscaler(style));
+                }
+                if !setup::model_present(realesrgan, model) {
+                    return Err(crate::messages::hd_build_needs_model(style, model));
+                }
+            }
+            Some(_) => {}
         }
     }
     Ok(())
@@ -212,7 +230,15 @@ pub fn run(
     cancel: &AtomicBool,
     progress: &mut dyn FnMut(&BuildProgress),
 ) -> Result<BuildOutcome, String> {
-    check(request, realesrgan)?;
+    let mine = super::hd_root(game_exe)
+        .map(|root| my_styles::read(&root, Some(scripts)))
+        .map(|mine| match mine.error {
+            Some(error) => Err(crate::messages::hd_build_bad_my_styles(&error)),
+            None => Ok(mine.styles),
+        })
+        .transpose()?
+        .unwrap_or_default();
+    check(request, realesrgan, &mine)?;
     let game_dir = game_exe
         .parent()
         .ok_or_else(|| crate::messages::HD_BUILD_NO_GAME_FOLDER.to_string())?;
@@ -350,7 +376,7 @@ pub fn run(
 }
 
 #[cfg(test)]
-mod tests {
+pub(in crate::hd) mod tests {
     use super::*;
     use crate::test_support::Scratch;
 
@@ -449,40 +475,47 @@ mod tests {
             types: types.iter().map(|s| s.to_string()).collect(),
             cap: 1024,
         };
+        let mine = my_styles::parse(
+            "crisp = plain 150
+anime = realesrgan-x4plus-anime
+",
+        )
+        .unwrap();
+        let check = |request: &BuildRequest| check(request, &realesrgan, &mine);
         // The cap is one of the scripts' sizes.
         let sized = |cap| BuildRequest {
             cap,
             ..request(&["plain"], &["world"])
         };
-        assert!(check(&sized(2048), &realesrgan).is_ok());
-        assert!(check(&sized(4096), &realesrgan).is_ok());
-        assert!(check(&sized(512), &realesrgan).is_err());
-        assert!(check(&sized(1536), &realesrgan).is_err());
+        assert!(check(&sized(2048)).is_ok());
+        assert!(check(&sized(4096)).is_ok());
+        assert!(check(&sized(512)).is_err());
+        assert!(check(&sized(1536)).is_err());
         let common = include_str!("../../../goldsrc-hooks/tools/hd/hdcommon.py");
         assert!(common.contains(&format!("CAPS = ({}, {}, {})", CAPS[0], CAPS[1], CAPS[2])));
         assert!(common.contains(r#"os.environ.get("HD_CAP", "1024")"#));
-        assert!(check(&request(&[], &["world"]), &realesrgan).is_err());
-        assert!(check(&request(&["plain"], &[]), &realesrgan).is_err());
-        assert!(check(&request(&["../evil"], &["world"]), &realesrgan).is_err());
-        assert!(check(&request(&["plain"], &["world", "maps"]), &realesrgan).is_err());
-        // No AI needed: fine without the upscaler. A custom style is left to
-        // the scripts, which know my_styles.txt.
-        assert!(
-            check(
-                &request(&["plain", "blend", "crisp"], &["world", "sky"]),
-                &realesrgan
-            )
-            .is_ok()
-        );
-        // An AI style needs the upscaler and its own model.
-        assert!(check(&request(&["ultrasharp"], &["world"]), &realesrgan).is_err());
+        assert!(check(&request(&[], &["world"])).is_err());
+        assert!(check(&request(&["plain"], &[])).is_err());
+        assert!(check(&request(&["../evil"], &["world"])).is_err());
+        assert!(check(&request(&["plain"], &["world", "maps"])).is_err());
+        // A style that is neither built in nor in my_styles.txt.
+        assert!(check(&request(&["nothing"], &["world"])).is_err());
+        // No AI needed: fine without the upscaler, custom styles included.
+        assert!(check(&request(&["plain", "blend", "crisp"], &["world", "sky"])).is_ok());
+        // An AI style needs the upscaler and its own model, custom ones too.
+        assert!(check(&request(&["ultrasharp"], &["world"])).is_err());
+        assert!(check(&request(&["anime"], &["world"])).is_err());
         std::fs::create_dir_all(realesrgan.join("models")).unwrap();
         std::fs::write(setup::upscaler_exe(&realesrgan), b"").unwrap();
-        assert!(check(&request(&["ultrasharp"], &["world"]), &realesrgan).is_err());
-        for ext in ["param", "bin"] {
-            std::fs::write(realesrgan.join(format!("models/ultrasharp-4x.{ext}")), b"").unwrap();
+        assert!(check(&request(&["ultrasharp"], &["world"])).is_err());
+        assert!(check(&request(&["anime"], &["world"])).is_err());
+        for model in ["ultrasharp-4x", "realesrgan-x4plus-anime"] {
+            for ext in ["param", "bin"] {
+                std::fs::write(realesrgan.join(format!("models/{model}.{ext}")), b"").unwrap();
+            }
         }
-        assert!(check(&request(&["ultrasharp"], &["world"]), &realesrgan).is_ok());
+        assert!(check(&request(&["ultrasharp"], &["world"])).is_ok());
+        assert!(check(&request(&["anime"], &["world"])).is_ok());
     }
 
     #[test]
@@ -542,7 +575,7 @@ mod tests {
 
     /// A BSP v30 with one lump that matters: the textures, holding one 16x16
     /// embedded texture named `wall`. `world_hd.py` reads nothing else.
-    pub(super) fn tiny_bsp() -> Vec<u8> {
+    pub(in crate::hd) fn tiny_bsp() -> Vec<u8> {
         const LUMPS: usize = 15;
         let header = 4 + LUMPS * 8;
         let (w, h) = (16u32, 16u32);

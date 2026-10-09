@@ -2,10 +2,10 @@
 
 Reads the game's gfx/detail/*.tga (never writes there), and for each:
 
-  wrap-pad half a tile each side -> 4x in the style -> Lanczos to 2x the
-  power-of-two target (capped at HD_CAP a side, 1024 by default) -> crop the
-  centre tile -> match
-  each channel's mean and spread to the original
+  wrap-pad half a tile (at most PAD px) each side -> 4x in the style ->
+  Lanczos the tile's own part to the power-of-two target (capped at HD_CAP
+  a side, 1024 by default), the padding feeding the filter at its edges ->
+  match each channel's mean and spread to the original
 
 Wrap padding matters even more here than for walls: a detail texture is
 tiled many times across every surface it's on. Matching mean and spread
@@ -21,7 +21,7 @@ for every detail texture a map loads, and the hook sizes that buffer for
 2048 (texture_hires.rs, DETAIL_MAX_SIDE). A bigger file would be skipped.
 
 usage: python detail_hd.py <out_dir> [<folder of .tga>]    (default gfx/detail)
-env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK
+env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
 """
 import glob, os, sys
 import numpy as np
@@ -37,6 +37,21 @@ DETAIL_CAP = min(C.CAP, 2048)
 def target(n):
     """4x `n`, rounded up to a power of two, at most DETAIL_CAP."""
     return min(C.pot(n * 4), DETAIL_CAP)
+
+
+# Wrap padding each side, in source pixels: half a tile, up to PAD, as in
+# world_hd.py (#383). Half a tile of a 512 px detail texture made the
+# upscaler work on a 1024 px image. Measured on 32 of the movie install's
+# detail textures (16 at 512 px, 8 at 256, 8 at 128): 2.2x faster with
+# ultrasharp and with x4plus; the 128 px ones come out byte-identical; of the
+# 20 whose source tiles cleanly, none has a worse seam than before with
+# ultrasharp (within 1%) and none is worse by 10% with x4plus.
+PAD = 64
+
+
+def margins(w, h):
+    """(rows, columns) of wrap padding for a w x h texture."""
+    return min(PAD, h // 2), min(PAD, w // 2)
 
 
 def main():
@@ -58,29 +73,32 @@ def main():
         if C.built(os.path.join(out_dir, name), target(w), target(h)):
             continue
         a = np.asarray(Image.open(f).convert("RGB"))
-        jobs[name] = a
-        pad = np.pad(a, ((h // 2, h // 2), (w // 2, w // 2), (0, 0)), mode="wrap")
-        Image.fromarray(pad).save(os.path.join(work, "in", name[:-4] + ".png"))
+        jobs[name[:-4]] = (name, a)
     print(f"{len(jobs)} detail textures to build")
 
-    S.upscale(os.path.join(work, "in"), os.path.join(work, "out"), style)
+    def prepare(key, job):
+        name, a = job
+        h, w = a.shape[:2]
+        py, px = margins(w, h)
+        return Image.fromarray(np.pad(a, ((py, py), (px, px), (0, 0)), mode="wrap"))
 
-    done = 0
-    for name, a in jobs.items():
-        src = os.path.join(work, "out", name[:-4] + ".png")
-        if not os.path.exists(src):
-            continue
+    def finish(key, job, src):
+        name, a = job
         h, w = a.shape[:2]
         tw, th = target(w), target(h)
-        centre = (tw // 2, th // 2, tw // 2 + tw, th // 2 + th)
-        up = np.asarray(Image.open(src).convert("RGB").resize((tw * 2, th * 2), Image.LANCZOS).crop(centre)).astype(np.float32)
+        # The upscaled image is the tile plus 4x the padding each side: resize
+        # just the tile's part, the padding feeding the filter at its edges.
+        py, px = margins(w, h)
+        box = (px * 4, py * 4, (px + w) * 4, (py + h) * 4)
+        up = np.asarray(Image.open(src).convert("RGB").resize((tw, th), Image.LANCZOS, box=box)).astype(np.float32)
         o = a.astype(np.float32)
         for c in range(3):
             um, us = up[..., c].mean(), up[..., c].std()
             om, os_ = o[..., c].mean(), o[..., c].std()
             up[..., c] = (up[..., c] - um) * (os_ / us if us > 1e-3 else 1.0) + om
         C.save_output(Image.fromarray(np.clip(up + 0.5, 0, 255).astype(np.uint8), "RGB"), os.path.join(out_dir, name))
-        done += 1
+
+    done = S.upscale_batches(work, style, jobs, prepare, finish)
     print(f"wrote {done} HD detail texture(s) to {out_dir}")
 
 

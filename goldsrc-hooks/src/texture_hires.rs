@@ -3590,7 +3590,7 @@ mod tests {
         // Sized for the 4x of a 512 original, not the upload ceiling: the
         // loader mallocs it for every detail texture.
         assert_eq!(DETAIL_MAX_BYTES, 16 * 1024 * 1024);
-        assert!(DETAIL_MAX_BYTES <= RAISED_MAX_PIXELS * 4);
+        const { assert!(DETAIL_MAX_BYTES <= RAISED_MAX_PIXELS * 4) };
     }
 
     #[test]
