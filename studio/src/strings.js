@@ -549,6 +549,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #438: each take's render history.
+    TABLE_HEADER_HISTORY: 'History',
+    TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
+    HISTORY_NEW: 'New',
+    historyRendered: (count) => `Rendered ×${count}`,
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
+    HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
+    historyFileNotFound: (name) => `${name} was moved or deleted`,
     // #108: named render setups.
     PRESET_LABEL: 'Preset:',
     PRESET_TITLE: 'A saved codec, FPS and concurrency. Pick one to apply it. Shows — when the settings above match no preset.',
