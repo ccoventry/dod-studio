@@ -14,6 +14,7 @@ import {
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
   launchObs,
+  defaultProjectsDir,
   systemMemoryBytes
 } from './ipc_bridge.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
@@ -47,6 +48,7 @@ import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
 import { splitIdenticalCopies } from './demo_copies.js';
+import { initReviewMode } from './review_mode.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -177,6 +179,7 @@ function applyCaptureModeUI() {
   const mode = currentCaptureMode();
   const video = mode === 'direct_to_video';
   const obs = mode === 'obs';
+  const agr = mode === 'agr';
 
   // Kept in step rather than read: the backend still accepts `ffmpeg_capture`
   // from older payloads, and leaving it stale would make the two disagree for
@@ -203,7 +206,17 @@ function applyCaptureModeUI() {
   // OBS, which has its own separate OBS Capture FPS field below — showing
   // both invites setting the wrong one.
   const captureFpsGroup = document.querySelector('#capture-fps-group');
-  if (captureFpsGroup) captureFpsGroup.style.display = obs ? 'none' : '';
+  if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
+
+  // AGR mode records no video, so Capture FPS gives way to its own rate. An
+  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
+  // shows the number that will actually be used.
+  const agrFpsGroup = document.querySelector('#agr-fps-group');
+  if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
+  const agrFpsInput = document.querySelector('#config-agr-fps');
+  if (agrFpsInput) {
+    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
+  }
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -474,6 +487,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 2.0);
     const postRoll = numberField('#config-post-roll', 0.6);
 
@@ -536,6 +551,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
       resolution_width: resWidth,
@@ -633,6 +649,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.obs_capture_fps) {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
+      }
+      // 0 is "the same as Capture FPS" and stays an empty box.
+      if (settings.agr_fps > 0) {
+        const inputEl = document.querySelector('#config-agr-fps');
+        if (inputEl) inputEl.value = settings.agr_fps;
       }
       // `!= null`, not truthiness: 0 is a real value for the five timing
       // fields, and a truthy check skipped restoring it.
@@ -803,9 +824,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       // Once a session's been loaded or saved once in this window, keep
       // writing back to that same file instead of asking Save-As again.
+      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
       const filePath = currentSessionPath || await save({
         title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: 'dod_project.json',
+        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
         filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
       });
       if (!filePath) return false;
@@ -868,8 +890,10 @@ window.addEventListener("DOMContentLoaded", async () => {
         // handler; 'discard' falls through to load over it either way.
       }
       try {
+        const projectsDir = await defaultProjectsDir();
         const selected = await open({
           multiple: false,
+          ...(projectsDir ? { defaultPath: projectsDir } : {}),
           filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
         });
         if (selected) {
@@ -1557,6 +1581,12 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   };
 
+  initReviewMode({
+    getDemos: () => currentScannedDemos,
+    getCheckedPaths: getCheckedDemoPaths,
+    onChanged: onHighlightStatusChange,
+  });
+
   initCaptureUI(() => ({
     scanPaths,
     targetDrives,
@@ -1586,8 +1616,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   // writes to disk on 'change' (blur/Enter), not every keystroke — closing
   // the app while a field still has focus (never blurred) would otherwise
   // silently drop that edit even though it's already reflected in the
-  // in-memory state persistAppSettings() reads from. Confirmed as a real,
-  // reproducible data-loss case 2026-08-23 (see engineering_backlog.md).
+  // in-memory state persistAppSettings() reads from (a real, reproducible
+  // data-loss case).
   const appWindow = getCurrentWindow();
   appWindow.onCloseRequested(async (event) => {
     event.preventDefault();

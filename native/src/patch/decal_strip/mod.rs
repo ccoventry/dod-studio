@@ -984,26 +984,20 @@ mod tests {
     }
 
     /// The same guard on a real recording, which exercises every message type
-    /// the game actually sends rather than the three built above. Skipped when
-    /// the demo is not on this machine; `DOD_ROUNDTRIP_DEMO` points it at any
-    /// other.
-    ///
-    /// The default is a short (~1MB) recording so a plain `cargo test` stays
-    /// quick. A full-length one works the same way but takes about a minute
-    /// and a half in a debug build.
+    /// the game actually sends rather than the three built above. The default
+    /// is the checked-in `test-fixtures/ci_fixture.dem`, so CI runs it;
+    /// `DOD_ROUNDTRIP_DEMO` points it at any other.
     #[test]
     fn a_real_demo_survives_the_verbatim_write() {
         let path = std::env::var_os("DOD_ROUNDTRIP_DEMO")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| {
-                std::path::PathBuf::from(
-                    r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies\dod\ktps8w8-stealth_ih_saints_h2_p1.dem",
-                )
+                std::path::PathBuf::from(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/../test-fixtures/ci_fixture.dem"
+                ))
             });
-        let Ok(bytes) = std::fs::read(&path) else {
-            eprintln!("skipped: no demo at {}", path.display());
-            return;
-        };
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         let mut demo = open_demo_from_bytes(&bytes).unwrap();
 
         // Untouched, the output is the input — except each directory entry's

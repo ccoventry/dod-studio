@@ -202,14 +202,28 @@
 		"Command"		"clear_players"
 		"helptext"		"Forget the picked players."
 	}
+	"FolderPath"
+	{
+		"ControlName"		"Label"
+		"fieldName"		"FolderPath"
+		"xpos"		"8"
+		"ypos"		"86"
+		"wide"		"520"
+		"tall"		"18"
+		"visible"		"1"
+		"enabled"		"1"
+		"labelText"		""
+		"textAlignment"		"west"
+		"helptext"		"The folder the list shows. Open a folder, or its up row, to move."
+	}
 	"DemoListSlot"
 	{
 		"ControlName"		"Label"
 		"fieldName"		"DemoListSlot"
 		"xpos"		"8"
-		"ypos"		"88"
+		"ypos"		"106"
 		"wide"		"520"
-		"tall"		"114"
+		"tall"		"96"
 		"visible"		"1"
 		"enabled"		"1"
 		"labelText"		""
@@ -240,8 +254,20 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1"
+		"labelText"		"Double-click a demo, or pick one and Load."
 		"textAlignment"		"west"
+	}
+	"FolderProgress"
+	{
+		"ControlName"		"ProgressBar"
+		"fieldName"		"FolderProgress"
+		"xpos"		"112"
+		"ypos"		"213"
+		"wide"		"416"
+		"tall"		"14"
+		"visible"		"0"
+		"enabled"		"1"
+		"helptext"		"Counting the demos in each folder, off the game thread."
 	}
 	"PlayerNote"
 	{
