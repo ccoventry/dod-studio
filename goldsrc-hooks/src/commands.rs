@@ -229,16 +229,40 @@ fn poll_code_patch(
     apply: fn(bool) -> Result<bool, String>,
     describe: fn(bool) -> &'static str,
 ) {
+    poll_code_patch_when(name, cvar, true, complained, apply, describe);
+}
+
+/// [`poll_code_patch`], with the patch held off while `allowed` is false even
+/// though the cvar is on: the match-POV patches during a POV demo (#613). The
+/// log line says it stood down, so a POV demo doesn't read as the cvar having
+/// been turned off.
+fn poll_code_patch_when(
+    name: &str,
+    cvar: &AtomicPtr<CvarSPartial>,
+    allowed: bool,
+    complained: &AtomicBool,
+    apply: fn(bool) -> Result<bool, String>,
+    describe: fn(bool) -> &'static str,
+) {
     let ptr = cvar.load(Ordering::Relaxed);
     if ptr.is_null() {
         return;
     }
-    let on = unsafe { (*ptr).value } != 0.0;
+    let wanted = unsafe { (*ptr).value } != 0.0;
+    let on = wanted && allowed;
     match apply(on) {
         Ok(false) => complained.store(false, Ordering::Relaxed),
         Ok(true) => {
             complained.store(false, Ordering::Relaxed);
-            unsafe { crate::debug::report(&format!("commands: {name} = {}", describe(on))) };
+            let line = if wanted && !allowed {
+                format!(
+                    "commands: {name} stands down for a POV demo -- {}",
+                    describe(false)
+                )
+            } else {
+                format!("commands: {name} = {}", describe(on))
+            };
+            unsafe { crate::debug::report(&line) };
         }
         Err(why) => {
             if !complained.swap(true, Ordering::Relaxed) {
@@ -468,16 +492,21 @@ pub fn poll() {
         );
         // Polled every frame like the rest, and for one extra reason: this is
         // also how it notices `cl_xhair_style` changing under it.
-        poll_code_patch(
+        //
+        // Both stand down in a POV demo, which is the recording they match.
+        let allowed = anim_fix::active();
+        poll_code_patch_when(
             SPEC_MATCH_POV_NAME,
             &CVAR_SPEC_MATCH_POV,
+            allowed,
             &SPECTATOR_CROSSHAIR_COMPLAINED,
             spectator_crosshair::set_matching,
             describe_spectator_crosshair,
         );
-        poll_code_patch(
+        poll_code_patch_when(
             SPEC_MATCH_POV_NAME,
             &CVAR_SPEC_MATCH_POV,
+            allowed,
             &SPECTATOR_EYE_COMPLAINED,
             spectator_eye::set_matching,
             describe_spectator_eye,
@@ -542,6 +571,8 @@ pub fn poll() {
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    crate::overview_players::poll();
+    crate::overview_marker::poll();
     crate::studio_panel::poll();
     crate::review::poll();
 }
@@ -711,6 +742,12 @@ fn status_text() -> String {
     }
     if let Some(lock) = crate::spectator_follow::status_line() {
         lines.push(lock);
+    }
+    if let Some(icons) = crate::overview_players::status_line() {
+        lines.push(icons);
+    }
+    if let Some(marker) = crate::overview_marker::status_line() {
+        lines.push(marker);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1405,6 +1442,7 @@ pub fn install() {
         crate::spectator_follow::TARGET_NAME,
         crate::spectator_follow::target_command,
     );
+    add_command(crate::position::NAME, crate::position::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed
@@ -1508,6 +1546,12 @@ pub fn install() {
     }
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
+    }
+    if let Some(icons) = register(crate::overview_players::NAME, "0") {
+        crate::overview_players::set_cvar(icons);
+    }
+    if let Some(marker) = register(crate::overview_marker::NAME, "0") {
+        crate::overview_marker::set_cvar(marker);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
@@ -1659,6 +1703,8 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::overview_players::NAME,
+            crate::overview_marker::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

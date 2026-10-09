@@ -81,6 +81,10 @@ is the complete list):
   stays on the player being watched when he dies; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_camera.md`.
+- **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
+  overview map shows -- the game's own (the watched player's team), everyone,
+  the other team, only the player being watched, or nobody. A detour on the
+  map's one team test in `client.dll`; see `src/overview_players.rs`.
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
@@ -301,7 +305,10 @@ against a real `client.dll` or `hw.dll`.
 detail textures and skies as the game loads them: on when there's a
 `dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
-the scripts that build those files; see its README.
+the scripts that build
+those files; see its README. It works the same on the 25th Anniversary
+`hw.dll` (#370), from that build's own offsets
+(`tools/verify_texture_hires_offsets.py --anniversary`).
 
 ### Always-on crash guards
 
