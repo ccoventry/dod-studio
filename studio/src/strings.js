@@ -1297,6 +1297,21 @@ export const STRINGS = {
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
+    // #426: how much of the game a style covers.
+    cellSummaryOf: (files, most, size) => `${files.toLocaleString()} of ${most.toLocaleString()} files, ${size}`,
+    CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
+    largestSize: (width, height) => `up to ${width}×${height}`,
+    LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    someOf: (files, most, type) => `${files} of ${most} ${type}`,
+    styleGaps: (style, none, some) => {
+      const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
+      const parts = [];
+      if (none.length) parts.push(`no ${list(none, 'or')}`);
+      if (some.length) parts.push(`only ${list(some, 'and')}`);
+      return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
+    },
+    cfgGapsComment: (sentence) => `// ${sentence}`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
