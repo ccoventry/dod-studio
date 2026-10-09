@@ -176,8 +176,13 @@ def section_text(doc, start):
         paras.append(" ".join(cur))
     for para in paras:
         para = re.sub(r"^No arguments\.\s*", "", para)
-        if para and not para.startswith(("`", "|", "```", "-")):
-            return para
+        if not para or para.startswith(("|", "```", "-")):
+            continue
+        # A bare usage line is skipped; prose that opens with the command
+        # ("`dodstudio_x <n>` puts the camera...") is the description.
+        if para.startswith("`") and len(para.split("`", 2)[-1].strip()) < 4:
+            continue
+        return para
     return ""
 
 
@@ -185,16 +190,22 @@ def dodstudio_names():
     src = REPO / "goldsrc-hooks" / "src"
     names = set()
     for f in src.rglob("*.rs"):
-        names |= set(re.findall(r'console_name!\("([a-z0-9_]+)"\)', f.read_text(encoding="utf-8")))
+        # Code only: a doc comment showing how to call the macro (names.rs)
+        # is not a registered name.
+        code = "\n".join(
+            line for line in f.read_text(encoding="utf-8").splitlines() if not line.lstrip().startswith("//")
+        )
+        names |= set(re.findall(r'console_name!\("([a-z0-9_]+)"\)', code))
     hints = {}
     doc = (REPO / "docs" / "dodstudio_commands.md").read_text(encoding="utf-8").splitlines()
     for i, line in enumerate(doc):
         row = re.match(r"^\| `dodstudio_([a-z0-9_]+)` \|[^|]*\| (.*?) \|", line)
         if row:
             hints.setdefault(row.group(1), first_sentence(row.group(2)))
-        head = re.match(r"^### `dodstudio_([a-z0-9_]+)", line)
-        if head:
-            hints.setdefault(head.group(1), first_sentence(section_text(doc, i + 1)))
+        if line.startswith("### "):
+            # A heading may name several commands ("`dodstudio_seek_to` / `dodstudio_seek_by`").
+            for name in re.findall(r"`dodstudio_([a-z0-9_]+)", line):
+                hints.setdefault(name, first_sentence(section_text(doc, i + 1)))
     return [["dodstudio_" + n, hints.get(n, "")] for n in sorted(names)]
 
 

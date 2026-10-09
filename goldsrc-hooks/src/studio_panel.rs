@@ -46,7 +46,8 @@
 //! ## The layout files
 //!
 //! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
-//! tab (`Playback.res`, `Demos.res`, `Studio.res`). Our own folder beside
+//! tab in [`PAGES`] (`Playback.res`, `Demos.res`, `Highlights.res`,
+//! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
 //! (`goldsrc-hooks/ui/`, built into the DLL) is written the first time; a
 //! later DLL with a changed default replaces a file only while it is still
@@ -56,7 +57,7 @@
 //!
 //! ## Per build
 //!
-//! Eight `GameUI.dll` addresses and sizes differ between the pre-Anniversary
+//! Sixteen `GameUI.dll` addresses and sizes differ between the pre-Anniversary
 //! and 25th Anniversary builds, and the Anniversary `Frame::Frame` takes a
 //! fourth argument. [`BUILDS`] names each build by PE timestamp and image
 //! size, and anything else is refused. `tools/verify_studio_panel.py` checks
@@ -95,7 +96,7 @@ pub struct Page {
 }
 
 /// The tabs, in strip order.
-pub const PAGES: [Page; 7] = [
+pub const PAGES: [Page; 8] = [
     Page {
         name: c"Playback",
         title: c"Playback",
@@ -159,6 +160,15 @@ pub const PAGES: [Page; 7] = [
             include_str!("../ui/Studio.res"),
         ),
     },
+    Page {
+        name: c"Review",
+        title: c"Review",
+        res: (
+            c"dodstudio_ui/Review.res",
+            "Review.res",
+            include_str!("../ui/Review.res"),
+        ),
+    },
 ];
 
 /// What the VCR bar's `OnCommand` handles, from the strings it compares
@@ -212,10 +222,12 @@ pub struct Build {
     pub keyvalues_new: usize,
     pub keyvalues_ctor: usize,
     /// `ProgressBar`'s vftable: only a control with exactly this one gets the
-    /// Highlights tab's progress.
+    /// Highlights tab's, the Playback tab's loading or the Demos tab's
+    /// counting progress.
     pub progress_bar_vftable: usize,
     /// `ComboBox`'s vftable: only a control with exactly this one is filled
-    /// as the Demos tab's Type dropdown.
+    /// as the Demos tab's Type or Player match dropdown, or driven as its
+    /// Player box.
     pub combo_box_vftable: usize,
     /// Where a `ComboBox` keeps its drop-down `Menu *` (what its item slots
     /// hand on to, `mov ecx, [ecx + combo_menu]`).
@@ -284,6 +296,9 @@ const LIST_SLOT_GET_ITEM: usize = 153;
 const KEYVALUES_SLOT_GET_STRING: usize = 12;
 /// The key each row's demo name is stored under.
 const ROW_KEY: &CStr = c"demoname";
+/// Where the Demos tab keeps a row's real path from `dod/` once
+/// [`ROW_KEY`], the list's own first column, shows just the name (#409).
+const PATH_KEY: &CStr = c"dodstudio_path";
 
 /// The `viewdemo` line for a row of the Load Demo list: the row as is when it
 /// is already quoted or has no space, quoted otherwise.
@@ -321,6 +336,8 @@ const FRAME_SLOT_ACTIVATE: usize = 160;
 /// after every `engine ...` menu command, and slot 8 (`+0x20`) to bring the
 /// menu up; the same in both builds' `GameUI.dll`.
 const BASEUI_SLOT_ACTIVATE_GAME_UI: usize = 8;
+/// `IBaseUI::HideGameUI()`: closes the menu (slot 7, above).
+const BASEUI_SLOT_HIDE_GAME_UI: usize = 7;
 /// `Frame::GetClientArea(int &x, int &y, int &wide, int &tall)`, which
 /// `PropertyDialog::PerformLayout` sizes its sheet by.
 const FRAME_SLOT_GET_CLIENT_AREA: usize = 186;
@@ -480,9 +497,15 @@ fn lends(source: &str) -> bool {
 /// The Playback and Console tabs' places in [`PAGES`].
 const PLAYBACK_PAGE: usize = 0;
 const DEMOS_PAGE: usize = 1;
+
+/// The slots whose borrowed lists take all the height their tab gains,
+/// whatever their share of the tab's design height (#612).
+const FILL_HEIGHT: [&str; 2] = ["DemoListSlot", "StreakListSlot"];
 const STREAKS_PAGE: usize = 2;
 const CONSOLE_PAGE: usize = 3;
 const SETTINGS_PAGE: usize = 4;
+/// The review mode's tab (#623).
+const REVIEW_PAGE: usize = 7;
 /// A check box named `cvar_<name>` on the Settings tab is bound to cvar
 /// `<name>`: it shows the cvar's value and sets it when clicked. Any tab
 /// layout can add more in build mode.
@@ -667,6 +690,145 @@ struct DemoFilters {
     pov: bool,
     /// Newer than this many days, or none.
     days: Option<u64>,
+}
+
+/// What a folder row shows in the Demos tab's Type column, where a demo says
+/// POV or HLTV.
+const FOLDER_TYPE: &CStr = c"Folder";
+
+/// The marks in front of a Demos tab row's name. The font has none of them:
+/// the game draws them from a fallback font but spaces them by its own font's
+/// narrower width, so each is followed by enough spaces to clear it
+/// (measured on PRE, 2026-10-05; one more each after the 25th Anniversary
+/// build drew them almost touching the name, 2026-10-06). The folder mark is a square: the 25th
+/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
+/// it draws these shapes and arrows. Not the rectangle (U+25AC): in Tahoma,
+/// the list's font, that is a 20x4 bar that reads as a dash, where the square
+/// is a solid block about 11x9.
+const FOLDER_MARK: &str = "\u{25A0}   ";
+const DEMO_MARK: &str = "\u{25B6}   ";
+const UP_MARK: &str = "\u{2191}   ";
+
+/// What the Demos tab's Demo File column shows for a row's `path` from
+/// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
+/// `.. (up one folder)` for the up row, not the whole path (#409). The path
+/// itself stays on the row, under [`PATH_KEY`], for loading.
+///
+/// A folder's demo count goes in brackets after its name, `count` (the Map
+/// column is for maps only).
+fn display_name(path: &str, count: Option<&str>) -> String {
+    let path = path.trim().trim_matches('"');
+    let count = count.map_or_else(String::new, |c| format!(" ({c})"));
+    if let Some(folder) = path.strip_suffix('/') {
+        let last = folder.rsplit('/').next().unwrap_or(folder);
+        if last == ".." {
+            format!("{UP_MARK}.. up one folder{count}")
+        } else {
+            format!("{FOLDER_MARK}{last}/{count}")
+        }
+    } else {
+        format!("{DEMO_MARK}{}", path.rsplit('/').next().unwrap_or(path))
+    }
+}
+
+/// The Demos tab's line above the list, naming the folder the list is in: as
+/// a path under the install folder's parent (`Half-Life - PRE-Anniversary for
+/// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
+/// parent itself included, where the path under it would be empty.
+fn folder_line(dod: &std::path::Path, folder: &str) -> String {
+    let here = crate::folder_counts::normalize(&dod.join(folder));
+    let shown = dod
+        .parent()
+        .and_then(std::path::Path::parent)
+        .and_then(|common| here.strip_prefix(common).ok())
+        .filter(|under| !under.as_os_str().is_empty())
+        .map_or_else(|| here.to_path_buf(), std::path::Path::to_path_buf);
+    let mut shown = shown.to_string_lossy().replace('\\', "/");
+    if !shown.is_empty() && !shown.ends_with('/') {
+        shown.push('/');
+    }
+    format!("Currently in {}", keep_the_end(&shown, FOLDER_LINE_CHARS))
+}
+
+/// The Demos tab's line above the list (`ui/Demos.res`).
+const FOLDER_LINE: &str = "FolderPath";
+
+/// How much of a folder path the line above the list shows. A label clips on
+/// the right at its width, which would cut off the folder's own name; a long
+/// path loses folders from the left instead. (The label's own limit is about
+/// 1,023 characters, so nothing overflows either way.)
+const FOLDER_LINE_CHARS: usize = 90;
+
+/// `path` (folders, each ending in `/`) cut to at most about `max` characters
+/// by dropping whole folders from the left behind `.../`. The last folder is
+/// always kept, however long.
+fn keep_the_end(path: &str, max: usize) -> String {
+    if path.chars().count() <= max {
+        return path.to_string();
+    }
+    let parts: Vec<&str> = path.split_inclusive('/').collect();
+    let mut kept = String::new();
+    for part in parts.iter().rev() {
+        let would = part.chars().count() + kept.chars().count() + 4;
+        if !kept.is_empty() && would > max {
+            break;
+        }
+        kept.insert_str(0, part);
+    }
+    format!(".../{kept}")
+}
+
+/// Whether a Demos tab row is a folder (#409 lists them as `name/`, quoted
+/// when the name has a space) rather than a demo.
+fn is_folder_row(row: &str) -> bool {
+    row.trim().trim_matches('"').ends_with('/')
+}
+
+/// A folder row's count, in brackets after its name, before it is in.
+const COUNTING: &str = "counting...";
+
+/// A folder row's demo count, in brackets after its name; `+` when the count stopped
+/// short of the whole folder.
+fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
+    let more = if count.complete { "" } else { "+" };
+    match count.demos {
+        1 if count.complete => "1 demo".to_string(),
+        n => format!("{n}{more} demos"),
+    }
+}
+
+/// The three folder settings as one value, so a change to any lists again.
+fn folder_settings() -> u8 {
+    use crate::demo_list_folders as f;
+    f::enabled() as u8 | (f::HIDE_EMPTY.on() as u8) << 1 | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+}
+
+/// A Settings-tab box that only applies while folders are listed, and so
+/// only shows then.
+fn shown_with_folders(cvar: &str) -> bool {
+    use crate::demo_list_folders as f;
+    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name
+}
+
+/// [`folder_settings`] before anything was seen: the tab has only just
+/// filled its list.
+const SETTINGS_UNSEEN: u8 = 0xff;
+
+/// Whether the folder settings (#409) changed since the Demos tab's list was
+/// last filled.
+fn folders_changed(last: u8, now: u8) -> bool {
+    last != SETTINGS_UNSEEN && last != now
+}
+
+/// The Demos tab's hint: how to load, and whether folders are listed, as a
+/// state rather than a command that reads like one.
+fn demos_hint(folders: bool) -> &'static CStr {
+    // No longer than the layout's first text, which fits its 416-wide label.
+    if folders {
+        c"Double-click a demo, or a folder to open it. Folders: on"
+    } else {
+        c"Double-click a demo to play it. Folders: off (dodstudio_demo_list_folders 1)"
+    }
 }
 
 /// Whether a row passes every filter. `info` is `None` for a row whose
@@ -865,7 +1027,7 @@ unsafe extern "C" fn wrapped_toggleconsole() {
         if hook::back_to_game_if_on_console() {
             // The game closes its console window its own way, which also
             // closes the menu. That also keeps ESC on the main menu from
-            // bringing the stock console back (2026-10-03).
+            // bringing the stock console back.
             unsafe {
                 crate::debug::report("studio_panel: the console key went back to the game");
                 crate::cmd_list::call_real(&REAL_TOGGLECONSOLE);
@@ -911,7 +1073,7 @@ pub fn bare_viewdemo() -> bool {
     }
     #[cfg(target_arch = "x86")]
     {
-        let line = match hook::open_on(PLAYBACK_PAGE) {
+        let line = match hook::open_on(PLAYBACK_PAGE, false) {
             Ok(state) => format!("{NAME}: viewdemo opened the window -- {state}"),
             Err(why) => format!("{NAME}: viewdemo could not open the window -- {why}"),
         };
@@ -1061,8 +1223,8 @@ const HELP_LINE: &str = "HelpLine";
 const HELP_TALL: i32 = 22;
 
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
-/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box)
-/// help line shows for it. (GameUI reads the key but shows no tooltip, so
+/// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box):
+/// what the help line shows for it. (GameUI reads the key but shows no tooltip, so
 /// the window shows it itself.)
 fn tooltips(res: &str) -> Vec<(String, String)> {
     #[derive(Clone, PartialEq)]
@@ -1300,10 +1462,14 @@ mod hook {
 
     use super::*;
 
+    /// The Demos tab's counting bar (#409).
+    mod folder_progress;
     /// The Playback tab's loading progress (#465).
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
+    /// The Review tab (#623).
+    pub(super) mod review_tab;
     /// The Highlights tab (#565).
     mod streaks_tab;
 
@@ -1387,9 +1553,50 @@ mod hook {
     /// Our own Load Demo window, or 0.
     static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
 
-    /// The selected row's `demoname` in our Load Demo window's list.
+    /// The selected row's path in our Load Demo window's list ([`row_path_text`]'s
+    /// keys, in the same order).
     unsafe fn selected_demo(dialog: *mut c_void) -> Option<String> {
-        unsafe { selected_value(dialog, ROW_KEY) }
+        unsafe { selected_value(dialog, PATH_KEY).or_else(|| selected_value(dialog, ROW_KEY)) }
+    }
+
+    /// A row's path from `dod/`: the hidden [`PATH_KEY`] once the tab has
+    /// given it a display name, otherwise the list's own [`ROW_KEY`].
+    unsafe fn row_path_text(row: *mut c_void) -> String {
+        unsafe {
+            let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
+            for key in [PATH_KEY, ROW_KEY] {
+                let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                if !raw.is_null() {
+                    let value = text(raw);
+                    if !value.is_empty() {
+                        return value;
+                    }
+                }
+            }
+            String::new()
+        }
+    }
+
+    /// Puts the selected row's path back in [`ROW_KEY`], for the window's
+    /// own handler (#409's folder opening reads it there).
+    unsafe fn restore_selected_path(dialog: *mut c_void) {
+        unsafe {
+            let Some(path) = selected_value(dialog, PATH_KEY) else {
+                return;
+            };
+            let Ok((_, build)) = gameui() else { return };
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let get_selected: ListIntFn = slot(list, LIST_SLOT_GET_SELECTED_ITEM);
+            let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
+            let row = get_item(list, get_selected(list, 0) as i32);
+            if let (false, Ok(path)) = (row.is_null(), std::ffi::CString::new(path)) {
+                let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
+                set_string(row, ROW_KEY.as_ptr(), path.as_ptr());
+            }
+        }
     }
 
     /// The selected row's `key` in a hidden Load Demo window's list.
@@ -1441,7 +1648,9 @@ mod hook {
                     };
                     return;
                 }
-                Some(_) => {}
+                // A folder: #409's handler opens it, reading the path from
+                // the column the tab gave a display name.
+                Some(_) => unsafe { restore_selected_path(this) },
                 None => {
                     crate::commands::console_print(&format!(
                         "{NAME}: pick a demo in the list first\n"
@@ -1462,8 +1671,17 @@ mod hook {
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
-    /// Shows only the demos matching the Demos tab's search box. Runs every
-    /// frame; does work only when the text (or the list) changed.
+    /// [`folder_settings`] as the Demos tab's list was last filled with them.
+    static LISTED_FOLDERS: std::sync::atomic::AtomicU8 =
+        std::sync::atomic::AtomicU8::new(SETTINGS_UNSEEN);
+
+    /// The Demos page whose hint last got [`demos_hint`]'s text, so a rebuilt
+    /// window gets it too.
+    static HINTED_PAGE: AtomicUsize = AtomicUsize::new(0);
+
+    /// The text last put on the line above the list, and on which page.
+    static HEADED: std::sync::Mutex<(usize, String)> = std::sync::Mutex::new((0, String::new()));
+
     /// A text box's text on `page`, or "" when the layout has none.
     unsafe fn box_text(vgui: &Vgui, page: Vpanel, name: &str) -> String {
         unsafe {
@@ -1548,11 +1766,54 @@ mod hook {
         info
     }
 
+    /// Shows only the demos matching the Demos tab's filters. Runs every
+    /// frame; does work only when a filter (or the list) changed.
     unsafe fn filter_demo_list(vgui: &Vgui) {
         unsafe {
             let page = vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void);
             if page == 0 || !vgui.visible(page) {
                 return;
+            }
+            // The list is filled when the tab opens. Changing a folder
+            // setting (#409) while it shows lists it again, so the folders
+            // appear, go or recount without reopening the window.
+            let folders = folder_settings();
+            let last = LISTED_FOLDERS.swap(folders, Ordering::AcqRel);
+            if folders_changed(last, folders) || crate::folder_counts::take_finished() {
+                refill_demo_list();
+            }
+            // The hint says whether folders are on, not just the command.
+            let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
+            // The line above the list says which folder the list is in, and
+            // is empty while folders are off.
+            let line_text = match folders & 1 {
+                1 => res_dir().parent().map_or_else(String::new, |dod| {
+                    folder_line(dod, &crate::demo_list_folders::current_folder())
+                }),
+                _ => String::new(),
+            };
+            let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
+            if *headed != (page as usize, line_text.clone()) {
+                if let Some(line) = vgui.child_named(page, FOLDER_LINE)
+                    && let Ok(text) = std::ffi::CString::new(line_text.clone())
+                {
+                    let object = vgui.object(line);
+                    if !object.is_null() {
+                        let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                        set_text(object, text.as_ptr());
+                    }
+                }
+                *headed = (page as usize, line_text);
+            }
+            drop(headed);
+            if (last != folders || new_page)
+                && let Some(hint) = vgui.child_named(page, DEMOS_HINT)
+            {
+                let object = vgui.object(hint);
+                if !object.is_null() {
+                    let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
+                    set_text(object, demos_hint(folders & 1 == 1).as_ptr());
+                }
             }
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
@@ -1602,15 +1863,7 @@ mod hook {
             let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
             let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
             let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
-            let get_string_of = |row: *mut c_void| -> String {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
-                if raw.is_null() {
-                    String::new()
-                } else {
-                    text(raw)
-                }
-            };
+            let get_string_of = |row: *mut c_void| -> String { row_path_text(row) };
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_secs());
@@ -1685,7 +1938,7 @@ mod hook {
         }
     }
 
-    /// Gives our Load Demo window's list Map and Date columns after the
+    /// Gives our Load Demo window's list [`DEMO_COLUMNS`] after the
     /// demo's name, every column sortable by a click on its heading. The name
     /// column stays the window's own (as wide as its `.res` list, so it is
     /// narrowed through its heading, which is a panel named after the column):
@@ -1756,8 +2009,9 @@ mod hook {
         date_text((year, month, day, hour, minute))
     }
 
-    /// Fills in every row's Map, Type and Date, when the list was (re)filled since
-    /// the last time. Returns whether it did.
+    /// Fills in every row's Map, Type, Player and Date, and its short name, when
+    /// the list was (re)filled or the players files changed since the last
+    /// time. Returns whether it did.
     unsafe fn stamp_demo_rows(list: *mut c_void) -> bool {
         unsafe {
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
@@ -1794,7 +2048,15 @@ mod hook {
                 let row = get_item(list, id);
                 if !row.is_null() {
                     let set_string: SetStringFn = slot(row, KEYVALUES_SLOT_SET_STRING);
-                    if let Some(info) = info_for(&get(row, ROW_KEY))
+                    // The path moves to the hidden key the first time, and
+                    // the first column gets the short name (end of the loop).
+                    let path = row_path_text(row);
+                    if get(row, PATH_KEY).is_empty()
+                        && let Ok(c_path) = std::ffi::CString::new(path.clone())
+                    {
+                        set_string(row, PATH_KEY.as_ptr(), c_path.as_ptr());
+                    }
+                    if let Some(info) = info_for(&path)
                         && let Ok(map) = std::ffi::CString::new(info.map.clone())
                         && let Ok(date) = std::ffi::CString::new(local_date(info.modified))
                     {
@@ -1803,13 +2065,35 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), kind.as_ptr());
                         set_string(row, DEMO_COLUMNS[3].0.as_ptr(), date.as_ptr());
                     }
-                    if let Some(info) = info_for(&get(row, ROW_KEY)) {
+                    // A folder row (#409) says so in the Type column, so it
+                    // can't be mistaken for a demo, and its demo count goes
+                    // in brackets after its name (`display_name`), leaving
+                    // the Map column to maps.
+                    let name = path.clone();
+                    let mut folder_count = None;
+                    if is_folder_row(&name) {
+                        set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
+                        // Counted in the background: "counting..." until
+                        // then, and the tab lists again when it is done.
+                        let count = res_dir()
+                            .parent()
+                            .map(|dod| dod.join(name.trim().trim_matches('"')))
+                            .and_then(|folder| {
+                                crate::folder_counts::count(
+                                    &folder,
+                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                                )
+                            });
+                        folder_count =
+                            Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                    }
+                    if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
                         // POV demo not analysed yet.
                         let player = if info.hltv {
                             "-".to_string()
                         } else {
-                            row_path(&get(row, ROW_KEY))
+                            row_path(&path)
                                 .and_then(|path| crate::demo_rosters::players_for(&path))
                                 .and_then(|d| d.players.into_iter().find(|p| p.recorder))
                                 .map(|p| p.name.replace('\0', ""))
@@ -1818,6 +2102,11 @@ mod hook {
                         if let Ok(player) = std::ffi::CString::new(player) {
                             set_string(row, DEMO_COLUMNS[2].0.as_ptr(), player.as_ptr());
                         }
+                    }
+                    if let Ok(shown) =
+                        std::ffi::CString::new(display_name(&path, folder_count.as_deref()))
+                    {
+                        set_string(row, ROW_KEY.as_ptr(), shown.as_ptr());
                     }
                     set_string(row, STAMP_KEY.as_ptr(), stamp.as_ptr());
                     // Each column keeps its rows sorted as they were added;
@@ -2024,7 +2313,7 @@ mod hook {
         /// Whether `vp`, kept from an earlier frame, is still GameUI's popup
         /// `name`. A kept handle can outlive its panel: on the 25th Anniversary
         /// build the VCR bar went away after ESC closed it, and asking vgui2
-        /// about the old one, `object` included, crashed the game (2026-10-04).
+        /// about the old one, `object` included, crashed the game.
         unsafe fn still(&self, name: &str, vp: Vpanel) -> bool {
             unsafe { self.popup(name) == Some(vp) }
         }
@@ -2603,7 +2892,12 @@ mod hook {
                 }
                 let Some(size) = design.size else { continue };
                 for &(control, at) in &design.controls {
-                    let want = crate::window_layout::fit_rect(at, size, (w, h));
+                    // A tab's list fills whatever height the tab gains (#612).
+                    let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
+                        crate::window_layout::fit_rect_tall(at, size, (w, h))
+                    } else {
+                        crate::window_layout::fit_rect(at, size, (w, h))
+                    };
                     vgui.place(control, want);
                 }
             }
@@ -2729,6 +3023,12 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
+                if shown_with_folders(cvar) {
+                    let want = crate::demo_list_folders::enabled();
+                    if vgui.visible(control) != want {
+                        vgui.set_visible(control, want);
+                    }
+                }
                 let object = vgui.object(control);
                 if object.is_null()
                     || *(object as *const usize) != base + build.check_button_vftable
@@ -2845,7 +3145,7 @@ mod hook {
     /// Whether our window is on screen showing its Console tab. If so, the
     /// window stays open (ESC brings it back with the menu) and the console
     /// window is made visible for the caller's `toggleconsole` to close the
-    /// game's way, which goes back to the game (2026-10-04, the user's call).
+    /// game's way, which goes back to the game.
     pub(super) fn back_to_game_if_on_console() -> bool {
         let Ok(vgui) = Vgui::get() else {
             return false;
@@ -2867,7 +3167,7 @@ mod hook {
                 // The menu is closed around our window (ESC, or this key's
                 // own trip back to the game): it is still open on the Console
                 // tab, but not on screen, so the key opens it afresh. Without
-                // this check, it took two presses (2026-10-04). A console the
+                // this check, it took two presses. A console the
                 // key left open behind the tab is closed the game's way first.
                 if CONSOLE_OPENED_BY_KEY.swap(false, Ordering::AcqRel) {
                     if let Some(window) = vgui.popup(CONSOLE) {
@@ -2922,8 +3222,8 @@ mod hook {
     static LAST_STATE: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(u32::MAX);
 
     /// Logs the menu, our window and the console window each time one of them
-    /// opens or closes: for the report of the DoD Studio menu item going back
-    /// to the game (2026-10-04), which nothing else in the log explains.
+    /// opens or closes: for a report of the DoD Studio menu item going back
+    /// to the game, which nothing else in the log explains.
     unsafe fn log_state_changes(vgui: &Vgui, vp: Vpanel) {
         unsafe {
             let menu = vgui.shown(vgui.parent_of(vp));
@@ -2944,7 +3244,7 @@ mod hook {
     /// The main menu's DoD Studio item (`ui/GameMenu.res`). GameUI runs an
     /// `engine ...` item by queueing the command and then closing the menu,
     /// as Resume Game does, so the window opened behind a closed menu and the
-    /// menu flashed back (2026-10-04). Taken in [`taskbar_on_command`] instead,
+    /// menu flashed back. Taken in [`taskbar_on_command`] instead,
     /// it opens at once, the way Options does.
     const MENU_COMMAND: &str = "engine dodstudio_panel 1";
     /// GameUI's `CTaskbar`, whose `OnCommand` runs the main menu's items,
@@ -3042,8 +3342,10 @@ mod hook {
                     update_help(&vgui, vp, &mut lent);
                     filter_demo_list(&vgui);
                     streaks_tab::update(&vgui);
+                    review_tab::update(&vgui);
                     player_picker::update(&vgui);
                     load_progress::update(&vgui);
+                    folder_progress::update(&vgui);
                 }
                 if !vgui.visible(vp) {
                     // Closed some other way than the console key (its X,
@@ -3059,7 +3361,7 @@ mod hook {
                     give_back(&vgui, &mut lent, None);
                     // The bar stays off screen while the setting is on, even
                     // with our window closed: closing it by its X brought the
-                    // stock bar back (2026-10-03). ESC -> DoD Studio, or
+                    // stock bar back. ESC -> DoD Studio, or
                     // viewdemo, opens the window again.
                     match vgui.bar() {
                         Some(bar) if viewdemo_in_panel() => park(&vgui, bar, &mut lent),
@@ -3393,13 +3695,19 @@ mod hook {
         }
     }
 
-    /// Opens the window on tab `page`, building it if needed.
-    pub(super) fn open_on(page: usize) -> Result<String, String> {
+    /// Opens the window on tab `page`, building it if needed. With
+    /// `bring_menu_up`, a menu that is down comes up around it: a tab named
+    /// by a bind or by the review (#623) runs during play, with the menu
+    /// closed.
+    pub(super) fn open_on(page: usize, bring_menu_up: bool) -> Result<String, String> {
         let vgui = Vgui::get()?;
         unsafe {
             let (object, vp, _) = ensure_window(&vgui, false)?;
             if page == DEMOS_PAGE {
                 refill_demo_list();
+            }
+            if bring_menu_up && !vgui.shown(vgui.parent_of(vp)) {
+                activate_game_ui();
             }
             show(&vgui, object, vp, Some(page))
         }
@@ -3422,7 +3730,7 @@ mod hook {
             } else {
                 // The main menu's DoD Studio item is an `engine` command, and
                 // GameUI closes the menu after running one, as Resume Game
-                // does (2026-10-04). The window lives in the menu, so bring
+                // does. The window lives in the menu, so bring
                 // the menu back up.
                 if !vgui.shown(vgui.parent_of(vp)) {
                     notes.push(activate_game_ui());
@@ -3444,6 +3752,34 @@ mod hook {
         }
         "brought the menu up".to_string()
     }
+
+    /// Closes the window and, when the menu around it is up, the menu too, as
+    /// Resume Game does.
+    pub(super) fn close_for_playback() {
+        let Ok(vgui) = Vgui::get() else { return };
+        unsafe {
+            let Some((_, vp)) = window(&vgui) else { return };
+            vgui.set_visible(vp, false);
+            if !vgui.shown(vgui.parent_of(vp)) {
+                return;
+            }
+            let Some(base_ui) = module(c"hw.dll").and_then(|hw| interface(hw, c"BaseUI001")) else {
+                return;
+            };
+            let hide: ActivateFn = slot(base_ui, BASEUI_SLOT_HIDE_GAME_UI);
+            hide(base_ui);
+        }
+    }
+}
+
+/// Set by the review (#623) when a highlight starts playing; the next
+/// [`poll`] closes the window and the menu, outside the review's lock.
+static CLOSE_FOR_PLAYBACK: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
+
+/// Gets the window and the menu out of the way of playback on the next frame.
+pub(crate) fn close_for_playback() {
+    CLOSE_FOR_PLAYBACK.store(true, Ordering::Release);
 }
 
 /// Keeps the tab strip sized to the window, swaps in our window after
@@ -3454,7 +3790,21 @@ pub fn poll() {
     wrap_toggleconsole();
     apply_saved_settings();
     #[cfg(target_arch = "x86")]
-    hook::poll();
+    {
+        hook::poll();
+        if CLOSE_FOR_PLAYBACK.swap(false, Ordering::AcqRel) {
+            hook::close_for_playback();
+        }
+    }
+}
+
+/// The Review tab's From, To and Note boxes (#623), when they belong to the
+/// highlight the review is on.
+pub(crate) fn review_inputs() -> Option<(String, String, String)> {
+    #[cfg(target_arch = "x86")]
+    return hook::review_tab::inputs();
+    #[cfg(not(target_arch = "x86"))]
+    None
 }
 
 fn argument() -> Option<String> {
@@ -3507,7 +3857,7 @@ pub unsafe extern "C" fn command() {
     let result: Result<String, String> = request(argument().as_deref()).and_then(|request| {
         #[cfg(target_arch = "x86")]
         if let Request::Tab(page) = request {
-            return hook::open_on(page);
+            return hook::open_on(page, true);
         }
         #[cfg(target_arch = "x86")]
         return hook::toggle(request);
@@ -3733,6 +4083,130 @@ mod tests {
         assert!(shows_type("", true) && shows_type("", false));
         assert!(shows_type("HLTV", true) && !shows_type("HLTV", false));
         assert!(!shows_type("POV", true) && shows_type("pov", false));
+    }
+
+    #[test]
+    fn the_demos_list_refills_only_when_folder_listing_flips() {
+        // Not seen yet: the tab just filled its list on opening.
+        assert!(!folders_changed(SETTINGS_UNSEEN, 1));
+        assert!(!folders_changed(SETTINGS_UNSEEN, 0));
+        assert!(folders_changed(1, 3), "hide empty turned on");
+        assert!(folders_changed(0, 1));
+        assert!(folders_changed(1, 0));
+        assert!(!folders_changed(1, 1));
+        assert!(!folders_changed(0, 0));
+    }
+
+    #[test]
+    fn a_long_folder_path_keeps_its_end() {
+        assert_eq!(keep_the_end("a/b/", 70), "a/b/");
+        let deep = "D:/Games/Library/Mine/Steam/steamapps/common/Half-Life - PRE/dod/temp demos/";
+        let short = keep_the_end(deep, 40);
+        assert!(
+            short.starts_with(".../") && short.ends_with("dod/temp demos/"),
+            "{short}"
+        );
+        assert!(short.chars().count() <= 40, "{short}");
+        // A single long last folder is kept whole.
+        let one = format!("x/{}/", "y".repeat(80));
+        assert!(keep_the_end(&one, 40).ends_with(&format!("{}/", "y".repeat(80))));
+    }
+
+    #[test]
+    fn the_line_above_the_list_names_the_folder() {
+        let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
+        assert_eq!(folder_line(dod, ""), "Currently in Half-Life - PRE/dod/");
+        assert_eq!(
+            folder_line(dod, "temp demos/"),
+            "Currently in Half-Life - PRE/dod/temp demos/"
+        );
+        assert_eq!(folder_line(dod, "../"), "Currently in Half-Life - PRE/");
+        // The installs' own folder: nothing under it to show, so in full.
+        assert_eq!(folder_line(dod, "../../"), "Currently in C:/Steam/common/");
+        assert_eq!(
+            folder_line(dod, "temp demos/../"),
+            "Currently in Half-Life - PRE/dod/"
+        );
+        // Above the installs: the whole path.
+        assert_eq!(folder_line(dod, "../../../"), "Currently in C:/Steam/");
+    }
+
+    #[test]
+    fn rows_show_names_not_paths() {
+        let demo = |n: &str| format!("{DEMO_MARK}{n}");
+        let folder = |n: &str| format!("{FOLDER_MARK}{n}");
+        let up = format!("{UP_MARK}.. up one folder");
+        assert_eq!(
+            display_name("temp demos/m3_h1.dem", None),
+            demo("m3_h1.dem")
+        );
+        assert_eq!(
+            display_name("\"temp demos/my clip.dem\"", None),
+            demo("my clip.dem")
+        );
+        assert_eq!(display_name("a.dem", None), demo("a.dem"));
+        assert_eq!(display_name("temp demos/", None), folder("temp demos/"));
+        assert_eq!(display_name("../../steamapps/", None), folder("steamapps/"));
+        assert_eq!(display_name("../", None), up);
+        assert_eq!(display_name("temp demos/../", None), up);
+        assert_eq!(display_name("../../../", None), up);
+        // A folder's count in brackets after its name; a demo never gets one.
+        assert_eq!(
+            display_name("temp demos/", Some("73 demos")),
+            folder("temp demos/ (73 demos)")
+        );
+        assert_eq!(
+            display_name("../", Some("572 demos")),
+            format!("{up} (572 demos)")
+        );
+        assert_eq!(display_name("a.dem", Some("1 demo")), demo("a.dem"));
+    }
+
+    #[test]
+    fn folder_rows_are_told_from_demos() {
+        for folder in [
+            "../",
+            "temp demos/",
+            "\"temp demos/\"",
+            "test/../",
+            " sub/ ",
+        ] {
+            assert!(is_folder_row(folder), "{folder}");
+        }
+        for demo in ["a.dem", "test/a.dem", "\"temp demos/a b.dem\"", ""] {
+            assert!(!is_folder_row(demo), "{demo}");
+        }
+    }
+
+    #[test]
+    fn a_folder_count_reads_as_text() {
+        use crate::folder_counts::FolderCount;
+        let c = |demos, complete| FolderCount { demos, complete };
+        assert_eq!(demo_count_text(c(0, true)), "0 demos");
+        assert_eq!(demo_count_text(c(1, true)), "1 demo");
+        assert_eq!(demo_count_text(c(12, true)), "12 demos");
+        assert_eq!(demo_count_text(c(1, false)), "1+ demos");
+        assert_eq!(demo_count_text(c(500, false)), "500+ demos");
+    }
+
+    #[test]
+    fn the_folder_sub_options_show_only_with_folders() {
+        assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
+        assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
+        assert!(!shown_with_folders("dodstudio_demo_list_folders"));
+        assert!(!shown_with_folders("hud_draw"));
+    }
+
+    #[test]
+    fn the_demos_hint_says_whether_folders_are_on() {
+        let on = demos_hint(true).to_str().unwrap();
+        let off = demos_hint(false).to_str().unwrap();
+        assert!(on.contains("Folders: on"));
+        assert!(off.contains("Folders: off") && off.contains("dodstudio_demo_list_folders 1"));
+        // The layout's own text fits its label; neither may run longer.
+        let first =
+            "Double-click a demo, or pick one and Load. Folders: dodstudio_demo_list_folders 1";
+        assert!(on.len() <= first.len() && off.len() <= first.len());
     }
 
     #[test]
