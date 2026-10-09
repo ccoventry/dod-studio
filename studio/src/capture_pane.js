@@ -4,19 +4,21 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
+import { attachCommandSuggest } from './command_suggest.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
-import { streakUid, recordTake, setVerifiedStatus } from './take_index.js';
+import { streakUid, recordTake, setVerifiedStatus, isSkipped } from './take_index.js';
 import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
-import { computeRequiredCaptureBytes } from './capture_estimate.js';
+import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
 import { refreshAfterTyping } from './input_refresh.js';
 
@@ -362,14 +364,19 @@ export async function refreshLaunchGuard(state) {
   const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
   const resWidthVal = numberField('#config-res-width', 1280, { integer: true, positive: true });
   const resHeightVal = numberField('#config-res-height', 720, { integer: true, positive: true });
+  // AGR mode writes a few KB a frame, at its own rate — sizing it like a
+  // frame sequence would block batches that fit with room to spare.
+  const agrMode = document.querySelector('#config-capture-mode')?.value === 'agr';
+  const agrFpsVal = numberField('#config-agr-fps', captureFpsVal, { integer: true, positive: true });
   const requiredBytes = computeRequiredCaptureBytes(resolvedState.currentScannedDemos, {
     preRollSeconds: preRollVal,
     postRollSeconds: postRollVal,
     recordStartLead: recordStartLeadVal,
     recordStopTrail: recordStopTrailVal,
-    captureFps: captureFpsVal,
+    captureFps: agrMode ? agrFpsVal : captureFpsVal,
     resWidth: resWidthVal,
     resHeight: resHeightVal,
+    bytesPerFrame: agrMode ? AGR_BYTES_PER_FRAME : undefined,
   });
 
   // Mirrors buildCapturePayload's outputDrivePool — Capture Output is the
@@ -543,6 +550,8 @@ function currentCaptureSetup() {
     mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    // An empty AGR FPS records at Capture FPS, as the batch does.
+    agrFps: numberField('#config-agr-fps', numberField('#config-capture-fps', 300, { integer: true, positive: true }), { integer: true, positive: true }),
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
@@ -837,7 +846,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   initCommandsEditor = createListEditor({
     container: document.querySelector('#init-commands-list'),
     getItems: () => initCommands,
-    fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER }],
+    fields: [{
+      key: 'value', type: 'text', primitive: true, placeholder: STRINGS.CAPTURE_CONFIG.INIT_COMMAND_PLACEHOLDER,
+      enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
+    }],
     onChange: () => {
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
@@ -850,7 +862,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     container: document.querySelector('#custom-commands-list'),
     getItems: () => customCommands,
     fields: [
-      { key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER },
+      {
+        key: 'command', type: 'text', placeholder: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_PLACEHOLDER,
+        enhance: (input) => attachCommandSuggest(input, { scheduled: true }),
+      },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],
@@ -901,10 +916,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   // window, so they change the disk estimate the guard is built on.
   ['#config-res-width', '#config-res-height', '#config-ffmpeg-capture',
    '#config-pre-roll', '#config-post-roll', '#config-capture-fps',
-   '#config-record-start-lead', '#config-record-stop-trail'].forEach(selector => {
+   '#config-record-start-lead', '#config-record-stop-trail', '#config-agr-fps'].forEach(selector => {
     const el = document.querySelector(selector);
     if (el) el.addEventListener('input', () => { refreshLaunchGuard(); notifySettingsChange(); });
   });
+  // AGR mode sizes a batch in KB rather than GB, so switching mode moves the
+  // disk estimate too.
+  document.querySelector('#config-capture-mode')?.addEventListener('change', () => refreshLaunchGuard());
   // Same missing-wiring bug as the rest of this function, just on the OBS
   // connection fields and the capture-mode selector — all three read at
   // capture/save time but never saved on their own change, so edits looked
@@ -952,6 +970,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     listen('capture_status', (event) => {
       const payload = event.payload || {};
       if (payload.running) {
+        // The first running report of a batch: the last one's results go.
+        if (!capturingInFlight) batchStarted();
         capturingInFlight = true;
         setBatchRunning(true);
         if (progressBar) {
@@ -972,6 +992,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
         if (currentOnBatchFinished) currentOnBatchFinished();
+        batchEnded(
+          payload.error ? 'error' : payload.status === 'Cancelled' ? 'cancelled' : 'completed',
+          uiStatusText(payload.status),
+        );
 
         if (payload.error) {
           // Without the engine's pointers at the log (#534); the log has them.
@@ -1065,6 +1089,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   if (!unlistenTakesVerified) {
     listen('capture_takes_verified', (event) => {
       const payload = event.payload || {};
+      batchVerified(payload, lastDispatch);
       const blocks = payload.blocks || [];
       const total = payload.total_count ?? blocks.length;
       const captured = payload.captured_count ?? 0;
@@ -1099,7 +1124,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // Status only ever moves forward. Re-capturing something already
           // rendered must not knock it back down to Captured -- unless that
           // Rendered was set by hand: a verified capture beats an unverified
-          // claim (#105, decided 2026-09-29).
+          // claim (#105).
           if (streak.status === 'Rendered' && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
           if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
@@ -1152,7 +1177,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         if (demo.streaks) {
           demo.streaks.forEach(streak => {
             // Opt-in model (detail_pane.js) — see computeRequiredCaptureBytes above.
-            if (streak.selected === true) {
+            // A Skip highlight is locked out even if something ticked it (#44).
+            if (streak.selected === true && !isSkipped(streak)) {
               selectedStreaks.push(streak);
               selectedDemoPaths.push(demo.path);
             }
@@ -1169,6 +1195,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
 
     const captureFpsVal = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFpsVal = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // Empty is 0, "the same as Capture FPS" — resolved by the backend.
+    const agrFpsVal = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRollVal = numberField('#config-pre-roll', 2.0);
     const postRollVal = numberField('#config-post-roll', 0.6);
     const recordStartLeadVal = numberField('#config-record-start-lead', 0.0);
@@ -1253,6 +1281,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       capture_directories: outputDrivePool,
       capture_fps: captureFpsVal,
       obs_capture_fps: obsCaptureFpsVal,
+      agr_fps: agrFpsVal,
       drives: state.targetDrives || [],
       record_start_lead: recordStartLeadVal,
       record_stop_trail: recordStopTrailVal,
@@ -1331,8 +1360,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // until after it has patched every demo in the queue — the engine's own
       // "Only one instance of this game can be run at a time" box appears at
       // the end of all that work, with nothing captured. The preview and
-      // standalone launches have been guarded against this all along; the batch
-      // was the one path that went straight through. Observed 2026-08-28.
+      // standalone launches are guarded against this the same way.
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();

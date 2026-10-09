@@ -2,6 +2,16 @@ pub fn calculate_raw_sequence_bytes(w: i32, h: i32, fps: i32, duration_secs: f32
     (w * h * 3) as u64 * (fps as u64) * (duration_secs as f64).ceil() as u64
 }
 
+/// Bytes one recorded `mirv_agr` frame costs, rounded up. Measured on #403's
+/// test take: 7.3 MB for 32.6 s at 30 fps is ~7.5 KB a frame. It grows with
+/// how many models are on screen, so this is a planning figure, not a bound.
+pub const AGR_BYTES_PER_FRAME: u64 = 8 * 1024;
+
+/// What an AGR take of `duration_secs` at `fps` is expected to need on disk.
+pub fn calculate_agr_bytes(fps: i32, duration_secs: f32) -> u64 {
+    AGR_BYTES_PER_FRAME * fps.max(1) as u64 * (duration_secs as f64).ceil() as u64
+}
+
 /// Minimum free space a capture drive must retain, shared by
 /// `patch::builder::build_batch_queue`'s AOT allocation (the only place that
 /// decides whether a drive has room) and `capture_engine`'s pre-launch

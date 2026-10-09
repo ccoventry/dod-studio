@@ -9,8 +9,11 @@
 //! `OnCommand("ButtonClicked")`, what its arrow button sends, which toggles
 //! it; so it is only sent while the list is closed.
 //!
-//! Picking a name sets the box's text to it, which the Player filter reads
-//! like anything typed; a text that is exactly a name doesn't reopen it.
+//! Picking a name adds it to the picked players, shown on the line beside
+//! the box, and empties the box for the next; the Player filter reads only
+//! the picked players, so what is typed searches the list, not the demos.
+//! A picked player's row comes first in the list, marked `[x] `, and
+//! clicking it takes them off again.
 
 use std::ffi::{CString, c_void};
 use std::sync::Mutex;
@@ -118,13 +121,7 @@ unsafe fn names_in(list: *mut c_void) -> Vec<String> {
             guard += 1;
             let row = get_item(list, id);
             if !row.is_null() {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let raw = get_string(row, ROW_KEY.as_ptr(), c"".as_ptr());
-                let name = if raw.is_null() {
-                    String::new()
-                } else {
-                    text(raw)
-                };
+                let name = row_path_text(row);
                 if let Some(players) =
                     row_path(&name).and_then(|path| crate::demo_rosters::players_for(&path))
                 {
