@@ -4,7 +4,7 @@ For each sky, reads the six gfx/env/<sky><face>.tga faces (dod/, else
 valve/; never writes there) and:
 
   reflect-pad -> 4x in the style -> Lanczos to 4x the original (capped at
-  1024/side)
+  HD_CAP a side, 1024 by default)
 
 Faces are upscaled one by one, so where two meet at a cube edge they can
 differ slightly; the reflect padding keeps each edge close to its original,
@@ -58,10 +58,10 @@ def main():
     for sky in skies:
         for face in FACES:
             name = sky + face + ".tga"
-            if os.path.exists(os.path.join(out_dir, name)):
-                continue
             with Image.open(face_path(name)) as im:
                 w, h = im.size
+            if C.built(os.path.join(out_dir, name), min(w * 4, C.CAP), min(h * 4, C.CAP)):
+                continue
             jobs[name[:-4]] = (name, w, h)
     print(f"{len(jobs)} sky faces to build")
 
