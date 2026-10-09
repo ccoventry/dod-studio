@@ -1,7 +1,7 @@
 """A readable summary of every game crash on record.
 
 Reads the hook DLL's logs (%APPDATA%\\dod-studio\\logs\\dodstudio_goldsrc_hooks_*.log,
-kept 30 days) for the crash recorder's `CRASH:` blocks, and the movie
+kept 30 days) for the crash recorder's `CRASH:` blocks and `PANIC:` lines, and the movie
 install's qconsole.log for the engine's own fatal errors. Groups crashes by
 where they happened (`module+offset`, which is the same every run), newest
 first, with what was happening just before, and marks the ones already known.
@@ -72,6 +72,8 @@ NOISE = re.compile(r"texture_hires: (world|model|sprite) \"|texture_hires: detai
 LOGS = os.path.join(os.environ.get("APPDATA", ""), "dod-studio", "logs")
 HEADER = re.compile(r"^\[(?P<time>[\d:.]+)\](?: \[demo +(?P<demo>[\d.]+)\])? \[dodstudio_goldsrc_hooks\] (?P<msg>.*)$")
 CRASH = re.compile(r"CRASH: (?P<what>.+?) at (?P<where>[\w.]+\+0x[0-9a-f]+)(?: \(0x[0-9a-f]+\))?(?: -- (?P<detail>.*))?$")
+# A panic in the DLL (panic_log.rs): the abort that follows skips crash.rs.
+PANIC = re.compile(r"PANIC: (?P<what>.+) at (?P<where>\S+:\d+:\d+) \(thread [^)]*\)$")
 FRAME = re.compile(r"CRASH:\s+\[esp\+0x[0-9a-f]+\] (?P<frame>[\w.]+\+0x[0-9a-f]+)")
 
 
@@ -115,6 +117,12 @@ def hook_crashes(context):
                 out.append((date, m.group("time"), m.group("demo"), c.group("where"), c.group("what"),
                             c.group("detail"), frames, list(before), level, session))
                 i = j
+                continue
+            p = PANIC.match(msg) if m else None
+            if p:
+                out.append((date, m.group("time"), m.group("demo"), "panic at " + p.group("where"),
+                            p.group("what"), None, [], list(before), level, session))
+                i += 1
                 continue
             if lines[i].strip() and not NOISE.search(lines[i]) and "CRASH:" not in lines[i]:
                 before.append(lines[i])

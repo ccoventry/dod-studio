@@ -3,6 +3,8 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+/// What a highlight is, and whose, for every list of them (#573).
+pub mod highlights;
 mod kill;
 mod localization;
 mod mortality;
