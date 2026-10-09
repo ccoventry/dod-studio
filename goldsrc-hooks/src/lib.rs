@@ -37,10 +37,10 @@
 //! - `msglog`: the `dodstudio_debug_msglog` command -- dump chosen DoD user messages
 //!   and their payloads to the log, forwarded to the game untouched. Full
 //!   design write-up in the module doc itself.
-//! - `hide_sprite`: the `dodstudio_hide_sprite <model-path>...` command --
-//!   suppress specific map-placed `env_sprite` entities by model path, an
-//!   allow-list rather than a blanket toggle. Full design write-up in the
-//!   module doc itself (issue #315).
+//! - `hide_asset`: the `dodstudio_hide_asset list|add|del|clear` command
+//!   (renamed from `dodstudio_hide_sprite`, #333) -- suppress specific world entities
+//!   by model path, an allow-list rather than a blanket toggle. Full design
+//!   write-up in the module doc itself (issue #315).
 //! - `spectator_follow`: `dodstudio_spec_lock`, which keeps the camera on a
 //!   player through his death in an HLTV demo, and `dodstudio_spec_target`,
 //!   which puts it on a player by number (issue #206).
@@ -179,7 +179,7 @@ mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
 mod hand_signals;
-mod hide_sprite;
+mod hide_asset;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
@@ -192,6 +192,7 @@ mod objicons;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
+mod panic_log;
 mod patch;
 mod pe;
 mod pmove_guard;
@@ -341,6 +342,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     // unhandled exceptions and exits without a dump or an event-log entry,
     // so without this a crash in an engine-thread callback is untraceable.
     crash::install();
+    // The abort that follows a panic skips that handler: log the panic itself.
+    panic_log::install();
 
     // Registered before install() so there's no window in which Initialize
     // could fire before the callback exists.

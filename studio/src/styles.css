@@ -453,6 +453,13 @@ body {
   color: #ffffff;
 }
 
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
@@ -673,6 +680,41 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
   color: var(--text-muted);
   padding: 16px !important;
+}
+
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 /* Configuration Tabs */
@@ -1306,6 +1348,58 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Last Batch (#172). */
 .batch-results {
   margin-top: 12px;
@@ -1937,6 +2031,20 @@ tr.keyboard-selected {
   border-bottom: 1px solid #282828;
 }
 
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage {
+  color: #ffb74d;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
@@ -1994,6 +2102,114 @@ tr.keyboard-selected {
   user-select: text;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* Demo Auditor tabs (#624): one per tool, under the shared folder picker. */
+.auditor-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--border-color, #444);
+}
+
+.auditor-tab-btn {
+  border: 1px solid var(--border-color, #444);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--text-muted, #aaa);
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.auditor-tab-btn.active {
+  background: var(--panel-bg-light, #2a2a2a);
+  color: var(--text-color, #fff);
+  font-weight: 600;
+}
+
+/* Split Maps (#624). */
+.split-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted, #aaa);
+  max-width: 80ch;
+}
+
+.split-recursive-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.split-demo {
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.split-demo-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.split-demo-name {
+  overflow-wrap: anywhere;
+}
+
+.split-demo-meta {
+  color: var(--text-muted, #aaa);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.split-maps {
+  margin: 6px 0;
+  border-collapse: collapse;
+}
+
+.split-maps td {
+  padding: 2px 10px 2px 0;
+}
+
+.split-map-num,
+.split-map-when {
+  color: var(--text-muted, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+
+.split-short td {
+  opacity: 0.6;
+}
+
+.split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.split-result {
+  font-size: 0.9em;
+}
+
+.split-written {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.split-reveal {
+  margin-left: 6px;
+  font-size: 0.85em;
 }
 
 /* One line of code beside its Copy button. */
