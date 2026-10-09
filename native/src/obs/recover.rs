@@ -36,13 +36,6 @@ pub struct OrphanReport {
     pub ours: bool,
 }
 
-impl OrphanReport {
-    /// Whether there is something worth offering to clean up.
-    pub fn actionable(&self) -> bool {
-        self.recording && self.ours
-    }
-}
-
 /// Whether a record directory could only have been set by this app.
 ///
 /// The test is the path shape, not a configured root, and that is deliberate:
