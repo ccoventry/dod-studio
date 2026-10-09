@@ -37,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import verify_window_layout as vwl  # noqa: E402  (shares the PE helpers)
 
 RUST = Path(__file__).resolve().parent.parent / "src" / "studio_panel.rs"
+SORT_ARROWS = RUST.parent / "studio_panel" / "hook" / "sort_arrows.rs"
 
 
 def rust_builds(src):
@@ -217,6 +218,38 @@ def verify(game, src):
         index = vwl.rust_usize(src, name)
         got = ui.last_ret(ui.u32(list_vt + 4 * index) - ui.base)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # 25: the sort arrows (#611). "SetSortColumn"'s message handler is a
+    # thunk to vftable slot 190, OnSetSortColumn: a repeat
+    # click flips the ascending byte at list_sort_ascending; another column
+    # moves the one at list_sort_column to the secondary (+4) and its flag to
+    # +1. SetSortColumn (slot 146) stores at list_sort_column.
+    on_set_sort_column = 190
+    thunk = ["mov eax, dword ptr [ecx]", f"jmp dword ptr [eax + {hex(4 * on_set_sort_column)}]"]
+    name_at = ui.img.find(b"\0SetSortColumn\0") + 1
+    registered = any(
+        ui.code[0] <= ui.u32(at) - ui.base < ui.code[1] and ui.body(ui.u32(at) - ui.base, 0x10)[:2] == thunk
+        for ref in ui.refs(name_at) for at in range(ref - 0x20, ref + 0x40))
+    check(registered, f"\"SetSortColumn\" is handled by ListPanel slot {on_set_sort_column} (OnSetSortColumn)")
+    col, asc = build["list_sort_column"], build["list_sort_ascending"]
+    on_set = ui.body(ui.u32(list_vt + 4 * on_set_sort_column) - ui.base, 0x80)
+    check(any(x.endswith(f"[esi + {hex(col)}]") for x in on_set)
+          and any(x == f"mov byte ptr [esi + {hex(asc)}], al" for x in on_set)
+          and any(f"[esi + {hex(col + 4)}]," in x for x in on_set)
+          and any(f"[esi + {hex(asc + 1)}]," in x for x in on_set),
+          f"which reads the sort column +{col:#x} and its flag +{asc:#x}, each with its secondary after it")
+    set_sort = ui.body(ui.u32(list_vt + 4 * 146) - ui.base, 0x20)
+    check(f"mov dword ptr [ecx + {hex(col)}], eax" in set_sort,
+          f"ListPanel slot 146 (SetSortColumn) stores the column at +{col:#x}")
+    arrows = SORT_ARROWS.read_text(encoding="utf-8")
+    for name, want, label_slot in (("LIST_SLOT_SET_COLUMN_HEADER_TEXT_WIDE", "ret 8", 134),
+                                   ("LIST_SLOT_GET_COLUMN_HEADER_TEXT", "ret 0xc", 137)):
+        index = vwl.rust_usize(arrows, name)
+        func = ui.u32(list_vt + 4 * index) - ui.base
+        got = ui.last_ret(func)
+        on_heading = any(x.endswith(f"+ {hex(4 * label_slot)}]") for x in ui.body(func, 0x200))
+        check(got == want and on_heading,
+              f"ListPanel slot {index} ({name}) returns with {got!r} and calls the heading's slot {label_slot}")
+
     # SetColumnVisible(int, bool): writes the column's hidden byte (+0x1d)
     # unless its unhidable byte (+0x1e) is set.
     visible_slot = vwl.rust_usize(src, "LIST_SLOT_SET_COLUMN_VISIBLE")
