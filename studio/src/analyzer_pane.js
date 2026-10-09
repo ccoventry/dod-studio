@@ -29,7 +29,11 @@ function setAnalyzerFileIndicator(text) {
 }
 
 let report = null;
-let analyzerLoadInProgress = false;
+// The demo whose analysis the page is waiting on (null when none), and a
+// count of loads: clicking a second demo before the first finishes leaves
+// both analyses running, and only the latest may show its progress or result.
+let analyzerLoadingPath = null;
+let analyzerLoadSeq = 0;
 let activeSubTab = 'summary';
 let highlightedPlayerId = null; // shared selection: Scoreboard row <-> Player Details dropdown
 let selectedPlayerId = null;
@@ -963,9 +967,11 @@ function initAnalyzerBrowser() {
 // noted for render_status in ipc_bridge.js — analyzer_progress is throttled
 // to ~30fps backend-side (Rust `analyze_demo_full`), so no further
 // throttling is needed on the receiving end.
+// Each event names its demo: an earlier click's analysis still running in
+// the background reports too, and mixing the two made the % jump around.
 listen('analyzer_progress', (event) => {
-  if (!analyzerLoadInProgress) return;
-  const { processed, total } = event.payload || {};
+  const { processed, total, path } = event.payload || {};
+  if (!analyzerLoadingPath || path !== analyzerLoadingPath) return;
   if (!total) return;
   const pct = Math.min(100, Math.round((processed / total) * 100));
   const container = document.querySelector('#analyzer-tab-content');
@@ -1090,14 +1096,20 @@ export async function openAnalyzerDemo(path) {
 }
 
 async function loadAnalyzerDemo(path) {
+  // Already being analysed: a second run of the same demo would only race
+  // the first one's progress.
+  if (analyzerLoadingPath === path) return;
   const container = document.querySelector('#analyzer-tab-content');
   if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
   // The last demo's multi-map notice isn't about this one.
   renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
-  analyzerLoadInProgress = true;
+  const seq = ++analyzerLoadSeq;
+  analyzerLoadingPath = path;
   try {
-    report = await analyzeDemoFull(path);
+    const result = await analyzeDemoFull(path);
+    if (seq !== analyzerLoadSeq) return; // another demo was picked meanwhile
+    report = result;
     highlightedPlayerId = null;
     selectedPlayerId = null;
     setAnalyzerFileIndicator(report.file_name);
@@ -1106,12 +1118,13 @@ async function loadAnalyzerDemo(path) {
     renderActiveTab();
     renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
   } catch (err) {
+    if (seq !== analyzerLoadSeq) return;
     if (container) {
       container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
   } finally {
-    analyzerLoadInProgress = false;
+    if (seq === analyzerLoadSeq) analyzerLoadingPath = null;
   }
 }
 
