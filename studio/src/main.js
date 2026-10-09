@@ -595,6 +595,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       clip_name_template: getClipNameTemplate(),
       demo_rename_pov_template: getDemoRenameTemplates().pov,
       demo_rename_hltv_template: getDemoRenameTemplates().hltv,
+      demo_rename_lowercase: getDemoRenameTemplates().lowercase,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -749,7 +750,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
       setClipNameTemplate(settings.clip_name_template);
-      setDemoRenameTemplates(settings.demo_rename_pov_template, settings.demo_rename_hltv_template);
+      setDemoRenameTemplates(
+        settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
+      );
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;

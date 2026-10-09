@@ -142,6 +142,11 @@ describe('planRenames', () => {
     expect(rows[0].to).toBe('Zoe_x_1_D_31k.dem');
   });
 
+  it('lower-cases the whole name when asked', () => {
+    const rows = plan([pov('a.dem'), hltv('h.dem')], { lowercase: true });
+    expect(rows.map((r) => r.to)).toEqual(['krod_31k_v_dice_anzio.dem', 'dice_v_gskill_anzio_2026-09-28.dem']);
+  });
+
   it('refuses a POV-only placeholder in the HLTV template', () => {
     const rows = plan([hltv('h.dem')], { hltvTemplate: '{name}_{map}' });
     expect(rows[0].status).toBe('template');

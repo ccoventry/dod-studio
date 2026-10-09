@@ -84,6 +84,16 @@ test('a chip goes into the template field last used, and a settled template is s
   expect(await page.evaluate(() => window.__changes)).toBeGreaterThan(0);
 });
 
+test('Lowercase the whole name lower-cases every new name and is saved', async ({ page }) => {
+  await loadHarness(page);
+  await page.click('#rename-list-btn');
+  const before = await page.evaluate(() => window.__changes);
+  await page.check('#rename-lowercase');
+  await expect(newNames(page).nth(0)).toHaveText('krod_31k_v_dice_anzio.dem');
+  await expect(newNames(page).nth(1)).toHaveText('dice_v_gskill_anzio_2026-09-28.dem');
+  expect(await page.evaluate(() => window.__changes)).toBeGreaterThan(before);
+});
+
 test('the HLTV template gets only the placeholders an HLTV demo has', async ({ page }) => {
   await loadHarness(page);
   await page.click('#rename-list-btn');

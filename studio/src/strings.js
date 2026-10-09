@@ -1924,6 +1924,8 @@ export const STRINGS = {
     RESET_BUTTON: 'Default',
     RESET_TITLE: 'Go back to the default template.',
     INSERT_LABEL: 'Insert:',
+    LOWERCASE_LABEL: 'Lowercase the whole name',
+    LOWERCASE_TITLE: 'Every new name in lower case, both templates, without :lower on each placeholder.',
     LIST_BUTTON: 'List Demos',
     LIST_TITLE: "Read every demo in the Target Folder. Demos the analyzer hasn't seen take about a second each.",
     CANCEL_BUTTON: 'Cancel',

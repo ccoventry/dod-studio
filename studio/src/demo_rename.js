@@ -152,7 +152,7 @@ function folderOf(facts) {
  * name there is kept free, except the demo's own (so a change of case alone
  * goes through). A clash gets `_2`, `_3`, ... and `numbered`.
  */
-export function planRenames(factsList, { povTemplate, hltvTemplate, projectTeams, selected }) {
+export function planRenames(factsList, { povTemplate, hltvTemplate, lowercase = false, projectTeams, selected }) {
   const templates = {
     pov: parseDemoTemplate(povTemplate, 'pov'),
     hltv: parseDemoTemplate(hltvTemplate, 'hltv'),
@@ -176,7 +176,8 @@ export function planRenames(factsList, { povTemplate, hltvTemplate, projectTeams
     const parsed = templates[demoType];
     if (parsed.errors.length) return { ...row, status: 'template' };
 
-    const base = plainName(buildName(parsed, demoValues(facts, projectTeams)).name);
+    const built = plainName(buildName(parsed, demoValues(facts, projectTeams)).name);
+    const base = lowercase ? built.toLowerCase() : built;
     if (!base) return { ...row, status: 'template' };
     const used = takenIn(folder);
     const own = facts.file_name.toLowerCase();

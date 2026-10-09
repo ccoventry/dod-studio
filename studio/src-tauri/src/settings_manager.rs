@@ -201,6 +201,10 @@ pub struct AppSettings {
     pub demo_rename_pov_template: String,
     #[serde(default = "default_demo_rename_hltv_template")]
     pub demo_rename_hltv_template: String,
+    /// Lower-cases every new demo name, so a template needs no `:lower`
+    /// on each placeholder.
+    #[serde(default)]
+    pub demo_rename_lowercase: bool,
 }
 
 fn default_resolution_width() -> i32 {
@@ -362,6 +366,7 @@ impl Default for AppSettings {
             clip_name_template: default_clip_name_template(),
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
+            demo_rename_lowercase: false,
         }
     }
 }

@@ -26,15 +26,18 @@ export function getDemoRenameTemplates() {
   return {
     pov: value('#rename-pov-template', DEFAULT_POV_TEMPLATE),
     hltv: value('#rename-hltv-template', DEFAULT_HLTV_TEMPLATE),
+    lowercase: !!$('#rename-lowercase')?.checked,
   };
 }
 
-/** Sets both fields from saved settings. */
-export function setDemoRenameTemplates(pov, hltv) {
+/** Sets both fields and the lowercase box from saved settings. */
+export function setDemoRenameTemplates(pov, hltv, lowercase) {
   const povInput = $('#rename-pov-template');
   const hltvInput = $('#rename-hltv-template');
+  const lowerBox = $('#rename-lowercase');
   if (povInput) povInput.value = pov || DEFAULT_POV_TEMPLATE;
   if (hltvInput) hltvInput.value = hltv || DEFAULT_HLTV_TEMPLATE;
+  if (lowerBox) lowerBox.checked = !!lowercase;
   refresh();
 }
 
@@ -197,6 +200,7 @@ function refresh() {
   rows = planRenames(facts, {
     povTemplate: templates.pov,
     hltvTemplate: templates.hltv,
+    lowercase: templates.lowercase,
     projectTeams: getProjectTeams(),
     selected,
   });
@@ -340,6 +344,10 @@ export function initDemoRenamePane({ projectTeams, onChange } = {}) {
       if (onChange) onChange();
     });
   }
+  $('#rename-lowercase')?.addEventListener('change', () => {
+    refresh();
+    if (onChange) onChange();
+  });
   $('#rename-select-all')?.addEventListener('change', (e) => {
     selected = e.target.checked ? new Set(facts.map((f) => f.path)) : new Set();
     refresh();
