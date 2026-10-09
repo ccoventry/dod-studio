@@ -131,29 +131,6 @@ pub fn atlas_path(dir: &Path, key: &MapKey) -> PathBuf {
     dir.join(key.file_name())
 }
 
-/// Unions one map's coordinates across several stores.
-///
-/// The intended shape is one writable store fed by this user's own captures
-/// plus any number of read-only ones — a store shipped with the app, or a
-/// pooled community store dropped in by the updater. Union is the whole merge
-/// rule: every entry is an independent claim that a surface exists at a
-/// coordinate, so two stores can never contradict each other, only cover
-/// different ground. Deduplication happens on the shared grid.
-pub fn load_all(dirs: &[PathBuf], key: &MapKey) -> Vec<[f32; 3]> {
-    let mut cells: BTreeMap<Cell, [f32; 3]> = BTreeMap::new();
-    for dir in dirs {
-        for p in load(dir, key) {
-            if cells.len() >= MAX_ATLAS_COORDS {
-                break;
-            }
-            if let Some(c) = to_cell(&p) {
-                cells.entry(c).or_insert(p);
-            }
-        }
-    }
-    cells.into_values().collect()
-}
-
 /// Reads one map's stored coordinates. A missing, unreadable or malformed file
 /// is an empty store, not an error: the flush works without one and fills it in
 /// on the way past.
