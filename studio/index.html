@@ -596,6 +596,53 @@
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
 
+              <!-- "When a batch finishes" (#440) — finish_clips.js. Queues the
+                   batch's own takes through the same queue this tab's Scan
+                   uses, so the codec per capture mode is all it adds. There is
+                   no "keep as captured" for Video or Frame sequence: only an
+                   OBS take already carries its own sound. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-finish-clips" data-str="FINISH.WHEN_LABEL" data-str-title="FINISH.WHEN_TITLE">When a batch finishes:</label>
+                  <select id="config-finish-clips" data-str-title="FINISH.WHEN_TITLE">
+                    <option value="off" data-str="FINISH.WHEN_LEAVE">Leave the takes for the Render tab</option>
+                    <option value="finish" data-str="FINISH.WHEN_FINISH">Finish clips automatically</option>
+                  </select>
+                </div>
+              </div>
+              <div class="inline-controls">
+                <div class="control-group">
+                  <label for="config-finish-codec-obs" data-str="FINISH.CODEC_OBS_LABEL" data-str-title="FINISH.CODEC_TITLE">OBS clips:</label>
+                  <select id="config-finish-codec-obs" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="source_copy" data-str="FINISH.CODEC_KEEP">Keep as captured (copy, seconds)</option>
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-video" data-str="FINISH.CODEC_VIDEO_LABEL" data-str-title="FINISH.CODEC_TITLE">Video clips:</label>
+                  <select id="config-finish-codec-video" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-frames" data-str="FINISH.CODEC_FRAMES_LABEL" data-str-title="FINISH.CODEC_TITLE">Frame sequence clips:</label>
+                  <select id="config-finish-codec-frames" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+              </div>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
               <div class="input-row" style="margin-top: 10px;">
@@ -1352,6 +1399,7 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="kill-map" data-str="ANALYZER.SUBTAB_KILL_MAP">Kill Map</button>
                 <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>

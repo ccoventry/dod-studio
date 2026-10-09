@@ -54,6 +54,10 @@ pub mod blender;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
+
 /// Map overviews made from the BSP, for the Overviews page (#371).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod overview;

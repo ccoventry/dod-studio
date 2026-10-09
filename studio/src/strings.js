@@ -662,6 +662,42 @@ export const STRINGS = {
     UNKNOWN_SOURCE_FOLDER: '(unknown)',
   },
 
+  // ── Finishing clips after a capture batch (#440) + finish_clips.js ───────
+  FINISH: {
+    SECTION_TITLE: 'When a batch finishes',
+    WHEN_LABEL: 'When a batch finishes:',
+    WHEN_TITLE:
+        'Finish clips automatically turns every take the batch captured into one video with its sound, in the export folder below, as soon as the batch ends. The jobs show up in the Render tab like any other. Leave the takes to render them yourself from the Render tab.',
+    WHEN_LEAVE: 'Leave the takes for the Render tab',
+    WHEN_FINISH: 'Finish clips automatically',
+    CODEC_OBS_LABEL: 'OBS clips:',
+    CODEC_VIDEO_LABEL: 'Video clips:',
+    CODEC_FRAMES_LABEL: 'Frame sequence clips:',
+    CODEC_TITLE: 'What each finished clip is saved as, for batches captured in this mode.',
+    CODEC_KEEP: 'Keep as captured (copy, seconds)',
+    CODEC_RENDER_TAB: 'Same as the Codec setting above',
+    progressStatus: (finished, total, rendering) =>
+      `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,
+    WAITING_STATUS: 'Finishing clips: waiting for the Render tab to finish what it is already doing',
+    startedToast: (n) => `Finishing ${n} clip${n === 1 ? '' : 's'}.`,
+    VIEW_IN_RENDER_TAB: 'View in Render tab',
+    NOTIFY_TITLE: 'Clips ready',
+    doneSummary: (finished, failed, cancelled) => {
+      const ready = `${finished} clip${finished === 1 ? '' : 's'} ready`;
+      const extra = [];
+      if (failed > 0) extra.push(`${failed} failed`);
+      if (cancelled > 0) extra.push(`${cancelled} cancelled`);
+      return extra.length ? `${ready}, ${extra.join(', ')} — see the Render tab.` : `${ready}.`;
+    },
+    OPEN_EXPORT_FOLDER: 'Open export folder',
+    FAILED_STATUS: 'Could not finish the clips — the takes are still there for the Render tab.',
+    failedToast: (err) => `Could not finish the clips automatically: ${err}. The takes are still on disk; render them from the Render tab.`,
+    NOTHING_FOUND: 'No clips to finish: the Render tab found no takes it can use in this batch.',
+    SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
+    SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
+    SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
   ERROR_LOG_MODAL: {
     TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -837,6 +873,7 @@ export const STRINGS = {
     SUBTAB_ROUNDS: 'Rounds',
     SUBTAB_FLAGS: 'Flags',
     SUBTAB_CHAT: 'Chat Log',
+    SUBTAB_KILL_MAP: 'Kill Map',
     EMPTY_PICK_DEMO: 'Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".',
     EMPTY_PICK_DEMO_JS_FALLBACK: 'Browse for a demo file, or select one from the Workspace and click "View Match Telemetry".',
 
@@ -966,6 +1003,28 @@ export const STRINGS = {
     TEAM_SCORE_TIMELINE_TITLE: 'Team Score Timeline',
     TIMELINE_TOOLTIP_ELAPSED_LABEL: 'Time Elapsed:',
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
+
+    // Kill Map tab (#448)
+    KILL_MAP_TITLE: 'Where Players Died',
+    KILL_MAP_LOADING: 'Loading the map…',
+    killMapNoOverview: (map) => `No map picture for ${map}, so deaths can't be placed on it. The app looks in the game's dod\\overviews folder.`,
+    KILL_MAP_NO_KILLS: 'No deaths recorded.',
+    killMapCoverage: (placed, total) => `${placed} of ${total} deaths shown.`,
+    KILL_MAP_POV_NOTE: 'This demo was recorded by a player, and only has positions for enemies that player could see — so some deaths are missing, and some kills have no distance.',
+    killMapDiedLegend: (team) => `${team} player died`,
+    killMapTooltip: (victim, killer, weapon) => killer ? `${victim} killed by ${killer} (${weapon})` : `${victim} died (${weapon})`,
+    KILL_MAP_TOOLTIP_DISTANCE_LABEL: 'Distance:',
+    KILL_MAP_TOOLTIP_TIME_LABEL: 'Demo time:',
+    KILL_MAP_TEAMKILL_TAG: 'team kill',
+    KILL_MAP_UNKNOWN_PLAYER: 'Unknown player',
+    ENGAGEMENT_TITLE: 'Engagement Distance',
+    ENGAGEMENT_EXPLAINER: 'How far apart the killer and the victim were at each kill. Team kills and kills where either player\'s position is unknown are left out.',
+    NO_ENGAGEMENT_DATA: 'No kills with both players\' positions known.',
+    COL_KILLS_MEASURED: 'Kills',
+    COL_AVERAGE_DISTANCE: 'Average',
+    COL_LONGEST_DISTANCE: 'Longest',
+    ALL_WEAPONS_LABEL: 'All weapons',
+    metres: (m) => `${m.toFixed(1)} m`,
 
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.

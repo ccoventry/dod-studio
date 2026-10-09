@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
@@ -19,6 +20,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { requestFinishClips } from './finish_clips.js';
 import { syncCommandProfileRow } from './command_profiles_ui.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
@@ -1141,9 +1143,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           // rendered must not knock it back down to Captured -- unless that
           // Rendered was set by hand: a verified capture beats an unverified
           // claim (#105).
-          if (streak.status === 'Rendered' && !streak.statusByHand) return;
+          if (streak.status === HIGHLIGHT_STATUS.RENDERED && !streak.statusByHand) return;
           if (streak.statusByHand) markCleared = true;
-          if (setVerifiedStatus(streak, 'Captured')) advanced += 1;
+          if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.CAPTURED)) advanced += 1;
         });
         // Recorded even when the take isn't renderable yet — a future render
         // still needs to resolve this take_key back to these highlights once
@@ -1168,6 +1170,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       } else {
         showToast(`${STRINGS.CAPTURE.allTakesVerified(total)}${marked}`, 'success');
       }
+
+      // "When a batch finishes" (#440) — a no-op unless that is set to finish
+      // clips. After the status flip above, so the take index already maps
+      // each take back to its highlights when its render lands.
+      requestFinishClips(payload, lastDispatch?.captureMode);
     }).then(unlistenFn => {
       unlistenTakesVerified = unlistenFn;
     }).catch(err => {
@@ -1235,6 +1242,8 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     // both fields again in `normalise_capture_mode`, which is what keeps an
     // older frontend working against this build.
     const captureModeVal = document.querySelector("#config-capture-mode")?.value || "frame_sequence";
+    // The finish step (#440) picks its codec by the mode this batch used.
+    lastDispatch.captureMode = captureModeVal;
     const ffmpegCaptureVal = captureModeVal === "direct_to_video";
     const ffmpegCaptureCodecVal = document.querySelector("#config-capture-codec")?.value || "utvideo";
     const obsHostVal = document.querySelector("#config-obs-host")?.value?.trim() || "127.0.0.1";

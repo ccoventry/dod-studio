@@ -3,6 +3,7 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+pub mod entity_replay;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
 mod kill;
@@ -10,6 +11,7 @@ mod localization;
 mod mortality;
 mod objective;
 mod player;
+mod position;
 mod round;
 mod scoreboard;
 mod team_tag;
@@ -29,6 +31,7 @@ use crate::{
     mortality::with_mortality_detection,
     objective::use_objective_updates,
     player::use_player_updates,
+    position::use_position_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
@@ -49,6 +52,7 @@ pub use crate::{
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
+    position::{KillPosition, PlayerPose},
     round::Round,
     team_tag::{TeamTag, detect_team_tag, team_tags},
 };
@@ -128,6 +132,13 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Every kill, with where both players stood (#448). Defaulted so a
+    /// cache entry written before it existed still loads.
+    #[serde(default)]
+    pub kill_positions: Vec<KillPosition>,
+    /// Working state for `kill_positions`; never serialized.
+    #[serde(skip)]
+    positions: position::PositionTracker,
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
@@ -458,6 +469,7 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
         state.players.clear();
         state.rounds.clear();
         state.team_scores.reset();
+        state.kill_positions.clear();
         state.objectives = Objectives::default();
         state.clan_match_detected = false;
         state.clan_match_detection = ClanMatchDetection::WaitingForReset;
@@ -690,6 +702,13 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                     chat.sender_team = Some(Team::British);
                 }
             }
+            for kill in &mut state.kill_positions {
+                for team in [&mut kill.killer_team, &mut kill.victim_team] {
+                    if *team == Some(Team::Allies) {
+                        *team = Some(Team::British);
+                    }
+                }
+            }
         }
     }
 }
@@ -706,6 +725,7 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     }
     use_timing_updates(state, event);
     use_player_updates(state, event);
+    use_position_updates(state, event);
     with_mortality_detection(state, event);
     use_scoreboard_updates(state, event);
     use_kill_streak_updates(state, event);
@@ -865,14 +885,6 @@ impl AnalyzerState {
     fn find_player_by_id_mut(&mut self, id: &PlayerGlobalId) -> Option<&mut Player> {
         self.players.iter_mut().find(|player| player.id == *id)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DemoFingerprint {
-    pub map_name: String,
-    pub server_ip: String,
-    pub player_roster_hash: u64,
-    pub event_signature: Vec<String>,
 }
 
 pub fn parse_fingerprint(
@@ -1086,20 +1098,6 @@ pub fn parse_fingerprint(
         event_signature,
         recorder_id,
     ))
-}
-
-pub fn extract_match_fingerprint(bytes: &[u8]) -> Result<DemoFingerprint, String> {
-    match parse_fingerprint(bytes) {
-        Ok((map_name, server_ip, player_roster_hash, event_signature, _recorder_id)) => {
-            Ok(DemoFingerprint {
-                map_name,
-                server_ip,
-                player_roster_hash,
-                event_signature,
-            })
-        }
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[cfg(test)]

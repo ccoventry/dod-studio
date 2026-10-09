@@ -12,7 +12,7 @@ import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { makeClearable } from './clearable_input.js';
-import { statusCountColor } from './status_colors.js';
+import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -26,7 +26,7 @@ function describeTrackedReasons(demo) {
   const streaks = demo?.streaks || [];
   let hasStatus = false, hasNotes = false, hasClipName = false, hasReview = false, hasRange = false;
   streaks.forEach(s => {
-    if (s.status === 'Pending' || s.status === 'Captured' || s.status === 'Rendered') hasStatus = true;
+    if (s.status === HIGHLIGHT_STATUS.PENDING || s.status === HIGHLIGHT_STATUS.CAPTURED || s.status === HIGHLIGHT_STATUS.RENDERED) hasStatus = true;
     if (s.notes && s.notes.trim()) hasNotes = true;
     if (s.clipName && s.clipName.trim()) hasClipName = true;
     if (s.curation) hasReview = true;
@@ -360,9 +360,9 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
-    const pending     = countByStatus(ownStreaks, 'Pending');    // M4
-    const captured    = countByStatus(ownStreaks, 'Captured');   // M4
-    const rendered    = countByStatus(ownStreaks, 'Rendered');   // M4
+    const pending     = countByStatus(ownStreaks, HIGHLIGHT_STATUS.PENDING); // M4
+    const captured    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.CAPTURED); // M4
+    const rendered    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.RENDERED); // M4
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
@@ -461,21 +461,21 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdPending = document.createElement('td');
     tdPending.style.padding = '6px 8px';
     tdPending.style.textAlign = 'center';
-    tdPending.style.color = statusCountColor('Pending', pending);
+    tdPending.style.color = statusCountColor(HIGHLIGHT_STATUS.PENDING, pending);
     tdPending.textContent = pending;
 
     // Col 6: Captured count  [M4]
     const tdCaptured = document.createElement('td');
     tdCaptured.style.padding = '6px 8px';
     tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = statusCountColor('Captured', captured);
+    tdCaptured.style.color = statusCountColor(HIGHLIGHT_STATUS.CAPTURED, captured);
     tdCaptured.textContent = captured;
 
     // Col 7: Rendered count  [M4]
     const tdRendered = document.createElement('td');
     tdRendered.style.padding = '6px 8px';
     tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = statusCountColor('Rendered', rendered);
+    tdRendered.style.color = statusCountColor(HIGHLIGHT_STATUS.RENDERED, rendered);
     tdRendered.textContent = rendered;
 
     // Col 8: Actions — remove-from-queue only, no status badge  [M3]
