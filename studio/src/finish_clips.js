@@ -242,6 +242,7 @@ export function createFinishController(deps) {
 
 let controller = null;
 let getExportDirsFn = null;
+let getClipNamesFn = null;
 let captureRunning = false;
 
 /** Reads the finish settings and the Render tab's shared ones from the page. */
@@ -322,6 +323,8 @@ export function requestFinishClips(verified, captureMode) {
       ffmpeg_path: settings.ffmpegPath,
       export_directories: exportDirs,
       max_concurrent_renders: settings.maxConcurrent,
+      // The same clip names (#441) the Render tab's Scan gives these takes.
+      clip_names: getClipNamesFn ? getClipNamesFn(exportDirs) : {},
     },
   });
 }
@@ -332,11 +335,13 @@ export function finishClipsOwnsJobs(jobs) {
 }
 
 /**
- * `getExportDirs` is main.js's Render export pool; `onSettingsChange`
+ * `getExportDirs` is main.js's Render export pool; `getClipNames(exportDirs)`
+ * gives each take's clip name (`take key -> name`); `onSettingsChange`
  * persists settings when one of the finish fields changes.
  */
-export function initFinishClips({ getExportDirs, onSettingsChange } = {}) {
+export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange } = {}) {
   getExportDirsFn = getExportDirs || null;
+  getClipNamesFn = getClipNames || null;
 
   controller = createFinishController({
     queue: (payload) => queueRenderBatch(payload),

@@ -51,6 +51,7 @@ import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
 import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
+import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
@@ -1646,7 +1647,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // "When a batch finishes" (#440): queues a verified batch's takes into the
   // Render tab's own queue. capture_pane.js hands it each verified batch.
-  initFinishClips({ getExportDirs: () => renderExportDirs, onSettingsChange: persistAppSettings });
+  initFinishClips({
+    getExportDirs: () => renderExportDirs,
+    getClipNames: (exportDirs) => clipNamesForTakes(
+      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+    ),
+    onSettingsChange: persistAppSettings,
+  });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a
