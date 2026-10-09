@@ -24,8 +24,9 @@ import { initRollFloors } from './roll_floors.js';
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
-import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { initCombineClips } from './combine_clips.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
@@ -33,6 +34,8 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
 import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
+import { emptyProjectTeams, normalizeProjectTeams, demoHasTeams } from './project_teams.js';
+import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -177,6 +180,7 @@ function applyCaptureModeUI() {
   const mode = currentCaptureMode();
   const video = mode === 'direct_to_video';
   const obs = mode === 'obs';
+  const agr = mode === 'agr';
 
   // Kept in step rather than read: the backend still accepts `ffmpeg_capture`
   // from older payloads, and leaving it stale would make the two disagree for
@@ -203,7 +207,17 @@ function applyCaptureModeUI() {
   // OBS, which has its own separate OBS Capture FPS field below — showing
   // both invites setting the wrong one.
   const captureFpsGroup = document.querySelector('#capture-fps-group');
-  if (captureFpsGroup) captureFpsGroup.style.display = obs ? 'none' : '';
+  if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
+
+  // AGR mode records no video, so Capture FPS gives way to its own rate. An
+  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
+  // shows the number that will actually be used.
+  const agrFpsGroup = document.querySelector('#agr-fps-group');
+  if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
+  const agrFpsInput = document.querySelector('#config-agr-fps');
+  if (agrFpsInput) {
+    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
+  }
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -340,6 +354,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // rendering, so status can auto-advance even after a restart or re-scan
   // replaced the original streak objects. Persisted in the project file.
   let takeIndex = {};
+  // The Teams list's user-owned half (#445): display names and merges, keyed
+  // on the detected tag (project_teams.js). Project state rather than demo
+  // state, so a re-scan never touches it. Persisted in the project file.
+  let projectTeams = emptyProjectTeams();
   // True whenever project state (scanned demos, takeIndex, scanPaths) has
   // changed since the last successful save or load — gates the "unsaved
   // changes" prompt on window close. Cleared by saveProjectSession() and
@@ -389,6 +407,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   initThemedConfirm();
   initAuditorPane();
   initHdPane();
+  initTeamsPane({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: markProjectDirty,
+    // triggerAutoScan is a hoisted declaration further down this scope.
+    onReadMissing: (paths) => triggerAutoScan(paths),
+  });
 
   async function pickTargetDrive() {
     try {
@@ -463,6 +488,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 2.0);
     const postRoll = numberField('#config-post-roll', 0.6);
 
@@ -525,6 +552,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
       resolution_width: resWidth,
@@ -622,6 +650,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.obs_capture_fps) {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
+      }
+      // 0 is "the same as Capture FPS" and stays an empty box.
+      if (settings.agr_fps > 0) {
+        const inputEl = document.querySelector('#config-agr-fps');
+        if (inputEl) inputEl.value = settings.agr_fps;
       }
       // `!= null`, not truthiness: 0 is a real value for the five timing
       // fields, and a truthy check skipped restoring it.
@@ -814,6 +847,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(takeIndex, collectAllUids()),
+        teams: projectTeams,
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
@@ -893,6 +927,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             // what makes it possible to prove a later auto-Rendered flip
             // came from this loaded data and not a leftover in-memory state.
             console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
+            // Tolerant the same way: a project saved before the Teams list
+            // (#445) has no `teams`, and loads with none named or merged.
+            projectTeams = normalizeProjectTeams(data.teams);
             if (data.demos) {
               currentScannedDemos = data.demos;
               // timeline_string is a derived field, saved as a convenience
@@ -911,6 +948,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
               await checkMissingDemos(selected, data.scanPaths || []);
             }
+            refreshTeamsPane();
           }
         }
       } catch (err) {
@@ -958,6 +996,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     replaceScannedDemos([]);
     currentSessionPath = null;
     takeIndex = {};
+    projectTeams = emptyProjectTeams();
+    refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
     switchNavTab('workspace');
@@ -1300,9 +1340,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key) are scanned.
+      // re-parsed; ones from an older project (no file_key, or no teams:
+      // #445) are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key)
+        .filter((d) => d.file_key && demoHasTeams(d))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1361,6 +1402,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      refreshTeamsPane();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
@@ -1554,6 +1596,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initCombineClips({
+    finishedRenders: () => finishedRenderOutputs(),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,

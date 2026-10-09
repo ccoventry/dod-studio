@@ -558,6 +558,33 @@ export async function cancelAudit() {
     });
 }
 
+// ── Combine Clips (#107) ───────────────────────────────────────────────────
+
+export async function combinePlan(clips, ffmpegPath) {
+  return invoke("combine_plan", { clips, ffmpegPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_plan):", err);
+      throw err;
+    });
+}
+
+export async function combineClips(clips, output, ffmpegPath) {
+  return invoke("combine_clips", { clips, output, ffmpegPath })
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_clips):", err);
+      if (String(err) !== 'cancelled') showToast(STRINGS.IPC.combineFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function combineCancel() {
+  return invoke("combine_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (combine_cancel):", err);
+      throw err;
+    });
+}
+
 export async function revealInExplorer(path) {
   return invoke("reveal_in_explorer", { path })
     .catch((err) => {
@@ -778,6 +805,62 @@ export async function hdSetPython(path) {
     .catch((err) => {
       console.error("IPC Execution Error (hd_set_python):", err);
       showToast(STRINGS.IPC.hdPythonFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** { command, report }: the newest list `dodstudio_debug_hd_misses` wrote to
+ *  the hook log (null when there is none yet), and the command. No toast: the HD page shows the error in
+ *  place. */
+export async function hdMisses() {
+  return invoke("hd_misses")
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_misses):", err);
+      throw err;
+    });
+}
+
+/** Adds `name` to the install's my_styles.txt as `def` ({ kind: 'ai', model }
+ *  / { kind: 'plain', sharpening } / { kind: 'blend', a, b, percent }), or
+ *  changes it. */
+export async function hdSaveStyle(gamePath, name, def) {
+  return invoke("hd_save_style", { gamePath, name, def })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_save_style):", err);
+      showToast(STRINGS.IPC.hdStyleFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Puts `text` in effect as the install's hd_maps.txt, or with `null`
+ *  builds every map again (the list is set aside, not deleted). */
+export async function hdSaveMapList(gamePath, text) {
+  return invoke("hd_save_map_list", { gamePath, text })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_save_map_list):", err);
+      showToast(STRINGS.IPC.hdMapListFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Takes `name` out of the install's my_styles.txt. */
+export async function hdRemoveStyle(gamePath, name) {
+  return invoke("hd_remove_style", { gamePath, name })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_remove_style):", err);
+      showToast(STRINGS.IPC.hdStyleFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Makes the style comparison sheet for `request` ({ maps, styles }; empty
+ *  means picked for you / every style). Resolves { image (a data: URL),
+ *  samples, maps, skipped }. */
+export async function hdPreview(gamePath, request) {
+  return invoke("hd_preview", { gamePath, request })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_preview):", err);
+      showToast(STRINGS.IPC.hdPreviewFailed(err), 'error');
       throw err;
     });
 }
