@@ -880,3 +880,37 @@ export async function hdPreview(gamePath, request) {
       throw err;
     });
 }
+
+// ── Demo Auditor: Split Maps (#624) ─────────────────────────────────────────
+
+export async function findMultiMapDemos(folder, recursive) {
+  return invoke("find_multi_map_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_multi_map_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelMultiMapScan() {
+  return invoke("cancel_multi_map_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_multi_map_scan):", err);
+      throw err;
+    });
+}
+
+export async function demoMapSegments(path) {
+  return invoke("demo_map_segments", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_map_segments):", err);
+      throw err;
+    });
+}
+
+export async function splitDemoMaps(path, keep) {
+  return invoke("split_demo_maps", { path, keep })
+    .catch((err) => {
+      console.error("IPC Execution Error (split_demo_maps):", err);
+      throw err;
+    });
+}

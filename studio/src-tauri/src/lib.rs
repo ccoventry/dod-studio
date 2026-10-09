@@ -2,6 +2,7 @@ mod audit_manager;
 mod capture_manager;
 mod combine_manager;
 mod demo_cache_cmd;
+mod demo_split_manager;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -595,6 +596,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
@@ -672,6 +674,10 @@ pub fn run() {
             changed_demos,
             system_memory_bytes,
             run_demo_audit,
+            demo_split_manager::find_multi_map_demos_cmd,
+            demo_split_manager::cancel_multi_map_scan,
+            demo_split_manager::demo_map_segments,
+            demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
             combine_manager::combine_plan,

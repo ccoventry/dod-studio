@@ -643,10 +643,41 @@ export const STRINGS = {
   },
 
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
+  // Demo Auditor's Split Maps tab (#624).
+  SPLIT: {
+    TITLE: 'Demos With More Than One Map',
+    HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
+    RECURSIVE: 'Include subfolders',
+    FIND_BUTTON: 'Find Multi-Map Demos',
+    CANCEL_BUTTON: 'Cancel',
+    CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
+    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    CANCELLING: 'Cancelling...',
+    found: (n, total) => n === 0
+      ? 'No demo here has more than one map.'
+      : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
+    scanFailed: (e) => `Couldn't check the folder: ${e}`,
+    mapsCount: (n) => `${n} maps`,
+    LOADING_DETAILS: 'Reading lengths...',
+    detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
+    startsAt: (start, length) => `${start} · ${length} long`,
+    SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
+    SPLIT_BUTTON: 'Split Checked Maps',
+    SHOW_IN_FOLDER: 'Show in folder',
+    NOTHING_TICKED: 'Tick at least one map.',
+    SPLITTING: 'Splitting...',
+    wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
+    writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
+    splitFailed: (e) => `Split failed: ${e}`,
+    SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
+  },
+
   AUDITOR: {
-    PANEL_TITLE: 'Demo Auditor (Deduplication)',
+    PANEL_TITLE: 'Demo Auditor',
     TARGET_FOLDER_LABEL: 'Target Folder:',
-    TARGET_FOLDER_PLACEHOLDER: 'Folder to scan for duplicate demos...',
+    TARGET_FOLDER_PLACEHOLDER: 'Folder of demos...',
+    TAB_DUPLICATES: 'Duplicates',
+    TAB_SPLIT: 'Split Maps',
     BROWSE_BUTTON: 'Browse',
     START_AUDIT_BUTTON: 'Start Audit',
     CANCEL_SCAN_BUTTON: 'Cancel Scan',

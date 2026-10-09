@@ -105,6 +105,12 @@ pub struct AnalyzerState {
     /// another map or the same one; everything from there on is ignored
     /// (`use_segment_boundary`).
     pub map_changed: bool,
+    /// The map of every signon in the demo, in order, including the ones the
+    /// analysis ignores: two or more is a demo that can be split into one per
+    /// map (#624). Defaulted so an older cache entry still loads; empty there
+    /// means "not recorded", not "no maps".
+    #[serde(default)]
+    pub signon_maps: Vec<String>,
     pub initial_map_name: Option<String>,
     pub current_time: GameTime,
 
@@ -353,6 +359,20 @@ fn extract_ip_port(s: &str) -> Option<String> {
         }
     }
     None
+}
+
+/// Records every signon's map in `signon_maps`, before the segment gate, so
+/// the ones after the match are listed too.
+pub fn use_signon_maps(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
+        let file = String::from_utf8_lossy(&msg.map_file_name);
+        let map = file
+            .trim_end_matches('\0')
+            .trim_start_matches("maps/")
+            .trim_end_matches(".bsp")
+            .to_string();
+        state.signon_maps.push(map);
+    }
 }
 
 /// Ends the analysed demo at a second signon (#217).
@@ -638,6 +658,7 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
 /// Feeds one event through every analyzer, in order. Shared with the
 /// optimised-vs-unoptimised test so its reference pass can't drift from this.
 fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    use_signon_maps(state, event);
     if !state.map_changed {
         use_segment_boundary(state, event);
     }
