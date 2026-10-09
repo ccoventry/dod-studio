@@ -110,7 +110,9 @@ let playerIndexRequest = 0;
 let playerIndexTotal = 0;
 let demoFilterPlayer = '';
 let playerOptions = [];
-let demoSortColumn = null; // 'name' | 'type' | 'map' | 'date'
+/** The Demos table's sortable columns: index.html's `th[data-sort]` values (#35). */
+const DEMO_SORT = Object.freeze({ NAME: 'name', TYPE: 'type', MAP: 'map', DATE: 'date' });
+let demoSortColumn = null; // a DEMO_SORT value
 let demoSortAscending = true;
 
 const TEAM_COLORS = {
@@ -744,10 +746,10 @@ function sortedFilteredDemos() {
     list = list.slice().sort((a, b) => {
       let cmp;
       switch (demoSortColumn) {
-        case 'name': cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
-        case 'type': cmp = demoTypeOf(a).localeCompare(demoTypeOf(b)); break;
-        case 'map': cmp = (a.map_name || '').toLowerCase().localeCompare((b.map_name || '').toLowerCase()); break;
-        case 'date': cmp = a.modified_unix_secs - b.modified_unix_secs; break;
+        case DEMO_SORT.NAME: cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
+        case DEMO_SORT.TYPE: cmp = demoTypeOf(a).localeCompare(demoTypeOf(b)); break;
+        case DEMO_SORT.MAP: cmp = (a.map_name || '').toLowerCase().localeCompare((b.map_name || '').toLowerCase()); break;
+        case DEMO_SORT.DATE: cmp = a.modified_unix_secs - b.modified_unix_secs; break;
         default: cmp = 0;
       }
       return demoSortAscending ? cmp : -cmp;

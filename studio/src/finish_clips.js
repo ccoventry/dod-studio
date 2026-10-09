@@ -18,6 +18,7 @@ import { queueRenderBatch, startQueuedRender, revealInExplorer } from './ipc_bri
 import { showToast } from './toast.js';
 import { notify } from './os_notifications.js';
 import { STRINGS } from './strings.js';
+import { JOB_STATUS } from './render_jobs.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 
 /** Finish-codec value meaning "whatever Render Settings' own codec is". */
@@ -85,11 +86,11 @@ export function finishProgress(jobs, folders) {
   (jobs || []).forEach((job) => {
     if (!jobInFolders(job, folders)) return;
     counts.total += 1;
-    if (job.status === 'Queued') counts.queued += 1;
-    else if (job.status === 'Rendering') counts.rendering += 1;
-    else if (job.status === 'Finished') counts.finished += 1;
-    else if (job.status === 'Error') counts.failed += 1;
-    else if (job.status === 'Cancelled') counts.cancelled += 1;
+    if (job.status === JOB_STATUS.QUEUED) counts.queued += 1;
+    else if (job.status === JOB_STATUS.RENDERING) counts.rendering += 1;
+    else if (job.status === JOB_STATUS.FINISHED) counts.finished += 1;
+    else if (job.status === JOB_STATUS.ERROR) counts.failed += 1;
+    else if (job.status === JOB_STATUS.CANCELLED) counts.cancelled += 1;
   });
   counts.done = counts.finished + counts.failed + counts.cancelled;
   return counts;
@@ -97,7 +98,7 @@ export function finishProgress(jobs, folders) {
 
 /** Whether the Render tab has anything staged or running that a new batch would clobber. */
 export function renderQueueBusy(jobs) {
-  return (jobs || []).some((j) => j.status === 'Queued' || j.status === 'Rendering');
+  return (jobs || []).some((j) => j.status === JOB_STATUS.QUEUED || j.status === JOB_STATUS.RENDERING);
 }
 
 /**
@@ -357,7 +358,7 @@ export function initFinishClips({ getExportDirs, getClipNames, onSettingsChange 
     onDone: (c, jobs) => {
       const summary = STRINGS.FINISH.doneSummary(c.finished, c.failed, c.cancelled);
       setFooter(summary, 100);
-      const firstOutput = (jobs || []).find((j) => j.status === 'Finished' && j.output_path)?.output_path;
+      const firstOutput = (jobs || []).find((j) => j.status === JOB_STATUS.FINISHED && j.output_path)?.output_path;
       const level = c.failed > 0 ? 'error' : (c.finished > 0 ? 'success' : 'info');
       showToast(summary, level, 10000, firstOutput ? {
         action: { label: STRINGS.FINISH.OPEN_EXPORT_FOLDER, onClick: () => revealInExplorer(firstOutput).catch(() => {}) },
