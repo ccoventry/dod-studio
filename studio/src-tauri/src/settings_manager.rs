@@ -191,6 +191,23 @@ pub struct AppSettings {
     pub update_channel: String,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// "When a batch finishes" (#440): `true` queues and starts a Render
+    /// Studio job for every take the batch verified, so each clip ends up as
+    /// one video with audio in the export folder without a Render tab visit.
+    /// Off by default, and for every settings file written before it existed,
+    /// so nobody's machine starts encoding after a batch without being asked.
+    #[serde(default)]
+    pub finish_clips_after_batch: bool,
+    /// The codec each capture mode's clips are finished with, as a
+    /// `RenderCodec` string id, plus `"render_tab"` for "whatever Render
+    /// Settings' own codec is". Strings for the same reason `render_codec` is
+    /// one: a value this build does not know still loads.
+    #[serde(default = "default_finish_codec_obs")]
+    pub finish_codec_obs: String,
+    #[serde(default = "default_finish_codec_render_tab")]
+    pub finish_codec_video: String,
+    #[serde(default = "default_finish_codec_render_tab")]
+    pub finish_codec_frames: String,
     /// How a highlight's clip name is built (#441), in the placeholder syntax
     /// of `studio/src/clip_name.js`. Configuration > Render Output.
     #[serde(default = "default_clip_name_template")]
@@ -277,6 +294,14 @@ fn default_clip_name_template() -> String {
 fn default_auto_check_updates() -> bool {
     true
 }
+/// An OBS take already is a finished file with its audio in it, so the
+/// default finish is a plain copy (`RenderCodec::SourceCopy`).
+fn default_finish_codec_obs() -> String {
+    "source_copy".to_string()
+}
+fn default_finish_codec_render_tab() -> String {
+    "render_tab".to_string()
+}
 
 impl Default for AppSettings {
     fn default() -> Self {
@@ -345,6 +370,10 @@ impl Default for AppSettings {
             notify_updates: default_notify_updates(),
             update_channel: default_update_channel(),
             auto_check_updates: default_auto_check_updates(),
+            finish_clips_after_batch: false,
+            finish_codec_obs: default_finish_codec_obs(),
+            finish_codec_video: default_finish_codec_render_tab(),
+            finish_codec_frames: default_finish_codec_render_tab(),
             clip_name_template: default_clip_name_template(),
         }
     }
@@ -426,6 +455,11 @@ mod tests {
 
         assert_eq!(settings.hlae_path, "C:/hlae/hlae.exe");
         assert_eq!(settings.capture_fps, 300);
+        // Settings saved before #440 do not start finishing clips on their own.
+        assert!(!settings.finish_clips_after_batch);
+        assert_eq!(settings.finish_codec_obs, "source_copy");
+        assert_eq!(settings.finish_codec_video, "render_tab");
+        assert_eq!(settings.finish_codec_frames, "render_tab");
         // Settings saved before #246 get today's worker count.
         assert_eq!(
             settings.scan_workers,
