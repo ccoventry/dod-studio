@@ -16,9 +16,9 @@ export const MAX_SUGGESTIONS = 12;
 // them against cfg_scan.rs). Banned for two reasons, so two lists.
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
-export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename'];
+export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
-  'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate'];
+  'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'mirv_agr'];
 export const NOOP_EVERYWHERE = ['exec', 'quit'];
 export const NOOP_IN_INIT = ['mirv_movie_filename'];
 
