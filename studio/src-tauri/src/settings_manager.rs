@@ -157,6 +157,11 @@ pub struct AppSettings {
     pub render_fps: i32,
     #[serde(default = "default_render_max_concurrent")]
     pub render_max_concurrent: i32,
+    /// Named render setups (#108), applied from Configuration > Render
+    /// Output. Each carries a codec, its custom args, source FPS and
+    /// concurrency; the frontend owns the shape (`render_presets.js`).
+    #[serde(default)]
+    pub render_presets: Vec<serde_json::Value>,
     /// How many demos a scan parses at once (#246). Each worker holds a
     /// whole analysis, roughly 1.2 GB at peak; see `SCAN_CONCURRENCY`.
     #[serde(default = "default_scan_workers")]
@@ -320,6 +325,7 @@ impl Default for AppSettings {
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
             render_max_concurrent: default_render_max_concurrent(),
+            render_presets: Vec::new(),
             scan_workers: default_scan_workers(),
             render_export_dirs: Vec::new(),
             notify_patching: default_notify_patching(),

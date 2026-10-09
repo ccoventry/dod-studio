@@ -14,6 +14,14 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
+/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
+function cacheCounts(already, failed) {
+  const parts = [];
+  if (already) parts.push(`${already} already cached`);
+  if (failed) parts.push(`${failed} failed`);
+  return parts.length ? ` (${parts.join(', ')})` : '';
+}
+
 export const STRINGS = {
   // ── Top Navigation / Header ─────────────────────────────────────────────
   NAV: {
@@ -65,6 +73,9 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #174: demos you can capture a player from (POV demos they recorded).
+    PLAYER_FILTER_ALL: 'All players',
+    PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
     // #54: the Master Queue's quick filters.
     KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
     KILLS_FILTER_ALL: 'All demos',
@@ -532,6 +543,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #108: named render setups.
+    PRESET_LABEL: 'Preset:',
+    PRESET_TITLE: 'A saved codec, FPS and concurrency. Pick one to apply it. Shows — when the settings above match no preset.',
+    PRESET_NONE: '—',
+    PRESET_NAME_PLACEHOLDER: 'Name for these settings',
+    PRESET_SAVE_BUTTON: 'Save Preset',
+    PRESET_SAVE_TITLE: 'Save the codec, FPS and concurrency above under the name typed here, or over the picked preset when no name is typed.',
+    PRESET_DELETE_BUTTON: 'Delete',
+    PRESET_DELETE_TITLE: 'Delete the picked preset. The settings above stay as they are.',
     // #40: sortable columns and the whole-batch bar.
     SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
     batchProgress: (pct) => `Batch ${pct}%`,
@@ -654,10 +674,41 @@ export const STRINGS = {
   },
 
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
+  // Demo Auditor's Split Maps tab (#624).
+  SPLIT: {
+    TITLE: 'Demos With More Than One Map',
+    HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
+    RECURSIVE: 'Include subfolders',
+    FIND_BUTTON: 'Find Multi-Map Demos',
+    CANCEL_BUTTON: 'Cancel',
+    CHOOSE_FOLDER_FIRST: 'Choose a folder first.',
+    scanning: (done, total, demo) => `Checking ${done} of ${total}${demo ? `: ${demo}` : ''}`,
+    CANCELLING: 'Cancelling...',
+    found: (n, total) => n === 0
+      ? 'No demo here has more than one map.'
+      : `${n} demo${n === 1 ? '' : 's'} with more than one map${total ? ` (of the ones checked)` : ''}.`,
+    scanFailed: (e) => `Couldn't check the folder: ${e}`,
+    mapsCount: (n) => `${n} maps`,
+    LOADING_DETAILS: 'Reading lengths...',
+    detailsFailed: (e) => `Couldn't read this demo's maps: ${e}`,
+    startsAt: (start, length) => `${start} · ${length} long`,
+    SHORT_MAP_TITLE: 'Under a minute: probably the next map loading as the recording stopped. Unticked.',
+    SPLIT_BUTTON: 'Split Checked Maps',
+    SHOW_IN_FOLDER: 'Show in folder',
+    NOTHING_TICKED: 'Tick at least one map.',
+    SPLITTING: 'Splitting...',
+    wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
+    writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
+    splitFailed: (e) => `Split failed: ${e}`,
+    SOURCE_TITLE: { cache: 'Remembered from an earlier check', analyzer: 'From the analyzer cache', scan: 'Read from the demo' },
+  },
+
   AUDITOR: {
-    PANEL_TITLE: 'Demo Auditor (Deduplication)',
+    PANEL_TITLE: 'Demo Auditor',
     TARGET_FOLDER_LABEL: 'Target Folder:',
-    TARGET_FOLDER_PLACEHOLDER: 'Folder to scan for duplicate demos...',
+    TARGET_FOLDER_PLACEHOLDER: 'Folder of demos...',
+    TAB_DUPLICATES: 'Duplicates',
+    TAB_SPLIT: 'Split Maps',
     BROWSE_BUTTON: 'Browse',
     START_AUDIT_BUTTON: 'Start Audit',
     CANCEL_SCAN_BUTTON: 'Cancel Scan',
@@ -711,6 +762,27 @@ export const STRINGS = {
     CLOSE_BUTTON: 'Close',
   },
 
+  // ── Teams list (#445) — clan tags found in the project's demos ──────────
+  TEAMS: {
+    BUTTON: 'Teams',
+    BUTTON_TITLE: "The clan tags found in this project's demos, and the team names clip names use for them",
+    TITLE: 'Teams',
+    INTRO: "Tags found in players' names, one per side of each demo. Type the name you want a team to go by, or pick another tag it is the same team as.",
+    HEADER_TAG: 'Tag',
+    HEADER_DEMOS: 'Demos',
+    HEADER_NAME: 'Name',
+    HEADER_SAME_AS: 'Same team as',
+    SAME_AS_NONE: '—',
+    EMPTY: 'No tags found yet. They appear once demos with tagged players are in the queue.',
+    unreadNote: (count) => `${count} demo(s) in the queue were scanned before teams were read.`,
+    READ_BUTTON: 'Read Their Teams',
+    READ_BUTTON_TITLE: 'Scan those demos again. Statuses, notes and kill ranges are kept.',
+    READING_BUTTON: 'Reading...',
+    alsoTag: (tag) => `also ${tag}`,
+    splitTitle: (tag) => `Split ${tag} back out into a team of its own`,
+    CLOSE_BUTTON: 'Close',
+  },
+
   // ── Demo Analyzer pane (explorer, filters, 7 report tabs) ────────────────
   ANALYZER: {
     EXPLORER_TITLE: 'Explorer',
@@ -721,11 +793,27 @@ export const STRINGS = {
     ADD_PIN_BUTTON: '➕ Add Pin…',
     RESIZE_HANDLE_TITLE: 'Drag to resize',
     DEMOS_TITLE: 'Demos',
+    CACHE_ALL_BUTTON: 'Cache all',
+    CACHE_STOP_BUTTON: 'Stop',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_NOTHING: 'No demos in this folder to cache.',
+    CACHE_STOPPING: 'Stopping after the demos in progress…',
+    cacheProgress: ({ done, total, already, failed }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed),
+    cacheDone: ({ done, total, already, failed, cancelled }) =>
+      (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
+      cacheCounts(already, failed),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',
     TYPE_HLTV: 'HLTV',
     MAP_PLACEHOLDER: 'Map',
+    // #437: every demo a player appears in.
+    PLAYER_PLACEHOLDER: 'Player',
+    PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
+    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    ROLE_RECORDED: 'recorded it',
+    ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
     MAX_DATE_PLACEHOLDER: 'Max Date (YYYY-MM-DD)',
     RESET_BUTTON: 'Reset',
@@ -1316,6 +1404,21 @@ export const STRINGS = {
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
+    // #426: how much of the game a style covers.
+    cellSummaryOf: (files, most, size) => `${files.toLocaleString()} of ${most.toLocaleString()} files, ${size}`,
+    CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
+    largestSize: (width, height) => `up to ${width}×${height}`,
+    LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    someOf: (files, most, type) => `${files} of ${most} ${type}`,
+    styleGaps: (style, none, some) => {
+      const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
+      const parts = [];
+      if (none.length) parts.push(`no ${list(none, 'or')}`);
+      if (some.length) parts.push(`only ${list(some, 'and')}`);
+      return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
+    },
+    cfgGapsComment: (sentence) => `// ${sentence}`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
@@ -1463,6 +1566,35 @@ export const STRINGS = {
     OPEN_FOLDER: 'Open folder',
   },
 
+  // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
+  COMBINE: {
+    OPEN_BUTTON: 'Combine Clips…',
+    OPEN_TITLE: 'Join rendered clips into one video',
+    TITLE: 'Combine Clips',
+    HINT: 'Join rendered clips into one video, in the order listed. Clips that all match are joined as they are, in seconds; mixed ones are fitted to the first clip and re-encoded.',
+    ADD_FINISHED_BUTTON: 'Add finished renders',
+    ADD_FILES_BUTTON: 'Add files…',
+    ADD_FILES_TITLE: 'Choose clips to combine',
+    CLEAR_BUTTON: 'Clear',
+    VIDEO_FILTER: 'Video',
+    MOVE_UP: 'Move up',
+    MOVE_DOWN: 'Move down',
+    REMOVE: 'Remove from the list',
+    EMPTY: 'No clips yet. Add finished renders, or add files.',
+    NO_FINISHED: 'No finished renders in this session yet.',
+    NEED_TWO: 'Add at least two clips.',
+    CHECKING: 'Checking the clips…',
+    planCopy: (length) => `They match, so they're joined as they are: a few seconds, no quality lost. ${length} in all.`,
+    planEncode: (length, width, height, fps) => `They differ in size, frame rate or format, so the video is re-encoded to MP4 at ${width}×${height}, ${fps} fps (the first clip's): this takes a while. ${length} in all.`,
+    planFailed: (err) => `Can't combine these: ${err}`,
+    START_BUTTON: 'Combine…',
+    SAVE_TITLE: 'Save the combined video as',
+    CANCEL_BUTTON: 'Cancel',
+    CLOSE_BUTTON: 'Close',
+    saved: (name) => `Saved ${name}.`,
+    SHOW_FILE: 'Show',
+  },
+
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
   COMMAND_SUGGEST: {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
@@ -1535,6 +1667,7 @@ export const STRINGS = {
     settingsLoadFailed: (err) => `Failed to load settings: ${err}`,
     settingsSaveFailed: (err) => `Failed to save settings: ${err}`,
     auditFailed: (err) => `Audit failed: ${err}`,
+    combineFailed: (err) => `Combining the clips failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
@@ -1547,7 +1680,7 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
-    somethingWentWrong: (message) => `Something went wrong (${message}). Details logged to crash_log.md.`,
+    somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
   // ── Footer ────────────────────────────────────────────────────────────
