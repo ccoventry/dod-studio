@@ -48,6 +48,7 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
@@ -594,6 +595,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
       render_export_dirs: renderExportDirs
     };
@@ -769,6 +771,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
@@ -1601,6 +1604,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
   initCombineClips({
     finishedRenders: () => finishedRenderOutputs(),
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,

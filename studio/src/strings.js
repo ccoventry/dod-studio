@@ -73,6 +73,9 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #174: demos you can capture a player from (POV demos they recorded).
+    PLAYER_FILTER_ALL: 'All players',
+    PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
     // #54: the Master Queue's quick filters.
     KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
     KILLS_FILTER_ALL: 'All demos',
@@ -521,6 +524,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #108: named render setups.
+    PRESET_LABEL: 'Preset:',
+    PRESET_TITLE: 'A saved codec, FPS and concurrency. Pick one to apply it. Shows — when the settings above match no preset.',
+    PRESET_NONE: '—',
+    PRESET_NAME_PLACEHOLDER: 'Name for these settings',
+    PRESET_SAVE_BUTTON: 'Save Preset',
+    PRESET_SAVE_TITLE: 'Save the codec, FPS and concurrency above under the name typed here, or over the picked preset when no name is typed.',
+    PRESET_DELETE_BUTTON: 'Delete',
+    PRESET_DELETE_TITLE: 'Delete the picked preset. The settings above stay as they are.',
     // #40: sortable columns and the whole-batch bar.
     SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
     batchProgress: (pct) => `Batch ${pct}%`,
@@ -777,6 +789,12 @@ export const STRINGS = {
     TYPE_POV: 'POV',
     TYPE_HLTV: 'HLTV',
     MAP_PLACEHOLDER: 'Map',
+    // #437: every demo a player appears in.
+    PLAYER_PLACEHOLDER: 'Player',
+    PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
+    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    ROLE_RECORDED: 'recorded it',
+    ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
     MAX_DATE_PLACEHOLDER: 'Max Date (YYYY-MM-DD)',
     RESET_BUTTON: 'Reset',
