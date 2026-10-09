@@ -449,11 +449,13 @@ unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
 }
 
 /// What Go runs: the seek, then the camera onto the streak's player when the
-/// row names one.
+/// row names one. The camera command rides on the seek and runs once it has
+/// landed: a long seek steps there over a few hundred frames, and the player
+/// may only exist once it has caught up (#596).
 fn go_line(secs: &str, target: Option<&str>) -> String {
     match target.filter(|t| !t.is_empty()) {
         Some(number) => format!(
-            "{} {secs};{} {number}\n",
+            "{} {secs} {} {number}\n",
             crate::demo_seek::SEEK_TO_NAME,
             crate::spectator_follow::TARGET_NAME
         ),

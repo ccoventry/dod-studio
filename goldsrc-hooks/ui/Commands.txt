@@ -23,8 +23,10 @@ HUD
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
       Hide the text a map puts on screen itself (mortar warnings, round results).
-  dodstudio_hide_sprite <model>...
-      Hide entities by model path.
+  dodstudio_hide_clan_text 0/1
+      Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
+  dodstudio_hide_asset list|add|del|clear <model>...
+      Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
       Kill feed: max lines, offset, block players, fake a kill. The bare command shows the options.
   dodstudio_objectives

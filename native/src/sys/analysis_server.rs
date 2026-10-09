@@ -1,6 +1,6 @@
 //! Studio analyses demos for the game (#565).
 //!
-//! The in-game DoD Studio window's Killstreaks tab needs a demo's analysis.
+//! The in-game DoD Studio window's Highlights tab needs a demo's analysis.
 //! The game is a 32-bit process, and the pre-Anniversary one has under 1 GB
 //! of address space left, while an analysis peaks at about 12 times the
 //! demo's size: a big demo doesn't fit. So while Studio runs, it serves a
