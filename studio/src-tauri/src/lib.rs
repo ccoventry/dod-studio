@@ -8,6 +8,7 @@ mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
+mod packet_limit_manager;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
@@ -735,6 +736,7 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
+            packet_limit_manager::engine_packet_entity_limit,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,

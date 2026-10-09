@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { confirmOverLimit } from './packet_entity_limit.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
@@ -1358,6 +1359,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
         return;
       }
+
+      // A demo with more entities in a snapshot than this game's engine takes
+      // closes the game when it gets there (#207). Ask before patching.
+      const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
+      const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
+      if (!(await confirmOverLimit(picked, hlPathNow))) return;
 
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason

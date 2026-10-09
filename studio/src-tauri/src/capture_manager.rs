@@ -1509,6 +1509,11 @@ pub struct SerializedDemo {
     /// simply scanned again.
     #[serde(default)]
     pub file_key: Option<String>,
+    /// The most entities in one snapshot (#207): over the engine's
+    /// `MAX_PACKET_ENTITIES` the game closes to the desktop. `None` for a
+    /// demo from a project saved before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
     /// Who recorded this POV demo (#174): the analyzer's global id (a
     /// SteamID64 when the demo has one) and name. `None` for an HLTV demo,
     /// and for demos from a project saved before this existed, which the
@@ -2110,6 +2115,7 @@ pub async fn scan_directory_impl(
                                     playback_frames,
                                     streaks: serialized_streaks,
                                     file_key: file_keys[idx].clone(),
+                                    peak_packet_entities: analysis.demo_info.peak_packet_entities,
                                     recorder_id: recorder.as_ref().map(|p| p.id.clone()),
                                     recorder_name: recorder.map(|p| p.name),
                                     teams: ::analysis::team_tags(&analysis.state),

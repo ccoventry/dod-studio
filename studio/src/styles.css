@@ -1348,6 +1348,18 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
+/* #207: a demo this install's game can't play. */
+.entity-limit-badge {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #ffb74d;
+  border: 1px solid #ffb74d;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: help;
+}
+
 /* Combine Clips (#107). */
 .combine-content {
   max-width: 680px;

@@ -1198,6 +1198,9 @@ function renderSummaryTab(container) {
       ${section(STRINGS.ANALYZER.TECH_SPECS_SECTION, [
         [STRINGS.ANALYZER.DEMO_PROTOCOL_LABEL, String(di.demo_protocol)],
         [STRINGS.ANALYZER.NETWORK_PROTOCOL_LABEL, String(di.network_protocol)],
+        [STRINGS.ANALYZER.PEAK_ENTITIES_LABEL, Number.isInteger(di.peak_packet_entities)
+          ? esc(STRINGS.ANALYZER.peakEntitiesValue(di.peak_packet_entities))
+          : STRINGS.ANALYZER.EMPTY_DASH],
       ])}
     </div>`;
 }

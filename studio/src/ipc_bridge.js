@@ -557,6 +557,16 @@ export async function cancelAudit() {
     });
 }
 
+/** The engine's MAX_PACKET_ENTITIES beside hl.exe (#207), or null. Never
+ *  toasts: the warning it feeds simply assumes the pre-Anniversary 256. */
+export async function enginePacketEntityLimit(gamePath) {
+  return invoke("engine_packet_entity_limit", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (engine_packet_entity_limit):", err);
+      return null;
+    });
+}
+
 // ── Combine Clips (#107) ───────────────────────────────────────────────────
 
 export async function combinePlan(clips, ffmpegPath) {

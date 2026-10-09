@@ -9,6 +9,7 @@ import { groupPlayers } from './player_filter.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { overLimitBadge } from './packet_entity_limit.js';
 import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { makeClearable } from './clearable_input.js';
 import { statusCountColor } from './status_colors.js';
@@ -423,6 +424,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       missingBadge.style.cssText = 'flex-shrink:0;font-size:0.75em;font-weight:normal;color:#ef5350;border:1px solid #ef5350;border-radius:2px;padding:0 4px;cursor:help;';
       tdName.appendChild(missingBadge);
     }
+
+    // More entities in a snapshot than the game's engine takes (#207).
+    const limitBadge = overLimitBadge(demo);
+    if (limitBadge) tdName.appendChild(limitBadge);
 
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {

@@ -26,6 +26,7 @@ import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsSta
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
@@ -1966,6 +1967,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (hlPathInput) {
     refreshInitCommandWarnings();
     hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
+    // Which engine it is decides which demos the Master Queue marks (#207).
+    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
+      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
+    markDemosOverLimit();
+    hlPathInput.addEventListener('change', markDemosOverLimit);
   }
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
