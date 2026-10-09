@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
@@ -1360,6 +1361,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         return;
       }
 
+      // A map a session crashed on before, for a reason the demo file can't
+      // show (#207): ask before patching.
+      const pickedPaths = (state.currentScannedDemos || [])
+        .filter((d) => (d.streaks || []).some((s) => s.selected === true))
+        .map((d) => d.path);
+      if (!(await confirmCrashMaps(pickedPaths))) return;
       // A demo with more entities in a snapshot than this game's engine takes
       // closes the game when it gets there (#207). Ask before patching.
       const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));

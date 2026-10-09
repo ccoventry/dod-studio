@@ -557,6 +557,16 @@ export async function cancelAudit() {
     });
 }
 
+/** Picked demos on a map a session crashed on (#207). Never toasts: the
+ *  warning it feeds is skipped when it fails. */
+export async function crashMapWarnings(demoPaths) {
+  return invoke("crash_map_warnings", { demoPaths })
+    .catch((err) => {
+      console.error("IPC Execution Error (crash_map_warnings):", err);
+      throw err;
+    });
+}
+
 /** The engine's MAX_PACKET_ENTITIES beside hl.exe (#207), or null. Never
  *  toasts: the warning it feeds simply assumes the pre-Anniversary 256. */
 export async function enginePacketEntityLimit(gamePath) {

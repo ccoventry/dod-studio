@@ -1,6 +1,7 @@
 mod audit_manager;
 mod capture_manager;
 mod combine_manager;
+mod crash_maps_manager;
 mod demo_cache_cmd;
 mod demo_split_manager;
 mod dir_browser;
@@ -736,6 +737,8 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
+            crash_maps_manager::crash_map_warnings,
+            crash_maps_manager::forget_crash_map,
             packet_limit_manager::engine_packet_entity_limit,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
