@@ -1549,7 +1549,7 @@ export const STRINGS = {
 
   // ── error_reporter.js: the one user-facing crash toast ───────────────────
   ERROR_REPORTER: {
-    somethingWentWrong: (message) => `Something went wrong (${message}). Details logged to crash_log.md.`,
+    somethingWentWrong: (message) => `Something went wrong (${message}). Details are in the activity log (Help → View Logs).`,
   },
 
   // ── Footer ────────────────────────────────────────────────────────────
