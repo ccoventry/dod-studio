@@ -26,6 +26,22 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// Maps a session crashed on with a known cause, for the next batch's warning
+/// (#207).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_maps;
+
+/// Caching many demos ahead of time (#569).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_cache;
+
+/// Which demos in a folder recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_maps_scan;
+/// Splitting a demo that recorded more than one map (#624).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_split;
+
 /// The Demo Auditor's renamer: facts, renames and the undo log (#469).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
@@ -38,6 +54,9 @@ pub mod hd;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
 /// The review mode's queue and answers (#623).
 pub mod review_queue;
 
@@ -82,12 +101,12 @@ where
 
 /// Where the analyzer cache lives: `analysis::cache` holds the format.
 #[cfg(not(target_arch = "wasm32"))]
-fn analyzer_cache_root() -> PathBuf {
+pub fn analyzer_cache_root() -> PathBuf {
     crate::shared::paths::get_appdata_dir().join("analyzer_cache")
 }
 
-/// Where `demo_path`'s analyzer cache entry lives, for the renamer (#469),
-/// which has to read it before the rename changes the key.
+/// The file `demo_path`'s analyzer cache entry lives in, or `None` when the
+/// demo can't be found (the key is its canonical path).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn analyzer_cache_path(demo_path: &std::path::Path) -> Option<PathBuf> {
     analysis::cache::entry_path(&analyzer_cache_root(), demo_path)
@@ -219,13 +238,6 @@ pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::pa
         && fs::write(&new_cache, json).is_ok()
     {
         let _ = fs::remove_file(old_cache);
-        // The players file beside the entry (`analysis::cache`) is keyed the
-        // same way. A rename keeps the demo's size and mtime, so it stays
-        // valid under the new key.
-        let _ = fs::rename(
-            old_cache.with_extension("players.json"),
-            new_cache.with_extension("players.json"),
-        );
     }
 }
 

@@ -48,7 +48,11 @@ export function initAuditorPane() {
         });
         if (selected) {
           const path = Array.isArray(selected) ? selected[0] : selected;
-          if (targetFolderInput) targetFolderInput.value = path;
+          if (targetFolderInput) {
+            targetFolderInput.value = path;
+            // The other tabs follow the folder too (#624).
+            targetFolderInput.dispatchEvent(new Event('input'));
+          }
           refreshStartButtonState();
         }
       } catch (err) {

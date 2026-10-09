@@ -998,7 +998,30 @@ pub fn spawn_capture_engine(
                         "[HLAE] hl.exe is gone with no exit trigger after {:.1}s — either the game was closed (quit / ALT+F4 / End Process) or it crashed",
                         start_time.elapsed().as_secs_f32()
                     ));
-                    failure_reason = Some("hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into());
+                    // The hook DLL's crash recorder says whether it was a
+                    // crash, where, and on which map; a known one is
+                    // remembered so later batches on that map are warned
+                    // (#207).
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs())
+                        .unwrap_or(0);
+                    let batch_started = std::time::SystemTime::now()
+                        .checked_sub(start_time.elapsed())
+                        .unwrap_or(std::time::UNIX_EPOCH);
+                    let explained = crate::crash_maps::explain_and_record(
+                        &crate::activity_log_dir(),
+                        &crate::shared::paths::get_appdata_dir(),
+                        batch_started,
+                        now,
+                    );
+                    failure_reason = Some(match explained {
+                        Some(crash) => {
+                            log_markdown(&format!("[HLAE] {crash}"));
+                            crash
+                        }
+                        None => "hl.exe ended before the batch finished — the game was either closed manually or crashed (no exit trigger was written)".into(),
+                    });
                     break;
                 }
                 // 500 ms is fine for watching a process; it is far too coarse

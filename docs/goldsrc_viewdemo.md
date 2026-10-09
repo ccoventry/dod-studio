@@ -168,6 +168,34 @@ the next frame runs that frame's commands and nothing before it. That suits a
 batch, whose skipped commands belong to other clips; it does not suit a POV
 demo, whose type-3 frames are the player's own key presses.
 
+### One message per jump, and what overflows it (#596)
+
+The player sends a jump's whole catch-up as **one** message, built in its
+64 KB `m_DemoStream` (ReHLDS `DemoPlayer::WriteDatagram`):
+
+- `World::WriteFrame(frame, lastFrameSeqnr, ...)` adds the reliable data and
+  user messages of every frame after the last one sent, each only if it still
+  fits. That is where a jumped-over player's `svc_updateuserinfo`, team and
+  score messages travel.
+- `WriteCommands` then adds the director events with no such check. A stream
+  that overflows is cleared whole, the console prints `Demo data stream
+  overflow.`, and the player carries on from the landing frame alone.
+
+A 20-minute jump in an HLTV demo did exactly that on 2026-10-04
+(`dodstudio_seek_to: 90.10 -> 1335.30 s`, then the overflow line): a player
+who joined 6:42 into the recording had no name in the kill feed and no team,
+the scoreboard counted 0 Allies and 0 Axis, and `dodstudio_spec_target` found
+no such player. Players already on the server when the recording began were
+fine, since their info is in the signon data.
+
+So `dodstudio_seek_to`/`_by` take a forward jump of more than 5 seconds in
+5-second steps, one per sent frame (each step waits for `m_LastFrameTime` to
+reach it). Measured with `analysis/examples/seek_burst.rs` on four HLTV
+demos: no 5-second window held more than 55 KB of network data, entities
+included, and the catch-up leaves entities out. Backward jumps replay nothing
+either way, so going back past a join or a team change still shows the later
+state. `dodstudio_seek_skip_between 1` jumps at once, as before.
+
 ## What this means for moving the batch
 
 Nothing found blocks it. Today's patched chain demos would run under

@@ -104,6 +104,9 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+                  <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
+                </select>
                 <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
                 <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
@@ -119,6 +122,13 @@
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
+                </label>
+                <!-- #665: gaps between kills play fast. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
+                  <input type="checkbox" id="review-fast-forward-cb" checked />
+                  <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
                 </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
@@ -485,6 +495,16 @@
 
             <!-- Tab Content: Initial + Scheduled Commands -->
             <div id="tab-custom-commands" class="config-tab-content" style="display: none;">
+              <!-- #442: named sets of both lists below. -->
+              <div class="input-row" style="margin-bottom: 12px;">
+                <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
+                <select id="command-profile-select"><option value="">—</option></select>
+                <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
+                <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
+                <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
+                <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
                 <span class="info-icon" data-str-title="CAPTURE_CONFIG.INIT_COMMANDS_INFO_TITLE" title=""><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span>
@@ -551,6 +571,15 @@
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
                   <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
                 </div>
+              </div>
+
+              <!-- #108: named render setups. -->
+              <div class="input-row" style="margin-top: 6px;">
+                <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
+                <select id="render-preset-select"><option value="">—</option></select>
+                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
+                <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
               </div>
 
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
@@ -649,6 +678,7 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
@@ -694,24 +724,36 @@
         <section id="pane-demo-auditor" class="content-pane" style="display: none;">
           <div class="egui-panel">
             <div class="panel-header">
-              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor (Deduplication)</h3>
+              <h3 data-str="AUDITOR.PANEL_TITLE">Demo Auditor</h3>
             </div>
             <div class="panel-body">
               <div class="input-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
-                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder to scan for duplicate demos..." style="flex: 1;" />
+                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
-              <div class="row-inputs">
-                <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
-                <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+              <!-- One tab per tool; all of them work on the folder above (#624). -->
+              <div class="auditor-tabs" role="tablist">
+                <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
+                <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
+            <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="rename" data-str="AUDITOR.TAB_RENAME">Rename Demos</button>
               </div>
-              <p id="audit-status" class="status-indicator">
-                <span id="audit-spinner" class="spinner" style="display: none;"></span>
-                <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
-              </p>
             </div>
           </div>
+
+          <div class="auditor-tab-panel" data-auditor-panel="duplicates">
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-body">
+                <div class="row-inputs">
+                  <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
+                  <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
+                </div>
+                <p id="audit-status" class="status-indicator">
+                  <span id="audit-spinner" class="spinner" style="display: none;"></span>
+                  <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                </p>
+              </div>
+            </div>
 
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
@@ -738,8 +780,30 @@
             </div>
             <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
           </div>
+          </div>
+
+          <!-- Split Maps (#624): split_pane.js. Demos that recorded more than
+               one map, split into one demo per map. -->
+          <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
+            <div class="egui-panel" style="margin-top: 10px;">
+              <div class="panel-header">
+                <h3 data-str="SPLIT.TITLE">Demos With More Than One Map</h3>
+              </div>
+              <div class="panel-body">
+                <p class="split-hint" data-str="SPLIT.HINT">A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.</p>
+                <div class="row-inputs">
+                  <label class="split-recursive-label"><input type="checkbox" id="split-recursive" checked /> <span data-str="SPLIT.RECURSIVE">Include subfolders</span></label>
+                  <button id="split-find-btn" class="primary-btn" disabled data-str="SPLIT.FIND_BUTTON">Find Multi-Map Demos</button>
+                  <button id="split-cancel-btn" disabled data-str="SPLIT.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="split-status" class="status-indicator"></p>
+                <div id="split-list" class="split-list"></div>
+              </div>
+            </div>
+          </div>
 
           <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
+          <div class="auditor-tab-panel" data-auditor-panel="rename" hidden>
           <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
               <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
@@ -783,6 +847,7 @@
               </table>
             </div>
           </div>
+          </div>
         </section>
 
         <!-- HD Textures (#372): what is built, the movie.cfg lines to use it,
@@ -819,6 +884,7 @@
                   <select id="hd-style-select"></select>
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
+                <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
               </div>
             </div>
@@ -1044,8 +1110,12 @@
                docked above the report tabs. -->
           <div class="analyzer-main-column">
             <div class="egui-panel analyzer-demos-panel">
-              <div class="panel-header">
+              <div class="panel-header flex-between">
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
+                <div class="analyzer-cache-controls">
+                  <span id="analyzer-cache-status" class="status-text"></span>
+                  <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
+                </div>
               </div>
               <div class="analyzer-filter-bar">
                 <input type="text" id="analyzer-filter-search" data-str-placeholder="ANALYZER.SEARCH_NAME_MAP_PLACEHOLDER" placeholder="Search name/map..." />
@@ -1055,9 +1125,12 @@
                   <option value="HLTV" data-str="ANALYZER.TYPE_HLTV">HLTV</option>
                 </select>
                 <input type="text" id="analyzer-filter-map" data-str-placeholder="ANALYZER.MAP_PLACEHOLDER" placeholder="Map" />
+                <input type="text" id="analyzer-filter-player" list="analyzer-player-options" data-str-placeholder="ANALYZER.PLAYER_PLACEHOLDER" data-str-title="ANALYZER.PLAYER_FILTER_TITLE" placeholder="Player" />
+                <datalist id="analyzer-player-options"></datalist>
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
+                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">
@@ -1250,6 +1323,27 @@
     </div>
 
     <!-- FFmpeg Error Log — shown via a render job row's "View Log" action. -->
+    <!-- Combine Clips (#107): combine_clips.js. -->
+    <div id="combine-modal" class="modal" style="display: none;">
+      <div class="modal-content combine-content">
+        <h2 data-str="COMBINE.TITLE">Combine Clips</h2>
+        <p class="combine-hint" data-str="COMBINE.HINT">Join rendered clips into one video, in the order listed.</p>
+        <div class="combine-toolbar">
+          <button id="combine-add-finished-btn" data-combine-edit data-str="COMBINE.ADD_FINISHED_BUTTON">Add finished renders</button>
+          <button id="combine-add-files-btn" data-combine-edit data-str="COMBINE.ADD_FILES_BUTTON">Add files…</button>
+          <button id="combine-clear-btn" data-combine-edit data-str="COMBINE.CLEAR_BUTTON">Clear</button>
+        </div>
+        <ol id="combine-list" class="combine-list"></ol>
+        <p id="combine-plan" class="combine-plan"></p>
+        <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <div class="combine-actions">
+          <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
+          <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>
+          <button id="combine-close-btn" data-str="COMBINE.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>

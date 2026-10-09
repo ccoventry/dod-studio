@@ -60,7 +60,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 **Master Demo Queue.** One row per demo with counts: Highlights, Selected, Pending, Captured, Rendered. Counts include only the recording player's streaks. A search box (with an × and Esc to clear it) filters by name, path or map, and quick filters narrow the list to demos with kills or to POV demos only. Every bulk action works on the visible rows only:
 
-- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
+- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. **Fast-forward gaps over N s** (on, 8 s by default, #665) plays the stretch between two kills further apart than that at 4x, from 2 s after one kill to 4 s before the next. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
 - **Clear Untracked** removes demos with no statuses, notes, narrowed ranges or review answers.
 - **Clear Selected** and **Clear All** ask to save first when tracked work would be lost.
 - **Teams** lists the clan tags found in the queue's demos (issue #445), with how many demos each is in. A tag is the longest start or end that at least 60% and at least 3 of a side's player names share, kept to letters, digits and spaces. Each row takes a display name and a **Same team as** pick that merges it into another row (× on the merged tag splits it out). Names and merges are saved in the project file. Demos from a project saved before this have no teams until **Read Their Teams** scans them again. These feed the clip-name `{team_name}` and `{opponent}` placeholders (#441).
@@ -105,7 +105,10 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 ### 2.5 Demo Auditor
 
-Finds byte-identical duplicate demos under one folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+One folder picker, then a tab per tool:
+
+- **Duplicates:** finds byte-identical duplicate demos under the folder. Files are keyed by size plus a hash of the first 64 KiB. Each duplicate group keeps its first file and pre-ticks the rest for deletion. The footer shows duplicates found and wasted space.
+- **Split Maps (#624):** lists every demo under the folder that recorded more than one map, with each map's start and length. Ticked maps are written as demos of their own next to the original, which is never changed. A map under a minute starts unticked (usually the next map loading as the recording stopped). The list comes from a remembered answer, the analyzer cache's `signon_maps`, or a quick byte scan, in that order (`native::demo_maps_scan`); the split itself is `native::demo_split`.
 
 **Rename Demos** (#469) renames the same folder's demos, subfolders too, in place: one template for POV demos (default `{name}_{kills}k_v_{opponent}_{map}`) and one for HLTV demos (default `{allies}_v_{axis}_{map}_{date}`), on the clip names' template engine. Team names come from the project's Teams list. A preview lists every demo first; a clash gets `_2`, and a name already in the folder is never taken. **Undo Last Rename** reverses the newest batch, from a log in `%APPDATA%\dod-studio\demo_rename_logs`. A demo's analyzer cache entry moves with it.
 
@@ -113,6 +116,7 @@ Finds byte-identical duplicate demos under one folder. Files are keyed by size p
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
+- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
 - **Report**, eight sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
