@@ -10,6 +10,7 @@ import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
+import { multiMapSplitButton } from './queue_multimap.js';
 import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { makeClearable } from './clearable_input.js';
 import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
@@ -58,6 +59,8 @@ let currentOnRequestTrackedDeleteConfirm = null;
 let currentOnLocateDemo = null;
 // main.js's handler for a missing demo's Use found copy button (#21).
 let currentOnUseFoundCopy = null;
+// main.js's handler for a multi-map demo's Split button (#217).
+let currentOnSplitDemo = null;
 let currentSearchTerm = '';
 // #174: the player picked in the header's player filter ('' = everyone), and
 // the recorders looked up for demos scanned before a scan stored one
@@ -161,9 +164,12 @@ export function getVisibleDemos() {
   return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesPlayer(d) && matchesQuickFilters(d, quickFilters));
 }
 
-export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy) {
+export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
+  }
+  if (onSplitDemo) {
+    currentOnSplitDemo = onSplitDemo;
   }
   if (onLocateDemo) {
     currentOnLocateDemo = onLocateDemo;
@@ -430,6 +436,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     // More entities in a snapshot than the game's engine takes (#207).
     const limitBadge = overLimitBadge(demo);
     if (limitBadge) tdName.appendChild(limitBadge);
+
+    // More than one map: the game stops at the first map change (#217).
+    const splitBtn = multiMapSplitButton(demo, currentOnSplitDemo);
+    if (splitBtn) tdName.appendChild(splitBtn);
 
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {

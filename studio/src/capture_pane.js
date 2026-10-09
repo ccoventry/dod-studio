@@ -1364,9 +1364,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // A demo may have moved since the queue was loaded (#21). main.js looks
       // for it the same way Load Project does and offers the match; a demo
       // still missing after that stops the batch, since its highlights
-      // cannot be captured.
-      if (pickedDemosPresent && !(await pickedDemosPresent())) {
-        showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
+      // cannot be captured. A picked demo with more than one map stops it
+      // too (#217); main.js has said why then ('handled').
+      const demosReady = pickedDemosPresent ? await pickedDemosPresent() : true;
+      if (demosReady !== true) {
+        if (demosReady === false) showToast(STRINGS.CAPTURE.DEMOS_MISSING_NOT_STARTED, 'error');
         return;
       }
 

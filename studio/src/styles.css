@@ -1393,6 +1393,28 @@ button.primary-btn:hover:not(:disabled) {
   cursor: help;
 }
 
+/* #217: a queued demo with more than one map; the badge is the Split button. */
+.multimap-split-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #fbbf24;
+  background: transparent;
+  border: 1px solid #fbbf24;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.multimap-split-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
 /* Combine Clips (#107). */
 .combine-content {
   max-width: 680px;
