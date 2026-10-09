@@ -1046,9 +1046,7 @@ version = "0.1.0"
 dependencies = [
  "analysis",
  "dirs 5.0.1",
- "dod",
  "hl-demo-auditor",
- "indexmap 2.14.0",
  "log",
  "native",
  "serde",
@@ -1057,7 +1055,6 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
- "tauri-plugin-fs",
  "tauri-plugin-notification",
  "tauri-plugin-opener",
  "tauri-plugin-updater",
@@ -2605,7 +2602,6 @@ dependencies = [
  "js-sys",
  "keepawake",
  "log",
- "nom",
  "open",
  "rfd 0.14.1",
  "serde",
@@ -2620,7 +2616,6 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "web-time",
 ]
 
 [[package]]
@@ -5603,17 +5598,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8622dcb61c0bcc9fffa6938bed81210af2da9a7e4a1a834b2e37a59b6dfb6141"
 dependencies = [
  "js-sys",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "web-time"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
-dependencies = [
- "js-sys",
- "serde",
  "wasm-bindgen",
 ]
 

@@ -125,6 +125,13 @@ is the complete list):
   the engine's own remove functions do. Nothing to do with `r_decals`, which
   bounds a rotating index and evicts nothing. Pre-Anniversary `hw.dll` only,
   and it says so loudly on any other engine -- see `docs/goldsrc_decals.md`.
+- **Console commands from window buttons** (on by default): a button added
+  to any GameUI window in build mode (Ctrl+Shift+Alt+B) whose command is
+  `engine <console command>` runs it, as the ESC menu's `GameMenu.res`
+  entries already do. Stock, the window drops it: vgui2's
+  `Panel::OnCommand` is empty here, unlike Source's. One redirected call at
+  the end of `Frame::OnCommand`; `GOLDSRC_HOOKS_ENGINE_BUTTONS=0` turns it
+  off. See `src/engine_buttons.rs`.
 - **Seek** (`dodstudio_seek_to <seconds>`, `dodstudio_seek_by <seconds>`):
   jumps `viewdemo` playback to a time, the way the demo editor's Goto does,
   through `DemoPlayer.dll`'s own `IDemoPlayer`. A forward jump normally runs
@@ -189,6 +196,12 @@ is the complete list):
   copy of the name, so the DLL wraps both engine commands to note it; the
   wrap goes through the SDK's command-list functions, with no per-build
   address. See `src/demo_reload.rs`.
+- **Review highlights** (`dodstudio_review`, #623): plays each highlight
+  DoD Studio queued at normal speed, pauses at its end on the window's Review
+  tab, and sends each Yes/No, kill range and note back to Studio on the
+  events pipe. Pause and speed go through `DemoPlayer.dll`'s `SetPaused` and
+  `SetTimeScale`, checked by `tools/verify_demo_seek_offsets.py`. See
+  `src/review.rs`.
 - **Refuses to join a server, except an HLTV proxy** (on by default):
   `connect` and `listen` first ask the address what it is (`A2S_INFO`, off
   the game thread, `src/server_query.rs`) and only join an HLTV proxy that
@@ -286,7 +299,10 @@ against a real `client.dll` or `hw.dll`.
 detail textures and skies as the game loads them: on when there's a
 `dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
-the scripts that build those files; see its README.
+the scripts that build
+those files; see its README. It works the same on the 25th Anniversary
+`hw.dll` (#370), from that build's own offsets
+(`tools/verify_texture_hires_offsets.py --anniversary`).
 
 ### Always-on crash guards
 

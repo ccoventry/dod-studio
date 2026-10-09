@@ -520,6 +520,8 @@ pub fn poll() {
     demo_list_folders::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::frame_esc::poll();
+    // Installs once GameUI.dll is found, then costs one atomic load.
+    crate::engine_buttons::poll();
     // Every few frames, once GameUI, vgui2 and hw are found; a cvar read or
     // two while both of its settings are off.
     window_layout::poll();
@@ -541,6 +543,7 @@ pub fn poll() {
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
     crate::studio_panel::poll();
+    crate::review::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -1392,6 +1395,7 @@ pub fn install() {
     add_command(demo_seek::SEEK_TO_NAME, demo_seek::seek_to);
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
     add_command(crate::studio_panel::NAME, crate::studio_panel::command);
+    add_command(crate::review::NAME, crate::review::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one

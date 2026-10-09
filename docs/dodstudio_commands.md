@@ -41,7 +41,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
-| `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven, no specific value settled on yet | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
+| `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
 | `dodstudio_hd_enabled` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
@@ -55,6 +55,9 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
 | `dodstudio_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
 | `dodstudio_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
+
+The HD rows work the same on the pre-Anniversary and the 25th Anniversary
+`hw.dll` (#370).
 
 ## Commands
 
@@ -121,7 +124,8 @@ chat, the kill feed, the status bar, the objective icons and the rest.
 
 No arguments. Empties the engine's 4096-slot decal pool on command,
 unlinking each decal from its surface first the way the engine's own remove
-functions do. Nothing to do with `r_decals`. Pre-Anniversary `hw.dll` only.
+functions do. Nothing to do with `r_decals`. Works on the pre-Anniversary
+and the 25th Anniversary `hw.dll`.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
 
 ### `dodstudio_seek_to` / `dodstudio_seek_by`
@@ -138,6 +142,18 @@ Anniversary `DemoPlayer.dll`. Nothing in the pipeline calls them yet. See
 No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
+
+### `dodstudio_review`
+
+DoD Studio's **Review highlights** (#623): plays each queued highlight at
+normal speed, from 4 s before its first kill to 2 s after its last, pauses,
+and opens the window's Review tab. `start "<queue file>"` begins (Studio
+sends it over the game's pipe); `yes` and `no` answer with the Review tab's
+kill range and note and move on; `replay`, `next` (skip without answering),
+`back` and `stop` move around. `range <from> <to>` and `note <text>` set the
+answer from the console, for key binds. Bare prints where the review is.
+Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
+pipe. See `src/review.rs`.
 
 ### `dodstudio_overviewmap`
 
@@ -236,7 +252,7 @@ is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
 The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
-one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`), written
+one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then
 Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
