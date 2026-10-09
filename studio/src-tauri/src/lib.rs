@@ -689,6 +689,7 @@ pub fn run() {
             hd_manager::hd_misses,
             hd_manager::hd_save_style,
             hd_manager::hd_remove_style,
+            hd_manager::hd_save_map_list,
             hd_manager::hd_preview,
             blender_manager::blender_status,
             blender_manager::blender_set_exe,

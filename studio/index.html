@@ -280,6 +280,8 @@
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_VIDEO_TITLE">Video</option>
                     <option value="obs" data-str="CAPTURE_CONFIG.CAPTURE_MODE_OBS"
                             data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_OBS_TITLE">OBS (real time)</option>
+                    <option value="agr" data-str="CAPTURE_CONFIG.CAPTURE_MODE_AGR"
+                            data-str-title="CAPTURE_CONFIG.CAPTURE_MODE_AGR_TITLE">AGR for Blender (no video)</option>
                   </select>
                   <input type="checkbox" id="config-ffmpeg-capture" hidden />
                 </div>
@@ -290,6 +292,13 @@
                      Every entry is also RGB/4:4:4 because hudAlpha carries the
                      HUD matte in its red channel. Disabled unless Video is on;
                      it has no meaning for a frame sequence. -->
+                <!-- Shown only in AGR mode (#450). Empty means "the same as
+                     Capture FPS", which is hidden in this mode, so the
+                     placeholder names the number it will use. -->
+                <div class="control-group" id="agr-fps-group" style="display: none;">
+                  <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
+                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
                          data-str-title="CAPTURE_CONFIG.CAPTURE_CODEC_TITLE">Capture Codec:</label>
@@ -803,6 +812,54 @@
                   <button id="hd-setup-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
                 </div>
                 <p id="hd-setup-progress" class="hd-hint"></p>
+              </div>
+            </div>
+
+            <!-- Which maps get HD map textures and skies: the install's hd_maps.txt. -->
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="HD.MAPS_TITLE">Maps to build</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="HD.MAPS_HINT">Map textures and skies are built only for the maps you pick here, which saves hours on a big map collection. Model skins, sprites and detail textures aren't tied to a map, so they're always built. The command-line scripts read the same list.</p>
+                <p id="hd-maps-file" class="hd-hint"></p>
+                <div class="hd-maps-mode">
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-every" value="every">
+                    <span id="hd-maps-every-label" data-str="HD.MAPS_EVERY">Every map</span>
+                  </label>
+                  <label class="hd-check">
+                    <input type="radio" name="hd-maps-mode" id="hd-maps-some" value="some">
+                    <span data-str="HD.MAPS_SOME">Only the maps I pick</span>
+                  </label>
+                </div>
+                <div id="hd-maps-editor">
+                  <div class="hd-choice-group">
+                    <span class="hd-choice-label" data-str="HD.MAPS_LIST_LABEL">Picked by:</span>
+                    <ul id="hd-maps-patterns" class="hd-map-patterns"></ul>
+                  </div>
+                </div>
+                <div class="input-row">
+                  <label for="hd-maps-search" data-str="HD.MAPS_SEARCH_LABEL">Your maps:</label>
+                  <input id="hd-maps-search" type="search" spellcheck="false" data-str-placeholder="HD.MAPS_SEARCH_PLACEHOLDER" placeholder="Search as a line: *anzio*">
+                  <button id="hd-maps-add-btn" data-str="HD.MAPS_ADD_BUTTON">Add as a line</button>
+                  <label class="hd-check">
+                    <input type="checkbox" id="hd-maps-picked-only">
+                    <span data-str="HD.MAPS_PICKED_ONLY">Picked only</span>
+                  </label>
+                  <span id="hd-maps-legend" class="hd-map-legend" hidden>
+                    <span class="hd-tick hd-tick-own"></span><span data-str="HD.MAPS_TICK_OWN">its own line</span>
+                    <span class="hd-tick hd-tick-pattern"></span><span data-str="HD.MAPS_TICK_PATTERN">a pattern</span>
+                  </span>
+                </div>
+                <p id="hd-maps-pattern-hint" class="hd-hint" data-str="HD.MAPS_PATTERN_HELP">The search is read as a line: * matches any run of characters (*anzio* is every anzio map), ? one character, and a bare name is that one map. Add as a line keeps what you typed. A green tick is a map a pattern picked: click it to see which chip, and change or remove that line to leave the map out.</p>
+                <ul id="hd-maps-available" class="hd-map-list"></ul>
+                <p id="hd-maps-summary" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="hd-maps-save-btn" class="primary-btn" data-str="HD.MAPS_SAVE_BUTTON">Save</button>
+                  <button id="hd-maps-undo-btn" data-str="HD.MAPS_UNDO_BUTTON">Undo changes</button>
+                </div>
+                <p id="hd-maps-message" class="hd-hint"></p>
               </div>
             </div>
 
