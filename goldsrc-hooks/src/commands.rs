@@ -542,6 +542,8 @@ pub fn poll() {
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    crate::overview_players::poll();
+    crate::overview_marker::poll();
     crate::studio_panel::poll();
     crate::review::poll();
 }
@@ -711,6 +713,12 @@ fn status_text() -> String {
     }
     if let Some(lock) = crate::spectator_follow::status_line() {
         lines.push(lock);
+    }
+    if let Some(icons) = crate::overview_players::status_line() {
+        lines.push(icons);
+    }
+    if let Some(marker) = crate::overview_marker::status_line() {
+        lines.push(marker);
     }
     if let Some(shaders) = crate::world_shaders::status_line() {
         lines.push(shaders);
@@ -1513,6 +1521,12 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(icons) = register(crate::overview_players::NAME, "0") {
+        crate::overview_players::set_cvar(icons);
+    }
+    if let Some(marker) = register(crate::overview_marker::NAME, "0") {
+        crate::overview_marker::set_cvar(marker);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1663,6 +1677,8 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::overview_players::NAME,
+            crate::overview_marker::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }
