@@ -5,6 +5,7 @@ How the capture pipeline launches HLAE, ends a batch, and checks what HLAE wrote
 ## Commands
 - **GoldSrc HLAE takes the legacy command set**: `mirv_movie_filename`, `mirv_movie_fps`, `mirv_movie_ffmpeg`. CS:GO-era commands such as `mirv_streams` do not exist in AfxHookGoldSrc and fail as invalid console input.
 - **The pipeline owns the recording commands.** Which commands a user may type into Initial or Scheduled Commands, and why, is set by `native::patch::cfg_scan`; see `docs/command_tiers.md`.
+- **`mirv_agr start` takes a plain file path (#450):** Verified offline against AfxHookGoldSrc 2.25.3: the argument is converted to UTF-16 and handed straight to `_wfopen_s`, nothing else. So a relative path resolves against `hl.exe`'s working directory (the game root, see below), and no folder is created — the parent must already exist, or HLAE prints "Started AGR recording." and writes nothing. An absolute path must be quoted, because GoldSrc's `COM_Parse` splits a bare word at `:` (`C:\x.agr` arrives as `C`), and an alias body cannot hold quotes — so an alias can only carry a relative path. AGR capture mode therefore records to `_route_<drive>/<block>/<block>.agr` through the same junctions `mirv_movie_filename` uses. See `patch::builder::agr_route_path`.
 
 ## Ending a batch
 GoldSrc drops `quit` and `exec` from a demo's message stream, so a demo cannot end the game itself. A batch ends one of three ways:

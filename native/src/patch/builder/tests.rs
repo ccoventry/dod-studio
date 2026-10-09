@@ -460,6 +460,241 @@ fn mock_config_in(tag: &str) -> PatcherConfig {
     config
 }
 
+// ── AGR capture (#450) ───────────────────────────────────────────────────
+
+fn config_in_mode(mode: crate::patch::CaptureMode) -> PatcherConfig {
+    PatcherConfig {
+        capture_mode: mode,
+        ..PatcherConfig::default()
+    }
+}
+
+#[test]
+fn the_movie_modes_record_aliases_are_unchanged_by_agr_mode() {
+    // Pinned to the exact bytes the helper cfg carried before AGR mode
+    // existed: adding a mode must not move anything the other three emit.
+    for mode in [
+        crate::patch::CaptureMode::FrameSequence,
+        crate::patch::CaptureMode::DirectToVideo,
+    ] {
+        assert_eq!(
+            record_alias_lines(&config_in_mode(mode)),
+            "alias sys_record_start \"mirv_recordmovie_start; stopsound\"\n\
+             alias sys_record_stop \"mirv_recordmovie_stop\"\n",
+            "{mode:?}"
+        );
+    }
+    assert_eq!(
+        record_alias_lines(&config_in_mode(crate::patch::CaptureMode::Obs)),
+        "alias sys_record_start \"stopsound\"\n\
+         alias sys_record_stop \"echo [dod-studio] OBS_MODE_NO_HLAE_STOP\"\n"
+    );
+    for mode in [
+        crate::patch::CaptureMode::FrameSequence,
+        crate::patch::CaptureMode::DirectToVideo,
+        crate::patch::CaptureMode::Obs,
+    ] {
+        assert_eq!(
+            route_alias_line(&config_in_mode(mode), "dodstudio_chain_01", 4, 1),
+            "alias dodstudio_chain_01_route_4 \"mirv_movie_filename _route_1/dodstudio_chain_01_b4\"\n",
+            "{mode:?}"
+        );
+    }
+}
+
+#[test]
+fn agr_mode_pins_the_timestep_to_the_agr_fps_and_never_records_a_movie() {
+    let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
+    config.capture_fps = 300;
+    config.agr_fps = 30;
+    let lines = record_alias_lines(&config);
+    assert_eq!(
+        lines,
+        format!(
+            "alias sys_record_start \"host_framerate {}\"\n\
+             alias sys_record_stop \"mirv_agr stop; host_framerate 0\"\n",
+            1.0f32 / 30.0
+        )
+    );
+    assert!(!lines.contains("mirv_recordmovie"), "{lines}");
+}
+
+#[test]
+fn agr_fps_follows_the_capture_fps_until_it_is_set() {
+    let mut config = config_in_mode(crate::patch::CaptureMode::Agr);
+    config.capture_fps = 300;
+    config.agr_fps = 0;
+    assert_eq!(config.effective_agr_fps(), 300);
+    assert_eq!(agr_host_framerate(&config), 1.0 / 300.0);
+    config.agr_fps = 120;
+    assert_eq!(config.effective_agr_fps(), 120);
+    // Never a division by zero, whatever the settings say.
+    config.agr_fps = -5;
+    config.capture_fps = 0;
+    assert_eq!(config.effective_agr_fps(), 1);
+}
+
+#[test]
+fn the_agr_path_survives_goldsrcs_tokenizer_as_one_argument() {
+    // The alias body cannot carry quotes, so the path has to be one bare
+    // word: nothing COM_Parse breaks a word at, no whitespace, no quote,
+    // and no `//` (a comment to the tokenizer).
+    let config = config_in_mode(crate::patch::CaptureMode::Agr);
+    for (drive, block) in [(0, 0), (3, 17), (12, 250)] {
+        let line = route_alias_line(&config, "dodstudio_chain_12", block, drive);
+        let path = agr_route_path(drive, "dodstudio_chain_12", block);
+        assert_eq!(
+            line,
+            format!("alias dodstudio_chain_12_route_{block} \"mirv_agr start {path}\"\n")
+        );
+        assert!(
+            !path
+                .chars()
+                .any(|c| "{}()',:\"".contains(c) || c.is_whitespace()),
+            "{path}"
+        );
+        assert!(!path.contains("//"), "{path}");
+        assert!(path.starts_with(&format!("_route_{drive}/")), "{path}");
+        assert!(path.ends_with(".agr"), "{path}");
+    }
+}
+
+/// A one-drive AGR batch in a folder of the test's own, returning the jobs,
+/// the helper cfg, the capture drive and the game folder to clean up.
+fn build_agr_batch(
+    tag: &str,
+    mode: crate::patch::CaptureMode,
+) -> (
+    Vec<PatchJob>,
+    String,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    // A run that panicked last time left its folders behind.
+    let stale = std::env::temp_dir().join(format!("dod_test_{tag}"));
+    let _ = std::fs::remove_dir(stale.join("_route_0"));
+    let _ = std::fs::remove_dir_all(&stale);
+    let mut config = mock_config_in(tag);
+    let game = std::path::PathBuf::from(&config.game_path)
+        .parent()
+        .unwrap()
+        .to_path_buf();
+    let drive = game.join("capture");
+    std::fs::create_dir_all(&drive).unwrap();
+    config.capture_directories = vec![drive.clone()];
+    config.session_id = "session_agr".to_string();
+    config.capture_mode = mode;
+    config.agr_fps = 60;
+    let streaks = vec![
+        streak_with_kills(1000, 1200, &[1000, 1200]),
+        streak_with_kills(9000, 9300, &[9000, 9300]),
+    ];
+    let (jobs, _) = build_batch_queue(streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let cfg = std::fs::read_to_string(game.join("dod").join("dodstudio_helper.cfg")).unwrap();
+    // The route junction build_batch_queue made beside hl.exe: unlink it
+    // before anything deletes the tree, or the delete follows it.
+    let _ = std::fs::remove_dir(game.join("_route_0"));
+    (jobs, cfg, drive, game)
+}
+
+#[test]
+fn an_agr_batch_patches_the_same_demos_as_a_frame_sequence_batch() {
+    // AGR mode changes only what the alias names do, in the helper cfg. The
+    // commands injected into the demos -- and so every frame ordinal, and
+    // the 64-byte budget -- are the frame-sequence batch's, byte for byte.
+    let (agr_jobs, _, _, agr_game) =
+        build_agr_batch("agr_same_demos_agr", crate::patch::CaptureMode::Agr);
+    let (seq_jobs, _, _, seq_game) = build_agr_batch(
+        "agr_same_demos_seq",
+        crate::patch::CaptureMode::FrameSequence,
+    );
+    let _ = std::fs::remove_dir_all(&agr_game);
+    let _ = std::fs::remove_dir_all(&seq_game);
+
+    assert_eq!(agr_jobs.len(), seq_jobs.len());
+    for (a, s) in agr_jobs.iter().zip(&seq_jobs) {
+        assert_eq!(a.scheduled_commands, s.scheduled_commands);
+        assert_eq!(a.init_commands, s.init_commands);
+        for (tick, cmd) in &a.scheduled_commands {
+            assert!(
+                cmd.len() < crate::patch::MAX_CONSOLE_CMD_SAFE_LEN,
+                "{cmd:?} at tick {tick} does not fit a ConsoleCommand frame"
+            );
+        }
+    }
+}
+
+#[test]
+fn an_agr_batch_routes_each_block_into_its_own_take_folder_and_makes_it() {
+    let (jobs, cfg, drive, game) =
+        build_agr_batch("agr_routes_blocks", crate::patch::CaptureMode::Agr);
+    let blocks: Vec<&crate::patch::types::CaptureBlock> =
+        jobs.iter().flat_map(|j| j.blocks.iter()).collect();
+    let made: Vec<bool> = blocks.iter().map(|b| b.take_folder.is_dir()).collect();
+    let _ = std::fs::remove_dir_all(&game);
+
+    assert_eq!(blocks.len(), 2, "two separate highlights, two takes");
+    assert_eq!(
+        made,
+        vec![true, true],
+        "mirv_agr cannot make its own folder"
+    );
+    for block in &blocks {
+        // The alias's relative path, resolved through the junction, is
+        // exactly the planned take folder: `_route_0` links to
+        // `<drive>/<session_id>`.
+        let rel = agr_route_path(block.drive_index, &block.demo_name, block.block_index);
+        let via_junction = rel.strip_prefix("_route_0/").expect("drive 0");
+        assert_eq!(
+            drive.join("session_agr").join(via_junction),
+            block
+                .take_folder
+                .join(agr_file_name(&block.demo_name, block.block_index)),
+        );
+        assert!(
+            cfg.contains(&format!(
+                "alias {}_route_{} \"mirv_agr start {rel}\"\n",
+                block.demo_name, block.block_index
+            )),
+            "{cfg}"
+        );
+    }
+    assert!(!cfg.contains("mirv_movie_filename _route_"), "{cfg}");
+    assert!(
+        cfg.contains(&format!(
+            "alias sys_record_start \"host_framerate {}\"",
+            1.0f32 / 60.0
+        )),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn a_frame_sequence_batch_makes_no_take_folders_of_its_own() {
+    // HLAE's movie recorder makes them; an empty one made in advance would
+    // only sit there looking like a take that captured nothing.
+    let (jobs, _, _, game) = build_agr_batch(
+        "agr_seq_no_folders",
+        crate::patch::CaptureMode::FrameSequence,
+    );
+    let made = jobs
+        .iter()
+        .flat_map(|j| j.blocks.iter())
+        .any(|b| b.take_folder.exists());
+    let _ = std::fs::remove_dir_all(&game);
+    assert!(!made);
+}
+
+#[test]
+fn an_agr_block_is_sized_as_an_agr_file_not_a_frame_sequence() {
+    // 30 s at 300 fps: ~74 MB of AGR, against ~25 GB of 720p bitmaps. Sizing
+    // an AGR batch like a frame sequence would refuse drives it fits on.
+    let agr = crate::sys::disk::calculate_agr_bytes(300, 30.0);
+    assert_eq!(agr, 8 * 1024 * 300 * 30);
+    assert!(agr < 100 * 1024 * 1024);
+    assert!(crate::sys::disk::calculate_raw_sequence_bytes(1280, 720, 300, 30.0) > 300 * agr);
+}
+
 #[test]
 fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
     let mut config = PatcherConfig::default();
