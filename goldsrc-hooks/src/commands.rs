@@ -680,8 +680,8 @@ fn status_text() -> String {
     }
     // Same reasoning as msglog above: hiding is off by default and a
     // permanent "hiding nothing" line would be noise in the common case.
-    if let Some(hide_sprite) = crate::hide_sprite::status_line() {
-        lines.push(hide_sprite);
+    if let Some(hide_asset) = crate::hide_asset::status_line() {
+        lines.push(hide_asset);
     }
     // The one setting the console's own type-ahead cannot report, because it
     // is a command rather than a cvar -- which is the reason the rest are left
@@ -1416,10 +1416,7 @@ pub fn install() {
     add_commands(crate::deathmsg::COMMAND_NAMES, crate::deathmsg::command);
     add_commands(crate::msglog::COMMAND_NAMES, crate::msglog::command);
     add_commands(crate::objicons::COMMAND_NAMES, crate::objicons::command);
-    add_commands(
-        crate::hide_sprite::COMMAND_NAMES,
-        crate::hide_sprite::command,
-    );
+    add_commands(crate::hide_asset::COMMAND_NAMES, crate::hide_asset::command);
     add_commands(
         texture_hires::MISSES_COMMAND_NAMES,
         texture_hires::misses_command,
