@@ -7,7 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { MODIFIERS } from './clip_name.js';
 import {
-  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS,
+  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
@@ -80,13 +80,21 @@ function insertAtCursor(text) {
   input.dispatchEvent(new Event('change'));
 }
 
+/** The demo type of the template the chips insert into. */
+function chipType() {
+  return chipTarget?.id === 'rename-hltv-template' ? 'hltv' : 'pov';
+}
+
 let chipsKey = null;
 function renderChips() {
   const box = $('#rename-chips');
   if (!box) return;
-  const first = facts.find((f) => !f.error);
+  // Only the placeholders the focused template's demo type has, each
+  // showing its value for the first demo of that type.
+  const type = chipType();
+  const first = facts.find((f) => !f.error && (f.demo_type === 'hltv' ? 'hltv' : 'pov') === type);
   const values = first ? demoValues(first, getProjectTeams()) : null;
-  const key = JSON.stringify(values);
+  const key = JSON.stringify([type, values]);
   if (key === chipsKey && box.childElementCount) return;
   chipsKey = key;
   const D = STRINGS.DEMO_RENAME;
@@ -105,7 +113,7 @@ function renderChips() {
   label.textContent = D.INSERT_LABEL;
   box.replaceChildren(
     label,
-    ...DEMO_PLACEHOLDERS.map((name) => chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))),
+    ...placeholdersFor(type).map((name) => chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))),
     ...MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m])),
   );
 }
@@ -184,8 +192,8 @@ function updateButtons() {
 /** Re-checks both templates and rebuilds the preview. */
 function refresh() {
   const templates = getDemoRenameTemplates();
-  showErrors('#rename-pov-errors', parseDemoTemplate(templates.pov).errors);
-  showErrors('#rename-hltv-errors', parseDemoTemplate(templates.hltv).errors);
+  showErrors('#rename-pov-errors', parseDemoTemplate(templates.pov, 'pov').errors);
+  showErrors('#rename-hltv-errors', parseDemoTemplate(templates.hltv, 'hltv').errors);
   rows = planRenames(facts, {
     povTemplate: templates.pov,
     hltvTemplate: templates.hltv,
@@ -231,9 +239,12 @@ async function listDemos() {
   selected = new Set(facts.map((f) => f.path));
   listedOnce = true;
   refresh();
-  setStatus(cancelled
-    ? STRINGS.DEMO_RENAME.CANCELLED
-    : STRINGS.DEMO_RENAME.listed(facts.length, rows.filter((r) => r.status === 'rename').length));
+  if (cancelled) setStatus(STRINGS.DEMO_RENAME.CANCELLED);
+  else showListed();
+}
+
+function showListed() {
+  setStatus(STRINGS.DEMO_RENAME.listed(facts.length, rows.filter((r) => r.status === 'rename').length));
 }
 
 /** Points each listed demo at its new path, so the preview stays right
@@ -276,6 +287,7 @@ async function applyRenames() {
   } finally {
     busy = false;
     refresh();
+    showListed();
     refreshUndo();
   }
 }
@@ -293,6 +305,7 @@ async function undoLast() {
   } finally {
     busy = false;
     refresh();
+    if (listedOnce) showListed();
     refreshUndo();
   }
 }
@@ -312,7 +325,10 @@ export function initDemoRenamePane({ projectTeams, onChange } = {}) {
     const input = $(inputSel);
     if (!input) return;
     if (!input.value) input.value = fallback;
-    input.addEventListener('focus', () => { chipTarget = input; });
+    input.addEventListener('focus', () => {
+      chipTarget = input;
+      renderChips();
+    });
     input.addEventListener('input', refresh);
     input.addEventListener('change', () => {
       refresh();

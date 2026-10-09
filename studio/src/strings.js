@@ -1918,7 +1918,7 @@ export const STRINGS = {
   // ── demo_rename_ui.js: the Demo Auditor's renamer (#469) ─────────────────
   DEMO_RENAME: {
     PANEL_TITLE: 'Rename Demos',
-    HINT: "Renames the demos in the Target Folder above, subfolders too, in place. Each type has its own template. Nothing changes until you click Rename, and Undo puts the last batch back.",
+    HINT: "Renames the demos in the Target Folder above, subfolders too, in place. Each type has its own template. New names keep letters, digits, - and _ only: anything else becomes _. Nothing changes until you click Rename, and Undo puts the last batch back.",
     POV_LABEL: 'POV demos:',
     HLTV_LABEL: 'HLTV demos:',
     RESET_BUTTON: 'Default',
@@ -1952,11 +1952,15 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
-    fallbackNotAllowed: (raw) => `${raw}: only {name} and the team placeholders take a word after |.`,
+    fallbackNotAllowed: (raw) => `${raw}: only the name, faction and team placeholders take a word after |.`,
+    povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     DESCRIPTIONS: {
-      name: 'The recording player (POV demos)',
+      name: "The recording player's name without their team's tag",
+      full_name: "The recording player's name as it is, tag included",
       kills: "The recording player's kills",
       deaths: "The recording player's deaths",
+      faction: "The recording player's side: Allies, British or Axis",
+      enemy_faction: 'The other side',
       map: 'The map, without dod_',
       date: "The demo file's date, YYYY-MM-DD",
       demo_type: 'pov or hltv',

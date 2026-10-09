@@ -17,12 +17,25 @@ export const DEFAULT_POV_TEMPLATE = '{name}_{kills}k_v_{opponent}_{map}';
 export const DEFAULT_HLTV_TEMPLATE = '{allies}_v_{axis}_{map}_{date}';
 
 export const DEMO_PLACEHOLDERS = [
-  'name', 'kills', 'deaths', 'map', 'date', 'demo_type',
+  'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'map', 'date', 'demo_type',
   'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2', 'demo',
 ];
 
+/** About the recording player, so only a POV demo has them: an HLTV
+ *  template that uses one is refused, and its chips leave them out. */
+export const POV_ONLY = new Set([
+  'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'team_name', 'opponent',
+]);
+
+/** The placeholders a demo type has, in chip order. */
+export function placeholdersFor(demoType) {
+  return demoType === 'hltv' ? DEMO_PLACEHOLDERS.filter((p) => !POV_ONLY.has(p)) : DEMO_PLACEHOLDERS;
+}
+
 /** The ones a demo can be without, so the ones that take `|fallback`. */
-const WITH_FALLBACK = new Set(['name', 'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2']);
+const WITH_FALLBACK = new Set([
+  'name', 'full_name', 'faction', 'enemy_faction', 'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2',
+]);
 
 const DEMO_RULES = {
   placeholders: DEMO_PLACEHOLDERS,
@@ -33,9 +46,46 @@ const DEMO_RULES = {
   fallbackNotAllowed: (raw) => STRINGS.DEMO_RENAME.fallbackNotAllowed(raw),
 };
 
-/** A template checked against the demo placeholders. */
-export function parseDemoTemplate(template) {
-  return parseTemplate(template, DEMO_RULES);
+/** A template checked against the placeholders its demo type has. */
+export function parseDemoTemplate(template, demoType = 'pov') {
+  const parsed = parseTemplate(template, DEMO_RULES);
+  if (demoType === 'hltv') {
+    for (const part of parsed.parts) {
+      if (part.name && POV_ONLY.has(part.name)) parsed.errors.push(STRINGS.DEMO_RENAME.povOnly(part.raw));
+    }
+  }
+  return parsed;
+}
+
+/** `name` without the clan tag its side's players share (#445), and
+ *  without the punctuation that framed the tag: `dicE[: :]m00cat :D`
+ *  with tag `dicE` gives `m00cat :D`. The name as it is when there's no
+ *  tag, or nothing would be left. */
+export function nameWithoutTag(name, tag) {
+  if (!name || !tag) return name || null;
+  const lower = name.toLowerCase();
+  const t = tag.toLowerCase();
+  // Past any bracket or symbol the tag sits in: `[dicE] m00cat`.
+  const start = lower.match(/^[^\p{L}\p{N}]*/u)[0].length;
+  const end = lower.length - lower.match(/[^\p{L}\p{N}]*$/u)[0].length;
+  let rest;
+  if (lower.startsWith(t, start)) rest = name.slice(start + tag.length);
+  else if (lower.slice(0, end).endsWith(t)) rest = name.slice(0, end - tag.length);
+  else return name;
+  rest = rest.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+  return rest || name;
+}
+
+/** A file name made plain: letters, digits, `-` and `_` only. Anything
+ *  else (spaces, brackets, `#`, emoji) becomes `_`, accents are dropped,
+ *  runs of `_` collapse, and none is left at either end. */
+export function plainName(name) {
+  return String(name ?? '')
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[_-]+|[_-]+$/g, '');
 }
 
 function localDate(unixSecs) {
@@ -61,10 +111,18 @@ export function demoValues(facts, projectTeams) {
   const known = facts?.side === 'Allies' || facts?.side === 'British' || isAxis(facts?.side);
   const [team1, team2] = fixedOrder(allies, axis);
   const number = (n) => (n === null || n === undefined ? null : String(n));
+  // The other side: Axis against Allies or British, whichever the demo has.
+  const enemy = !known ? null
+    : isAxis(facts.side)
+      ? ((facts.teams || []).find((t) => t.side === 'British') ? 'British' : 'Allies')
+      : 'Axis';
   return {
-    name: facts?.name || null,
+    name: nameWithoutTag(facts?.name || null, sideTag(facts, facts?.side)),
+    full_name: facts?.name || null,
     kills: number(facts?.kills),
     deaths: number(facts?.deaths),
+    faction: known ? facts.side : null,
+    enemy_faction: enemy,
     map: facts?.map ? facts.map.replace(/^dod_/i, '') : null,
     date: localDate(facts?.modified_unix_secs),
     demo_type: facts?.demo_type || null,
@@ -96,8 +154,8 @@ function folderOf(facts) {
  */
 export function planRenames(factsList, { povTemplate, hltvTemplate, projectTeams, selected }) {
   const templates = {
-    pov: parseDemoTemplate(povTemplate),
-    hltv: parseDemoTemplate(hltvTemplate),
+    pov: parseDemoTemplate(povTemplate, 'pov'),
+    hltv: parseDemoTemplate(hltvTemplate, 'hltv'),
   };
   const taken = new Map();
   const takenIn = (folder) => {
@@ -118,7 +176,7 @@ export function planRenames(factsList, { povTemplate, hltvTemplate, projectTeams
     const parsed = templates[demoType];
     if (parsed.errors.length) return { ...row, status: 'template' };
 
-    const base = buildName(parsed, demoValues(facts, projectTeams)).name;
+    const base = plainName(buildName(parsed, demoValues(facts, projectTeams)).name);
     if (!base) return { ...row, status: 'template' };
     const used = takenIn(folder);
     const own = facts.file_name.toLowerCase();

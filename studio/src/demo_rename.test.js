@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
+  placeholdersFor, nameWithoutTag,
 } from './demo_rename.js';
 import { emptyProjectTeams } from './project_teams.js';
 
@@ -66,11 +67,19 @@ describe('demoValues', () => {
       side: 'British', teams: [{ side: 'British', tag: 'dicE' }, { side: 'Axis', tag: 'gskill' }],
     }), teams);
     expect(values).toMatchObject({ team_name: 'Dice Squad', opponent: 'gskiLL', allies: 'Dice Squad' });
+    expect(values).toMatchObject({ faction: 'British', enemy_faction: 'Axis' });
+  });
+
+  it("gives the recorder's side, the other side, and the name without the side's tag", () => {
+    const values = demoValues(pov('a.dem', { name: 'gskiLL | krod' }), emptyProjectTeams());
+    expect(values).toMatchObject({ name: 'krod', full_name: 'gskiLL | krod', faction: 'Axis', enemy_faction: 'Allies' });
   });
 
   it('leaves an HLTV demo without a player, and an untagged side without a team', () => {
     const values = demoValues(hltv('h.dem', { teams: [{ side: 'Allies', tag: null }, { side: 'Axis', tag: 'gskiLL' }] }), emptyProjectTeams());
-    expect(values).toMatchObject({ name: null, kills: null, team_name: null, opponent: null, allies: null, axis: 'gskiLL' });
+    expect(values).toMatchObject({
+      name: null, kills: null, faction: null, team_name: null, opponent: null, allies: null, axis: 'gskiLL',
+    });
     expect([values.team1, values.team2]).toEqual(['gskiLL', null]);
   });
 });
@@ -124,7 +133,46 @@ describe('planRenames', () => {
   });
 
   it('gives a missing value its fallback word, else unknown', () => {
-    const rows = plan([hltv('h.dem', { teams: [] })], { hltvTemplate: '{name|hltv}_{allies}_{map}' });
-    expect(rows[0].to).toBe('hltv_unknown_anzio.dem');
+    const rows = plan([hltv('h.dem', { teams: [] })], { hltvTemplate: '{team1|mix}_{allies}_{map}' });
+    expect(rows[0].to).toBe('mix_unknown_anzio.dem');
+  });
+
+  it('makes every name plain: letters, digits, - and _ only', () => {
+    const rows = plan([pov('a.dem', { name: 'Zoë [x] #1 :D' })], { povTemplate: '{name} {kills}k' });
+    expect(rows[0].to).toBe('Zoe_x_1_D_31k.dem');
+  });
+
+  it('refuses a POV-only placeholder in the HLTV template', () => {
+    const rows = plan([hltv('h.dem')], { hltvTemplate: '{name}_{map}' });
+    expect(rows[0].status).toBe('template');
+  });
+});
+
+describe('POV-only placeholders', () => {
+  it('are errors in an HLTV template and fine in a POV one', () => {
+    expect(parseDemoTemplate('{faction}_{kills}k', 'hltv').errors).toHaveLength(2);
+    expect(parseDemoTemplate('{faction}_{kills}k', 'pov').errors).toEqual([]);
+  });
+
+  it('are left out of the HLTV chips', () => {
+    expect(placeholdersFor('hltv')).not.toContain('name');
+    expect(placeholdersFor('hltv')).toContain('allies');
+    expect(placeholdersFor('pov')).toContain('faction');
+  });
+});
+
+describe('nameWithoutTag', () => {
+  it('drops the tag at either end and the punctuation around it', () => {
+    expect(nameWithoutTag('dicE[: :]m00cat :D', 'dicE')).toBe('m00cat :D');
+    expect(nameWithoutTag('[DICE] m00cat', 'dice')).toBe('m00cat');
+    expect(nameWithoutTag('DICE | m00cat', 'dice')).toBe('m00cat');
+    expect(nameWithoutTag('m00cat -gskiLL-', 'gskiLL')).toBe('m00cat');
+    expect(nameWithoutTag('m00cat', 'dicE')).toBe('m00cat');
+  });
+
+  it('keeps the name when there is no tag, or nothing would be left', () => {
+    expect(nameWithoutTag('m00cat', null)).toBe('m00cat');
+    expect(nameWithoutTag('dicE', 'dicE')).toBe('dicE');
+    expect(nameWithoutTag(null, 'dicE')).toBe(null);
   });
 });

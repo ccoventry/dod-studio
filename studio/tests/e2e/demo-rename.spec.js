@@ -84,6 +84,20 @@ test('a chip goes into the template field last used, and a settled template is s
   expect(await page.evaluate(() => window.__changes)).toBeGreaterThan(0);
 });
 
+test('the HLTV template gets only the placeholders an HLTV demo has', async ({ page }) => {
+  await loadHarness(page);
+  await page.click('#rename-list-btn');
+  await page.locator('#rename-pov-template').focus();
+  await expect(page.locator('.rename-chip:text-is("{faction}")')).toBeVisible();
+  await page.locator('#rename-hltv-template').focus();
+  await expect(page.locator('.rename-chip:text-is("{faction}")')).toHaveCount(0);
+  await expect(page.locator('.rename-chip:text-is("{allies}")')).toBeVisible();
+
+  await page.fill('#rename-hltv-template', '{kills}_{map}');
+  await expect(page.locator('#rename-hltv-errors')).toContainText('only works in the POV template');
+  await expect(newNames(page).nth(1)).toHaveText('its template has a problem (see above)');
+});
+
 test('Rename confirms, sends only the renames, follows them, and Undo puts them back', async ({ page }) => {
   await loadHarness(page);
   await page.click('#rename-list-btn');
@@ -100,6 +114,7 @@ test('Rename confirms, sends only the renames, follows them, and Undo puts them 
   await expect(page.locator('#rename-body tr td:nth-child(2)')).toHaveText(
     ['krod_31k_v_dicE_anzio.dem', 'dicE_v_gskiLL_anzio_2026-09-28.dem', 'broken.dem']);
   await expect(newNames(page).nth(0)).toHaveText('already named this way');
+  await expect(page.locator('#rename-status')).toHaveText('3 demos, 0 to rename.');
   await expect(page.locator('#rename-undo-btn')).toBeEnabled();
 
   await page.click('#rename-undo-btn');
