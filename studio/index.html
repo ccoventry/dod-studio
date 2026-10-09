@@ -989,8 +989,12 @@
                docked above the report tabs. -->
           <div class="analyzer-main-column">
             <div class="egui-panel analyzer-demos-panel">
-              <div class="panel-header">
+              <div class="panel-header flex-between">
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
+                <div class="analyzer-cache-controls">
+                  <span id="analyzer-cache-status" class="status-text"></span>
+                  <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
+                </div>
               </div>
               <div class="analyzer-filter-bar">
                 <input type="text" id="analyzer-filter-search" data-str-placeholder="ANALYZER.SEARCH_NAME_MAP_PLACEHOLDER" placeholder="Search name/map..." />

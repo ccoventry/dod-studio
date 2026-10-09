@@ -1,6 +1,7 @@
 mod audit_manager;
 mod capture_manager;
 mod combine_manager;
+mod demo_cache_cmd;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -615,6 +616,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            demo_cache_cmd::cache_demos,
+            demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
             validate_paths,

@@ -626,6 +626,23 @@ export async function deleteOrphanedPreviews(filePaths) {
  *  widgets. Errors (e.g. permission denied) are surfaced inline by the
  *  caller rather than as a global toast, since browsing into an
  *  inaccessible folder is an expected, recoverable event. */
+// The Demo Analyzer's Cache all (#569). Starts a background run; progress
+// comes as `demo_cache_progress` events.
+export async function cacheDemos(paths) {
+  return invoke("cache_demos", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (cache_demos):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoCache() {
+  return invoke("cancel_demo_cache")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_cache):", err);
+    });
+}
+
 export async function browseDirectory(path) {
   return invoke("browse_directory", { path: path ?? null })
     .catch((err) => {
