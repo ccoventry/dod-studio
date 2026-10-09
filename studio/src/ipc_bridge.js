@@ -1091,3 +1091,12 @@ export async function splitDemoMaps(path, keep) {
       throw err;
     });
 }
+
+// Split now (#217): every map at least `minSeconds` long, one parse.
+export async function splitDemoAuto(path, minSeconds) {
+  return invoke("split_demo_auto", { path, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (split_demo_auto):", err);
+      throw err;
+    });
+}

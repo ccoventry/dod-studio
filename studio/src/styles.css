@@ -1305,6 +1305,39 @@ button.primary-btn:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* #217: a demo that recorded more than one map, above every analyzer tab. */
+.analyzer-multimap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.analyzer-multimap-banner[hidden] {
+  display: none;
+}
+
+.analyzer-multimap-text {
+  flex: 1 1 320px;
+}
+
+/* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
+.split-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.split-progress .progress-bar-container {
+  margin-top: 0;
+}
+
+.split-progress-text {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
 .analyzer-toolbar {
   display: flex;
   gap: 10px;

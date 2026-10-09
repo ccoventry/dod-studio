@@ -566,7 +566,9 @@ async fn analyze_demo_full(
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    serde_json::json!({ "processed": processed, "total": total }),
+                    // The path lets the page ignore an earlier click's
+                    // analysis still running beside this one.
+                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
                 );
             }
         };
@@ -762,6 +764,7 @@ pub fn run() {
             demo_split_manager::cancel_multi_map_scan,
             demo_split_manager::demo_map_segments,
             demo_split_manager::split_demo_maps,
+            demo_split_manager::split_demo_auto,
             delete_audit_files,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,

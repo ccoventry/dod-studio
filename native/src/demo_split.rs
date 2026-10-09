@@ -417,11 +417,79 @@ pub fn split_file(
     keep: &[usize],
     map_dirs: &[std::path::PathBuf],
 ) -> Result<Vec<Written>, String> {
+    split_file_with_progress(path, Keep::These(keep), map_dirs, &mut |_| {})
+}
+
+/// Which maps a split writes.
+pub enum Keep<'a> {
+    /// These, by [`MapSegment::index`].
+    These(&'a [usize]),
+    /// Every map at least this many seconds long ([`keep_at_least`]).
+    AtLeast(f32),
+}
+
+/// Every map at least `min_seconds` long. A shorter one is almost always the
+/// next map loading as the recording stopped, so Split Maps leaves it
+/// unticked too. When that leaves nothing, every map.
+pub fn keep_at_least(segs: &[MapSegment], min_seconds: f32) -> Vec<usize> {
+    let long: Vec<usize> = segs
+        .iter()
+        .filter(|s| s.seconds() >= min_seconds)
+        .map(|s| s.index)
+        .collect();
+    if long.is_empty() {
+        segs.iter().map(|s| s.index).collect()
+    } else {
+        long
+    }
+}
+
+/// How far a split has got, for a progress bar.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SplitProgress {
+    /// 0.0 to 1.0 over the whole split.
+    pub fraction: f32,
+    /// "reading" the demo, "writing" a map, or "checking" one read back.
+    pub stage: &'static str,
+    /// The map being written or checked; empty while reading.
+    pub map: String,
+    /// Which of `parts` (1-based); 0 while reading.
+    pub part: usize,
+    pub parts: usize,
+}
+
+/// Reading the demo is this much of a split; the rest is shared between the
+/// maps written, half writing and half reading each one back.
+const READ_SHARE: f32 = 0.4;
+
+/// [`split_file`], parsing the demo once even when the maps to keep depend on
+/// their lengths, and calling `progress` as it goes: about every 1% of a
+/// parse, and at each map.
+pub fn split_file_with_progress(
+    path: &std::path::Path,
+    keep: Keep,
+    map_dirs: &[std::path::PathBuf],
+    progress: &mut dyn FnMut(SplitProgress),
+) -> Result<Vec<Written>, String> {
     let bytes =
         std::fs::read(path).map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    let demo =
-        dem::open_demo_from_bytes(&bytes).map_err(|e| format!("could not read the demo: {e}"))?;
+    let demo = dem::open_demo_from_bytes_with_progress(&bytes, &mut |read, total| {
+        progress(SplitProgress {
+            fraction: READ_SHARE * read as f32 / total.max(1) as f32,
+            stage: "reading",
+            map: String::new(),
+            part: 0,
+            parts: 0,
+        })
+    })
+    .map_err(|e| format!("could not read the demo: {e}"))?;
     let segs = segments(&demo);
+    let keep: Vec<usize> = match keep {
+        Keep::These(k) => k.to_vec(),
+        Keep::AtLeast(min) => keep_at_least(&segs, min),
+    };
+    let parts = keep.len().max(1);
+    let share = (1.0 - READ_SHARE) / parts as f32;
     let dir = path.parent().ok_or("the demo has no folder")?;
     let stem = path
         .file_stem()
@@ -436,17 +504,33 @@ pub fn split_file(
         })
     };
     let mut written = Vec::new();
-    for &i in keep {
+    for (k, &i) in keep.iter().enumerate() {
         let seg = segs
             .get(i)
             .ok_or_else(|| format!("the demo has no map {}", i + 1))?;
+        let start = READ_SHARE + share * k as f32;
+        progress(SplitProgress {
+            fraction: start,
+            stage: "writing",
+            map: seg.map.clone(),
+            part: k + 1,
+            parts,
+        });
         let part = extract(&demo, i, &find_bsp)
             .ok_or_else(|| format!("map {} ({}) could not be cut out", i + 1, seg.map))?;
         let out = part
             .write_to_bytes_reusing_source_cancellable(&bytes, &|| false)
             .ok_or("writing was cancelled")?;
-        let back = dem::open_demo_from_bytes(&out)
-            .map_err(|e| format!("map {} ({}) did not read back: {e}", i + 1, seg.map))?;
+        let back = dem::open_demo_from_bytes_with_progress(&out, &mut |read, total| {
+            progress(SplitProgress {
+                fraction: start + share * (0.5 + 0.5 * read as f32 / total.max(1) as f32),
+                stage: "checking",
+                map: seg.map.clone(),
+                part: k + 1,
+                parts,
+            })
+        })
+        .map_err(|e| format!("map {} ({}) did not read back: {e}", i + 1, seg.map))?;
         let back_segs = segments(&back);
         if back_segs.len() != 1 || back_segs[0].map != seg.map {
             return Err(format!(
@@ -516,6 +600,39 @@ mod tests {
         assert_eq!(split_name("m", &two, &two[1]), "m_dod_flash");
         let same = [seg(0, "dod_anzio"), seg(1, "dod_anzio")];
         assert_eq!(split_name("m", &same, &same[1]), "m_dod_anzio_2");
+    }
+
+    #[test]
+    fn a_split_keeps_the_maps_of_a_minute_or_more() {
+        let seg = |i: usize, start: f32, end: f32| MapSegment {
+            index: i,
+            map: "dod_lennon2".into(),
+            map_checksum: 0,
+            start_seconds: start,
+            end_seconds: end,
+            frames: 0,
+        };
+        // wsod25_grp3_h1_dyelife: 21:28 of lennon2, then 14 s of the next half.
+        assert_eq!(
+            keep_at_least(&[seg(0, -2.0, 1288.0), seg(1, 1288.0, 1302.0)], 60.0),
+            [0]
+        );
+        assert_eq!(
+            keep_at_least(
+                &[
+                    seg(0, 0.0, 1200.0),
+                    seg(1, 1200.0, 2400.0),
+                    seg(2, 2400.0, 2410.0)
+                ],
+                60.0
+            ),
+            [0, 1]
+        );
+        // All short: keep them all rather than write nothing.
+        assert_eq!(
+            keep_at_least(&[seg(0, 0.0, 20.0), seg(1, 20.0, 30.0)], 60.0),
+            [0, 1]
+        );
     }
 
     #[test]
