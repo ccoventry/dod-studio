@@ -1,6 +1,7 @@
 #![cfg(not(target_arch = "wasm32"))]
 
 pub mod autosave;
+pub mod combine;
 pub mod config;
 pub mod renderer;
 pub mod scanner;

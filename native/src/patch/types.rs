@@ -152,6 +152,13 @@ pub struct CaptureStreak {
     pub status: HighlightStatus,
     #[serde(default)]
     pub match_start_tick: Option<i32>,
+    /// `source_demo`'s size and start hash when it was scanned
+    /// (`demo_hasher::demo_key_text`). Every tick above counts frames of that
+    /// file, so a different file saved under the same name since must stop a
+    /// batch before anything is patched (#196). `None` for streaks from
+    /// before this field existed, which are not checked.
+    #[serde(default)]
+    pub source_key: Option<String>,
 }
 
 impl CaptureStreak {

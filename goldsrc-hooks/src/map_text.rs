@@ -218,7 +218,7 @@ fn short_name(level: &str) -> &str {
 // ── Engine side ──────────────────────────────────────────────────────────────
 
 /// The engine's level name (`maps/dod_anzio.bsp`), or `None` without one.
-fn level_name() -> Option<String> {
+pub(crate) fn level_name() -> Option<String> {
     let engfuncs = engine::engfuncs()?;
     // Safety: a pointer into the engine's client state, valid for the
     // session; checked for null before reading.
