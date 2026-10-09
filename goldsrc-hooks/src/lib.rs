@@ -124,6 +124,9 @@
 //! - `map_text`: the `dodstudio_hide_map_text` cvar -- hide the text a map
 //!   puts on screen itself (the anzio mortar warning, the round result), and
 //!   pass DoD's own `HudText` prompts through (issue #287).
+//! - `clan_text`: the `dodstudio_hide_clan_text` cvar -- hide all of DoD's
+//!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
+//!   countdown and "MATCH IS LIVE!" (issue #608).
 //! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -153,6 +156,7 @@
 
 mod anim_fix;
 mod batch_end;
+mod clan_text;
 mod cmd_list;
 mod commands;
 mod connect_guard;
@@ -185,6 +189,7 @@ mod missing_shots;
 mod msglog;
 mod names;
 mod objicons;
+mod overview_hd;
 mod overview_map;
 mod overview_marker;
 mod overview_players;

@@ -107,6 +107,19 @@ pub fn ffmpeg_could_not_be_resolved(ffmpeg_path: &str) -> String {
     )
 }
 
+// ── blender_manager.rs ──────────────────────────────────────────────────────
+
+pub const BLENDER_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the maps and HD textures come from its dod folder.";
+pub const BLENDER_ALREADY_RUNNING: &str =
+    "A Blender step is already running. Wait for it, or Cancel it.";
+pub const BLENDER_NO_SCRIPTS: &str =
+    "This copy of DoD Studio has no Blender scripts (the blender folder in the DoD Studio repo).";
+pub const BLENDER_NOT_FOUND: &str = "No Blender found: choose blender.exe (Blender 4.4).";
+
+pub fn blender_not_blender(path: &str) -> String {
+    format!("{path} is not blender.exe")
+}
+
 // ── hd_manager.rs ───────────────────────────────────────────────────────────
 
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
@@ -180,6 +193,12 @@ pub fn failed_to_launch_obs(err: impl Display) -> String {
     format!("Failed to launch OBS: {}", err)
 }
 
+/// The batch status line while the game fast-forwards to, then records, a
+/// clip (#76). 1-based.
+pub fn capturing_clip(clip: u32, total: u32) -> String {
+    format!("Capturing clip {} of {}", clip, total)
+}
+
 pub fn game_directory_not_found(game_dir: &str) -> String {
     format!("Game directory not found: {}", game_dir)
 }
@@ -209,6 +228,33 @@ pub const COULD_NOT_RESOLVE_PREVIEW_FILE_STEM: &str =
 
 pub fn failed_to_read_dod_directory(err: impl Display) -> String {
     format!("Failed to read dod directory: {}", err)
+}
+
+/// The batch status line while demos patch (#75). `writing` holds each
+/// in-flight job's percent written; `clearing` counts those still in the
+/// decal pass, which reports no percentage.
+pub fn patching_status(done: u32, total: usize, clearing: usize, writing: &[u8]) -> String {
+    let head = format!("Patching {} / {}", done, total);
+    match (clearing, writing) {
+        (0, []) => head,
+        (1, []) => format!("{}: clearing decals", head),
+        (0, [percent]) => format!("{}: writing, {}%", head, percent),
+        _ => {
+            let mut parts = Vec::new();
+            if clearing > 0 {
+                parts.push(format!("{} clearing decals", clearing));
+            }
+            if !writing.is_empty() {
+                let average = writing.iter().map(|&p| p as usize).sum::<usize>() / writing.len();
+                parts.push(format!(
+                    "{} writing ({}% on average)",
+                    writing.len(),
+                    average
+                ));
+            }
+            format!("{}: {}", head, parts.join(", "))
+        }
+    }
 }
 
 // ── render_manager.rs ────────────────────────────────────────────────────

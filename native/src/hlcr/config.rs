@@ -114,37 +114,6 @@ impl Default for RenderConfig {
     }
 }
 
-pub fn get_config_path() -> PathBuf {
-    if let Ok(exe_path) = std::env::current_exe()
-        && let Some(parent) = exe_path.parent()
-    {
-        return parent.join("hlcr_config.json");
-    }
-    PathBuf::from("hlcr_config.json")
-}
-
-pub fn load_config() -> RenderConfig {
-    let path = get_config_path();
-    if path.exists()
-        && let Ok(content) = std::fs::read_to_string(&path)
-        && let Ok(config) = serde_json::from_str::<RenderConfig>(&content)
-    {
-        return config;
-    }
-    let default_config = RenderConfig::default();
-    let _ = save_config(&default_config);
-    default_config
-}
-
-pub fn save_config(config: &RenderConfig) -> Result<(), String> {
-    let path = get_config_path();
-    let content = serde_json::to_string_pretty(config)
-        .map_err(|e| format!("Failed to serialize config: {}", e))?;
-    std::fs::write(&path, content)
-        .map_err(|e| format!("Failed to write config file to {}: {}", path.display(), e))?;
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

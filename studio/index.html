@@ -53,6 +53,8 @@
           <button class="nav-tab-btn" data-nav="demo-auditor" data-str="NAV.DEMO_AUDITOR_TAB">Demo Auditor</button>
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
           <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
+          <button class="nav-tab-btn" data-nav="overviews" data-str="NAV.OVERVIEWS_TAB">Overviews</button>
+          <button class="nav-tab-btn" data-nav="blender" data-str="NAV.BLENDER_TAB">Blender</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -104,6 +106,9 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+                  <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
+                </select>
                 <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
                 <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
@@ -119,6 +124,13 @@
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
+                </label>
+                <!-- #665: gaps between kills play fast. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
+                  <input type="checkbox" id="review-fast-forward-cb" checked />
+                  <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
                 </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
@@ -485,6 +497,16 @@
 
             <!-- Tab Content: Initial + Scheduled Commands -->
             <div id="tab-custom-commands" class="config-tab-content" style="display: none;">
+              <!-- #442: named sets of both lists below. -->
+              <div class="input-row" style="margin-bottom: 12px;">
+                <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
+                <select id="command-profile-select"><option value="">—</option></select>
+                <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
+                <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
+                <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
+                <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
                 <span class="info-icon" data-str-title="CAPTURE_CONFIG.INIT_COMMANDS_INFO_TITLE" title=""><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span>
@@ -553,6 +575,15 @@
                 </div>
               </div>
 
+              <!-- #108: named render setups. -->
+              <div class="input-row" style="margin-top: 6px;">
+                <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
+                <select id="render-preset-select"><option value="">—</option></select>
+                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
+                <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
+              </div>
+
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
               <div class="input-row" style="margin-top: 6px;">
                 <input type="text" id="render-export-dir-input" data-str-placeholder="RENDER.EXPORT_DIR_PLACEHOLDER" placeholder="Add export drive/folder..." style="flex: 1;" />
@@ -564,6 +595,65 @@
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
+
+              <!-- "When a batch finishes" (#440) — finish_clips.js. Queues the
+                   batch's own takes through the same queue this tab's Scan
+                   uses, so the codec per capture mode is all it adds. There is
+                   no "keep as captured" for Video or Frame sequence: only an
+                   OBS take already carries its own sound. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-finish-clips" data-str="FINISH.WHEN_LABEL" data-str-title="FINISH.WHEN_TITLE">When a batch finishes:</label>
+                  <select id="config-finish-clips" data-str-title="FINISH.WHEN_TITLE">
+                    <option value="off" data-str="FINISH.WHEN_LEAVE">Leave the takes for the Render tab</option>
+                    <option value="finish" data-str="FINISH.WHEN_FINISH">Finish clips automatically</option>
+                  </select>
+                </div>
+              </div>
+              <div class="inline-controls">
+                <div class="control-group">
+                  <label for="config-finish-codec-obs" data-str="FINISH.CODEC_OBS_LABEL" data-str-title="FINISH.CODEC_TITLE">OBS clips:</label>
+                  <select id="config-finish-codec-obs" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="source_copy" data-str="FINISH.CODEC_KEEP">Keep as captured (copy, seconds)</option>
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-video" data-str="FINISH.CODEC_VIDEO_LABEL" data-str-title="FINISH.CODEC_TITLE">Video clips:</label>
+                  <select id="config-finish-codec-video" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-frames" data-str="FINISH.CODEC_FRAMES_LABEL" data-str-title="FINISH.CODEC_TITLE">Frame sequence clips:</label>
+                  <select id="config-finish-codec-frames" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+              </div>
+              <!-- Clip names (#441): the finished file of each highlight is
+                   named from this template, unless its row has a typed name. -->
+              <div class="input-row" style="margin-top: 10px;">
+                <label for="config-clip-name-template" data-str="CLIP_NAME.TEMPLATE_LABEL" data-str-title="CLIP_NAME.TEMPLATE_TITLE">Clip Name Template:</label>
+                <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
+                <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
+              <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
@@ -657,11 +747,12 @@
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
                     <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
                     <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-str="RENDER.TABLE_HEADER_HISTORY" data-str-title="RENDER.TABLE_HEADER_HISTORY_TITLE">History</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="10" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="11" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -789,7 +880,7 @@
                 <h3 data-str="HD.USE_TITLE">Use it in the game</h3>
               </div>
               <div class="panel-body">
-                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.</p>
+                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.</p>
                 <div class="input-row">
                   <label for="hd-style-select" data-str="HD.STYLE_LABEL">Style:</label>
                   <select id="hd-style-select"></select>
@@ -911,6 +1002,15 @@
                   <span class="hd-choice-label" data-str="HD.BUILD_TYPES_LABEL">Files:</span>
                   <div id="hd-build-types" class="hd-choices"></div>
                 </div>
+                <div class="input-row">
+                  <label for="hd-build-cap" data-str="HD.BUILD_CAP_LABEL">Largest size:</label>
+                  <select id="hd-build-cap">
+                    <option value="1024" data-str="HD.CAP_NAMES.1024">1024 (the usual)</option>
+                    <option value="2048" data-str="HD.CAP_NAMES.2048">2048</option>
+                    <option value="4096" data-str="HD.CAP_NAMES.4096">4096</option>
+                  </select>
+                </div>
+                <p id="hd-build-cap-hint" class="hd-hint"></p>
                 <div class="row-inputs">
                   <button id="hd-build-btn" class="primary-btn" data-str="HD.BUILD_BUTTON">Build</button>
                   <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
@@ -992,6 +1092,242 @@
           </div>
         </section>
 
+        <!-- Blender (#403): rebuild a highlight recorded with mirv_agr in Blender -->
+        <section id="pane-blender" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="BLENDER.BLENDER_TITLE">Blender</h3>
+                <button id="blender-refresh-btn" data-str="BLENDER.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.INTRO">Rebuild a highlight you recorded with HLAE's mirv_agr in Blender, with the real map, HD textures, lighting and the recorded camera, and render it. Needs Blender 4.4 with Blender Source Tools 3.4.3 and afx-blender-scripts 1.14.6 installed, and the game's models decompiled with Crowbar (blender\README.md in the DoD Studio repo has the steps).</p>
+                <p id="blender-status-text" class="hd-hint"></p>
+                <p id="blender-addons-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="blender-pick-exe-btn" data-str="BLENDER.PICK_EXE_BUTTON">Choose blender.exe...</button>
+                  <button id="blender-reset-exe-btn" data-str="BLENDER.RESET_EXE_BUTTON">Find it automatically</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.TAKE_TITLE">Take</h3>
+              </div>
+              <div class="panel-body">
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.AGR_LABEL">Recording (.agr):</span>
+                  <span id="blender-agr-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-agr-btn" data-str="BLENDER.PICK_AGR_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.ASSETS_LABEL">Crowbar models folder:</span>
+                  <span id="blender-assets-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-assets-btn" data-str="BLENDER.PICK_ASSETS_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <label for="blender-map-select" data-str="BLENDER.MAP_LABEL">Map:</label>
+                  <select id="blender-map-select"></select>
+                  <label for="blender-style-select" data-str="BLENDER.STYLE_LABEL">Textures:</label>
+                  <select id="blender-style-select"></select>
+                </div>
+                <div class="input-row">
+                  <span id="blender-work-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-open-work-btn" data-str="BLENDER.OPEN_WORK_BUTTON">Open folder</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.STEPS_TITLE">Steps</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.STEPS_HINT">Run them in order; each one picks up the last one's files. Import opens Blender minimized in the taskbar while it works.</p>
+                <div class="row-inputs">
+                  <button id="blender-import-btn" class="primary-btn" data-str="BLENDER.IMPORT_BUTTON">1. Import</button>
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-scene-btn" class="primary-btn" data-str="BLENDER.SCENE_BUTTON">2. Build scene</button>
+                  <select id="blender-engine-select">
+                    <option value="eevee" data-str="BLENDER.ENGINE_EEVEE">EEVEE previews</option>
+                    <option value="cycles" data-str="BLENDER.ENGINE_CYCLES">One Cycles frame</option>
+                  </select>
+                  <input id="blender-frames-input" type="text" data-str-placeholder="BLENDER.FRAMES_PLACEHOLDER" placeholder="frames, e.g. 180 510 (optional)" />
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-render-btn" class="primary-btn" data-str="BLENDER.RENDER_BUTTON">3. Render</button>
+                  <button id="blender-encode-btn" class="primary-btn" data-str="BLENDER.ENCODE_BUTTON">4. Encode MP4</button>
+                  <select id="blender-quality-select">
+                    <option value="quick" data-str="BLENDER.QUALITY_QUICK">Quick: 720p, 32 samples</option>
+                    <option value="final" data-str="BLENDER.QUALITY_FINAL">Final: 1080p, 64 samples</option>
+                  </select>
+                  <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="blender-progress" class="hd-hint"></p>
+                <p id="blender-line" class="hd-hint hd-mono"></p>
+                <ul id="blender-results" class="hd-hint hd-mono"></ul>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- The Overviews page (#371): map overviews made from the map, edited
+             here and written for the game. overviews_pane.js drives it. -->
+        <section id="pane-overviews" class="content-pane" style="display: none;">
+          <div class="ov-layout">
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.MAPS_TITLE">Maps</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.INSTALL_LABEL">Half-Life install</span>
+                  <select id="ov-install-select"></select>
+                </label>
+                <input id="ov-map-filter" type="search" data-str-placeholder="OVERVIEWS.FILTER_PLACEHOLDER" placeholder="Filter maps">
+                <div id="ov-map-list" class="ov-map-list"></div>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-main">
+              <div class="panel-header flex-between">
+                <h3 id="ov-map-title" data-str="OVERVIEWS.NO_MAP_TITLE">Pick a map</h3>
+                <div class="ov-tools-row" id="ov-mode-buttons">
+                  <button class="ov-mode active" data-mode="area" data-str="OVERVIEWS.MODE_AREA" data-str-title="OVERVIEWS.MODE_AREA_TIP" title="Click an area to give it the chosen colour. Pieces you coloured on their own keep theirs; hold Shift to paint over them too">Colour area</button>
+                  <button class="ov-mode" data-mode="face" data-str="OVERVIEWS.MODE_FACE" data-str-title="OVERVIEWS.MODE_FACE_TIP" title="Click to colour one piece of floor only">Colour piece</button>
+                  <button class="ov-mode" data-mode="hide" data-str="OVERVIEWS.MODE_HIDE" data-str-title="OVERVIEWS.MODE_HIDE_TIP" title="Click an area to hide it or show it again">Hide area</button>
+                  <button id="ov-undo-btn" data-str="OVERVIEWS.UNDO_BUTTON" data-str-title="OVERVIEWS.UNDO_TIP" title="Undo (Ctrl+Z)">Undo</button>
+                  <span class="ov-zoom">
+                    <button id="ov-zoom-out" data-str-title="OVERVIEWS.ZOOM_OUT_TIP" title="Zoom out (or scroll)">−</button>
+                    <button id="ov-zoom-fit" data-str-title="OVERVIEWS.ZOOM_FIT_TIP" title="Show the whole map. Scroll to zoom; drag with the right or middle button, or hold Space, to move about">100%</button>
+                    <button id="ov-zoom-in" data-str-title="OVERVIEWS.ZOOM_IN_TIP" title="Zoom in (or scroll)">+</button>
+                  </span>
+                </div>
+              </div>
+              <div class="panel-body ov-canvas-wrap" id="ov-canvas-wrap">
+                <canvas id="ov-canvas"></canvas>
+                <p id="ov-empty" class="hd-hint" data-str="OVERVIEWS.EMPTY_HINT">Pick a map on the left. Its overview is made from the map itself: every floor a player can reach from the spawns.</p>
+                <div id="ov-building" class="ov-building" hidden>
+                  <p id="ov-building-text" class="hd-hint"></p>
+                  <div class="progress-bar-container"><div id="ov-building-fill" class="progress-bar-fill" style="width: 0%"></div></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel ov-side">
+              <div class="panel-header">
+                <h3 data-str="OVERVIEWS.EDIT_TITLE">Edit</h3>
+              </div>
+              <div class="panel-body ov-side-body">
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.THEME_LABEL">Theme</span>
+                  <select id="ov-theme"></select>
+                </label>
+                <div class="ov-subtitle" data-str="OVERVIEWS.COLOUR_TITLE">Colour</div>
+                <div id="ov-palette" class="ov-palette"></div>
+                <div class="ov-recent-row">
+                  <span data-str="OVERVIEWS.RECENT_LABEL">Recent</span>
+                  <div id="ov-recent" class="ov-recent"></div>
+                </div>
+                <div class="ov-colour-row">
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.CUSTOM_COLOUR_LABEL">Other colour</span>
+                    <input id="ov-custom-colour" type="color" value="#929bf7">
+                  </label>
+                  <button class="ov-mode" data-mode="pick" id="ov-pick-btn" data-str-title="OVERVIEWS.PICK_TIP" title="Pick a colour from the map: click a floor to take its colour (then back to the tool you had). Or hold Ctrl and click" aria-label="Pick a colour from the map"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true"><path d="M14.5 4.5l5 5-9.5 9.5H5v-5z" fill="#cfe8ff" stroke="currentColor" stroke-width="1.8"/><path d="M16 2.5a2.1 2.1 0 0 1 3 0l2.5 2.5a2.1 2.1 0 0 1 0 3L19.5 10 14 4.5z" fill="currentColor"/><path d="M5 19l-2.5 2.5" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+                </div>
+                <button id="ov-clear-colour-btn" data-str="OVERVIEWS.CLEAR_COLOUR_BUTTON" data-str-title="OVERVIEWS.CLEAR_COLOUR_TIP" title="Pick this, then click an area to put its own colour back">Original colour</button>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SHOW_TITLE">Show</div>
+                <div class="ov-checks" id="ov-show">
+                  <label><input type="checkbox" data-show="flags"> <span data-str="OVERVIEWS.SHOW_FLAGS">Flags</span></label>
+                  <label><input type="checkbox" data-show="flagLabels"> <span data-str="OVERVIEWS.SHOW_FLAG_NAMES">Flag names</span></label>
+                  <label><input type="checkbox" data-show="capZones"> <span data-str="OVERVIEWS.SHOW_CAP_ZONES">Capture zones</span></label>
+                  <label title="Floors you can shoot or blow away get a dotted outline"><input type="checkbox" data-show="breakables"> <span data-str="OVERVIEWS.SHOW_BREAKABLES">Breakable floors</span></label>
+                  <label title="Slopes too steep to stand on, that you can still get onto and slide off, get an outline"><input type="checkbox" data-show="slopes"> <span data-str="OVERVIEWS.SHOW_SLOPES">Slopes you slide on</span></label>
+                  <label><input type="checkbox" data-show="spawns"> <span data-str="OVERVIEWS.SHOW_SPAWNS">Spawn points</span></label>
+                  <label><input type="checkbox" data-show="spawnLabels"> <span data-str="OVERVIEWS.SHOW_SPAWN_NAMES">Spawn names</span></label>
+                  <label title="The area round each spawn that hurts the other team: its floor filled, and the line where you walk into it"><input type="checkbox" data-show="spawnProtection"> <span data-str="OVERVIEWS.SHOW_SPAWN_PROTECTION">Spawn protection</span></label>
+                  <label><input type="checkbox" data-show="stairs"> <span data-str="OVERVIEWS.SHOW_STAIRS">Stairs in white</span></label>
+                  <label><input type="checkbox" data-show="water"> <span data-str="OVERVIEWS.SHOW_WATER">Water</span></label>
+                  <div class="ov-check-row">
+                    <label data-str-title="OVERVIEWS.SHOW_TITLE_TIP" title="The map's name on a card, top right. Drag it on the map to move it"><input type="checkbox" data-show="title"> <span data-str="OVERVIEWS.SHOW_TITLE">Map title</span></label>
+                    <button id="ov-title-reset" class="ov-flag-reset" data-str-title="OVERVIEWS.TITLE_RESET_TIP" title="Put the title back in the top right">↺</button>
+                  </div>
+                  <div class="ov-flag-row ov-credit-row">
+                    <input id="ov-credit" type="text" data-str-title="OVERVIEWS.CREDIT_TIP" title="Who made the map, on the title card's second line. Found in the map's .txt or the map itself: type over it, or clear it for none">
+                    <button id="ov-credit-reset" class="ov-flag-reset" data-str-title="OVERVIEWS.CREDIT_RESET_TIP" title="Back to the credit found with the map">↺</button>
+                  </div>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.PREVIEW_TITLE">While editing (not saved)</div>
+                <div class="ov-checks" id="ov-preview">
+                  <label data-str-title="OVERVIEWS.HOVER_TIP" title="Light up what a click would change before you click"><input type="checkbox" id="ov-hover-preview"> <span data-str="OVERVIEWS.HOVER_PREVIEW">Highlight what a click changes</span></label>
+                  <label data-str-title="OVERVIEWS.SHOW_AREAS_TIP" title="Outline every area. Hold Alt to outline every floor piece instead"><input type="checkbox" id="ov-show-areas"> <span data-str="OVERVIEWS.SHOW_AREAS">Show areas</span></label>
+                  <label title="The game's flag icons over the map, as big as they come out in game"><input type="checkbox" id="ov-flag-icons"> <span data-str="OVERVIEWS.SHOW_FLAG_ICONS">Flag icons</span></label>
+                </div>
+                <label class="ov-field" title="The game draws flag icons at a fixed size on screen, so they cover more of the map the smaller the screen">
+                  <span data-str="OVERVIEWS.FLAG_SCREEN_LABEL">Flag icons as seen at</span>
+                  <select id="ov-flag-screen"></select>
+                </label>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SP_TITLE">Spawn protection</div>
+                <div class="ov-sp" id="ov-sp">
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_FILL">Fill</span>
+                    <select id="ov-sp-fill">
+                      <option value="tint" data-str="OVERVIEWS.SP_FILL_TINT">Tint</option>
+                      <option value="hatch" data-str="OVERVIEWS.SP_FILL_HATCH">Hatching</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <label class="ov-field ov-inline">
+                    <span data-str="OVERVIEWS.SP_LINE">Line</span>
+                    <select id="ov-sp-line">
+                      <option value="team" data-str="OVERVIEWS.SP_LINE_TEAM">Team colour</option>
+                      <option value="hazard" data-str="OVERVIEWS.SP_LINE_HAZARD">Hazard stripes</option>
+                      <option value="none" data-str="OVERVIEWS.SP_NONE">None</option>
+                    </select>
+                  </label>
+                  <div class="ov-sp-colours">
+                    <label title="Allies' spawn"><span data-str="OVERVIEWS.SP_ALLIES">Allies</span> <input type="color" id="ov-sp-allies"></label>
+                    <label title="Axis' spawn"><span data-str="OVERVIEWS.SP_AXIS">Axis</span> <input type="color" id="ov-sp-axis"></label>
+                    <label title="Hazard stripes"><span data-str="OVERVIEWS.SP_STRIPES">Stripes</span> <input type="color" id="ov-sp-stripe1"><input type="color" id="ov-sp-stripe2"></label>
+                  </div>
+                  <button id="ov-sp-reset" data-str="OVERVIEWS.SP_RESET">Default look</button>
+                </div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.FLAGS_TITLE">Flag names</div>
+                <div id="ov-flag-names" class="ov-list"></div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SPAWN_NAMES_TITLE">Spawn names</div>
+                <div id="ov-spawn-names" class="ov-list"></div>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.LABELS_TITLE">Labels</div>
+                <button class="ov-mode ov-add-label" data-mode="label" data-str="OVERVIEWS.MODE_LABEL" data-str-title="OVERVIEWS.MODE_LABEL_TIP" title="Click to put a text label there">Add label</button>
+                <div id="ov-labels" class="ov-list"></div>
+                <p id="ov-labels-hint" class="hd-hint" data-str="OVERVIEWS.LABELS_HINT">Click Add label, then click the map where it goes. Drag a label to move it.</p>
+
+                <div class="ov-subtitle" data-str="OVERVIEWS.SAVE_TITLE">Save for the game</div>
+                <label class="ov-field">
+                  <span data-str="OVERVIEWS.FORMAT_LABEL">Image</span>
+                  <select id="ov-format">
+                    <option value="tga" data-str="OVERVIEWS.FORMAT_TGA">TGA: full colour, smooth edges</option>
+                    <option value="bmp" data-str="OVERVIEWS.FORMAT_BMP">BMP: 256 colours, like the game's own</option>
+                  </select>
+                </label>
+                <label class="ov-checks"><span><input id="ov-hd" type="checkbox" checked> <span data-str="OVERVIEWS.HD_LABEL">Also save a high-quality copy</span></span></label>
+                <p class="hd-hint" data-str="OVERVIEWS.HD_HINT">The high-quality copy is &lt;map&gt;_hd.tga at 4096x3072, saved in dod_addon/overviews. The game alone shows at most 1024x768; with DoD Studio's in-game hook it uses this copy instead.</p>
+                <button id="ov-save-btn" class="primary" data-str="OVERVIEWS.SAVE_BUTTON">Save overview</button>
+                <button id="ov-reset-btn" data-str="OVERVIEWS.RESET_BUTTON">Start over</button>
+                <p id="ov-save-status" class="hd-hint"></p>
+              </div>
+            </div>
+          </div>
+        </section>
+
         <!-- Demo Analyzer: standalone per-demo report (Summary/Scoreboard/Player/Team/Timeline/Rounds/Chat) -->
         <section id="pane-demo-analyzer" class="content-pane" style="display: none;">
           <!-- Left: Explorer sidebar — 3-tier Quick Links (Pinned/Recent/Local) + a
@@ -1036,9 +1372,12 @@
                   <option value="HLTV" data-str="ANALYZER.TYPE_HLTV">HLTV</option>
                 </select>
                 <input type="text" id="analyzer-filter-map" data-str-placeholder="ANALYZER.MAP_PLACEHOLDER" placeholder="Map" />
+                <input type="text" id="analyzer-filter-player" list="analyzer-player-options" data-str-placeholder="ANALYZER.PLAYER_PLACEHOLDER" data-str-title="ANALYZER.PLAYER_FILTER_TITLE" placeholder="Player" />
+                <datalist id="analyzer-player-options"></datalist>
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
+                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">
@@ -1070,6 +1409,7 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="kill-map" data-str="ANALYZER.SUBTAB_KILL_MAP">Kill Map</button>
                 <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>
@@ -1160,6 +1500,9 @@
         </div>
         <div id="footer-hd-textures" class="pinned-footer-content" style="display: none;">
           <div id="footer-hd-summary"></div>
+        </div>
+        <div id="footer-overviews" class="pinned-footer-content" style="display: none;">
+          <div id="footer-overviews-summary"></div>
         </div>
       </footer>
 

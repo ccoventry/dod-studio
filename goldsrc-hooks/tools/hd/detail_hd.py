@@ -3,9 +3,9 @@
 Reads the game's gfx/detail/*.tga (never writes there), and for each:
 
   wrap-pad half a tile (at most PAD px) each side -> 4x in the style ->
-  Lanczos the tile's own part to the power-of-two target (capped at
-  1024/side), the padding feeding the filter at its edges -> match each
-  channel's mean and spread to the original
+  Lanczos the tile's own part to the power-of-two target (capped at HD_CAP
+  a side, 1024 by default), the padding feeding the filter at its edges ->
+  match each channel's mean and spread to the original
 
 Wrap padding matters even more here than for walls: a detail texture is
 tiled many times across every surface it's on. Matching mean and spread
@@ -13,7 +13,12 @@ matters because the engine blends detail multiplicatively over the wall
 (mid-grey = no change): an upscaler that brightened or flattened it would
 brighten or flatten every wall that uses it.
 
-Files already at 1024 (or whose 4x wouldn't be any bigger) are skipped.
+Files already built at the cap (or whose 4x wouldn't be any bigger) are
+skipped. Most detail textures are 512 a side, so a cap of 2048 is where
+they gain: at 1024 they are only 2x. Detail textures stop at 2048 whatever
+the cap (DETAIL_CAP): the game reads each one into a buffer it allocates
+for every detail texture a map loads, and the hook sizes that buffer for
+2048 (texture_hires.rs, DETAIL_MAX_SIDE). A bigger file would be skipped.
 
 usage: python detail_hd.py <out_dir> [<folder of .tga>]    (default gfx/detail)
 env:   HD_STYLE (default ultrasharp), HD_GAME, HD_WORK, HD_BATCH
@@ -24,6 +29,15 @@ from PIL import Image
 
 import hdcommon as C
 import styles as S
+
+# The hook's DETAIL_MAX_SIDE: the largest detail texture the game will load.
+DETAIL_CAP = min(C.CAP, 2048)
+
+
+def target(n):
+    """4x `n`, rounded up to a power of two, at most DETAIL_CAP."""
+    return min(C.pot(n * 4), DETAIL_CAP)
+
 
 # Wrap padding each side, in source pixels: half a tile, up to PAD, as in
 # world_hd.py (#383). Half a tile of a 512 px detail texture made the
@@ -52,12 +66,13 @@ def main():
     jobs = {}
     for f in sorted(glob.glob(os.path.join(src_dir, "*.tga"))):
         name = os.path.basename(f)
-        if os.path.exists(os.path.join(out_dir, name)):
+        with Image.open(f) as im:
+            w, h = im.size
+        if target(w) <= w and target(h) <= h:
+            continue  # already at the cap: nothing to gain
+        if C.built(os.path.join(out_dir, name), target(w), target(h)):
             continue
         a = np.asarray(Image.open(f).convert("RGB"))
-        h, w = a.shape[:2]
-        if C.pot(w * 4) <= w and C.pot(h * 4) <= h:
-            continue  # already at the cap: nothing to gain
         jobs[name[:-4]] = (name, a)
     print(f"{len(jobs)} detail textures to build")
 
@@ -70,7 +85,7 @@ def main():
     def finish(key, job, src):
         name, a = job
         h, w = a.shape[:2]
-        tw, th = C.pot(w * 4), C.pot(h * 4)
+        tw, th = target(w), target(h)
         # The upscaled image is the tile plus 4x the padding each side: resize
         # just the tile's part, the padding feeding the filter at its edges.
         py, px = margins(w, h)

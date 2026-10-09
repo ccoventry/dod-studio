@@ -1,6 +1,8 @@
 mod audit_manager;
+mod blender_manager;
 mod capture_manager;
 mod combine_manager;
+mod crash_maps_manager;
 mod demo_cache_cmd;
 mod demo_split_manager;
 mod dir_browser;
@@ -8,6 +10,8 @@ mod hd_manager;
 mod manifest_file;
 mod map_manager;
 mod messages;
+mod overview_manager;
+mod packet_limit_manager;
 mod preview_in_place;
 mod render_manager;
 mod review_manager;
@@ -483,6 +487,60 @@ pub struct AnalyzerReportPayload {
     pub state: analysis::AnalyzerState,
 }
 
+/// Which request `index_demo_players` is serving, per lane; a newer one stops
+/// an older one between demos (the Demo Analyzer moved to another folder).
+/// Two lanes, so the Master Queue's lookups never cancel the Analyzer's.
+static PLAYER_INDEX_ANALYZER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_QUEUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Who is in each demo (#437, #174), one `demo_players` event per demo as it
+/// is read: from the small player index when it is current (milliseconds), or
+/// from the analyzer cache or a full parse (about a second) when it is not.
+/// Resolves with how many demos were read.
+#[tauri::command]
+async fn index_demo_players(
+    app_handle: tauri::AppHandle,
+    paths: Vec<String>,
+    request_id: u64,
+    lane: String,
+) -> Result<usize, String> {
+    let current: &'static std::sync::atomic::AtomicU64 = if lane == "queue" {
+        &PLAYER_INDEX_QUEUE
+    } else {
+        &PLAYER_INDEX_ANALYZER
+    };
+    current.store(request_id, Ordering::SeqCst);
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        use tauri::Emitter;
+        let mut done = 0;
+        for path in paths {
+            if current.load(Ordering::SeqCst) != request_id {
+                break;
+            }
+            let result = native::player_index::demo_players(std::path::Path::new(&path));
+            let payload = match result {
+                Ok((demo, _)) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "demoType": demo.demo_type,
+                    "players": demo.players,
+                }),
+                Err(e) => serde_json::json!({
+                    "lane": lane,
+                    "requestId": request_id,
+                    "path": path,
+                    "error": e,
+                }),
+            };
+            let _ = app_handle.emit("demo_players", payload);
+            done += 1;
+        }
+        Ok(done)
+    }))
+    .await
+}
+
 #[tauri::command]
 async fn analyze_demo_full(
     app_handle: tauri::AppHandle,
@@ -556,6 +614,29 @@ fn get_weapon_display_names() -> std::collections::HashMap<String, String> {
     analysis::all_weapon_display_names()
 }
 
+/// The overview image for `map_name` and how it lies over the world, for the
+/// Demo Analyzer's kill map (#448). `None` when no `overviews/` folder near
+/// the game or the demo has one the app can show -- not an error, since
+/// custom maps often ship without.
+#[tauri::command]
+async fn load_map_overview(
+    game_path: Option<String>,
+    demo_path: String,
+    map_name: String,
+) -> Result<Option<native::map_overview::MapOverview>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let game = game_path
+            .filter(|p| !p.trim().is_empty())
+            .map(std::path::PathBuf::from);
+        let dirs = native::map_overview::overview_search_dirs(
+            game.as_deref(),
+            std::path::Path::new(&demo_path),
+        );
+        Ok(native::map_overview::find_map_overview(&dirs, &map_name))
+    }))
+    .await
+}
+
 // ── App entry point ────────────────────────────────────────────────────────────
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -600,6 +681,7 @@ pub fn run() {
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
+        .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -612,7 +694,7 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
-            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // The game's Highlights tab asks Studio to analyse a demo too big
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();
@@ -629,6 +711,7 @@ pub fn run() {
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
+            load_map_overview,
             start_capture_batch,
             launch_demo_preview,
             generate_all_previews,
@@ -670,6 +753,7 @@ pub fn run() {
             save_settings,
             save_project_session,
             load_project_session,
+            index_demo_players,
             default_projects_dir,
             locate_missing_demos,
             changed_demos,
@@ -681,6 +765,9 @@ pub fn run() {
             demo_split_manager::split_demo_maps,
             delete_audit_files,
             cancel_audit,
+            crash_maps_manager::crash_map_warnings,
+            crash_maps_manager::forget_crash_map,
+            packet_limit_manager::engine_packet_entity_limit,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,
@@ -699,11 +786,25 @@ pub fn run() {
             hd_manager::hd_build,
             hd_manager::hd_set_python,
             hd_manager::hd_set_upscaler,
+            overview_manager::overview_installs,
+            overview_manager::overview_maps,
+            overview_manager::overview_scene,
+            overview_manager::overview_load_edits,
+            overview_manager::overview_save_edits,
+            overview_manager::overview_reset_edits,
+            overview_manager::overview_export,
+            overview_manager::overview_export_hd,
+            overview_manager::overview_flag_icons,
+            overview_manager::overview_screen_height,
             hd_manager::hd_misses,
             hd_manager::hd_save_style,
             hd_manager::hd_remove_style,
             hd_manager::hd_save_map_list,
             hd_manager::hd_preview,
+            blender_manager::blender_status,
+            blender_manager::blender_set_exe,
+            blender_manager::blender_run,
+            blender_manager::blender_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

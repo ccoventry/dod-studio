@@ -52,6 +52,24 @@ pub fn url_returned_status(url: &str, status: impl Display) -> String {
     format!("{} returned {}", url, status)
 }
 
+// ── patch/scanner.rs ─────────────────────────────────────────────────────
+
+pub fn source_demo_unreadable(demo: impl Display) -> String {
+    format!(
+        "{} could not be read. It was scanned, but has since been moved, deleted or \
+         locked. Put it back, or remove its highlights and scan again.",
+        demo
+    )
+}
+
+pub fn source_demo_changed(demo: impl Display) -> String {
+    format!(
+        "{} is not the file that was scanned: it has been replaced or edited since. \
+         Scan it again before capturing, so the highlights match what is in it now.",
+        demo
+    )
+}
+
 // ── shared/hlae_ffmpeg.rs ────────────────────────────────────────────────
 
 pub fn not_a_file(path: impl Display) -> String {
@@ -108,6 +126,40 @@ pub fn hd_download_incomplete(url: &str, got: u64, want: u64) -> String {
     format!("{url} stopped after {got} of {want} bytes")
 }
 
+// ── blender/mod.rs ───────────────────────────────────────────────────────
+
+pub const BLENDER_CANCELLED: &str = "cancelled";
+
+pub const BLENDER_IMPORT_FIRST: &str = "Import the .agr first: this step opens the imported scene.";
+
+pub const BLENDER_SCENE_FIRST: &str =
+    "Build the scene first: this step renders the textured scene.";
+
+pub const BLENDER_RENDER_FIRST: &str = "Render the frames first: this step encodes them.";
+
+pub fn blender_missing_input(path: &str) -> String {
+    format!("{path} is not a file")
+}
+
+pub fn blender_no_assets(dir: &str) -> String {
+    format!("{dir} has no models folder; choose the folder Crowbar decompiled the models into")
+}
+
+pub fn blender_bad_map(name: &str) -> String {
+    format!("{name:?} is not a map name")
+}
+
+pub fn blender_step_failed(status: impl Display, detail: &str) -> String {
+    if detail.is_empty() {
+        format!("Blender stopped ({status})")
+    } else {
+        format!(
+            "Blender stopped ({status}):
+{detail}"
+        )
+    }
+}
+
 // ── hd/build.rs ──────────────────────────────────────────────────────────
 
 pub const HD_BUILD_NO_GAME_FOLDER: &str =
@@ -121,6 +173,10 @@ pub fn hd_build_bad_style(style: &str) -> String {
 
 pub fn hd_build_bad_type(kind: &str) -> String {
     format!("{kind:?} is not something the build makes")
+}
+
+pub fn hd_build_bad_cap(cap: u32) -> String {
+    format!("{cap} is not a size the build makes: 1024, 2048 or 4096")
 }
 
 pub fn hd_build_unknown_style(style: &str) -> String {
@@ -218,6 +274,19 @@ pub fn hd_zip_missing_upscaler(dir: impl Display) -> String {
     format!(
         "the Real-ESRGAN zip didn't contain realesrgan-ncnn-vulkan.exe; unzip it into {dir} by hand"
     )
+}
+
+// ── crash_maps.rs (#207) ──────────────────────────────────────────────────
+
+/// What the hook log says about a crash that ended a batch.
+pub fn crash_explained(what: &str, site: &str, map: Option<&str>, cause: Option<&str>) -> String {
+    let on = map.map(|m| format!(" on {m}")).unwrap_or_default();
+    match cause {
+        Some(cause) => format!("The game crashed{on} ({what} at {site}). {cause}"),
+        None => format!(
+            "The game crashed{on} ({what} at {site}), a crash DoD Studio doesn't know yet. goldsrc-hooks/tools/crash_report.py shows what led up to it."
+        ),
+    }
 }
 
 // ── hlcr/combine.rs (#107) ────────────────────────────────────────────────

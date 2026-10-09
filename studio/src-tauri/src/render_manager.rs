@@ -17,6 +17,7 @@ use native::hlcr::renderer::{
     RenderUpdate, RenderWakeLock, hold_render_wake_lock, job_reservation_estimate, run_render_job,
 };
 use native::hlcr::scanner::{ClipData, clip_is_skip_eligible, scan_folder_background};
+use native::hlcr::take_meta::{RenderAttempt, RenderOutcome};
 use native::log_markdown;
 use native::shared::paths::take_key;
 use serde::{Deserialize, Serialize};
@@ -45,6 +46,10 @@ pub struct RenderBatchPayload {
     /// the first entry with 20 GiB+ free.
     pub export_directories: Vec<String>,
     pub max_concurrent_renders: usize,
+    /// Clip names by take key (#441), from the loaded project: the finished
+    /// file of each of those takes is named after its highlight.
+    #[serde(default)]
+    pub clip_names: std::collections::HashMap<String, String>,
 }
 
 /// Resolve the FFmpeg binary path using the same fallback chain as the
@@ -104,6 +109,47 @@ struct RenderJobRuntime {
     /// re-runs with exactly what the job was queued with.
     custom_codec_args: String,
     fps: u32,
+    /// This take's render history (#438), read from its `dodstudio_take.json`
+    /// when the job is queued and kept current as attempts start and end.
+    history: Vec<HistoryEntry>,
+    /// When the attempt in progress started, to find it again when it ends.
+    current_attempt: Option<u64>,
+}
+
+/// One past attempt as the job table shows it: the recorded attempt, and
+/// whether its output file was still there when last looked at.
+#[derive(Clone, Serialize)]
+pub struct HistoryEntry {
+    #[serde(flatten)]
+    attempt: RenderAttempt,
+    output_exists: bool,
+}
+
+fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
+    native::hlcr::take_meta::read_history(std::path::Path::new(take_folder))
+        .into_iter()
+        .map(|attempt| HistoryEntry {
+            output_exists: !attempt.output_path.is_empty()
+                && std::path::Path::new(&attempt.output_path).is_file(),
+            attempt,
+        })
+        .collect()
+}
+
+/// The first non-empty line of an FFmpeg error log, cut to a readable
+/// length, for a failed attempt's history line.
+fn first_error_line(log: &str) -> Option<String> {
+    let line = log.lines().map(str::trim).find(|l| !l.is_empty())?;
+    Some(line.chars().take(200).collect())
+}
+
+/// The stream an attempt is recorded under: one take can be two jobs.
+fn attempt_stream(clip: &ClipData) -> String {
+    if clip.clip_type == "hud_only" {
+        format!("hud:{}", clip.img_folder)
+    } else {
+        clip.img_folder.clone()
+    }
 }
 
 #[derive(Clone, Serialize)]
@@ -146,6 +192,9 @@ pub struct RenderJobView {
     /// a captured video). `set_render_job_codec` enforces the same rule; this
     /// is what lets the frontend decide whether to show the toggle at all.
     pub skip_available: bool,
+    /// Every recorded render of this job's stream of the take, oldest first
+    /// (#438).
+    pub history: Vec<HistoryEntry>,
 }
 
 impl RenderJobRuntime {
@@ -161,7 +210,11 @@ impl RenderJobRuntime {
         };
         RenderJobView {
             id: self.id.clone(),
-            name: self.clip.base_name.clone(),
+            name: self
+                .clip
+                .clip_name
+                .clone()
+                .unwrap_or_else(|| self.clip.base_name.clone()),
             stream: if self.clip.clip_type == "hud_only" {
                 "HUD ONLY".to_string()
             } else {
@@ -186,6 +239,14 @@ impl RenderJobRuntime {
             codec_id: self.codec.to_str_id().to_string(),
             custom_codec_args: self.custom_codec_args.clone(),
             skip_available: clip_is_skip_eligible(&self.clip),
+            history: {
+                let stream = attempt_stream(&self.clip);
+                self.history
+                    .iter()
+                    .filter(|h| h.attempt.stream == stream)
+                    .cloned()
+                    .collect()
+            },
         }
     }
 }
@@ -342,9 +403,52 @@ fn apply_render_update(
             // directly rather than replaying this update.
             let mut just_finished = None;
             let mut just_failed = None;
+            let mut attempt_ended = None;
             {
                 let mut guard = jobs.lock().unwrap();
                 if let Some(job) = guard.iter_mut().find(|j| j.id == id) {
+                    // #438: how this attempt ended, for the take's history.
+                    // Status updates have already run, so "Cancelled" is
+                    // already set for a cancelled job.
+                    if let Some(started) = job.current_attempt.take() {
+                        let outcome = if success {
+                            RenderOutcome::Finished
+                        } else if job.status == "Cancelled" {
+                            RenderOutcome::Cancelled
+                        } else {
+                            RenderOutcome::Failed
+                        };
+                        let error = (outcome == RenderOutcome::Failed)
+                            .then(|| err_log.as_deref().and_then(first_error_line))
+                            .flatten();
+                        let path = if success {
+                            job.output_path.clone()
+                        } else {
+                            String::new()
+                        };
+                        let size = if success { job.output_size_bytes } else { None };
+                        if let Some(entry) = job
+                            .history
+                            .iter_mut()
+                            .rev()
+                            .find(|h| h.attempt.started_unix_ms == started)
+                        {
+                            entry.attempt.outcome = outcome;
+                            entry.attempt.output_path = path.clone();
+                            entry.attempt.output_size_bytes = size;
+                            entry.attempt.error = error.clone();
+                            entry.output_exists = success;
+                        }
+                        attempt_ended = Some((
+                            job.clip.take_folder.clone(),
+                            started,
+                            attempt_stream(&job.clip),
+                            outcome,
+                            path,
+                            size,
+                            error,
+                        ));
+                    }
                     if job.status == "Rendering" {
                         job.status = if err_log.is_some() {
                             "Error".to_string()
@@ -367,6 +471,22 @@ fn apply_render_update(
                     }
                     job.error_log = err_log;
                 }
+            }
+            if let Some((take_folder, started, stream, outcome, path, size, error)) = attempt_ended
+                && let Err(e) = native::hlcr::take_meta::record_render_end(
+                    std::path::Path::new(&take_folder),
+                    started,
+                    &stream,
+                    outcome,
+                    &path,
+                    size,
+                    error,
+                )
+            {
+                log_markdown(&format!(
+                    "[render-history] couldn't record how a render of {} ended: {}",
+                    take_folder, e
+                ));
             }
             if let Some((take_folder, base_name, clip_type, _)) = &just_finished {
                 let key = take_key(std::path::Path::new(take_folder));
@@ -441,6 +561,7 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 dirty = true;
             }
 
+            let mut attempts_started: Vec<(String, RenderAttempt)> = Vec::new();
             let started_any = {
                 let mut guard = handles.jobs.lock().unwrap();
                 let active_count = guard.iter().filter(|j| j.status == "Rendering").count();
@@ -460,6 +581,32 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                         }
                         if job.status == "Queued" {
                             job.status = "Rendering".to_string();
+                            // #438: recorded as started (Interrupted) before
+                            // FFmpeg runs, written once the lock is released.
+                            let attempt = RenderAttempt {
+                                started_unix_ms: std::time::SystemTime::now()
+                                    .duration_since(std::time::UNIX_EPOCH)
+                                    .map(|d| d.as_millis() as u64)
+                                    .unwrap_or(0),
+                                stream: attempt_stream(&job.clip),
+                                codec: job.codec.to_str_id().to_string(),
+                                custom_codec_args: if job.codec == RenderCodec::Custom {
+                                    job.custom_codec_args.clone()
+                                } else {
+                                    String::new()
+                                },
+                                fps: job.fps,
+                                outcome: RenderOutcome::Interrupted,
+                                output_path: String::new(),
+                                output_size_bytes: None,
+                                error: None,
+                            };
+                            job.current_attempt = Some(attempt.started_unix_ms);
+                            job.history.push(HistoryEntry {
+                                attempt: attempt.clone(),
+                                output_exists: false,
+                            });
+                            attempts_started.push((job.clip.take_folder.clone(), attempt));
                             let job_id = job.id.clone();
                             let clip = job.clip.clone();
                             let cancel_flag = job.cancel_flag.clone();
@@ -492,6 +639,17 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
                 }
                 started > 0
             };
+            for (take_folder, attempt) in attempts_started {
+                if let Err(e) = native::hlcr::take_meta::record_render_start(
+                    std::path::Path::new(&take_folder),
+                    &attempt,
+                ) {
+                    log_markdown(&format!(
+                        "[render-history] couldn't record the start of a render of {}: {}",
+                        take_folder, e
+                    ));
+                }
+            }
 
             if dirty || started_any {
                 emit_jobs_snapshot(&app, &handles.jobs);
@@ -626,8 +784,14 @@ pub async fn queue_render_batch(
 
     let jobs: Vec<RenderJobRuntime> = scan_result
         .into_iter()
+        .map(|mut clip| {
+            clip.clip_name = take_key(std::path::Path::new(&clip.take_folder))
+                .and_then(|key| payload.clip_names.get(&key).cloned());
+            clip
+        })
         .enumerate()
-        .map(|(i, clip)| RenderJobRuntime {
+        .map(|(i, clip)| (i, clip.take_folder.clone(), clip))
+        .map(|(i, clip_take_folder, clip)| RenderJobRuntime {
             id: i.to_string(),
             clip,
             status: "Queued".to_string(),
@@ -640,6 +804,8 @@ pub async fn queue_render_batch(
             codec: config.target_codec,
             custom_codec_args: config.custom_codec_args.clone(),
             fps: config.fps,
+            history: history_for(&clip_take_folder),
+            current_attempt: None,
         })
         .collect();
 
@@ -1098,6 +1264,7 @@ pub fn recover_render_batch(
                 // The scanned clip when the autosave has it; otherwise a stub
                 // that a re-scan fills in.
                 clip: rj.clip.clone().unwrap_or_else(|| ClipData {
+                    clip_name: None,
                     take_folder: rj.take_folder.clone(),
                     clip_type: "single".to_string(),
                     img_folder: String::new(),
@@ -1130,6 +1297,8 @@ pub fn recover_render_batch(
                 codec: RenderCodec::from_str_id(&settings.codec),
                 custom_codec_args: settings.custom_codec_args,
                 fps: settings.fps,
+                history: history_for(&rj.take_folder),
+                current_attempt: None,
             }
         })
         .collect();

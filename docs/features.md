@@ -60,7 +60,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 **Master Demo Queue.** One row per demo with counts: Highlights, Selected, Pending, Captured, Rendered. Counts include only the recording player's streaks. A search box (with an × and Esc to clear it) filters by name, path or map, and quick filters narrow the list to demos with kills or to POV demos only. Every bulk action works on the visible rows only:
 
-- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
+- **Review highlights** (#623) plays every highlight of the ticked demos in the game, one after another, at normal speed. After each it pauses on the DoD Studio window's Review tab: **Yes** marks the row Keep and **No** marks it Skip in the Review column (#44); both save the kill range and note typed there, and neither touches Status. **Tick Yes for capture** (off by default) also ticks each Yes row. **Fast-forward gaps over N s** (on, 8 s by default, #665) plays the stretch between two kills further apart than that at 4x, from 2 s after one kill to 4 s before the next. Replay, Back, Next and Stop move around; a second review starts at the first highlight not yet answered. Studio uses the running game it started, or starts one. Highlights found before demo-player times were kept need a rescan first.
 - **Clear Untracked** removes demos with no statuses, notes, narrowed ranges or review answers.
 - **Clear Selected** and **Clear All** ask to save first when tracked work would be lost.
 - **Teams** lists the clan tags found in the queue's demos (issue #445), with how many demos each is in. A tag is the longest start or end that at least 60% and at least 3 of a side's player names share, kept to letters, digits and spaces. Each row takes a display name and a **Same team as** pick that merges it into another row (× on the merged tag splits it out). Names and merges are saved in the project file. Demos from a project saved before this have no teams until **Read Their Teams** scans them again. These feed the clip-name `{team_name}` and `{opponent}` placeholders (#441).
@@ -100,7 +100,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 | **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
 | **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Typing the start of a console name lists every name it could be, and says so when Studio refuses or overrides one. Warning banners explain what will not take effect, what is refused, and what your own game configs set (including a `config.cfg` that is not read-only). See 3.5 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
-| **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives. |
+| **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives, and **When a batch finishes** (see 4) with a finish codec per capture mode. |
 | **Notifications** | Six switches: patching started/finished, demo loading, fast-forward to clip, captures done, renders done, errors. |
 
 ### 2.5 Demo Auditor
@@ -115,17 +115,32 @@ One folder picker, then a tab per tool:
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
 - **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
-- **Report**, eight sub-tabs:
+- **Report**, nine sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
   - **Player Details:** Steam links (SteamID64, classic and SteamID3, each copyable), score, kills, deaths, lifespans, weapon breakdown, kill streaks with weapon filters.
   - **Team Details**, **Timeline** (team score chart), **Rounds**, **Flags** (per team: captures, how many were breaks, and the capture attempts it blocked; per flag: who holds it at the end and how often it changed hands; every capture with its cappers; each player's capture credits and objective points), **Chat Log** (with team, alive/dead and system-message filters).
+  - **Kill Map** (#448): every death placed on the map's overview picture (from the game's `dod\overviews` folder), with the players, weapon and distance on hover, and an engagement-distance table per weapon.
 
 There is no export from the page. The CLI can export Markdown or JSON (section 8).
 
 ### 2.7 HD Textures
 
 Covered in section 6.
+
+### 2.8 Overviews
+
+Makes the image the game draws for its overview map (`overviews/<map>.tga` or `.bmp`, with its `.txt`) from the map itself (#371). `native::overview` works out every floor a player can reach from the spawns and groups it into areas. The page draws them in the colours of a hand-made overview and lets you:
+
+- recolour an area or a single piece of floor;
+- hide an area;
+- rename flags;
+- add labels and drag them;
+- turn flags, capture zones, spawns, white stairs and water on or off.
+
+Edits are saved per map as you go. **Save overview** writes a TGA (full colour, the background left transparent) or an 8-bit BMP at the game's 1024x768. It goes into `dod_addon/overviews` (read when the game runs with `-addons`) or `dod/overviews`. A user's own overview there is copied to `overviews/dodstudio_backup` first. The `.txt` uses the game's own placement maths, so the game's player icons land on the right spot.
+
+The game itself shows at most 1024x768 (its loader reads the image into a fixed 3 MB buffer and cuts it into 128-pixel tiles). Ticking **Also save a high-quality copy** writes `<map>_hd.tga` at 4096x3072 beside it. With DoD Studio's hook DLL in the game (`goldsrc-hooks/src/overview_hd.rs`), each tile is re-uploaded from that copy at 512x512.
 
 ---
 
@@ -226,6 +241,7 @@ Each row shows its own codec and FPS snapshot, status, speed, progress and size,
 - **Scheduling:** up to the max-concurrent limit; each job reserves space on the first export drive with room, and the reservation learns each codec's real size per frame once there is a render to learn from.
 - **Crash recovery:** a lockfile (`.render_autosave.json`) is written at queue time and after each finished job. On the next start, a dialog offers to recover the batch. Recovered rows are stubs until rescanned. Per-job codec choices are lost on recovery until PR #395 lands.
 - **FFmpeg:** the override path, else `local/tools/ffmpeg.exe` beside the app, else `ffmpeg` on PATH.
+- **Finishing clips after a batch (#440):** with **When a batch finishes** set to *Finish clips automatically* (off by default), a capture batch that completes queues and starts its own verified takes here, through the same Scan/Start path, and the Capture footer shows "Finishing clips: 3 of 12". OBS clips default to Skip (a copy); Video and Frame sequence clips default to the Codec above, and a frame sequence is encoded at the batch's own capture FPS. A cancelled batch is not finished, nothing is finished without an export drive, and a busy Render tab (running, or staged but not started) is waited for rather than replaced.
 
 ---
 
@@ -301,8 +317,9 @@ Command-line only: `compare.py` (a side-by-side sheet of styles), `setup_tools.p
 | British | Allies become British the first time anyone plays a British class. |
 | Map change | Once there is gameplay, a new level ends the analysis, even the same map loaded again; before that, the warm-up is discarded. |
 | Demo type | "HLTV" if any HLTV or director message appears, else "POV". PR #395 stops patched previews counting as HLTV. |
+| Kill positions | Where both players stood at each kill, and the distance between them, from a replay of the entity snapshots (#448). The recording player's own position comes from its client data. On a POV demo, enemies out of the recorder's view have no position. |
 
-Analyses are cached as JSON in `%APPDATA%\dod-studio\analyzer_cache\v4\`, keyed by path and invalidated by size and modified time.
+Analyses are cached as JSON in `%APPDATA%\dod-studio\analyzer_cache\v6\`, keyed by path and invalidated by size and modified time.
 
 ### 7.3 Highlights
 
@@ -339,7 +356,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Settings | `%APPDATA%\dod-studio\settings.json`. The OBS password is stored in plain text. |
 | Activity log | `%APPDATA%\dod-studio\logs\activity_YYYYMMDD.md`, 30 days kept |
 | Hook DLL log | `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, 30 days kept |
-| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v4\` (the number is the cache schema version; older version folders are deleted once a week old; entries within a version are never evicted) |
+| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v6\` (the number is the cache schema version; older version folders are deleted once a week old; entries within a version are never evicted) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
 | Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
@@ -348,6 +365,8 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod\dodstudio_hd\` |
+| Overview edits | `%APPDATA%\dod-studio\overviews\<map>.json` |
+| Saved overviews | `<install>\dod_addon\overviews\` or `<install>\dod\overviews\`; a user's own copied to `overviews\dodstudio_backup\` first |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |
 | OBS | a `[DoD-Studio]` profile and scene inside your OBS |
 

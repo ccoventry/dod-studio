@@ -11,6 +11,9 @@ use std::path::PathBuf;
 
 pub mod patch;
 
+/// What a highlight's clip name can say beyond the streak itself (#441).
+pub mod clip_facts;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
@@ -22,6 +25,11 @@ mod messages;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
+
+/// Maps a session crashed on with a known cause, for the next batch's warning
+/// (#207).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_maps;
 
 /// Caching many demos ahead of time (#569).
 #[cfg(not(target_arch = "wasm32"))]
@@ -42,10 +50,25 @@ pub mod preview_in_place;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
 
+/// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod blender;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
+
+/// Map overviews made from the BSP, for the Overviews page (#371).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod overview;
+
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
 /// The review mode's queue and answers (#623).
 pub mod review_queue;
 

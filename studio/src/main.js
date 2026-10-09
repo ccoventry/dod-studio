@@ -22,16 +22,20 @@ import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_war
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
+import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initBlenderPane } from './blender_pane.js';
+import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
@@ -47,6 +51,10 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
+import { clipNamesForTakes, maxNameLength } from './clip_name.js';
+import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
@@ -411,6 +419,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initAuditorTabs();
   initSplitPane();
   initHdPane();
+  initBlenderPane();
+  initOverviewsPane();
   initTeamsPane({
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
@@ -541,6 +551,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
     const scanWorkers = readScanWorkers();
+    // "When a batch finishes" (#440). Off unless the select says otherwise.
+    const finishClipsAfterBatch = document.querySelector('#config-finish-clips')?.value === 'finish';
+    const finishCodecObs = document.querySelector('#config-finish-codec-obs')?.value || 'source_copy';
+    const finishCodecVideo = document.querySelector('#config-finish-codec-video')?.value || 'render_tab';
+    const finishCodecFrames = document.querySelector('#config-finish-codec-frames')?.value || 'render_tab';
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -581,6 +596,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       notify_updates: notifyUpdates,
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
+      clip_name_template: getClipNameTemplate(),
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -588,13 +604,20 @@ window.addEventListener("DOMContentLoaded", async () => {
       target_drives: targetDrives,
       init_commands,
       custom_commands,
+      command_profiles: getCommandProfiles(),
+      command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
-      render_export_dirs: renderExportDirs
+      render_export_dirs: renderExportDirs,
+      finish_clips_after_batch: finishClipsAfterBatch,
+      finish_codec_obs: finishCodecObs,
+      finish_codec_video: finishCodecVideo,
+      finish_codec_frames: finishCodecFrames
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -731,6 +754,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+      setClipNameTemplate(settings.clip_name_template);
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
@@ -768,10 +792,20 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
       }
+      const finishClipsEl = document.querySelector('#config-finish-clips');
+      if (finishClipsEl) finishClipsEl.value = settings.finish_clips_after_batch ? 'finish' : 'off';
+      [['#config-finish-codec-obs', settings.finish_codec_obs],
+       ['#config-finish-codec-video', settings.finish_codec_video],
+       ['#config-finish-codec-frames', settings.finish_codec_frames]].forEach(([sel, value]) => {
+        const el = document.querySelector(sel);
+        // Only a value the select offers — assigning an unknown one blanks it.
+        if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
+      });
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
         // Folders only: older builds added every file picked with
         // + Add Demo Files, one path per demo. Cleaned up once, here.
@@ -795,6 +829,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirsEditor.render();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -1344,10 +1379,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key, or no teams:
-      // #445) are scanned.
+      // re-parsed; ones from an older project (no file_key, no map_name:
+      // saved before clip names, #441, or no teams: #445) are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key && demoHasTeams(d))
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1597,9 +1632,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
   initCombineClips({
     finishedRenders: () => finishedRenderOutputs(),
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
@@ -1608,6 +1645,16 @@ window.addEventListener("DOMContentLoaded", async () => {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
     onStatusChange: onHighlightStatusChange
+  });
+
+  // "When a batch finishes" (#440): queues a verified batch's takes into the
+  // Render tab's own queue. capture_pane.js hands it each verified batch.
+  initFinishClips({
+    getExportDirs: () => renderExportDirs,
+    getClipNames: (exportDirs) => clipNamesForTakes(
+      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+    ),
+    onSettingsChange: persistAppSettings,
   });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
@@ -1957,7 +2004,31 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (hlPathInput) {
     refreshInitCommandWarnings();
     hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
+    // Which engine it is decides which demos the Master Queue marks (#207).
+    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
+      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
+    markDemosOverLimit();
+    hlPathInput.addEventListener('change', markDemosOverLimit);
   }
+  // #441: the preview uses the selected demo's first checked highlight (its
+  // first highlight when none is checked); a settled template change is
+  // saved and redraws the automatic names in Highlight Details.
+  initClipNameSettings({
+    getHighlight: () => {
+      const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
+      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const streak = own.find((s) => s.selected) || own[0];
+      return streak ? { demo, streak } : null;
+    },
+    getExportDirList: () => renderExportDirs,
+    onChange: () => {
+      persistAppSettings();
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+    },
+  });
+
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
     // switching the selected demo, or after a capture/render completes) —
@@ -1967,6 +2038,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Must NOT mark the project dirty — see onDirty below for that.
     refreshLaunchGuard({ targetDrives, currentScannedDemos });
     renderMasterList(currentScannedDemos, selectedDemoIdx);
+    refreshClipNamePreview();
   }, () => {
     // Fired only from an actual highlights-table field edit (selection,
     // kill range, status, notes) — all of it is part of the `demos` written
