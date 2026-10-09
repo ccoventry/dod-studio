@@ -43,6 +43,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
+| `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
 | `dodstudio_hd_enabled` | `1` if there's a `dod/dodstudio_hd` folder, else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
@@ -116,7 +117,7 @@ at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
 ### `dodstudio_hide_hudelement`
 
-`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the ten
+`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the nine
 elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
 chat, the kill feed, the status bar, the objective icons and the rest.
 `dodstudio_hide_hudelement all 0` puts everything back. See
@@ -136,8 +137,14 @@ See [`goldsrc_decals.md`](goldsrc_decals.md).
 clock the editor's events list shows); `dodstudio_seek_by <seconds>` jumps
 from where playback is, back when negative. Neither pauses, and both refuse
 while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
-Anniversary `DemoPlayer.dll`. Nothing in the pipeline calls them yet. See
-[`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
+Anniversary `DemoPlayer.dll`.
+
+A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
+(#596), so the names, teams and scores of everything jumped over reach the
+game; a 20-minute jump takes a few hundred frames. Anything after the time is
+a command to run once the jump has landed:
+`dodstudio_seek_to 1335.3 dodstudio_spec_target 13`. The in-game Highlights
+tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 
 ### `dodstudio_reload_demo`
 
@@ -211,19 +218,32 @@ was left alone on purpose (tool textures, blank sprites, per-player skins). A
 texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
 shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
-### `dodstudio_hide_sprite`
+### `dodstudio_hide_asset`
 
-`dodstudio_hide_sprite <model-path>...` suppresses specific map-placed
-`env_sprite` entities by exact model path -- an allow-list, not a blanket
-toggle, replacing the whole set on each call (not additive). `clear` stops
-hiding anything. Only reaches genuine `env_sprite` entities rendered through
-the engine's normal entity list (`HUD_AddEntity`); DoD draws some
-sprite-looking things -- the crosshair, the capture-area icon -- as ordinary
-2D HUD elements instead, which this command can never reach regardless of
-path spelling (`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach
-those). No enumeration of valid paths either: an unmatched entry (wrong path,
-wrong extension, or a 2D-drawn element like the above) fails silently, with
-no error -- see issue #333. See `src/hide_sprite.rs`'s module doc.
+`dodstudio_hide_asset` stops the game drawing an asset -- a sprite, model
+or brush entity, named by its file path -- here, specific world entities by exact model
+path: map sprites, props (`.mdl`), brush entities (`*12`). It keeps a list,
+shaped like HLAE's `mirv_matte_entities` but by model path rather than entity
+number (a path stays the same across demos):
+
+- `dodstudio_hide_asset list` (or no arguments): what is hidden.
+- `dodstudio_hide_asset add <model-path>...`: hide these too.
+- `dodstudio_hide_asset del <model-path>...`: stop hiding these.
+- `dodstudio_hide_asset clear`: stop hiding anything.
+
+It is an allow-list, not a blanket toggle: `all` is refused. It was
+`dodstudio_hide_sprite`, then `dodstudio_hide_entity` (#333); neither was in
+a release, and both names are gone. "Asset" because #614 extends it to the
+same paths drawn as temporary effects (bullet-impact dust and the like).
+
+It reaches only entities rendered through the engine's normal entity list
+(`HUD_AddEntity`). DoD draws some sprite-looking things -- the crosshair, the
+capture-area icon -- as ordinary 2D HUD elements instead, which this command
+can never reach regardless of path spelling
+(`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
+status, bare or in `dodstudio_debug_status`, says whether each path has
+matched anything this session, so a typo no longer fails silently. See
+`src/hide_asset.rs`'s module doc.
 
 ### `dodstudio_panel`
 

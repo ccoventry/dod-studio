@@ -228,60 +228,51 @@ pub fn scan_demo_for_highlights_with_analysis(
         crate::utils::demo_hasher::demo_key_of_head(&prefix, file_len as u64),
     );
 
-    // ── Per-player life-bounded streak iteration ────────────────────────────────────────────
-    for player in &analysis.state.players {
-        // Skip players that are not (or are no longer) in a connected slot.
-        // Disconnected entries have no valid client_id to anchor the patcher.
-        let player_index = match player.connection {
-            analysis::Connection::Connected { client_id } => client_id as usize,
-            _ => continue,
+    // ── Per-player life-bounded streaks, as `analysis::highlights` defines them ──
+    // Every player's (`all`): the frontend keeps the recording player's rows
+    // itself (`isVisibleStreak`), and saved projects index these rows in this
+    // order. Skips players no longer in a connected slot: capture needs a slot
+    // to anchor the patcher.
+    for highlight in &analysis::highlights::highlights(&analysis).all {
+        let Some(slot) = highlight.slot else {
+            continue;
         };
+        let kills_raw: Vec<(i32, f32, String)> = highlight
+            .kills
+            .iter()
+            .map(|kill| {
+                (
+                    kill.frame_index as i32,
+                    kill.real_secs,
+                    analysis::weapon_display_name(&kill.weapon),
+                )
+            })
+            .collect();
+        let viewdemo_times: Vec<f32> = highlight.kills.iter().map(|k| k.viewdemo_secs).collect();
 
-        for kill_streak in &player.kill_streaks {
-            let kills_raw: Vec<(i32, f32, String)> = kill_streak
-                .kills
-                .iter()
-                .map(|(time, weapon, _victim)| {
-                    let abs_time = time.real_offset.as_secs_f32();
-                    let tick = time.frame_index as i32;
-                    (tick, abs_time, analysis::weapon_display_name(weapon))
-                })
-                .collect();
-
-            if kills_raw.is_empty() {
-                continue;
-            }
-
-            let viewdemo_times: Vec<f32> = kill_streak
-                .kills
-                .iter()
-                .map(|(time, _, _)| time.viewdemo_offset.as_secs_f32())
-                .collect();
-
-            let end_index = kills_raw.len().saturating_sub(1);
-            let mut streak = CaptureStreak {
-                start_tick: kills_raw[0].0,
-                end_tick: kills_raw[end_index].0,
-                source_demo: path.to_string_lossy().to_string(),
-                target_player: Some(player.name.clone()),
-                kill_count: kills_raw.len(),
-                timeline_string: String::new(),
-                duration_string: String::new(),
-                player_index,
-                kills: kills_raw,
-                viewdemo_times,
-                start_index: 0,
-                end_index,
-                total_demo_frames: final_demo_frames,
-                demo_fps: tickrate,
-                frame_times: frame_times_arc.clone(),
-                status: HighlightStatus::None,
-                match_start_tick: analysis.state.match_start_tick,
-                source_key: Some(source_key.clone()),
-            };
-            streak.update_visuals();
-            streaks.push(streak);
-        }
+        let end_index = kills_raw.len().saturating_sub(1);
+        let mut streak = CaptureStreak {
+            start_tick: kills_raw[0].0,
+            end_tick: kills_raw[end_index].0,
+            source_demo: path.to_string_lossy().to_string(),
+            target_player: Some(highlight.player.clone()),
+            kill_count: kills_raw.len(),
+            timeline_string: String::new(),
+            duration_string: String::new(),
+            player_index: slot as usize,
+            kills: kills_raw,
+            viewdemo_times,
+            start_index: 0,
+            end_index,
+            total_demo_frames: final_demo_frames,
+            demo_fps: tickrate,
+            frame_times: frame_times_arc.clone(),
+            status: HighlightStatus::None,
+            match_start_tick: analysis.state.match_start_tick,
+            source_key: Some(source_key.clone()),
+        };
+        streak.update_visuals();
+        streaks.push(streak);
     }
 
     let local_player_index = analysis.state.pov_player_index.map(|idx| idx as usize);
