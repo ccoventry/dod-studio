@@ -8,7 +8,7 @@ Every fact below was measured on real demos or confirmed live in the engine, not
 
 - **Init state lives in directory entry 0**: `SvcServerInfo`, 7 × `SvcDeltaDescription`, `SvcSpawnBaseline`, the resource list and ~65 `SvcNewUserMsg`. Keep entry 0 whole and decoders and baselines survive any cut.
 - **Full `SvcPacketEntities` snapshots only appear at the very start**: one in an HLTV demo, five within the first 0.1 s in a POV demo, then 111k–126k *deltas*. Entity state has **no mid-demo restart point**. Cutting the end is safe (deltas only refer backwards); cutting the front is not.
-- **A map change re-sends the whole signon inline** (new ServerInfo, decoders, baseline and fresh full snapshots), so a demo can be split cleanly at a level change. Splitting multi-map demos (#624) and the analyzer's map picker (#217) rely on this.
+- **A map change re-sends the whole signon inline** (new ServerInfo, decoders, baseline and fresh full snapshots), so a demo can be split cleanly at a level change. Splitting multi-map demos (#624) and the analyzer's Split now (#217) rely on this.
 - **`origin` fields are absolute world coordinates**, not movement offsets (shifted +128, it round-trips). Position desync after a splice heals itself as entities move.
 - **Entity fields can be authored and round-trip exactly** through `dem-patch`'s writer (2,598 origins rewritten, identical file size).
 - **`entity_count` is not the number of listed entities.** A packet declares the size of the *resulting* snapshot (median 20) while listing only the changed entities (median 6). Anything reconstructing entity state must model the carry-forward or it undercounts badly.

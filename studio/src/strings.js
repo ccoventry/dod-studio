@@ -897,6 +897,16 @@ export const STRINGS = {
     analyzingDemoPct: (pct) => `Analyzing demo… ${pct}%`,
     analyzeFailed: (err) => `Failed to analyze demo: ${err}`,
     NO_DEMO_LOADED: 'No demo loaded',
+    // #217: a demo that recorded more than one map.
+    multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
+      + 'Only one is analysed: the first with gameplay, up to the next map.',
+    MULTI_MAP_SPLIT_BUTTON: 'Split now',
+    MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
+      + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
+      + 'the Demo Auditor\'s Split Maps tab lets you pick.',
+    MULTI_MAP_SPLITTING: 'Splitting…',
+    multiMapSplitDone: (names) => `Split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    multiMapSplitFailed: (err) => `Could not split it: ${err}`,
 
     NO_PLAYERS_FOUND: 'No players found in this demo.',
     NO_WEAPON_DATA: 'No weapon data.',

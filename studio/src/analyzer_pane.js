@@ -8,7 +8,10 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, demoMapSegments, splitDemoMaps } from './ipc_bridge.js';
+import { renderMultiMapBanner, mapsToKeep } from './analyzer_multimap.js';
+import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
+import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
@@ -1099,14 +1102,27 @@ async function loadAnalyzerDemo(path) {
     browserSelectedDemo = path;
     renderDemoTable();
     renderActiveTab();
+    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, () => splitAnalyzedDemo(path));
   } catch (err) {
     if (container) {
       container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
+    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
   } finally {
     analyzerLoadInProgress = false;
   }
+}
+
+// #217: Split now on a demo that recorded more than one map. Writes each map
+// (but the stub of a next map) as a demo next to this one, lists them in the
+// Explorer when it shows that folder, and opens the first.
+async function splitAnalyzedDemo(path) {
+  const segments = await demoMapSegments(path);
+  const written = await splitDemoMaps(path, mapsToKeep(segments, SHORT_MAP_SECONDS));
+  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
+  if (currentDir && currentDir === parentDirOf(path)) await setCurrentDir(currentDir);
+  if (written.length) await loadAnalyzerDemo(written[0].path);
 }
 
 function renderActiveTab() {

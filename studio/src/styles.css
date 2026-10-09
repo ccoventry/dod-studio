@@ -1305,6 +1305,22 @@ button.primary-btn:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* #217: a demo that recorded more than one map, above every analyzer tab. */
+.analyzer-multimap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.analyzer-multimap-banner[hidden] {
+  display: none;
+}
+
+.analyzer-multimap-text {
+  flex: 1 1 320px;
+}
+
 .analyzer-toolbar {
   display: flex;
   gap: 10px;
