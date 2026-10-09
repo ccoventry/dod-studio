@@ -82,7 +82,6 @@ pub const IO_BUFFER_CAPACITY: usize = 262_144;
 pub const MAX_PAYLOAD_LIMIT_BYTES: usize = 2_097_152;
 
 // Binary Frame & Header Sizes
-pub const HLTV_HEADER_SIZE: usize = 512;
 pub const DEMO_HEADER_SIZE: usize = 544;
 pub const DIRECTORY_OFFSET_POS: usize = 540;
 pub const FRAME_HEADER_SIZE: usize = 9;
@@ -209,7 +208,9 @@ pub use builder::{
 };
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use scanner::{is_hltv_demo, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis};
+pub use scanner::{
+    is_hltv_demo, is_hltv_head, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis,
+};
 
 /// Whether a frame can carry injected payload: it must be a `NetworkMessage`
 /// whose contents were actually parsed (an unparsed one is opaque bytes there
