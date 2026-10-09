@@ -54,6 +54,8 @@ python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 `AfxHookGoldSrc.dll` registers its pattern keys as C++ static initialisers —
 `push <name>; push <result slot>; mov ecx, <map>; call` — which makes the
 database recoverable exactly rather than approximately. There are **68 keys**.
+*(In the HLAE build this section read. HLAE 2.192.4 has 69, and a different
+set — §12.1.)*
 
 ### The list in issue #256 was a guess, and several entries were wrong
 
@@ -108,7 +110,8 @@ of HLAE's. That is worth knowing with certainty rather than by inference.
 
 `AfxHookGoldSrc.dll` carries `.detourc` and `.detourd` sections and a statically
 linked Microsoft Detours. Its install sequence is the standard transaction —
-begin, update-thread, then `DetourAttach(&target, hook)` per hook, 34 of them —
+begin, update-thread, then `DetourAttach(&target, hook)` per hook, 34 of them
+(40 in HLAE 2.192.4, which also span-patches; §12) —
 and `DetourAttach` rewrites **the first ≥5 bytes of the target function**,
 building a trampoline from the instructions it displaced.
 
@@ -236,11 +239,13 @@ nothing else, and it is not a cheat vector in a demo. `cl_updaterate` still sets
 the floor, so a demo recorded at a low update rate cannot be smoothed below what
 it captured.
 
-*Not proven: what the flag at `+0x2d5df84` is. It is written to `1` at
-`hw+0x10880` in the demo-start path, so "playing a demo" is the obvious reading
-and would mean demos already get the 200 ms ceiling — but that is inference, and
-it is exactly the sort of thing that should be checked before the work is
-costed.*
+*Not proven here: what the flag at `+0x2d5df84` is. (Answered since by
+`docs/goldsrc_ex_interp.md` §2–§2b, and the guess below was wrong: the
+demo-start path writes `0` there, at `hw+0x1087a`, not `1`; the only write of
+`1` on this build is unreachable. On the Anniversary build `svc_hltv` mode 0
+sets it.)* The first pass read the demo-start write as "playing a demo" and
+inferred that demos already get the 200 ms ceiling; checking it before costing
+the work was the right call.
 
 ### 3.3 Demo playback and parsing — located, not surveyed
 
@@ -824,3 +829,148 @@ The practical rule §10 gave for the message stream — don't touch the
 Anniversary span 11 bytes long. And there is now a second region with the same
 warning on the Anniversary build only: **`R_DrawEntitiesOnList` and
 `R_DrawSkyBox` are not detour targets there; their insides are HLAE's.**
+
+---
+
+## 13. The demo reader (#300 item 1)
+
+D6 dropped this item from #300 — #434 moves the schedule out of the demo file,
+which takes most of the motivation with it. It is recorded here as far as one
+bounded pass went, because what it found also answers §3.1's open question and
+explains a rule `cfg_scan.rs` learned empirically. Pre-Anniversary addresses;
+§13.4 says what was rechecked on the Anniversary build.
+
+### 13.1 Where "corrupt" is decided: at open, and only on the directory
+
+`Error: Corrupt demo file.` has one reference (`hw+0x108fa`), in the `playdemo`
+handler, and it fires on exactly one condition. The handler:
+
+1. opens the file — `ERROR: couldn't open.` and stop on failure;
+2. reads the 544-byte header (`HLDEMO`, two protocol ints, map name, game dir,
+   map CRC, directory offset);
+3. **magic** — the first 6 bytes must be `HLDEMO`, else `%s is not a demo file`
+   and stop;
+4. **protocols** — demo protocol 5 and network protocol 48 are expected, and
+   **a mismatch only warns** (`WARNING! demo protocol outdated`) and carries on;
+5. seeks to the directory offset and reads the entry count — **the only
+   "corrupt" test: fewer than 1 or more than 1024 entries**. That prints the
+   message, closes the file and calls `CL_Disconnect`;
+6. reads `count × 92` bytes of entries and seeks to entry 0's offset.
+
+Nothing checks the directory offset, an entry's offset or length, or its frame
+count against the file. The map name and game directory are not compared here
+(other code reads them later), and the header's map CRC field has no absolute
+reference anywhere in `hw.dll`. So a file the engine calls corrupt is one whose directory count
+is out of range — everything else that is wrong is found, if at all, while
+frames are being read.
+
+### 13.2 The frame reader: what it validates, and what it tolerates
+
+The per-frame reader (`hw+0x1104d`) reads a 9-byte header — type byte, float
+time, int frame — **without checking any of the three reads**, then dispatches
+on the type:
+
+| type | what it does |
+| --- | --- |
+| 2 `DemoStart` | resets the playback clock, reads the next frame |
+| 3 `ConsoleCommand` | reads **exactly 64 bytes**, filters, `Cbuf_AddText`s it plus `"\n"` |
+| 4 `ClientData` | reads 32 bytes |
+| 5 `NextSection` | advances to the next directory entry |
+| 6, 7, 8 | event, weapon animation, sound — each its own reader |
+| 9 `DemoBuffer` | reads a length, **clamps it to 32,768** and reads that many |
+| **anything else** | **read as a network message** — 0 and 1, and also 10–255 |
+
+Every type except 0 and 5 is time-gated: if it is not yet due, the reader seeks
+back to the header and returns, to try again next frame.
+
+The network message is the only checked read: the length must arrive whole
+(`Bad demo length.`), not be negative (`Demo message length < 0.`), not exceed
+65,536 (`Demo message > MAX_POSSIBLE_MSG`), and the payload must arrive whole
+(`Error reading demo message data.`). All four end the session through
+`Host_EndGame`. The payload then becomes `net_message` and goes to
+`CL_ParseServerMessage`.
+
+What that means for anything that writes demos:
+
+- **An unknown frame type is not an error, it is a misread.** Its bytes are
+  taken as a network message's preamble and length, so it ends in one of the
+  four messages above or, worse, a plausible length and a parse of garbage.
+  Every corrupt-demo symptom downstream of a bad type byte starts here.
+- **A `DemoBuffer` frame longer than 32,768 bytes desyncs the rest of the
+  file.** The reader clamps the length rather than skipping the remainder, so
+  the leftover bytes are read as the next frame header. The format side
+  (`dem-patch`) does not have that limit.
+- **The reader never looks at a frame's ordinal.** The header's `int frame`
+  is read into a local and never read back (timedemo pacing uses the host's
+  own frame count). So the "+1 ordinal shift" an injected frame causes
+  (CLAUDE.md, decal ring) is a fact about our own tooling's indexing, and
+  possibly the directory's frame counts (§13.5), not something the reader
+  checks.
+
+### 13.3 The 64-byte `ConsoleCommand` field, from the engine's side (§3.1)
+
+§3.1 concluded the 64-byte limit from the format side only. The read is:
+
+```asm
+hw+0x111c3  push 0x40                ; FS_Read(buf, 64, 1, demofile)
+hw+0x111c6  call FS_Read             ; buf is a 64-byte local
+hw+0x111cf  call hw+0x1dce0          ; the command filter (below)
+hw+0x111e3  call Cbuf_AddText        ; buf, then "\n"
+```
+
+**Proven: the engine reads exactly 64 bytes and writes no terminator.** The
+buffer is 64 bytes on the stack and the next local is the `ClientData`
+buffer, so a command that fills all 64 bytes is read on into whatever that
+holds until a zero turns up. The pipeline's rule — strictly *under* 64 bytes —
+is what guarantees the terminator, and that is now a fact about the reader
+rather than an assumption about it.
+
+**Proven: every `ConsoleCommand` frame goes through the same filter as
+`svc_stufftext`** (`hw+0x1dce0`; its other callers are the `stufftext` handler
+and two more). During demo playback it always runs. In order:
+
+1. **On the command's name** (`Cmd_Argv(0)`), case-insensitively: dropped if it
+   **starts with** `connect`, or **contains anywhere** `bind`, `_set`,
+   `unbind`, `retry`, `quit`, `_restart`, `motd_write`, `motdfile`, `kill`,
+   `exit`, `writecfg`, `cl_filterstuffcmd` or `unbindall`.
+2. **On the whole line:** dropped if it starts with `alias `; or contains
+   `bind `, `unbind `, `_restart`, `exit`, `writecfg`, `cl_filterstuffcmd` or
+   `unbindall`; or has `connect ` (not the one inside `reconnect`),
+   `motd_write`, `motdfile`, `retry`, `_set`, `quit` or `kill` at the start of
+   a token (line start, or after a space, `;` or newline) — and if it contains
+   **`exec`, unless the game directory is `tfc`**.
+3. **Only if `cl_filterstuffcmd` is non-zero** (default `0`): also `ex_interp `,
+   `say `, `developer`, `rate`, `fps_max`, `sensitivity`, `setinfo`, `volume`
+   and a dozen more, any `cl_`/`gl_`/`m_`/`r_`/`hud_` token, and any
+   non-printable character.
+
+That is `cfg_scan.rs`'s `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`) proven
+offline, and it shows the list is a subset. Two consequences worth knowing:
+
+- **The name test is a substring test.** Any command whose *name* contains
+  `_set`, `kill`, `exit`, `bind` or `quit` is dropped when it arrives through a
+  demo's message stream — HLAE's `mirv_matte_setcolor` and
+  `mirv_draw_sv_hitboxes_setucolor` included. Nothing reports it.
+- **`exec` is dropped for DoD specifically**; the `tfc` exemption is a
+  game-directory check, not a setting.
+
+Neither is acted on here; both belong to `cfg_scan.rs` and to #434's move away
+from demo-borne commands, which sidesteps the filter entirely.
+
+### 13.4 The Anniversary build
+
+Rechecked, not re-traced: its reader has the same messages (`Bad demo length.`
+and `Demo message > MAX_POSSIBLE_MSG` in one function, `hw+0x199cc0`;
+`Error: Corrupt demo file.` in `hw+0x199890`), the same filter (`hw+0x1aaa30`,
+the same strings in the same order, called from the `stufftext` handler and
+from the reader immediately after a 64-byte read at `hw+0x199f40`). The gate
+details in §13.3 — the `tfc` exemption and the `cl_filterstuffcmd` stage — were
+read on the pre-Anniversary build only.
+
+### 13.5 What is still not surveyed
+
+- What `NextSection` does when there is no next entry, and the timedemo path.
+- The six type-specific readers (types 4, 6, 7, 8, 9's client hand-off) beyond
+  their read sizes.
+- The 92-byte directory entry's fields other than `offset`, and whether
+  playback ever consults `length` or the frame count.
