@@ -566,7 +566,9 @@ async fn analyze_demo_full(
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    serde_json::json!({ "processed": processed, "total": total }),
+                    // The path lets the page ignore an earlier click's
+                    // analysis still running beside this one.
+                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
                 );
             }
         };
