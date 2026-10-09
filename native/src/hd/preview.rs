@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
+use super::map_list;
 use super::python::{self, PythonSource, Using};
 
 /// How often the script is polled, per CLAUDE.md's process rules.
@@ -86,80 +87,11 @@ fn args(request: &PreviewRequest) -> Result<Vec<String>, String> {
     Ok(args)
 }
 
-/// `hdcommon.MAP_LIST`: which maps get HD map textures and skies.
-pub const MAP_LIST: &str = "hd_maps.txt";
-
-/// `hdcommon.map_patterns`: the patterns in `hd_maps.txt`, lowercased and
-/// without `.bsp`.
-fn map_patterns(text: &str) -> Vec<String> {
-    text.lines()
-        .map(|raw| {
-            raw.split('#')
-                .next()
-                .unwrap_or_default()
-                .trim()
-                .to_lowercase()
-        })
-        .map(|line| {
-            line.strip_suffix(".bsp")
-                .map(str::to_string)
-                .unwrap_or(line)
-        })
-        .filter(|line| !line.is_empty())
-        .collect()
-}
-
-/// `fnmatch.fnmatchcase` for the two wildcards `hd_maps.txt` documents: `*`
-/// any run of characters, `?` exactly one.
-fn wildcard_match(pattern: &[u8], name: &[u8]) -> bool {
-    match (pattern.first(), name.first()) {
-        (None, None) => true,
-        (Some(b'*'), _) => {
-            wildcard_match(&pattern[1..], name)
-                || (!name.is_empty() && wildcard_match(pattern, &name[1..]))
-        }
-        (Some(b'?'), Some(_)) => wildcard_match(&pattern[1..], &name[1..]),
-        (Some(p), Some(n)) if p == n => wildcard_match(&pattern[1..], &name[1..]),
-        _ => false,
-    }
-}
-
-/// The maps the preview can sample: every `.bsp` in `<game>\dod\maps`, as
-/// `hd_maps.txt` (in `hd_root`, else beside the scripts from before #385)
-/// narrows them, sorted. Those are the maps a build makes map textures for.
+/// The maps the preview can sample: the ones a build makes map textures for
+/// ([`map_list::chosen`]), from `hd_root`'s `hd_maps.txt` (else the copy
+/// beside the scripts from before #385).
 pub fn map_choices(game_exe: &Path, hd_root: &Path, scripts: Option<&Path>) -> Vec<String> {
-    let Some(maps_dir) = game_exe.parent().map(|g| g.join("dod").join("maps")) else {
-        return Vec::new();
-    };
-    let Ok(entries) = std::fs::read_dir(maps_dir) else {
-        return Vec::new();
-    };
-    let mut names: Vec<String> = entries
-        .flatten()
-        .filter_map(|e| {
-            let name = e.file_name().to_string_lossy().to_string();
-            let stem = name
-                .strip_suffix(".bsp")
-                .or_else(|| name.strip_suffix(".BSP"))?;
-            Some(stem.to_string())
-        })
-        .collect();
-    let list = hd_root.join(MAP_LIST);
-    let list = match scripts.map(|dir| dir.join(MAP_LIST)) {
-        Some(old) if !list.exists() && old.is_file() => old,
-        _ => list,
-    };
-    if let Ok(text) = std::fs::read_to_string(list) {
-        let patterns = map_patterns(&text);
-        names.retain(|name| {
-            let lower = name.to_lowercase();
-            patterns
-                .iter()
-                .any(|p| wildcard_match(p.as_bytes(), lower.as_bytes()))
-        });
-    }
-    names.sort_by_key(|n| n.to_lowercase());
-    names
+    map_list::chosen(game_exe, hd_root, scripts)
 }
 
 /// Reads `compare.py`'s output: the maps it picked, what it skipped, and
@@ -280,6 +212,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hd::map_list::MAP_LIST;
     use crate::test_support::Scratch;
 
     fn request(maps: &[&str], styles: &[&str]) -> PreviewRequest {
@@ -362,22 +295,6 @@ mod tests {
             map_choices(&exe, &root, None),
             ["dod_anzio", "dod_Anzio2", "dod_harrington"]
         );
-        for (pattern, name, hit) in [
-            ("dod_*sherman*", "dod_sherman_b2", true),
-            ("dod_*sherman*", "dod_caen", false),
-            ("dod_caen", "dod_caen2", false),
-            ("*", "", true),
-            ("a?c", "ac", false),
-        ] {
-            assert_eq!(
-                wildcard_match(pattern.as_bytes(), name.as_bytes()),
-                hit,
-                "{pattern} {name}"
-            );
-        }
-        let common = include_str!("../../../goldsrc-hooks/tools/hd/hdcommon.py");
-        assert!(common.contains(&format!("MAP_LIST = \"{MAP_LIST}\"")));
-        assert!(common.contains("fnmatch.fnmatchcase(n.lower(), p)"));
     }
 
     /// The lines parsed here are the ones `compare.py` prints.
