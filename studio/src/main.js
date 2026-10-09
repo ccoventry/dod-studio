@@ -179,6 +179,7 @@ function applyCaptureModeUI() {
   const mode = currentCaptureMode();
   const video = mode === 'direct_to_video';
   const obs = mode === 'obs';
+  const agr = mode === 'agr';
 
   // Kept in step rather than read: the backend still accepts `ffmpeg_capture`
   // from older payloads, and leaving it stale would make the two disagree for
@@ -205,7 +206,17 @@ function applyCaptureModeUI() {
   // OBS, which has its own separate OBS Capture FPS field below — showing
   // both invites setting the wrong one.
   const captureFpsGroup = document.querySelector('#capture-fps-group');
-  if (captureFpsGroup) captureFpsGroup.style.display = obs ? 'none' : '';
+  if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
+
+  // AGR mode records no video, so Capture FPS gives way to its own rate. An
+  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
+  // shows the number that will actually be used.
+  const agrFpsGroup = document.querySelector('#agr-fps-group');
+  if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
+  const agrFpsInput = document.querySelector('#config-agr-fps');
+  if (agrFpsInput) {
+    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
+  }
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -467,6 +478,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 2.0);
     const postRoll = numberField('#config-post-roll', 0.6);
 
@@ -529,6 +542,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
       resolution_width: resWidth,
@@ -626,6 +640,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.obs_capture_fps) {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
+      }
+      // 0 is "the same as Capture FPS" and stays an empty box.
+      if (settings.agr_fps > 0) {
+        const inputEl = document.querySelector('#config-agr-fps');
+        if (inputEl) inputEl.value = settings.agr_fps;
       }
       // `!= null`, not truthiness: 0 is a real value for the five timing
       // fields, and a truthy check skipped restoring it.
