@@ -637,6 +637,7 @@
 
             <div class="action-row" style="margin-top: 8px;">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
+              <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
             </div>
             <div id="render-job-container"></div>
@@ -762,6 +763,7 @@
                   <select id="hd-style-select"></select>
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
+                <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
               </div>
             </div>
@@ -1193,6 +1195,27 @@
     </div>
 
     <!-- FFmpeg Error Log — shown via a render job row's "View Log" action. -->
+    <!-- Combine Clips (#107): combine_clips.js. -->
+    <div id="combine-modal" class="modal" style="display: none;">
+      <div class="modal-content combine-content">
+        <h2 data-str="COMBINE.TITLE">Combine Clips</h2>
+        <p class="combine-hint" data-str="COMBINE.HINT">Join rendered clips into one video, in the order listed.</p>
+        <div class="combine-toolbar">
+          <button id="combine-add-finished-btn" data-combine-edit data-str="COMBINE.ADD_FINISHED_BUTTON">Add finished renders</button>
+          <button id="combine-add-files-btn" data-combine-edit data-str="COMBINE.ADD_FILES_BUTTON">Add files…</button>
+          <button id="combine-clear-btn" data-combine-edit data-str="COMBINE.CLEAR_BUTTON">Clear</button>
+        </div>
+        <ol id="combine-list" class="combine-list"></ol>
+        <p id="combine-plan" class="combine-plan"></p>
+        <div id="combine-progress" class="progress-bar-container" hidden><div id="combine-progress-fill" class="progress-bar-fill" style="width: 0%;"></div></div>
+        <div class="combine-actions">
+          <button id="combine-start-btn" class="primary-btn" disabled data-str="COMBINE.START_BUTTON">Combine…</button>
+          <button id="combine-cancel-btn" disabled data-str="COMBINE.CANCEL_BUTTON">Cancel</button>
+          <button id="combine-close-btn" data-str="COMBINE.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
     <div id="render-error-log-modal" class="modal" style="display: none;">
       <div class="modal-content" style="max-width: 640px; padding: 20px;">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>

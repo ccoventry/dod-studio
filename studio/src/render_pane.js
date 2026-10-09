@@ -423,6 +423,12 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
   }, { once: true });
 }
 
+/** The output files of this session's finished render jobs, in table order,
+ *  for Combine Clips (#107). */
+export function finishedRenderOutputs() {
+  return jobs.filter((j) => j.status === 'Finished' && j.output_path).map((j) => j.output_path);
+}
+
 /** Export Marker List (#110): a CSV of every captured highlight. */
 async function exportMarkerList(getTakeIndex, getAllDemos) {
   const demos = getAllDemos ? getAllDemos() : [];

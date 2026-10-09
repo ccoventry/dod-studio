@@ -1341,6 +1341,58 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Last Batch (#172). */
 .batch-results {
   margin-top: 12px;
@@ -1970,6 +2022,20 @@ tr.keyboard-selected {
   text-align: left;
   white-space: nowrap;
   border-bottom: 1px solid #282828;
+}
+
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage {
+  color: #ffb74d;
 }
 
 #hd-status-table th {
