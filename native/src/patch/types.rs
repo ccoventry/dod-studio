@@ -639,8 +639,15 @@ impl PatcherConfig {
         // is where DoD Studio's own UI files go (`.res` layouts, menu
         // entries) so the user's own `dod/resource` is never written (#408).
         // Tested live: without it the engine ignores `dod_addon` entirely.
+        //
+        // `-demoedit` turns on the demo player's edit row (Master, Events,
+        // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
+        // GameUI, which otherwise sizes the bar so that row is cut off. It
+        // was on the command line once and fell off when the launchers were
+        // unified in 02b43c1; an install with a custom
+        // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game dod -insecure -addons -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            "-game dod -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
             self.resolution_width, self.resolution_height, extra_engine_args
         );
 
@@ -913,6 +920,21 @@ mod launch_args_tests {
             assert!(
                 line.find('+').is_none_or(|plus| addons < plus),
                 "-addons must precede any +command: {line}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_demoedit_is_passed_on_every_launch() {
+        // Without it the demo player's Master/Events/Save row is hidden on any
+        // install lacking a custom DemoPlayerDialog.res, which is how it went
+        // missing unnoticed once before.
+        for extra in ["", "+viewdemo foo", "+playdemo dodstudio_primer"] {
+            let line = cmd_line_of(&PatcherConfig::default(), extra);
+            let demoedit = line.find("-demoedit").expect("-demoedit present");
+            assert!(
+                line.find('+').is_none_or(|plus| demoedit < plus),
+                "-demoedit must precede any +command: {line}"
             );
         }
     }
