@@ -3,13 +3,16 @@
 // selected-streak yield counts, and a functional delete action (M1-M4 parity).
 
 import { isDemoTracked, isRangeModified } from './take_index.js';
-import { logFrontendEvent } from './ipc_bridge.js';
+import { logFrontendEvent, indexDemoPlayers } from './ipc_bridge.js';
+import { listen } from '@tauri-apps/api/event';
+import { groupPlayers } from './player_filter.js';
 import { themedConfirm } from './themed_confirm.js';
 import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
+import { overLimitBadge } from './packet_entity_limit.js';
 import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { makeClearable } from './clearable_input.js';
-import { statusCountColor } from './status_colors.js';
+import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -21,16 +24,18 @@ const TRACKED_ICON_SVG = `<svg width="12" height="12" viewBox="0 0 24 24" fill="
  *  in sync with isHighlightTracked's own checks. */
 function describeTrackedReasons(demo) {
   const streaks = demo?.streaks || [];
-  let hasStatus = false, hasNotes = false, hasReview = false, hasRange = false;
+  let hasStatus = false, hasNotes = false, hasClipName = false, hasReview = false, hasRange = false;
   streaks.forEach(s => {
-    if (s.status === 'Pending' || s.status === 'Captured' || s.status === 'Rendered') hasStatus = true;
+    if (s.status === HIGHLIGHT_STATUS.PENDING || s.status === HIGHLIGHT_STATUS.CAPTURED || s.status === HIGHLIGHT_STATUS.RENDERED) hasStatus = true;
     if (s.notes && s.notes.trim()) hasNotes = true;
+    if (s.clipName && s.clipName.trim()) hasClipName = true;
     if (s.curation) hasReview = true;
     if (isRangeModified(s)) hasRange = true;
   });
   const reasons = [];
   if (hasStatus) reasons.push(STRINGS.WORKSPACE.REASON_STATUS);
   if (hasNotes) reasons.push(STRINGS.WORKSPACE.REASON_NOTE);
+  if (hasClipName) reasons.push(STRINGS.WORKSPACE.REASON_CLIP_NAME);
   if (hasReview) reasons.push(STRINGS.WORKSPACE.REASON_REVIEW);
   if (hasRange) reasons.push(STRINGS.WORKSPACE.REASON_RANGE);
   return reasons;
@@ -54,12 +59,87 @@ let currentOnLocateDemo = null;
 // main.js's handler for a missing demo's Use found copy button (#21).
 let currentOnUseFoundCopy = null;
 let currentSearchTerm = '';
+// #174: the player picked in the header's player filter ('' = everyone), and
+// the recorders looked up for demos scanned before a scan stored one
+// (path -> { id, name } | null), filled in by `demo_players` events.
+let currentPlayerId = '';
+const lookedUpRecorders = new Map();
+let recorderLookupRequest = 0;
+let recorderLookupKey = '';
+let playerOptionsKey = '';
 // #54: the header's quick filters.
 const quickFilters = { kills: KILLS_FILTER.ALL, ownerOnly: false };
 // Row checkboxes for Clear Selected (Phase 4) — keyed by demo.path rather
 // than array index, since delete-from-queue splices currentDemos and would
 // otherwise leave an index-based selection pointing at the wrong rows.
 const checkedPaths = new Set();
+
+/** Who recorded `demo` ({ id, name }), or null: HLTV, no resolvable owner,
+ *  or an older demo whose lookup hasn't come back yet. */
+function recorderOf(demo) {
+  if (demo.recorder_id) return { id: demo.recorder_id, name: demo.recorder_name || '' };
+  return lookedUpRecorders.get(demo.path) || null;
+}
+
+/** Demos from a project saved before scans stored the recorder, which the
+ *  player index can still answer for. A null recorder_id is a scan that
+ *  found none (HLTV), so it isn't asked again. */
+function needsRecorderLookup(demo) {
+  return demo.recorder_id === undefined
+    && demo.local_player_index !== null && demo.local_player_index !== undefined
+    && !lookedUpRecorders.has(demo.path);
+}
+
+/** Asks for every demo still missing its recorder. A newer request replaces
+ *  an older one in the queue's lane, so each one covers all of them. */
+function lookUpMissingRecorders() {
+  const paths = currentDemos.filter(needsRecorderLookup).map((d) => d.path);
+  const key = paths.join('\n');
+  if (!paths.length || key === recorderLookupKey) return;
+  recorderLookupKey = key;
+  recorderLookupRequest += 1;
+  indexDemoPlayers(paths, recorderLookupRequest, 'queue');
+}
+
+listen('demo_players', (event) => {
+  const p = event.payload || {};
+  if (p.lane !== 'queue') return;
+  const recorder = (p.players || []).find((pl) => pl.recorder);
+  lookedUpRecorders.set(p.path, recorder ? { id: recorder.id, name: recorder.name } : null);
+  if (recorder) renderMasterList(currentDemos, null, currentOnSelectDemo);
+}).catch((err) => console.error('Failed to register demo_players listener:', err));
+
+/** Refills the player filter from the queue's recorders, keeping the pick
+ *  while that player still has a demo in the queue. */
+function renderPlayerFilterOptions() {
+  const select = document.querySelector('#master-player-filter');
+  if (!select) return;
+  const options = groupPlayers(currentDemos.map(recorderOf).filter(Boolean));
+  if (currentPlayerId && !options.some((o) => o.id === currentPlayerId)) currentPlayerId = '';
+  // Rebuilt only when the list changed, so a re-render doesn't close the
+  // dropdown under the user.
+  const key = options.map((o) => `${o.id}\t${o.label}`).join('\n');
+  if (key === playerOptionsKey && select.options.length) {
+    select.value = currentPlayerId;
+    return;
+  }
+  playerOptionsKey = key;
+  const all = document.createElement('option');
+  all.value = '';
+  all.textContent = STRINGS.WORKSPACE.PLAYER_FILTER_ALL;
+  select.replaceChildren(all, ...options.map((o) => {
+    const opt = document.createElement('option');
+    opt.value = o.id;
+    opt.textContent = o.label;
+    return opt;
+  }));
+  select.value = currentPlayerId;
+}
+
+function matchesPlayer(demo) {
+  if (!currentPlayerId) return true;
+  return recorderOf(demo)?.id === currentPlayerId;
+}
 
 /** Single source of truth for what the search box currently matches — used
  *  by rendering, the select-all header checkbox, and (via getVisibleDemos,
@@ -78,7 +158,7 @@ function matchesSearch(demo, term) {
  *  existing scoping — a search filter should narrow what a bulk action
  *  touches, not just what's on screen. */
 export function getVisibleDemos() {
-  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesQuickFilters(d, quickFilters));
+  return currentDemos.filter((d) => matchesSearch(d, currentSearchTerm) && matchesPlayer(d) && matchesQuickFilters(d, quickFilters));
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy) {
@@ -107,6 +187,10 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
     makeClearable(searchInput, STRINGS.WORKSPACE.SEARCH_CLEAR_TITLE);
   }
 
+  document.querySelector('#master-player-filter')?.addEventListener('change', (e) => {
+    currentPlayerId = e.target.value || '';
+    renderMasterList(currentDemos, null, currentOnSelectDemo);
+  });
   document.querySelector('#master-kills-filter')?.addEventListener('change', (e) => {
     quickFilters.kills = e.target.value || KILLS_FILTER.ALL;
     renderMasterList(currentDemos, null, currentOnSelectDemo);
@@ -225,6 +309,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   const tableBody = document.querySelector('#master-demo-table-body');
   if (!tableBody) return;
   tableBody.innerHTML = '';
+  renderPlayerFilterOptions();
+  lookUpMissingRecorders();
 
   if (!currentDemos || currentDemos.length === 0) {
     tableBody.innerHTML =
@@ -274,9 +360,9 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
-    const pending     = countByStatus(ownStreaks, 'Pending');    // M4
-    const captured    = countByStatus(ownStreaks, 'Captured');   // M4
-    const rendered    = countByStatus(ownStreaks, 'Rendered');   // M4
+    const pending     = countByStatus(ownStreaks, HIGHLIGHT_STATUS.PENDING); // M4
+    const captured    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.CAPTURED); // M4
+    const rendered    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.RENDERED); // M4
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
@@ -341,6 +427,10 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       tdName.appendChild(missingBadge);
     }
 
+    // More entities in a snapshot than the game's engine takes (#207).
+    const limitBadge = overLimitBadge(demo);
+    if (limitBadge) tdName.appendChild(limitBadge);
+
     const demoIsTracked = isDemoTracked(demo);
     if (demoIsTracked) {
       const badge = document.createElement('span');
@@ -371,21 +461,21 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const tdPending = document.createElement('td');
     tdPending.style.padding = '6px 8px';
     tdPending.style.textAlign = 'center';
-    tdPending.style.color = statusCountColor('Pending', pending);
+    tdPending.style.color = statusCountColor(HIGHLIGHT_STATUS.PENDING, pending);
     tdPending.textContent = pending;
 
     // Col 6: Captured count  [M4]
     const tdCaptured = document.createElement('td');
     tdCaptured.style.padding = '6px 8px';
     tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = statusCountColor('Captured', captured);
+    tdCaptured.style.color = statusCountColor(HIGHLIGHT_STATUS.CAPTURED, captured);
     tdCaptured.textContent = captured;
 
     // Col 7: Rendered count  [M4]
     const tdRendered = document.createElement('td');
     tdRendered.style.padding = '6px 8px';
     tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = statusCountColor('Rendered', rendered);
+    tdRendered.style.color = statusCountColor(HIGHLIGHT_STATUS.RENDERED, rendered);
     tdRendered.textContent = rendered;
 
     // Col 8: Actions — remove-from-queue only, no status badge  [M3]

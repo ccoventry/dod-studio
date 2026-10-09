@@ -1,0 +1,36 @@
+<!doctype html>
+<!--
+  Minimal harness for render_presets_ui.js (#108) — see tests/e2e/README.md.
+  Carries just Render Output's four settings and the preset row.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>render_presets_ui.js test harness</title>
+</head>
+<body>
+  <select id="render-codec-select">
+    <option value="prores">ProRes 422 HQ</option>
+    <option value="h264">H.264 (Software, MP4)</option>
+    <option value="h264_nvenc">H.264 (NVENC GPU, MP4)</option>
+    <option value="custom">Custom</option>
+  </select>
+  <input type="text" id="render-custom-codec-input" />
+  <input type="number" id="render-fps-input" value="300" />
+  <input type="number" id="render-max-concurrent-input" value="2" />
+
+  <select id="render-preset-select"></select>
+  <input type="text" id="render-preset-name" />
+  <button id="render-preset-save">Save Preset</button>
+  <button id="render-preset-delete">Delete</button>
+
+  <script type="module">
+    import { initRenderPresets, setRenderPresets, getRenderPresets } from '/src/render_presets_ui.js';
+    window.__saves = 0;
+    initRenderPresets({ onChange: () => { window.__saves += 1; } });
+    window.__setPresets = setRenderPresets;
+    window.__getPresets = getRenderPresets;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

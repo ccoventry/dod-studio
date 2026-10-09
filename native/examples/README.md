@@ -29,6 +29,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `demo_tickrate` | What frame rate was this demo actually recorded at? |
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
+| `demo_integrity` | Does every delta in this demo decode against a frame the file actually has? (#41) |
 
 ### HLTV and the director channel
 
@@ -135,7 +136,7 @@ pressure rather than CPU.
 
 | Probe | Question it answers |
 | --- | --- |
-| `analysis_server_probe` | Can the game's Killstreaks tab be tested against Studio's analysis pipe (#565) without the app? |
+| `analysis_server_probe` | Can the game's Highlights tab be tested against Studio's analysis pipe (#565) without the app? |
 
 Set `DOD_STUDIO_LOG_DIR` to a scratch folder first, then
 `cargo run -p native --release --example analysis_server_probe -- [seconds]`

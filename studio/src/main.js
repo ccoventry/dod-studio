@@ -22,17 +22,26 @@ import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_war
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
-import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
+import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { refreshPacketEntityLimit } from './packet_entity_limit.js';
+import { initAuditorTabs } from './auditor_tabs.js';
+import { initSplitPane } from './split_pane.js';
+import { initCombineClips } from './combine_clips.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initBlenderPane } from './blender_pane.js';
+import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
 import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
+import { emptyProjectTeams, normalizeProjectTeams, demoHasTeams } from './project_teams.js';
+import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -42,6 +51,10 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
+import { clipNamesForTakes, maxNameLength } from './clip_name.js';
+import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
@@ -177,6 +190,7 @@ function applyCaptureModeUI() {
   const mode = currentCaptureMode();
   const video = mode === 'direct_to_video';
   const obs = mode === 'obs';
+  const agr = mode === 'agr';
 
   // Kept in step rather than read: the backend still accepts `ffmpeg_capture`
   // from older payloads, and leaving it stale would make the two disagree for
@@ -203,7 +217,17 @@ function applyCaptureModeUI() {
   // OBS, which has its own separate OBS Capture FPS field below — showing
   // both invites setting the wrong one.
   const captureFpsGroup = document.querySelector('#capture-fps-group');
-  if (captureFpsGroup) captureFpsGroup.style.display = obs ? 'none' : '';
+  if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
+
+  // AGR mode records no video, so Capture FPS gives way to its own rate. An
+  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
+  // shows the number that will actually be used.
+  const agrFpsGroup = document.querySelector('#agr-fps-group');
+  if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
+  const agrFpsInput = document.querySelector('#config-agr-fps');
+  if (agrFpsInput) {
+    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
+  }
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -340,6 +364,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   // rendering, so status can auto-advance even after a restart or re-scan
   // replaced the original streak objects. Persisted in the project file.
   let takeIndex = {};
+  // The Teams list's user-owned half (#445): display names and merges, keyed
+  // on the detected tag (project_teams.js). Project state rather than demo
+  // state, so a re-scan never touches it. Persisted in the project file.
+  let projectTeams = emptyProjectTeams();
   // True whenever project state (scanned demos, takeIndex, scanPaths) has
   // changed since the last successful save or load — gates the "unsaved
   // changes" prompt on window close. Cleared by saveProjectSession() and
@@ -388,7 +416,18 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initAuditorTabs();
+  initSplitPane();
   initHdPane();
+  initBlenderPane();
+  initOverviewsPane();
+  initTeamsPane({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: markProjectDirty,
+    // triggerAutoScan is a hoisted declaration further down this scope.
+    onReadMissing: (paths) => triggerAutoScan(paths),
+  });
 
   async function pickTargetDrive() {
     try {
@@ -463,6 +502,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 2.0);
     const postRoll = numberField('#config-post-roll', 0.6);
 
@@ -510,6 +551,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
     const scanWorkers = readScanWorkers();
+    // "When a batch finishes" (#440). Off unless the select says otherwise.
+    const finishClipsAfterBatch = document.querySelector('#config-finish-clips')?.value === 'finish';
+    const finishCodecObs = document.querySelector('#config-finish-codec-obs')?.value || 'source_copy';
+    const finishCodecVideo = document.querySelector('#config-finish-codec-video')?.value || 'render_tab';
+    const finishCodecFrames = document.querySelector('#config-finish-codec-frames')?.value || 'render_tab';
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -525,6 +571,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
       resolution_width: resWidth,
@@ -549,6 +596,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       notify_updates: notifyUpdates,
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
+      clip_name_template: getClipNameTemplate(),
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -556,13 +604,20 @@ window.addEventListener("DOMContentLoaded", async () => {
       target_drives: targetDrives,
       init_commands,
       custom_commands,
+      command_profiles: getCommandProfiles(),
+      command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
-      render_export_dirs: renderExportDirs
+      render_export_dirs: renderExportDirs,
+      finish_clips_after_batch: finishClipsAfterBatch,
+      finish_codec_obs: finishCodecObs,
+      finish_codec_video: finishCodecVideo,
+      finish_codec_frames: finishCodecFrames
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -622,6 +677,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.obs_capture_fps) {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
+      }
+      // 0 is "the same as Capture FPS" and stays an empty box.
+      if (settings.agr_fps > 0) {
+        const inputEl = document.querySelector('#config-agr-fps');
+        if (inputEl) inputEl.value = settings.agr_fps;
       }
       // `!= null`, not truthiness: 0 is a real value for the five timing
       // fields, and a truthy check skipped restoring it.
@@ -694,6 +754,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+      setClipNameTemplate(settings.clip_name_template);
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
@@ -731,10 +792,20 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
       }
+      const finishClipsEl = document.querySelector('#config-finish-clips');
+      if (finishClipsEl) finishClipsEl.value = settings.finish_clips_after_batch ? 'finish' : 'off';
+      [['#config-finish-codec-obs', settings.finish_codec_obs],
+       ['#config-finish-codec-video', settings.finish_codec_video],
+       ['#config-finish-codec-frames', settings.finish_codec_frames]].forEach(([sel, value]) => {
+        const el = document.querySelector(sel);
+        // Only a value the select offers — assigning an unknown one blanks it.
+        if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
+      });
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
         // Folders only: older builds added every file picked with
         // + Add Demo Files, one path per demo. Cleaned up once, here.
@@ -758,6 +829,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirsEditor.render();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -814,6 +886,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(takeIndex, collectAllUids()),
+        teams: projectTeams,
         // Kept for older-file/older-version compatibility — nothing on the
         // reading side branches on it any more (Quick-Clip mode is gone).
         mode: 'workspace'
@@ -893,6 +966,9 @@ window.addEventListener("DOMContentLoaded", async () => {
             // what makes it possible to prove a later auto-Rendered flip
             // came from this loaded data and not a leftover in-memory state.
             console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
+            // Tolerant the same way: a project saved before the Teams list
+            // (#445) has no `teams`, and loads with none named or merged.
+            projectTeams = normalizeProjectTeams(data.teams);
             if (data.demos) {
               currentScannedDemos = data.demos;
               // timeline_string is a derived field, saved as a convenience
@@ -911,6 +987,7 @@ window.addEventListener("DOMContentLoaded", async () => {
               showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
               await checkMissingDemos(selected, data.scanPaths || []);
             }
+            refreshTeamsPane();
           }
         }
       } catch (err) {
@@ -958,6 +1035,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     replaceScannedDemos([]);
     currentSessionPath = null;
     takeIndex = {};
+    projectTeams = emptyProjectTeams();
+    refreshTeamsPane();
     hasUnsavedChanges = false;
     updateSessionFileIndicator();
     switchNavTab('workspace');
@@ -1300,9 +1379,10 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key) are scanned.
+      // re-parsed; ones from an older project (no file_key, no map_name:
+      // saved before clip names, #441, or no teams: #445) are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key)
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1361,6 +1441,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      refreshTeamsPane();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
@@ -1551,13 +1632,29 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
+  initCombineClips({
+    finishedRenders: () => finishedRenderOutputs(),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
     onStatusChange: onHighlightStatusChange
+  });
+
+  // "When a batch finishes" (#440): queues a verified batch's takes into the
+  // Render tab's own queue. capture_pane.js hands it each verified batch.
+  initFinishClips({
+    getExportDirs: () => renderExportDirs,
+    getClipNames: (exportDirs) => clipNamesForTakes(
+      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+    ),
+    onSettingsChange: persistAppSettings,
   });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
@@ -1907,7 +2004,31 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (hlPathInput) {
     refreshInitCommandWarnings();
     hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
+    // Which engine it is decides which demos the Master Queue marks (#207).
+    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
+      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
+    markDemosOverLimit();
+    hlPathInput.addEventListener('change', markDemosOverLimit);
   }
+  // #441: the preview uses the selected demo's first checked highlight (its
+  // first highlight when none is checked); a settled template change is
+  // saved and redraws the automatic names in Highlight Details.
+  initClipNameSettings({
+    getHighlight: () => {
+      const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
+      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const streak = own.find((s) => s.selected) || own[0];
+      return streak ? { demo, streak } : null;
+    },
+    getExportDirList: () => renderExportDirs,
+    onChange: () => {
+      persistAppSettings();
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+    },
+  });
+
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
     // switching the selected demo, or after a capture/render completes) —
@@ -1917,6 +2038,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Must NOT mark the project dirty — see onDirty below for that.
     refreshLaunchGuard({ targetDrives, currentScannedDemos });
     renderMasterList(currentScannedDemos, selectedDemoIdx);
+    refreshClipNamePreview();
   }, () => {
     // Fired only from an actual highlights-table field edit (selection,
     // kill range, status, notes) — all of it is part of the `demos` written

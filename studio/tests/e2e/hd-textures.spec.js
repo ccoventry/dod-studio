@@ -414,6 +414,32 @@ test('Build is off until at least one style and one kind of file are ticked', as
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
 });
 
+test('a partial style says what it is missing, in the table, beside the style and in the cfg lines (#426)', async ({ page }) => {
+  const status = structuredClone(STATUS);
+  status.types[0].folders.push({ name: 'remacri', files: 124, bytes: 80 * 1024 ** 2, largest_px: [1024, 1024] });
+  status.types[0].folders[1].largest_px = [2048, 2048];
+  status.built_styles = ['plain', 'remacri'];
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+
+  const plain = page.locator('#hd-status-body tr').nth(1);
+  const remacri = page.locator('#hd-status-body tr').nth(0);
+  await expect(plain.locator('td').nth(1)).toHaveText('4,708 files, 3.0 GBup to 2048×2048');
+  await expect(remacri.locator('td').nth(1)).toHaveText('124 of 4,708 files, 80.0 MBup to 1024×1024');
+  await expect(remacri.locator('td').nth(1)).toHaveClass(/hd-cell-partial/);
+
+  // plain is picked first and is complete: nothing to warn about.
+  await expect(page.locator('#hd-style-select')).toHaveValue('plain');
+  await expect(page.locator('#hd-style-coverage')).toBeHidden();
+
+  await page.selectOption('#hd-style-select', 'remacri');
+  const sentence = 'remacri covers only part of the game: it has no detail textures, and only 124 of 4,708 map textures.'
+    + ' Wherever it has none, the game shows the stock texture.';
+  await expect(page.locator('#hd-style-coverage')).toHaveText(sentence);
+  await expect(page.locator('#hd-cfg-lines')).toHaveText(
+    `dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
+});
+
 /** native::hd::misses::MissesView, as serde sends it. */
 const MISSES = {
   command: 'dodstudio_debug_hd_misses',

@@ -53,16 +53,18 @@ is the complete list):
   untouched -- a way to see what the client actually receives, in session,
   instead of reconstructing it from a demo parse. See the module doc in
   `src/msglog.rs`.
-- **Hide map sprite** (`dodstudio_hide_sprite <model-path>...`): suppresses
-  specific map-placed `env_sprite` entities by model path (e.g.
-  `sprites/mapsprites/flames.spr`) -- an allow-list, not a blanket toggle,
-  since most sprites in that folder are meaningful (smoke, fire, tracers). Not
-  every sprite-looking element qualifies: several DoD draws itself as an
-  ordinary 2D HUD element (the crosshair, the capture-area icon) rather than a
-  world-placed entity, and those never reach this command regardless of
-  spelling -- `dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those
-  instead. Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't
-  previously use. See the module doc in `src/hide_sprite.rs`.
+- **Hide an asset** (`dodstudio_hide_asset add <model-path>...`, with
+  `list`, `del` and `clear`): suppresses specific world entities by model path
+  (e.g. `sprites/mapsprites/flames.spr`, a prop's `.mdl`) -- an allow-list,
+  not a blanket toggle, since most map sprites are meaningful (smoke, fire,
+  tracers). `dodstudio_debug_status` says whether each path has matched
+  anything this session, so a typo shows. Not every sprite-looking element
+  qualifies: several DoD draws itself as an ordinary 2D HUD element (the
+  crosshair, the capture-area icon) rather than a world-placed entity, and
+  those never reach this command regardless of spelling --
+  `dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those instead.
+  Hooks `HUD_AddEntity`, a `cldll_func_t` slot `engine.rs` didn't previously
+  use. See the module doc in `src/hide_asset.rs`.
 - **Scoreboard** (`dodstudio_hide_scoreboard 1`): stops a POV demo's recorded TAB
   presses from putting the scoreboard over the shot. The demo replays
   `+showscores` exactly as the player typed it; this blocks the command rather
@@ -79,6 +81,14 @@ is the complete list):
   stays on the player being watched when he dies; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_camera.md`.
+- **High-quality overviews:** when `overviews/<map>_hd.tga` sits beside the
+  overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
+  replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
+  Overviews page writes it. See `src/overview_hd.rs`.
+- **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
+  overview map shows -- the game's own (the watched player's team), everyone,
+  the other team, only the player being watched, or nobody. A detour on the
+  map's one team test in `client.dll`; see `src/overview_players.rs`.
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
@@ -212,7 +222,7 @@ is the complete list):
   server. Wraps the engine commands the same way as the demo reload. See
   `src/connect_guard.rs` and `docs/vac_safety.md`.
 - **Any HUD element** (`dodstudio_hide_hudelement <name> 1`): hides one of the
-  ten elements DoD draws that the stock `cl_hud_*` cvars don't already
+  nine elements DoD draws that the stock `cl_hud_*` cvars don't already
   reach -- chat, the kill feed, the status bar, the MG-deploy and capture-area
   icons, the objective icons and the rest. (The ammo counter/weapon-select
   menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
@@ -318,4 +328,4 @@ crash. Set the variable to `0` to turn it off.
 
 A crash inside the game leaves no dump, WER record or event-log entry, because
 GoldSrc installs its own unhandled-exception filter. `src/crash.rs` logs the
-faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.
+faulting address as `module+RVA` so a crash is diagnosable from the log alone. Each distinct breakpoint (`int3`, `0x80000003`) address also gets one `BREAKPOINT:` line, up to 8: usually harmless, but if the game exits with that code, the last one says where. A panic in this DLL ends the game through `panic = "abort"`, which skips that handler, so `src/panic_log.rs` writes a `PANIC:` line (message, source file and line, thread) first. `tools/crash_report.py` summarises every crash on record: grouped by where it happened, with what led up to it, which map was loaded, the engine's own fatal errors from `qconsole.log`, and which crashes are already known.

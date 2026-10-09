@@ -414,10 +414,13 @@ pub async fn run_render_job(
             .extension()
             .map(|e| e.to_string_lossy().into_owned())
             .unwrap_or_else(|| "mp4".to_string());
-        let final_name = format!(
-            "{}_{}{}_{}_{}.{}",
-            demo_name, take_name, wav_part, stream_type, hash_str, ext
-        );
+        let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
+            Some(stem) => get_unique_filename(&output_folder, &stem, &format!(".{ext}")),
+            None => format!(
+                "{}_{}{}_{}_{}.{}",
+                demo_name, take_name, wav_part, stream_type, hash_str, ext
+            ),
+        };
         let out_file = output_folder.join(&final_name);
         let out_file_str = out_file.to_string_lossy().into_owned();
 
@@ -601,10 +604,13 @@ pub async fn run_render_job(
         &["-c:a", "pcm_s16le"]
     };
 
-    let final_name = format!(
-        "{}_{}{}_{}_{}{}",
-        demo_name, take_name, wav_part, stream_type, hash_str, file_ext
-    );
+    let final_name = match clip_file_stem(&clip, &wav_part, is_hud) {
+        Some(stem) => get_unique_filename(&output_folder, &stem, file_ext),
+        None => format!(
+            "{}_{}{}_{}_{}{}",
+            demo_name, take_name, wav_part, stream_type, hash_str, file_ext
+        ),
+    };
     let out_file = output_folder.join(&final_name);
 
     // Calculate thread scaling
@@ -773,6 +779,7 @@ pub async fn run_render_job(
         "Rendering".to_string(),
     ));
 
+    let existed_before = out_file.exists();
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
@@ -827,6 +834,7 @@ pub async fn run_render_job(
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -891,6 +899,8 @@ pub async fn run_render_job(
             _ = interval.tick() => {
                 if cancel_rx.load(Ordering::Relaxed) {
                     let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    remove_partial_output(&out_file, existed_before).await;
                     let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Cancelled".to_string()));
                     let _ = tx.send(RenderUpdate::Finished(
                         job_id.clone(),
@@ -941,6 +951,7 @@ pub async fn run_render_job(
                 exit_code,
                 err_log.as_deref().unwrap_or("")
             );
+            remove_partial_output(&out_file, existed_before).await;
             let _ = tx.send(RenderUpdate::Status(job_id.clone(), "Error".to_string()));
             let _ = tx.send(RenderUpdate::Finished(job_id, false, Some(error_msg)));
         }
@@ -1005,7 +1016,48 @@ async fn copy_cancellable(src: &Path, dst: &Path, cancel: &AtomicBool) -> std::i
     Ok(false)
 }
 
-#[allow(dead_code)]
+/// Removes what FFmpeg wrote of `out_file` before it was stopped or failed:
+/// a truncated file under the pipeline's naming looks like a finished export,
+/// the same reason `copy_cancellable` removes its partial copy. A file that was
+/// there before the job started is never touched.
+async fn remove_partial_output(out_file: &Path, existed_before: bool) {
+    if !existed_before {
+        let _ = tokio::fs::remove_file(out_file).await;
+    }
+}
+
+/// The finished file's name, without its extension, when the take has a clip
+/// name (#441): the name, the wav suffix, and `_hud` for the HUD stream. The
+/// caller makes it unique, so a re-render never overwrites an earlier file.
+/// `None` without a usable clip name.
+fn clip_file_stem(clip: &ClipData, wav_part: &str, is_hud: bool) -> Option<String> {
+    let name = sanitize_file_stem(clip.clip_name.as_deref()?);
+    if name.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{}{}{}",
+        name,
+        wav_part,
+        if is_hud { "_hud" } else { "" }
+    ))
+}
+
+/// Replaces what Windows refuses in a file name, and trims the trailing dots
+/// and spaces it drops silently. The frontend cleans names already; this is
+/// the last line, since a name can come from a hand-edited project file.
+fn sanitize_file_stem(name: &str) -> String {
+    let replaced: String = name
+        .chars()
+        .map(|c| match c {
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+    replaced.trim().trim_end_matches(['.', ' ']).to_string()
+}
+
 fn get_unique_filename(output_dir: &Path, base_name: &str, ext: &str) -> String {
     let mut counter = 1;
     let mut final_name = format!("{}{}", base_name, ext);
@@ -1039,6 +1091,7 @@ mod tests {
             date: String::new(),
             video_file: None,
             alpha_folder: None,
+            clip_name: None,
         }
     }
 
@@ -1132,6 +1185,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -1175,6 +1229,57 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
     }
 
+    /// A clip name (#441) names the finished file, and a second render of the
+    /// same clip gets a suffix instead of overwriting the first.
+    #[tokio::test]
+    async fn a_clip_name_names_the_file_and_never_overwrites() {
+        let root = scratch("clip_name");
+        let take_folder = root.join("take");
+        let stream = take_folder.join("all");
+        std::fs::create_dir_all(&stream).unwrap();
+        std::fs::write(stream.join("video.mp4"), b"v").unwrap();
+        let export_dir = root.join("export");
+        std::fs::create_dir_all(&export_dir).unwrap();
+
+        let clip = ClipData {
+            clip_name: Some("anzio_krod_4k".to_string()),
+            take_folder: take_folder.to_string_lossy().into_owned(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: None,
+            base_name: "demo-take-obs".to_string(),
+            frame_count: 0,
+            width: 0,
+            height: 0,
+            date: "-".to_string(),
+            video_file: Some("video.mp4".to_string()),
+            alpha_folder: None,
+        };
+
+        for _ in 0..2 {
+            let (tx, rx) = mpsc::channel();
+            run_render_job(
+                "0".to_string(),
+                clip.clone(),
+                source_copy_config(&export_dir),
+                tx,
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(Mutex::new(HashMap::new())),
+            )
+            .await;
+            assert_eq!(last_finished(&drain(&rx)), Some((true, None)));
+        }
+        assert!(export_dir.join("anzio_krod_4k.mp4").is_file());
+        assert!(export_dir.join("anzio_krod_4k_1.mp4").is_file());
+    }
+
+    #[test]
+    fn a_clip_name_is_cleaned_for_windows() {
+        assert_eq!(sanitize_file_stem("anzio: krod?  "), "anzio_ krod_");
+        assert_eq!(sanitize_file_stem("a/b\\c|d."), "a_b_c_d");
+        assert_eq!(sanitize_file_stem(" . "), "");
+    }
+
     /// HUD/alpha compositing always needs the FFmpeg alpha-merge pass, so
     /// skip cannot apply to it regardless of how the clip's audio arrived.
     #[tokio::test]
@@ -1188,6 +1293,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "hud_only".to_string(),
             img_folder: "hudcolor".to_string(),
@@ -1231,6 +1337,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -1275,6 +1382,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -1324,6 +1432,7 @@ mod tests {
         std::fs::create_dir_all(&export_dir).unwrap();
 
         let clip = ClipData {
+            clip_name: None,
             take_folder: take_folder.to_string_lossy().into_owned(),
             clip_type: "single".to_string(),
             img_folder: "all".to_string(),
@@ -1388,6 +1497,23 @@ mod tests {
         let cancelled = copy_cancellable(&src, &dst, &cancel).await.unwrap();
         assert!(!cancelled);
         assert_eq!(std::fs::read(&dst).unwrap(), b"hello world");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A cancelled or failed FFmpeg render removes the file it was writing,
+    /// but never one that was there before the job started.
+    #[tokio::test]
+    async fn remove_partial_output_only_removes_the_jobs_own_file() {
+        let root = scratch("partial_output");
+        let written = root.join("clip.mp4");
+        std::fs::write(&written, b"48 bytes of a header").unwrap();
+        remove_partial_output(&written, false).await;
+        assert!(!written.exists(), "the job's partial file must go");
+
+        let earlier = root.join("earlier.mp4");
+        std::fs::write(&earlier, b"someone's finished clip").unwrap();
+        remove_partial_output(&earlier, true).await;
+        assert!(earlier.exists(), "a file from before the job must stay");
         let _ = std::fs::remove_dir_all(&root);
     }
 }

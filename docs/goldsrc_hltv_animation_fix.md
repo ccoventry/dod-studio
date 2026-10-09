@@ -239,6 +239,15 @@ Three things are *not* missing from the fix, and are settled rather than open:
   grenade's, but the catch is visible in the world, and the family is played
   from that (§13).
 
+**A POV demo gets none of it (#613).** It is the recording the fix copies, so
+`anim_fix::active()` stands every match-POV part down while one plays: a demo
+playing back while `IsSpectateOnly()` is false. That includes the recorder's
+dead stretches spent watching someone in-eye, which is what they saw live. The
+bug that made this explicit: `on_weapon_fired` kept the entity and viewmodel an
+HLTV demo earlier in the session had published, so in the POV demo every round
+entity 13 fired played the old model's "shoot" index on the STG44 in view, which
+is a reload. A frame with no spectated view now forgets them.
+
 One genuine `TODO` remains, marked in the source: on a bipod deploy state change
 the viewmodel snaps to the new family's idle rather than playing the model's own
 `uptodown` / `downtoup` transition. Unverified live.
