@@ -1239,6 +1239,7 @@ export const STRINGS = {
     MODE_FRAMES: 'Frame sequence',
     modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
     modeObs: (fps) => `OBS @ ${fps} fps`,
+    modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
     scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
     banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,

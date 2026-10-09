@@ -550,6 +550,8 @@ function currentCaptureSetup() {
     mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
+    // An empty AGR FPS records at Capture FPS, as the batch does.
+    agrFps: numberField('#config-agr-fps', numberField('#config-capture-fps', 300, { integer: true, positive: true }), { integer: true, positive: true }),
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
