@@ -1989,6 +1989,20 @@ tr.keyboard-selected {
   border-bottom: 1px solid #282828;
 }
 
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage {
+  color: #ffb74d;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
