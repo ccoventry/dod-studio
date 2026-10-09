@@ -2,6 +2,7 @@
 // copied verbatim so render.js can be a faithful, low-diff port of
 // analyzer_pane.js's render functions. Keep in sync by hand; there is no
 // shared build step between this static site and the desktop app.
+// studio/src/web_analyzer_copy.test.js fails when the two disagree (#238).
 export const STRINGS = {
   ANALYZER: {
     ANALYZER_TITLE: 'Demo Analyzer',
@@ -176,6 +177,11 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #207: what decides whether the pre-Anniversary engine can play it.
+    PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
+    peakEntitiesValue: (peak) => (peak > 256
+      ? `${peak}: over the pre-Anniversary engine's 256, so it closes the game there. The 25th Anniversary engine plays it.`
+      : peak >= 240 ? `${peak}: close to the pre-Anniversary engine's limit of 256` : String(peak)),
     GAME_MOD_DOD: 'Day of Defeat',
     GAME_MOD_CS: 'Counter-Strike',
     GAME_MOD_HL: 'Half-Life',
