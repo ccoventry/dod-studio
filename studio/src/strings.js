@@ -228,6 +228,12 @@ export const STRINGS = {
     CAPTURE_MODE_LABEL: 'Capture Mode:',
     CAPTURE_MODE_TITLE:
         'How frames get onto disk. Frame sequence and Video are both HLAE, deterministic and capable of any frame rate. OBS records the screen in real time instead, which is faster to a finished file but captures whatever actually rendered.',
+    CAPTURE_MODE_AGR: 'AGR for Blender (no video)',
+    CAPTURE_MODE_AGR_TITLE:
+        'HLAE records no video. Each clip is saved as one .agr file holding every player, weapon and the camera, for rebuilding the clip in Blender. A few MB per clip rather than gigabytes.',
+    AGR_FPS_LABEL: 'AGR FPS:',
+    AGR_FPS_TITLE:
+        'How many positions per second each .agr file records. Blender can only show motion the file contains, so for slow motion use at least the output frame rate times the slow-down (300 for 5x at 60 fps). A 30 second clip is about 7 MB at 30, 27 MB at 120 and 67 MB at 300. Leave empty to use Capture FPS.',
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
@@ -1012,6 +1018,9 @@ export const STRINGS = {
       mirv_recordmovie_start: 'the app schedules this itself; a manual one will break the automation',
       mirv_recordmovie_stop: 'the app schedules this itself; a manual one will break the automation',
       mirv_movie_filename: 'set the save location in the Destinations tab instead',
+      // Only ever reported for Scheduled Commands (it is fine in Initial
+      // Commands), like the three below.
+      mirv_agr: 'set Capture Mode to AGR in the Output Format tab instead -- it saves one file per clip',
       r_drawentities:
         "the engine resets this to 1 by itself, so it does nothing -- and if cheats are on instead, DoD's client closes the game",
       cl_lw: "DoD's client quits the game outright if this is not 1 -- there is no other value",
@@ -1230,6 +1239,7 @@ export const STRINGS = {
     MODE_FRAMES: 'Frame sequence',
     modeVideo: (codec) => (codec ? `Video · ${codec}` : 'Video'),
     modeObs: (fps) => `OBS @ ${fps} fps`,
+    modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
     scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
     banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,

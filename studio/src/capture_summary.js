@@ -11,8 +11,8 @@ import { STRINGS } from './strings.js';
  * `field` the selector to focus there. `blocking` marks a part that keeps
  * Start Capture Batch disabled.
  *
- * `setup`: `{ mode, codecLabel, obsFps, width, height, fps, scheduledCount,
- * bannedCount, decalFlush, destinations }`.
+ * `setup`: `{ mode, codecLabel, obsFps, agrFps, width, height, fps,
+ * scheduledCount, bannedCount, decalFlush, destinations }`.
  */
 export function summaryParts(setup) {
   const s = STRINGS.CAPTURE_SUMMARY;
@@ -21,14 +21,18 @@ export function summaryParts(setup) {
   let modeText;
   if (mode === 'direct_to_video') modeText = s.modeVideo(setup.codecLabel || '');
   else if (mode === 'obs') modeText = s.modeObs(setup.obsFps);
+  else if (mode === 'agr') modeText = s.modeAgr(setup.agrFps);
   else modeText = s.MODE_FRAMES;
   parts.push({ key: 'mode', text: modeText, tab: 'tab-output-format', field: '#config-capture-mode' });
-  parts.push({
-    key: 'format',
-    text: s.format(setup.width, setup.height, setup.fps),
-    tab: 'tab-output-format',
-    field: '#config-res-width',
-  });
+  // AGR records no pixels, so the window size and Capture FPS don't apply.
+  if (mode !== 'agr') {
+    parts.push({
+      key: 'format',
+      text: s.format(setup.width, setup.height, setup.fps),
+      tab: 'tab-output-format',
+      field: '#config-res-width',
+    });
+  }
   if (setup.bannedCount > 0) {
     parts.push({
       key: 'banned',

@@ -28,7 +28,9 @@ export function streakSeconds(streak) {
  * overlapping (or touching) pre/post-roll windows *within each source demo*
  * before billing them for disk space — two highlights that share footage
  * must not be double-counted, since the engine records that overlap once.
- * Base cost is `w * h * 3` bytes/frame at the configured capture FPS.
+ * Base cost is `w * h * 3` bytes/frame at the configured capture FPS, unless
+ * `bytesPerFrame` is given — AGR mode passes its own much smaller figure
+ * (`AGR_BYTES_PER_FRAME`, mirroring `sys::disk::AGR_BYTES_PER_FRAME`).
  *
  * Does not account for `mirv_movie_separate_hud 1` typed into Initial
  * Commands — that triples the real cost (HUD pass recorded as its own
@@ -39,7 +41,7 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   const {
     preRollSeconds, postRollSeconds,
     recordStartLead, recordStopTrail,
-    captureFps, resWidth, resHeight,
+    captureFps, resWidth, resHeight, bytesPerFrame,
   } = opts;
   let totalSeconds = 0;
 
@@ -84,6 +86,8 @@ export function computeRequiredCaptureBytes(currentScannedDemos, opts) {
   });
 
   const frames = Math.ceil(Math.max(0, totalSeconds) * captureFps);
-  const bytesPerFrame = resWidth * resHeight * 3;
-  return frames * bytesPerFrame;
+  return frames * (bytesPerFrame ?? resWidth * resHeight * 3);
 }
+
+/** What one recorded AGR frame costs on disk — see `sys::disk::AGR_BYTES_PER_FRAME`. */
+export const AGR_BYTES_PER_FRAME = 8 * 1024;
