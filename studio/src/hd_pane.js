@@ -948,10 +948,24 @@ export function initHdPane() {
     progressText.textContent = STRINGS.HD.progressLine(p.item, p.step, p.steps, done);
   }).catch((err) => console.error('hd_setup_progress listener failed:', err));
 
+  // The build only reports when build_all.py prints, which can be a minute
+  // apart (a one-batch step prints once, at its end), so the clock on the
+  // progress line counts on by itself between reports.
+  let buildStep = null;
+  let buildStartedAt = 0;
+  let buildClock = null;
+  const showBuildStep = () => {
+    if (!buildStep) return;
+    const p = buildStep;
+    const type = STRINGS.HD.TYPE_NAMES[p.asset_type] || p.asset_type;
+    const secs = Math.max(p.elapsed_secs, Math.floor((Date.now() - buildStartedAt) / 1000));
+    buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, formatElapsed(secs));
+  };
+
   listen('hd_build_progress', (event) => {
     const p = event.payload;
-    const type = STRINGS.HD.TYPE_NAMES[p.asset_type] || p.asset_type;
-    buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, formatElapsed(p.elapsed_secs));
+    buildStep = p;
+    showBuildStep();
     if (p.line) buildLine.textContent = p.line;
   }).catch((err) => console.error('hd_build_progress listener failed:', err));
 
@@ -982,12 +996,17 @@ export function initHdPane() {
     buildCancelBtn.disabled = false;
     buildProgress.textContent = '';
     buildLine.textContent = '';
+    buildStep = null;
+    buildStartedAt = Date.now();
+    buildClock = setInterval(showBuildStep, 1000);
     try {
       const outcome = await hdBuild(gamePath(), request);
       buildProgress.textContent = STRINGS.HD.buildDone(outcome.steps, formatElapsed(outcome.elapsed_secs), outcome.log_path);
     } catch (err) {
       buildProgress.textContent = err === 'cancelled' ? STRINGS.HD.BUILD_CANCELLED : STRINGS.IPC.hdBuildFailed(err);
     } finally {
+      clearInterval(buildClock);
+      buildStep = null;
       setBusy(false);
       buildCancelBtn.disabled = true;
       refresh();
