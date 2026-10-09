@@ -15,6 +15,7 @@ import {
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { mostPerType, styleGaps, gapsSentence } from './hd_coverage.js';
 
 function formatSize(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -56,6 +57,7 @@ export function initHdPane() {
   const buildLine = document.querySelector('#hd-build-line');
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
+  const styleCoverage = document.querySelector('#hd-style-coverage');
   const previewMap = document.querySelector('#hd-preview-map');
   const previewStyles = document.querySelector('#hd-preview-styles');
   const previewBtn = document.querySelector('#hd-preview-btn');
@@ -101,6 +103,8 @@ export function initHdPane() {
 
   // The cvar names come from the backend (native::hd), not from here.
   let cvars = null;
+  // The last status report, for the selected style's coverage (#426).
+  let lastStatus = null;
   // A download or a build is running: the backend allows one at a time.
   let busy = false;
   // Whether the build can run at all: scripts shipped, and a Python found.
@@ -128,7 +132,14 @@ export function initHdPane() {
 
   function renderCfgLines() {
     if (!cvars || !cfgLines) return;
-    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${styleSelect.value}`;
+    // #426: a partial style says so, here and in the lines copied to movie.cfg.
+    const gaps = gapsSentence(styleSelect.value, styleGaps(lastStatus, styleSelect.value));
+    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${styleSelect.value}`
+      + (gaps ? `\n${STRINGS.HD.cfgGapsComment(gaps)}` : '');
+    if (styleCoverage) {
+      styleCoverage.textContent = gaps;
+      styleCoverage.hidden = !gaps;
+    }
   }
 
   const myStyles = (status) => status.my_styles?.styles || [];
@@ -185,11 +196,31 @@ export function initHdPane() {
       statusBody.appendChild(row);
       return;
     }
+    const most = mostPerType(status);
     for (const name of rows) {
       const row = document.createElement('tr');
       row.append(cell('td', name), ...status.types.map((t) => {
         const folder = t.folders.find((f) => f.name === name && f.files > 0);
-        return cell('td', folder ? STRINGS.HD.cellSummary(folder.files, formatSize(folder.bytes)) : '–');
+        if (!folder) return cell('td', '–');
+        // #426: a style with fewer files than the fullest one says so, and
+        // every cell says the biggest size it holds. `overrides` is the
+        // user's own handful, never measured against the styles.
+        const partial = name !== 'overrides' && folder.files < most[t.asset_type];
+        const td = cell('td', partial
+          ? STRINGS.HD.cellSummaryOf(folder.files, most[t.asset_type], formatSize(folder.bytes))
+          : STRINGS.HD.cellSummary(folder.files, formatSize(folder.bytes)));
+        if (partial) {
+          td.classList.add('hd-cell-partial');
+          td.title = STRINGS.HD.CELL_OF_TITLE;
+        }
+        if (folder.largest_px) {
+          const size = document.createElement('div');
+          size.className = 'hd-cell-largest';
+          size.textContent = STRINGS.HD.largestSize(...folder.largest_px);
+          size.title = STRINGS.HD.LARGEST_SIZE_TITLE;
+          td.appendChild(size);
+        }
+        return td;
       }));
       statusBody.appendChild(row);
     }
@@ -310,6 +341,7 @@ export function initHdPane() {
       return;
     }
     cvars = { enabled: status.enabled_cvar, style: status.style_cvar };
+    lastStatus = status;
     statusText.textContent = [
       status.hd_root_exists ? STRINGS.HD.hdRootFound(status.hd_root) : STRINGS.HD.hdRootMissing(status.hd_root),
       status.built_styles.length ? STRINGS.HD.stylesBuilt(status.built_styles) : STRINGS.HD.NO_STYLES_BUILT,
@@ -387,9 +419,9 @@ export function initHdPane() {
   // 1:1 by default (the point of the sheet); a click fits it to the page.
   previewImg?.addEventListener('click', () => previewWrap.classList.toggle('hd-preview-fit'));
 
-  // The custom-style form. `lastStatus` is the newest status report: the
-  // form's model and blend lists come from it.
-  let lastStatus = null;
+  // The custom-style form. `lastStatus` (declared above, shared with the
+  // coverage line) is the newest status report: the form's model and blend
+  // lists come from it.
   const STYLE_NAME = /^[a-z0-9_-]{1,32}$/;
 
   function renderMyStyles(status) {

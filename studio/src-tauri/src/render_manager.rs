@@ -54,7 +54,7 @@ pub struct RenderBatchPayload {
 /// Resolve the FFmpeg binary path using the same fallback chain as the
 /// legacy `settings::resolve_ffmpeg_path()`: override → bundled local →
 /// system PATH.
-fn resolve_ffmpeg(override_path: Option<&String>) -> PathBuf {
+pub(crate) fn resolve_ffmpeg(override_path: Option<&String>) -> PathBuf {
     if let Some(p) = override_path {
         let pb = PathBuf::from(p);
         if !p.trim().is_empty() && pb.exists() {
