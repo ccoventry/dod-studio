@@ -242,9 +242,10 @@ export async function sendPreviewToRunningGame(hlaePath, gamePath, streaks, gold
 }
 
 /** Review highlights (#623): sends the highlights to the running game, or
- *  starts one. Resolves to `{ pid, launched, count }`. */
-export async function startHighlightReview(highlights) {
-  return invoke("start_highlight_review", { highlights })
+ *  starts one. `fastForwardGap`: seconds between kills above which a gap
+ *  plays fast, or null (#665). Resolves to `{ pid, launched, count }`. */
+export async function startHighlightReview(highlights, fastForwardGap = null) {
+  return invoke("start_highlight_review", { highlights, fastForwardGap })
     .catch((err) => {
       console.error("IPC Execution Error (start_highlight_review):", err);
       showToast(STRINGS.IPC.reviewFailed(err), 'error', 8000);

@@ -124,6 +124,13 @@
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
                 </label>
+                <!-- #665: gaps between kills play fast. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
+                  <input type="checkbox" id="review-fast-forward-cb" checked />
+                  <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
+                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
+                </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
                 <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
@@ -587,6 +594,18 @@
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
+
+              <!-- Clip names (#441): the finished file of each highlight is
+                   named from this template, unless its row has a typed name. -->
+              <div class="input-row" style="margin-top: 10px;">
+                <label for="config-clip-name-template" data-str="CLIP_NAME.TEMPLATE_LABEL" data-str-title="CLIP_NAME.TEMPLATE_TITLE">Clip Name Template:</label>
+                <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
+                <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
+              <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
+              <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
             </div>
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent

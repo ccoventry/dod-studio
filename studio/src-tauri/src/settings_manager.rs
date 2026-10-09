@@ -191,6 +191,10 @@ pub struct AppSettings {
     pub update_channel: String,
     #[serde(default = "default_auto_check_updates")]
     pub auto_check_updates: bool,
+    /// How a highlight's clip name is built (#441), in the placeholder syntax
+    /// of `studio/src/clip_name.js`. Configuration > Render Output.
+    #[serde(default = "default_clip_name_template")]
+    pub clip_name_template: String,
 }
 
 fn default_resolution_width() -> i32 {
@@ -266,6 +270,10 @@ fn default_notify_updates() -> bool {
 fn default_update_channel() -> String {
     "stable".to_string()
 }
+/// Keep in step with `DEFAULT_TEMPLATE` in `studio/src/clip_name.js`.
+fn default_clip_name_template() -> String {
+    "{map}_{player}_{kills}k_{weapons}_{time}".to_string()
+}
 fn default_auto_check_updates() -> bool {
     true
 }
@@ -337,6 +345,7 @@ impl Default for AppSettings {
             notify_updates: default_notify_updates(),
             update_channel: default_update_channel(),
             auto_check_updates: default_auto_check_updates(),
+            clip_name_template: default_clip_name_template(),
         }
     }
 }
