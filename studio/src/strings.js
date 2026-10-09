@@ -1328,6 +1328,21 @@ export const STRINGS = {
     TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
+    // #426: how much of the game a style covers.
+    cellSummaryOf: (files, most, size) => `${files.toLocaleString()} of ${most.toLocaleString()} files, ${size}`,
+    CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
+    largestSize: (width, height) => `up to ${width}×${height}`,
+    LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    someOf: (files, most, type) => `${files} of ${most} ${type}`,
+    styleGaps: (style, none, some) => {
+      const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
+      const parts = [];
+      if (none.length) parts.push(`no ${list(none, 'or')}`);
+      if (some.length) parts.push(`only ${list(some, 'and')}`);
+      return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
+    },
+    cfgGapsComment: (sentence) => `// ${sentence}`,
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
@@ -1475,6 +1490,35 @@ export const STRINGS = {
     OPEN_FOLDER: 'Open folder',
   },
 
+  // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────
+  COMBINE: {
+    OPEN_BUTTON: 'Combine Clips…',
+    OPEN_TITLE: 'Join rendered clips into one video',
+    TITLE: 'Combine Clips',
+    HINT: 'Join rendered clips into one video, in the order listed. Clips that all match are joined as they are, in seconds; mixed ones are fitted to the first clip and re-encoded.',
+    ADD_FINISHED_BUTTON: 'Add finished renders',
+    ADD_FILES_BUTTON: 'Add files…',
+    ADD_FILES_TITLE: 'Choose clips to combine',
+    CLEAR_BUTTON: 'Clear',
+    VIDEO_FILTER: 'Video',
+    MOVE_UP: 'Move up',
+    MOVE_DOWN: 'Move down',
+    REMOVE: 'Remove from the list',
+    EMPTY: 'No clips yet. Add finished renders, or add files.',
+    NO_FINISHED: 'No finished renders in this session yet.',
+    NEED_TWO: 'Add at least two clips.',
+    CHECKING: 'Checking the clips…',
+    planCopy: (length) => `They match, so they're joined as they are: a few seconds, no quality lost. ${length} in all.`,
+    planEncode: (length, width, height, fps) => `They differ in size, frame rate or format, so the video is re-encoded to MP4 at ${width}×${height}, ${fps} fps (the first clip's): this takes a while. ${length} in all.`,
+    planFailed: (err) => `Can't combine these: ${err}`,
+    START_BUTTON: 'Combine…',
+    SAVE_TITLE: 'Save the combined video as',
+    CANCEL_BUTTON: 'Cancel',
+    CLOSE_BUTTON: 'Close',
+    saved: (name) => `Saved ${name}.`,
+    SHOW_FILE: 'Show',
+  },
+
   // ── command_suggest.js: the Commands tab's type-ahead (#215) ────────────
   COMMAND_SUGGEST: {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
@@ -1547,6 +1591,7 @@ export const STRINGS = {
     settingsLoadFailed: (err) => `Failed to load settings: ${err}`,
     settingsSaveFailed: (err) => `Failed to save settings: ${err}`,
     auditFailed: (err) => `Audit failed: ${err}`,
+    combineFailed: (err) => `Combining the clips failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
