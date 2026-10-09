@@ -43,6 +43,30 @@
 //! for a POV demo, whose type-3 frames are the player's own key presses: skip a
 //! `-showscores` and the scoreboard stays up. HLTV demos record none.
 //!
+//! ## Long forward seeks go in steps (#596)
+//!
+//! The burst above goes out as **one** network message, built in the player's
+//! 64 KB `m_DemoStream`. `World::WriteFrame` adds every skipped frame's
+//! reliable data and user messages (`svc_updateuserinfo`, team and score
+//! messages, ...) while they fit, then `WriteCommands` adds the director events
+//! without checking; a stream that overflows is cleared whole ("Demo data
+//! stream overflow." in the console) and the player carries on from the landing
+//! frame alone. A 20-minute jump in an HLTV demo did exactly that (2026-10-04):
+//! a player who joined after the recording began had no name and no team, the
+//! scoreboard read 0/0, and `dodstudio_spec_target` found no such player.
+//!
+//! So a forward seek of more than [`STEP_SECONDS`] moves the clock that far per
+//! frame instead, from [`poll`], until it lands. Each step's catch-up is a few
+//! seconds of the demo, which always fits, so everything in between reaches the
+//! client in order, as if played very fast. A whole HLTV demo takes a few
+//! hundred frames. `dodstudio_seek_skip_between 1` seeks still jump at once:
+//! they skip the in-between on purpose.
+//!
+//! A command after the time (`dodstudio_seek_to <seconds> <command ...>`) runs
+//! one frame after the seek lands, once the landing frame has reached the
+//! client: the Highlights tab's Go uses it to put the camera on a player who
+//! may only exist once the jump has caught up.
+//!
 //! ## Why only `viewdemo`
 //!
 //! `playdemo` never loads `DemoPlayer.dll`'s player; `hw.dll` streams the file
@@ -93,6 +117,62 @@ use crate::names::console_name;
 pub const SEEK_TO_NAME: &str = console_name!("seek_to");
 pub const SEEK_BY_NAME: &str = console_name!("seek_by");
 pub const SKIP_BETWEEN_NAME: &str = console_name!("seek_skip_between");
+
+/// How far one step of a long forward seek moves the clock. Measured on four
+/// HLTV demos (`analysis/examples/seek_burst.rs`, 2026-10-04): no 5-second
+/// window held more than 55 KB of network data, entities included, and the
+/// catch-up leaves entities out. `m_DemoStream` holds 64 KB.
+pub const STEP_SECONDS: f64 = 5.0;
+
+/// A seek still on its way, stepped by [`poll`].
+struct Pending {
+    target: f64,
+    /// Run one frame after landing.
+    then: Option<String>,
+    /// The clock has been set to `target`; once that frame is sent, `then`
+    /// runs.
+    landed: bool,
+    /// The clock value the last step set.
+    last_set: f64,
+    /// Frames spent waiting for the player to send the last step.
+    waited: u32,
+    steps: u32,
+    started: std::time::Instant,
+}
+
+/// How many frames a step waits for the player to send the one before it
+/// before moving on regardless: a frame the world has no new data for (a gap,
+/// or the end of the demo) is never sent.
+const MAX_WAIT_FRAMES: u32 = 10;
+
+/// Whether the player has sent the step that set the clock to `last_set`:
+/// `WriteDatagram` records the clock it sent at in `m_LastFrameTime`.
+fn sent(last_frame_time: f64, last_set: f64) -> bool {
+    last_frame_time >= last_set - 0.001
+}
+
+static PENDING: std::sync::Mutex<Option<Pending>> = std::sync::Mutex::new(None);
+
+/// One frame of a stepped seek: move the clock to `To`, or set it to the
+/// target and land.
+#[derive(Debug, PartialEq)]
+enum Step {
+    To(f64),
+    Land(f64),
+}
+
+fn next_step(now: f64, target: f64) -> Step {
+    if target - now > STEP_SECONDS {
+        Step::To(now + STEP_SECONDS)
+    } else {
+        Step::Land(target)
+    }
+}
+
+/// Whether a seek from `now` to `to` goes in steps.
+fn stepped(now: f64, to: f64, skip_between: bool) -> bool {
+    !skip_between && to - now > STEP_SECONDS
+}
 
 /// `dodstudio_seek_skip_between`: 1 lands a seek without running the director
 /// events and console commands it jumps over. Off by default, so a seek does
@@ -206,26 +286,42 @@ fn skip_mark(last_sent_seq: u32, landing_seq: u32) -> Option<u32> {
     (landing_seq != last_sent_seq).then(|| landing_seq.saturating_sub(1))
 }
 
-/// What the console command reads: the one argument, or why there isn't one.
-fn argument(name: &str) -> Result<String, String> {
+/// What the console command reads: the time, and the command to run once the
+/// seek lands, if one follows it.
+fn arguments(name: &str) -> Result<(String, Option<String>), String> {
+    let usage = || format!("usage: {name} <seconds> [command to run once there]");
     let engfuncs = engine::engfuncs().ok_or_else(|| "the engine is not ready".to_string())?;
     // Cmd_Argc counts the command name itself.
-    if unsafe { (engfuncs.cmd_argc)() } != 2 {
-        return Err(format!("usage: {name} <seconds>"));
+    let argc = unsafe { (engfuncs.cmd_argc)() };
+    if argc < 2 {
+        return Err(usage());
     }
-    let raw = unsafe { (engfuncs.cmd_argv)(1) };
-    if raw.is_null() {
-        return Err(format!("usage: {name} <seconds>"));
+    let mut args = Vec::new();
+    for i in 1..argc {
+        let raw = unsafe { (engfuncs.cmd_argv)(i) };
+        if raw.is_null() {
+            return Err(usage());
+        }
+        args.push(
+            unsafe { CStr::from_ptr(raw as *const c_char) }
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
-    Ok(unsafe { CStr::from_ptr(raw as *const c_char) }
-        .to_string_lossy()
-        .into_owned())
+    let then = follow_up(&args[1..]);
+    Ok((args.swap_remove(0), then))
+}
+
+/// The words after the time, as one command line, or `None` when there are none.
+fn follow_up(words: &[String]) -> Option<String> {
+    (!words.is_empty()).then(|| words.join(" "))
 }
 
 fn run(name: &str, relative: bool) {
-    let result = argument(name)
-        .and_then(|raw| parse_seconds(&raw))
-        .and_then(|seconds| player::seek(seconds, relative, skip_between()));
+    let result = arguments(name).and_then(|(raw, then)| {
+        parse_seconds(&raw)
+            .and_then(|seconds| player::seek(seconds, relative, skip_between(), then))
+    });
     let line = match result {
         Ok(done) => format!("{name}: {done}"),
         Err(why) => format!("{name}: {why}"),
@@ -241,6 +337,40 @@ pub fn buffered_while_loading() -> Option<f64> {
     return player::buffered_while_loading();
     #[cfg(not(target_arch = "x86"))]
     None
+}
+
+/// Steps a long forward seek on by one frame, and runs a landed seek's
+/// follow-up command. Called every frame; one uncontended lock when idle.
+pub fn poll() {
+    let Ok(mut pending) = PENDING.try_lock() else {
+        return;
+    };
+    let Some(seek) = pending.as_mut() else {
+        return;
+    };
+    #[cfg(target_arch = "x86")]
+    let done = player::step(seek);
+    #[cfg(not(target_arch = "x86"))]
+    let done: Result<bool, String> = Err("only a 32-bit x86 build can drive DemoPlayer.dll".into());
+    let line = match done {
+        Ok(false) => return,
+        Ok(true) => {
+            if let Some(then) = &seek.then
+                && let Ok(line) = std::ffi::CString::new(format!("{then}\n"))
+            {
+                engine::client_cmd(&line);
+            }
+            format!(
+                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms",
+                seek.target,
+                seek.steps,
+                seek.started.elapsed().as_millis()
+            )
+        }
+        Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),
+    };
+    *pending = None;
+    unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
 }
 
 /// Where the demo player is, for the review mode (#623).
@@ -292,7 +422,7 @@ pub fn set_time_scale(scale: f32) -> Result<(), String> {
 /// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
 pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between());
+    return player::seek(seconds, false, skip_between(), None);
     #[cfg(not(target_arch = "x86"))]
     {
         let _ = seconds;
@@ -439,7 +569,50 @@ mod player {
         Ok(())
     }
 
-    pub(super) fn seek(arg: f64, relative: bool, skip_between: bool) -> Result<String, String> {
+    /// One frame of a stepped seek: `Ok(true)` once it has landed and a frame
+    /// has passed since.
+    pub(super) fn step(seek: &mut Pending) -> Result<bool, String> {
+        let (player, _) = find()?;
+        // Safety: the slots `seek` uses, checked against both builds, and
+        // `m_LastFrameTime`, which `seek`'s skip already writes.
+        unsafe {
+            let is_active: ByteFn = slot(player, SLOT_IS_ACTIVE);
+            if !is_set(is_active(player)) {
+                return Err("the demo stopped".into());
+            }
+            // One step per datagram: two steps sent together could overflow.
+            let last_frame_time =
+                ((player as *const u8).add(FIELD_LAST_FRAME_TIME) as *const f64).read_unaligned();
+            if !sent(last_frame_time, seek.last_set) && seek.waited < MAX_WAIT_FRAMES {
+                seek.waited += 1;
+                return Ok(false);
+            }
+            seek.waited = 0;
+            if seek.landed {
+                return Ok(true);
+            }
+            let get_now: TimeFn = slot(player, SLOT_GET_WORLD_TIME);
+            let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
+            let t = match next_step(get_now(player), seek.target) {
+                Step::To(t) => t,
+                Step::Land(t) => {
+                    seek.landed = true;
+                    t
+                }
+            };
+            set_world_time(player, t, 0);
+            seek.last_set = t;
+        }
+        seek.steps += 1;
+        Ok(false)
+    }
+
+    pub(super) fn seek(
+        arg: f64,
+        relative: bool,
+        skip_between: bool,
+        then: Option<String>,
+    ) -> Result<String, String> {
         let (player, build) = find()?;
         unsafe { crate::debug::report(&format!("demo_seek: {} DemoPlayer.dll", build.name)) };
         // Safety: every slot and field below is checked against both builds by
@@ -463,7 +636,35 @@ mod player {
             let to = landing(now, arg, relative, start, end);
 
             let set_world_time: SetWorldTimeFn = slot(player, SLOT_SET_WORLD_TIME);
+            let mut pending = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+            if stepped(now, to, skip_between) {
+                // Each frame from here moves the clock one step (`step`).
+                *pending = Some(Pending {
+                    target: to,
+                    then,
+                    landed: false,
+                    last_set: now,
+                    waited: 0,
+                    steps: 0,
+                    started: std::time::Instant::now(),
+                });
+                return Ok(format!(
+                    "{now:.2} -> {to:.2} s in steps of {STEP_SECONDS} s (demo runs {start:.2} to {end:.2})"
+                ));
+            }
             set_world_time(player, to, 0);
+            // A follow-up still waits a frame, for the landing frame to reach
+            // the client; a seek that was stepping is replaced by this one.
+            *pending = then.map(|then| Pending {
+                target: to,
+                then: Some(then),
+                landed: true,
+                last_set: to,
+                waited: 0,
+                steps: 0,
+                started: std::time::Instant::now(),
+            });
+            drop(pending);
 
             let mut skipped = "";
             if skip_between {
@@ -492,7 +693,12 @@ mod player {
 
 #[cfg(not(target_arch = "x86"))]
 mod player {
-    pub(super) fn seek(_arg: f64, _relative: bool, _skip_between: bool) -> Result<String, String> {
+    pub(super) fn seek(
+        _arg: f64,
+        _relative: bool,
+        _skip_between: bool,
+        _then: Option<String>,
+    ) -> Result<String, String> {
         Err("only a 32-bit x86 build can drive DemoPlayer.dll".to_string())
     }
 }
@@ -528,6 +734,56 @@ mod tests {
         assert_eq!(skip_mark(5000, 100), Some(99));
         assert_eq!(skip_mark(0, 1), Some(0));
         assert_eq!(skip_mark(5000, 5000), None);
+    }
+
+    /// A long forward seek moves the clock one step per frame, then lands on
+    /// the target exactly, however the clock ran in between.
+    #[test]
+    fn a_long_forward_seek_steps_then_lands() {
+        assert_eq!(next_step(90.0, 1335.3), Step::To(95.0));
+        assert_eq!(next_step(1331.0, 1335.3), Step::Land(1335.3));
+        assert_eq!(next_step(1335.3, 1335.3), Step::Land(1335.3));
+        // The clock ran past the target while stepping: land anyway.
+        assert_eq!(next_step(1336.0, 1335.3), Step::Land(1335.3));
+        let (mut now, mut frames) = (90.1, 0);
+        while let Step::To(t) = next_step(now, 1335.3) {
+            now = t + 0.01; // the clock also runs a little each frame
+            frames += 1;
+        }
+        assert_eq!(frames, 248);
+    }
+
+    /// The player records the clock it sent at, which has run on a little
+    /// past what the step set.
+    #[test]
+    fn a_step_counts_as_sent_once_the_player_sent_at_or_after_it() {
+        assert!(sent(95.004, 95.0));
+        assert!(sent(95.0, 95.0));
+        assert!(!sent(90.1, 95.0));
+    }
+
+    #[test]
+    fn only_long_forward_seeks_without_the_skip_go_in_steps() {
+        assert!(stepped(90.0, 1335.3, false));
+        assert!(!stepped(90.0, 94.0, false), "a short hop fits in one frame");
+        assert!(
+            !stepped(1335.3, 90.0, false),
+            "backward runs nothing in between"
+        );
+        assert!(
+            !stepped(90.0, 1335.3, true),
+            "the skip jumps at once on purpose"
+        );
+    }
+
+    #[test]
+    fn the_words_after_the_time_are_one_command() {
+        let words = |w: &[&str]| w.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(follow_up(&words(&[])), None);
+        assert_eq!(
+            follow_up(&words(&["dodstudio_spec_target", "13"])),
+            Some("dodstudio_spec_target 13".to_string())
+        );
     }
 
     /// No name may be the whole start of another: the console's autocomplete
