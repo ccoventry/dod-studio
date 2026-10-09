@@ -1,16 +1,13 @@
 # Demo Analyzer Load Performance — Audit & Implementation Plan
 
-Status: **Tiers 1a/1b/2/3 implemented and committed** (`00be056` perf commit,
-`ee86ea1` follow-up `run.ps1` fix — unrelated, just adjacent history on the
-same branch). **Tier 4/5 not started**, tracked as
-[GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) — still
-blocked on the future-stats review exactly as originally planned, see that
-section, it's unchanged.
-Written so a fresh chat (clean context) can pick this up without re-deriving
-anything. If you're that fresh session: read this whole file before touching
-code, it front-loads everything the audit already ruled out. The "Implementation
-plan" section below is now a record of what was built, not just a proposal —
-each tier is marked with its outcome and any deviation from the original design.
+Status: **Tiers 1a/1b/2/3 are done and on `dev`**: the on-disk analyzer cache, real
+progress events, the dead-code removal and cache warm-up from the Capture scan,
+plus later work: the scan warms the cache (#512), the decoded demo is freed off
+the calling thread (#511), and older cache schema versions are swept (#510).
+**Tier 4/5 are not started**, tracked as
+[GitHub issue #37](https://github.com/ccoventry/dod-studio/issues/37) (open).
+Written so a fresh chat can pick Tier 4/5 up without re-deriving anything: read
+the measurements and the Tier 4/5 section before touching code.
 
 ## Goal
 
@@ -18,41 +15,31 @@ Opening a demo in the Demo Analyzer (`studio/src/analyzer_pane.js` ->
 `analyze_demo_full`) takes a few seconds. User wants it faster — ideally
 instant, or at least <= 1s.
 
-## Relationship to the (separate, not-yet-started) "more player stats" work
+## Relationship to the "more player stats" work
 
-User also wants to review what stats could be added beyond the current
-kills/deaths/kills-by-weapon set, including data the parser already sees but
-`analysis/` never surfaces. **These two efforts are not independent — read
-the Tier 4/5 section before doing either.**
+Tier 4/5 (skip decoding message types the analyzer doesn't read, to save the
+last big chunk of parse time) directly targets `SvcClientData` and
+`SvcDeltaPacketEntities`, which carry per-tick position, velocity, angles,
+health and ammo for every player and are the richest source of new stats. The
+stats review that this was waiting on has partly happened: the objective and
+flag data (#517, the Flags tab #593) came from other messages, but nothing
+reads these two streams yet (`docs/demo_stats_feasibility.md`, #192). So
+decide which fields the stats work wants before designing the skip, or risk
+building an optimization you partly undo.
 
-Short version: Tiers 1a/1b/2/3 below (caching, progress events, dead-code
-removal, reusing Capture Studio's scan) have no conflict with adding stats —
-Tier 1a just needs a cache schema version, noted inline. Tier 4/5 (skip
-decoding message types the analyzer doesn't read, to save the last big chunk
-of parse time) directly targets `SvcClientData` and `SvcDeltaPacketEntities`
-— which, per-tick position/velocity/angles/health/ammo for every player, are
-almost certainly the richest source of *new* stats and are currently 100%
-unread by `analysis/`. Do the stats-data review before Tier 4, not after, or
-risk building an optimization you immediately have to partially undo.
+## The benchmark
 
-## Already shipped (unrelated but adjacent — don't re-do)
+`benchmark/src/main.rs` is a phase-attribution profiler for the real
+`analyze_demo_full` path. Use it to reproduce every number below:
 
-Commit `f6b382c` on `feature/tauri-migration`:
-- Folder/demo picker sidebar in the Demo Analyzer tab (folder tree + demo list
-  next to the report, matching the `dev` branch egui GUI's persistent
-  explorer). Files: `studio/index.html`, `studio/src/analyzer_pane.js`,
-  `studio/src-tauri/src/dir_browser.rs`.
-- `benchmark/src/main.rs` rewritten. It used to compare an "unoptimized vs
-  optimized" event loop that doesn't reflect the real load path (see below) —
-  it's now a phase-attribution profiler for the actual path
-  `analyze_demo_full` runs. **Use this to reproduce every number below:**
-
-  ```
-  cargo build --release -p dod-benchmark
-  ./target/release/dod-benchmark.exe ./local/demos          # or any folder of .dem files
-  ```
+```
+cargo build --release -p dod-benchmark
+./target/release/dod-benchmark.exe ./local/demos          # or any folder of .dem files
+```
 
 ## Measured baseline (release build, 4 demos, 52-89 MB each)
+
+Taken before #511 and #512, so the drop row now runs off the calling thread and the scan path shares the parse. Re-measure before trusting a number for a new decision.
 
 | Phase | Avg | Share | What it is |
 |---|---|---|---|
@@ -88,17 +75,9 @@ even under `tauri dev`. Not a real lever — don't spend time here.
 ## What this rules out
 
 - **The analyzer's own event-loop logic is not the bottleneck** (2.9%). The
-  existing `parse_with_diagnostics` / `ParseDiagnostics` machinery in
-  `analysis/src/lib.rs` (~lines 802-1240, `pub fn parse_with_diagnostics`,
-  `struct ParseDiagnostics`, `fn check_states_equal`) only ever measured this
-  event loop in isolation (an "unoptimized vs optimized" comparison, ~1.1-1.3x
-  speedup) — which is why it looked like nothing changed no matter what you
-  did to it. **It is now dead code** — nothing calls it after the benchmark
-  rewrite (verified: `grep -rn "parse_with_diagnostics\|ParseDiagnostics" --include=*.rs .`
-  finds only its own definition; the one test that does a similar unopt/opt
-  comparison, `test_optimized_vs_unoptimized` at ~line 1478, has its own
-  separate inline `assert_states_eq` helper and doesn't call it). Safe to
-  delete as part of the next pass — see Tier 2 below.
+  old `parse_with_diagnostics` machinery only ever measured that loop in
+  isolation, which is why tuning it seemed to change nothing; it was deleted in
+  Tier 2.
 - **IPC / frontend render is not the bottleneck.** Payload is ~0.3 MB;
   serialize + Tauri IPC + `JSON.parse` is single-digit ms.
 - **File read is not the bottleneck** (~1%). Don't memory-map the file — it
@@ -134,27 +113,11 @@ work (Tier 4), that's the first thing to instrument.
 - **`Analysis` and `FileInfo` already derive `Serialize`/`Deserialize`**
   (`analysis/src/lib.rs` ~line 225, `native/src/lib.rs` ~line 29) — a JSON
   cache needs zero new derive work.
-- **Incidental bug, unrelated to load speed, found while tracing callers —
-  resolved 2026-08-22, by removal rather than a fix.** `analyze_demo` (the
-  *other* Tauri command, `studio/src-tauri/src/lib.rs` ~line
-  207-255 — different from `analyze_demo_full`) fed the "Advanced
-  Diagnostics / Match Telemetry" inline panel (`#telemetry-container`,
-  distinct from the Demo Analyzer tab). It did the full ~1.3s parse, then
-  looked up `analysis_json.get("scoreboard")`,
-  `.get("chat_logs").or(.get("chat"))`,
-  `.get("mortality_metrics").or(.get("deaths"))`,
-  `.get("round_chronologies").or(.get("rounds"))` on the serialized
-  `Analysis`. But `Analysis` serializes as `{"demo_info": {...}, "state":
-  {...}, "events": [...]}` — **none of those top-level keys exist**, so all
-  four always resolved to `Null`; the panel paid the full parse cost and
-  rendered nothing, every time. A user report of the always-blank panel led
-  straight back to this exact diagnosis. Fixing it properly meant real
-  backend rework (returning `state`'s actual nested fields under the right
-  names) for a feature that mostly duplicated the "View Match Telemetry"
-  button, which already jumps straight to the full Demo Analyzer report —
-  so it was removed instead: `analyze_demo`, `SerializedAnalysis`,
-  `telemetry_pane.js`, and the `analyzeDemo()` IPC wrapper are all gone.
-  The button and its jump to Demo Analyzer are untouched.
+- **Incidental bug, resolved 2026-08-22 by removal:** the old `analyze_demo`
+  command fed an inline telemetry panel from top-level keys the serialized
+  `Analysis` never had, so it paid the full parse and always rendered nothing.
+  The command, its panel and its IPC wrapper are gone; the "View Match
+  Telemetry" button jumps to the Demo Analyzer instead.
 - Confirmed directly in this session's own build output:
   `[profile.release]` in `studio/src-tauri/Cargo.toml` is silently
   ignored by Cargo ("profiles for the non root package will be ignored,
@@ -167,135 +130,30 @@ work (Tier 4), that's the first thing to instrument.
   cannot actually catch anything in release builds. Correctness/crash-handling
   gap, not a speed issue — flagging so it doesn't get mistaken for "handled."
 
-## Implementation plan
+## What was built (Tiers 1a, 1b, 2, 3: all done)
 
-### Tier 1a — on-disk analyzer cache (the only path to "instant") ✅ implemented
+- **Tier 1a, on-disk analyzer cache.** One JSON file per demo under
+  `%APPDATA%\dod-studio\analyzer_cache\v<SCHEMA_VERSION>\<fnv1a of the canonical path>.json`,
+  valid while the demo's size and modified time match. The code is
+  `analysis/src/cache.rs` (`SCHEMA_VERSION`, currently 4), used by
+  `native::run_analyzer_cached`; write errors never fail the analysis. A warm
+  open is about 10-15 ms; a cold one still costs the full parse. **Bump
+  `SCHEMA_VERSION` whenever what gets computed changes**, or an old entry
+  silently deserializes with the new field missing. Older version folders are
+  swept in the background (#510).
+- **Tier 1b, progress events.** `analyze_demo_full` emits `analyzer_progress`
+  (`{processed, total}`), throttled to 33 ms per CLAUDE.md. A cache hit never
+  calls the progress callback, so the progress bar appears on cold parses only.
+- **Tier 2, dead code.** `parse_with_diagnostics`, `ParseDiagnostics` and
+  `check_states_equal` are deleted.
+- **Tier 3, cache warm-up from the scan.** `scan_demo_for_highlights_with_analysis`
+  returns the `Analysis` its parse already built, and `scan_directory_impl`
+  passes it to `native::warm_analyzer_cache`, so a Capture folder scan fills the
+  cache for the Analyzer (#512 made the scan read the same cache it writes).
+- **Free off the calling thread (#511).** The decoded demo is dropped on a
+  background thread, taking the drop row of the baseline off the open path.
 
-Highest leverage, low risk, purely additive. Design:
-
-- New function in `native/src/lib.rs`, e.g.
-  `run_analyzer_cached(demo_path: &PathBuf, progress_cb) -> Result<(FileInfo, Analysis, bool /* from_cache */), String>`.
-- Cache dir: `native::shared::paths::get_appdata_dir().join("analyzer_cache")`
-  (mirrors the existing appdata pattern in `native/src/shared/paths.rs`).
-- One JSON file per demo, named by a hash (std `DefaultHasher`/FNV-1a — no new
-  dependency needed) of the canonicalized absolute demo path. Contents:
-  `{ size_bytes, modified_unix_secs, file_info: FileInfo, analysis: Analysis }`.
-- On call: `fs::metadata` the demo (size + mtime — cheap, already done today
-  in `run_analyzer_with_progress`), compute the cache key, try read + parse
-  the cache file. If size/mtime match -> return immediately (no progress
-  callback needed, this is the ~10-15ms warm path). If missing/stale/corrupt
-  -> run today's `run_analyzer_with_progress` in full, then best-effort
-  write-through to the cache file (ignore write errors — must never fail the
-  analyze call because the cache write failed).
-- Wire `studio/src-tauri/src/lib.rs::analyze_demo_full` (~line 275) to
-  call this instead of `run_analyzer_with_progress` directly.
-
-**As built:** matches the design above almost exactly. `native/src/lib.rs`
-gained `run_analyzer_cached` (cache read/write, size+mtime validity check),
-`build_file_info` (factored out of `run_analyzer_with_progress` so both paths
-share it), and `write_analyzer_cache_entry` (shared write-through helper, also
-used by Tier 3 below). Cache key is `fnv1a_hash` of the canonicalized path
-(reusing `native::utils::demo_hasher::fnv1a_hash`, already used by
-`hl-demo-auditor` — no new hashing dependency needed, as hoped). Cache dir is
-`analyzer_cache/v{CACHE_SCHEMA_VERSION}/<hash>.json`, `CACHE_SCHEMA_VERSION`
-starts at `1`. `analyze_demo_full` now calls `run_analyzer_cached` instead of
-`run_analyzer_with_progress`.
-
-Expected result: first open of a demo unchanged (~1.3s); every subsequent
-open of the same unmodified file drops to ~10-15ms (cache-file read + JSON
-deserialize of a ~0.3MB payload). This is what "instant" actually means here
-— cold-load has a real floor around 1-1.3s without Tier 4/5 work below.
-
-**Schema versioning — required, not optional.** The cache stores a
-deserialized `Analysis`. The moment a future change adds a new stat (a new
-field on `Player`, a new pass over the event stream, anything that changes
-*what gets computed*, not just how fast), an old cache entry will happily
-deserialize with the new field missing/defaulted — silently returning
-incomplete data forever instead of a cache miss. Bake a
-`const CACHE_SCHEMA_VERSION: u32` into the cache file (or the cache
-subdirectory name, e.g. `analyzer_cache/v1/<hash>.json`) and bump it any time
-`AnalyzerState`/`Player`/related structs change in a way that affects
-computed content. Treat a version mismatch as a miss. This is what makes
-Tier 1a compatible with an evolving stats set — see below, this is not
-hypothetical, it's coming soon.
-
-### Tier 1b — real progress events (fixes "feels frozen", not speed) ✅ implemented
-
-- Add `app_handle: tauri::AppHandle` param to the `analyze_demo_full` command
-  (same pattern already used by `scan_directory` in the same file).
-- Replace the no-op `|_, _| {}` progress closure with one that emits a Tauri
-  event, mirroring `capture_manager.rs`'s existing `scan_progress` emit
-  pattern (`app_handle.emit("analyzer_progress", json!({...}))`).
-- **Throttle it.** `try_from_bytes_with_progress` already calls the callback
-  every ~500 frames (`analysis/src/lib.rs` ~line 781:
-  `processed_frames % 500 == 0`), which is ~1000+ calls for a 540k-frame demo.
-  Emitting a Tauri IPC event on every one of those would add real overhead
-  back onto the path we're trying to shrink. Wrap the closure with a
-  `last_emit: Instant` and skip emitting unless >= 33ms has elapsed (per
-  CLAUDE.md's telemetry-throttling guardrail — ~30fps). That bounds real
-  emits to ~25-40 per parse.
-- Frontend: `studio/src/analyzer_pane.js::loadAnalyzerDemo` needs a
-  `listen('analyzer_progress', ...)` (register directly in the pane module,
-  per the existing note in `ipc_bridge.js` about not double-registering
-  listeners — same pattern `render_pane.js` uses for `render_status`) to swap
-  the static "Analyzing…" text for a real percentage/progress bar.
-
-**As built:** matches the design. `analyze_demo_full` now takes `app_handle:
-tauri::AppHandle`, throttles via a `last_emit: Instant` + 33ms check (always
-emitting on the final `processed == total` call too, so the UI never gets
-stuck below 100%), and emits `analyzer_progress` with `{processed, total}`.
-`analyzer_pane.js` registers a single `listen('analyzer_progress', ...)` at
-module scope (not inside a function, so it only ever runs once per app
-lifetime — same double-registration concern noted for `render_status` in
-`ipc_bridge.js`), gated by an `analyzerLoadInProgress` flag so stray/late
-events from a previous load can't clobber the UI. One thing not in the
-original design: since a cache *hit* (Tier 1a) never calls `progress_cb` at
-all, the progress UI only ever appears on a cold parse — correct behavior,
-just worth knowing if it looks like progress events "stopped working" once
-the cache warms up.
-
-### Tier 2 — delete dead code ✅ implemented
-
-Remove `analysis/src/lib.rs` ~lines 802-1240: `parse_with_diagnostics`,
-`struct ParseDiagnostics`, `fn check_states_equal`. Confirmed unused (see
-above). Pure cleanup, ~440 lines gone, no behavior change.
-
-**As built:** exactly as planned, plus a pass to keep the boundary clean
-(the block sat inside `impl Analysis { ... }` alongside `try_from_bytes*`, so
-only the `parse_with_diagnostics` fn body was deleted from inside that impl;
-`ParseDiagnostics`/`check_states_equal` were free-standing and deleted
-outright). `cargo build --workspace` and a `grep -rn` for all three names
-confirmed zero remaining references before landing it.
-
-### Tier 3 — reuse Capture Studio's scan for cache warm-up ✅ implemented (design changed)
-
-`scan_demo_for_highlights` (`native/src/patch/scanner.rs`) already builds the
-exact `Analysis` the cache in Tier 1a wants, then throws it away. Threading it
-through would mean every Capture Studio folder scan pre-warms the analyzer
-cache for free — for the common "scan a folder, then inspect demos"
-workflow, every analyzer open after a scan becomes the ~10-15ms cache path.
-
-**As built — deliberately not what this section originally proposed.** The
-plan above called for changing `scan_demo_for_highlights`'s return signature
-directly, flagged at the time as the reason to defer it (bigger blast radius,
-touches a `pub fn` with call sites beyond `capture_manager.rs`). When Tier 3
-actually got built, that turned out to be avoidable: `scan_demo_for_highlights`
-now has a new sibling, `scan_demo_for_highlights_with_analysis`, which does the
-real work and returns `(the_original_7_tuple, analysis::Analysis)`;
-`scan_demo_for_highlights` itself became a one-line wrapper
-(`.map(|(result, _analysis)| result)`) with its signature and behavior
-completely unchanged. Only `capture_manager.rs::scan_directory_impl` (the one
-caller that actually wanted the `Analysis`) was switched to call the new
-function. The other four call sites (`native/src/bin/check_ticks.rs`,
-`debug_scanner.rs`, `cli/main.rs`, `test_builder.rs`) were never touched —
-same effect as the original design (folder scans warm the cache), much
-smaller diff. `scan_directory_impl` calls the new
-`native::warm_analyzer_cache(&file, &analysis)` (in `native/src/lib.rs`,
-built alongside `run_analyzer_cached` in Tier 1a, sharing its
-`write_analyzer_cache_entry` helper) right after each successful scan —
-best-effort, never fails the scan itself.
-
-### Tier 4/5 — BLOCKED on the future-stats question below, not just "later"
+### Tier 4/5 — not started (issue #37)
 
 Tracked as [issue #37](https://github.com/ccoventry/dod-studio/issues/37). Kept in full below since it's the technical detail an implementer of that issue will actually need (which message types, which fields, why the sequencing with the stats work matters).
 
@@ -313,10 +171,8 @@ Tracked as [issue #37](https://github.com/ccoventry/dod-studio/issues/37). Kept 
 
 Both need a `check_states_equal`-style correctness harness (a real "compare
 before/after parsed state across a broad demo corpus" check) rebuilt and run
-wide before shipping. That code was deleted in Tier 2 (now done, see above) —
-its pattern is still in history at commit `00be056`'s parent (`fa0d9d4`) if
-you want to resurrect it as a starting point rather than writing one from
-scratch.
+wide before shipping. That code was deleted in Tier 2; its pattern is still in git history
+(commit `fa0d9d4`) if you want a starting point.
 
 **This tier is not just deferred, it is actively in tension with adding more
 player stats — read this before starting either.** The two biggest
@@ -388,11 +244,11 @@ shown on the Demo Analyzer's Kill Map tab). What that settled:
   delta's `HashMap<String, Vec<u8>>` -- one heap table per delta and one heap
   string per key -- so Tier 4's `Delta` rewrite is what would remove it.
   Looking the three origin keys up by hash instead measured slower. A cached
-  load is unaffected. `ANALYZER_CACHE_SCHEMA_VERSION` went to 4 so older
+  load is unaffected. `analysis::cache::SCHEMA_VERSION` went to 6 so older
   cache entries re-parse instead of showing an empty Kill Map; the new field
   is also `#[serde(default)]`.
 
-**Sequencing, restated plainly**: do the future-stats review first, then design the selective-parse mode around its answer (keep decoding whatever fields the stats work wants, skip only what's still unwanted regardless — e.g. `SvcSound`, `ClientAreas`, `SvcTempEntity`). Shipping Tier 4 first risks partially reverting it once a wanted stat turns out to need `SvcClientData`/`SvcDeltaPacketEntities`. That review hasn't happened yet.
+**Sequencing, restated plainly**: do the future-stats review first, then design the selective-parse mode around its answer (keep decoding whatever fields the stats work wants, skip only what's still unwanted regardless — e.g. `SvcSound`, `ClientAreas`, `SvcTempEntity`). Shipping Tier 4 first risks partially reverting it once a wanted stat turns out to need `SvcClientData`/`SvcDeltaPacketEntities`. The part of that review about which fields to keep is still open.
 
 ## How to verify any of this yourself
 
@@ -405,18 +261,8 @@ Reproduces the phase table and the consumed/discarded netmessage histogram
 above — still accurate for a cold/cache-miss parse, since the benchmark
 exercises the parse path directly and doesn't go through the Tier 1a cache.
 
-**Tier 1a cache, now that it exists:** open a demo in the Demo Analyzer tab,
-check `%APPDATA%\dod-studio\analyzer_cache\v1\` populates with a
-`<16-hex-digit>.json` file, then re-open the same demo (or re-select it from
-the sidebar) and confirm it's near-instant with no progress bar — a cache hit
-skips `progress_cb` entirely, so the absence of the Tier 1b progress UI on a
-second open is itself the tell. Bump `ANALYZER_CACHE_SCHEMA_VERSION` in
-`native/src/lib.rs` (currently `1`) any time computed `AnalyzerState`/`Player`
-fields change, so old cache entries get treated as a miss instead of quietly
-deserializing incomplete.
-
-**Tier 3 warm-up:** run a Capture Studio folder scan over a directory of
-demos you haven't opened in the Analyzer yet, then check
-`analyzer_cache/v1/` already has entries for them before you ever open the
-Analyzer tab — confirms `scan_directory_impl` is calling
-`native::warm_analyzer_cache` per scanned demo.
+**The cache:** open a demo in the Demo Analyzer tab, check
+`%APPDATA%\dod-studio\analyzer_cache\v4\` (the current `SCHEMA_VERSION`)
+gets a `<16-hex-digit>.json` file, then re-open the same demo and confirm it is
+near-instant with no progress bar. A Capture folder scan fills it too, before
+you ever open the Analyzer tab.

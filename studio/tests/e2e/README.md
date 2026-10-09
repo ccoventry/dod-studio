@@ -1,9 +1,13 @@
 # Frontend e2e tests
 
-Playwright, run in headless Chromium against a minimal test harness
-(`render-studio.html`) — not the real app shell. Tauri's IPC (`invoke`/`listen`)
-is mocked (`mocks/`, wired in via `../vite.config.e2e.js`), so `render_pane.js`
-and `ipc_bridge.js` run completely unmodified with no Rust backend at all.
+Playwright, run in headless Chromium against minimal test harnesses — not the
+real app shell. Each `*.spec.js` loads its own `*.html` harness
+(`analyzer-tree`, `cfg-warnings`, `command-suggest`, `detail-notes`,
+`hd-textures`, `info-tooltip`, `master-pane`, `render-studio`, `themed-confirm`).
+Tauri's IPC (`invoke`/`listen`) is mocked (`mocks/`, wired in via
+`../vite.config.e2e.js`), so the pane modules under test and `ipc_bridge.js`
+run completely unmodified with no Rust backend at all. Pure-logic unit tests
+are separate: `npm run test:unit` (vitest, `src/*.test.js`).
 
 ## Run it
 
@@ -30,8 +34,8 @@ real app.
 - Real Rust command execution, real `run_render_job`/scanner behavior — that's
   `cargo test -p native` (see `native/src/hlcr/*.rs`'s own test modules).
 - The real native window, real file dialogs, real filesystem access.
-- Anything outside Render Studio — the harness only wires up what
-  `render_pane.js` touches.
+- Any pane without a harness here — each harness only wires up what its
+  module touches.
 
 For that level of coverage, the fallback is still a real
 `npm run tauri dev` session and manual clicking, or investing further in a
@@ -40,7 +44,7 @@ what this is — see the PR that introduced this suite for the tradeoff).
 
 ## Adding a fixture the harness doesn't have yet
 
-`render-studio.html` only carries the DOM elements `render_pane.js` currently
-queries. If a change to that file starts querying a new element id, add it to
-the harness too — `grep "querySelector('#" src/render_pane.js` finds the
-full current list.
+Each harness carries only the DOM elements its module queries. If a change
+starts querying a new element id, add it to that module's harness too —
+for example `grep "querySelector('#" src/render_pane.js` finds the full current
+list for `render-studio.html`.

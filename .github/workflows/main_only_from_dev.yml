@@ -14,6 +14,8 @@ on:
     branches: [main]
     types: [opened, edited, reopened, synchronize]
 
+permissions: {}
+
 jobs:
   source-branch:
     name: PR into main comes from dev

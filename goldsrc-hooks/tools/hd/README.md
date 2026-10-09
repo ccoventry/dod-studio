@@ -166,6 +166,8 @@ python sky_hd.py     %OUT%\sky\ultrasharp     dod_mymap
 
 Set `HD_STYLE` to build a style other than `ultrasharp` (for example `set HD_STYLE=remacri`). Run any script with no arguments for its usage.
 
+Every script upscales 250 files at a time and writes each batch before starting the next, so a stopped build keeps what it finished. `HD_BATCH` changes the batch size (for example `set HD_BATCH=100`). Each extra batch costs about a second to restart the upscaler.
+
 **Replacing one texture by hand.** Name it the way the hook expects and drop it into `overrides`:
 
 - **Map textures:** `<name>_<hash>.tga`
@@ -183,11 +185,15 @@ python compare.py compare.png
 
 This makes one sheet with the original and every built style side by side, for a few sample textures, model skins, sprites, detail textures and a sky. Pass your own samples to compare something specific; run it with no arguments for the format.
 
+To see your own maps instead of the fixed samples, `--map dod_anzio` takes that map's most detailed textures that have an HD file, plus its sky, and `--auto` picks a few of your maps for you. `--styles ultrasharp,plain` keeps the sheet to the styles you're choosing between. DoD Studio's HD Textures page makes the same sheet under **Compare styles**.
+
 In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
 
 ## Make your own style
 
 The game loads whatever style folder you name, so you can make as many as you like without touching any code:
+
+DoD Studio's HD Textures page has a form for this (Your own styles) that writes the same file. By hand:
 
 1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:
@@ -235,6 +241,7 @@ Lists saved in this folder by an older version still work while the install has 
 | `hd_maps.example.txt` | template for building only some maps (copy it to `dodstudio_hd\hd_maps.txt`) |
 | `goldsrc.py` | BSP, WAD, model and sprite readers |
 | `hdcommon.py` | game folder lookup, and the hashing and naming the hook matches |
+| `requirements.txt` | Python packages the scripts need (`pip install -r`) |
 | `valve_models.txt` | Half-Life models DoD borrows (breakable-object gibs, `gordon`, `skeleton`) |
 
 The file name hash is FNV-1a over the original's 8-bit pixels and its 768-byte palette. It must stay byte-for-byte identical to `texture_hires.rs`, or the hook won't find the files.

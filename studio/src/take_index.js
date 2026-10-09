@@ -53,12 +53,34 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
+    if (previous.curation !== undefined) fresh.curation = previous.curation;
     // Kill Range edits are user edits too, not scan output.
     if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
     if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
   });
 
   return freshDemo;
+}
+
+// ── Curation (#44) ──────────────────────────────────────────────────────────
+//
+// An editorial mark, separate from `status` (which drives what the pipeline
+// does): unset = not reviewed yet, Keep, or Skip. Skip unticks the row and
+// locks it, so no batch can include it. Frontend-only, persisted in the
+// project file with the rest of the streak.
+
+export const CURATION = { KEEP: 'Keep', SKIP: 'Skip' };
+
+/** True for a highlight marked Skip: never selectable, never captured. */
+export function isSkipped(streak) {
+  return streak?.curation === CURATION.SKIP;
+}
+
+/** Sets the mark ('' clears it). Skip also unticks the row. */
+export function setCuration(streak, value) {
+  if (value === CURATION.KEEP || value === CURATION.SKIP) streak.curation = value;
+  else delete streak.curation;
+  if (value === CURATION.SKIP) streak.selected = false;
 }
 
 // ── Status source (#105) ────────────────────────────────────────────────────
@@ -173,27 +195,20 @@ export function isRangeModified(streak) {
 /**
  * True if this highlight carries anything the user did on purpose — real
  * pipeline-earned status (Pending/Captured/Rendered), a note, or a narrowed
- * kill range. This is deliberately a wide net (per user, 2026-08-19): any
- * one of the three is enough to protect the row from Clear Untracked in
- * Workspace mode.
+ * kill range. This is deliberately a wide net: any one of the three is
+ * enough to protect the row from Clear Untracked in Workspace mode.
  *
- * `Pending` used to deliberately NOT count (revised 2026-08-19, was
- * originally "status !== None"): back then `streak.status` started as
- * `undefined` and the status dropdown *displayed* undefined as "Pending"
- * purely for convenience, without ever writing to the field — so an
- * explicit "Pending" selection looked identical to an untouched row, and
- * counting it as tracked could silently flip a row's protection with no
- * visible change. That premise is gone now that an unset status displays
- * (and counts, master_pane.js's countByStatus) as "None" instead —
- * "Pending" only ever appears once the user deliberately sets it, e.g. to
- * flag a highlight for a later capture pass without selecting it yet — so
- * it is exactly the kind of on-purpose signal this predicate exists to
- * protect, and the 2026-08-19 restriction no longer applies.
+ * `Pending` counts because an unset status displays (and counts,
+ * master_pane.js's countByStatus) as "None" — "Pending" only ever appears
+ * once the user deliberately sets it, e.g. to flag a highlight for a later
+ * capture pass without selecting it yet — so it is exactly the kind of
+ * on-purpose signal this predicate exists to protect.
  */
 function isHighlightTracked(streak) {
   if (!streak) return false;
   if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
   if (streak.notes && streak.notes.trim()) return true;
+  if (streak.curation) return true;
   return isRangeModified(streak);
 }
 

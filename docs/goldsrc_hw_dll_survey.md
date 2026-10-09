@@ -21,6 +21,21 @@ read but never modified.
 python goldsrc-hooks/tools/survey_hw_dll.py [keys|collide|findings]
 ```
 
+> ### Status (2026-10)
+>
+> §1–§5 are the first pass; §7–§11 are later passes (#273, closed) that resolved
+> most of what §3.3–§3.5 and §4 leave open. Where the two disagree, trust the
+> later section; §11 is what is still not surveyed.
+>
+> | Candidate | Built? | Command / module | Issue / PR |
+> | --- | --- | --- | --- |
+> | raise `ex_interp`'s 100 ms ceiling (§3.2) | yes | `dodstudio_ex_interp_max`, `ex_interp.rs` | #271, PR #301 |
+> | empty the decal pool (§3.4, §9) | yes | `dodstudio_clear_decals`, `decals.rs` | PR #297; #290 still open |
+> | the 64-byte command limit (§3.1) | not reachable | — | #256 |
+> | `CL_ParseServerMessage` / demo reader (§3.3) | no | — | — |
+> | `CL_FlushEntityPacket` predicate (§3.5, §8) | located offline, no command | — | #273 |
+> | map entity trim (`MAX_PACKET_ENTITIES`) | no | — | #207, open |
+>
 > ### Read this before §1
 >
 > **This is a partial survey, and says so up front.** `hw.dll` is ten times the
@@ -150,8 +165,8 @@ not reproduce; the tool reports the match count rather than guessing.
 
 ### 3.1 The 64-byte command limit — settled, and its name is wrong
 
-**`CLAUDE.md` calls it "GoldSrc's 64-byte `Cbuf_AddTextToBuffer` limit". There is
-no such limit.**
+**`CLAUDE.md` used to call it "GoldSrc's 64-byte `Cbuf_AddTextToBuffer` limit".
+There is no such limit.**
 
 `Cbuf_Init` at `hw+0x272b0`:
 
@@ -178,8 +193,8 @@ frame carries a fixed `char command[64]`. This project's own reader says so —
 **Consequence: not reachable, and there is nothing to raise.** The limit is a
 property of the bytes we write into a file the engine parses, not of a buffer we
 could grow. Staggering long paths across ticks remains the answer. What changes
-is the reasoning — and `CLAUDE.md`'s wording, which currently sends anyone
-investigating this to a function that does not impose it.
+is the reasoning. `CLAUDE.md` now says so: the limit is a file-format property
+and cannot be raised.
 
 *(Not proven: the engine's own read of that 64-byte field was not located. The
 conclusion rests on the format side — our reader, and the pipeline's own naming
@@ -227,6 +242,10 @@ costed.*
 
 ### 3.3 Demo playback and parsing — located, not surveyed
 
+*(Later passes: §7 names `CL_ParseServerMessage` and the dispatch table, §8 reads
+`CL_ParsePacketEntities`, §10 pins HLAE's span patch inside it. The demo reader
+itself is still unopened, per §11.)*
+
 `CL_ParseServerMessage` is at the function containing `hw+0x1aab2`
 (`CL_ParseServerMessage: svc_updateuserinfo > MAX_CLIENTS`), and the whole
 `svc_*` name table is in `.data` from `hw+0x13afd0`, so the dispatch is
@@ -246,6 +265,9 @@ pass, not a paragraph.
 
 ### 3.4 Entity and decal limits — located, not surveyed
 
+*(Resolved by §9 (#273): the ring's size is not reachable; see
+`docs/goldsrc_decals.md` for the shipped `dodstudio_clear_decals`.)*
+
 `r_decals` is registered at `hw+0x46c35` with a default of `4096.0`, alongside
 `sp_decals` and `mp_decals`. `Draw_DecalMaterial` is one of the fourteen
 functions HLAE detours, which is the first thing anyone touching decals
@@ -258,6 +280,8 @@ decal above the new limit — and the pipeline already works around it from
 
 ### 3.5 `CL_FlushEntityPacket` — not located
 
+*(Resolved by §8 (#273): located, and the predicate is computable offline.)*
+
 No self-naming string, and no pattern of HLAE's points at it. The condition
 under which it fires is already recorded from the demo side, and that is what
 the reseq work needed; whether the engine side is reachable remains open.
@@ -265,6 +289,9 @@ the reseq work needed; whether the engine side is reachable remains open.
 ---
 
 ## 4. What is left that is worth doing
+
+*(First-pass table. §7–§9 (#273) resolved the `CL_ParseServerMessage` naming and
+the decal and flush rows; see the status table at the top.)*
 
 Subtracting HLAE, and taking §3 at face value:
 
@@ -505,9 +532,10 @@ unlinking, leaving every `msurface_t::pdecals` pointing at zeroed structures the
 renderer still walks. The engine's own remove functions unlink first, and
 `dodstudio_clear_decals` reproduces that loop. See `docs/goldsrc_decals.md`.
 
-Note this is the one finding here that is **pre-Anniversary only**: the
-Anniversary engine compiles the remove loop differently, so `R_DecalUnlink`
-cannot be recovered from it this way. `R_DecalInit`'s signature matches both.
+The Anniversary engine inlines `R_DecalUnlink` into its remove loops, so it
+can't be recovered from the loop there. `decals.rs` finds that build's
+standalone copy by its own signature instead (`goldsrc_decals.md` §5).
+`R_DecalInit`'s signature matches both.
 
 ---
 

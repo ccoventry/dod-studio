@@ -43,6 +43,11 @@ pub struct AppSettings {
     /// `capture_fps` with frame-sequence/direct-to-video.
     #[serde(default = "default_obs_capture_fps")]
     pub obs_capture_fps: i32,
+    /// AGR mode's own rate — see `PatcherConfig::agr_fps`. 0 means "the same
+    /// as `capture_fps`", which is also what a file written before it existed
+    /// gets.
+    #[serde(default)]
+    pub agr_fps: i32,
     pub pre_roll_seconds: f32,
     pub post_roll_seconds: f32,
     #[serde(default = "default_resolution_width")]
@@ -68,7 +73,8 @@ pub struct AppSettings {
     /// default instead of failing the whole file.
     #[serde(default = "default_capture_codec")]
     pub ffmpeg_capture_codec: String,
-    /// How this batch records: `frame_sequence`, `direct_to_video` or `obs`.
+    /// How this batch records: `frame_sequence`, `direct_to_video`, `obs` or
+    /// `agr`.
     ///
     /// Stored as the string id for the same reason the codec is — a settings
     /// file naming a mode this build does not know loads and degrades to the
@@ -252,6 +258,7 @@ impl Default for AppSettings {
             language: "en".to_string(),
             capture_fps: 300,
             obs_capture_fps: default_obs_capture_fps(),
+            agr_fps: 0,
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,
             resolution_width: default_resolution_width(),
