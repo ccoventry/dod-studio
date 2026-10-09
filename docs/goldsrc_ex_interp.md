@@ -67,6 +67,26 @@ restating them.
 
 ---
 
+## 2b. The 25th Anniversary build is different (#370)
+
+The Anniversary engine's clamp (`hw+0x1a3cde`) has the same shape in SSE:
+
+```text
+hw+0x1a3cde  cmp dword [flag], 0
+hw+0x1a3ce5  mov eax, 0xc8          ; 200 ms
+hw+0x1a3cf2  mov edx, 0x64          ; 100 ms
+hw+0x1a3cf7  cmovne edx, eax        ; edx is the ceiling
+```
+
+But here the flag **is** set: `CL_Parse_HLTV` writes 1 on `svc_hltv`'s mode 0
+(`hw+0x1a74d4`, reached by a `je` from `hw+0x1a7458`). So on that build an HLTV
+demo gets 200 ms and a POV demo 100. `ex_interp.rs` carries both builds'
+ceiling immediates (`BUILDS`). At the default, 100, it leaves every immediate
+alone on both builds. Any other value is written into both Anniversary
+immediates, so it is the ceiling for every demo, the same as on the
+pre-Anniversary build (and a value under 200 lowers an HLTV demo's ceiling
+there). `verify_ex_interp_offsets.py --anniversary` checks all of it.
+
 ## 3. The flag is not the lever
 
 Setting it would be one dword and looks tempting. It is **read from 25 sites**,
