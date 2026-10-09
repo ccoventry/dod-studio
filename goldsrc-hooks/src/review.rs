@@ -17,7 +17,8 @@
 //!
 //! ## The queue file
 //!
-//! [`QUEUE_HEADER`] on the first line, then one highlight per line, tab
+//! [`QUEUE_HEADER`] on the first line, optionally followed by tab-separated
+//! `key=value` options ([`Options`]), then one highlight per line, tab
 //! separated: the demo's full path, Studio's key for the row, the player,
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
@@ -96,12 +97,89 @@ impl Highlight {
     }
 }
 
+/// The default fast-forward speed when the queue names none.
+const FAST_SPEED: f32 = 4.0;
+
+/// How the queue asks the review to play (#665).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct Options {
+    /// A gap between two kills longer than this many seconds is fast-forwarded;
+    /// 0 plays every gap at normal speed.
+    pub gap: f64,
+    /// The speed a gap plays at.
+    pub speed: f32,
+}
+
+impl Default for Options {
+    fn default() -> Self {
+        Options {
+            gap: 0.0,
+            speed: FAST_SPEED,
+        }
+    }
+}
+
+/// The header line's `key=value` options. Unknown keys and bad values are
+/// ignored, so an older or newer Studio still gets a review.
+fn parse_options<'a>(fields: impl Iterator<Item = &'a str>) -> Options {
+    let mut options = Options::default();
+    for field in fields {
+        match field.trim().split_once('=') {
+            Some(("gap", v)) => {
+                if let Ok(gap) = v.trim().parse::<f64>()
+                    && gap.is_finite()
+                {
+                    options.gap = gap.clamp(0.0, 600.0);
+                }
+            }
+            Some(("speed", v)) => {
+                if let Ok(speed) = v.trim().parse::<f32>()
+                    && speed.is_finite()
+                {
+                    options.speed = speed.clamp(1.0, 16.0);
+                }
+            }
+            _ => {}
+        }
+    }
+    options
+}
+
+/// The stretches of a highlight to fast-forward: between two kills more than
+/// `gap` seconds apart, from [`TAIL`] after the first to [`LEAD`] before the
+/// second, the same margins a highlight starts and ends with.
+fn fast_spans(kills: &[f64], gap: f64) -> Vec<(f64, f64)> {
+    if gap <= 0.0 {
+        return Vec::new();
+    }
+    kills
+        .windows(2)
+        .filter(|pair| pair[1] - pair[0] > gap)
+        .map(|pair| (pair[0] + TAIL, pair[1] - LEAD))
+        .filter(|(start, end)| end > start)
+        .collect()
+}
+
+/// The log's note on what will be fast-forwarded, or nothing.
+fn describe_spans(spans: &[(f64, f64)], speed: f32) -> String {
+    if spans.is_empty() {
+        return String::new();
+    }
+    let list: Vec<String> = spans
+        .iter()
+        .map(|(s, e)| format!("{s:.1}..{e:.1}"))
+        .collect();
+    format!("; at {speed}x: {}", list.join(", "))
+}
+
 /// Reads a queue file.
-pub(crate) fn parse_queue(text: &str) -> Result<Vec<Highlight>, String> {
+pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), String> {
     let mut lines = text.lines();
-    if lines.next().map(str::trim) != Some(QUEUE_HEADER) {
+    let mut header = lines.next().unwrap_or("").split('\t');
+    if header.next().map(str::trim) != Some(QUEUE_HEADER) {
         return Err(format!("not a review queue (no \"{QUEUE_HEADER}\" line)"));
     }
+    let options = parse_options(header);
     let mut queue = Vec::new();
     for (n, line) in lines.enumerate() {
         if line.trim().is_empty() {
@@ -152,7 +230,7 @@ pub(crate) fn parse_queue(text: &str) -> Result<Vec<Highlight>, String> {
     if queue.is_empty() {
         return Err("the queue has no highlights".to_string());
     }
-    Ok(queue)
+    Ok((queue, options))
 }
 
 /// Where a review picks up: the first highlight not answered yet, or the
@@ -233,11 +311,14 @@ enum Phase {
     },
     /// Playing the highlight; pauses at `until` on the world clock. `last` is
     /// the clock a frame ago, to log a jump, and `beat` when the log last
-    /// heard where it is.
+    /// heard where it is. `spans` are the gaps to fast-forward ([`fast_spans`])
+    /// and `fast` whether one is playing fast now.
     Playing {
         until: f64,
         last: f64,
         beat: Instant,
+        spans: Vec<(f64, f64)>,
+        fast: bool,
     },
     /// Paused at the end, for an answer.
     Waiting,
@@ -247,6 +328,7 @@ enum Phase {
 
 struct Review {
     queue: Vec<Highlight>,
+    options: Options,
     at: usize,
     phase: Phase,
     /// The demo the review last loaded.
@@ -374,6 +456,7 @@ fn detail(h: &Highlight, phase: &Phase) -> String {
 fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
+    let spans = fast_spans(&h.kills, review.options.gap);
     let started = crate::demo_seek::seek_to_seconds(from).and_then(|seek| {
         crate::demo_seek::set_time_scale(1.0)?;
         crate::demo_seek::set_paused(false)?;
@@ -383,14 +466,17 @@ fn play(review: &mut Review) {
         Ok(seek) => {
             let now = crate::demo_seek::clock().map_or(-1.0, |c| c.now);
             trace(&format!(
-                "highlight {} of {}: playing {from:.1}..{until:.1} s, clock {now:.1} after the seek ({seek})",
+                "highlight {} of {}: playing {from:.1}..{until:.1} s, clock {now:.1} after the seek ({seek}){}",
                 review.at + 1,
-                review.queue.len()
+                review.queue.len(),
+                describe_spans(&spans, review.options.speed)
             ));
             review.phase = Phase::Playing {
                 until,
                 last: now,
                 beat: Instant::now(),
+                spans,
+                fast: false,
             };
             // Out of the way while it plays: the window and the menu.
             crate::studio_panel::close_for_playback();
@@ -501,8 +587,38 @@ pub fn poll() {
             }
             play(review);
         }
-        Phase::Playing { until, last, beat } => match crate::demo_seek::clock() {
+        Phase::Playing {
+            until,
+            last,
+            beat,
+            spans,
+            fast,
+        } => match crate::demo_seek::clock() {
             Some(c) if c.active && c.now < until => {
+                // Into or out of a gap between kills (#665).
+                let want_fast = spans.iter().any(|&(s, e)| c.now >= s && c.now < e);
+                let fast = if want_fast != fast {
+                    let speed = if want_fast { review.options.speed } else { 1.0 };
+                    match crate::demo_seek::set_time_scale(speed) {
+                        Ok(()) => {
+                            trace(&format!(
+                                "highlight {}: clock {:.1}, speed {speed}",
+                                review.at + 1,
+                                c.now
+                            ));
+                            want_fast
+                        }
+                        Err(why) => {
+                            trace(&format!(
+                                "highlight {}: speed {speed}: {why}",
+                                review.at + 1
+                            ));
+                            fast
+                        }
+                    }
+                } else {
+                    fast
+                };
                 // A jump the review didn't make (#663's first ESC).
                 if (c.now - last).abs() > JUMP_SECONDS {
                     trace(&format!(
@@ -527,6 +643,8 @@ pub fn poll() {
                     until,
                     last: c.now,
                     beat,
+                    spans,
+                    fast,
                 };
             }
             Some(c) if c.active => {
@@ -535,6 +653,9 @@ pub fn poll() {
                     review.at + 1,
                     c.now
                 ));
+                if fast {
+                    let _ = crate::demo_seek::set_time_scale(1.0);
+                }
                 let _ = crate::demo_seek::set_paused(true);
                 review.phase = Phase::Waiting;
                 open_tab();
@@ -686,7 +807,11 @@ pub unsafe extern "C" fn command() {
             GENERATION.fetch_add(1, Ordering::Relaxed);
         }
         "stop" => {
-            if lock().take().is_some() {
+            if let Some(review) = lock().take() {
+                // Stopped inside a gap: the demo plays on at normal speed.
+                if matches!(review.phase, Phase::Playing { fast: true, .. }) {
+                    let _ = crate::demo_seek::set_time_scale(1.0);
+                }
                 crate::events::send("REVIEW_END\tstopped");
                 GENERATION.fetch_add(1, Ordering::Relaxed);
                 say("stopped");
@@ -707,13 +832,14 @@ fn start(path: &str) {
         .map_err(|e| format!("could not read {path}: {e}"))
         .and_then(|text| parse_queue(&text))
     {
-        Ok(queue) => queue,
+        Ok(parsed) => parsed,
         Err(why) => {
             say(&why);
             crate::events::send(&format!("REVIEW_END\tfailed: {}", clean_note(&why)));
             return;
         }
     };
+    let (queue, options) = queue;
     let at = first_unanswered(&queue);
     say(&format!(
         "{} highlight(s); starting at {}",
@@ -724,6 +850,7 @@ fn start(path: &str) {
     let mut guard = lock();
     let review = guard.insert(Review {
         queue,
+        options,
         at,
         phase: Phase::Waiting,
         loaded: None,
@@ -761,7 +888,8 @@ mod tests {
             "C:/demos/a.dem\t3\tm00cat\t100.5,104,110.25\t2\t3\t-\tnice flick",
             "C:/demos/a.dem\t7\tm00cat\t200\t1\t1\tyes\t",
         ]);
-        let queue = parse_queue(&text).unwrap();
+        let (queue, options) = parse_queue(&text).unwrap();
+        assert_eq!(options, Options::default());
         assert_eq!(queue.len(), 2);
         assert_eq!(queue[0].demo, "C:/demos/a.dem");
         assert_eq!(queue[0].key, "3");
@@ -776,15 +904,60 @@ mod tests {
 
     #[test]
     fn a_trailing_empty_note_may_be_missing() {
-        let queue = parse_queue(&queue_text(&["d.dem\t1\tp\t5\t1\t1\tno"])).unwrap();
+        let (queue, _) = parse_queue(&queue_text(&["d.dem\t1\tp\t5\t1\t1\tno"])).unwrap();
         assert_eq!(queue[0].note, "");
         assert_eq!(queue[0].verdict, Some(Verdict::No));
     }
 
     #[test]
     fn a_range_outside_the_kills_is_pulled_in() {
-        let queue = parse_queue(&queue_text(&["d.dem\t1\tp\t5,6\t0\t9\t-\t"])).unwrap();
+        let (queue, _) = parse_queue(&queue_text(&["d.dem\t1\tp\t5,6\t0\t9\t-\t"])).unwrap();
         assert_eq!((queue[0].from, queue[0].to), (1, 2));
+    }
+
+    #[test]
+    fn the_header_carries_the_fast_forward_options() {
+        let text = format!("{QUEUE_HEADER}\tgap=8\tspeed=6\tnew=1\nd.dem\t1\tp\t5\t1\t1\t-\t");
+        let (_, options) = parse_queue(&text).unwrap();
+        assert_eq!(
+            options,
+            Options {
+                gap: 8.0,
+                speed: 6.0
+            }
+        );
+    }
+
+    #[test]
+    fn bad_fast_forward_options_fall_back_or_clamp() {
+        let parse = |fields: &str| parse_options(fields.split('\t'));
+        assert_eq!(parse("gap=x\tspeed=NaN"), Options::default());
+        assert_eq!(
+            parse("gap=-3\tspeed=99"),
+            Options {
+                gap: 0.0,
+                speed: 16.0
+            }
+        );
+        assert_eq!(parse("gap=inf"), Options::default());
+    }
+
+    #[test]
+    fn only_gaps_longer_than_the_setting_are_fast_forwarded() {
+        // Kills at 217, 234, 247, 254: gaps of 17, 13 and 7 s.
+        let kills = [217.0, 234.0, 247.0, 254.0];
+        assert_eq!(
+            fast_spans(&kills, 8.0),
+            vec![(217.0 + TAIL, 234.0 - LEAD), (234.0 + TAIL, 247.0 - LEAD)]
+        );
+        assert_eq!(fast_spans(&kills, 0.0), vec![]);
+        assert_eq!(fast_spans(&kills, 20.0), vec![]);
+    }
+
+    #[test]
+    fn a_gap_too_short_for_its_margins_plays_at_normal_speed() {
+        // 5 s apart, over a 3 s setting, but TAIL + LEAD is 6 s.
+        assert_eq!(fast_spans(&[10.0, 15.0], 3.0), vec![]);
     }
 
     #[test]

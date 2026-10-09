@@ -42,9 +42,18 @@ fn field(text: &str) -> String {
         .to_string()
 }
 
-/// The queue file's text.
-pub fn format_queue(highlights: &[ReviewHighlight]) -> String {
+/// How fast a gap between kills plays when it is fast-forwarded (#665).
+pub const FAST_FORWARD_SPEED: f32 = 4.0;
+
+/// The queue file's text. `fast_forward_gap`: gaps between kills longer than
+/// this many seconds play at [`FAST_FORWARD_SPEED`]; `None` plays them all at
+/// normal speed. It goes on the header line as `gap=` and `speed=`, which an
+/// older game ignores.
+pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64>) -> String {
     let mut out = String::from(QUEUE_HEADER);
+    if let Some(gap) = fast_forward_gap.filter(|g| g.is_finite() && *g > 0.0) {
+        out.push_str(&format!("\tgap={gap}\tspeed={FAST_FORWARD_SPEED}"));
+    }
     out.push('\n');
     for h in highlights {
         let times: Vec<String> = h.kill_times.iter().map(|t| format!("{t:.3}")).collect();
@@ -148,11 +157,27 @@ mod tests {
         second.answered = Some("yes".to_string());
         second.note = String::new();
         assert_eq!(
-            format_queue(&[highlight(), second]),
+            format_queue(&[highlight(), second], None),
             "dodstudio-review 1\n\
              C:\\demos\\a b.dem\t3\tm00cat\t100.500,104.000\t1\t2\t-\tnice flick\n\
              C:\\demos\\a b.dem\t3\tm00cat\t100.500,104.000\t1\t2\tyes\t\n"
         );
+    }
+
+    #[test]
+    fn fast_forward_goes_on_the_header_line() {
+        let text = format_queue(&[highlight()], Some(8.0));
+        assert_eq!(
+            text.lines().next(),
+            Some("dodstudio-review 1\tgap=8\tspeed=4")
+        );
+        // Off, zero or nonsense leave the header bare.
+        for gap in [None, Some(0.0), Some(f64::NAN)] {
+            assert_eq!(
+                format_queue(&[highlight()], gap).lines().next(),
+                Some(QUEUE_HEADER)
+            );
+        }
     }
 
     #[test]
