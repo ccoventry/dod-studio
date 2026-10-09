@@ -56,11 +56,6 @@ pub enum MapStatus {
 }
 
 impl MapStatus {
-    /// Whether anything derived from this map's geometry can be trusted.
-    pub fn geometry_is_trustworthy(&self) -> bool {
-        matches!(self, MapStatus::Ok { .. })
-    }
-
     /// Whether the demo can be played at all.
     pub fn is_playable(&self) -> bool {
         !matches!(self, MapStatus::Missing)
@@ -243,10 +238,6 @@ mod tests {
             expected_checksum: None,
         };
         assert_eq!(status_of(&unstated, &maps), MapStatus::Unverifiable);
-        assert!(
-            !status_of(&unstated, &maps).geometry_is_trustworthy(),
-            "an unverified map must not be trusted for geometry"
-        );
     }
 
     #[test]
