@@ -867,14 +867,6 @@ impl AnalyzerState {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DemoFingerprint {
-    pub map_name: String,
-    pub server_ip: String,
-    pub player_roster_hash: u64,
-    pub event_signature: Vec<String>,
-}
-
 pub fn parse_fingerprint(
     bytes: &[u8],
 ) -> Result<(String, String, u64, Vec<String>, Option<String>), std::io::Error> {
@@ -1086,20 +1078,6 @@ pub fn parse_fingerprint(
         event_signature,
         recorder_id,
     ))
-}
-
-pub fn extract_match_fingerprint(bytes: &[u8]) -> Result<DemoFingerprint, String> {
-    match parse_fingerprint(bytes) {
-        Ok((map_name, server_ip, player_roster_hash, event_signature, _recorder_id)) => {
-            Ok(DemoFingerprint {
-                map_name,
-                server_ip,
-                player_roster_hash,
-                event_signature,
-            })
-        }
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[cfg(test)]
