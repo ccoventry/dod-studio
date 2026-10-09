@@ -764,7 +764,7 @@ export const STRINGS = {
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',
-    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Killstreaks tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped.',
     CACHE_NOTHING: 'No demos in this folder to cache.',
     CACHE_STOPPING: 'Stopping after the demos in progress…',
     cacheProgress: ({ done, total, already, failed }) =>

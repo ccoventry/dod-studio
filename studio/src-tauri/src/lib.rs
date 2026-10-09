@@ -611,7 +611,7 @@ pub fn run() {
             if let Ok(resource_dir) = app.path().resource_dir() {
                 analysis::add_localization_search_path(resource_dir.join("localizations"));
             }
-            // The game's Killstreaks tab asks Studio to analyse a demo too big
+            // The game's Highlights tab asks Studio to analyse a demo too big
             // for the game's own memory (#565).
             #[cfg(windows)]
             native::sys::analysis_server::start();

@@ -2,7 +2,7 @@
 //! the analyzer cache unless it is there already, so later loads take ~15 ms
 //! instead of a full parse. Everything that reads a demo shares that cache:
 //! the Demo Analyzer, the Master Queue scan, and the in-game DoD Studio
-//! window's Killstreaks tab and Player filter.
+//! window's Highlights tab and Player filter.
 
 use std::path::PathBuf;
 use std::sync::Arc;
