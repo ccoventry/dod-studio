@@ -173,6 +173,16 @@ With no number it says who the camera is on. It refuses a number with no
 player, and a first-person demo. See
 [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md).
 
+### `dodstudio_debug_position`
+
+No arguments. Prints where the view is, as `spec_pos` does while the map has no
+overview (once it has one, `spec_pos` prints the overview camera instead): the
+eye position, pitch and yaw; the player in view (the one watched in first
+person, else your own) with the origin and where the feet are (36 units below
+the origin standing, 18 crouched or prone); and the map. For checking an
+overview's reach in the game (#581). The line also goes to the hook log.
+`goldsrc-hooks/src/position.rs`.
+
 ### `dodstudio_debug_msglog`
 
 `dodstudio_debug_msglog <name>... | all | clear` dumps chosen DoD user messages and

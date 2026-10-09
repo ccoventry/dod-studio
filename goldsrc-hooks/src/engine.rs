@@ -1097,6 +1097,10 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     unsafe { real(pparams) };
+    if !pparams.is_null() {
+        // Safety: the engine's ref_params_s for this view, valid for the call.
+        crate::position::record(unsafe { &*pparams });
+    }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
 }
 

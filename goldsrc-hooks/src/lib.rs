@@ -191,6 +191,7 @@ mod overview_players;
 mod patch;
 mod pe;
 mod pmove_guard;
+mod position;
 mod remote;
 mod review;
 mod scan;
