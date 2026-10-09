@@ -104,6 +104,7 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
                 <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
                   <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
@@ -1272,6 +1273,36 @@
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
           <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Teams list (#445) — the clan tags found in the project's demos, each
+         with the name clip names use for it. Filled by teams_pane.js; the
+         names and merges are saved in the project file. -->
+    <div id="teams-modal" class="modal" style="display: none;">
+      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+        <h2 data-str="TEAMS.TITLE">Teams</h2>
+        <p class="status-text" data-str="TEAMS.INTRO"></p>
+        <div id="teams-unread-row" class="teams-unread-row" hidden>
+          <span id="teams-unread-note"></span>
+          <button id="teams-read-btn" data-str="TEAMS.READ_BUTTON" data-str-title="TEAMS.READ_BUTTON_TITLE">Read Their Teams</button>
+        </div>
+        <div class="table-wrapper" style="max-height: 360px;">
+          <table id="teams-table">
+            <thead>
+              <tr>
+                <th data-str="TEAMS.HEADER_TAG">Tag</th>
+                <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th data-str="TEAMS.HEADER_NAME">Name</th>
+                <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
+              </tr>
+            </thead>
+            <tbody id="teams-table-body"></tbody>
+          </table>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+          <button id="teams-close-btn" data-str="TEAMS.CLOSE_BUTTON">Close</button>
         </div>
       </div>
     </div>
