@@ -1445,6 +1445,7 @@ pub fn install() {
         crate::spectator_follow::TARGET_NAME,
         crate::spectator_follow::target_command,
     );
+    add_command(crate::position::NAME, crate::position::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed
