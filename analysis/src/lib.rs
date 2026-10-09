@@ -3,6 +3,8 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+/// What a highlight is, and whose, for every list of them (#573).
+pub mod highlights;
 mod kill;
 mod localization;
 mod mortality;
@@ -10,6 +12,7 @@ mod objective;
 mod player;
 mod round;
 mod scoreboard;
+mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
 mod time;
@@ -44,6 +47,7 @@ pub use crate::{
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
     round::Round,
+    team_tag::{TeamTag, detect_team_tag, team_tags},
 };
 pub use dod::{Team, Weapon};
 

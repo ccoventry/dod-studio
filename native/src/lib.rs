@@ -23,6 +23,10 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// Caching many demos ahead of time (#569).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_cache;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;

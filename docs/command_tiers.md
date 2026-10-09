@@ -11,7 +11,7 @@ Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s rep
   - *DoD's client quits the game over it* (`r_drawentities`, `cl_lw`). `CHud::Redraw` forces the value back, prints an error and calls `quit` if either is not `1` (binary-level evidence: `docs/goldsrc_client_dll_internals.md` §5).
 
   Reachability differs between those two, and `FATAL_CVARS` encodes it: `cl_lw` always takes the value it is given, whereas GoldSrc itself clamps `r_drawentities` back to `1.0` while `sv_cheats` is `0`, making a config line setting it inert. Both stay refused as *typed commands* — cheap, and `cfg_scan` cannot see what else a user's configs did — but only `cl_lw` is reported as a fatal config cvar unconditionally.
-- **`SCHEDULED_BANNED_COMMANDS`** — fine at demo load, refused **only when scheduled** (`r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename`). Why `r_decals` must be set exactly once: `docs/goldsrc_dod_quirks.md`.
+- **`SCHEDULED_BANNED_COMMANDS`** — fine at demo load, refused **only when scheduled** (`r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename`, `mirv_agr`). Why `r_decals` must be set exactly once: `docs/goldsrc_dod_quirks.md`.
 - **`MID_DEMO_HAZARDS`** — shadowed with a warning, not refused, because each corresponds to a real setting.
 - **`NOOP_EVERYWHERE_COMMANDS`** (`exec`, `quit`) — reported as doing nothing: the engine drops them from a demo's message stream.
 - **`NOOP_IN_INIT_COMMANDS`** (`mirv_movie_filename`) — reported as doing nothing: the pipeline overwrites it before anything reads it.

@@ -453,6 +453,13 @@ body {
   color: #ffffff;
 }
 
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
@@ -494,13 +501,18 @@ body {
   margin-bottom: 8px;
 }
 
+/* display: flex above would otherwise beat the hidden attribute. */
+.row-inputs[hidden], .input-row[hidden] {
+  display: none;
+}
+
 .input-row label {
   min-width: 150px;
   font-weight: 500;
   color: #cccccc;
 }
 
-input[type="text"], input[type="search"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
   color: #ffffff;
   border: 1px solid var(--border-color);
@@ -510,8 +522,13 @@ input[type="text"], input[type="search"], input[type="number"], select {
   outline: none;
 }
 
-input[type="text"]:focus, input[type="search"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus {
   border-color: var(--primary-accent);
+}
+
+/* The map search: wide enough for a pattern, placeholder included. */
+#hd-maps-search {
+  min-width: 18em;
 }
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
@@ -663,6 +680,41 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
   color: var(--text-muted);
   padding: 16px !important;
+}
+
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 /* Configuration Tabs */
@@ -1296,6 +1348,58 @@ button.primary-btn:hover:not(:disabled) {
   color: #ccc;
 }
 
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
 /* Last Batch (#172). */
 .batch-results {
   margin-top: 12px;
@@ -1927,6 +2031,20 @@ tr.keyboard-selected {
   border-bottom: 1px solid #282828;
 }
 
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage {
+  color: #ffb74d;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
@@ -2282,6 +2400,267 @@ tr.keyboard-selected {
 /* The side panel scrolls, which clips an outline drawn outside the button. */
 .ov-add-label.active {
   outline-offset: -2px;
+}
+
+/* One line of code beside its Copy button. */
+.hd-code-inline {
+  margin: 0;
+  min-width: 16em;
+}
+
+.hd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The style comparison sheet: 1:1 pixels in a scrolling box, or fitted. */
+.hd-preview-wrap {
+  margin-top: 8px;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  background: #000;
+}
+
+.hd-preview-wrap img {
+  display: block;
+  cursor: zoom-out;
+  image-rendering: pixelated;
+}
+
+.hd-preview-fit img {
+  width: 100%;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
+}
+
+/* The map list: every map in dod\maps, ticked when the list picks it. */
+.hd-maps-mode {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 6px;
+}
+
+/* The list's lines as chips, across and down. */
+.hd-map-patterns {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.hd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+
+.hd-chip-name {
+  font-family: monospace;
+}
+
+.hd-chip-count {
+  color: var(--text-muted);
+}
+
+.hd-pattern-unused {
+  border-color: #d9a441;
+}
+
+.hd-pattern-unused .hd-chip-count {
+  color: #d9a441;
+}
+
+.hd-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.hd-chip-x:hover {
+  color: #fff;
+}
+
+/* Clicking a map's box that a pattern picked points at the pattern's chip. */
+.hd-chip-flash {
+  animation: hd-chip-flash 1.2s ease-out;
+}
+
+@keyframes hd-chip-flash {
+  0%, 60% { background: #2f6b47; border-color: var(--hd-tick-pattern); }
+  100% { background: var(--bg-input); border-color: var(--border-color); }
+}
+
+/* A map a pattern picked: its tick and its mark in the pattern colour,
+   against the browser's blue for a map with its own line. The legend beside
+   "Picked only" is two drawn ticks in the same two colours. */
+:root {
+  --hd-tick-own: var(--primary-accent);
+  --hd-tick-pattern: #3ea86b;
+}
+
+/* Outranks the global input[type="checkbox"] accent rule at the top. */
+input[type="checkbox"].hd-box-pattern {
+  accent-color: var(--hd-tick-pattern);
+}
+
+.hd-map-via {
+  color: var(--hd-tick-pattern);
+  margin-left: -3px;
+  flex-shrink: 0;
+}
+
+.hd-map-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-map-legend .hd-tick + span {
+  margin-right: 8px;
+}
+
+.hd-tick {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  text-align: center;
+  line-height: 13px;
+  font-size: 11px;
+  color: #fff;
+}
+
+.hd-tick::after {
+  content: "\2713";
+}
+
+.hd-tick-own {
+  background: var(--hd-tick-own);
+}
+
+.hd-tick-pattern {
+  background: var(--hd-tick-pattern);
+}
+
+.hd-map-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  column-gap: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.hd-map-list li {
+  min-width: 0;
+}
+
+.hd-map-list label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+  min-width: 0;
+}
+
+.hd-map-name {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hd-map-list .hd-miss-detail {
+  margin-left: auto;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.hd-map-list.hd-map-list-off label {
+  opacity: 0.75;
+}
+
+/* Misses view: one collapsible block per map. */
+.hd-miss-map {
+  border-top: 1px solid #282828;
+  padding: 6px 0;
+}
+
+.hd-miss-map summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.hd-miss-heading {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.hd-miss-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-miss-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0;
+}
+
+.hd-miss-type {
+  min-width: 90px;
+  color: var(--text-muted);
+}
+
+.hd-miss-detail {
+  color: var(--text-muted);
 }
 
 /* Highlight Details' Notes (#605): notes are clip descriptions of a sentence

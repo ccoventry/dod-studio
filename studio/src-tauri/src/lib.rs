@@ -1,5 +1,7 @@
 mod audit_manager;
 mod capture_manager;
+mod combine_manager;
+mod demo_cache_cmd;
 mod dir_browser;
 mod hd_manager;
 mod manifest_file;
@@ -594,6 +596,7 @@ pub fn run() {
         .manage(ScanManager::default())
         .manage(SettingsManager::new())
         .manage(AuditManager::default())
+        .manage(combine_manager::CombineManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
@@ -614,6 +617,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            demo_cache_cmd::cache_demos,
+            demo_cache_cmd::cancel_demo_cache,
             log_frontend_event,
             get_activity_log_path,
             validate_paths,
@@ -670,6 +675,9 @@ pub fn run() {
             run_demo_audit,
             delete_audit_files,
             cancel_audit,
+            combine_manager::combine_plan,
+            combine_manager::combine_clips,
+            combine_manager::combine_cancel,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
@@ -695,6 +703,11 @@ pub fn run() {
             overview_manager::overview_export_hd,
             overview_manager::overview_flag_icons,
             overview_manager::overview_screen_height,
+            hd_manager::hd_misses,
+            hd_manager::hd_save_style,
+            hd_manager::hd_remove_style,
+            hd_manager::hd_save_map_list,
+            hd_manager::hd_preview,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,
