@@ -333,6 +333,7 @@ mod tests {
         let build = super::super::build::BuildRequest {
             styles: vec!["plain".into()],
             types: vec!["world".into()],
+            cap: 1024,
         };
         super::super::build::run(
             &build,
