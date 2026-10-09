@@ -558,6 +558,26 @@ export async function cancelAudit() {
     });
 }
 
+/** Picked demos on a map a session crashed on (#207). Never toasts: the
+ *  warning it feeds is skipped when it fails. */
+export async function crashMapWarnings(demoPaths) {
+  return invoke("crash_map_warnings", { demoPaths })
+    .catch((err) => {
+      console.error("IPC Execution Error (crash_map_warnings):", err);
+      throw err;
+    });
+}
+
+/** The engine's MAX_PACKET_ENTITIES beside hl.exe (#207), or null. Never
+ *  toasts: the warning it feeds simply assumes the pre-Anniversary 256. */
+export async function enginePacketEntityLimit(gamePath) {
+  return invoke("engine_packet_entity_limit", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (engine_packet_entity_limit):", err);
+      return null;
+    });
+}
+
 // ── Combine Clips (#107) ───────────────────────────────────────────────────
 
 export async function combinePlan(clips, ffmpegPath) {
@@ -627,6 +647,23 @@ export async function deleteOrphanedPreviews(filePaths) {
  *  widgets. Errors (e.g. permission denied) are surfaced inline by the
  *  caller rather than as a global toast, since browsing into an
  *  inaccessible folder is an expected, recoverable event. */
+// The Demo Analyzer's Cache all (#569). Starts a background run; progress
+// comes as `demo_cache_progress` events.
+export async function cacheDemos(paths) {
+  return invoke("cache_demos", { paths })
+    .catch((err) => {
+      console.error("IPC Execution Error (cache_demos):", err);
+      throw err;
+    });
+}
+
+export async function cancelDemoCache() {
+  return invoke("cancel_demo_cache")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_demo_cache):", err);
+    });
+}
+
 export async function browseDirectory(path) {
   return invoke("browse_directory", { path: path ?? null })
     .catch((err) => {
@@ -656,6 +693,18 @@ export async function countDemoFiles(path) {
 /** Bounded background scan (depth-4, 2000-folder cap) for folders containing
  *  at least one `.dem` file, rooted at `root` (or the default browse dir).
  *  Feeds the Explorer sidebar's "Local" Quick Links tier. */
+/** Reads who is in each demo (#437, #174). Results arrive as `demo_players`
+ *  events, one per demo; resolves with how many were read. `lane` is
+ *  "analyzer" or "queue": a newer request stops an older one in the same
+ *  lane only. Quiet on failure, since the list still works without it. */
+export async function indexDemoPlayers(paths, requestId, lane) {
+  return invoke("index_demo_players", { paths, requestId, lane })
+    .catch((err) => {
+      console.error("IPC Execution Error (index_demo_players):", err);
+      return 0;
+    });
+}
+
 /** Writes a text file the user picked a path for (#110's marker list).
  *  Goes through the same unscoped Rust write as Save Project, since the fs
  *  plugin can't reach paths a save dialog returns. */
@@ -861,6 +910,40 @@ export async function hdPreview(gamePath, request) {
     .catch((err) => {
       console.error("IPC Execution Error (hd_preview):", err);
       showToast(STRINGS.IPC.hdPreviewFailed(err), 'error');
+      throw err;
+    });
+}
+
+// ── Demo Auditor: Split Maps (#624) ─────────────────────────────────────────
+
+export async function findMultiMapDemos(folder, recursive) {
+  return invoke("find_multi_map_demos_cmd", { folder, recursive })
+    .catch((err) => {
+      console.error("IPC Execution Error (find_multi_map_demos_cmd):", err);
+      throw err;
+    });
+}
+
+export async function cancelMultiMapScan() {
+  return invoke("cancel_multi_map_scan")
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_multi_map_scan):", err);
+      throw err;
+    });
+}
+
+export async function demoMapSegments(path) {
+  return invoke("demo_map_segments", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (demo_map_segments):", err);
+      throw err;
+    });
+}
+
+export async function splitDemoMaps(path, keep) {
+  return invoke("split_demo_maps", { path, keep })
+    .catch((err) => {
+      console.error("IPC Execution Error (split_demo_maps):", err);
       throw err;
     });
 }

@@ -199,7 +199,7 @@ pub use map_text::{MapText, TextSelection, TextStats, hide_map_text, map_text};
 pub use map_fetch::{DEFAULT_MIRROR, FetchOutcome, fetch_map, map_url};
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use engine::StreamPatcher;
+pub use engine::{PatchStage, StreamPatcher};
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use builder::{
@@ -209,7 +209,8 @@ pub use builder::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use scanner::{
-    is_hltv_demo, is_hltv_head, scan_demo_for_highlights, scan_demo_for_highlights_with_analysis,
+    check_sources_unchanged, is_hltv_demo, is_hltv_head, scan_demo_for_highlights,
+    scan_demo_for_highlights_with_analysis,
 };
 
 /// Whether a frame can carry injected payload: it must be a `NetworkMessage`
