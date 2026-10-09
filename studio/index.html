@@ -104,6 +104,9 @@
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
               <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
                 <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+                  <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
+                </select>
                 <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
                 <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
@@ -485,6 +488,16 @@
 
             <!-- Tab Content: Initial + Scheduled Commands -->
             <div id="tab-custom-commands" class="config-tab-content" style="display: none;">
+              <!-- #442: named sets of both lists below. -->
+              <div class="input-row" style="margin-bottom: 12px;">
+                <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
+                <select id="command-profile-select"><option value="">—</option></select>
+                <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
+                <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
+                <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
+                <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
+                <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
+              </div>
               <div class="input-row">
                 <strong data-str="CAPTURE_CONFIG.INIT_COMMANDS_LABEL">Initial Commands (run once at demo load):</strong>
                 <span class="info-icon" data-str-title="CAPTURE_CONFIG.INIT_COMMANDS_INFO_TITLE" title=""><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span>
@@ -551,6 +564,15 @@
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
                   <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
                 </div>
+              </div>
+
+              <!-- #108: named render setups. -->
+              <div class="input-row" style="margin-top: 6px;">
+                <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
+                <select id="render-preset-select"><option value="">—</option></select>
+                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
+                <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
               </div>
 
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
@@ -1036,9 +1058,12 @@
                   <option value="HLTV" data-str="ANALYZER.TYPE_HLTV">HLTV</option>
                 </select>
                 <input type="text" id="analyzer-filter-map" data-str-placeholder="ANALYZER.MAP_PLACEHOLDER" placeholder="Map" />
+                <input type="text" id="analyzer-filter-player" list="analyzer-player-options" data-str-placeholder="ANALYZER.PLAYER_PLACEHOLDER" data-str-title="ANALYZER.PLAYER_FILTER_TITLE" placeholder="Player" />
+                <datalist id="analyzer-player-options"></datalist>
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
+                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">

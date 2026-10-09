@@ -33,7 +33,10 @@ use crate::{
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
-use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
+use dem::{
+    bit::BitSliceCast,
+    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
+};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -155,6 +158,41 @@ pub struct DemoInfo {
 
     /// Map checksum / CRC.
     pub map_checksum: u32,
+
+    /// The most entities any one snapshot carries (`svc_packetentities` or
+    /// `svc_deltapacketentities`). The pre-Anniversary engine closes to the
+    /// desktop at the first snapshot over 256 (#207), so this says before a
+    /// capture whether a demo can play there. `None` in an analysis cached
+    /// before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
+}
+
+/// The most entities in any one snapshot of `demo` (#207).
+fn peak_packet_entities(demo: &Demo) -> u32 {
+    let mut peak = 0;
+    for entry in &demo.directory.entries {
+        for frame in &entry.frames {
+            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &box_type.1.messages else {
+                continue;
+            };
+            for msg in msgs {
+                let NetMessage::EngineMessage(eng_msg) = msg else {
+                    continue;
+                };
+                let count = match &**eng_msg {
+                    EngineMessage::SvcPacketEntities(pe) => pe.entity_count.to_u32(),
+                    EngineMessage::SvcDeltaPacketEntities(pe) => pe.entity_count.to_u32(),
+                    _ => continue,
+                };
+                peak = peak.max(count);
+            }
+        }
+    }
+    peak
 }
 
 impl From<&Demo> for DemoInfo {
@@ -221,6 +259,7 @@ impl From<&Demo> for DemoInfo {
             game_directory,
             demo_type,
             map_checksum: value.header.map_checksum,
+            peak_packet_entities: Some(peak_packet_entities(value)),
         }
     }
 }

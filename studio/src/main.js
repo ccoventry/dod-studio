@@ -22,10 +22,11 @@ import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_war
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
@@ -47,6 +48,8 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
+import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
@@ -588,11 +591,14 @@ window.addEventListener("DOMContentLoaded", async () => {
       target_drives: targetDrives,
       init_commands,
       custom_commands,
+      command_profiles: getCommandProfiles(),
+      command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
       render_export_dirs: renderExportDirs
     };
@@ -768,6 +774,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
@@ -795,6 +802,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirsEditor.render();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -1597,9 +1605,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
   initCombineClips({
     finishedRenders: () => finishedRenderOutputs(),
     ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
@@ -1957,6 +1967,11 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (hlPathInput) {
     refreshInitCommandWarnings();
     hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
+    // Which engine it is decides which demos the Master Queue marks (#207).
+    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
+      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
+    markDemosOverLimit();
+    hlPathInput.addEventListener('change', markDemosOverLimit);
   }
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when

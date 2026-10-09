@@ -73,6 +73,9 @@ export const STRINGS = {
     SCAN_STATUS_READY: 'Status: Ready',
     MASTER_QUEUE_TITLE: 'Master Demo Queue',
     SEARCH_PLACEHOLDER: 'Search filename or map...',
+    // #174: demos you can capture a player from (POV demos they recorded).
+    PLAYER_FILTER_ALL: 'All players',
+    PLAYER_FILTER_TITLE: 'Show only the POV demos this player recorded, so every highlight in the list is theirs. Each entry groups every name the player used.',
     // #54: the Master Queue's quick filters.
     KILLS_FILTER_TITLE: 'Hide demos where the recording player got no kills, or no highlight of two or more kills.',
     KILLS_FILTER_ALL: 'All demos',
@@ -426,6 +429,25 @@ export const STRINGS = {
     NOTIFY_RENDERS_DONE_TITLE: 'Fires once when the whole render batch finishes.',
     NOTIFY_ERROR_LABEL: 'Errors',
     NOTIFY_ERROR_TITLE: 'Fires immediately if a patch, capture, or render step fails.',
+    // #442: named sets of both command lists. Row laid out like Render
+    // Output's preset row (#108).
+    PROFILE_LABEL: 'Profile:',
+    PROFILE_TITLE: 'A saved set of Initial and Scheduled Commands. Pick one to replace both lists below with it. Shows — when the lists match no profile, and "(edited)" once you change them after picking one.',
+    PROFILE_NONE: '—',
+    profileEditedOption: (name) => `${name} (edited)`,
+    PROFILE_NAME_PLACEHOLDER: 'Name for these commands',
+    PROFILE_SAVE_CHANGES_BUTTON: 'Save Changes',
+    PROFILE_SAVE_CHANGES_TITLE: 'Save your changes to both lists back into the picked profile.',
+    PROFILE_SAVE_BUTTON: 'Save Profile',
+    PROFILE_SAVE_TITLE: 'Save both lists below under the name typed here, or over the picked profile when no name is typed.',
+    PROFILE_RENAME_BUTTON: 'Rename',
+    PROFILE_RENAME_TITLE: 'Rename the picked profile to the name typed here.',
+    PROFILE_DELETE_BUTTON: 'Delete',
+    PROFILE_DELETE_TITLE: 'Delete the picked profile. The lists below stay as they are.',
+    PROFILE_UNDO: 'Undo',
+    profileAppliedToast: (name) => `Replaced both command lists with the "${name}" profile.`,
+    profileDeletedToast: (name) => `Deleted the "${name}" profile.`,
+    profileNameTakenToast: (name) => `There is already a profile named "${name}".`,
     INIT_COMMANDS_LABEL: 'Initial Commands (run once at demo load):',
     INIT_COMMANDS_INFO_TITLE:
       "If you already exec a movie config from your config.cfg or autoexec, you don't need to add anything here. If you exec one manually instead, use Import Config below to pull its lines in as Initial Commands.",
@@ -521,6 +543,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #108: named render setups.
+    PRESET_LABEL: 'Preset:',
+    PRESET_TITLE: 'A saved codec, FPS and concurrency. Pick one to apply it. Shows — when the settings above match no preset.',
+    PRESET_NONE: '—',
+    PRESET_NAME_PLACEHOLDER: 'Name for these settings',
+    PRESET_SAVE_BUTTON: 'Save Preset',
+    PRESET_SAVE_TITLE: 'Save the codec, FPS and concurrency above under the name typed here, or over the picked preset when no name is typed.',
+    PRESET_DELETE_BUTTON: 'Delete',
+    PRESET_DELETE_TITLE: 'Delete the picked preset. The settings above stay as they are.',
     // #40: sortable columns and the whole-batch bar.
     SORT_HEADER_TITLE: 'Click to sort; again to reverse; a third time for the batch order.',
     batchProgress: (pct) => `Batch ${pct}%`,
@@ -777,6 +808,12 @@ export const STRINGS = {
     TYPE_POV: 'POV',
     TYPE_HLTV: 'HLTV',
     MAP_PLACEHOLDER: 'Map',
+    // #437: every demo a player appears in.
+    PLAYER_PLACEHOLDER: 'Player',
+    PLAYER_FILTER_TITLE: 'Show only demos this player is in, recorded or played. Pick a name from the list (it matches every name that player used), or type part of a name or a SteamID.',
+    playersReading: (done, total) => `Reading players: ${done} / ${total}`,
+    ROLE_RECORDED: 'recorded it',
+    ROLE_PLAYED: 'played in it',
     MIN_DATE_PLACEHOLDER: 'Min Date (YYYY-MM-DD)',
     MAX_DATE_PLACEHOLDER: 'Max Date (YYYY-MM-DD)',
     RESET_BUTTON: 'Reset',
@@ -973,6 +1010,11 @@ export const STRINGS = {
     TECH_SPECS_SECTION: 'Technical Specifications',
     DEMO_PROTOCOL_LABEL: 'Demo protocol',
     NETWORK_PROTOCOL_LABEL: 'Network protocol',
+    // #207: what decides whether the pre-Anniversary engine can play it.
+    PEAK_ENTITIES_LABEL: 'Most entities in one snapshot',
+    peakEntitiesValue: (peak) => (peak > 256
+      ? `${peak}: over the pre-Anniversary engine's 256, so it closes the game there. The 25th Anniversary engine plays it.`
+      : peak >= 240 ? `${peak}: close to the pre-Anniversary engine's limit of 256` : String(peak)),
     GAME_MOD_DOD: 'Day of Defeat',
     GAME_MOD_CS: 'Counter-Strike',
     GAME_MOD_HL: 'Half-Life',
@@ -1536,6 +1578,20 @@ export const STRINGS = {
     demos: (names) => (names.length <= 2 ? names.join(', ') : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`),
     seen: (count, date, build) => `Seen ${count === 1 ? 'once' : `${count} times`}, last on ${date}${build ? `, ${build} build` : ''}.`,
     START_ANYWAY: 'Start anyway',
+  },
+
+  // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
+  ENTITY_LIMIT: {
+    BADGE: "won't play",
+    badgeTitle: (peak, limit) => `Up to ${peak} entities in one snapshot. This install's game closes at more than ${limit}, so it can't play this demo: a capture or preview of it fails at that point.`,
+    batchTitle: (count) => `${count} demo${count === 1 ? '' : 's'} won't play in this game`,
+    batchMessage: (count, limit) => `${count === 1 ? 'This demo has' : 'These demos have'} more than ${limit} entities in one snapshot, and the game closes when it gets there. Start the batch anyway?`,
+    PREVIEW_TITLE: "This demo won't play in this game",
+    previewMessage: (limit) => `It has more than ${limit} entities in one snapshot, and the game closes when it gets there. Launch it anyway?`,
+    peakDetail: (peak) => `Up to ${peak} entities in one snapshot`,
+    ANNIVERSARY_HINT: 'The 25th Anniversary engine allows 1024: set its hl.exe in Configuration → Paths for these.',
+    START_ANYWAY: 'Start anyway',
+    PREVIEW_ANYWAY: 'Launch anyway',
   },
 
   // ── combine_clips.js: Render Studio's Combine Clips (#107) ──────────────

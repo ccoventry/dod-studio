@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
+import { confirmOverLimit } from './packet_entity_limit.js';
 import { batchStarted, batchEnded, batchVerified } from './batch_results.js';
 import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
@@ -18,6 +19,7 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
+import { syncCommandProfileRow } from './command_profiles_ui.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
@@ -589,6 +591,15 @@ export function hydrateCommandsState(persistedInitCommands, persistedCustomComma
   customCommandsEditor?.render();
 }
 
+/** Replaces both lists with a command profile's (#442). Unlike boot-time
+ *  hydration, this is a change the user made, so everything that reads the
+ *  lists hears about it; the caller saves settings. */
+export function applyCommandsState(lists) {
+  hydrateCommandsState(lists?.init_commands, lists?.custom_commands);
+  refreshInitCommandWarnings();
+  refreshRollFloors();
+}
+
 // ── Clear Previews audit modal ─────────────────────────────────────────────
 //
 // Audits `<hl>/dod` for orphaned `*_preview.dem` bookmark previews (see the
@@ -852,6 +863,9 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       enhance: (input) => attachCommandSuggest(input, { scheduled: false }),
     }],
     onChange: () => {
+      // Before the save, so a profile this list now matches is saved as the
+      // active one.
+      syncCommandProfileRow();
       notifySettingsChange();
       // Typing a command here can silence a line in the user's own config, and
       // this is the moment they can still see both.
@@ -871,6 +885,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
     ],
     onChange: () => {
+      syncCommandProfileRow();
       notifySettingsChange();
       // These run last of all — after the configs and after the init commands —
       // and are the only place a cvar changes partway through a capture.
@@ -1352,6 +1367,11 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         .filter((d) => (d.streaks || []).some((s) => s.selected === true))
         .map((d) => d.path);
       if (!(await confirmCrashMaps(pickedPaths))) return;
+      // A demo with more entities in a snapshot than this game's engine takes
+      // closes the game when it gets there (#207). Ask before patching.
+      const picked = (state.currentScannedDemos || []).filter((d) => (d.streaks || []).some((s) => s.selected === true));
+      const hlPathNow = document.querySelector('#hl-path-input')?.value?.trim() || '';
+      if (!(await confirmOverLimit(picked, hlPathNow))) return;
 
       const activePayload = buildCapturePayload(state);
       if (!activePayload) return; // buildCapturePayload already toasted the reason
