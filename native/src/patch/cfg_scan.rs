@@ -347,12 +347,15 @@ pub fn value_warnings(
 /// downstream — the fps stamped into take metadata, Render Studio's own
 /// expectation — assumes that never changes mid-batch. `mirv_movie_ffmpeg`
 /// configures the direct-to-video encoder pipe the same way, once, before
-/// anything records into it.
+/// anything records into it. `mirv_agr` is AGR capture mode's recorder: the
+/// route aliases start it into each block's own file and `sys_record_stop`
+/// ends it, so a scheduled one would end a take early or start one into a file
+/// nobody planned.
 ///
 /// `mirv_movie_separate_hud` deliberately is NOT here. It used to be, but the
 /// only reason was that the pipeline always re-appended its own value to
 /// Initial Commands after the user's, making anything the user set — Initial
-/// or Scheduled — moot. That checkbox is gone (removed 2026-09-08; typing the
+/// or Scheduled — moot. That checkbox is gone (#214; typing the
 /// command into Initial Commands directly is the only way to use it now), and
 /// with it the one confirmed reason to flag this cvar at all. Nothing in this
 /// codebase has actually tested what a mid-demo toggle does — unlike
@@ -376,6 +379,7 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
     "mirv_movie_fps",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "mirv_agr",
 ];
 
 /// Commands refused wherever a command can be typed (Initial Commands and
@@ -395,13 +399,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 /// typing that is redundant, not dangerous, so it stays shadowed-with-a-
 /// warning rather than refused. `mirv_movie_separate_hud` is not here either,
 /// and not in `MID_DEMO_HAZARDS`: no setting exists behind it any more
-/// (removed 2026-09-08), Initial Commands is simply the intended way to use
+/// (#214), Initial Commands is simply the intended way to use
 /// it, and typing it in Scheduled Commands instead is untracked rather than
 /// flagged — see `MID_DEMO_HAZARDS`'s own doc comment for why. Also distinct
 /// from `mirv_movie_filename`, which used to be here too — see
-/// `SCHEDULED_BANNED_COMMANDS` for why it moved. User-confirmed tier list,
-/// 2026-09-02 (`mirv_movie_filename` re-tiered 2026-09-05, `r_drawentities`/
-/// `cl_lw` added 2026-09-08).
+/// `SCHEDULED_BANNED_COMMANDS` for why it moved.
 ///
 /// - `mirv_recordmovie_start` / `mirv_recordmovie_stop` — the pipeline's own
 ///   `sys_record_start`/`sys_record_stop` scheduling relies on being the only
@@ -576,11 +578,10 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// resize anything — the flush already decided what counts as on screen for
 /// the entire clip — so a warning banner isn't enough here the way it is for
 /// the rest of `MID_DEMO_HAZARDS`: the capture would complete and look
-/// plausible while quietly being wrong. User-requested escalation from hazard
-/// to refused, 2026-09-05.
+/// plausible while quietly being wrong, hence refused rather than a hazard.
 ///
 /// `mirv_movie_filename` is a different shape of exception, moved here from
-/// `BANNED_COMMANDS` the same day: in Initial Commands (or a config) it is
+/// `BANNED_COMMANDS`: in Initial Commands (or a config) it is
 /// not merely safe, it is inert — `build_batch_queue` schedules a fresh
 /// `<demo>_route_N` alias (which sets it) at the same tick as every block's
 /// own `sys_record_start`, for every block including the first, so a value
@@ -589,11 +590,22 @@ pub fn banned_commands(commands: &[String]) -> Vec<(String, String)> {
 /// it fires mid-clip — between one block's route alias and the next — and
 /// genuinely misroutes that block's frames, which is the danger it was
 /// originally banned everywhere for.
+///
+/// `mirv_agr` (#450) is here rather than in `BANNED_COMMANDS`, a deliberate
+/// call. Scheduled, it collides with AGR capture mode's own start/stop at each
+/// block's bounds. Outside that mode a scheduled `mirv_agr start` names one
+/// fixed file for every highlight, so each clip overwrites the last; AGR mode
+/// is the way to get one file per clip. In Initial Commands it is not a collision: a
+/// `mirv_agr start` there opens a file at demo load, and in AGR mode the first
+/// block's own start simply closes it and opens the planned one (HLAE's start
+/// closes any recording already open). So it is refused only where it can
+/// actually misplace a take — the same shape as `mirv_movie_filename`.
 pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
     "r_decals",
     "mirv_fov",
     "gl_widescreenfov",
     "mirv_movie_filename",
+    "mirv_agr",
 ];
 
 /// Commands GoldSrc itself silently drops whenever they arrive via a demo's
@@ -1326,7 +1338,7 @@ mod tests {
 
     #[test]
     fn mirv_movie_separate_hud_is_untracked_everywhere() {
-        // No setting exists behind it any more (removed 2026-09-08), and
+        // No setting exists behind it any more (#214), and
         // nothing in this codebase has verified what a mid-demo toggle does
         // — unlike r_decals/mirv_fov, which are measured. Rather than assert
         // a mechanism nobody has checked, it gets no special treatment at
@@ -1503,6 +1515,24 @@ mod tests {
                 "mirv_movie_filename"
             ]
         );
+    }
+
+    #[test]
+    fn a_scheduled_mirv_agr_is_refused_but_an_initial_one_is_not() {
+        // AGR capture mode starts and stops mirv_agr at each block's own
+        // bounds (#450); a scheduled one collides with that. At demo load it
+        // collides with nothing, so it is not refused there.
+        let commands = vec![
+            "mirv_agr start \"C:\\agr\\take.agr\"".to_string(),
+            "mirv_agr stop".to_string(),
+        ];
+        let flagged: Vec<String> = scheduled_banned_commands(&commands)
+            .into_iter()
+            .map(|(cvar, _)| cvar)
+            .collect();
+        assert_eq!(flagged, vec!["mirv_agr", "mirv_agr"]);
+        assert!(banned_commands(&commands).is_empty());
+        assert_eq!(mid_demo_hazards(&commands).len(), 2);
     }
 
     #[test]
