@@ -49,6 +49,8 @@
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `dodstudio_hud_map_team_marker`, which marks the
 //!   player being watched in HLTV with his team's camera icon (#304).
+//! - `run_in_background`: `dodstudio_run_in_background`, full speed while
+//!   another window has the foreground (capture without the screen).
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -158,6 +160,7 @@
 //! the command that started the session.
 
 mod anim_fix;
+mod batch;
 mod batch_end;
 mod clan_text;
 mod cmd_list;
@@ -183,6 +186,7 @@ mod folder_counts;
 mod frame_esc;
 mod hand_signals;
 mod hide_asset;
+mod hlae_window;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
@@ -204,7 +208,9 @@ mod pmove_guard;
 mod position;
 mod remote;
 mod review;
+mod run_in_background;
 mod scan;
+mod schedule;
 mod scoreboard;
 mod server_query;
 mod spectator_bars;

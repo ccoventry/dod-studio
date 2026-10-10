@@ -14,12 +14,13 @@ export const MAX_SUGGESTIONS = 12;
 
 // Copies of native::patch::cfg_scan's tiers (command_suggest.test.js checks
 // them against cfg_scan.rs). Banned for two reasons, so two lists.
-export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate'];
+export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
+  'dodstudio_batch', 'dodstudio_schedule'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
 export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'mirv_agr'];
-export const NOOP_IN_INIT = ['mirv_movie_filename'];
+export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background'];
 // The game's filter for commands a demo carries (#679): cfg_scan's DEMO_FILTER_*.
 export const DEMO_FILTER_NAME_CONTAINS = ['bind', '_set', 'unbind', 'retry', 'quit', '_restart', 'motd_write',
   'motdfile', 'kill', 'exit', 'writecfg', 'cl_filterstuffcmd', 'unbindall'];

@@ -382,6 +382,9 @@ export const STRINGS = {
     DECAL_FLUSH_TITLE:
       'Clear bullet holes and blood off the walls between one clip and the next, so a later capture does not inherit the damage from an earlier one. Off captures the walls exactly as the engine leaves them. How many decals the engine keeps is a separate thing — set r_decals in Initial Commands.',
     SAVE_LOCAL_PATCHED_LABEL: 'Save Local Patched Copy',
+    HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips (experimental)',
+    HOOK_RUNS_BATCH_TITLE:
+      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. Needs the DoD Studio hook DLL and demos on the same drive as the game; a batch that cannot run this way is patched as before.',
     PRE_ROLL_LABEL: 'Pre-roll (s):',
     PRE_ROLL_HINT: 'Time between fast-forward stopping and capture starting.',
     POST_ROLL_LABEL: 'Post-roll (s):',

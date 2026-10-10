@@ -71,6 +71,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
+    const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked || false;
 
     const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
@@ -136,6 +137,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       command_profiles: getCommandProfiles(),
       command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
+      hook_runs_batch: hookRunsBatch,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
@@ -313,6 +315,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   }
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
+  const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
+  if (hookRunsBatchEl) hookRunsBatchEl.checked = !!settings.hook_runs_batch;
   if (settings.render_codec) {
     const inputEl = document.querySelector('#render-codec-select');
     if (inputEl) inputEl.value = settings.render_codec;

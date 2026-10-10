@@ -39,6 +39,8 @@ HUD
       HLTV: mark the watched player on the overview map with his team's camera icon.
 
 DEMO PLAYBACK
+  dodstudio_run_in_background 0/1
+      Run at full speed while another window is in front, so a capture batch doesn't need the screen.
   dodstudio_seek_to <time>
       Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
   dodstudio_seek_by <seconds>
@@ -49,6 +51,10 @@ DEMO PLAYBACK
       Play the last demo again.
   dodstudio_review yes|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  dodstudio_schedule load "<file>"|clear
+      Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
+  dodstudio_batch start "<file>"|stop
+      Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
   dodstudio_clear_decals
       Clear every decal (bullet holes, blood, sprays).
   dodstudio_ex_interp_max <ms>

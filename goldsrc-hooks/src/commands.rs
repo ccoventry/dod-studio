@@ -579,8 +579,11 @@ pub fn poll() {
     crate::spectator_follow::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
+    crate::run_in_background::poll();
     crate::studio_panel::poll();
     crate::review::poll();
+    crate::schedule::poll();
+    crate::batch::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -1442,6 +1445,8 @@ pub fn install() {
     add_command(demo_seek::SEEK_BY_NAME, demo_seek::seek_by);
     add_command(crate::studio_panel::NAME, crate::studio_panel::command);
     add_command(crate::review::NAME, crate::review::command);
+    add_command(crate::schedule::NAME, crate::schedule::command);
+    add_command(crate::batch::NAME, crate::batch::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1567,6 +1572,9 @@ pub fn install() {
     }
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
         crate::overview_marker::set_cvar(marker);
+    }
+    if let Some(background) = register(crate::run_in_background::NAME, "0") {
+        crate::run_in_background::set_cvar(background);
     }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
@@ -1720,6 +1728,7 @@ mod tests {
             crate::spectator_follow::TARGET_NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
+            crate::run_in_background::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

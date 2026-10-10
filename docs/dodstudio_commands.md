@@ -40,6 +40,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
+| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. It also stops HLAE bringing the game window to the front, topmost, for every recording (`hlae_window.rs`), and puts a minimised game back behind the other windows instead, since a minimised game draws nothing. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
 | `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
@@ -151,6 +152,37 @@ tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
+
+### `dodstudio_schedule`
+
+R&D for #434 (the hook runs a batch's commands instead of frames patched into
+the demo). `load "<file>"` reads a schedule: `dodstudio-schedule 1` on the
+first line, then `<seconds>`, a tab and a command per line, the seconds on the
+demo player's clock (the one `dodstudio_seek_to` takes). While a `viewdemo`
+demo plays, each command runs once through the engine's `pfnClientCmd`, on
+the first frame at or past its time; a seek back re-arms the commands after
+it, and a jump forward runs the ones it passed, late. The hook log has each
+command's due time and how late it ran, and, while a schedule is loaded, every
+`[dod-studio]` marker `echo`ed from any route on the same clock. `clear` drops
+the schedule; bare says how far it got. Commands run this way skip the demo
+command filter (#679). Source: `goldsrc-hooks/src/schedule.rs`.
+
+### `dodstudio_batch`
+
+Studio's **Seek Between Clips** (#434): runs a capture batch on the original
+demos instead of patched copies. `start "<file>"` reads the batch file Studio
+wrote (`native::patch::runtime_batch`): `dodstudio-batch 1`, then per demo a
+`demo <path>` line, its `init` commands, and `at <seconds> <command>`,
+`seek <seconds> <to>` and `next <seconds>` lines on the demo player's clock,
+and `end` commands after the last demo, all tab-separated. Each demo is loaded
+with `viewdemo`; once it has loaded, the init commands run, then each timed
+line runs once on the first frame at or past its time, and where the patched
+demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
+while a seek is on its way. A demo that doesn't load in three minutes, stops,
+or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
+`stop` ends the batch; bare says where it is. With
+`dodstudio_run_in_background` on when it starts, the game steps aside behind
+the other windows. Source: `goldsrc-hooks/src/batch.rs`.
 
 ### `dodstudio_review`
 
