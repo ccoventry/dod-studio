@@ -87,7 +87,7 @@
 //! both ways.
 
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 
 use crate::names::console_name;
 
@@ -95,18 +95,52 @@ use crate::names::console_name;
 pub const COMMAND_NAMES: &[&str] = &[COMMAND];
 const COMMAND: &str = console_name!("hide_asset");
 
-/// One model path to suppress, and whether the engine has drawn anything by
-/// that path since it was set.
+/// Which drawing path asked about a model (#614). The same list is checked in
+/// each, and the status says where each entry turned up.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DrawnAs {
+    /// A world entity: `HUD_AddEntity` with any type but 2.
+    Entity,
+    /// An engine temporary effect (`R_TempModel`, `R_TempSprite`): the engine
+    /// passes it to `HUD_AddEntity` as type 2 (`ET_TEMPENTITY`).
+    Effect,
+    /// One of DoD's own particles, which never reach `HUD_AddEntity`: see
+    /// `particle_hide.rs`.
+    Particle,
+}
+
+impl DrawnAs {
+    fn bit(self) -> u8 {
+        match self {
+            DrawnAs::Entity => 1,
+            DrawnAs::Effect => 2,
+            DrawnAs::Particle => 4,
+        }
+    }
+
+    const ALL: [DrawnAs; 3] = [DrawnAs::Entity, DrawnAs::Effect, DrawnAs::Particle];
+
+    fn words(self) -> &'static str {
+        match self {
+            DrawnAs::Entity => "an entity",
+            DrawnAs::Effect => "an effect",
+            DrawnAs::Particle => "a particle",
+        }
+    }
+}
+
+/// One model path to suppress, and which drawing paths have met it since it
+/// was set (a [`DrawnAs::bit`] mask).
 struct Entry {
     path: String,
-    seen: AtomicBool,
+    seen: AtomicU8,
 }
 
 impl Entry {
     fn new(path: &str) -> Self {
         Self {
             path: path.to_string(),
-            seen: AtomicBool::new(false),
+            seen: AtomicU8::new(0),
         }
     }
 }
@@ -123,28 +157,34 @@ static HIDDEN: RwLock<Vec<Entry>> = RwLock::new(Vec::new());
 
 /// Pure matcher, so it can be unit-tested without touching the shared
 /// `HIDDEN` static -- see the test module for why nothing here does that.
-/// Marks the entry it matched as seen.
-fn matches(hidden: &[Entry], model_name: &str) -> bool {
+/// Marks the entry it matched as seen, `as` that kind.
+fn matches(hidden: &[Entry], model_name: &str, drawn_as: DrawnAs) -> bool {
     match hidden
         .iter()
         .find(|h| h.path.eq_ignore_ascii_case(model_name))
     {
         Some(entry) => {
-            entry.seen.store(true, Ordering::Relaxed);
+            entry.seen.fetch_or(drawn_as.bit(), Ordering::Relaxed);
             true
         }
         None => false,
     }
 }
 
-/// `a (seen), b (not seen yet)`.
+/// `a (seen as an effect), b (not seen yet)`.
 fn describe(list: &[Entry]) -> String {
     list.iter()
         .map(|e| {
-            let seen = if e.seen.load(Ordering::Relaxed) {
-                "seen"
+            let mask = e.seen.load(Ordering::Relaxed);
+            let kinds: Vec<&str> = DrawnAs::ALL
+                .iter()
+                .filter(|k| mask & k.bit() != 0)
+                .map(|k| k.words())
+                .collect();
+            let seen = if kinds.is_empty() {
+                "not seen this session yet -- check the path".to_string()
             } else {
-                "not seen this session yet -- check the path"
+                format!("seen as {}", kinds.join(" and "))
             };
             format!("{} ({seen})", e.path)
         })
@@ -153,16 +193,17 @@ fn describe(list: &[Entry]) -> String {
 }
 
 /// Called from `engine::tramp_hud_add_entity` for every entity the engine is
-/// about to add to the render list. `true` means suppress it.
+/// about to add to the render list, and from `particle_hide` for every
+/// particle DoD makes. `true` means suppress it.
 ///
 /// A plain linear scan over what is expected to be a handful of entries, not
 /// the 71-message table `msglog.rs` searches -- this runs once per entity
 /// per frame, considerably hotter than a console command's own argument
 /// parsing, so it stays a `Vec`, not a data structure sized for a table that
 /// will never be large.
-pub fn should_hide(model_name: &str) -> bool {
+pub fn should_hide(model_name: &str, drawn_as: DrawnAs) -> bool {
     match HIDDEN.read() {
-        Ok(list) => matches(&list, model_name),
+        Ok(list) => matches(&list, model_name, drawn_as),
         Err(_) => false,
     }
 }
@@ -270,6 +311,14 @@ fn dispatch(argv: &[String]) -> String {
 
 pub unsafe extern "C" fn command() {
     let argv = crate::cmd_list::argv();
+    // Particles are made where `HUD_AddEntity` never looks: hook their makers
+    // the first time anything is hidden (#614).
+    if argv
+        .get(1)
+        .is_some_and(|verb| verb.eq_ignore_ascii_case("add"))
+    {
+        crate::particle_hide::install();
+    }
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe {
@@ -306,9 +355,21 @@ mod tests {
     #[test]
     fn matching_is_case_insensitive() {
         let hidden = vec![Entry::new("sprites/mapsprites/caparea.spr")];
-        assert!(matches(&hidden, "sprites/mapsprites/caparea.spr"));
-        assert!(matches(&hidden, "SPRITES/MAPSPRITES/CAPAREA.SPR"));
-        assert!(!matches(&hidden, "sprites/mapsprites/speakerIcon.spr"));
+        assert!(matches(
+            &hidden,
+            "sprites/mapsprites/caparea.spr",
+            DrawnAs::Entity
+        ));
+        assert!(matches(
+            &hidden,
+            "SPRITES/MAPSPRITES/CAPAREA.SPR",
+            DrawnAs::Entity
+        ));
+        assert!(!matches(
+            &hidden,
+            "sprites/mapsprites/speakerIcon.spr",
+            DrawnAs::Entity
+        ));
     }
 
     #[test]
@@ -318,10 +379,35 @@ mod tests {
             Entry::new("all"),
         ];
         assert!(describe(&hidden).contains("flames.spr (not seen"));
-        matches(&hidden, "sprites/mapsprites/flames.spr");
+        matches(&hidden, "sprites/mapsprites/flames.spr", DrawnAs::Entity);
         let text = describe(&hidden);
-        assert!(text.contains("flames.spr (seen)"), "{text}");
+        assert!(text.contains("flames.spr (seen as an entity)"), "{text}");
         assert!(text.contains("all (not seen"), "{text}");
+    }
+
+    /// #614: the status says which drawing path met each entry.
+    #[test]
+    fn an_entry_says_how_it_was_drawn() {
+        let hidden = vec![
+            Entry::new("sprites/effects/adrian/dirt_puff.spr"),
+            Entry::new("models/shells.mdl"),
+        ];
+        matches(
+            &hidden,
+            "sprites/effects/adrian/dirt_puff.spr",
+            DrawnAs::Particle,
+        );
+        matches(&hidden, "models/shells.mdl", DrawnAs::Effect);
+        matches(&hidden, "models/shells.mdl", DrawnAs::Entity);
+        let text = describe(&hidden);
+        assert!(
+            text.contains("dirt_puff.spr (seen as a particle)"),
+            "{text}"
+        );
+        assert!(
+            text.contains("shells.mdl (seen as an entity and an effect)"),
+            "{text}"
+        );
     }
 
     #[test]
@@ -389,7 +475,11 @@ mod tests {
 
     #[test]
     fn an_empty_list_hides_nothing() {
-        assert!(!matches(&[], "sprites/mapsprites/caparea.spr"));
+        assert!(!matches(
+            &[],
+            "sprites/mapsprites/caparea.spr",
+            DrawnAs::Entity
+        ));
     }
 
     #[test]

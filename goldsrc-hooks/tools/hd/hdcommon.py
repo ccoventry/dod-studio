@@ -202,7 +202,7 @@ old_place_noted = set()
 
 def user_file(name, env):
     """Where one of the user's own lists is read from: the path in `env` if
-    set, else <game>/dod/dodstudio_hd/<name>, beside the files it shapes.
+    set, else in the install's dodstudio_hd folder (hd_dir), beside the files it shapes.
 
     That folder belongs to one install and survives a re-clone of the repo;
     this folder does neither (#385). A copy left here from before still works
@@ -289,8 +289,14 @@ def dod_dir():
 
 
 def hd_dir():
-    """dod/dodstudio_hd, where texture_hires looks."""
-    return os.path.join(dod_dir(), "dodstudio_hd")
+    """Where texture_hires looks (#415): dod_addon/dodstudio_hd, or
+    dod/dodstudio_hd while that one exists and the dod_addon one doesn't (an
+    install built before #415). native::hd::hd_root picks the same way."""
+    addon = os.path.join(game_root(), "dod_addon", "dodstudio_hd")
+    old = os.path.join(dod_dir(), "dodstudio_hd")
+    if os.path.isdir(old) and not os.path.isdir(addon):
+        return old
+    return addon
 
 
 def work_dir(name):

@@ -1,5 +1,5 @@
 // hd_pane.js — the HD Textures page (#372): what is built under
-// <game>/dod/dodstudio_hd, the movie.cfg lines to use it, downloading the
+// <game>/dod_addon/dodstudio_hd (dod/ from before #415), the movie.cfg lines to use it, downloading the
 // upscaler (and a Python when the PC has none), running the build, the
 // style comparison sheet, which maps to build (hd_maps.txt), the user's own
 // styles (my_styles.txt), and the
