@@ -201,6 +201,53 @@ available isn't fixed at compile time — it's whatever `clientdata_t` /
 decoded delta's keys before designing anything, to see the real field list
 rather than guessing from the GoldSrc SDK headers.
 
+**Update (#448, first slice): `SvcDeltaPacketEntities` is now read.** The
+analyzer replays the entity snapshots (`analysis/src/entity_replay.rs`) to
+record where both players stood at every kill (`AnalyzerState::kill_positions`,
+shown on the Demo Analyzer's Kill Map tab). What that settled:
+
+- **The field dump** (`analysis/examples/position_field_probe.rs`, run on
+  `solifotw-greetz1.dem` and `ktps8w3-dyelife_ih_anzio_h2.dem` (POV) and
+  `ktps9qf-dice_clinic_m1_armory_h1_hltv.dem` (HLTV)).
+  `entity_state_player_t` carries, most-changed first: `animtime`, `frame`,
+  `angles[0..2]`, `origin[0..2]`, `blending[0..1]`, `gaitsequence`,
+  `sequence`, `mins`/`maxs`, `weaponmodel`, `usehull`, `effects`, `health`,
+  `playerclass`, `team`, `body`, `movetype`, `framerate`, `solid`.
+  `clientdata_t` (POV only) adds `velocity[0..2]`, `health`, `fov`,
+  `punchangle[2]`, `view_ofs[2]`, `flDuckTime`, `bInDuck`, `maxspeed`,
+  `weapons`, `m_iId`, `ammo_shells`, `iuser1..3`, `deadflag`, `fuser2/4`;
+  `weapon_data_t` has `m_iClip`, `m_iId`, `m_fInReload` and the three attack
+  timers. An HLTV demo's `clientdata_t` is the proxy's own and carries no
+  weapon data.
+- **Positions are exact per packet, no interpolation needed.** Both demo types
+  run ~95-100 snapshots a second. On HLTV every player is in every snapshot;
+  on POV, teammates always are and enemies only while the recorder could see
+  them -- about a third of kills on the two POV demos had one side missing,
+  and those keep `None` rather than a stale position.
+- **The replay had to be sequence-aware, but only just.** A naive "apply every
+  delta over the latest state" agreed with it on all but 3 of 877 victim
+  positions checked (`kill_position_probe`, the three demos above plus
+  `ktps8w10qf-dyelife_soul_m1_saints_h1.dem`); the difference is the
+  re-enter-from-baseline and reverted-field cases the unit tests pin down.
+  No packets were flushed or missing a reference on those demos (9 flushed on
+  the greetz one).
+- **The recording player's own entity never carries an origin** -- the
+  server leaves it out because the client predicts its own movement -- so on
+  a POV demo that player's position comes from `svc_clientdata`
+  (`ClientDataReplay`), which is encoded against the same acknowledged frame.
+- **Cost: roughly +0.15-0.4 s per cold load, ~10-15%.** The replay on its own
+  measured 110-160 ms on a quiet machine and up to ~260 ms on a busy one
+  (`kill_position_probe`'s "replay alone", best of 3, 70-90 MB demos); the
+  full analysis with and without the hook, best of 3 each on a busy machine,
+  differed by ~290 ms (POV anzio) and ~300-390 ms (HLTV armory). Only ~20-45
+  ms of that is reaching into `entity_states`; the rest is walking each
+  delta's `HashMap<String, Vec<u8>>` -- one heap table per delta and one heap
+  string per key -- so Tier 4's `Delta` rewrite is what would remove it.
+  Looking the three origin keys up by hash instead measured slower. A cached
+  load is unaffected. `analysis::cache::SCHEMA_VERSION` went to 6 so older
+  cache entries re-parse instead of showing an empty Kill Map; the new field
+  is also `#[serde(default)]`.
+
 **Sequencing, restated plainly**: do the future-stats review first, then design the selective-parse mode around its answer (keep decoding whatever fields the stats work wants, skip only what's still unwanted regardless — e.g. `SvcSound`, `ClientAreas`, `SvcTempEntity`). Shipping Tier 4 first risks partially reverting it once a wanted stat turns out to need `SvcClientData`/`SvcDeltaPacketEntities`. The part of that review about which fields to keep is still open.
 
 ## How to verify any of this yourself

@@ -1,5 +1,18 @@
 import { describe, it, expect } from 'vitest';
-import { sortJobs, nextSort, batchProgress } from './render_jobs.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
+
+describe('JOB_STATUS (#35)', () => {
+  it("matches the status strings render_manager.rs sends", () => {
+    const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+    const rs = fs.readFileSync(path.join(repo, 'studio', 'src-tauri', 'src', 'render_manager.rs'), 'utf8');
+    const documented = rs.match(/status: String, \/\/ (.*)/)[1];
+    expect([...documented.matchAll(/"([^"]+)"/g)].map((m) => m[1]).sort())
+      .toEqual(Object.values(JOB_STATUS).sort());
+  });
+});
 
 const job = (id, extra) => ({ id, name: `clip-${id}`, status: 'Queued', progress: 0, ...extra });
 

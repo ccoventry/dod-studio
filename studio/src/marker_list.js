@@ -4,6 +4,7 @@
 // in an editor. Pure, so it can be tested on its own.
 
 import { streakUid } from './take_index.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
 
 /** Seconds as `h:mm:ss.ss` (hours only when there are some). */
 export function clockTime(seconds) {
@@ -45,7 +46,7 @@ export function markerRows(demos, takeIndex) {
   const rows = [];
   (demos || []).forEach((demo) => {
     (demo.streaks || [])
-      .filter((s) => s.status === 'Captured' || s.status === 'Rendered')
+      .filter((s) => s.status === HIGHLIGHT_STATUS.CAPTURED || s.status === HIGHLIGHT_STATUS.RENDERED)
       .sort((a, b) => a.start_tick - b.start_tick)
       .forEach((streak) => {
         const start = streak.start_index ?? 0;

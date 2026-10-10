@@ -1,6 +1,6 @@
 // demo_cache.js — the Demo Analyzer's "Cache all" button (#569): analyses
 // every demo of the current folder into the analyzer cache in the background
-// (`cache_demos`), so opening one later, the in-game Killstreaks tab and the
+// (`cache_demos`), so opening one later, the in-game Highlights tab and the
 // player filters are instant. Progress arrives as `demo_cache_progress`
 // events; while a run goes, the button is Stop.
 import { listen } from '@tauri-apps/api/event';

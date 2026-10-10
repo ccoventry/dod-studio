@@ -33,6 +33,39 @@ test.describe('master_pane missing demos', () => {
   });
 });
 
+test.describe('master_pane multi-map demos (#217)', () => {
+  test('a demo with two maps gets a Split button that names them on hover', async ({ page }) => {
+    await gotoHarness(page);
+    const split = row(page, 'here.dem').locator('.multimap-split-btn');
+    await expect(split).toHaveText('2 maps · Split');
+    await expect(split).toHaveAttribute('title', /recorded 2 maps \(dod_lennon2, dod_lennon2\)/);
+  });
+
+  test('clicking it hands the demo over without selecting the row', async ({ page }) => {
+    await gotoHarness(page);
+    await row(page, 'here.dem').locator('.multimap-split-btn').click();
+    await expect(page.locator('#result')).toHaveText('split here.dem');
+    await expect(row(page, 'here.dem')).not.toHaveClass(/table-row-selected/);
+  });
+
+  test('while it splits, the row shows a progress bar in place of the button', async ({ page }) => {
+    await gotoHarness(page);
+    const r = row(page, 'here.dem');
+    await r.locator('.multimap-split-btn').click();
+    await expect(r.locator('.multimap-split-progress .split-progress-text')).toHaveText('Reading the demo… 30%');
+    await expect(r.locator('.multimap-split-btn')).toBeHidden();
+    await page.evaluate(() => window.__finishRowSplit());
+    await expect(r.locator('.multimap-split-progress')).toHaveCount(0);
+    await expect(r.locator('.multimap-split-btn')).toBeVisible();
+  });
+
+  test('a one-map demo, or one saved before the map list existed, has none', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(row(page, 'moved.dem').locator('.multimap-split-btn')).toHaveCount(0);
+    await expect(row(page, 'gone.dem').locator('.multimap-split-btn')).toHaveCount(0);
+  });
+});
+
 test.describe('master_pane search clear button (#529)', () => {
   const search = (page) => page.locator('#demo-search-input');
   const x = (page) => page.locator('.clearable-x');

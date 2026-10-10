@@ -11,6 +11,9 @@ use std::path::PathBuf;
 
 pub mod patch;
 
+/// What a highlight's clip name can say beyond the streak itself (#441).
+pub mod clip_facts;
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hlcr;
 
@@ -23,6 +26,11 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+/// Maps a session crashed on with a known cause, for the next batch's warning
+/// (#207).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod crash_maps;
+
 /// Caching many demos ahead of time (#569).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_cache;
@@ -34,14 +42,37 @@ pub mod demo_maps_scan;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_split;
 
+/// The Demo Auditor's renamer: facts, renames and the undo log (#469).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_rename;
+
+/// Launch Preview without patching (#434, step 2).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod preview_in_place;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
+
+/// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod blender;
 
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
 
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
+
+/// Map overviews made from the BSP, for the Overviews page (#371).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod overview;
+
+/// Who is in a demo, from a small index beside the analyzer cache (#437).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod player_index;
 /// The review mode's queue and answers (#623).
 pub mod review_queue;
 
@@ -88,6 +119,13 @@ where
 #[cfg(not(target_arch = "wasm32"))]
 pub fn analyzer_cache_root() -> PathBuf {
     crate::shared::paths::get_appdata_dir().join("analyzer_cache")
+}
+
+/// The file `demo_path`'s analyzer cache entry lives in, or `None` when the
+/// demo can't be found (the key is its canonical path).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn analyzer_cache_path(demo_path: &std::path::Path) -> Option<PathBuf> {
+    analysis::cache::entry_path(&analyzer_cache_root(), demo_path)
 }
 
 /// Same as `run_analyzer_with_progress`, but backed by an on-disk JSON cache
@@ -182,6 +220,41 @@ fn store_in_analyzer_cache(
     });
     // Best-effort: a cache write failure must never fail the caller.
     let _ = analysis::cache::store(root, demo_path, file_info, analysis);
+}
+
+/// Moves a renamed demo's analyzer cache entry from `old_cache` (the entry's
+/// path before the rename, since the key is the demo's canonical path) to
+/// the key of `new_demo`, and points its recorded file name and path at the
+/// new name. Without it the renamed demo is parsed again on its next open,
+/// and the old entry is never read again. Best-effort and silent: a miss
+/// only costs that parse.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn move_analyzer_cache_entry(old_cache: &std::path::Path, new_demo: &std::path::Path) {
+    let Some(new_cache) = analyzer_cache_path(new_demo) else {
+        return;
+    };
+    if new_cache == old_cache {
+        return;
+    }
+    let Ok(bytes) = fs::read(old_cache) else {
+        return;
+    };
+    let Ok(mut entry) = serde_json::from_slice::<serde_json::Value>(&bytes) else {
+        return;
+    };
+    if let Some(info) = entry.get_mut("file_info").and_then(|i| i.as_object_mut()) {
+        let name = new_demo
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        info.insert("name".into(), name.into());
+        info.insert("path".into(), new_demo.to_string_lossy().to_string().into());
+    }
+    if let Ok(json) = serde_json::to_vec(&entry)
+        && fs::write(&new_cache, json).is_ok()
+    {
+        let _ = fs::remove_file(old_cache);
+    }
 }
 
 /// Writes `analysis` (already computed by a folder scan, e.g.
