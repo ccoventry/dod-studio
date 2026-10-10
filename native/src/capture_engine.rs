@@ -662,15 +662,23 @@ pub fn spawn_capture_engine(
             // The HLAE alpha flags that used to be composed here now live in
             // `build_hlae_process` itself, so every `-customLoader` launch this
             // app makes carries them, not just a capture batch.
-            let extra_args = if runtime_batch.is_some() {
-                "+exec dodstudio_helper.cfg".to_string()
-            } else {
-                format!(
-                    "+exec dodstudio_helper.cfg +playdemo {}",
-                    crate::shared::paths::PRIMER_DEMO_STEM
-                )
+            //
+            // The first demo starts over the hook's pipe once the game is up,
+            // so its map loads after config.cfg/movie.cfg set the user's
+            // brightness and gamma (`game_handoff`). A batch the hook runs
+            // starts the same way, with its batch file instead of the primer.
+            let (extra_args, first_lines) = match runtime_batch.as_deref() {
+                Some(file) => (
+                    "+exec dodstudio_helper.cfg".to_string(),
+                    crate::patch::runtime_batch::start_lines(file),
+                ),
+                None => crate::game_handoff::first_demo_start(
+                    crate::shared::paths::PRIMER_DEMO_STEM,
+                    config.goldsrc_hooks_dll().is_some(),
+                ),
             };
-            let mut batch_handoff = runtime_batch.as_deref().map(BatchHandoff::new);
+            let mut handoff = (!first_lines.is_empty())
+                .then(|| crate::game_handoff::GameHandoff::new(first_lines));
 
             let dummy_path = active_export_dir.join("DOD_BATCH_DONE");
             let _ = std::fs::remove_dir_all(&dummy_path);
@@ -807,12 +815,12 @@ pub fn spawn_capture_engine(
                     alive
                 };
 
-                // A batch run from the hook starts once the game takes commands.
-                if let Some(handoff) = batch_handoff.as_mut() {
+                if let Some(handoff) = handoff.as_mut() {
+                    use crate::game_handoff::Handoff;
                     match handoff.poll(&crate::sys::process::game_pids_in(&sys)) {
                         Handoff::Waiting | Handoff::Sent => {}
                         Handoff::JustSent(pid) => log_markdown(&format!(
-                            "[HLAE] Sent the batch to the game (PID {pid}): `{}` — the hook DLL plays the original demos and seeks between clips",
+                            "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
                             handoff.lines.join("; ")
                         )),
                         Handoff::Failed(why) => {
@@ -1138,78 +1146,6 @@ pub fn spawn_capture_engine(
             let _ = tx.send(EngineEvent::AllCompleted);
         })
         .unwrap();
-}
-
-/// How long a launched game has to open its command pipe before a batch run
-/// from the hook gives up.
-const HANDOFF_PIPE_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
-/// After the pipe answers, how long before the batch is sent: the pipe opens
-/// while the engine is still starting, before the hook has wrapped `viewdemo`
-/// (the same wait Launch Preview makes).
-const HANDOFF_SETTLE: std::time::Duration = std::time::Duration::from_secs(5);
-
-enum Handoff {
-    Waiting,
-    JustSent(u32),
-    Sent,
-    Failed(String),
-}
-
-/// Hands a hook-run batch's file to the game once it takes commands.
-struct BatchHandoff {
-    lines: Vec<String>,
-    started: std::time::Instant,
-    answered: Option<(u32, std::time::Instant)>,
-    sent: bool,
-}
-
-impl BatchHandoff {
-    fn new(file: &std::path::Path) -> Self {
-        Self {
-            lines: crate::patch::runtime_batch::start_lines(file),
-            started: std::time::Instant::now(),
-            answered: None,
-            sent: false,
-        }
-    }
-
-    /// One look, from the capture loop; never blocks longer than one pipe write.
-    fn poll(&mut self, game_pids: &[u32]) -> Handoff {
-        use crate::sys::game_remote::{Sent, send_console_commands};
-        if self.sent {
-            return Handoff::Sent;
-        }
-        if let Some((pid, at)) = self.answered {
-            if at.elapsed() < HANDOFF_SETTLE {
-                return Handoff::Waiting;
-            }
-            return match send_console_commands(pid, &self.lines) {
-                Ok(Sent::Delivered) => {
-                    self.sent = true;
-                    Handoff::JustSent(pid)
-                }
-                Ok(Sent::NotListening) => Handoff::Failed(format!(
-                    "the game (PID {pid}) stopped taking commands before the batch could be sent to it"
-                )),
-                Err(e) => Handoff::Failed(format!("could not send the batch to the game: {e}")),
-            };
-        }
-        for &pid in game_pids {
-            // An empty message checks the pipe without running anything.
-            if matches!(send_console_commands(pid, &[]), Ok(Sent::Delivered)) {
-                self.answered = Some((pid, std::time::Instant::now()));
-                return Handoff::Waiting;
-            }
-        }
-        if self.started.elapsed() > HANDOFF_PIPE_WAIT {
-            return Handoff::Failed(format!(
-                "the game never opened its command pipe in {} s, so the batch could not be sent to it. \
-                 Is the DoD Studio hook DLL turned on?",
-                HANDOFF_PIPE_WAIT.as_secs()
-            ));
-        }
-        Handoff::Waiting
-    }
 }
 
 /// How the end of a batch was noticed, for the "Batch complete" log line.
