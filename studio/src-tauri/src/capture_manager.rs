@@ -1548,6 +1548,12 @@ pub struct SerializedDemo {
     /// saved before it existed; the frontend scans those again.
     #[serde(default)]
     pub teams: Vec<analysis::TeamTag>,
+    /// The map of every signon (#217): two or more is a demo the game's
+    /// `viewdemo` can't play past the first level change, so the Master Queue
+    /// offers to split it. Missing from demos in a project saved before it
+    /// existed; the frontend scans those again.
+    #[serde(default)]
+    pub signon_maps: Vec<String>,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -2161,6 +2167,7 @@ pub async fn scan_directory_impl(
                                     recorder_id: recorder.as_ref().map(|p| p.id.clone()),
                                     recorder_name: recorder.map(|p| p.name),
                                     teams: ::analysis::team_tags(&analysis.state),
+                                    signon_maps: analysis.state.signon_maps.clone(),
                                 }
                             },
                         );

@@ -113,6 +113,11 @@ export const STRINGS = {
     USE_FOUND_COPY_BUTTON: 'Use found copy',
     useFoundCopyTitle: (path) => `A matching file was found at ${path}. Click to use it.`,
     REMOVE_DEMO_TITLE: 'Remove demo from queue',
+    // #217: a queued demo that recorded more than one map.
+    multiMapSplitButton: (count) => `${count} maps · Split`,
+    multiMapSplitTitle: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
+      + 'The game stops playing it at the first map change, so nothing past it can be captured, and its highlights cover one map only. '
+      + 'Click to split it: each map of a minute or more becomes a demo of its own in the queue, in place of this one. The file itself is kept.',
     removeDemoConfirm: (name) => `Remove "${name}" from the queue? It has tracked work (a Pending/Captured/Rendered status, a note, or an edited kill range) that will be lost.`,
     trackedBadgeTooltip: (reasons) => `Tracked — has ${reasons.join(', ')}. Protected from Clear Untracked in Workspace mode.`,
     rowDeleteLog: (name, trackedNote) => `[queue] Row delete: removed "${name}"${trackedNote}`,
@@ -1361,6 +1366,17 @@ export const STRINGS = {
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
     CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
     CHANGED_DEMOS_RESCAN: 'Rescan',
+    // #217: splitting a queued demo that recorded more than one map.
+    SPLIT_TRACKED_DEMO_TITLE: 'Split Tracked Demo',
+    VERB_SPLITS: 'splits and replaces',
+    SPLIT_ANYWAY: 'Split Anyway',
+    queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
+    queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
+    MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
+    MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
+    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',
+    MULTI_MAP_PICKED_SPLIT: 'Split Them',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
 

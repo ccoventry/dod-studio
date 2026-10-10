@@ -17,6 +17,7 @@ import {
   defaultProjectsDir,
   systemMemoryBytes
 } from './ipc_bridge.js';
+import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
@@ -1033,6 +1034,15 @@ window.addEventListener("DOMContentLoaded", async () => {
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
   });
 
+  // Demos that recorded more than one map (#217): queue_split.js.
+  const { splitQueuedDemo, captureDemosReady } = createQueueSplit({
+    getDemos: () => currentScannedDemos,
+    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    pickedDemosPresent,
+  });
+
   // New Session (#122/#149) — resets to the same blank state the app starts
   // in: no session file, no demos, no take index. Reuses replaceScannedDemos
   // (defined below, hoisted) for the demo-queue reset — same as Clear All —
@@ -1391,9 +1401,10 @@ window.addEventListener("DOMContentLoaded", async () => {
     try {
       // Demos already queued and unchanged on disk are skipped, not
       // re-parsed; ones from an older project (no file_key, no map_name:
-      // saved before clip names, #441, or no teams: #445) are scanned.
+      // saved before clip names, #441, no teams: #445, or no map list: #217)
+      // are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d))
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1642,7 +1653,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     scanPaths,
     targetDrives,
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
   initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
@@ -2002,7 +2013,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]));
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
