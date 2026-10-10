@@ -178,7 +178,7 @@ is the complete list):
   A Highlights tab lists the playing demo's streaks, from Studio's analyzer
   cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
   crate; a demo too big for the game's address space is refused, not tried).
-  One `.res` per tab in `dod\dodstudio_ui\`, editable in
+  One `.res` per tab in `dod_addon\dodstudio_ui\` (`dod\dodstudio_ui\` without `-addons`), editable in
   build mode; never narrower than its tabs. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes
@@ -307,7 +307,7 @@ against a real `client.dll` or `hw.dll`.
 
 `src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
 detail textures and skies as the game loads them: on when there's a
-`dod/dodstudio_hd` folder, `dodstudio_hd_enabled 0/1` in game, and
+`dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
 those files; see its README. It works the same on the 25th Anniversary

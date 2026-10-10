@@ -564,7 +564,7 @@ anime = realesrgan-x4plus-anime
         .unwrap();
         assert_eq!(outcome.steps, 1);
         assert!(seen.iter().any(|p| p.step == 1 && p.asset_type == "world"));
-        let built: Vec<_> = std::fs::read_dir(game.join("dod/dodstudio_hd/world/plain"))
+        let built: Vec<_> = std::fs::read_dir(game.join("dod_addon/dodstudio_hd/world/plain"))
             .unwrap()
             .flatten()
             .map(|e| e.file_name().to_string_lossy().to_string())

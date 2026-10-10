@@ -43,7 +43,7 @@ fn scripts_dir(app: &AppHandle) -> Option<PathBuf> {
     hd::build::scripts_dir(bundled.as_deref())
 }
 
-/// What is built under `<game>\dod\dodstudio_hd`, which upscaler folder and
+/// What is built under `<game>\dod_addon\dodstudio_hd` (or `dod\` from before #415), which upscaler folder and
 /// Python a build would use, and what each is missing. `game_path` is the
 /// `hl.exe` the Configuration page holds.
 #[tauri::command]

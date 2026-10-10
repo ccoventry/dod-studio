@@ -846,7 +846,7 @@ export async function restartApp() {
     });
 }
 
-/** What is built under `<game>/dod/dodstudio_hd`, and whether the upscaler is
+/** What is built under `<game>/dod_addon/dodstudio_hd` (or `dod/` from before #415), and whether the upscaler is
  *  downloaded (#372). No toast: the HD page shows the error in place, and the
  *  common one (no Half-Life path yet) is a state, not a failure. */
 export async function hdStatus(gamePath) {

@@ -67,6 +67,9 @@
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
+//! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
+//!   debris, the grenade dirt cloud, smoke trails), which never reach
+//!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
 //! - `tempent_fix`: stop DoD's client crashing when the engine has no temp
 //!   effect entity to give it (issue #374). On by default, since it only acts
 //!   where the game would otherwise crash; `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns
@@ -194,6 +197,7 @@ mod overview_map;
 mod overview_marker;
 mod overview_players;
 mod panic_log;
+mod particle_hide;
 mod patch;
 mod pe;
 mod pmove_guard;
@@ -315,7 +319,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     // Studio falls back to qconsole.log without it, so on unless asked not to.
     events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
-    // HD textures: on when there's a dod/dodstudio_hd folder to load from,
+    // HD textures: on when there's a dodstudio_hd folder to load from (in
+    // dod_addon, or dod for an install from before #415),
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
     // it on and off in game.
@@ -403,6 +408,9 @@ fn install_fixes() {
     // Also re-runs if client.dll is ever loaded again: install() compares the
     // module base and patches the new copy.
     tempent_fix::install();
+    // Only once dodstudio_hide_asset has been used this session; then a
+    // reloaded client.dll is patched again.
+    particle_hide::reinstall_if_used();
     // hw.dll is loaded for the whole session, so once is enough.
     hull_trace_guard::install();
     // Before any map loads, so before the first demo's InitHUD.
