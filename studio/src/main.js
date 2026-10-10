@@ -45,6 +45,7 @@ import { emptyProjectTeams, demoHasTeams } from './project_teams.js';
 import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
+import { parseClock, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
 import { initInfoTooltips } from './info_tooltip.js';
@@ -67,6 +68,12 @@ import { initReviewMode } from './review_mode.js';
 // from the earliest possible moment, not just once the app's own init
 // logic gets around to it.
 initErrorReporter();
+
+// The Master Queue scan reads the demos the analyzer cache has first (#687);
+// its time left is measured from when the parses after them started. Module
+// scope, since triggerAutoScan is a hoisted declaration callable from early
+// in init.
+const scanParses = parseClock();
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -1156,7 +1163,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
       if (cancelScanBtn) cancelScanBtn.disabled = true;
     } else {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status);
+      if (scanStatusEl) {
+        scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status)
+          + timeLeftText(p, scanParses.elapsed(p.scanned, p.cached));
+      }
       if (cancelScanBtn) cancelScanBtn.disabled = false;
     }
   }).then(fn => { unlistenScanProgress = fn; });
@@ -1200,6 +1210,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (cancelScanBtnInner) cancelScanBtnInner.disabled = false;
     if (scanSpinnerEl) scanSpinnerEl.style.display = 'inline-block';
     if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
+    scanParses.reset();
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
 
     const masterTableBody = document.querySelector('#master-demo-table-body');

@@ -2,9 +2,11 @@
 // every demo of the current folder into the analyzer cache in the background
 // (`cache_demos`), so opening one later, the in-game Highlights tab and the
 // player filters are instant. Progress arrives as `demo_cache_progress`
-// events; while a run goes, the button is Stop.
+// events; while a run goes, the button is Stop. The demos already cached go
+// first, then the parses, with a time left from their pace (#687).
 import { listen } from '@tauri-apps/api/event';
 import { cacheDemos, cancelDemoCache } from './ipc_bridge.js';
+import { parseClock, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
 
 /**
@@ -15,6 +17,7 @@ export function initDemoCache({ getDemoPaths }) {
   const status = document.querySelector('#analyzer-cache-status');
   if (!button || !status) return;
   let running = false;
+  const parses = parseClock();
 
   const setRunning = (on) => {
     running = on;
@@ -33,7 +36,9 @@ export function initDemoCache({ getDemoPaths }) {
       return;
     }
     setRunning(true);
-    status.textContent = STRINGS.ANALYZER.cacheProgress({ done: 0, total: paths.length, already: 0, failed: 0 });
+    parses.reset();
+    // Until the first event the backend is checking which demos the cache has.
+    status.textContent = STRINGS.SCAN_PROGRESS.CHECKING_CACHE;
     try {
       await cacheDemos(paths);
     } catch (err) {
@@ -48,7 +53,8 @@ export function initDemoCache({ getDemoPaths }) {
       status.textContent = STRINGS.ANALYZER.cacheDone(payload);
     } else {
       setRunning(true);
-      status.textContent = STRINGS.ANALYZER.cacheProgress(payload);
+      status.textContent = STRINGS.ANALYZER.cacheProgress(payload)
+        + timeLeftText(payload, parses.elapsed(payload.done, payload.cached));
     }
   });
 }

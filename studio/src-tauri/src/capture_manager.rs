@@ -1620,14 +1620,19 @@ fn scan_worker_count(workers: usize, total: usize) -> usize {
     workers.clamp(1, SCAN_WORKERS_MAX).min(total).max(1)
 }
 
-/// The scan status line: how many demos are done out of how many, and one demo
-/// still being parsed, when there is one. With several scan workers,
-/// "the current file" is one of the current files.
-fn scan_status_line(done: u32, total: u32, current: Option<&str>) -> String {
-    match current {
-        Some(name) => format!("Scanning {done} / {total} — {name}"),
-        None => format!("Scanning {done} / {total}"),
+/// The scan status line: how many demos are done out of how many, how many
+/// of them the analyzer cache has (they go first, #687), and one demo still
+/// being parsed, when there is one. With several scan workers, "the current
+/// file" is one of the current files. Studio adds the time left.
+fn scan_status_line(done: u32, total: u32, cached: u32, current: Option<&str>) -> String {
+    let mut line = format!("Scanning {done} / {total}");
+    if cached > 0 {
+        line += &format!(" ({cached} from the analyzer cache)");
     }
+    if let Some(name) = current {
+        line += &format!(" — {name}");
+    }
+    line
 }
 
 /// True when a progress line may go out at `now_ms`: at most one per ~33 ms
@@ -2007,7 +2012,17 @@ pub async fn scan_directory_impl(
         // its own original index -- the output comes out in sorted order for
         // free, with no re-sort needed once concurrent workers finish out of
         // order.
+        //
+        // The work goes in another order (#687): the demos the analyzer cache
+        // has first, so the count jumps to "cached of total" at once, then
+        // the parses largest first, so no worker idles behind one big demo at
+        // the end.
         let total = list.len();
+        let plan = ::analysis::cache::WorkPlan::new(&native::analyzer_cache_root(), &list);
+        let cached = plan.cached() as u32;
+        let bytes_to_parse = plan.bytes_to_parse();
+        let parsed = std::sync::atomic::AtomicU32::new(0);
+        let bytes_parsed = std::sync::atomic::AtomicU64::new(0);
         let slots: Mutex<Vec<Option<SerializedDemo>>> =
             Mutex::new((0..total).map(|_| None).collect());
         let next_index = std::sync::atomic::AtomicUsize::new(0);
@@ -2023,12 +2038,16 @@ pub async fn scan_directory_impl(
         // still in flight rather than one that just finished (#433).
         let in_flight: Mutex<Vec<usize>> = Mutex::new(Vec::new());
         // ~33 ms telemetry throttle (CLAUDE.md), as ms since the scan began.
-        // Starts at u32::MAX so the first line always goes out.
+        // Starts at u32::MAX so the first line always goes out. `force` skips
+        // it for the lines a count must not wait on: the end of the cached
+        // batch and each parse's end.
         let scan_started = std::time::Instant::now();
         let last_emit_ms = std::sync::atomic::AtomicU32::new(u32::MAX);
-        let emit_progress = |done: u32, current: Option<&str>| {
+        let emit_progress = |done: u32, current: Option<&str>, force: bool| {
             let now_ms = scan_started.elapsed().as_millis().min(u32::MAX as u128 - 1) as u32;
-            if !progress_emit_due(&last_emit_ms, now_ms) {
+            if force {
+                last_emit_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
+            } else if !progress_emit_due(&last_emit_ms, now_ms) {
                 return;
             }
             let _ = app_handle.emit(
@@ -2036,8 +2055,13 @@ pub async fn scan_directory_impl(
                 serde_json::json!({
                     "scanned": done,
                     "found": found.load(std::sync::atomic::Ordering::Relaxed),
-                    "status": scan_status_line(done, total_files, current),
-                    "cancelled": false
+                    "status": scan_status_line(done, total_files, cached, current),
+                    "cancelled": false,
+                    "total": total_files,
+                    "cached": cached,
+                    "parsed": parsed.load(std::sync::atomic::Ordering::Relaxed),
+                    "bytes_to_parse": bytes_to_parse,
+                    "bytes_parsed": bytes_parsed.load(std::sync::atomic::Ordering::Relaxed),
                 }),
             );
         };
@@ -2054,6 +2078,9 @@ pub async fn scan_directory_impl(
                 let skipped = &skipped;
                 let in_flight = &in_flight;
                 let emit_progress = &emit_progress;
+                let plan = &plan;
+                let parsed = &parsed;
+                let bytes_parsed = &bytes_parsed;
                 let file_name_at = move |i: usize| {
                     list[i]
                         .file_name()
@@ -2070,10 +2097,12 @@ pub async fn scan_directory_impl(
                         if cancel_token.load(std::sync::atomic::Ordering::SeqCst) {
                             break;
                         }
-                        let idx = next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        if idx >= total {
+                        let Some(&idx) = plan
+                            .order
+                            .get(next_index.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+                        else {
                             break;
-                        }
+                        };
                         let file = &list[idx];
                         let file_name = file
                             .file_name()
@@ -2091,6 +2120,7 @@ pub async fn scan_directory_impl(
                         emit_progress(
                             completed.load(std::sync::atomic::Ordering::Relaxed),
                             Some(&file_name),
+                            false,
                         );
 
                         let scanned = scan_demo_for_highlights_with_analysis(file);
@@ -2177,6 +2207,12 @@ pub async fn scan_directory_impl(
                         }
                         slots.lock().unwrap_or_else(|p| p.into_inner())[idx] = serialized;
 
+                        let was_cached = plan.fresh[idx];
+                        if !was_cached {
+                            parsed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            bytes_parsed
+                                .fetch_add(plan.sizes[idx], std::sync::atomic::Ordering::Relaxed);
+                        }
                         let done = completed.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
                         let still_running = {
                             let mut running = in_flight.lock().unwrap_or_else(|p| p.into_inner());
@@ -2184,7 +2220,10 @@ pub async fn scan_directory_impl(
                             running.first().copied()
                         };
                         let current = still_running.map(file_name_at);
-                        emit_progress(done, current.as_deref());
+                        // A parse takes seconds, so each one reports; so does
+                        // the last cached demo, which the throttle could
+                        // otherwise hold back until the first parse ends.
+                        emit_progress(done, current.as_deref(), !was_cached || done == cached);
                     }
                 });
             }
@@ -3013,10 +3052,14 @@ mod tests {
     #[test]
     fn the_scan_status_line_names_a_demo_only_while_one_is_being_parsed() {
         assert_eq!(
-            scan_status_line(0, 1, Some("a.dem")),
+            scan_status_line(0, 1, 0, Some("a.dem")),
             "Scanning 0 / 1 — a.dem"
         );
-        assert_eq!(scan_status_line(1, 1, None), "Scanning 1 / 1");
+        assert_eq!(scan_status_line(1, 1, 0, None), "Scanning 1 / 1");
+        assert_eq!(
+            scan_status_line(3, 10, 2, Some("a.dem")),
+            "Scanning 3 / 10 (2 from the analyzer cache) — a.dem"
+        );
     }
 
     #[test]
