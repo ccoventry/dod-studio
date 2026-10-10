@@ -83,7 +83,7 @@ fn length_of_current_demo() -> Option<f32> {
     {
         return *length;
     }
-    let game_dir = res_dir().parent()?.to_path_buf();
+    let game_dir = dod_dir();
     let length = crate::demo_file::playback_seconds(&crate::streaks::demo_path(&game_dir, &name));
     *known = Some((name, length));
     length

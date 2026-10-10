@@ -2,7 +2,7 @@
 //! read and written by the HD page's map list.
 //!
 //! The file is the scripts' (`tools/hd/hdcommon.py`'s `map_patterns` and
-//! `select_maps`), in the install's `dod\dodstudio_hd` folder
+//! `select_maps`), in the install's HD folder (`super::hd_root`)
 //! (`hdcommon.user_file`, #385). One pattern per line, `#` starts a comment,
 //! `.bsp` is optional, case doesn't matter; `*` matches any run of
 //! characters and `?` exactly one (`fnmatch.fnmatchcase` on the lowercased
