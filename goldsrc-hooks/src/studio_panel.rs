@@ -1314,6 +1314,12 @@ fn res_dir() -> std::path::PathBuf {
     base.join(RES_DIR)
 }
 
+/// `<game>\dod`, where demos are named from: the layouts' folder can be
+/// in `dod_addon`, so it isn't this one's child.
+fn dod_dir() -> std::path::PathBuf {
+    crate::texture_hires::game_dir()
+}
+
 /// Whether the layouts live in `dod_addon`: only with `-addons`, and then as
 /// the HD files pick (`texture_hires::hd_home`).
 fn ui_in_addon(addons: bool, in_addon: bool, in_dod: bool) -> bool {
@@ -1768,7 +1774,7 @@ mod hook {
         if name.ends_with('/') || name.is_empty() {
             return None;
         }
-        Some(res_dir().parent()?.join(name))
+        Some(dod_dir().join(name))
     }
 
     /// The header facts of the demo a row names (a path from `dod/`).
@@ -1820,9 +1826,7 @@ mod hook {
             // The line above the list says which folder the list is in, and
             // is empty while folders are off.
             let line_text = match folders & 1 {
-                1 => res_dir().parent().map_or_else(String::new, |dod| {
-                    folder_line(dod, &crate::demo_list_folders::current_folder())
-                }),
+                1 => folder_line(&dod_dir(), &crate::demo_list_folders::current_folder()),
                 _ => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
@@ -2108,15 +2112,14 @@ mod hook {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
                         // then, and the tab lists again when it is done.
-                        let count = res_dir()
-                            .parent()
-                            .map(|dod| dod.join(name.trim().trim_matches('"')))
-                            .and_then(|folder| {
+                        let count = Some(dod_dir().join(name.trim().trim_matches('"'))).and_then(
+                            |folder| {
                                 crate::folder_counts::count(
                                     &folder,
                                     crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
                                 )
-                            });
+                            },
+                        );
                         folder_count =
                             Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
                     }

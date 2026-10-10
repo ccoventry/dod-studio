@@ -156,9 +156,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             show_filters(vgui, page, None);
             return;
         };
-        let Some(game_dir) = res_dir().parent().map(std::path::Path::to_path_buf) else {
-            return;
-        };
+        let game_dir = dod_dir();
         let path = streaks::demo_path(&game_dir, &name);
         streaks::request(&path);
         let Some((generation, status, percent)) = streaks::status() else {
