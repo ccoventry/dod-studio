@@ -231,9 +231,9 @@ pub struct CfgFatalRow {
     pub line: usize,
 }
 
-/// A command from `cfg_scan::NOOP_IN_INIT_COMMANDS` or
-/// `NOOP_EVERYWHERE_COMMANDS` found somewhere that has no effect — never
-/// blocking, just something the user should stop expecting to matter.
+/// A command from `cfg_scan::NOOP_IN_INIT_COMMANDS` found somewhere that has
+/// no effect — never blocking, just something the user should stop expecting
+/// to matter.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NoopCommandRow {
@@ -242,6 +242,31 @@ pub struct NoopCommandRow {
     /// "Initial Commands", "Scheduled Commands", or "<file>, line <n>" for a
     /// config the engine executes.
     pub source: String,
+}
+
+/// An Initial or Scheduled Command the engine's demo command filter drops
+/// (`cfg_scan::demo_filter_rule`, #679). Never blocking: the capture still
+/// works, the command just never runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilteredCommandRow {
+    pub command: String,
+    /// `DemoFilterRule::kind`: "nameContains", "nameStartsWith",
+    /// "lineStartsWith", "lineContains" or "wordStartsWith".
+    pub rule: String,
+    /// The text the rule matched, e.g. "_set".
+    pub pattern: String,
+}
+
+fn filtered_rows(commands: &[String]) -> Vec<FilteredCommandRow> {
+    native::patch::cfg_scan::demo_filtered_commands(commands)
+        .into_iter()
+        .map(|f| FilteredCommandRow {
+            command: f.command,
+            rule: f.rule.kind().to_string(),
+            pattern: f.rule.pattern().to_string(),
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -288,15 +313,16 @@ pub struct CfgReport {
     /// Initial Commands overriding — `ring_limit` gives both equal standing,
     /// same as `capture_fov_resolved` does for `mirv_fov`.
     pub decal_flush_is_noop: bool,
-    /// Commands that do nothing wherever they were found — see
-    /// `cfg_scan::NOOP_IN_INIT_COMMANDS` / `NOOP_EVERYWHERE_COMMANDS`. Found
-    /// in Initial Commands, a config the engine executes, or Scheduled
-    /// Commands (the last only for `NOOP_EVERYWHERE_COMMANDS` — GoldSrc drops
-    /// those from its own message stream regardless of when they arrive;
-    /// `NOOP_IN_INIT_COMMANDS` entries are dangerous rather than inert once
-    /// scheduled, so they show up in `banned_scheduled` instead).
+    /// Commands that do nothing — see `cfg_scan::NOOP_IN_INIT_COMMANDS`.
+    /// Found in Initial Commands or a config the engine executes. Scheduled,
+    /// those entries are dangerous rather than inert, so they show up in
+    /// `banned_scheduled` instead.
     pub noop_init: Vec<NoopCommandRow>,
-    pub noop_scheduled: Vec<NoopCommandRow>,
+    /// Initial / Scheduled Commands the engine's demo command filter drops
+    /// (#679). Both lists reach the game as demo frames, so both are
+    /// filtered; a config the engine execs is not, so configs are not checked.
+    pub filtered_init: Vec<FilteredCommandRow>,
+    pub filtered_scheduled: Vec<FilteredCommandRow>,
     /// `cfg_scan::FATAL_CVARS` entries a config sets wrong -- DoD's own
     /// client quits the game outright the moment it renders a HUD frame with
     /// one of these not at its required value. Not blocking (nothing here can
@@ -462,11 +488,7 @@ pub async fn scan_game_configs(
                 .collect();
 
         // Does nothing wherever found — see NOOP_IN_INIT_COMMANDS's doc
-        // comment for why. Only mirv_movie_filename is checked against the
-        // config scan: `exec`/`quit` (NOOP_EVERYWHERE_COMMANDS) can never
-        // appear there in the first place — the scanner follows a config's
-        // own `exec` as the real exec chain it is rather than recording it as
-        // a setting, and `quit` takes no argument to record as one either.
+        // comment for why.
         let mut noop_init: Vec<NoopCommandRow> =
             native::patch::cfg_scan::noop_commands_in_init(&init_commands)
                 .into_iter()
@@ -505,19 +527,10 @@ pub async fn scan_game_configs(
                 .into_iter()
                 .map(|(cvar, command)| BannedCommandRow { cvar, command }),
         );
-        // GoldSrc drops these from its own message stream regardless of when
-        // they arrive — see NOOP_EVERYWHERE_COMMANDS. mirv_movie_filename is
-        // not included here: scheduled, it is dangerous rather than inert
-        // (already reported above via banned_scheduled).
-        let noop_scheduled: Vec<NoopCommandRow> =
-            native::patch::cfg_scan::noop_commands_in_scheduled(&command_texts)
-                .into_iter()
-                .map(|(cvar, command)| NoopCommandRow {
-                    cvar,
-                    command,
-                    source: "Scheduled Commands".to_string(),
-                })
-                .collect();
+        // Dropped by the engine on the way in (#679), wherever in the demo
+        // they arrive — see `cfg_scan::demo_filter_rule`.
+        let filtered_init = filtered_rows(&init_commands);
+        let filtered_scheduled = filtered_rows(&command_texts);
         // Every scheduled `r_decals` breaks the flush, however many there are,
         // so the hazard list is not deduplicated the way the overrides are.
         for (cvar, command) in native::patch::cfg_scan::mid_demo_hazards(&command_texts) {
@@ -532,6 +545,7 @@ pub async fn scan_game_configs(
 
         // The two value rules (#216). Scheduled commands already reported as
         // hazards or banned are left out: each has its own, louder warning.
+        // So are the ones the demo filter drops, which set nothing at all.
         let flagged: std::collections::HashSet<String> = custom
             .iter()
             .map(|w| w.cvar.to_lowercase())
@@ -540,6 +554,7 @@ pub async fn scan_game_configs(
         let scheduled: Vec<native::patch::cfg_scan::ScheduledCommand> =
             application_order(&custom_commands)
                 .into_iter()
+                .filter(|c| native::patch::cfg_scan::demo_filter_rule(&c.command).is_none())
                 .filter(|c| {
                     native::patch::cfg_scan::assigned_cvar(&c.command)
                         .is_none_or(|(cvar, _)| !flagged.contains(&cvar.to_lowercase()))
@@ -550,10 +565,15 @@ pub async fn scan_game_configs(
                     offset_seconds: c.offset_seconds,
                 })
                 .collect();
+        // Initial Commands the demo filter drops set nothing either. The
+        // pipeline's own additions all get through (pinned by a builder test),
+        // so dropping from the whole list keeps the user's count right.
+        let passes = |c: &&String| native::patch::cfg_scan::demo_filter_rule(c).is_none();
+        let applied_init: Vec<String> = effective_commands.iter().filter(passes).cloned().collect();
         let values = native::patch::cfg_scan::value_warnings(
             &scan,
-            &effective_commands,
-            init_commands.len(),
+            &applied_init,
+            init_commands.iter().filter(passes).count(),
             &scheduled,
         );
         let conflicts: Vec<ValueConflictRow> = values
@@ -602,7 +622,8 @@ pub async fn scan_game_configs(
             decal_default_ring,
             decal_flush_is_noop,
             noop_init,
-            noop_scheduled,
+            filtered_init,
+            filtered_scheduled,
             fatal_cvars,
             config_cfg_writable,
         }
@@ -1329,35 +1350,73 @@ mod tests {
         );
     }
 
-    #[test]
-    fn exec_and_quit_in_initial_commands_are_reported_as_noops() {
-        let r = report(
-            "noop_exec_quit_init",
-            &["exec somefile.cfg", "quit"],
-            &[],
-            120,
-        );
-
-        let flagged: Vec<&str> = r.noop_init.iter().map(|n| n.cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["exec", "quit"], "{:?}", r.noop_init);
-        assert!(r.noop_init.iter().all(|n| n.source == "Initial Commands"));
+    fn filtered(rows: &[FilteredCommandRow]) -> Vec<(&str, &str, &str)> {
+        rows.iter()
+            .map(|f| (f.command.as_str(), f.rule.as_str(), f.pattern.as_str()))
+            .collect()
     }
 
     #[test]
-    fn exec_and_quit_in_scheduled_commands_are_reported_as_noops() {
+    fn initial_commands_the_demo_filter_drops_are_reported() {
         let r = report(
-            "noop_exec_quit_scheduled",
+            "filtered_init",
+            &["exec somefile.cfg", "quit", "sensitivity 3"],
             &[],
-            &["exec somefile.cfg", "quit"],
             120,
         );
 
-        let flagged: Vec<&str> = r.noop_scheduled.iter().map(|n| n.cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["exec", "quit"], "{:?}", r.noop_scheduled);
+        assert_eq!(
+            filtered(&r.filtered_init),
+            vec![
+                ("exec somefile.cfg", "lineContains", "exec"),
+                ("quit", "nameContains", "quit"),
+            ]
+        );
+        assert!(r.noop_init.is_empty(), "{:?}", r.noop_init);
+        assert!(r.filtered_scheduled.is_empty());
+    }
+
+    #[test]
+    fn scheduled_commands_the_demo_filter_drops_are_reported() {
+        let r = report(
+            "filtered_scheduled",
+            &[],
+            &["mirv_matte_setcolor 255 0 255", "echo ok", "alias a b"],
+            120,
+        );
+
+        assert_eq!(
+            filtered(&r.filtered_scheduled),
+            vec![
+                ("mirv_matte_setcolor 255 0 255", "nameContains", "_set"),
+                ("alias a b", "lineStartsWith", "alias"),
+            ]
+        );
+        assert!(r.filtered_init.is_empty());
+    }
+
+    #[test]
+    fn a_scheduled_command_the_demo_filter_drops_sets_no_value() {
+        // A dropped command never runs, so it cannot conflict with anything.
+        let r = report(
+            "filtered_no_conflict",
+            &["cl_killsound 0", "sensitivity 2"],
+            &["cl_killsound 1", "sensitivity 3"],
+            120,
+        );
+
+        assert_eq!(r.filtered_init.len(), 1, "{:?}", r.filtered_init);
+        assert_eq!(r.filtered_scheduled.len(), 1, "{:?}", r.filtered_scheduled);
+        // The commands that do run are still compared.
         assert!(
-            r.noop_scheduled
-                .iter()
-                .all(|n| n.source == "Scheduled Commands")
+            r.conflicts.iter().any(|c| c.cvar == "sensitivity"),
+            "{:?}",
+            r.conflicts
+        );
+        assert!(
+            r.conflicts.iter().all(|c| c.cvar != "cl_killsound"),
+            "{:?}",
+            r.conflicts
         );
     }
 
@@ -1370,7 +1429,11 @@ mod tests {
             120,
         );
 
-        assert!(r.noop_scheduled.is_empty(), "{:?}", r.noop_scheduled);
+        assert!(
+            r.filtered_scheduled.is_empty(),
+            "{:?}",
+            r.filtered_scheduled
+        );
         assert!(
             r.banned_scheduled
                 .iter()
