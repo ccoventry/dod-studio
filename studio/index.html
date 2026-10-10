@@ -786,6 +786,7 @@
               <div class="auditor-tabs" role="tablist">
                 <button type="button" class="auditor-tab-btn active" role="tab" aria-selected="true" data-auditor-tab="duplicates" data-str="AUDITOR.TAB_DUPLICATES">Duplicates</button>
                 <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="split" data-str="AUDITOR.TAB_SPLIT">Split Maps</button>
+            <button type="button" class="auditor-tab-btn" role="tab" aria-selected="false" data-auditor-tab="rename" data-str="AUDITOR.TAB_RENAME">Rename Demos</button>
               </div>
             </div>
           </div>
@@ -849,6 +850,61 @@
                 <div id="split-list" class="split-list"></div>
               </div>
             </div>
+          </div>
+
+          <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
+          <div class="auditor-tab-panel" data-auditor-panel="rename" hidden>
+          <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
+            <div class="panel-header flex-between">
+              <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
+            </div>
+            <div class="panel-body">
+              <p class="rename-hint" data-str="DEMO_RENAME.HINT"></p>
+              <div class="input-row">
+                <label for="rename-pov-template" class="rename-label" data-str="DEMO_RENAME.POV_LABEL">POV demos:</label>
+                <input type="text" id="rename-pov-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-pov-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-pov-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div class="input-row">
+                <label for="rename-hltv-template" class="rename-label" data-str="DEMO_RENAME.HLTV_LABEL">HLTV demos:</label>
+                <input type="text" id="rename-hltv-template" class="rename-template" spellcheck="false" autocomplete="off" />
+                <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
+              </div>
+              <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
+              <div id="rename-chips" class="rename-chips"></div>
+              <label class="rename-lowercase-label" data-str-title="DEMO_RENAME.LOWERCASE_TITLE"><input type="checkbox" id="rename-lowercase" /> <span data-str="DEMO_RENAME.LOWERCASE_LABEL">Lowercase the whole name</span></label>
+              <div class="row-inputs">
+                <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
+                <button id="rename-cancel-btn" disabled data-str="DEMO_RENAME.CANCEL_BUTTON">Cancel</button>
+                <button id="rename-apply-btn" class="primary-btn" disabled data-str="DEMO_RENAME.APPLY_BUTTON">Rename</button>
+                <button id="rename-undo-btn" disabled data-str="DEMO_RENAME.UNDO_BUTTON">Undo Last Rename</button>
+              </div>
+              <div id="rename-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <p class="status-indicator"><span id="rename-status"></span></p>
+            </div>
+            <div class="table-wrapper" style="max-height: 400px;">
+              <table id="rename-table" class="analyzer-table rename-table">
+                <colgroup>
+                  <col class="rename-col-check" />
+                  <col />
+                  <col />
+                  <col class="rename-col-type" />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th class="rename-center"><input type="checkbox" id="rename-select-all" checked /></th>
+                    <th data-str="DEMO_RENAME.COL_CURRENT">Current Name</th>
+                    <th data-str="DEMO_RENAME.COL_NEW">New Name</th>
+                    <th class="rename-center" data-str="DEMO_RENAME.COL_TYPE">Type</th>
+                  </tr>
+                </thead>
+                <tbody id="rename-body">
+                  <tr><td colspan="4" class="table-empty" data-str="DEMO_RENAME.TABLE_EMPTY">Choose a Target Folder above and click List Demos.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           </div>
         </section>
 

@@ -32,6 +32,7 @@ import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
+import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
@@ -419,6 +420,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   initAuditorPane();
   initAuditorTabs();
   initSplitPane();
+  initDemoRenamePane({
+    projectTeams: () => projectTeams,
+    onChange: () => persistAppSettings(),
+  });
   initHdPane();
   initBlenderPane();
   initOverviewsPane();
@@ -598,6 +603,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
       clip_name_template: getClipNameTemplate(),
+      demo_rename_pov_template: getDemoRenameTemplates().pov,
+      demo_rename_hltv_template: getDemoRenameTemplates().hltv,
+      demo_rename_lowercase: getDemoRenameTemplates().lowercase,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -756,6 +764,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
       setClipNameTemplate(settings.clip_name_template);
+      setDemoRenameTemplates(
+        settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
+      );
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;

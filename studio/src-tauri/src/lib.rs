@@ -4,6 +4,7 @@ mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod demo_cache_cmd;
+mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
 mod hd_manager;
@@ -12,6 +13,7 @@ mod map_manager;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
+mod preview_in_place;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
@@ -681,6 +683,7 @@ pub fn run() {
         .manage(AuditManager::default())
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
+        .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
@@ -773,6 +776,11 @@ pub fn run() {
             combine_manager::combine_plan,
             combine_manager::combine_clips,
             combine_manager::combine_cancel,
+            demo_rename_manager::demo_rename_list,
+            demo_rename_manager::demo_rename_cancel,
+            demo_rename_manager::demo_rename_apply,
+            demo_rename_manager::demo_rename_undo,
+            demo_rename_manager::demo_rename_undoable,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,

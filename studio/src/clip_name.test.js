@@ -41,6 +41,14 @@ describe('parseTemplate', () => {
     expect(parseTemplate('{faction:lower}_{map:upper}_{opponent:lower|mix}_{row}').errors).toEqual([]);
   });
 
+  it('reads placeholder and modifier names in any case, and keeps the fallback as typed', () => {
+    expect(parseTemplate('{MAP}_{Map:UPPER}_{Opponent|MiX}_{row}').errors).toEqual([]);
+    const s = streak();
+    const v = highlightValues(demo([s]), s);
+    expect(buildName(parseTemplate('{MAP}_{row}'), v).name).toBe(buildName(parseTemplate('{map}_{row}'), v).name);
+    expect(buildName(parseTemplate('{Team_Name|MiX}_{row}'), v).name).toBe('MiX_01');
+  });
+
   it('flags unknown placeholders and modifiers, braces and bad characters', () => {
     expect(parseTemplate('{oponent}_{row}').errors[0]).toContain('{oponent}');
     expect(parseTemplate('{map:title}_{row}').errors[0]).toContain('{map:title}');
@@ -85,6 +93,14 @@ describe('buildName', () => {
     const { name } = buildName(parseTemplate('{player}_v_{opponent:lower|mix}_{victims}_{faction:upper}'), v);
     expect(name).toBe('krod_v_mix_dicE_ Hub-bajko-element_ALLIES');
     expect(buildName(parseTemplate('{team_name}_{row}'), v).name).toBe('unknown_01');
+  });
+
+  it(':first keeps the first word, read before the value is cleaned', () => {
+    const s = streak();
+    const v = { ...highlightValues(demo([s]), s), player: 'm00cat :D' };
+    expect(buildName(parseTemplate('{player:first}_{row}'), v).name).toBe('m00cat_01');
+    // A one-word value is kept whole; a missing one still falls back.
+    expect(buildName(parseTemplate('{map:first}_{team_name:first}_{row}'), v).name).toMatch(/^[a-z0-9]+_unknown_01$/);
   });
 
   it('cuts victims, demo, then weapons to fit, never row or time', () => {

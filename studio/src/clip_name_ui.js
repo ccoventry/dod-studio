@@ -4,7 +4,7 @@
 // the selected highlight.
 
 import {
-  DEFAULT_TEMPLATE, PLACEHOLDERS, MODIFIERS, NAME_WARN_LENGTH,
+  DEFAULT_TEMPLATE, PLACEHOLDERS, MODIFIERS, WITH_FALLBACK, NAME_WARN_LENGTH,
   parseTemplate, buildName, highlightValues, clipNameFor, maxNameLength,
 } from './clip_name.js';
 import { STRINGS } from './strings.js';
@@ -46,12 +46,14 @@ function insertAtCursor(text) {
   if (!input) return;
   const start = input.selectionStart ?? input.value.length;
   const end = input.selectionEnd ?? start;
-  // A modifier goes inside the placeholder the cursor sits just after.
-  const intoPlaceholder = text.startsWith(':') && start === end && input.value[end - 1] === '}';
+  // A modifier or a | goes inside the placeholder the cursor sits just
+  // after; after a |, the cursor stays inside for the word to be typed.
+  const fallback = text === '|';
+  const intoPlaceholder = (text.startsWith(':') || fallback) && start === end && input.value[end - 1] === '}';
   const from = intoPlaceholder ? end - 1 : start;
   const to = intoPlaceholder ? end - 1 : end;
   input.value = input.value.slice(0, from) + text + input.value.slice(to);
-  const caret = from + text.length + (intoPlaceholder ? 1 : 0);
+  const caret = from + text.length + (intoPlaceholder && !fallback ? 1 : 0);
   input.setSelectionRange(caret, caret);
   input.focus();
   input.dispatchEvent(new Event('input'));
@@ -59,6 +61,12 @@ function insertAtCursor(text) {
 }
 
 let chipsKey = null;
+
+/** The | chip reads "|fallback" but inserts a bare |, for the word to follow. */
+function fallbackChip(button) {
+  button.textContent = '|fallback';
+  return button;
+}
 
 function renderChips(values) {
   const box = document.querySelector('#config-clip-name-chips');
@@ -87,6 +95,7 @@ function renderChips(values) {
     ...PLACEHOLDERS.map((name) => chip(`{${name}}`,
       STRINGS.CLIP_NAME.chipTitle(STRINGS.CLIP_NAME.DESCRIPTIONS[name], values?.[name]))),
     ...MODIFIERS.map((m) => chip(`:${m}`, STRINGS.CLIP_NAME.DESCRIPTIONS[m])),
+    fallbackChip(chip('|', STRINGS.CLIP_NAME.fallbackTitle(PLACEHOLDERS.filter((n) => WITH_FALLBACK.has(n)).map((n) => `{${n}}`).join(' ')))),
   );
 }
 
