@@ -19,8 +19,30 @@ export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
 export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'mirv_agr'];
-export const NOOP_EVERYWHERE = ['exec', 'quit'];
 export const NOOP_IN_INIT = ['mirv_movie_filename'];
+// The game's filter for commands a demo carries (#679): cfg_scan's DEMO_FILTER_*.
+export const DEMO_FILTER_NAME_CONTAINS = ['bind', '_set', 'unbind', 'retry', 'quit', '_restart', 'motd_write',
+  'motdfile', 'kill', 'exit', 'writecfg', 'cl_filterstuffcmd', 'unbindall'];
+export const DEMO_FILTER_NAME_STARTS_WITH = ['connect'];
+export const DEMO_FILTER_LINE_STARTS_WITH = ['alias '];
+export const DEMO_FILTER_LINE_CONTAINS = ['bind ', 'unbind ', '_restart', 'exit', 'writecfg', 'cl_filterstuffcmd',
+  'unbindall', 'exec'];
+export const DEMO_FILTER_WORD_STARTS_WITH = ['connect ', 'motd_write', 'motdfile', 'retry', '_set', 'quit', 'kill'];
+
+/** What in `name` makes the game drop a command by that name from a demo,
+ *  or null. Only the name is known here, so it stands for the whole line:
+ *  `alias` always starts an alias line, and a name with `exec` in it puts
+ *  `exec` on the line. The word rule needs arguments to add anything to the
+ *  name rules, so it is not checked here. Initial and Scheduled Commands
+ *  alike, since both reach the game as demo frames. */
+export function droppedFromDemo(name) {
+  const n = String(name).toLowerCase();
+  return DEMO_FILTER_NAME_CONTAINS.find((p) => n.includes(p))
+    ?? DEMO_FILTER_NAME_STARTS_WITH.find((p) => n.startsWith(p))
+    ?? DEMO_FILTER_LINE_STARTS_WITH.map((p) => p.trim()).find((p) => n === p)
+    ?? DEMO_FILTER_LINE_CONTAINS.map((p) => p.trim()).find((p) => n.includes(p))
+    ?? null;
+}
 
 /** Every name, once: `{ name, source, kind, builds, hint }`. */
 const ALL = (() => {
@@ -39,7 +61,8 @@ export function tierNote(name, { scheduled }) {
   if (OWNED_BY_STUDIO.includes(name)) return { level: 'refused', text: S.OWNED_BY_STUDIO };
   if (GAME_QUITS_OVER.includes(name)) return { level: 'refused', text: S.GAME_QUITS_OVER };
   if (scheduled && SCHEDULED_BANNED.includes(name)) return { level: 'refused', text: S.SCHEDULED_BANNED };
-  if (NOOP_EVERYWHERE.includes(name)) return { level: 'noop', text: S.NOOP_EVERYWHERE };
+  const dropped = droppedFromDemo(name);
+  if (dropped) return { level: 'noop', text: S.droppedFromDemo(dropped) };
   if (!scheduled && NOOP_IN_INIT.includes(name)) return { level: 'noop', text: S.NOOP_IN_INIT };
   if (MID_DEMO_HAZARDS.includes(name)) return { level: 'warned', text: S.HAS_A_SETTING };
   return null;

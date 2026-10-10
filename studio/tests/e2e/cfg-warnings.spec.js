@@ -24,7 +24,8 @@ const EMPTY_REPORT = {
   decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
-  noopScheduled: [],
+  filteredInit: [],
+  filteredScheduled: [],
   fatalCvars: [],
   configCfgWritable: false,
 };
@@ -181,5 +182,34 @@ test.describe('value rules (#216)', () => {
     const row = banner.locator('li code');
     await expect(row).toContainText('the first clip records at 10 (movie.cfg, line 3)');
     await expect(row).toContainText('every later clip at 1 (Scheduled, 0.5s after)');
+  });
+});
+
+// #679: the engine drops some commands a demo carries without a word.
+test.describe('demo command filter', () => {
+  test('a dropped Scheduled Command is named with the reason, under Scheduled Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      filteredScheduled: [{ command: 'mirv_matte_setcolor 255 0 255', rule: 'nameContains', pattern: '_set' }],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText('The game drops these commands without running them:');
+    const row = banner.locator('li code');
+    await expect(row).toHaveCount(1);
+    await expect(row).toContainText("mirv_matte_setcolor 255 0 255 — dropped: its name contains '_set'");
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a dropped Initial Command shows under Initial Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      filteredInit: [{ command: 'exec movie.cfg', rule: 'lineContains', pattern: 'exec' }],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText("exec movie.cfg — dropped: it contains 'exec'");
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
   });
 });

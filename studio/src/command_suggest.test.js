@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  suggestions, typedName, acceptSuggestion, tierNote,
-  OWNED_BY_STUDIO, GAME_QUITS_OVER, SCHEDULED_BANNED, MID_DEMO_HAZARDS, NOOP_EVERYWHERE, NOOP_IN_INIT,
+  suggestions, typedName, acceptSuggestion, tierNote, droppedFromDemo,
+  OWNED_BY_STUDIO, GAME_QUITS_OVER, SCHEDULED_BANNED, MID_DEMO_HAZARDS, NOOP_IN_INIT,
+  DEMO_FILTER_NAME_CONTAINS, DEMO_FILTER_NAME_STARTS_WITH, DEMO_FILTER_LINE_STARTS_WITH,
+  DEMO_FILTER_LINE_CONTAINS, DEMO_FILTER_WORD_STARTS_WITH,
 } from './command_suggest.js';
 import { DODSTUDIO_NAMES } from './console_commands_data.js';
 
@@ -43,6 +45,48 @@ describe('suggestions (#215)', () => {
     expect(tierNote('exec', { scheduled: true }).level).toBe('noop');
     expect(tierNote('sensitivity', { scheduled: true })).toBeNull();
   });
+
+  it("says when the game drops a name from a demo (#679), in either list", () => {
+    for (const scheduled of [false, true]) {
+      const note = tierNote('mirv_matte_setcolor', { scheduled });
+      expect(note.level).toBe('noop');
+      expect(note.text).toContain("'_set'");
+    }
+    expect(tierNote('kill', { scheduled: true }).text).toContain("'kill'");
+  });
+});
+
+describe('droppedFromDemo (#679)', () => {
+  it('finds a filtered piece anywhere in the name, any case', () => {
+    expect(droppedFromDemo('mirv_matte_setcolor')).toBe('_set');
+    expect(droppedFromDemo('MIRV_Draw_SV_Hitboxes_SetUColor')).toBe('_set');
+    expect(droppedFromDemo('cl_killsound')).toBe('kill');
+    expect(droppedFromDemo('unbindall')).toBe('bind');
+    expect(droppedFromDemo('writecfg')).toBe('writecfg');
+  });
+
+  it('drops a name starting with connect, but not reconnect', () => {
+    expect(droppedFromDemo('connect')).toBe('connect');
+    expect(droppedFromDemo('reconnect')).toBeNull();
+  });
+
+  it('drops alias and anything with exec in it', () => {
+    expect(droppedFromDemo('alias')).toBe('alias');
+    expect(droppedFromDemo('aliases')).toBeNull();
+    expect(droppedFromDemo('exec')).toBe('exec');
+  });
+
+  it('lets ordinary names through', () => {
+    for (const name of ['echo', 'sensitivity', 'mirv_fov', 'spec_autodirector', 'dodstudio_spec_lock']) {
+      expect(droppedFromDemo(name)).toBeNull();
+    }
+  });
+
+  it('never fires for a name another tier already covers', () => {
+    for (const name of [...OWNED_BY_STUDIO, ...GAME_QUITS_OVER, ...SCHEDULED_BANNED, ...MID_DEMO_HAZARDS, ...NOOP_IN_INIT]) {
+      expect(droppedFromDemo(name)).toBeNull();
+    }
+  });
 });
 
 describe('typing', () => {
@@ -70,7 +114,11 @@ describe('kept in step with the code', () => {
     expect([...OWNED_BY_STUDIO, ...GAME_QUITS_OVER].sort()).toEqual(rustList(cfgScan, 'BANNED_COMMANDS'));
     expect([...SCHEDULED_BANNED].sort()).toEqual(rustList(cfgScan, 'SCHEDULED_BANNED_COMMANDS'));
     expect([...MID_DEMO_HAZARDS].sort()).toEqual(rustList(cfgScan, 'MID_DEMO_HAZARDS'));
-    expect([...NOOP_EVERYWHERE].sort()).toEqual(rustList(cfgScan, 'NOOP_EVERYWHERE_COMMANDS'));
+    expect([...DEMO_FILTER_NAME_CONTAINS].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_NAME_CONTAINS'));
+    expect([...DEMO_FILTER_NAME_STARTS_WITH].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_NAME_STARTS_WITH'));
+    expect([...DEMO_FILTER_LINE_STARTS_WITH].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_LINE_STARTS_WITH'));
+    expect([...DEMO_FILTER_LINE_CONTAINS].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_LINE_CONTAINS'));
+    expect([...DEMO_FILTER_WORD_STARTS_WITH].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_WORD_STARTS_WITH'));
     expect([...NOOP_IN_INIT].sort()).toEqual(rustList(cfgScan, 'NOOP_IN_INIT_COMMANDS'));
   });
 
