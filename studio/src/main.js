@@ -1,14 +1,10 @@
 import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
-  scanDirectory,
   calculateExportPoolSpace,
-  cancelScan,
   getSettings,
   saveSettings,
-  logFrontendEvent,
   openActivityLog,
   checkHlaeFfmpeg,
   linkHlaeFfmpeg,
@@ -18,7 +14,7 @@ import {
 } from './ipc_bridge.js';
 import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
-import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
+import { initMapWarnings, resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
 import { renderDetailView, initDetailPane } from './detail_pane.js';
@@ -32,7 +28,7 @@ import { initAuditorTabs } from './auditor_tabs.js';
 import { initSplitPane } from './split_pane.js';
 import { initCombineClips } from './combine_clips.js';
 import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
-import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
+import { initThemedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
 import { initBlenderPane } from './blender_pane.js';
@@ -40,10 +36,9 @@ import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
-import { preserveHighlightState, isDemoTracked } from './take_index.js';
-import { emptyProjectTeams, demoHasTeams } from './project_teams.js';
-import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
+import { emptyProjectTeams } from './project_teams.js';
+import { initTeamsPane } from './teams_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -57,10 +52,10 @@ import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
-import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
+import { createQueueScan } from './queue_scan.js';
 import { createProjectSession } from './project_session.js';
-import { splitIdenticalCopies } from './demo_copies.js';
+import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
@@ -409,7 +404,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
     onChange: markProjectDirty,
-    // triggerAutoScan is a hoisted declaration further down this scope.
+    // triggerAutoScan is declared further down (queue_scan.js).
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
 
@@ -1134,210 +1129,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
   }
 
-  // ── scan_progress event listener (registered once on load) ────────────────
-  let unlistenScanProgress = null;
-  listen('scan_progress', (event) => {
-    const p = event.payload || {};
-    const scanStatusEl = document.querySelector('#scan-status');
-    const cancelScanBtn = document.querySelector('#cancel-scan-btn');
-    const masterTableBody = document.querySelector('#master-demo-table-body');
-
-    // Demos the scan could not read (#23). Only the final event carries it.
-    const skipped = Array.isArray(p.skipped) ? p.skipped : [];
-    if (skipped.length > 0) {
-      console.warn('Scan skipped unreadable demos:', skipped);
-      showToast(STRINGS.MAIN.skippedDemosToast(skipped), 'warning', 10000);
-    }
-
-    if (p.cancelled) {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.cancelledStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
-      if (cancelScanBtn) cancelScanBtn.disabled = true;
-    } else if (p.status === 'Complete') {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.readyFoundStatus(p.found) + STRINGS.MAIN.skippedStatusSuffix(skipped.length);
-      if (cancelScanBtn) cancelScanBtn.disabled = true;
-    } else {
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.statusGeneric(p.status);
-      if (cancelScanBtn) cancelScanBtn.disabled = false;
-    }
-  }).then(fn => { unlistenScanProgress = fn; });
-
-  // ── Cancel Scan button ────────────────────────────────────────────────────
-  const cancelScanBtn = document.querySelector('#cancel-scan-btn');
-  if (cancelScanBtn) {
-    cancelScanBtn.disabled = true;
-    cancelScanBtn.addEventListener('click', async () => {
-      cancelScanBtn.disabled = true;
-      try {
-        await cancelScan();
-        showToast(STRINGS.MAIN.SCAN_CANCEL_REQUESTED_TOAST, 'info');
-      } catch (_) { /* already toasted in ipc_bridge */ }
-    });
-  }
-
-  // Scans only the given paths and merges the results into the existing
-  // master list (replacing entries with matching `path`, appending new ones).
-  // `scanPaths` is the app-wide pinned-folder list (settings' pinned_folders,
-  // also the Demo Analyzer's Pinned tier) -- it must NOT be re-walked on every
-  // add, or every scan re-processes every folder ever added across the app's
-  // lifetime. Capture's output folders are a separate list (targetDrives).
-  //
-  // Resolves true when the scan ran (a cancelled one included), false when it
-  // failed -- e.g. every picked path is gone, which the backend reports (#432).
-  // `pickedFiles`: the paths are files the user picked one by one (+ Add
-  // Demo Files), so a copy of a queued demo is offered in its place rather
-  // than only skipped (#21).
-  async function triggerAutoScan(pathsToScan, { pickedFiles = false } = {}) {
-    if (!pathsToScan || pathsToScan.length === 0) return false;
-
-    const scanStatusEl = document.querySelector('#scan-status');
-    const scanSpinnerEl = document.querySelector('#scan-spinner');
-    const addFilesBtn = document.querySelector('#add-files-btn');
-    const addFolderBtn = document.querySelector('#add-folder-btn');
-    const cancelScanBtnInner = document.querySelector('#cancel-scan-btn');
-
-    if (addFilesBtn) addFilesBtn.disabled = true;
-    if (addFolderBtn) addFolderBtn.disabled = true;
-    if (cancelScanBtnInner) cancelScanBtnInner.disabled = false;
-    if (scanSpinnerEl) scanSpinnerEl.style.display = 'inline-block';
-    if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
-    showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
-
-    const masterTableBody = document.querySelector('#master-demo-table-body');
-    if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="8">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
-
-    try {
-      // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key, no map_name:
-      // saved before clip names, #441, no teams: #445, or no map list: #217)
-      // are scanned.
-      const known = currentScannedDemos
-        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined)
-        .map((d) => ({ path: d.path, file_key: d.file_key }));
-      const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
-      // An identical copy under another name would be a second row for the
-      // same demo, capturing every highlight twice (#21). The scan skips them
-      // by key before parsing (`unparsedCopies`, each naming the queued or
-      // scanned demo it copies); the split below is a fallback for any that
-      // reach here parsed.
-      const { keep: newlyScanned, copies } = splitIdenticalCopies(currentScannedDemos, scanned);
-      unparsedCopies.forEach((c) => {
-        const sameAs = c.queued
-          ? currentScannedDemos.find((d) => samePath(d.path, c.same_as))
-          : newlyScanned.find((d) => samePath(d.path, c.same_as));
-        if (sameAs) copies.push({ demo: { path: c.path, name: fileNameOf(c.path) }, sameAs, queued: Boolean(c.queued) });
-      });
-      // The frontend fallback's copies are all of queued demos.
-      copies.forEach((c) => { if (c.queued === undefined) c.queued = currentScannedDemos.includes(c.sameAs); });
-
-      // Merge: replace any existing demo with the same path, append new ones.
-      // (Prior behavior replaced the whole master list with the result of
-      // re-scanning everything in `scanPaths`, which is what caused a single
-      // "Add Demo Files" click to report hundreds of demos.)
-      const indexByPath = new Map(currentScannedDemos.map((d, i) => [d.path, i]));
-      newlyScanned.forEach((demo) => {
-        const existingIdx = indexByPath.get(demo.path);
-        if (existingIdx !== undefined) {
-          // A re-scan produces brand new streak objects, so replacing
-          // outright would wipe every status, selection, note and Kill
-          // Range edit on this demo — carry that user-owned state across by
-          // highlight uid instead.
-          currentScannedDemos[existingIdx] = preserveHighlightState(currentScannedDemos[existingIdx], demo);
-        } else {
-          indexByPath.set(demo.path, currentScannedDemos.length);
-          currentScannedDemos.push(demo);
-        }
-      });
-
-      // footer is also updated on the Complete scan_progress event, but set
-      // it here in case the event arrives before renderMasterList finishes.
-      updateDemoFooter(currentScannedDemos);
-      if (newlyScanned.length > 0) markProjectDirty();
-      showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
-      selectedDemoIdx = newlyScanned.length > 0
-        ? currentScannedDemos.indexOf(newlyScanned[0])
-        : (currentScannedDemos.length > 0 ? 0 : null);
-      // renderMasterList calls this with (null, null) whenever the queue is
-      // empty (e.g. after Clear All) — selectDemoAndRenderDetail resets the
-      // telemetry UI instead of dereferencing a demo that isn't there.
-      renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
-      if (selectedDemoIdx !== null) {
-        selectDemoAndRenderDetail(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
-      }
-      // Reads 544 bytes per demo and one map file per distinct map, so it runs
-      // after the scan rather than inside it. Not awaited: the queue is already
-      // usable, and a demo whose map is missing is still worth listing.
-      refreshMapWarnings(
-        newlyScanned.map((d) => d.path),
-        document.querySelector('#hl-path-input')?.value?.trim() || ''
-      );
-      refreshTeamsPane();
-      if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
-      return true;
-    } catch (err) {
-      console.error("Error scanning directories:", err);
-      showToast(STRINGS.MAIN.scanErrorToast(err), 'error');
-      if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.scanErrorStatus(err);
-      return false;
-    } finally {
-      if (addFilesBtn) addFilesBtn.disabled = false;
-      if (addFolderBtn) addFolderBtn.disabled = false;
-      if (cancelScanBtnInner) cancelScanBtnInner.disabled = true;
-      if (scanSpinnerEl) scanSpinnerEl.style.display = 'none';
-    }
-  }
-
-  // Native Demo Files Ingestion (+ Add Demo Files)
-  const addFilesBtn = document.querySelector('#add-files-btn');
-  if (addFilesBtn) {
-    addFilesBtn.addEventListener('click', async () => {
-      try {
-        const selected = await open({
-          multiple: true,
-          filters: [{ name: STRINGS.MAIN.DEMO_FILES_FILTER_NAME, extensions: ['dem'] }],
-          title: STRINGS.MAIN.SELECT_DEMO_FILES_TITLE
-        });
-        if (selected) {
-          const files = Array.isArray(selected) ? selected : [selected];
-          // Files aren't remembered in the pinned-folder list (only folders
-          // are); the scan itself adds them to the queue and the project.
-          await triggerAutoScan(files, { pickedFiles: true });
-        }
-      } catch (err) {
-        console.error("Error opening demo files dialog:", err);
-      }
-    });
-  }
-
-  // Native Demo Folder Ingestion (+ Add Folder)
-  const addFolderBtn = document.querySelector('#add-folder-btn');
-  if (addFolderBtn) {
-    addFolderBtn.addEventListener('click', async () => {
-      try {
-        const selected = await open({
-          directory: true,
-          multiple: false,
-          title: STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE
-        });
-        if (selected) {
-          const folder = Array.isArray(selected) ? selected[0] : selected;
-          // Always scan (#432): a folder added before, then emptied from the
-          // list (bin icon, Clear All), used to be a silent no-op here.
-          // scanPaths only decides whether to remember it, and a folder that
-          // turned out not to exist is not remembered. The merge in
-          // triggerAutoScan replaces demos by path, so a re-scan adds no
-          // duplicate rows.
-          const scanned = await triggerAutoScan([folder]);
-          if (scanned && !scanPaths.includes(folder)) {
-            scanPaths.push(folder);
-            markProjectDirty();
-            await persistAppSettings();
-          }
-        }
-      } catch (err) {
-        console.error("Error opening demo directory dialog:", err);
-      }
-    });
-  }
+  // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
+  // queue_scan.js. Declared before anything can start a scan; the earlier
+  // callers above reach triggerAutoScan through closures.
+  const { triggerAutoScan } = createQueueScan({
+    getDemos: () => currentScannedDemos,
+    setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
+    selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
+    updateDemoFooter: (demos) => updateDemoFooter(demos),
+    markProjectDirty: () => markProjectDirty(),
+    readScanWorkers: () => readScanWorkers(),
+    offerIdenticalCopies: (copies, pickedFiles) => offerIdenticalCopies(copies, pickedFiles),
+    getScanPaths: () => scanPaths,
+    persistAppSettings: () => persistAppSettings(),
+  });
 
   async function updateExportPoolIndicator() {
     const indicator = document.querySelector('#export-pool-free-indicator');
@@ -1587,201 +1392,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (currentScannedDemos.length === 0) resetMapWarnings();
   }
 
-  // One-line callout appended to Clear actions' toasts/summaries whenever an
-  // active search filter narrowed what got acted on, so "Clear All" (etc.)
-  // doesn't silently do less than its name implies without the user noticing.
-  function filterScopeNote(visibleCount, totalCount) {
-    return visibleCount < totalCount
-      ? STRINGS.MAIN.filterScopeNote(visibleCount, totalCount)
-      : '';
-  }
-
-  // Clear Untracked — removes only demos with no tracked work (isDemoTracked).
-  // Scoped to the currently search-filtered demos, matching the select-all
-  // checkbox — a demo hidden by the search box is left untouched no matter
-  // its status.
-  const clearUntrackedBtn = document.querySelector('#clear-untracked-btn');
-  if (clearUntrackedBtn) {
-    clearUntrackedBtn.addEventListener('click', () => {
-      if (currentScannedDemos.length === 0) {
-        showToast(STRINGS.MAIN.QUEUE_ALREADY_EMPTY, 'info');
-        return;
-      }
-      const visible = getVisibleDemos();
-      if (visible.length === 0) {
-        showToast(STRINGS.MAIN.NO_DEMOS_MATCH_SEARCH, 'info');
-        return;
-      }
-      const trackedVisibleCount = visible.filter(isDemoTracked).length;
-      const untrackedVisible = new Set(visible.filter((d) => !isDemoTracked(d)).map((d) => d.path));
-      if (untrackedVisible.size === 0) {
-        showToast(STRINGS.MAIN.NOTHING_TRACKED_TO_CLEAR, 'info');
-        return;
-      }
-      const totalCount = currentScannedDemos.length;
-      const removedNames = currentScannedDemos.filter((d) => untrackedVisible.has(d.path)).map((d) => d.name || d.path);
-      replaceScannedDemos(currentScannedDemos.filter((d) => !untrackedVisible.has(d.path)));
-      // "Kept N with tracked work" only ever refers to visible demos that
-      // were actually evaluated and found tracked — never demos hidden by
-      // the search filter, which weren't touched for a completely different
-      // reason and would otherwise get mislabeled as "kept ... tracked".
-      const keptNote = trackedVisibleCount > 0 ? STRINGS.MAIN.keptWithTrackedWork(trackedVisibleCount) : '';
-      const scopeNote = filterScopeNote(visible.length, totalCount);
-      showToast(
-        STRINGS.MAIN.removedUntrackedToast(untrackedVisible.size, keptNote, scopeNote),
-        'success'
-      );
-      logFrontendEvent(STRINGS.MAIN.clearUntrackedLog(untrackedVisible.size, keptNote, scopeNote, removedNames.join(', ')));
-    });
-  }
-
-  // Shared "tracked work at risk" confirmation modal — a pure yes/no
-  // primitive (with an optional Save-First detour), awaited by every caller
-  // that needs to warn before removing tracked demos: Clear Selected, Clear
-  // All, and the row-level delete button (master_pane.js, via
-  // requestTrackedDeleteConfirm below). It does NOT perform the removal
-  // itself — Clear All/Selected replace the whole scanned-demo list, while
-  // the row delete button needs to preserve its own selection-shift logic
-  // instead, so "how to remove" stays with each caller; the modal only
-  // answers "should we." Resolves `false` on Cancel, `'confirm'` on Confirm,
-  // `'save-first'` once a save actually succeeded — the last two are both
-  // truthy but let callers word their success toast accordingly.
-  let pendingConfirmResolve = null;
-  const clearAllModal = document.querySelector('#clear-all-modal');
-
-  function requestTrackedClearConfirmation(targets, { title, verb, filterNote, confirmLabel }) {
-    const trackedCount = targets.filter(isDemoTracked).length;
-    const plural = targets.length === 1 ? STRINGS.MAIN.DEMO_SINGULAR : STRINGS.MAIN.DEMO_PLURAL;
-    const titleEl = document.querySelector('#clear-all-title');
-    if (titleEl) titleEl.textContent = title;
-    const confirmBtnEl = document.querySelector('#clear-all-confirm-btn');
-    if (confirmBtnEl) confirmBtnEl.textContent = confirmLabel || STRINGS.MAIN.CLEAR_ANYWAY_DEFAULT;
-    const summaryEl = document.querySelector('#clear-all-summary');
-    if (summaryEl) {
-      summaryEl.textContent = (trackedCount > 0
-        ? STRINGS.MAIN.clearSummaryTracked(verb, targets.length, plural, trackedCount)
-        : STRINGS.MAIN.clearSummaryUntracked(verb, targets.length, plural)
-      ) + (filterNote || '');
-    }
-    if (clearAllModal) clearAllModal.style.display = 'flex';
-    return new Promise(resolve => { pendingConfirmResolve = resolve; });
-  }
-
-  if (clearAllModal) {
-    document.querySelector('#clear-all-cancel-btn')?.addEventListener('click', () => {
-      clearAllModal.style.display = 'none';
-      pendingConfirmResolve?.(false);
-      pendingConfirmResolve = null;
-    });
-    document.querySelector('#clear-all-confirm-btn')?.addEventListener('click', () => {
-      clearAllModal.style.display = 'none';
-      pendingConfirmResolve?.('confirm');
-      pendingConfirmResolve = null;
-    });
-    document.querySelector('#clear-all-save-first-btn')?.addEventListener('click', async () => {
-      // Saves the whole current queue (not just whatever's about to be
-      // removed) — the point is that everything at risk is still
-      // recoverable from the saved file afterward, whether this is a
-      // single tracked delete, Clear Selected, or Clear All.
-      const saved = await saveProjectSession();
-      if (!saved) return; // leave the modal open — nothing was lost yet
-      clearAllModal.style.display = 'none';
-      pendingConfirmResolve?.('save-first');
-      pendingConfirmResolve = null;
-    });
-  }
-
-  // Clear Selected — removes checked rows regardless of status, same in
-  // both modes (the user explicitly checked them). Whenever any checked
-  // demo is tracked, escalate from a plain confirm() to the shared modal.
-  // Scoped to visible rows too: a row checked, then hidden by a later
-  // search, is left in the queue AND stays checked — the action never saw
-  // it, so it shouldn't lose that selection just because clearCheckedPaths()
-  // (inside replaceScannedDemos) resets everything by default.
-  const clearSelectedBtn = document.querySelector('#clear-selected-btn');
-  if (clearSelectedBtn) {
-    clearSelectedBtn.addEventListener('click', async () => {
-      const checkedPaths = new Set(getCheckedDemoPaths());
-      if (checkedPaths.size === 0) {
-        showToast(STRINGS.MAIN.NO_DEMOS_SELECTED, 'info');
-        return;
-      }
-      const visiblePaths = new Set(getVisibleDemos().map((d) => d.path));
-      const targets = currentScannedDemos.filter(d => checkedPaths.has(d.path) && visiblePaths.has(d.path));
-      if (targets.length === 0) {
-        showToast(STRINGS.MAIN.allSelectedHiddenToast(checkedPaths.size), 'info');
-        return;
-      }
-      const hiddenCheckedCount = checkedPaths.size - targets.length;
-      const hiddenNote = hiddenCheckedCount > 0
-        ? STRINGS.MAIN.hiddenCheckedNote(hiddenCheckedCount)
-        : '';
-      let savedFirst = false;
-      if (targets.some(isDemoTracked)) {
-        const outcome = await requestTrackedClearConfirmation(targets, { title: STRINGS.MAIN.CLEAR_SELECTED_TITLE, verb: STRINGS.MAIN.VERB_REMOVES, filterNote: hiddenNote, confirmLabel: STRINGS.MAIN.CLEAR_SELECTED_ANYWAY });
-        if (!outcome) return;
-        savedFirst = outcome === 'save-first';
-      } else if (!(await themedConfirm(STRINGS.MAIN.removeSelectedConfirm(targets.length, hiddenNote), { title: STRINGS.MAIN.CLEAR_SELECTED_TITLE }))) {
-        return;
-      }
-      const removePaths = new Set(targets.map((d) => d.path));
-      const removedNames = targets.map((d) => d.name || d.path);
-      // Preserve checkboxes on rows the action never touched (checked, but
-      // hidden by the search filter) — captured before replaceScannedDemos
-      // wipes the whole checked set via clearCheckedPaths().
-      const survivingHiddenChecked = Array.from(checkedPaths).filter((p) => !removePaths.has(p));
-      replaceScannedDemos(currentScannedDemos.filter(d => !removePaths.has(d.path)));
-      if (survivingHiddenChecked.length > 0) setCheckedDemoPaths(survivingHiddenChecked);
-      showToast(STRINGS.MAIN.removedSelectedToast(savedFirst, targets.length, hiddenNote), 'success');
-      logFrontendEvent(STRINGS.MAIN.clearSelectedLog(targets.length, savedFirst ? STRINGS.MAIN.SAVED_SESSION_FIRST_NOTE : '', hiddenNote, removedNames.join(', ')));
-    });
-  }
-
-  // Clear All — escalates to the shared modal (enumerating what would be
-  // lost, offering to save first) whenever something tracked is actually at
-  // risk, same threshold as Clear Selected/row delete. Also scoped to the
-  // search filter, same as the other two Clear actions — "All" means "all
-  // visible," with an explicit callout whenever that's fewer than the full
-  // queue, so it never silently does less than its name implies.
-  const clearAllBtn = document.querySelector('#clear-all-btn');
-  if (clearAllBtn) {
-    clearAllBtn.addEventListener('click', async () => {
-      if (currentScannedDemos.length === 0) {
-        showToast(STRINGS.MAIN.QUEUE_ALREADY_EMPTY, 'info');
-        return;
-      }
-      const targets = getVisibleDemos();
-      if (targets.length === 0) {
-        showToast(STRINGS.MAIN.NO_DEMOS_MATCH_SEARCH, 'info');
-        return;
-      }
-      const note = filterScopeNote(targets.length, currentScannedDemos.length);
-      let savedFirst = false;
-      if (targets.some(isDemoTracked)) {
-        const outcome = await requestTrackedClearConfirmation(targets, { title: STRINGS.MAIN.CLEAR_ALL_TITLE, verb: STRINGS.MAIN.VERB_REMOVES, filterNote: note, confirmLabel: STRINGS.MAIN.CLEAR_ALL_ANYWAY });
-        if (!outcome) return;
-        savedFirst = outcome === 'save-first';
-      } else if (!(await themedConfirm(STRINGS.MAIN.removeAllConfirm(targets.length, note), { title: STRINGS.MAIN.CLEAR_ALL_TITLE }))) {
-        return;
-      }
-      const removePaths = new Set(targets.map((d) => d.path));
-      const removedNames = targets.map((d) => d.name || d.path);
-      replaceScannedDemos(currentScannedDemos.filter((d) => !removePaths.has(d.path)));
-      showToast(STRINGS.MAIN.clearedAllToast(savedFirst, targets.length, note), 'success');
-      logFrontendEvent(STRINGS.MAIN.clearAllLog(targets.length, savedFirst ? STRINGS.MAIN.SAVED_SESSION_FIRST_NOTE : '', note, removedNames.join(', ')));
-    });
-  }
-
-  // Single-row tracked delete (master_pane.js's 🗑 button) reuses the same
-  // modal via this thin wrapper, so a tracked demo gets the exact same
-  // Save-First affordance as Clear Selected/All instead of a lesser plain
-  // confirm() just because it's one row. Returns whether the caller should
-  // proceed — master_pane.js still owns the actual splice + selection-shift
-  // logic, since that's specific to a single-row delete.
-  async function requestTrackedDeleteConfirm(demo) {
-    const outcome = await requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.REMOVE_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_REMOVES, confirmLabel: STRINGS.MAIN.REMOVE_ANYWAY });
-    return !!outcome;
-  }
+  // Clear Untracked / Selected / All and the tracked-work modal:
+  // queue_actions.js.
+  const { requestTrackedClearConfirmation, requestTrackedDeleteConfirm } = createQueueActions({
+    getDemos: () => currentScannedDemos,
+    replaceDemos: (demos) => replaceScannedDemos(demos),
+    saveProjectSession: () => saveProjectSession(),
+  });
 
   initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
   // Read at click time, not captured: the hl.exe path can be set after a scan
