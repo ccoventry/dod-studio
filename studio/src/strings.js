@@ -524,6 +524,9 @@ export const STRINGS = {
     CAPTURING_DEFAULT: 'Capturing',
     CAPTURING_ELLIPSIS_DEFAULT: 'Capturing...',
     capturingWithName: (status, name) => `${status}: ${name}`,
+    // #643: the batch's time left, after the status line.
+    timeLeftMinutes: (minutes) => ` · about ${minutes} min left`,
+    TIME_LEFT_UNDER_A_MINUTE: ' · under a minute left',
     captureErrorToast: (status) => `Capture error: ${status}`,
     CAPTURE_ERROR_STATUS_DEFAULT: 'Unknown error',
     captureErrorStatusText: (status) => `Error: ${status}`,
