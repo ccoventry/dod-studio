@@ -77,7 +77,7 @@ Some notes on each step:
 
 - **Import** needs Blender's window, because the importer wants a UI context. `--quit` closes Blender when it's done. DoD Studio opens that window small and unfocused (`--window-geometry 0 0 640 360 --no-window-focus`) and minimizes it as soon as it appears; a minimized start alone is ignored by Blender.
 - **Build scene** options:
-  - `--style <name>` picks an HD style from `dod\dodstudio_hd`. `none` uses the original textures. Without `--style`, it uses the first style built.
+  - `--style <name>` picks an HD style from `dod_addon\dodstudio_hd` (or `dod\dodstudio_hd` on an install built before #415). `none` uses the original textures. Without `--style`, it uses the first style built.
   - `--engine cycles` renders one 1080p Cycles frame instead of four EEVEE previews.
   - `--frames 180 510` picks which frames to preview.
 - **Render** skips frames already on disk, so a stopped render carries on where it left off. `--start`, `--end` and `--samples` narrow it down.

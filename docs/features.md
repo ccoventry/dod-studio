@@ -283,7 +283,7 @@ Four fixes have no console name and are on by default: the **temp-entity crash f
 
 ## 6. HD textures
 
-**In the game:** the DLL replaces textures as the engine uploads them, from `dod\dodstudio_hd\<type>\<style>\`, where type is `world`, `models`, `sprites`, `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
+**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
 
 **The page** (HD Textures tab):
 
@@ -292,7 +292,7 @@ Four fixes have no console name and are on by default: the **temp-entity crash f
 - **Tools:** finds or downloads the Real-ESRGAN upscaler, its models, and a private Python 3.12 with numpy, Pillow and SciPy. You can also point it at your own copies.
 - **Build:** tick styles and asset types, then Build. It runs `goldsrc-hooks/tools/hd/build_all.py` with live step progress; Cancel keeps finished files.
 
-**Built-in styles:** `ultrasharp` (default), `remacri`, `siax`, `generalv3`, `x4plus` (all Real-ESRGAN models), `plain` (Lanczos plus sharpening) and `blend` (x4plus and plain mixed). Your own styles go in `dod\dodstudio_hd\my_styles.txt`, and `hd_maps.txt` limits which maps are built.
+**Built-in styles:** `ultrasharp` (default), `remacri`, `siax`, `generalv3`, `x4plus` (all Real-ESRGAN models), `plain` (Lanczos plus sharpening) and `blend` (x4plus and plain mixed). Your own styles go in `dodstudio_hd\my_styles.txt`, and `hd_maps.txt` limits which maps are built.
 
 Command-line only: `compare.py` (a side-by-side sheet of styles), `setup_tools.py`, the per-type scripts, `--also` and `--extra-models`. Batched writing (`HD_BATCH`, PR #404), the misses view, custom-style form, comparison, and map picker (PRs #390, #391, #392, #422) are still open pull requests, not on `dev`.
 
@@ -368,7 +368,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_primer.dem`, `dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`) |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
-| HD files | `<game>\dod\dodstudio_hd\` |
+| HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |
 | Overview edits | `%APPDATA%\dod-studio\overviews\<map>.json` |
 | Saved overviews | `<install>\dod_addon\overviews\` or `<install>\dod\overviews\`; a user's own copied to `overviews\dodstudio_backup\` first |
 | HLAE FFmpeg link | `<HLAE>\ffmpeg\ffmpeg.ini` |
