@@ -225,8 +225,11 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
 /// `MAX_CONSOLE_CMD_SAFE_LEN` when it writes the ConsoleCommand frame (#454)
 /// -- a too-long name would fail the whole patch. The
 /// `dodstudio_` prefix (#197) made all of these 9 bytes longer, so pin it.
+/// Each also has to get past the engine's demo command filter (#679), or it
+/// is dropped without a word: an alias name containing `_set` or `kill`
+/// would never run.
 #[test]
-fn every_injected_command_fits_a_console_command_frame() {
+fn every_injected_command_fits_a_console_command_frame_and_passes_the_demo_filter() {
     let mut config = PatcherConfig::default();
     let temp_game_path = std::env::temp_dir().join("dod_test_cbuf_len");
     std::fs::create_dir_all(temp_game_path.join("dod")).expect("dummy dod dir");
@@ -264,7 +267,19 @@ fn every_injected_command_fits_a_console_command_frame() {
     );
 
     for job in &jobs {
+        for cmd in &job.init_commands {
+            assert_eq!(
+                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                None,
+                "init command {cmd:?} is dropped by the demo filter"
+            );
+        }
         for (tick, cmd) in &job.scheduled_commands {
+            assert_eq!(
+                crate::patch::cfg_scan::demo_filter_rule(cmd),
+                None,
+                "scheduled command {cmd:?} at tick {tick} is dropped by the demo filter"
+            );
             assert!(
                 cmd.len() < crate::patch::MAX_CONSOLE_CMD_SAFE_LEN,
                 "scheduled command {cmd:?} at tick {tick} is {} bytes, at or over the {}-byte command field a ConsoleCommand frame holds",

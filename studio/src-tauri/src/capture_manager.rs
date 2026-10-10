@@ -1125,6 +1125,12 @@ pub async fn start_capture_batch_impl(
         // already produced — cheap, and lets the demo-loading notification
         // show "X of Y clips total" without any per-demo lookback.
         let total_batch_clips: u32 = patch_jobs.iter().map(|j| j.blocks.len() as u32).sum();
+        // What each clip records, in batch order, for the time left (#643).
+        let clip_frames: Vec<i64> = patch_jobs
+            .iter()
+            .flat_map(|j| j.blocks.iter())
+            .map(|b| i64::from(b.record_stop_tick) - i64::from(b.record_start_tick))
+            .collect();
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching
         // is no longer instant, but a toast per demo patched would still be
@@ -1309,6 +1315,14 @@ pub async fn start_capture_batch_impl(
                 // demo-loading toast itself would have shown. See issue #98.
                 let mut clips = ClipTally::default();
                 let mut last_name = String::new();
+                // Time left (#643): from when the engine starts, priced by
+                // the clips done so far.
+                let eta = crate::batch_eta::BatchEta::new(clip_frames);
+                let mut started: Option<std::time::Instant> = None;
+                let seconds_left = |started: Option<std::time::Instant>, done: u32| {
+                    let elapsed = started?.elapsed().as_secs_f64();
+                    eta.seconds_left(done, elapsed)
+                };
                 // The bar counts clips when the batch knows how many, and
                 // game sessions otherwise.
                 let bar = |clips: &ClipTally, current_idx: u32, total_jobs: u32| {
@@ -1321,6 +1335,7 @@ pub async fn start_capture_batch_impl(
                 while let Ok(event) = engine_rx.recv() {
                     match event {
                         EngineEvent::Starting(total) => {
+                            started = Some(std::time::Instant::now());
                             total_jobs = total as u32;
                             current_idx = 0;
                             let (index, total) = bar(&clips, current_idx, total_jobs);
@@ -1359,7 +1374,8 @@ pub async fn start_capture_batch_impl(
                                     "index": index,
                                     "total": total,
                                     "name": name,
-                                    "status": "Finished"
+                                    "status": "Finished",
+                                    "seconds_left": seconds_left(started, clips.done),
                                 }),
                             );
                         }
@@ -1394,7 +1410,8 @@ pub async fn start_capture_batch_impl(
                                         "status": crate::messages::capturing_clip(
                                             clips.done + 1,
                                             total_batch_clips
-                                        )
+                                        ),
+                                        "seconds_left": seconds_left(started, clips.done),
                                     }),
                                 );
                             }

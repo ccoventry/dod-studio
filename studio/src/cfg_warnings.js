@@ -17,6 +17,7 @@
 
 import { scanGameConfigs } from './ipc_bridge.js';
 import { STRINGS } from './strings.js';
+import { escapeHtml } from './html.js';
 
 const EMPTY = {
   unseen: [],
@@ -30,7 +31,8 @@ const EMPTY = {
   decalDefaultRing: null,
   decalFlushIsNoop: false,
   noopInit: [],
-  noopScheduled: [],
+  filteredInit: [],
+  filteredScheduled: [],
   fatalCvars: [],
   configCfgWritable: false,
 };
@@ -128,6 +130,14 @@ function tooLongSection(commands) {
   return section(STRINGS.CFG.TOO_LONG_TITLE, STRINGS.CFG.TOO_LONG_ADVICE, rows, '#f44336');
 }
 
+/** Commands the game's demo filter drops (#679), as one section. */
+function filteredSection(rows) {
+  const items = rows
+    .map((f) => `<li><code>${escapeHtml(STRINGS.CFG.filteredRow(f.command, f.rule, f.pattern))}</code></li>`)
+    .join('');
+  return section(STRINGS.CFG.FILTERED_TITLE, STRINGS.CFG.FILTERED_ADVICE, items, '#ff8a5c');
+}
+
 function section(title, advice, rows, accent) {
   const style = accent ? ` style="color:${accent}"` : '';
   return `
@@ -192,7 +202,8 @@ function render() {
   const decalDefaultRing = report?.decalDefaultRing ?? null;
   const decalFlushIsNoop = report?.decalFlushIsNoop ?? false;
   const noopInit = report?.noopInit ?? [];
-  const noopScheduled = report?.noopScheduled ?? [];
+  const filteredInit = report?.filteredInit ?? [];
+  const filteredScheduled = report?.filteredScheduled ?? [];
   const fatalCvars = report?.fatalCvars ?? [];
   const configCfgWritable = report?.configCfgWritable ?? false;
   // Banned commands are already flagged, more specifically, in the banned
@@ -236,6 +247,10 @@ function render() {
   // Next, because a value somebody stated is being thrown away.
   if (initConflicts.length > 0) {
     initParts.push(conflictSection(initConflicts));
+  }
+  // A command the user typed never runs, and nothing in the game says so.
+  if (filteredInit.length > 0) {
+    initParts.push(filteredSection(filteredInit));
   }
   if (unseen.length > 0) {
     const rows = unseen
@@ -314,11 +329,8 @@ function render() {
   if (scheduledConflicts.length > 0) {
     schedParts.push(conflictSection(scheduledConflicts));
   }
-  if (noopScheduled.length > 0) {
-    const rows = noopScheduled
-      .map((n) => `<li><code>${STRINGS.CFG.noopRow(n.command, STRINGS.CFG.NOOP_REASONS[n.cvar], n.source)}</code></li>`)
-      .join('');
-    schedParts.push(section(STRINGS.CFG.NOOP_TITLE, STRINGS.CFG.NOOP_ADVICE, rows));
+  if (filteredScheduled.length > 0) {
+    schedParts.push(filteredSection(filteredScheduled));
   }
   renderInto('#scheduled-commands-warning-banner', joinSections(schedParts));
 }

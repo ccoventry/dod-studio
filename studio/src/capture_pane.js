@@ -26,6 +26,7 @@ import { syncCommandProfileRow } from './command_profiles_ui.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
+import { timeLeftSuffix } from './capture_time_left.js';
 import { refreshAfterTyping } from './input_refresh.js';
 
 let listeningForExternalErrors = false;
@@ -37,6 +38,11 @@ let unlistenPatchingFinished = null;
 // Tracks whether a batch is actively running so refreshLaunchGuard() never
 // re-enables Start Capture out from under the capture_status "running" lock.
 let capturingInFlight = false;
+// The batch's time left (#643): the last estimate, the status line it goes
+// after, and the timer that counts it down between clip boundaries.
+let timeLeft = null;
+let timeLeftStatus = '';
+let timeLeftTimer = null;
 
 /** Whether a capture batch is running right now (#545's close prompt). */
 export function isCaptureRunning() {
@@ -993,7 +999,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       const payload = event.payload || {};
       if (payload.running) {
         // The first running report of a batch: the last one's results go.
-        if (!capturingInFlight) batchStarted();
+        if (!capturingInFlight) {
+          batchStarted();
+          timeLeft = null;
+        }
         capturingInFlight = true;
         setBatchRunning(true);
         if (progressBar) {
@@ -1005,11 +1014,25 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
           }
         }
         const statusText = payload.name ? STRINGS.CAPTURE.capturingWithName(payload.status || STRINGS.CAPTURE.CAPTURING_DEFAULT, payload.name) : (payload.status || STRINGS.CAPTURE.CAPTURING_ELLIPSIS_DEFAULT);
-        setStatusLine(statusEl, statusText);
+        // Only clip boundaries carry an estimate; the last one counts down in
+        // between (a launch or a demo load sends none).
+        if (payload.seconds_left != null) timeLeft = { seconds: payload.seconds_left, at: Date.now() };
+        timeLeftStatus = statusText;
+        setStatusLine(statusEl, statusText + timeLeftSuffix(timeLeft, Date.now()));
+        if (!timeLeftTimer) {
+          timeLeftTimer = setInterval(() => {
+            if (capturingInFlight && timeLeft) setStatusLine(statusEl, timeLeftStatus + timeLeftSuffix(timeLeft, Date.now()));
+          }, 15000);
+        }
         if (startBtn) startBtn.disabled = true;
         if (cancelBtn) cancelBtn.disabled = false;
       } else {
         capturingInFlight = false;
+        timeLeft = null;
+        if (timeLeftTimer) {
+          clearInterval(timeLeftTimer);
+          timeLeftTimer = null;
+        }
         setBatchRunning(false);
         if (cancelBtn) cancelBtn.disabled = true;
         refreshLaunchGuard();
