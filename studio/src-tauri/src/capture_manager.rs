@@ -59,6 +59,7 @@ pub const SCAN_WORKERS_MAX: usize = 8;
 
 use native::capture_engine::{CaptureJob, EngineEvent, spawn_capture_engine};
 use native::log_markdown;
+use native::patch::launch_settings::RunningGameCheck;
 use native::patch::{
     CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatchJob, PatcherConfig,
     StreamPatcher, build_batch_queue, build_preview_patch_jobs,
@@ -2495,20 +2496,32 @@ pub(crate) fn running_game_pids() -> Vec<u32> {
 /// `viewdemo <stem>_preview` to the running one over its hook DLL's pipe.
 ///
 /// Resolves to the command sent, or `None` when no running game takes
-/// commands -- one Studio didn't start, or with its hooks off -- so the caller
-/// can fall back to the "already running" prompt.
+/// commands -- one Studio didn't start, with its hooks off, or started with
+/// other launch settings (#666) -- so the caller can fall back to the
+/// "already running" prompt.
 #[tauri::command]
 pub async fn send_preview_to_running_game(
+    app: tauri::AppHandle,
     hlae_path: String,
     game_path: String,
     streaks: Vec<SerializedStreak>,
     goldsrc_hooks_dll_path: Option<String>,
 ) -> Result<Option<String>, String> {
+    let request = LaunchRequest {
+        hlae_path: Some(hlae_path.clone()),
+        game_path: Some(game_path.clone()),
+        goldsrc_hooks_dll_path: goldsrc_hooks_dll_path.clone(),
+        ..LaunchRequest::default()
+    };
+    let launch = launch_config(&saved_settings(&app), &request);
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        let pids = running_game_pids();
-        if pids.is_empty() {
-            return Ok(None);
-        }
+        // Only a game started with the settings a launch would use now: a
+        // preview sent to any other plays at the old resolution or install.
+        let pids =
+            match native::patch::launch_settings::check_running_game(&launch.launch_settings()) {
+                RunningGameCheck::Match { pid } => vec![pid],
+                RunningGameCheck::None | RunningGameCheck::Mismatch { .. } => return Ok(None),
+            };
         let (patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
         if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
@@ -2640,14 +2653,7 @@ pub async fn read_cfg_commands(path: String) -> Result<Vec<String>, String> {
 /// command-line args that config.cfg/movie.cfg can still override).
 #[tauri::command]
 pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String> {
-    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
-    let settings = {
-        let guard = settings_state
-            .inner
-            .lock()
-            .unwrap_or_else(|p| p.into_inner());
-        guard.clone()
-    };
+    let settings = saved_settings(&app);
 
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
         if settings.hlae_path.trim().is_empty() || settings.hl_path.trim().is_empty() {
@@ -2660,19 +2666,7 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
         }
 
-        let patcher_config = PatcherConfig {
-            hlae_path: settings.hlae_path.clone(),
-            game_path: settings.hl_path.clone(),
-            resolution_width: settings.resolution_width,
-            resolution_height: settings.resolution_height,
-            ffmpeg_capture: settings.ffmpeg_capture,
-            ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
-                &settings.ffmpeg_capture_codec,
-            ),
-            goldsrc_hooks_dll_path: settings.goldsrc_hooks_dll_path.clone(),
-            ..PatcherConfig::default()
-        };
-
+        let patcher_config = launch_config(&settings, &LaunchRequest::default());
         let mut cmd = patcher_config.build_hlae_process("");
         let launcher = cmd
             .spawn()
@@ -2680,6 +2674,126 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
         watch_for_error_dialogs(app, launcher);
 
         Ok(())
+    }))
+    .await
+}
+
+// ── Reusing a running game (#666) ─────────────────────────────────────────────
+//
+// Some settings only take effect when the game starts (which install, the
+// resolution). Every path that would reuse a running game first checks it
+// was started with the settings a launch would use now; one that wasn't is
+// closed and started again, after the frontend asks.
+
+pub(crate) fn saved_settings(app: &tauri::AppHandle) -> crate::settings_manager::AppSettings {
+    let settings_state = app.state::<crate::settings_manager::SettingsManager>();
+    let guard = settings_state
+        .inner
+        .lock()
+        .unwrap_or_else(|p| p.into_inner());
+    guard.clone()
+}
+
+/// Launch settings a caller has that may not be saved yet: Launch Preview's
+/// paths, a capture batch's payload. Anything left out comes from the saved
+/// settings, as Launch Game and Review use them.
+#[derive(Debug, Default, Clone, Deserialize)]
+pub struct LaunchRequest {
+    #[serde(default)]
+    pub hlae_path: Option<String>,
+    #[serde(default)]
+    pub game_path: Option<String>,
+    #[serde(default)]
+    pub goldsrc_hooks_dll_path: Option<String>,
+    #[serde(default)]
+    pub resolution_width: Option<i32>,
+    #[serde(default)]
+    pub resolution_height: Option<i32>,
+}
+
+/// The config a launch from `settings` with `request` on top starts the game
+/// with: Launch Game launches from exactly this, and the running-game check
+/// compares against it.
+pub(crate) fn launch_config(
+    settings: &crate::settings_manager::AppSettings,
+    request: &LaunchRequest,
+) -> PatcherConfig {
+    let pick = |given: &Option<String>, saved: &str| {
+        given
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| saved.to_string())
+    };
+    PatcherConfig {
+        hlae_path: pick(&request.hlae_path, &settings.hlae_path),
+        game_path: pick(&request.game_path, &settings.hl_path),
+        resolution_width: request
+            .resolution_width
+            .unwrap_or(settings.resolution_width),
+        resolution_height: request
+            .resolution_height
+            .unwrap_or(settings.resolution_height),
+        ffmpeg_capture: settings.ffmpeg_capture,
+        ffmpeg_capture_codec: native::patch::CaptureCodec::from_str_id(
+            &settings.ffmpeg_capture_codec,
+        ),
+        goldsrc_hooks_dll_path: request
+            .goldsrc_hooks_dll_path
+            .clone()
+            .filter(|s| !s.trim().is_empty())
+            .or_else(|| settings.goldsrc_hooks_dll_path.clone()),
+        ..PatcherConfig::default()
+    }
+}
+
+/// Whether a game is running, and whether it was started with the launch
+/// settings `request` (over the saved ones) would start one with.
+#[tauri::command]
+pub async fn check_running_game(
+    app: tauri::AppHandle,
+    request: Option<LaunchRequest>,
+) -> Result<RunningGameCheck, String> {
+    let launch = launch_config(&saved_settings(&app), &request.unwrap_or_default());
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let check = native::patch::launch_settings::check_running_game(&launch.launch_settings());
+        if let RunningGameCheck::Mismatch {
+            pid,
+            running,
+            wanted,
+            differs,
+        } = &check
+        {
+            log_markdown(&format!(
+                "[launch] Game {pid} was started with other settings ({differs:?}): {} at {:?}x{:?}; Studio is set to {} at {}x{}",
+                running.exe,
+                running.width,
+                running.height,
+                wanted.exe,
+                launch.resolution_width,
+                launch.resolution_height,
+            ));
+        }
+        Ok(check)
+    }))
+    .await
+}
+
+/// How long a game gets to close before the restart gives up.
+const CLOSE_GAME_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Closes game `pid` so it can start again with the settings Studio has now,
+/// and resolves once it has gone.
+#[tauri::command]
+pub async fn close_running_game(pid: u32) -> Result<(), String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        log_markdown(&format!(
+            "[launch] Closing game {pid} to start it with the current launch settings"
+        ));
+        if native::sys::process::close_game(pid, CLOSE_GAME_TIMEOUT) {
+            Ok(())
+        } else {
+            Err(crate::messages::GAME_DID_NOT_CLOSE.to_string())
+        }
     }))
     .await
 }
@@ -2939,6 +3053,36 @@ mod tests {
     use super::*;
     use crate::test_support::Scratch;
     use native::patch::PatchStage;
+
+    /// The running-game check compares against what a launch would use: the
+    /// caller's unsaved values over the saved settings, blanks ignored (#666).
+    #[test]
+    fn launch_config_puts_the_callers_values_over_the_saved_ones() {
+        let saved = crate::settings_manager::AppSettings {
+            hlae_path: "C:/hlae/hlae.exe".into(),
+            hl_path: "C:/pre/hl.exe".into(),
+            goldsrc_hooks_dll_path: Some("C:/hooks.dll".into()),
+            resolution_width: 1920,
+            resolution_height: 1080,
+            ..Default::default()
+        };
+        let cfg = launch_config(&saved, &LaunchRequest::default());
+        assert_eq!(cfg.game_path, "C:/pre/hl.exe");
+        assert_eq!((cfg.resolution_width, cfg.resolution_height), (1920, 1080));
+        assert_eq!(cfg.goldsrc_hooks_dll_path.as_deref(), Some("C:/hooks.dll"));
+
+        let request = LaunchRequest {
+            game_path: Some("C:/post/hl.exe".into()),
+            hlae_path: Some("  ".into()),
+            resolution_width: Some(3440),
+            resolution_height: Some(1440),
+            ..Default::default()
+        };
+        let cfg = launch_config(&saved, &request);
+        assert_eq!(cfg.game_path, "C:/post/hl.exe");
+        assert_eq!(cfg.hlae_path, "C:/hlae/hlae.exe");
+        assert_eq!((cfg.resolution_width, cfg.resolution_height), (3440, 1440));
+    }
 
     #[test]
     fn the_patching_line_names_what_each_job_is_doing() {

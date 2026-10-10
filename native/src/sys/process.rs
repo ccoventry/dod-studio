@@ -1,10 +1,15 @@
 //! Finding running processes by executable name (`hl.exe`, `hlae.exe`, OBS).
 //!
-//! Every caller only needs names and pids, so the snapshot refreshes the
+//! Most callers only need names and pids, so the snapshot refreshes the
 //! process list alone -- no command lines, environments, CPU, memory or
-//! disks, which `System::new_all()` used to gather on every check.
+//! disks, which `System::new_all()` used to gather on every check. Only
+//! [`running_games`] reads more, and only for the games.
 
-use sysinfo::{Process, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System};
+use std::time::{Duration, Instant};
+
+use sysinfo::{
+    Pid, Process, ProcessRefreshKind, ProcessesToUpdate, RefreshKind, System, UpdateKind,
+};
 
 /// A process list with names and pids only. Call [`refresh`] to update it.
 pub fn snapshot() -> System {
@@ -100,6 +105,71 @@ pub fn kill_pid(pid: u32) {
         .ok();
 }
 
+/// Every running game with its image path and command line, which say what
+/// it was launched with (#666). Those are read for the games alone: reading
+/// them opens each process, which is not worth doing for every one.
+pub fn running_games() -> Vec<crate::patch::launch_settings::RunningGame> {
+    launches_of(&[GAME_EXE])
+}
+
+/// [`running_games`] for any process names, so a test can read itself.
+fn launches_of(names: &[&str]) -> Vec<crate::patch::launch_settings::RunningGame> {
+    let mut sys = snapshot();
+    let pids: Vec<Pid> = pids_named_in(&sys, names)
+        .into_iter()
+        .map(Pid::from_u32)
+        .collect();
+    if pids.is_empty() {
+        return Vec::new();
+    }
+    sys.refresh_processes_specifics(
+        ProcessesToUpdate::Some(&pids),
+        true,
+        ProcessRefreshKind::nothing()
+            .with_exe(UpdateKind::Always)
+            .with_cmd(UpdateKind::Always),
+    );
+    pids.iter()
+        .filter_map(|pid| sys.process(*pid))
+        .map(|p| crate::patch::launch_settings::RunningGame {
+            pid: p.pid().as_u32(),
+            exe: p.exe().map(|e| e.to_string_lossy().into_owned()),
+            cmd: p
+                .cmd()
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect(),
+        })
+        .collect()
+}
+
+/// Ends game `pid` and polls until it has left the process list, so a launch
+/// straight after does not meet the engine's one-instance check. True once it
+/// is gone, false if it is still there after `timeout`. A pid that is no
+/// longer a game is left alone: Windows may have given it to another process.
+pub fn close_game(pid: u32, timeout: Duration) -> bool {
+    let is_game = |sys: &System| {
+        sys.process(Pid::from_u32(pid))
+            .is_some_and(|p| is_named(p, &[GAME_EXE]))
+    };
+    let mut sys = snapshot();
+    if !is_game(&sys) {
+        return true;
+    }
+    kill_pid(pid);
+    let since = Instant::now();
+    loop {
+        refresh(&mut sys);
+        if !is_game(&sys) {
+            return true;
+        }
+        if since.elapsed() >= timeout {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -112,6 +182,31 @@ mod tests {
         let pids = pids_named(&[&name]);
         assert!(pids.contains(&std::process::id()), "{name}: {pids:?}");
         assert!(!is_running(&["no-such-process-dodstudio.exe"]));
+    }
+
+    /// The image path and command line are read: the test binary finds
+    /// its own.
+    #[test]
+    fn reads_a_process_image_and_command_line() {
+        let exe = std::env::current_exe().unwrap();
+        let name = exe.file_name().unwrap().to_string_lossy().into_owned();
+        let me = launches_of(&[&name])
+            .into_iter()
+            .find(|p| p.pid == std::process::id())
+            .expect("the test process is listed");
+        let read = std::path::PathBuf::from(me.exe.expect("an image path"));
+        assert_eq!(
+            read.file_name().map(|n| n.to_ascii_lowercase()),
+            exe.file_name().map(|n| n.to_ascii_lowercase())
+        );
+        assert!(!me.cmd.is_empty());
+    }
+
+    /// A pid that isn't a game is never ended: this test binary survives
+    /// being named, and counts as already closed.
+    #[test]
+    fn close_game_leaves_other_processes_alone() {
+        assert!(close_game(std::process::id(), Duration::from_millis(10)));
     }
 
     /// Children are matched by parent pid as well as name: the test binary

@@ -1,6 +1,7 @@
 import { switchNavTab } from './nav.js';
 import { openAnalyzerDemo } from './analyzer_pane.js';
 import { launchDemoPreview, generateAllPreviews, checkEngineProcesses, killEngineProcesses, sendPreviewToRunningGame } from './ipc_bridge.js';
+import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { ensureSteamReady } from './steam_guard.js';
 import { isRangeModified as isKillRangeModified, setStatusByHand, restoreStatus, isSkipped, setCuration, CURATION } from './take_index.js';
@@ -254,6 +255,11 @@ window.addEventListener("DOMContentLoaded", () => {
       const highlights = allPreviewableStreaks(currentDemo);
       // The game closes on a demo over its entity limit (#207).
       if (!(await confirmOverLimit([currentDemo], hlPath, { preview: true }))) return;
+      // A game started with other launch settings is never sent the preview
+      // (#666): asked to close it, or stop here.
+      const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
+      const launchRequest = { hlae_path: hlaePath, game_path: hlPath, goldsrc_hooks_dll_path: goldsrcHooksDllPath };
+      if (!(await closeGameWithOtherSettings(launchRequest, { button: btnLaunchPreview }))) return;
 
       let engineAlreadyRunning = false;
       try {

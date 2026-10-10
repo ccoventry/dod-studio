@@ -565,15 +565,36 @@ impl PatcherConfig {
         }
     }
 
-    pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
-        let hlae_exe = &self.hlae_path;
-        let hl_exe = &self.game_path;
-        let hlae_dir = std::path::Path::new(hlae_exe).parent();
-
-        let dll_path = match hlae_dir {
+    /// The settings a launch from this config gives the game, which it only
+    /// reads at start. `build_hlae_process` launches with exactly these, and
+    /// `launch_settings::compare` checks a running game against them (#666).
+    pub fn launch_settings(&self) -> super::launch_settings::LaunchSettings {
+        let afx_hook_dll = match std::path::Path::new(&self.hlae_path).parent() {
             Some(parent) => parent.join("AfxHookGoldSrc.dll"),
             None => std::path::PathBuf::from("AfxHookGoldSrc.dll"),
         };
+        super::launch_settings::LaunchSettings {
+            game_path: self.game_path.clone(),
+            width: self.resolution_width,
+            height: self.resolution_height,
+            afx_hook_dll,
+            goldsrc_hooks_dll: self.goldsrc_hooks_dll(),
+        }
+    }
+
+    pub fn build_hlae_process(&self, extra_engine_args: &str) -> std::process::Command {
+        let hlae_exe = &self.hlae_path;
+        let hlae_dir = std::path::Path::new(hlae_exe).parent();
+        // Every launch-time value comes from here, destructured in full, so a
+        // new one can't skip the running-game check (#666).
+        let super::launch_settings::LaunchSettings {
+            game_path: hl_exe,
+            width,
+            height,
+            afx_hook_dll: dll_path,
+            goldsrc_hooks_dll,
+        } = self.launch_settings();
+
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
         // `-hookDllPath` is repeatable on HLAE's `-customLoader` command line
@@ -588,7 +609,6 @@ impl PatcherConfig {
         // see the crate's README for what it needs to do anything.
         //
         // Resolution order: see `goldsrc_hooks_dll`.
-        let goldsrc_hooks_dll = self.goldsrc_hooks_dll();
         let goldsrc_hooks_dll_str =
             goldsrc_hooks_dll.map(|p| p.to_string_lossy().replace("/", "\\\\"));
 
@@ -661,7 +681,7 @@ impl PatcherConfig {
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
             "-game dod -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
-            self.resolution_width, self.resolution_height, extra_engine_args
+            width, height, extra_engine_args
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);

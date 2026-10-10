@@ -727,6 +727,8 @@ pub fn run() {
             read_cfg_commands,
             check_engine_processes,
             kill_engine_processes,
+            capture_manager::check_running_game,
+            capture_manager::close_running_game,
             steam_state,
             start_steam,
             send_preview_to_running_game,

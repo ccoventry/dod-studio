@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import { themedConfirm } from './themed_confirm.js';
+import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { confirmCrashMaps } from './crash_map_warnings.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
@@ -710,6 +711,9 @@ async function initStandaloneLaunchButton() {
   }
 
   btn.addEventListener('click', async () => {
+    // A game started with other launch settings is closed first, if the user
+    // says so (#666).
+    if (!(await closeGameWithOtherSettings(null, { button: btn }))) return;
     let engineAlreadyRunning = false;
     try {
       engineAlreadyRunning = await checkEngineProcesses();
@@ -1400,6 +1404,20 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       // "Only one instance of this game can be run at a time" box appears at
       // the end of all that work, with nothing captured. The preview and
       // standalone launches are guarded against this the same way.
+      //
+      // One started with other launch settings gets its own ask first, naming
+      // what differs (#666).
+      const launchRequest = {
+        hlae_path: activePayload.hlae_path,
+        game_path: activePayload.game_path,
+        goldsrc_hooks_dll_path: activePayload.goldsrc_hooks_dll_path,
+        resolution_width: activePayload.resolution_width,
+        resolution_height: activePayload.resolution_height,
+      };
+      if (!(await closeGameWithOtherSettings(launchRequest, { button: startBtn }))) {
+        setStatusLine(statusEl, STRINGS.RUNNING_GAME.BATCH_NOT_STARTED_STATUS);
+        return;
+      }
       let engineAlreadyRunning = false;
       try {
         engineAlreadyRunning = await checkEngineProcesses();

@@ -4,7 +4,8 @@
 //! The queue goes in a file (`review_queue.tsv` in the app data folder); the
 //! game is told to read it with `dodstudio_review start "<file>"` over its
 //! command pipe (#413). When no game is running, DoD Studio starts one as the
-//! Launch Game button does and waits for its pipe. The answers come back as
+//! Launch Game button does and waits for its pipe; a running game started
+//! with other launch settings is not reused (#666). The answers come back as
 //! `[dod-studio] REVIEW` lines on the game's events pipe (#434): a thread
 //! per game reads them for as long as that game runs and emits each one as a
 //! `review_event`.
@@ -13,6 +14,7 @@ use std::io::{BufRead, BufReader};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
+use native::patch::launch_settings::{RunningGameCheck, check_running_game};
 use native::review_queue::{ReviewHighlight, format_queue, parse_event};
 use native::sys::game_remote::{self, Sent};
 use serde::Serialize;
@@ -44,15 +46,30 @@ fn start_line(queue: &std::path::Path) -> String {
     )
 }
 
+/// Sends `line` to game `pid`. `Ok(None)` when it doesn't take commands.
+fn try_send(pid: u32, line: &str) -> Result<Option<u32>, String> {
+    match game_remote::send_console_commands(pid, &[line.to_string()])
+        .map_err(crate::messages::failed_to_send_review)?
+    {
+        Sent::Delivered => Ok(Some(pid)),
+        Sent::NotListening => Ok(None),
+    }
+}
+
+/// Sends `line` to the running game `pid`, which must take commands: one
+/// that doesn't wasn't started by DoD Studio.
+fn send_to_game(pid: u32, line: &str) -> Result<Option<u32>, String> {
+    try_send(pid, line)?
+        .map(Some)
+        .ok_or_else(|| crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string())
+}
+
 /// Sends `line` to the first running game that takes commands, and says
-/// which. `Ok(None)` when none does.
+/// which. `Ok(None)` when none does. For the game DoD Studio just started.
 fn send_to_any_game(line: &str) -> Result<Option<u32>, String> {
     for pid in native::sys::process::game_pids() {
-        match game_remote::send_console_commands(pid, &[line.to_string()])
-            .map_err(crate::messages::failed_to_send_review)?
-        {
-            Sent::Delivered => return Ok(Some(pid)),
-            Sent::NotListening => continue,
+        if let Some(pid) = try_send(pid, line)? {
+            return Ok(Some(pid));
         }
     }
     Ok(None)
@@ -121,10 +138,23 @@ pub async fn start_highlight_review(
         .map_err(crate::messages::could_not_write_review_queue)?;
     let line = start_line(&queue);
 
+    let launch = crate::capture_manager::launch_config(
+        &crate::capture_manager::saved_settings(&app),
+        &crate::capture_manager::LaunchRequest::default(),
+    );
     let sent = {
         let line = line.clone();
         crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-            send_to_any_game(&line)
+            // Only a game started with the settings Launch Game would use now
+            // (#666). The frontend asks about any other before calling this,
+            // so a mismatch here means it changed in between.
+            match check_running_game(&launch.launch_settings()) {
+                RunningGameCheck::None => Ok(None),
+                RunningGameCheck::Match { pid } => send_to_game(pid, &line),
+                RunningGameCheck::Mismatch { .. } => {
+                    Err(crate::messages::REVIEW_GAME_LAUNCH_SETTINGS_DIFFER.to_string())
+                }
+            }
         }))
         .await?
     };
