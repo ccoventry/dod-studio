@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<!--
+  Harness for running_game_guard.js (#666): the themed confirm, and
+  `window.__guard(request)` running closeGameWithOtherSettings with the
+  answer in #result. The backend's check_running_game and close_running_game
+  are window.__mockInvokeHandlers.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>running_game_guard.js test harness</title>
+</head>
+<body>
+  <div id="result"></div>
+  <button id="launch-btn">Launch</button>
+  <div id="themed-confirm-modal" class="modal" style="display: none;">
+    <h2 id="themed-confirm-title">Confirm</h2>
+    <p id="themed-confirm-message"></p>
+    <button id="themed-confirm-ok-btn">Confirm</button>
+    <button id="themed-confirm-cancel-btn">Cancel</button>
+  </div>
+  <script type="module">
+    import { initThemedConfirm } from '/src/themed_confirm.js';
+    import { closeGameWithOtherSettings } from '/src/running_game_guard.js';
+    initThemedConfirm();
+    window.__guard = async (request) => {
+      const button = document.querySelector('#launch-btn');
+      document.querySelector('#result').textContent = String(await closeGameWithOtherSettings(request, { button }));
+    };
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

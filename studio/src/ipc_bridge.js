@@ -303,6 +303,31 @@ export async function checkEngineProcesses() {
     });
 }
 
+/** Whether a game is running and was started with the launch settings a
+ *  launch would use now (#666): `{ state: 'none' }`, `{ state: 'match', pid }`
+ *  or `{ state: 'mismatch', pid, running, wanted, differs }`. `request`
+ *  carries settings not saved yet (`hlae_path`, `game_path`,
+ *  `goldsrc_hooks_dll_path`, `resolution_width`, `resolution_height`);
+ *  anything left out is the saved setting. Resolves null when the check
+ *  itself fails, so a broken check never blocks a launch. */
+export async function checkRunningGame(request = null) {
+  return invoke("check_running_game", { request })
+    .catch((err) => {
+      console.error("IPC Execution Error (check_running_game):", err);
+      return null;
+    });
+}
+
+/** Closes game `pid` and resolves once it has gone (#666). */
+export async function closeRunningGame(pid) {
+  return invoke("close_running_game", { pid })
+    .catch((err) => {
+      console.error("IPC Execution Error (close_running_game):", err);
+      showToast(String(err), 'error', 8000);
+      throw err;
+    });
+}
+
 /** Launches HLAE against `hl.exe` directly with no demo loaded, applying the
  *  persisted resolution/HUD/init-command settings. */
 export async function launchStandaloneGame() {
