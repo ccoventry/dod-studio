@@ -336,8 +336,20 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
         return Ok((streaks_of(&analysis), "from the analyzer cache"));
     }
     // DoD Studio, when it runs, analyses it in its own (64-bit) process.
+    // When it saved the result for another cache version than this DLL reads
+    // (#684), the result is in a folder this DLL never looks in: say so, and
+    // analyse in the game instead when the demo fits.
+    let mut mismatch = None;
     match ask_studio(path, generation) {
-        Some(Ok(())) => {
+        Some(Ok(Some(theirs))) if theirs != analysis::cache::SCHEMA_VERSION => {
+            let why = version_mismatch(theirs, analysis::cache::SCHEMA_VERSION);
+            log(&format!(
+                "{}: {why} Analysing in the game instead.",
+                path.display()
+            ));
+            mismatch = Some(why);
+        }
+        Some(Ok(_)) => {
             return root
                 .as_deref()
                 .and_then(|root| analysis::cache::load(root, path))
@@ -365,10 +377,12 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
             free >> 20,
             largest >> 20
         ));
-        return Err(
+        // With the versions apart, opening it in Studio wouldn't help: the
+        // DLL is what needs changing.
+        return Err(mismatch.unwrap_or_else(|| {
             "too big to read inside the game. Open it once in DoD Studio's Demo Analyzer, and it shows here"
-                .to_string(),
-        );
+                .to_string()
+        }));
     }
     log(&format!("analysing {}", path.display()));
     let bytes = std::fs::read(path).map_err(|e| format!("could not read the demo: {e}"))?;
@@ -398,9 +412,50 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
 /// PIPE_NAME` to the character.
 const STUDIO_PIPE: &str = r"\\.\pipe\dodstudio-analyzer";
 
+/// One line of DoD Studio's answer (`native::sys::analysis_server`'s
+/// protocol).
+#[derive(Debug, PartialEq)]
+enum Reply {
+    Progress(u32),
+    /// The analyzer cache version Studio saved the result in.
+    Cache(u32),
+    Done,
+    Failed(String),
+    /// Anything else, ignored, so a later Studio can add lines.
+    Other,
+}
+
+fn parse_reply(line: &str) -> Reply {
+    let line = line.trim_end_matches('\r');
+    if let Some(percent) = line.strip_prefix("progress ") {
+        percent
+            .trim()
+            .parse::<u32>()
+            .map_or(Reply::Other, |p| Reply::Progress(p.min(100)))
+    } else if let Some(version) = line.strip_prefix("cache v") {
+        version.trim().parse().map_or(Reply::Other, Reply::Cache)
+    } else if line == "done" {
+        Reply::Done
+    } else if let Some(why) = line.strip_prefix("failed ") {
+        Reply::Failed(why.to_string())
+    } else {
+        Reply::Other
+    }
+}
+
+/// What the Highlights tab says when DoD Studio saved a demo for another
+/// analyzer cache version than this DLL reads.
+fn version_mismatch(studio: u32, ours: u32) -> String {
+    format!(
+        "DoD Studio saved it for analyzer cache v{studio}, but this hook DLL reads v{ours}: use a hook DLL built from the same version as DoD Studio."
+    )
+}
+
 /// Asks DoD Studio to analyse `path` into the analyzer cache, following its
-/// progress. `None` when Studio isn't running (nothing serves the pipe).
-fn ask_studio(path: &Path, generation: u64) -> Option<Result<(), String>> {
+/// progress. `None` when Studio isn't running (nothing serves the pipe);
+/// otherwise the cache version Studio saved it for, when it says (a Studio
+/// from before #684 doesn't).
+fn ask_studio(path: &Path, generation: u64) -> Option<Result<Option<u32>, String>> {
     use std::io::{BufRead, BufReader, Write};
     let mut pipe = std::fs::OpenOptions::new()
         .read(true)
@@ -412,18 +467,19 @@ fn ask_studio(path: &Path, generation: u64) -> Option<Result<(), String>> {
     if let Err(e) = pipe.write_all(request.as_bytes()) {
         return Some(Err(format!("could not ask: {e}")));
     }
+    let mut cache = None;
     for line in BufReader::new(pipe).lines() {
         let Ok(line) = line else { break };
-        if let Some(percent) = line.strip_prefix("progress ") {
-            if let Ok(percent) = percent.trim().parse::<u32>()
-                && GENERATION.load(Ordering::Acquire) == generation
-            {
-                PERCENT.store(percent.min(100), Ordering::Release);
+        match parse_reply(&line) {
+            Reply::Progress(percent) => {
+                if GENERATION.load(Ordering::Acquire) == generation {
+                    PERCENT.store(percent, Ordering::Release);
+                }
             }
-        } else if line == "done" {
-            return Some(Ok(()));
-        } else if let Some(why) = line.strip_prefix("failed ") {
-            return Some(Err(why.to_string()));
+            Reply::Cache(version) => cache = Some(version),
+            Reply::Done => return Some(Ok(cache)),
+            Reply::Failed(why) => return Some(Err(why)),
+            Reply::Other => {}
         }
     }
     Some(Err("DoD Studio stopped answering".to_string()))
@@ -649,5 +705,33 @@ mod tests {
         for streak in streaks.streaks.iter().take(5) {
             println!("{streak:?}");
         }
+    }
+
+    #[test]
+    fn studio_replies_parse_line_by_line() {
+        assert_eq!(parse_reply("progress 42"), Reply::Progress(42));
+        assert_eq!(parse_reply("progress 250\r"), Reply::Progress(100));
+        assert_eq!(parse_reply("cache v7"), Reply::Cache(7));
+        assert_eq!(parse_reply("done"), Reply::Done);
+        assert_eq!(parse_reply("done\r"), Reply::Done);
+        assert_eq!(
+            parse_reply("failed no such demo"),
+            Reply::Failed("no such demo".to_string())
+        );
+        // Unknown or garbled lines are skipped, so either side can add lines.
+        assert_eq!(parse_reply("cache vX"), Reply::Other);
+        assert_eq!(parse_reply("progress"), Reply::Other);
+        assert_eq!(parse_reply("hello v2"), Reply::Other);
+    }
+
+    #[test]
+    fn a_version_mismatch_names_both_versions_and_the_fix() {
+        let text = version_mismatch(7, 6);
+        assert!(text.contains("analyzer cache v7"), "{text}");
+        assert!(text.contains("reads v6"), "{text}");
+        assert!(
+            text.contains("hook DLL built from the same version"),
+            "{text}"
+        );
     }
 }

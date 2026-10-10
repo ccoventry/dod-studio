@@ -16,10 +16,18 @@ test('Cache all sends the folder\'s demos, follows progress, and says how it wen
   expect(calls).toHaveLength(1);
   expect(calls[0].args.paths).toEqual(['C:\demos\a.dem', 'C:\demos\b.dem', 'C:\demos\c.dem']);
   await expect(button).toHaveText('Stop');
+  // Until the backend has checked which demos the cache has (#687).
+  await expect(status).toHaveText('Checking the analyzer cache…');
+
+  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 0, total: 3, already: 0, failed: 0, cached: 1, parsed: 0, bytes_to_parse: 200, bytes_parsed: 0, finished: false, cancelled: false }));
   await expect(status).toHaveText('Caching 0 / 3');
 
-  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 2, total: 3, already: 1, failed: 0, finished: false, cancelled: false }));
-  await expect(status).toHaveText('Caching 2 / 3 (1 already cached)');
+  // The cached demo first, then a parse: a time left from the parses' pace.
+  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 1, total: 3, already: 1, failed: 0, cached: 1, parsed: 0, bytes_to_parse: 200, bytes_parsed: 0, finished: false, cancelled: false }));
+  await expect(status).toHaveText('Caching 1 / 3 (1 already cached)');
+  await page.waitForTimeout(20);
+  await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 2, total: 3, already: 1, failed: 0, cached: 1, parsed: 1, bytes_to_parse: 200, bytes_parsed: 100, finished: false, cancelled: false }));
+  await expect(status).toHaveText(/^Caching 2 \/ 3 \(1 already cached\) · about \d+ s left$/);
 
   await page.evaluate(() => window.__mockEmit('demo_cache_progress', { done: 3, total: 3, already: 1, failed: 1, finished: true, cancelled: false }));
   await expect(status).toHaveText('Cached 3 demos (1 already cached, 1 failed)');

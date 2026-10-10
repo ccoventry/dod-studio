@@ -1288,8 +1288,44 @@ pub fn poll_map() {
         .collect();
     if new_level {
         uses.extend(map_file_uses(&map));
+        warn_if_gl_max_size_shrinks(&map);
     }
     add_map_uses(&map, uses);
+}
+
+/// Below this, `gl_max_size` visibly shrinks HD replacements (#680): the
+/// builds make files up to 1024 a side by default, and the engine's own
+/// default is 256.
+const WARN_BELOW_GL_MAX_SIZE: u32 = 1024;
+
+/// Once per map, while HD is on: a console and log line when `gl_max_size`
+/// shows replacements smaller than they were built. Nothing else says so,
+/// and the game just looks softer (#680).
+fn warn_if_gl_max_size_shrinks(map: &str) {
+    // Without the raised ceiling, replacements stop at 512 whatever
+    // gl_max_size says, so it isn't what shrinks them.
+    if !enabled() || !CEILING_RAISED.load(Ordering::Acquire) {
+        return;
+    }
+    let Some(engfuncs) = engine::engfuncs() else {
+        return;
+    };
+    let gl_max_size = unsafe { (engfuncs.pfn_get_cvar_float)(c"gl_max_size".as_ptr()) };
+    if let Some(line) = gl_max_size_warning(gl_max_size) {
+        crate::commands::console_print(&format!("{line}\n"));
+        unsafe { crate::debug::report(&format!("texture_hires: {map}: {line}")) };
+    }
+}
+
+/// The warning for a `gl_max_size` that shows HD files below
+/// [`WARN_BELOW_GL_MAX_SIZE`], or `None`.
+fn gl_max_size_warning(gl_max_size: f32) -> Option<String> {
+    let shown = pot_floor(gl_max_size);
+    (shown < WARN_BELOW_GL_MAX_SIZE).then(|| {
+        format!(
+            "HD textures are being shrunk to {shown} px: gl_max_size is {gl_max_size}. Set gl_max_size 1024 (or 2048) in movie.cfg."
+        )
+    })
 }
 
 /// Whether to write a debug-log line for every load. Off by default -- a map
@@ -3992,6 +4028,18 @@ mod tests {
         assert_eq!(pot_floor(-1.0), MIN_GL_MAX_SIZE);
         assert_eq!(pot_floor(f32::NAN), MIN_GL_MAX_SIZE);
         assert_eq!(pot_floor(200.0), 128);
+    }
+
+    #[test]
+    fn a_gl_max_size_that_shrinks_hd_files_is_warned_about() {
+        let line = gl_max_size_warning(256.0).unwrap();
+        assert_eq!(
+            line,
+            "HD textures are being shrunk to 256 px: gl_max_size is 256. Set gl_max_size 1024 (or 2048) in movie.cfg."
+        );
+        assert!(gl_max_size_warning(1000.0).unwrap().contains("512 px"));
+        assert_eq!(gl_max_size_warning(1024.0), None);
+        assert_eq!(gl_max_size_warning(2048.0), None);
     }
 
     #[test]

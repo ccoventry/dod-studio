@@ -41,21 +41,16 @@ pub async fn demo_rename_list(
         let demos = demo_rename::demos_in(&root);
         let total = demos.len();
         // The demos the analyzer cache already has go first, then the parses
-        // largest first (`analysis::cache::work_order`). The bytes left to
-        // parse give the page a steady time left: demo sizes vary too much
-        // (5 MB tests, 90 MB matches) for a time per demo.
-        let cache_root = native::analyzer_cache_root();
-        let fresh: Vec<bool> = demos
-            .iter()
-            .map(|d| analysis::cache::is_fresh(&cache_root, d))
-            .collect();
-        let sizes: Vec<u64> = demos
-            .iter()
-            .map(|d| std::fs::metadata(d).map_or(0, |m| m.len()))
-            .collect();
-        let cached = fresh.iter().filter(|f| **f).count();
-        let bytes_to_parse: u64 = (0..total).filter(|&i| !fresh[i]).map(|i| sizes[i]).sum();
-        let order = analysis::cache::work_order(&fresh, &sizes);
+        // largest first (`analysis::cache::WorkPlan`). The bytes left to
+        // parse give the page a steady time left.
+        let plan = analysis::cache::WorkPlan::new(&native::analyzer_cache_root(), &demos);
+        let cached = plan.cached();
+        let bytes_to_parse = plan.bytes_to_parse();
+        let analysis::cache::WorkPlan {
+            fresh,
+            sizes,
+            order,
+        } = plan;
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(0);
         let parsed = AtomicUsize::new(0);

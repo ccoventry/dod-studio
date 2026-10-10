@@ -18,6 +18,7 @@
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
 pub mod build;
+pub mod gl_max_size;
 pub mod map_list;
 pub mod misses;
 pub mod my_styles;
@@ -166,6 +167,10 @@ pub struct HdStatus {
     /// 2 GB (false); `None` when it couldn't be read (#430). Filled in by
     /// the caller, which knows the game path.
     pub large_address_aware: Option<bool>,
+    /// The `gl_max_size` the install runs with (#680), from its configs and
+    /// Studio's Initial Commands. Filled in by the caller, which knows both:
+    /// [`gl_max_size::effective`].
+    pub gl_max_size: Option<gl_max_size::GlMaxSize>,
 }
 
 /// Where the HD files are, from the `hl.exe` path the app launches:
@@ -222,6 +227,7 @@ pub fn scan(hd_root: &Path, tools_dir: &Path) -> HdStatus {
         maps: Vec::new(),
         map_list: None,
         large_address_aware: None,
+        gl_max_size: None,
     }
 }
 

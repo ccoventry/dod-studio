@@ -51,6 +51,13 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
     let exe = game_exe(&game_path)?;
     let root = hd::hd_root(&exe).ok_or_else(|| crate::messages::HD_NEEDS_GAME_PATH.to_string())?;
     let scripts = scripts_dir(&app);
+    // Initial Commands run after every config, so they have the last word on
+    // gl_max_size (#680).
+    let init_commands = {
+        let settings = app.state::<crate::settings_manager::SettingsManager>();
+        let guard = settings.inner.lock().unwrap_or_else(|p| p.into_inner());
+        guard.init_commands.clone()
+    };
     // A big HD folder is tens of thousands of files, and finding Python runs
     // a few processes: neither belongs on the async runtime's own threads.
     crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
@@ -66,6 +73,11 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.map_list = Some(map_list::read(&exe, &root, scripts.as_deref()));
         status.scripts = scripts.map(|dir| dir.to_string_lossy().to_string());
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
+        // Read fresh, not scan_cached: the user may have just edited movie.cfg.
+        if let Some(game) = exe.parent() {
+            let configs = native::patch::cfg_scan::scan(&game.join("dod"));
+            status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
+        }
         status
     }))
     .await
