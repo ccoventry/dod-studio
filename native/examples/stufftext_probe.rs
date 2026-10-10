@@ -7,17 +7,18 @@
 //! time this prints:
 //!
 //! - `echo stufftext_probe_start` / `_end` bracket the test.
-//! - `foo_plain` is a control: an unknown name that the filter lets through,
-//!   so the console prints `Unknown command: foo_plain`.
-//! - `foo_settest` (`_set`) and `foo_killtest` (`kill`) are unknown names the
-//!   filter should drop: nothing is printed for them.
-//! - `mirv_matte_setcolor 255 0 255` is the real case from the issue: it
-//!   prints HLAE's usage/confirmation if it runs, nothing if dropped.
+//! - `cvarlist gl_max` is a control the filter lets through: it prints the
+//!   matching cvars. (An unknown name is no control: during playback the
+//!   engine prints nothing for it either way, measured 2026-10-10.)
+//! - `bind f1` (name contains `bind`) prints F1's binding if it runs and
+//!   nothing if dropped.
+//! - `mirv_matte_setcolor` is the real case from the issue: with no arguments
+//!   it prints HLAE's usage if it runs, nothing if dropped.
 //! - `echo stufftext_probe exit_in_args` tests a line rule on an argument
 //!   (`exit` anywhere on the line): dropped means nothing is printed.
-//! - `echo stufftext_probe_chain; foo_chained_settest` asks whether a filtered
-//!   name behind a `;` gets through, since the name test sees only `echo`: an
-//!   `Unknown command: foo_chained_settest` line means it does.
+//! - `echo stufftext_probe_chain; bind f2` asks whether a filtered name behind
+//!   a `;` gets through, since the name test sees only `echo`: F2's binding
+//!   printed means it does.
 //!
 //! Usage:
 //!
@@ -34,12 +35,11 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 const COMMANDS: &[&str] = &[
     "echo stufftext_probe_start",
-    "foo_plain",
-    "foo_settest",
-    "foo_killtest",
-    "mirv_matte_setcolor 255 0 255",
+    "cvarlist gl_max",
+    "bind f1",
+    "mirv_matte_setcolor",
     "echo stufftext_probe exit_in_args",
-    "echo stufftext_probe_chain; foo_chained_settest",
+    "echo stufftext_probe_chain; bind f2",
     "echo stufftext_probe_end",
 ];
 
