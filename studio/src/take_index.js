@@ -9,6 +9,8 @@
 // moves the ticks but never mutates the kills array, so the uid stays put
 // across range edits.
 
+import { HIGHLIGHT_STATUS } from './status_colors.js';
+
 /**
  * Content-addressed id for one highlight, stable across re-scans, project
  * save/load, and Kill Range edits. Cached onto the streak after first use.
@@ -53,6 +55,7 @@ export function preserveHighlightState(previousDemo, freshDemo) {
     if (previous.statusByHand) fresh.statusByHand = true;
     if (previous.selected !== undefined) fresh.selected = previous.selected;
     if (previous.notes !== undefined) fresh.notes = previous.notes;
+    if (previous.clipName !== undefined) fresh.clipName = previous.clipName;
     if (previous.curation !== undefined) fresh.curation = previous.curation;
     // Kill Range edits are user edits too, not scan output.
     if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
@@ -206,8 +209,9 @@ export function isRangeModified(streak) {
  */
 function isHighlightTracked(streak) {
   if (!streak) return false;
-  if (streak.status === 'Pending' || streak.status === 'Captured' || streak.status === 'Rendered') return true;
+  if (streak.status === HIGHLIGHT_STATUS.PENDING || streak.status === HIGHLIGHT_STATUS.CAPTURED || streak.status === HIGHLIGHT_STATUS.RENDERED) return true;
   if (streak.notes && streak.notes.trim()) return true;
+  if (streak.clipName && streak.clipName.trim()) return true;
   if (streak.curation) return true;
   return isRangeModified(streak);
 }

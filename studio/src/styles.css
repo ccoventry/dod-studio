@@ -453,6 +453,13 @@ body {
   color: #ffffff;
 }
 
+/* The Demo Analyzer's Cache all, beside the Demos title (#569). */
+.analyzer-cache-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
@@ -494,13 +501,18 @@ body {
   margin-bottom: 8px;
 }
 
+/* display: flex above would otherwise beat the hidden attribute. */
+.row-inputs[hidden], .input-row[hidden] {
+  display: none;
+}
+
 .input-row label {
   min-width: 150px;
   font-weight: 500;
   color: #cccccc;
 }
 
-input[type="text"], input[type="number"], select {
+input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
   color: #ffffff;
   border: 1px solid var(--border-color);
@@ -510,8 +522,13 @@ input[type="text"], input[type="number"], select {
   outline: none;
 }
 
-input[type="text"]:focus, input[type="number"]:focus, select:focus {
+input[type="text"]:focus, input[type="number"]:focus, input[type="search"]:focus, select:focus {
   border-color: var(--primary-accent);
+}
+
+/* The map search: wide enough for a pattern, placeholder included. */
+#hd-maps-search {
+  min-width: 18em;
 }
 
 /* The bare `appearance: none` reset above doesn't reliably suppress the
@@ -663,6 +680,41 @@ button.primary-btn:hover:not(:disabled) {
   text-align: center;
   color: var(--text-muted);
   padding: 16px !important;
+}
+
+/* Teams list (#445) */
+.teams-unread-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.teams-unread-row[hidden] {
+  display: none;
+}
+
+#teams-table td input[type="text"],
+#teams-table td select {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.teams-also {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.teams-also button {
+  padding: 0 4px;
+  font-size: 11px;
+  line-height: 1.2;
 }
 
 /* Configuration Tabs */
@@ -1253,6 +1305,39 @@ button.primary-btn:hover:not(:disabled) {
   margin-bottom: 10px;
 }
 
+/* #217: a demo that recorded more than one map, above every analyzer tab. */
+.analyzer-multimap-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.analyzer-multimap-banner[hidden] {
+  display: none;
+}
+
+.analyzer-multimap-text {
+  flex: 1 1 320px;
+}
+
+/* split_progress.js: a split's bar and its line (Analyzer, Auditor, Queue). */
+.split-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 220px;
+}
+
+.split-progress .progress-bar-container {
+  margin-top: 0;
+}
+
+.split-progress-text {
+  font-size: 0.9em;
+  color: var(--text-muted);
+}
+
 .analyzer-toolbar {
   display: flex;
   gap: 10px;
@@ -1294,6 +1379,98 @@ button.primary-btn:hover:not(:disabled) {
   border-top: 1px solid var(--border-color);
   font-size: 11px;
   color: #ccc;
+}
+
+/* #207: a demo this install's game can't play. */
+.entity-limit-badge {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #ffb74d;
+  border: 1px solid #ffb74d;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: help;
+}
+
+/* #217: a queued demo with more than one map; the badge is the Split button. */
+.multimap-split-btn {
+  flex-shrink: 0;
+  font-size: 0.75em;
+  font-weight: normal;
+  color: #fbbf24;
+  background: transparent;
+  border: 1px solid #fbbf24;
+  border-radius: 2px;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.multimap-split-btn:hover:not(:disabled) {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+.multimap-split-progress {
+  min-width: 160px;
+  flex-shrink: 0;
+  font-weight: normal;
+}
+
+.multimap-split-btn:disabled {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+/* Combine Clips (#107). */
+.combine-content {
+  max-width: 680px;
+  padding: 20px;
+}
+
+.combine-hint,
+.combine-plan {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.combine-toolbar,
+.combine-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.combine-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.combine-list {
+  margin: 10px 0;
+  padding-left: 24px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.combine-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 0;
+}
+
+.combine-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.combine-empty {
+  list-style: none;
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 /* Last Batch (#172). */
@@ -1522,6 +1699,46 @@ button.primary-btn:hover:not(:disabled) {
   font-size: 11px;
   white-space: nowrap;
   z-index: 5;
+}
+
+/* Kill Map tab (#448): the overview image with an SVG of death markers laid
+   exactly over it, both scaled together. */
+.analyzer-killmap {
+  position: relative;
+  max-width: 1024px;
+  margin-bottom: 8px;
+}
+
+.analyzer-killmap img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 1px solid var(--border-color);
+  border-radius: 2px;
+}
+
+.analyzer-killmap svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.analyzer-killmap circle {
+  stroke: #000;
+  stroke-width: 1.5;
+  cursor: default;
+}
+
+.analyzer-killmap circle:hover {
+  stroke: #fff;
+  stroke-width: 2.5;
+}
+
+.analyzer-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-bottom: 8px;
 }
 
 .analyzer-weapon-filters {
@@ -1927,6 +2144,20 @@ tr.keyboard-selected {
   border-bottom: 1px solid #282828;
 }
 
+/* #426: fewer files than the fullest style, and the biggest size built. */
+#hd-status-table td.hd-cell-partial {
+  color: #ffb74d;
+}
+
+.hd-cell-largest {
+  font-size: 11px;
+  color: #888888;
+}
+
+.hd-style-coverage {
+  color: #ffb74d;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
@@ -1986,6 +2217,673 @@ tr.keyboard-selected {
   word-break: break-all;
 }
 
+/* Demo Auditor tabs (#624): one per tool, under the shared folder picker. */
+.auditor-tabs {
+  display: flex;
+  gap: 4px;
+  margin-top: 10px;
+  border-bottom: 1px solid var(--border-color, #444);
+}
+
+.auditor-tab-btn {
+  border: 1px solid var(--border-color, #444);
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  background: transparent;
+  color: var(--text-muted, #aaa);
+  padding: 5px 14px;
+  cursor: pointer;
+}
+
+.auditor-tab-btn.active {
+  background: var(--panel-bg-light, #2a2a2a);
+  color: var(--text-color, #fff);
+  font-weight: 600;
+}
+
+/* Split Maps (#624). */
+.split-hint {
+  margin: 0 0 8px;
+  color: var(--text-muted, #aaa);
+  max-width: 80ch;
+}
+
+.split-recursive-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.split-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.split-demo {
+  border: 1px solid var(--border-color, #444);
+  border-radius: 4px;
+  padding: 8px 10px;
+  min-width: 0;
+}
+
+.split-demo-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: baseline;
+}
+
+.split-demo-name {
+  overflow-wrap: anywhere;
+}
+
+.split-demo-meta {
+  color: var(--text-muted, #aaa);
+  font-size: 0.85em;
+  overflow-wrap: anywhere;
+}
+
+.split-maps {
+  margin: 6px 0;
+  border-collapse: collapse;
+}
+
+.split-maps td {
+  padding: 2px 10px 2px 0;
+}
+
+.split-map-num,
+.split-map-when {
+  color: var(--text-muted, #aaa);
+  font-variant-numeric: tabular-nums;
+}
+
+.split-short td {
+  opacity: 0.6;
+}
+
+.split-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.split-result {
+  font-size: 0.9em;
+}
+
+.split-written {
+  margin: 4px 0 0;
+  padding-left: 1.2em;
+}
+
+.split-reveal {
+  margin-left: 6px;
+  font-size: 0.85em;
+}
+
+/* ── Overviews page (#371) ─────────────────────────────────────────────── */
+#pane-overviews {
+  flex: 1;
+  min-height: 0;
+}
+
+.ov-layout {
+  display: flex;
+  gap: 10px;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+
+.ov-side {
+  width: 250px;
+  flex: 0 0 250px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ov-side-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.ov-main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.ov-canvas-wrap {
+  flex: 1;
+  min-height: 300px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+#ov-canvas {
+  image-rendering: auto;
+  cursor: crosshair; /* overviews_pane.js sets it by what a click would do */
+  box-shadow: 0 0 0 1px var(--border-color);
+}
+
+.ov-sp {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-sp-colours {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-sp-colours label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.ov-sp-colours input[type='color'] {
+  width: 26px;
+  height: 20px;
+  padding: 0;
+}
+
+#ov-sp-reset {
+  align-self: flex-start;
+}
+
+.ov-zoom {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: 8px;
+}
+
+.ov-zoom button {
+  min-width: 28px;
+}
+
+#ov-zoom-fit {
+  min-width: 52px;
+}
+
+.ov-tools-row {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.ov-mode.active,
+#ov-clear-colour-btn.active {
+  outline: 2px solid var(--primary-accent);
+}
+
+.ov-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-field.ov-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.ov-subtitle {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.ov-map-list {
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+}
+
+.ov-map-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  text-align: left;
+  padding: 3px 6px;
+  font-size: 12px;
+  background: none;
+  border: none;
+  border-bottom: 1px solid #282828;
+}
+
+.ov-map-row span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-map-row.active {
+  background: var(--bg-input);
+}
+
+.ov-badge {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+}
+
+.ov-badge-ours {
+  color: #8ade75;
+  border-color: #8ade75;
+}
+
+.ov-badge-edited {
+  color: #d5e34f;
+  border-color: #d5e34f;
+}
+
+.ov-palette {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 4px;
+}
+
+.ov-swatch {
+  height: 24px;
+  padding: 0;
+  border: 1px solid #000;
+  border-radius: 3px;
+}
+
+.ov-recent-row,
+.ov-colour-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ov-colour-row {
+  justify-content: space-between;
+}
+
+.ov-recent {
+  display: flex;
+  gap: 3px;
+  flex: 1;
+  min-height: 20px;
+  align-items: center;
+}
+
+#ov-pick-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+}
+
+.ov-recent .ov-swatch {
+  width: 20px;
+  height: 20px;
+}
+
+.ov-swatch.active {
+  outline: 2px solid #fff;
+}
+
+.ov-checks {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+}
+
+.ov-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ov-label-row {
+  display: flex;
+  gap: 4px;
+}
+
+.ov-label-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-flag-row {
+  display: flex;
+  gap: 4px;
+}
+
+/* A Show checkbox with a reset beside it (the map title). */
+.ov-check-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ov-credit-row {
+  margin-left: 20px;
+}
+
+.ov-check-row .ov-flag-reset {
+  padding: 0 6px;
+  line-height: 1.3;
+}
+
+.ov-flag-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.ov-label-row.active input {
+  outline: 1px dashed #ffdd00;
+}
+
+.ov-add-label {
+  align-self: flex-start;
+}
+
+/* A map's scene being built: what and how far, where the map will be. */
+.ov-building {
+  width: min(360px, 80%);
+  text-align: center;
+}
+
+/* The side panel scrolls, which clips an outline drawn outside the button. */
+.ov-add-label.active {
+  outline-offset: -2px;
+}
+
+/* One line of code beside its Copy button. */
+.hd-code-inline {
+  margin: 0;
+  min-width: 16em;
+}
+
+.hd-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 12px;
+}
+
+/* The style comparison sheet: 1:1 pixels in a scrolling box, or fitted. */
+.hd-preview-wrap {
+  margin-top: 8px;
+  max-height: 70vh;
+  overflow: auto;
+  border: 1px solid var(--border-color);
+  background: #000;
+}
+
+.hd-preview-wrap img {
+  display: block;
+  cursor: zoom-out;
+  image-rendering: pixelated;
+}
+
+.hd-preview-fit img {
+  width: 100%;
+  cursor: zoom-in;
+  image-rendering: auto;
+}
+
+/* The user's own styles: name, what it is, Edit and Remove. */
+.hd-my-styles {
+  margin: 4px 0 10px;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-my-styles li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 2px 0;
+}
+
+.hd-my-style-name {
+  min-width: 90px;
+  font-family: monospace;
+}
+
+/* The map list: every map in dod\maps, ticked when the list picks it. */
+.hd-maps-mode {
+  display: flex;
+  gap: 18px;
+  margin: 4px 0 6px;
+}
+
+/* The list's lines as chips, across and down. */
+.hd-map-patterns {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+  padding: 0;
+  font-size: 12px;
+}
+
+.hd-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--bg-input);
+}
+
+.hd-chip-name {
+  font-family: monospace;
+}
+
+.hd-chip-count {
+  color: var(--text-muted);
+}
+
+.hd-pattern-unused {
+  border-color: #d9a441;
+}
+
+.hd-pattern-unused .hd-chip-count {
+  color: #d9a441;
+}
+
+.hd-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.hd-chip-x:hover {
+  color: #fff;
+}
+
+/* Clicking a map's box that a pattern picked points at the pattern's chip. */
+.hd-chip-flash {
+  animation: hd-chip-flash 1.2s ease-out;
+}
+
+@keyframes hd-chip-flash {
+  0%, 60% { background: #2f6b47; border-color: var(--hd-tick-pattern); }
+  100% { background: var(--bg-input); border-color: var(--border-color); }
+}
+
+/* A map a pattern picked: its tick and its mark in the pattern colour,
+   against the browser's blue for a map with its own line. The legend beside
+   "Picked only" is two drawn ticks in the same two colours. */
+:root {
+  --hd-tick-own: var(--primary-accent);
+  --hd-tick-pattern: #3ea86b;
+}
+
+/* Outranks the global input[type="checkbox"] accent rule at the top. */
+input[type="checkbox"].hd-box-pattern {
+  accent-color: var(--hd-tick-pattern);
+}
+
+.hd-map-via {
+  color: var(--hd-tick-pattern);
+  margin-left: -3px;
+  flex-shrink: 0;
+}
+
+.hd-map-legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 14px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.hd-map-legend .hd-tick + span {
+  margin-right: 8px;
+}
+
+.hd-tick {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border-radius: 2px;
+  text-align: center;
+  line-height: 13px;
+  font-size: 11px;
+  color: #fff;
+}
+
+.hd-tick::after {
+  content: "\2713";
+}
+
+.hd-tick-own {
+  background: var(--hd-tick-own);
+}
+
+.hd-tick-pattern {
+  background: var(--hd-tick-pattern);
+}
+
+.hd-map-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 4px 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18em, 1fr));
+  column-gap: 18px;
+  border: 1px solid var(--border-color);
+  background: var(--bg-input);
+  font-size: 12px;
+}
+
+.hd-map-list li {
+  min-width: 0;
+}
+
+.hd-map-list label {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 1px 0;
+  min-width: 0;
+}
+
+.hd-map-name {
+  font-family: monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hd-map-list .hd-miss-detail {
+  margin-left: auto;
+  padding-right: 8px;
+  white-space: nowrap;
+}
+
+.hd-map-list.hd-map-list-off label {
+  opacity: 0.75;
+}
+
+/* Misses view: one collapsible block per map. */
+.hd-miss-map {
+  border-top: 1px solid #282828;
+  padding: 6px 0;
+}
+
+.hd-miss-map summary {
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.hd-miss-heading {
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #aaaaaa;
+}
+
+.hd-miss-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  font-size: 12px;
+}
+
+.hd-miss-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  padding: 1px 0;
+}
+
+.hd-miss-type {
+  min-width: 90px;
+  color: var(--text-muted);
+}
+
+.hd-miss-detail {
+  color: var(--text-muted);
+}
+
 /* Highlight Details' Notes (#605): notes are clip descriptions of a sentence
    or two, so the column takes the room and the box wraps; drag its corner
    to make it bigger. A class, not a column position, so a new column doesn't
@@ -2010,3 +2908,125 @@ tr.keyboard-selected {
   font-size: 12px;
   line-height: 1.35;
 }
+
+/* Demo Auditor: Rename Demos (#469). */
+.rename-hint {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.rename-label {
+  min-width: 90px;
+}
+
+.rename-template {
+  flex: 1;
+  font-family: monospace;
+}
+
+.rename-errors {
+  margin: 2px 0 4px;
+  color: #ef5350;
+}
+
+/* One row per placeholder group: its label, then its chips (#469). */
+.rename-chips {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
+  align-items: center;
+  margin: 4px 0 8px;
+  font-size: 0.85em;
+}
+
+.rename-chip-group-label {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  text-align: right;
+}
+
+.rename-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.rename-chip {
+  padding: 1px 6px;
+  font-family: monospace;
+  font-size: 1em;
+}
+
+/* A placeholder the focused template's demo type doesn't have. */
+.rename-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The list: the shared .analyzer-table look, with fixed columns so the two
+   names share the width evenly and a long one ends in … (full on hover). */
+.rename-table {
+  table-layout: fixed;
+}
+
+.rename-table .rename-col-check {
+  width: 34px;
+}
+
+.rename-table .rename-col-type {
+  width: 64px;
+}
+
+.rename-table th.rename-center,
+.rename-table td.rename-center {
+  text-align: center;
+}
+
+.rename-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rename-table tr.rename-unticked td {
+  opacity: 0.45;
+}
+
+#rename-table td.rename-new {
+  color: #81c784;
+}
+
+#rename-table td.rename-note {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+#rename-table td.rename-numbered {
+  color: #ffb74d;
+}
+
+.rename-type {
+  display: inline-block;
+  min-width: 36px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.rename-type-pov {
+  color: #64b5f6;
+  background: rgba(100, 181, 246, 0.12);
+}
+
+.rename-type-hltv {
+  color: #ce93d8;
+  background: rgba(206, 147, 216, 0.12);
+}
+

@@ -2,8 +2,8 @@
 <!--
   Minimal harness for master_pane.js's missing-demo row (#21): just the queue
   table and search box it queries. See tests/e2e/README.md for the general
-  shape. Three demos: one present, one missing with a found copy, one missing
-  with nothing found.
+  shape. Three demos: one present (which recorded two maps, #217), one missing
+  with a found copy, one missing with nothing found.
 -->
 <html lang="en">
 <head>
@@ -25,8 +25,8 @@
       return demo;
     };
     const demos = [
-      { name: 'here.dem', path: 'C:\\demos\\here.dem', streaks: [] },
-      missing({ name: 'moved.dem', path: 'C:\\demos\\moved.dem', streaks: [] }, 'C:\\demos\\sub\\moved.dem'),
+      { name: 'here.dem', path: 'C:\\demos\\here.dem', streaks: [], signon_maps: ['dod_lennon2', 'dod_lennon2'] },
+      missing({ name: 'moved.dem', path: 'C:\\demos\\moved.dem', streaks: [], signon_maps: ['dod_anzio'] }, 'C:\\demos\\sub\\moved.dem'),
       missing({ name: 'gone.dem', path: 'C:\\demos\\gone.dem', streaks: [] }, null),
     ];
 
@@ -35,7 +35,13 @@
       null,
       null,
       (demo) => { result.textContent = `locate ${demo.name}`; },
-      (demo) => { result.textContent = `use ${demo.name}`; }
+      (demo) => { result.textContent = `use ${demo.name}`; },
+      // A split reports 30% and then waits for window.__finishRowSplit().
+      async (demo, update) => {
+        result.textContent = `split ${demo.name}`;
+        update({ fraction: 0.3, stage: 'reading', map: '', part: 0, parts: 0 });
+        await new Promise((resolve) => { window.__finishRowSplit = resolve; });
+      }
     );
     renderMasterList(demos, null, (demo) => { result.textContent = `select ${demo.name}`; });
     window.__harnessReady = true;

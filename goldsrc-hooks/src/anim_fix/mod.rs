@@ -120,6 +120,31 @@ pub fn enabled() -> bool {
     level() > LEVEL_OFF
 }
 
+/// Whether the match-POV fixes may act now: the switch is on and no POV demo
+/// is playing.
+///
+/// A POV demo is the player's own recording, so there is nothing to match,
+/// and every fix can only disagree with it (#613). That includes the stretch
+/// its recorder spends dead and watching someone in-eye: that is what they saw
+/// live, recorded. Live play and HLTV demos are unchanged.
+pub fn active() -> bool {
+    enabled() && !engine::engfuncs().is_some_and(playing_pov_demo)
+}
+
+/// A demo is playing and the engine is not connected as a spectator.
+/// `IsSpectateOnly()` is true through an HLTV demo and false for the whole of
+/// a POV one: the hook log of the #613 session shows it false from that
+/// demo's first frame, and `apply()` has always gated on it.
+fn playing_pov_demo(engfuncs: &engine::ClEngineFuncsPartial) -> bool {
+    let api = engfuncs.p_demo_api;
+    let playing_back = !api.is_null() && unsafe { ((*api).is_playingback)() } != 0;
+    is_pov_demo(playing_back, unsafe { (engfuncs.is_spectate_only)() } != 0)
+}
+
+fn is_pov_demo(playing_back: bool, spectate_only: bool) -> bool {
+    playing_back && !spectate_only
+}
+
 /// Whether the viewmodel on screen is the weapon the spectated player is
 /// actually holding.
 ///
@@ -295,7 +320,7 @@ fn just_drew(now: f64) -> bool {
 /// and its animation index means nothing on the new one -- a K98's fire
 /// played on the Luger he quick-switched to looks like the Luger firing.
 pub fn allow_event_weapon_animation(sequence: i32) -> bool {
-    if !enabled() || crate::spectator_target::in_eye_target().is_none() {
+    if !active() || crate::spectator_target::in_eye_target().is_none() {
         return true;
     }
     if !just_drew(engine::client_time()) {
@@ -332,6 +357,16 @@ pub(crate) fn current_viewmodel_entity() -> i32 {
     CURRENT_SPECTATED.load(Ordering::Relaxed)
 }
 static CURRENT_DEPLOY_STATE: AtomicI32 = AtomicI32::new(-1);
+
+/// Drops what `apply()` last published for `on_weapon_fired`, once there is no
+/// spectated view to publish. Left standing, a POV demo watched after an HLTV
+/// one played the old viewmodel's "shoot" index on the new gun whenever the
+/// player with the old entity number fired: on an STG44, a reload (#613).
+fn forget_published_view() {
+    CURRENT_SPECTATED.store(-1, Ordering::Relaxed);
+    CURRENT_VIEWMODEL.store(std::ptr::null_mut(), Ordering::Relaxed);
+    CURRENT_DEPLOY_STATE.store(-1, Ordering::Relaxed);
+}
 /// Last bipod state actually read off a "bu"/"bd" model, carried across the
 /// stance variants that do not encode one. Cleared on a player switch, since
 /// it says nothing about the next person.
@@ -422,7 +457,8 @@ pub fn install() {
 /// Called from `fire_sounds`' `EV_PlaySound` hook, on the engine thread, same as
 /// `apply()`.
 pub fn on_weapon_fired(entity_index: i32) {
-    if !enabled() {
+    // A POV demo plays its own recorded animations (#613).
+    if !active() {
         return;
     }
 
@@ -475,6 +511,7 @@ pub fn apply() {
     // that leaves the last answer standing is the viewmodel mismatch below,
     // which is a flicker inside such a view, not the end of one.
     let no_view = || {
+        forget_published_view();
         crate::spectator_crosshair::set_pov_hides(None);
         crate::spectator_eye::set_prone(false);
         crate::spectator_gun::set_lowered(false);
@@ -1074,5 +1111,45 @@ pub(crate) mod tests {
         assert!(!enabled());
 
         LEVEL.store(LEVEL_MAX, Ordering::Relaxed);
+    }
+
+    /// Only a POV demo stands the fixes down (#613): an HLTV demo is played
+    /// back spectate-only, and live play, spectating or not, plays nothing back.
+    #[test]
+    fn only_a_pov_demo_counts_as_one() {
+        assert!(is_pov_demo(true, false));
+        assert!(!is_pov_demo(true, true), "HLTV demo");
+        assert!(!is_pov_demo(false, true), "live through an HLTV proxy");
+        assert!(!is_pov_demo(false, false), "live play");
+    }
+
+    /// #613: an HLTV demo published entity 13 and its viewmodel, then a POV
+    /// demo ran with nobody spectated. Each round entity 13 fired in the POV
+    /// demo played the old viewmodel's "shoot" index on the new gun. A frame
+    /// with no spectated view now forgets them, so the fire trigger has no one
+    /// to match.
+    #[test]
+    fn a_frame_with_no_spectated_view_forgets_the_last_one() {
+        let _statics = reset_settle_state();
+        // A real `model_t`-shaped value, in case a regression gets as far as
+        // reading the viewmodel's name.
+        let mut model: ModelSPartial = unsafe { std::mem::zeroed() };
+        CURRENT_SPECTATED.store(13, Ordering::Relaxed);
+        CURRENT_VIEWMODEL.store(&mut model, Ordering::Relaxed);
+        CURRENT_DEPLOY_STATE.store(0, Ordering::Relaxed);
+        let fires_before = LAST_FIRE_PLAYED.load(Ordering::Relaxed);
+        let played_before = ANIMATIONS_PLAYED.load(Ordering::Relaxed);
+
+        // No engine under test: `apply()` stops at its first check, as it
+        // does at `IsSpectateOnly()` in a POV demo.
+        apply();
+
+        assert_eq!(CURRENT_SPECTATED.load(Ordering::Relaxed), -1);
+        assert!(CURRENT_VIEWMODEL.load(Ordering::Relaxed).is_null());
+        assert_eq!(CURRENT_DEPLOY_STATE.load(Ordering::Relaxed), -1);
+
+        on_weapon_fired(13);
+        assert_eq!(LAST_FIRE_PLAYED.load(Ordering::Relaxed), fires_before);
+        assert_eq!(ANIMATIONS_PLAYED.load(Ordering::Relaxed), played_before);
     }
 }
