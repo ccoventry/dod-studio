@@ -1456,7 +1456,7 @@ pub(crate) fn game_dir() -> PathBuf {
 
 /// Which mod folder holds `dodstudio_hd` (#415).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HdHome {
+pub(crate) enum HdHome {
     /// `dod_addon`: DoD Studio's own place, and where a new build goes.
     Addon,
     /// `dod`: where the files were before #415, used while `dod_addon` has
@@ -1464,7 +1464,7 @@ enum HdHome {
     Dod,
 }
 
-fn hd_home(in_addon: bool, in_dod: bool) -> HdHome {
+pub(crate) fn hd_home(in_addon: bool, in_dod: bool) -> HdHome {
     if in_dod && !in_addon {
         HdHome::Dod
     } else {
@@ -1492,8 +1492,8 @@ pub(crate) fn hd_base() -> PathBuf {
 }
 
 /// Whether the game was started with `-addons`, which the detail textures in
-/// `dod_addon` need.
-fn addons_on() -> bool {
+/// `dod_addon` need, and the layouts there too (`studio_panel::res_dir`).
+pub(crate) fn addons_on() -> bool {
     std::env::args_os().any(|a| a.to_string_lossy().eq_ignore_ascii_case("-addons"))
 }
 

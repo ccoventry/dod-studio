@@ -178,7 +178,7 @@ is the complete list):
   A Highlights tab lists the playing demo's streaks, from Studio's analyzer
   cache or analysed in the game (`src/streaks.rs`, which links the `analysis`
   crate; a demo too big for the game's address space is refused, not tried).
-  One `.res` per tab in `dod\dodstudio_ui\`, editable in
+  One `.res` per tab in `dod_addon\dodstudio_ui\` (`dod\dodstudio_ui\` without `-addons`), editable in
   build mode; never narrower than its tabs. See `src/studio_panel.rs`.
 - **Commands from Studio** (on by default): the game serves a local named
   pipe, `\\.\pipe\dodstudio-hl-<pid>`, and runs each line Studio writes

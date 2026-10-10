@@ -285,7 +285,7 @@ The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`
 is launched with `-addons` (#412); `dod\resource`'s menu is never written, and a
 `dod_addon` menu without the "DoD Studio" mark is left alone.
 
-The layouts are in `dod\dodstudio_ui\`: `DodStudio.res` for the window and
+The layouts are in `dod_addon\dodstudio_ui\` (or `dod\dodstudio_ui\` when the game has no `-addons`, or while only that one exists, as before #415): `DodStudio.res` for the window and
 one per tab (`Playback.res`, `Demos.res`, `Console.res`, `Studio.res`, `Review.res`), written
 the first time and never overwritten. The empty `...Slot` controls in
 `Playback.res` and `Console.res` mark where the lent controls go. Edit a tab in-game with Ctrl+Shift+Alt+B on it, then

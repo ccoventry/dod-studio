@@ -45,7 +45,8 @@
 //!
 //! ## The layout files
 //!
-//! `<game>\dod\dodstudio_ui\`: `DodStudio.res` for the window, then one per
+//! `<game>\dod_addon\dodstudio_ui\` (or `dod\dodstudio_ui\` without
+//! `-addons`, or while only that one exists: [`res_dir`]): `DodStudio.res` for the window, then one per
 //! tab in [`PAGES`] (`Playback.res`, `Demos.res`, `Highlights.res`,
 //! `Console.res`, `Settings.res`, `Commands.res`, `Studio.res`). Our own folder beside
 //! `dodstudio_hd` -- never `dod\resource`, which is the user's. Each default
@@ -1289,13 +1290,34 @@ fn tooltips(res: &str) -> Vec<(String, String)> {
     out
 }
 
+/// The layouts' folder: `dod_addon\dodstudio_ui` when the game has
+/// `-addons` (every DoD Studio launch, #412) and `dod_addon` has the folder
+/// or `dod` doesn't, else `dod\dodstudio_ui`, the place from before #415.
+/// The engine loads the layouts through its own search paths, which only
+/// include `dod_addon` with `-addons`, ahead of `dod`.
 fn res_dir() -> std::path::PathBuf {
-    std::env::current_exe()
+    let game = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_default()
-        .join("dod")
-        .join(RES_DIR)
+        .unwrap_or_default();
+    let addon = game.join("dod_addon");
+    let dod = game.join("dod");
+    let base = if ui_in_addon(
+        crate::texture_hires::addons_on(),
+        addon.join(RES_DIR).is_dir(),
+        dod.join(RES_DIR).is_dir(),
+    ) {
+        addon
+    } else {
+        dod
+    };
+    base.join(RES_DIR)
+}
+
+/// Whether the layouts live in `dod_addon`: only with `-addons`, and then as
+/// the HD files pick (`texture_hires::hd_home`).
+fn ui_in_addon(addons: bool, in_addon: bool, in_dod: bool) -> bool {
+    addons && crate::texture_hires::hd_home(in_addon, in_dod) == crate::texture_hires::HdHome::Addon
 }
 
 /// Where Settings-tab changes are kept between launches: our own file, never
@@ -3912,6 +3934,18 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_layouts_follow_the_hd_files_into_dod_addon_only_with_addons() {
+        // -addons: dod_addon unless only dod has the folder.
+        assert!(ui_in_addon(true, true, false));
+        assert!(ui_in_addon(true, true, true));
+        assert!(ui_in_addon(true, false, false));
+        assert!(!ui_in_addon(true, false, true));
+        // Without it the engine never reads dod_addon.
+        assert!(!ui_in_addon(false, true, false));
+        assert!(!ui_in_addon(false, true, true));
+    }
 
     #[test]
     fn every_enable_button_is_in_its_tab_and_runs_its_setting() {
