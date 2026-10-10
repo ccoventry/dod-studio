@@ -145,6 +145,13 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     out.push("sys_autodir".to_string());
     out.push(format!("mirv_movie_fps {}", config.capture_fps));
 
+    // A batch runs at full speed with another window in front: without it the
+    // engine waits up to 20 ms for input every frame while it isn't the active
+    // app, which slows the fast-forward between clips 5-8x (measured on both
+    // builds). The hook DLL's setting; without the hook it is an unknown
+    // command and does nothing.
+    out.push(format!("{RUN_IN_BACKGROUND} 1"));
+
     // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
     // `mirv_movie_fps` above is inert on this path — nothing reads it. What
     // OBS actually records is however fast the engine renders, so that rate
@@ -190,6 +197,10 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
 
     out
 }
+
+/// The hook DLL's `dodstudio_run_in_background` (goldsrc-hooks
+/// `run_in_background.rs`), which every batch turns on.
+pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
