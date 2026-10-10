@@ -7,7 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { MODIFIERS } from './clip_name.js';
 import {
-  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, placeholdersFor,
+  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
@@ -92,8 +92,9 @@ let chipsKey = null;
 function renderChips() {
   const box = $('#rename-chips');
   if (!box) return;
-  // Only the placeholders the focused template's demo type has, each
-  // showing its value for the first demo of that type.
+  // Every placeholder, always in the same place; the ones the focused
+  // template's demo type doesn't have are greyed out and say why. Each shows
+  // its value for the first demo of that type.
   const type = chipType();
   const first = facts.find((f) => !f.error && (f.demo_type === 'hltv' ? 'hltv' : 'pov') === type);
   const values = first ? demoValues(first, getProjectTeams()) : null;
@@ -101,22 +102,26 @@ function renderChips() {
   if (key === chipsKey && box.childElementCount) return;
   chipsKey = key;
   const D = STRINGS.DEMO_RENAME;
-  const chip = (text, title) => {
+  const chip = (text, title, usable = true) => {
     const b = document.createElement('button');
     b.type = 'button';
     b.className = 'rename-chip';
     b.textContent = text;
     b.title = title;
+    b.disabled = !usable;
     // Keeps the cursor in the field (see clip_name_ui.js).
     b.addEventListener('mousedown', (e) => e.preventDefault());
     b.addEventListener('click', () => insertAtCursor(text));
     return b;
   };
+  const usable = new Set(placeholdersFor(type));
   const label = document.createElement('span');
   label.textContent = D.INSERT_LABEL;
   box.replaceChildren(
     label,
-    ...placeholdersFor(type).map((name) => chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))),
+    ...DEMO_PLACEHOLDERS.map((name) => (usable.has(name)
+      ? chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))
+      : chip(`{${name}}`, D.povOnly(`{${name}}`), false))),
     ...MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m])),
   );
 }
@@ -151,7 +156,10 @@ function renderTable() {
   }
   body.replaceChildren(...rows.map((row) => {
     const tr = document.createElement('tr');
+    // An unticked row stays listed, dimmed: it's left as it is.
+    tr.classList.toggle('rename-unticked', !selected.has(row.path));
     const tdCb = document.createElement('td');
+    tdCb.className = 'rename-center';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = selected.has(row.path);
@@ -165,11 +173,17 @@ function renderTable() {
     current.title = row.path;
     const renamed = row.status === 'rename';
     const next = cell(renamed ? row.to : statusNote(row), renamed ? 'rename-new' : 'rename-note');
+    next.title = next.textContent;
     if (row.numbered) {
       next.classList.add('rename-numbered');
       next.title = STRINGS.DEMO_RENAME.NUMBERED_TITLE;
     }
-    tr.append(tdCb, current, next, cell(row.demoType.toUpperCase()));
+    const type = cell('', 'rename-center');
+    const chip = document.createElement('span');
+    chip.className = `rename-type rename-type-${row.demoType.toLowerCase()}`;
+    chip.textContent = row.demoType.toUpperCase();
+    type.append(chip);
+    tr.append(tdCb, current, next, type);
     return tr;
   }));
 }

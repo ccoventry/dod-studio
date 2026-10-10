@@ -2917,6 +2917,49 @@ input[type="checkbox"].hd-box-pattern {
   font-size: 1em;
 }
 
+/* A placeholder the focused template's demo type doesn't have. */
+.rename-chip:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+/* The list: the shared .analyzer-table look, with fixed columns so the two
+   names share the width evenly and a long one ends in … (full on hover). */
+.rename-table {
+  table-layout: fixed;
+}
+
+.rename-table .rename-col-check {
+  width: 34px;
+}
+
+.rename-table .rename-col-type {
+  width: 64px;
+}
+
+.rename-table th.rename-center,
+.rename-table td.rename-center {
+  text-align: center;
+}
+
+.rename-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rename-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rename-table tr.rename-unticked td {
+  opacity: 0.45;
+}
+
+#rename-table td.rename-new {
+  color: #81c784;
+}
+
 #rename-table td.rename-note {
   color: var(--text-muted);
   font-style: italic;
@@ -2924,5 +2967,25 @@ input[type="checkbox"].hd-box-pattern {
 
 #rename-table td.rename-numbered {
   color: #ffb74d;
+}
+
+.rename-type {
+  display: inline-block;
+  min-width: 36px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+
+.rename-type-pov {
+  color: #64b5f6;
+  background: rgba(100, 181, 246, 0.12);
+}
+
+.rename-type-hltv {
+  color: #ce93d8;
+  background: rgba(206, 147, 216, 0.12);
 }
 

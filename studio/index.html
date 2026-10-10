@@ -883,13 +883,19 @@
               <p class="status-indicator"><span id="rename-status"></span></p>
             </div>
             <div class="table-wrapper" style="max-height: 400px;">
-              <table id="rename-table">
+              <table id="rename-table" class="analyzer-table rename-table">
+                <colgroup>
+                  <col class="rename-col-check" />
+                  <col />
+                  <col />
+                  <col class="rename-col-type" />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th><input type="checkbox" id="rename-select-all" checked /></th>
+                    <th class="rename-center"><input type="checkbox" id="rename-select-all" checked /></th>
                     <th data-str="DEMO_RENAME.COL_CURRENT">Current Name</th>
                     <th data-str="DEMO_RENAME.COL_NEW">New Name</th>
-                    <th data-str="DEMO_RENAME.COL_TYPE">Type</th>
+                    <th class="rename-center" data-str="DEMO_RENAME.COL_TYPE">Type</th>
                   </tr>
                 </thead>
                 <tbody id="rename-body">

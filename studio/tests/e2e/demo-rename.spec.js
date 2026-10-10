@@ -94,14 +94,17 @@ test('Lowercase the whole name lower-cases every new name and is saved', async (
   expect(await page.evaluate(() => window.__changes)).toBeGreaterThan(before);
 });
 
-test('the HLTV template gets only the placeholders an HLTV demo has', async ({ page }) => {
+test('the HLTV template keeps every chip but greys out the POV-only ones', async ({ page }) => {
   await loadHarness(page);
   await page.click('#rename-list-btn');
+  const faction = page.locator('.rename-chip:text-is("{faction}")');
   await page.locator('#rename-pov-template').focus();
-  await expect(page.locator('.rename-chip:text-is("{faction}")')).toBeVisible();
+  await expect(faction).toBeEnabled();
   await page.locator('#rename-hltv-template').focus();
-  await expect(page.locator('.rename-chip:text-is("{faction}")')).toHaveCount(0);
-  await expect(page.locator('.rename-chip:text-is("{allies}")')).toBeVisible();
+  await expect(faction).toBeVisible();
+  await expect(faction).toBeDisabled();
+  await expect(faction).toHaveAttribute('title', /only works in the POV template/);
+  await expect(page.locator('.rename-chip:text-is("{allies}")')).toBeEnabled();
 
   await page.fill('#rename-hltv-template', '{kills}_{map}');
   await expect(page.locator('#rename-hltv-errors')).toContainText('only works in the POV template');
