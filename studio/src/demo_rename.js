@@ -43,7 +43,7 @@ export function placeholdersFor(demoType) {
 }
 
 /** The ones a demo can be without, so the ones that take `|fallback`. */
-const WITH_FALLBACK = new Set([
+export const WITH_FALLBACK = new Set([
   'name', 'full_name', 'faction', 'enemy_faction', 'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2',
 ]);
 

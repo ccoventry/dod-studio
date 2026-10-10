@@ -84,6 +84,22 @@ test('a chip goes into the template field last used, and a settled template is s
   expect(await page.evaluate(() => window.__changes)).toBeGreaterThan(0);
 });
 
+test('the |fallback chip goes inside the placeholder, ready for the word', async ({ page }) => {
+  await loadHarness(page);
+  await page.click('#rename-list-btn');
+  await page.fill('#rename-pov-template', '{team_name}');
+  await page.locator('#rename-pov-template').press('End');
+  const chip = page.locator('.rename-chip:text-is("|fallback")');
+  // The tooltip names every placeholder it works on.
+  await expect(chip).toHaveAttribute('title', /\{name\} \{full_name\} \{faction\} \{enemy_faction\} \{team_name\} \{opponent\} \{allies\} \{axis\} \{team1\} \{team2\}/);
+  await chip.click();
+  await page.keyboard.type('mix');
+  await expect(page.locator('#rename-pov-template')).toHaveValue('{team_name|mix}');
+  await expect(page.locator('#rename-pov-errors')).toBeHidden();
+  await expect(page.locator('.rename-chip:text-is("{team_name}")')).toHaveAttribute('title', /your word after \|/);
+  await expect(page.locator('.rename-chip:text-is("{map}")')).not.toHaveAttribute('title', /your word after \|/);
+});
+
 test('Lowercase the whole name lower-cases every new name and is saved', async ({ page }) => {
   await loadHarness(page);
   await page.click('#rename-list-btn');
@@ -108,7 +124,7 @@ test('the HLTV template keeps every chip but greys out the POV-only ones', async
   // One labelled row per group, the modifiers (with :first) last.
   await expect(page.locator('.rename-chip-group-label')).toHaveText(['Player', 'Sides', 'Teams', 'Demo', 'Format']);
   await expect(page.locator('.rename-chip-group[data-group="player"] .rename-chip:disabled')).toHaveCount(4);
-  await expect(page.locator('.rename-chip-group[data-group="format"] .rename-chip')).toHaveText([':lower', ':upper', ':first']);
+  await expect(page.locator('.rename-chip-group[data-group="format"] .rename-chip')).toHaveText([':lower', ':upper', ':first', '|fallback']);
 
   await page.fill('#rename-hltv-template', '{kills}_{map}');
   await expect(page.locator('#rename-hltv-errors')).toContainText('only works in the POV template');

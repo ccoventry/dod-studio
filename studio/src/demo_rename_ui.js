@@ -7,7 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { MODIFIERS } from './clip_name.js';
 import {
-  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDER_GROUPS, placeholdersFor,
+  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, WITH_FALLBACK, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
@@ -71,12 +71,14 @@ function insertAtCursor(text) {
   if (!input) return;
   const start = input.selectionStart ?? input.value.length;
   const end = input.selectionEnd ?? start;
-  // A modifier goes inside the placeholder the cursor sits just after.
-  const into = text.startsWith(':') && start === end && input.value[end - 1] === '}';
+  // A modifier or a | goes inside the placeholder the cursor sits just
+  // after; after a |, the cursor stays inside for the word to be typed.
+  const fallback = text === '|';
+  const into = (text.startsWith(':') || fallback) && start === end && input.value[end - 1] === '}';
   const from = into ? end - 1 : start;
   const to = into ? end - 1 : end;
   input.value = input.value.slice(0, from) + text + input.value.slice(to);
-  const caret = from + text.length + (into ? 1 : 0);
+  const caret = from + text.length + (into && !fallback ? 1 : 0);
   input.setSelectionRange(caret, caret);
   input.focus();
   input.dispatchEvent(new Event('input'));
@@ -86,6 +88,12 @@ function insertAtCursor(text) {
 /** The demo type of the template the chips insert into. */
 function chipType() {
   return chipTarget?.id === 'rename-hltv-template' ? 'hltv' : 'pov';
+}
+
+/** The | chip reads "|fallback" but inserts a bare |, for the word to follow. */
+function fallbackChip(button) {
+  button.textContent = '|fallback';
+  return button;
 }
 
 let chipsKey = null;
@@ -128,9 +136,13 @@ function renderChips() {
   };
   box.replaceChildren(
     ...DEMO_PLACEHOLDER_GROUPS.flatMap((g) => row(g.key, g.names.map((name) => (usable.has(name)
-      ? chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))
+      ? chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name])
+        + (WITH_FALLBACK.has(name) ? ` ${D.noValueNote(name)}` : ''))
       : chip(`{${name}}`, D.povOnly(`{${name}}`), false))))),
-    ...row('format', MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m]))),
+    ...row('format', [
+      ...MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m])),
+      fallbackChip(chip('|', D.fallbackTitle(DEMO_PLACEHOLDERS.filter((n) => WITH_FALLBACK.has(n)).map((n) => `{${n}}`).join(' ')))),
+    ]),
   );
 }
 

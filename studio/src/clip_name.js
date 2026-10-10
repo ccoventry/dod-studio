@@ -20,7 +20,7 @@ export const PLACEHOLDERS = [
 export const MODIFIERS = ['lower', 'upper', 'first'];
 
 /** The only placeholders that can be missing, so the only ones with a fallback. */
-const WITH_FALLBACK = new Set(['team_name', 'opponent']);
+export const WITH_FALLBACK = new Set(['team_name', 'opponent']);
 /** What tells two highlights apart. */
 const DISTINGUISHING = ['row', 'time', 'demo'];
 /** Cut first, in this order, when a name is too long for its path. */

@@ -2117,7 +2117,10 @@ export const STRINGS = {
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
       first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
     },
+    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the placeholder has no value, '
+      + `like the team names in a pug. {team_name|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. First demo: ${value}` : description),
+    noValueNote: (name) => `With no value (a pug has no team names) it gives unknown, or your word after |, as in {${name}|mix}.`,
     // The chip rows, by what the placeholders hold.
     GROUPS: {
       player: 'Player',
@@ -2170,6 +2173,8 @@ export const STRINGS = {
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
       first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',
     },
+    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the team has no name, '
+      + `like in a pug. {opponent|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
   },
