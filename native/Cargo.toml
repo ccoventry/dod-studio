@@ -27,7 +27,6 @@ dirs = { workspace = true }
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros", "process", "fs", "sync", "io-util", "time"] }
 walkdir = "2.5.0"
 hl-demo-auditor = { path = "../hl-demo-auditor" }
-rfd = "0.14"
 open = "5.1"
 sysinfo = { workspace = true }
 keepawake = "0.6"

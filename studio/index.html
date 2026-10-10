@@ -54,6 +54,7 @@
           <button class="nav-tab-btn" data-nav="demo-analyzer" data-str="NAV.DEMO_ANALYZER_TAB">Demo Analyzer</button>
           <button class="nav-tab-btn" data-nav="hd-textures" data-str="NAV.HD_TEXTURES_TAB">HD Textures</button>
           <button class="nav-tab-btn" data-nav="overviews" data-str="NAV.OVERVIEWS_TAB">Overviews</button>
+          <button class="nav-tab-btn" data-nav="blender" data-str="NAV.BLENDER_TAB">Blender</button>
         </div>
         <div class="nav-actions">
           <span id="session-file-indicator" class="session-file-indicator" title="" data-str="NAV.NO_SESSION_LOADED">No session loaded</span>
@@ -595,6 +596,53 @@
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
 
+              <!-- "When a batch finishes" (#440) — finish_clips.js. Queues the
+                   batch's own takes through the same queue this tab's Scan
+                   uses, so the codec per capture mode is all it adds. There is
+                   no "keep as captured" for Video or Frame sequence: only an
+                   OBS take already carries its own sound. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-finish-clips" data-str="FINISH.WHEN_LABEL" data-str-title="FINISH.WHEN_TITLE">When a batch finishes:</label>
+                  <select id="config-finish-clips" data-str-title="FINISH.WHEN_TITLE">
+                    <option value="off" data-str="FINISH.WHEN_LEAVE">Leave the takes for the Render tab</option>
+                    <option value="finish" data-str="FINISH.WHEN_FINISH">Finish clips automatically</option>
+                  </select>
+                </div>
+              </div>
+              <div class="inline-controls">
+                <div class="control-group">
+                  <label for="config-finish-codec-obs" data-str="FINISH.CODEC_OBS_LABEL" data-str-title="FINISH.CODEC_TITLE">OBS clips:</label>
+                  <select id="config-finish-codec-obs" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="source_copy" data-str="FINISH.CODEC_KEEP">Keep as captured (copy, seconds)</option>
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-video" data-str="FINISH.CODEC_VIDEO_LABEL" data-str-title="FINISH.CODEC_TITLE">Video clips:</label>
+                  <select id="config-finish-codec-video" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <label for="config-finish-codec-frames" data-str="FINISH.CODEC_FRAMES_LABEL" data-str-title="FINISH.CODEC_TITLE">Frame sequence clips:</label>
+                  <select id="config-finish-codec-frames" data-str-title="FINISH.CODEC_TITLE">
+                    <option value="render_tab" data-str="FINISH.CODEC_RENDER_TAB">Same as the Codec setting above</option>
+                    <option value="prores" data-str="RENDER.CODEC_PRORES">ProRes 422 HQ</option>
+                    <option value="dnxhr" data-str="RENDER.CODEC_DNXHR">DNxHR HQ</option>
+                    <option value="h264" data-str="RENDER.CODEC_H264">H.264 (Software, MP4)</option>
+                    <option value="h264_nvenc" data-str="RENDER.CODEC_H264_NVENC">H.264 (NVENC GPU, MP4)</option>
+                  </select>
+                </div>
+              </div>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
               <div class="input-row" style="margin-top: 10px;">
@@ -699,11 +747,12 @@
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
                     <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
                     <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
+                    <th data-str="RENDER.TABLE_HEADER_HISTORY" data-str-title="RENDER.TABLE_HEADER_HISTORY_TITLE">History</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="10" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="11" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -880,7 +929,7 @@
                 <h3 data-str="HD.USE_TITLE">Use it in the game</h3>
               </div>
               <div class="panel-body">
-                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.</p>
+                <p class="hd-hint" data-str="HD.USE_HINT">HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.</p>
                 <div class="input-row">
                   <label for="hd-style-select" data-str="HD.STYLE_LABEL">Style:</label>
                   <select id="hd-style-select"></select>
@@ -1002,6 +1051,15 @@
                   <span class="hd-choice-label" data-str="HD.BUILD_TYPES_LABEL">Files:</span>
                   <div id="hd-build-types" class="hd-choices"></div>
                 </div>
+                <div class="input-row">
+                  <label for="hd-build-cap" data-str="HD.BUILD_CAP_LABEL">Largest size:</label>
+                  <select id="hd-build-cap">
+                    <option value="1024" data-str="HD.CAP_NAMES.1024">1024 (the usual)</option>
+                    <option value="2048" data-str="HD.CAP_NAMES.2048">2048</option>
+                    <option value="4096" data-str="HD.CAP_NAMES.4096">4096</option>
+                  </select>
+                </div>
+                <p id="hd-build-cap-hint" class="hd-hint"></p>
                 <div class="row-inputs">
                   <button id="hd-build-btn" class="primary-btn" data-str="HD.BUILD_BUTTON">Build</button>
                   <button id="hd-build-cancel-btn" disabled data-str="HD.CANCEL_BUTTON">Cancel</button>
@@ -1078,6 +1136,87 @@
                   <span data-str="HD.MISSES_SHOW_ON_PURPOSE">Show textures left alone on purpose</span>
                 </label>
                 <div id="hd-misses-maps"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Blender (#403): rebuild a highlight recorded with mirv_agr in Blender -->
+        <section id="pane-blender" class="content-pane" style="display: none;">
+          <div class="hd-pane-column">
+            <div class="egui-panel">
+              <div class="panel-header flex-between">
+                <h3 data-str="BLENDER.BLENDER_TITLE">Blender</h3>
+                <button id="blender-refresh-btn" data-str="BLENDER.REFRESH_BUTTON">Refresh</button>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.INTRO">Rebuild a highlight you recorded with HLAE's mirv_agr in Blender, with the real map, HD textures, lighting and the recorded camera, and render it. Needs Blender 4.4 with Blender Source Tools 3.4.3 and afx-blender-scripts 1.14.6 installed, and the game's models decompiled with Crowbar (blender\README.md in the DoD Studio repo has the steps).</p>
+                <p id="blender-status-text" class="hd-hint"></p>
+                <p id="blender-addons-text" class="hd-hint"></p>
+                <div class="row-inputs">
+                  <button id="blender-pick-exe-btn" data-str="BLENDER.PICK_EXE_BUTTON">Choose blender.exe...</button>
+                  <button id="blender-reset-exe-btn" data-str="BLENDER.RESET_EXE_BUTTON">Find it automatically</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.TAKE_TITLE">Take</h3>
+              </div>
+              <div class="panel-body">
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.AGR_LABEL">Recording (.agr):</span>
+                  <span id="blender-agr-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-agr-btn" data-str="BLENDER.PICK_AGR_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <span class="hd-choice-label" data-str="BLENDER.ASSETS_LABEL">Crowbar models folder:</span>
+                  <span id="blender-assets-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-pick-assets-btn" data-str="BLENDER.PICK_ASSETS_BUTTON">Choose...</button>
+                </div>
+                <div class="input-row">
+                  <label for="blender-map-select" data-str="BLENDER.MAP_LABEL">Map:</label>
+                  <select id="blender-map-select"></select>
+                  <label for="blender-style-select" data-str="BLENDER.STYLE_LABEL">Textures:</label>
+                  <select id="blender-style-select"></select>
+                </div>
+                <div class="input-row">
+                  <span id="blender-work-text" class="hd-hint hd-mono"></span>
+                  <button id="blender-open-work-btn" data-str="BLENDER.OPEN_WORK_BUTTON">Open folder</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="egui-panel">
+              <div class="panel-header">
+                <h3 data-str="BLENDER.STEPS_TITLE">Steps</h3>
+              </div>
+              <div class="panel-body">
+                <p class="hd-hint" data-str="BLENDER.STEPS_HINT">Run them in order; each one picks up the last one's files. Import opens Blender minimized in the taskbar while it works.</p>
+                <div class="row-inputs">
+                  <button id="blender-import-btn" class="primary-btn" data-str="BLENDER.IMPORT_BUTTON">1. Import</button>
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-scene-btn" class="primary-btn" data-str="BLENDER.SCENE_BUTTON">2. Build scene</button>
+                  <select id="blender-engine-select">
+                    <option value="eevee" data-str="BLENDER.ENGINE_EEVEE">EEVEE previews</option>
+                    <option value="cycles" data-str="BLENDER.ENGINE_CYCLES">One Cycles frame</option>
+                  </select>
+                  <input id="blender-frames-input" type="text" data-str-placeholder="BLENDER.FRAMES_PLACEHOLDER" placeholder="frames, e.g. 180 510 (optional)" />
+                </div>
+                <div class="row-inputs">
+                  <button id="blender-render-btn" class="primary-btn" data-str="BLENDER.RENDER_BUTTON">3. Render</button>
+                  <button id="blender-encode-btn" class="primary-btn" data-str="BLENDER.ENCODE_BUTTON">4. Encode MP4</button>
+                  <select id="blender-quality-select">
+                    <option value="quick" data-str="BLENDER.QUALITY_QUICK">Quick: 720p, 32 samples</option>
+                    <option value="final" data-str="BLENDER.QUALITY_FINAL">Final: 1080p, 64 samples</option>
+                  </select>
+                  <button id="blender-cancel-btn" disabled data-str="BLENDER.CANCEL_BUTTON">Cancel</button>
+                </div>
+                <p id="blender-progress" class="hd-hint"></p>
+                <p id="blender-line" class="hd-hint hd-mono"></p>
+                <ul id="blender-results" class="hd-hint hd-mono"></ul>
               </div>
             </div>
           </div>
@@ -1319,9 +1458,11 @@
                 <button class="analyzer-subtab-btn" data-subtab="team-details" data-str="ANALYZER.SUBTAB_TEAM_DETAILS">Team Details</button>
                 <button class="analyzer-subtab-btn" data-subtab="timeline" data-str="ANALYZER.SUBTAB_TIMELINE">Timeline</button>
                 <button class="analyzer-subtab-btn" data-subtab="rounds" data-str="ANALYZER.SUBTAB_ROUNDS">Rounds</button>
+                <button class="analyzer-subtab-btn" data-subtab="kill-map" data-str="ANALYZER.SUBTAB_KILL_MAP">Kill Map</button>
                 <button class="analyzer-subtab-btn" data-subtab="flags" data-str="ANALYZER.SUBTAB_FLAGS">Flags</button>
                 <button class="analyzer-subtab-btn" data-subtab="chat" data-str="ANALYZER.SUBTAB_CHAT">Chat Log</button>
               </div>
+              <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
               <div id="analyzer-tab-content" class="analyzer-tab-content">
                 <p class="analyzer-empty" data-str="ANALYZER.EMPTY_PICK_DEMO">Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".</p>
               </div>

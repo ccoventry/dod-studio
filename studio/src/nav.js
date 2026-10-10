@@ -58,9 +58,10 @@ export function switchNavTab(navKey) {
   const auditorPane = document.querySelector('#pane-demo-auditor');
   const analyzerPane = document.querySelector('#pane-demo-analyzer');
   const hdPane = document.querySelector('#pane-hd-textures');
+  const blenderPane = document.querySelector('#pane-blender');
   const overviewsPane = document.querySelector('#pane-overviews');
 
-  [workspacePane, detailsPane, captureSubtabsBar, detailPane, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane, overviewsPane]
+  [workspacePane, detailsPane, captureSubtabsBar, detailPane, exportPanel, renderPanel, auditorPane, analyzerPane, hdPane, blenderPane, overviewsPane]
     .forEach((el) => { if (el) el.style.display = 'none'; });
 
   const footerCaptureStudio = document.querySelector('#footer-capture-studio');
@@ -91,6 +92,8 @@ export function switchNavTab(navKey) {
   } else if (navKey === 'hd-textures') {
     if (hdPane) hdPane.style.display = 'flex';
     if (footerHdTextures) footerHdTextures.style.display = 'flex';
+  } else if (navKey === 'blender') {
+    if (blenderPane) blenderPane.style.display = 'flex';
   } else if (navKey === 'overviews') {
     if (overviewsPane) overviewsPane.style.display = 'flex';
     if (footerOverviews) footerOverviews.style.display = 'flex';

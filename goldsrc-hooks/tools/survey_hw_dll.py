@@ -35,15 +35,20 @@ Sections:
     decals     the decal ring: pool, count, unlink, and what is reachable
     pin        HLAE patterns that match in several places, resolved to the
                function each match sits in
+    writes     the census behind #300: every function in AfxHookGoldSrc that
+               reaches VirtualProtect, and every caller of each, attributed
+               to the key slots and strings it uses
+    spans      HLAE's mid-function span patches in THIS hw.dll, re-checked by
+               instruction shape; picks the build the way HLAE does
 
 Usage:
     python goldsrc-hooks/tools/survey_hw_dll.py [section...]
         [--hw PATH] [--afx PATH]
 
-Defaults to the pre-Anniversary movies install and the pre-Anniversary HLAE.
-`keys`, `collide` and `pin` need HLAE present; the rest do not. Requires `pefile`
-and `capstone` (`pip install pefile capstone`); both are analysis-only and are
-not build dependencies of anything in the workspace.
+Defaults to the pre-Anniversary movies install and the first HLAE found among
+`DEFAULT_AFX`. `keys`, `collide`, `pin` and `writes` need HLAE present; the rest
+do not. Requires `pefile` and `capstone` (`pip install pefile capstone`); both
+are analysis-only and are not build dependencies of anything in the workspace.
 """
 
 import bisect
@@ -62,7 +67,12 @@ DEFAULT_HW = Path(
     r"C:\Program Files (x86)\Steam\steamapps\common"
     r"\Half-Life - PRE-Anniversary for Movies\hw.dll"
 )
-DEFAULT_AFX = Path(r"C:\Program Files (x86)\HLAE\HLAE (Pre-Anniversary)\AfxHookGoldSrc.dll")
+# §1-§11 read the first of these; §12 (#300) reads the second, HLAE 2.192.4,
+# which covers both engine builds. The first one that exists is used.
+DEFAULT_AFX = [
+    Path(r"C:\Program Files (x86)\HLAE\HLAE (Pre-Anniversary)\AfxHookGoldSrc.dll"),
+    Path(r"C:\Programs\HLAE\AfxHookGoldSrc.dll"),
+]
 
 # HLAE's key registrations are `push <name>; push <slot>; mov ecx, <map>; call`,
 # one per key, emitted as C++ static initialisers.
@@ -71,10 +81,9 @@ KEY_REGISTRATION = re.compile(rb"\x68(....)\x68(....)\xb9(....)\xe8", re.S)
 # A pattern in HLAE's own spelling, which `scan.rs` deliberately shares.
 PATTERN_TEXT = re.compile(r"^(?:[0-9A-Fa-f]{2}|\?\?)(?: (?:[0-9A-Fa-f]{2}|\?\?))+$")
 
-# `DetourAttach(&target, hook)` in AfxHookGoldSrc, identified by the three-call
-# transaction shape around it (begin / update-thread / attach) and confirmed by
-# the `.detourc`/`.detourd` sections the module carries.
-DETOUR_ATTACH = 0x26070
+# `DetourAttach(&target, hook)` in AfxHookGoldSrc is found by the transaction
+# shape around it rather than by address -- `find_detour_attach` -- because the
+# address moves between HLAE builds (it was afx+0x26070 in the build §1 read).
 
 # Our own findings, re-checked rather than restated. Each is (rva, expected
 # bytes, what it is) -- a mismatch means this hw.dll is not the analysed build.
@@ -163,6 +172,28 @@ class Image:
         )
         return [m.start() for m in rx.finditer(self.data) if self.sect(m.start()) == ".text"]
 
+    def iat(self, name):
+        """The IAT slot rva of an imported function, or None."""
+        if not hasattr(self, "_imports"):
+            self.pe.parse_data_directories(
+                directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_IMPORT"]]
+            )
+            self._imports = {
+                imp.name.decode(): imp.address - self.base
+                for entry in getattr(self.pe, "DIRECTORY_ENTRY_IMPORT", [])
+                for imp in entry.imports
+                if imp.name
+            }
+        return self._imports.get(name)
+
+    def func_start(self, rva, back=0x400):
+        """The nearest `push ebp; mov ebp, esp` at or before `rva` that follows
+        padding or a `ret` -- a prologue, as MSVC lays this module out."""
+        for at in range(rva, max(0, rva - back), -1):
+            if self.data[at:at + 3] == b"\x55\x8b\xec" and self.data[at - 1] in (0xCC, 0xC3, 0x90):
+                return at
+        return None
+
     def calls_to(self, rva):
         out = []
         for start, size in self.code_ranges():
@@ -224,6 +255,31 @@ def pattern_owner(afx, keys):
     return out
 
 
+def find_detour_attach(afx):
+    """`DetourAttach`, by the shape of a Detours transaction.
+
+    Every HLAE install is `DetourTransactionBegin(); DetourUpdateThread(
+    GetCurrentThread()); DetourAttach(&target, hook); ...; Commit()`. So after
+    each `call [GetCurrentThread]`, the first direct call is UpdateThread and
+    the second is Attach; the most common second call is the answer.
+    """
+    iat = afx.iat("GetCurrentThread")
+    if iat is None:
+        return None
+    votes = {}
+    for ref in afx.xrefs_to(iat):
+        if afx.data[ref - 2:ref] != b"\xff\x15" or afx.sect(ref) != ".text":
+            continue
+        calls = []
+        for ins in afx.disasm(ref - 2, ref + 0x30):
+            if ins.mnemonic == "call" and ins.op_str.startswith("0x"):
+                calls.append(int(ins.op_str, 16) - afx.base)
+            if len(calls) == 2:
+                votes[calls[1]] = votes.get(calls[1], 0) + 1
+                break
+    return max(votes, key=votes.get) if votes else None
+
+
 def hlae_detours(afx, keys):
     """{key name: hook rva} for every key HLAE attaches a Detours hook to."""
     def pushes_before(rva, back=0x20):
@@ -255,7 +311,8 @@ def hlae_detours(afx, keys):
         return sorted(found)
 
     out = {}
-    for call in sorted(afx.calls_to(DETOUR_ATTACH)):
+    attach = find_detour_attach(afx)
+    for call in sorted(afx.calls_to(attach) if attach else []):
         hook, target = pushes_before(call)
         if target is None:
             continue
@@ -663,6 +720,165 @@ def report_hlae_pin(hw, afx):
     return True
 
 
+# ── Every write HLAE makes (#300) ────────────────────────────────────────────
+# #300 asked whether the DetourAttach count plus §10's span patch is all of
+# HLAE's writes. Closed from the API side: anything that changes a page's
+# protection must reach VirtualProtect, so the functions that do are the
+# complete list of write primitives, and their callers are the complete list
+# of protection-changing writes.
+
+def protect_census(afx):
+    """{function rva: [VirtualProtect call sites]} -- direct `call [iat]`, and
+    calls to a `jmp [iat]` thunk (how the statically linked Detours reaches
+    it)."""
+    iat = afx.iat("VirtualProtect")
+    out = {}
+    if iat is None:
+        return out
+    for ref in afx.xrefs_to(iat):
+        if afx.sect(ref) != ".text":
+            continue
+        op = afx.data[ref - 2:ref]
+        if op == b"\xff\x15":
+            sites = [ref - 2]
+        elif op == b"\xff\x25":
+            sites = afx.calls_to(ref - 2)
+        else:
+            sites = [ref - 2]  # loaded into a register; reported as is
+        for site in sites:
+            # Detours' commit is over 1 KB long, so look a long way back.
+            start = afx.func_start(site, back=0x1000) or site
+            out.setdefault(start, []).append(site)
+    return out
+
+
+def writes_jmp(afx, start, end):
+    """Whether a function stores an `E9` opcode byte through a register --
+    the signature of a hand-written jump patch (`mov byte [reg], 0xe9`)."""
+    return any(
+        ins.mnemonic == "mov" and ins.op_str.startswith("byte ptr [") and ins.op_str.endswith(", 0xe9")
+        for ins in afx.disasm(start, end)
+    )
+
+
+def site_context(afx, keys, site, back=0x80):
+    """Key slots and strings referenced in the bytes leading up to `site`."""
+    names, texts = [], []
+    for ins in afx.disasm(max(0, site - back), site):
+        for tok in re.findall(r"0x[0-9a-f]{6,8}", ins.op_str):
+            rva = int(tok, 16) - afx.base
+            if rva in keys and keys[rva] not in names:
+                names.append(keys[rva])
+            elif 0 <= rva < len(afx.data) and afx.sect(rva) == ".rdata" and not PATTERN_TEXT.match(
+                afx.cstr(rva, 80) or ""
+            ):
+                text = afx.cstr(rva, 80)
+                if text and len(text) > 3 and text not in texts:
+                    texts.append(text)
+    return names, texts
+
+
+def report_writes(hw, afx):
+    keys = hlae_keys(afx)
+    attach = find_detour_attach(afx)
+    census = protect_census(afx)
+    print("== every function in AfxHookGoldSrc that reaches VirtualProtect ==")
+    print("Anything that changes a page's protection must, so this is the complete")
+    print("list of HLAE's write primitives. Pattern strings are never printed.\n")
+    attach_calls = afx.calls_to(attach) if attach else []
+    print(f"  DetourAttach = afx+{attach:#x} (by transaction shape), {len(attach_calls)} call sites")
+    attach_inner = {
+        int(i.op_str, 16) - afx.base
+        for i in afx.disasm(attach, attach + 0x40)
+        if i.mnemonic in ("call", "jmp") and i.op_str.startswith("0x")
+    } if attach else set()
+    for start, sites in sorted(census.items()):
+        nxt = next(
+            (at for at in range(start + 3, start + 0x1000)
+             if afx.data[at:at + 3] == b"\x55\x8b\xec" and afx.data[at - 1] in (0xCC, 0xC3)),
+            start + 0x1000,
+        )
+        callers = afx.calls_to(start)
+        kind = []
+        if start in attach_inner:
+            kind.append("DetourAttachEx (Detours)")
+        if afx.sect(start) == ".text" and writes_jmp(afx, start, nxt):
+            kind.append("writes an E9 jump")
+        pointers = [r for r in afx.xrefs_to(start) if afx.sect(r) == ".text"]
+        if pointers:
+            kind.append(f"also passed as a pointer from {', '.join('afx+%#x' % p for p in pointers)}")
+        print(f"\n  afx+{start:#x}: {len(sites)} VirtualProtect site(s), {len(callers)} caller(s)"
+              + (f"  [{'; '.join(kind)}]" if kind else ""))
+        if len(callers) > 16:
+            print("    (a Detours transaction function -- one call per transaction)")
+            continue
+        for call in callers:
+            names, texts = site_context(afx, keys, call)
+            what = ", ".join(names) or "no key slot"
+            extra = f"  strings: {texts[-2:]}" if texts else ""
+            print(f"    from afx+{call:#x}: {what}{extra}")
+    print("\n  Not visible to this census: stores into memory that is already writable")
+    print("  (command handlers, the engine's cldll_func_t copy). See §12.2.")
+    return True
+
+
+# HLAE's mid-function span patches, per engine build, as §12.3 records them:
+# (key, hw rva, span length, instruction mnemonics the span must consist of).
+# Recorded as game addresses and instruction shapes -- never HLAE's patterns.
+SPANS = {
+    "pre-Anniversary": [
+        ("UnkDrawHudIn", 0xB75B4, 5, ["call"]),
+        ("UnkDrawHudOut", 0xB7639, 5, ["call"]),
+        ("CL_ParseServerMessage_CmdRead", 0x1D3E6, 7, ["mov", "call"]),
+    ],
+    "25th Anniversary": [
+        ("UnkDrawHudIn", 0x25D2D2, 5, ["call"]),
+        ("UnkDrawHudOut", 0x25D34F, 5, ["call"]),
+        ("R_DrawEntitiesOnList_In", 0x244354, 9, ["push", "xor", "cmp"]),
+        ("R_DrawEntitiesOnList_Out", 0x244492, 12, ["xor", "mov"]),
+        ("R_DrawSkyBox_Begin", 0x251521, 8, ["movss"]),
+        ("R_DrawSkyBox_End", 0x2516E6, 6, ["test", "pop", "pop", "je"]),
+        ("CL_ParseServerMessage_CmdRead", 0x1A7DDC, 11, ["mov", "call"]),
+    ],
+}
+
+
+def report_spans(hw, _afx):
+    """HLAE's span patches in this hw.dll, re-checked by instruction shape."""
+    build = "pre-Anniversary" if b"A3D.DLL\0" in hw.data else "25th Anniversary"
+    print(f"== HLAE's span patches in this hw.dll: {build} ==")
+    print("Build chosen the way HLAE chooses it: does hw.dll contain `A3D.DLL`?\n")
+    ok = True
+    entries = call_targets(hw)
+    for key, rva, length, shape in SPANS[build]:
+        got, size = [], 0
+        for ins in hw.disasm(rva, rva + length + 16):
+            if size >= length:
+                break
+            got.append(ins.mnemonic)
+            size += ins.size
+        good = got == shape and size == length
+        ok &= good
+        owner = owner_of(entries, rva)
+        print(f"  {'OK  ' if good else 'FAIL'} {key:<31} hw+{rva:#x} .. +{length:<2} in hw+{owner:#x}"
+              f"  ({' / '.join(got)})")
+
+    # Two derivations that need nothing of HLAE's, as cross-checks.
+    s = hw.data.find(b"CL_ParseServerMessage: Bad server message\0")
+    refs = [r for r in hw.xrefs_to(s) if hw.sect(r) == ".text"] if s >= 0 else []
+    cmd = next(r for k, r, _l, _s in SPANS[build] if k == "CL_ParseServerMessage_CmdRead")
+    derived = refs[0] + 0x12 if len(refs) == 1 else None
+    good = derived == cmd
+    ok &= good
+    print(f"\n  {'OK  ' if good else 'FAIL'} CmdRead is 0x12 bytes past the one reference to"
+          f" \"Bad server message\" ({'hw+%#x' % derived if derived else 'not found'})")
+    hud = [r for k, r, _l, _s in SPANS[build] if k.startswith("UnkDrawHud")]
+    print(f"  INFO UnkDrawHudOut is {hud[1] - hud[0]:#x} bytes after UnkDrawHudIn, in one function")
+    print("\n  Lazy ones: CmdRead exists only after `mirv_voice_block`. The others are")
+    print("  written at hw.dll load in every HLAE session. See §12.3.")
+    return ok
+
+
 REPORTS = {
     "keys": report_keys,
     "collide": report_collide,
@@ -671,11 +887,14 @@ REPORTS = {
     "entities": report_entities,
     "decals": report_decals,
     "pin": report_hlae_pin,
+    "writes": report_writes,
+    "spans": report_spans,
 }
 
 
 def main(argv):
-    hw_path, afx_path = DEFAULT_HW, DEFAULT_AFX
+    hw_path = DEFAULT_HW
+    afx_path = next((p for p in DEFAULT_AFX if p.is_file()), DEFAULT_AFX[-1])
     for flag, setter in (("--hw", "hw"), ("--afx", "afx")):
         if flag in argv:
             i = argv.index(flag)
@@ -693,7 +912,7 @@ def main(argv):
 
     hw = Image(hw_path)
     afx = None
-    if any(w in ("keys", "collide", "pin") for w in wanted):
+    if any(w in ("keys", "collide", "pin", "writes") for w in wanted):
         if not afx_path.is_file():
             return print(f"no AfxHookGoldSrc.dll at {afx_path} -- `findings` works without it") or 2
         afx = Image(afx_path)

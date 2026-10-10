@@ -50,9 +50,17 @@ pub mod demo_rename;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
 
+/// Rebuilding a recorded highlight in Blender from an HLAE `.agr` (#403).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod blender;
+
 /// Driving OBS Studio as an alternate capture path (#65).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod obs;
+
+/// A map's overview image and its placement, for the Demo Analyzer (#448).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod map_overview;
 
 /// Map overviews made from the BSP, for the Overviews page (#371).
 #[cfg(not(target_arch = "wasm32"))]

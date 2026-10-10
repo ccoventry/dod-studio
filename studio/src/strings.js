@@ -51,6 +51,7 @@ export const STRINGS = {
     DEMO_AUDITOR_TAB: 'Demo Auditor',
     DEMO_ANALYZER_TAB: 'Demo Analyzer',
     HD_TEXTURES_TAB: 'HD Textures',
+    BLENDER_TAB: 'Blender',
     OVERVIEWS_TAB: 'Overviews',
     NO_SESSION_LOADED: 'No session loaded',
     FILE_MENU: 'File',
@@ -548,6 +549,15 @@ export const STRINGS = {
     CODEC_LABEL: 'Codec:',
     CODEC_PRORES: 'ProRes 422 HQ',
     CODEC_DNXHR: 'DNxHR HQ',
+    // #438: each take's render history.
+    TABLE_HEADER_HISTORY: 'History',
+    TABLE_HEADER_HISTORY_TITLE: 'Every time this take was rendered, kept beside the take so it survives restarts. ▸ lists each attempt.',
+    HISTORY_NEW: 'New',
+    historyRendered: (count) => `Rendered ×${count}`,
+    HISTORY_OUTCOME: { finished: 'Rendered', failed: 'Failed', cancelled: 'Cancelled', interrupted: 'Interrupted' },
+    HISTORY_SKIPPED_SETTINGS: 'Skip (kept original)',
+    HISTORY_TOGGLE_TITLE: 'Show or hide every render of this take',
+    historyFileNotFound: (name) => `${name} was moved or deleted`,
     // #108: named render setups.
     PRESET_LABEL: 'Preset:',
     PRESET_TITLE: 'A saved codec, FPS and concurrency. Pick one to apply it. Shows — when the settings above match no preset.',
@@ -661,6 +671,42 @@ export const STRINGS = {
     UNKNOWN_SOURCE_FOLDER: '(unknown)',
   },
 
+  // ── Finishing clips after a capture batch (#440) + finish_clips.js ───────
+  FINISH: {
+    SECTION_TITLE: 'When a batch finishes',
+    WHEN_LABEL: 'When a batch finishes:',
+    WHEN_TITLE:
+        'Finish clips automatically turns every take the batch captured into one video with its sound, in the export folder below, as soon as the batch ends. The jobs show up in the Render tab like any other. Leave the takes to render them yourself from the Render tab.',
+    WHEN_LEAVE: 'Leave the takes for the Render tab',
+    WHEN_FINISH: 'Finish clips automatically',
+    CODEC_OBS_LABEL: 'OBS clips:',
+    CODEC_VIDEO_LABEL: 'Video clips:',
+    CODEC_FRAMES_LABEL: 'Frame sequence clips:',
+    CODEC_TITLE: 'What each finished clip is saved as, for batches captured in this mode.',
+    CODEC_KEEP: 'Keep as captured (copy, seconds)',
+    CODEC_RENDER_TAB: 'Same as the Codec setting above',
+    progressStatus: (finished, total, rendering) =>
+      `Finishing clips: ${finished} of ${total}${rendering > 0 ? `, ${rendering} in progress` : ''}`,
+    WAITING_STATUS: 'Finishing clips: waiting for the Render tab to finish what it is already doing',
+    startedToast: (n) => `Finishing ${n} clip${n === 1 ? '' : 's'}.`,
+    VIEW_IN_RENDER_TAB: 'View in Render tab',
+    NOTIFY_TITLE: 'Clips ready',
+    doneSummary: (finished, failed, cancelled) => {
+      const ready = `${finished} clip${finished === 1 ? '' : 's'} ready`;
+      const extra = [];
+      if (failed > 0) extra.push(`${failed} failed`);
+      if (cancelled > 0) extra.push(`${cancelled} cancelled`);
+      return extra.length ? `${ready}, ${extra.join(', ')} — see the Render tab.` : `${ready}.`;
+    },
+    OPEN_EXPORT_FOLDER: 'Open export folder',
+    FAILED_STATUS: 'Could not finish the clips — the takes are still there for the Render tab.',
+    failedToast: (err) => `Could not finish the clips automatically: ${err}. The takes are still on disk; render them from the Render tab.`,
+    NOTHING_FOUND: 'No clips to finish: the Render tab found no takes it can use in this batch.',
+    SKIPPED_CANCELLED: 'The batch was cancelled, so its clips were not finished. Render the takes from the Render tab if you want them.',
+    SKIPPED_NO_EXPORT_DIR: 'Clips were not finished: add an export folder in Configuration → Render Settings first. The takes are still there for the Render tab.',
+    SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
+  },
+
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
   ERROR_LOG_MODAL: {
     TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -681,6 +727,10 @@ export const STRINGS = {
   // ── Demo Auditor pane + auditor_pane.js ──────────────────────────────────
   // Demo Auditor's Split Maps tab (#624).
   SPLIT: {
+    // split_progress.js: a split's progress line (#217).
+    progressReading: (pct) => `Reading the demo… ${pct}%`,
+    progressWriting: (map, part, parts, pct) => `Writing ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
+    progressChecking: (map, part, parts, pct) => `Checking ${map}${parts > 1 ? ` (${part} of ${parts})` : ''}… ${pct}%`,
     TITLE: 'Demos With More Than One Map',
     HINT: "A demo that kept recording through a map change holds every map, but viewdemo only shows the first. Tick the maps to keep: each becomes its own demo next to the original, which is never changed.",
     RECURSIVE: 'Include subfolders',
@@ -701,7 +751,6 @@ export const STRINGS = {
     SPLIT_BUTTON: 'Split Checked Maps',
     SHOW_IN_FOLDER: 'Show in folder',
     NOTHING_TICKED: 'Tick at least one map.',
-    SPLITTING: 'Splitting...',
     wrote: (n) => `Wrote ${n} demo${n === 1 ? '' : 's'}:`,
     writtenLine: (name, length, mb) => `${name} (${length}, ${mb} MB)`,
     splitFailed: (e) => `Split failed: ${e}`,
@@ -837,6 +886,7 @@ export const STRINGS = {
     SUBTAB_ROUNDS: 'Rounds',
     SUBTAB_FLAGS: 'Flags',
     SUBTAB_CHAT: 'Chat Log',
+    SUBTAB_KILL_MAP: 'Kill Map',
     EMPTY_PICK_DEMO: 'Pick a folder and demo on the left, browse for a file, or select one from the Workspace and click "View Match Telemetry".',
     EMPTY_PICK_DEMO_JS_FALLBACK: 'Browse for a demo file, or select one from the Workspace and click "View Match Telemetry".',
 
@@ -860,6 +910,15 @@ export const STRINGS = {
     analyzingDemoPct: (pct) => `Analyzing demo… ${pct}%`,
     analyzeFailed: (err) => `Failed to analyze demo: ${err}`,
     NO_DEMO_LOADED: 'No demo loaded',
+    // #217: a demo that recorded more than one map.
+    multiMapNotice: (maps) => `This demo recorded ${maps.length} maps (${maps.join(', ')}). `
+      + 'Only the first is analysed: the game stops playing it at the map change. Split it to use the rest.',
+    MULTI_MAP_SPLIT_BUTTON: 'Split now',
+    MULTI_MAP_SPLIT_TITLE: 'Writes each map out as a demo of its own, next to this one, and opens the first. '
+      + 'This demo is kept as it is. A map under a minute (the next map loading as the recording stopped) is left out; '
+      + 'the Demo Auditor\'s Split Maps tab lets you pick.',
+    multiMapSplitDone: (names) => `Split into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    multiMapSplitFailed: (err) => `Could not split it: ${err}`,
 
     NO_PLAYERS_FOUND: 'No players found in this demo.',
     NO_WEAPON_DATA: 'No weapon data.',
@@ -966,6 +1025,28 @@ export const STRINGS = {
     TEAM_SCORE_TIMELINE_TITLE: 'Team Score Timeline',
     TIMELINE_TOOLTIP_ELAPSED_LABEL: 'Time Elapsed:',
     TIMELINE_TOOLTIP_TIMESTAMP_LABEL: 'Demo Timestamp:',
+
+    // Kill Map tab (#448)
+    KILL_MAP_TITLE: 'Where Players Died',
+    KILL_MAP_LOADING: 'Loading the map…',
+    killMapNoOverview: (map) => `No map picture for ${map}, so deaths can't be placed on it. The app looks in the game's dod\\overviews folder.`,
+    KILL_MAP_NO_KILLS: 'No deaths recorded.',
+    killMapCoverage: (placed, total) => `${placed} of ${total} deaths shown.`,
+    KILL_MAP_POV_NOTE: 'This demo was recorded by a player, and only has positions for enemies that player could see — so some deaths are missing, and some kills have no distance.',
+    killMapDiedLegend: (team) => `${team} player died`,
+    killMapTooltip: (victim, killer, weapon) => killer ? `${victim} killed by ${killer} (${weapon})` : `${victim} died (${weapon})`,
+    KILL_MAP_TOOLTIP_DISTANCE_LABEL: 'Distance:',
+    KILL_MAP_TOOLTIP_TIME_LABEL: 'Demo time:',
+    KILL_MAP_TEAMKILL_TAG: 'team kill',
+    KILL_MAP_UNKNOWN_PLAYER: 'Unknown player',
+    ENGAGEMENT_TITLE: 'Engagement Distance',
+    ENGAGEMENT_EXPLAINER: 'How far apart the killer and the victim were at each kill. Team kills and kills where either player\'s position is unknown are left out.',
+    NO_ENGAGEMENT_DATA: 'No kills with both players\' positions known.',
+    COL_KILLS_MEASURED: 'Kills',
+    COL_AVERAGE_DISTANCE: 'Average',
+    COL_LONGEST_DISTANCE: 'Longest',
+    ALL_WEAPONS_LABEL: 'All weapons',
+    metres: (m) => `${m.toFixed(1)} m`,
 
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
@@ -1352,6 +1433,57 @@ export const STRINGS = {
   },
 
   // ── hd_pane.js: the HD Textures page (#372) ─────────────────────────────
+  // ── Blender page (#403) ───────────────────────────────────────────────────
+  BLENDER: {
+    BLENDER_TITLE: 'Blender',
+    REFRESH_BUTTON: 'Refresh',
+    INTRO: "Rebuild a highlight you recorded with HLAE's mirv_agr in Blender, with the real map, HD textures, lighting and the recorded camera, and render it. Needs Blender 4.4 with Blender Source Tools 3.4.3 and afx-blender-scripts 1.14.6 installed, and the game's models decompiled with Crowbar (blender\\README.md in the DoD Studio repo has the steps).",
+    NEEDS_GAME_PATH: 'Set the Half-Life Executable in Configuration → Paths first: the maps and HD textures come from its dod folder.',
+    NO_SCRIPTS: 'This copy of DoD Studio has no Blender scripts (the blender folder in the DoD Studio repo).',
+    NOT_FOUND: 'Blender: none found. Choose blender.exe (Blender 4.4).',
+    using: (exe, version, chosen, supported) => `Blender ${version || '(version unknown)'}${chosen ? ', the one you chose' : ''} (${exe}).${supported ? '' : ' The import add-ons need Blender 4.4; other versions may fail at Import.'}`,
+    ADDONS_OK: 'Import add-ons: installed.',
+    addonsMissing: (names) => `Import add-ons not installed for this Blender: ${names.join(', ')}. Install them from Blender's Edit > Preferences > Add-ons > Install from Disk.`,
+    PICK_EXE_BUTTON: 'Choose blender.exe...',
+    RESET_EXE_BUTTON: 'Find it automatically',
+    PICK_EXE_TITLE: 'Choose blender.exe',
+    TAKE_TITLE: 'Take',
+    AGR_LABEL: 'Recording (.agr):',
+    ASSETS_LABEL: 'Crowbar models folder:',
+    PICK_AGR_BUTTON: 'Choose...',
+    PICK_ASSETS_BUTTON: 'Choose...',
+    PICK_AGR_TITLE: 'Choose a mirv_agr recording',
+    PICK_ASSETS_TITLE: 'Choose the folder Crowbar decompiled the models into (it holds models)',
+    NONE_PICKED: 'none chosen',
+    MAP_LABEL: 'Map:',
+    PICK_MAP: '(choose the map it was recorded on)',
+    STYLE_LABEL: 'Textures:',
+    STYLE_ORIGINAL: 'Original',
+    workFolder: (dir) => `Work folder: ${dir}`,
+    OPEN_WORK_BUTTON: 'Open folder',
+    STEPS_TITLE: 'Steps',
+    STEPS_HINT: "Run them in order; each one picks up the last one's files. Import opens Blender minimized in the taskbar while it works.",
+    IMPORT_BUTTON: '1. Import',
+    SCENE_BUTTON: '2. Build scene',
+    RENDER_BUTTON: '3. Render',
+    ENCODE_BUTTON: '4. Encode MP4',
+    ENGINE_EEVEE: 'EEVEE previews',
+    ENGINE_CYCLES: 'One Cycles frame',
+    FRAMES_PLACEHOLDER: 'frames, e.g. 180 510 (optional)',
+    QUALITY_QUICK: 'Quick: 720p, 32 samples',
+    QUALITY_FINAL: 'Final: 1080p, 64 samples',
+    CANCEL_BUTTON: 'Cancel',
+    IMPORT_LABEL: 'Import',
+    SCENE_LABEL: 'Build scene',
+    RENDER_LABEL: 'Render',
+    ENCODE_LABEL: 'Encode',
+    running: (label) => `${label}: running...`,
+    done: (label, elapsed) => `${label}: done in ${elapsed}.`,
+    failed: (label) => `${label}: stopped with an error (see the message).`,
+    CANCELLED: 'Stopped. A render keeps the frames it finished; Render again to carry on.',
+    frames: (done, total, secs, elapsed) => `Frame ${done} of ${total}${secs ? ` (${secs.toFixed(1)} s each)` : ''}, ${elapsed} so far`,
+  },
+
   // #443: the capture summary strip above Start Capture Batch.
   CAPTURE_SUMMARY: {
     MODE_FRAMES: 'Frame sequence',
@@ -1377,7 +1509,7 @@ export const STRINGS = {
     checkedAt: (time) => `Checked at ${time}.`,
     TABLE_STYLE: 'Style',
     USE_TITLE: 'Use it in the game',
-    USE_HINT: 'HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map.',
+    USE_HINT: "HD turns itself on when the game finds the dodstudio_hd folder. Put these lines in movie.cfg to pick the style from the first map. The gl_max_size line is the size the game shows textures at: the game's own default is 256, which would shrink every HD file back down.",
     STYLE_LABEL: 'Style:',
     COPY_BUTTON: 'Copy',
     SETUP_TITLE: 'Tools',
@@ -1389,6 +1521,14 @@ export const STRINGS = {
     BUILD_HINT: 'Pick the styles and kinds of files to build. Files already built are skipped, so a stopped build carries on where it left off. Map textures take the longest: a few minutes per style for a few dozen maps, and an hour or more for every map in a large collection.',
     BUILD_STYLES_LABEL: 'Styles:',
     BUILD_TYPES_LABEL: 'Files:',
+    BUILD_CAP_LABEL: 'Largest size:',
+    CAP_NAMES: { 1024: '1024 (the usual)', 2048: '2048', 4096: '4096' },
+    // Each cap's cost, since the number alone says nothing about it.
+    CAP_HINTS: {
+      1024: 'Every file is 4x its original, up to 1024 a side. Most map textures are 128 or 256 to begin with, so they end at 512 or 1024 either way.',
+      2048: 'Only files whose 4x is bigger than 1024 change: detail textures (most are 512, so they go from 1024 to 2048), a few large map textures and model skins. A 2048 file is 16 MB, four times a 1024 one, and the game is 32-bit: try one map before building everything.',
+      4096: 'Only files whose 4x is bigger than 2048 change, and almost none are: nothing in the game is over 512 a side except a few skies. This is here for files you upscale yourself. A 4096 file is 64 MB.',
+    },
     BUILD_BUTTON: 'Build',
     SCRIPTS_SUMMARY: 'Build from a Command Prompt instead',
     SCRIPTS_HINT: 'The same scripts run from goldsrc-hooks\\tools\\hd (their README has the steps). To make them use the upscaler downloaded here, run this first in the same Command Prompt:',
@@ -1806,6 +1946,7 @@ export const STRINGS = {
     overviewSaveFailed: (err) => `Could not save the overview: ${err}`,
     hdSetupFailed: (err) => `Download failed: ${err}`,
     hdBuildFailed: (err) => `Build failed: ${err}`,
+    blenderFailed: (err) => `Blender: ${err}`,
     hdPythonFailed: (err) => `Could not use that Python: ${err}`,
     hdUpscalerFailed: (err) => `Could not use that folder: ${err}`,
     hdStyleFailed: (err) => `Could not change my_styles.txt: ${err}`,

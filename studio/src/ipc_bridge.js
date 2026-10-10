@@ -205,6 +205,16 @@ export async function getWeaponDisplayNames() {
   });
 }
 
+// The map's overview image and placement for the kill map (#448), or null
+// when there is none. A failure is logged and treated as "no overview" — the
+// kill map's distance table still works without the image.
+export async function loadMapOverview(gamePath, demoPath, mapName) {
+  return invoke("load_map_overview", { gamePath: gamePath || null, demoPath, mapName }).catch((err) => {
+    console.error("IPC Execution Error (load_map_overview):", err);
+    return null;
+  });
+}
+
 export async function startCaptureBatch(payload) {
   return invoke("start_capture_batch", { payload: payload })
     .catch((err) => {
@@ -872,6 +882,47 @@ export async function hdBuild(gamePath, request) {
     });
 }
 
+/** The Blender page's status (#403): which Blender a step would run and its
+ *  add-ons, plus the maps and HD styles to pick from. */
+export async function blenderStatus(gamePath) {
+  return invoke("blender_status", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_status):", err);
+      showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Uses `path` (a blender.exe) from now on, or finds one again with null. */
+export async function blenderSetExe(path) {
+  return invoke("blender_set_exe", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_set_exe):", err);
+      showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Runs one step of the Blender pipeline on `request.agr`; progress arrives as
+ *  `blender_progress` events. Resolves to what the step made. */
+export async function blenderRun(gamePath, request) {
+  return invoke("blender_run", { gamePath, request })
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_run):", err);
+      if (err !== "cancelled") showToast(STRINGS.IPC.blenderFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Stops the running Blender step. */
+export async function blenderCancel() {
+  return invoke("blender_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (blender_cancel):", err);
+      throw err;
+    });
+}
+
 /** Stops a running download or build. */
 export async function hdCancel() {
   return invoke("hd_cancel")
@@ -1082,6 +1133,15 @@ export async function splitDemoMaps(path, keep) {
   return invoke("split_demo_maps", { path, keep })
     .catch((err) => {
       console.error("IPC Execution Error (split_demo_maps):", err);
+      throw err;
+    });
+}
+
+// Split now (#217): every map at least `minSeconds` long, one parse.
+export async function splitDemoAuto(path, minSeconds) {
+  return invoke("split_demo_auto", { path, minSeconds })
+    .catch((err) => {
+      console.error("IPC Execution Error (split_demo_auto):", err);
       throw err;
     });
 }

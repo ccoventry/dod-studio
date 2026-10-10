@@ -1,13 +1,18 @@
 // analyzer_pane.js
 // Standalone "Demo Analyzer" tab — a JS port of the egui report_ui views
 // (Summary / Scoreboard / Player Details / Team Details / Timeline / Rounds /
-// Chat Log) from the `dev` branch. Reads the full analysis::{DemoInfo,
+// Chat Log) from the `dev` branch, plus a Kill Map tab of its own (#448).
+// Reads the full analysis::{DemoInfo,
 // AnalyzerState} payload from `analyze_demo_full` rather than the flattened
 // generic JSON used by the compact inline telemetry summary.
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, indexDemoPlayers } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { renderMultiMapBanner } from './analyzer_multimap.js';
+import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
+import { showToast } from './toast.js';
+import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
 import { initDemoCache } from './demo_cache.js';
@@ -24,7 +29,11 @@ function setAnalyzerFileIndicator(text) {
 }
 
 let report = null;
-let analyzerLoadInProgress = false;
+// The demo whose analysis the page is waiting on (null when none), and a
+// count of loads: clicking a second demo before the first finishes leaves
+// both analyses running, and only the latest may show its progress or result.
+let analyzerLoadingPath = null;
+let analyzerLoadSeq = 0;
 let activeSubTab = 'summary';
 let highlightedPlayerId = null; // shared selection: Scoreboard row <-> Player Details dropdown
 let selectedPlayerId = null;
@@ -108,7 +117,9 @@ let playerIndexRequest = 0;
 let playerIndexTotal = 0;
 let demoFilterPlayer = '';
 let playerOptions = [];
-let demoSortColumn = null; // 'name' | 'type' | 'map' | 'date'
+/** The Demos table's sortable columns: index.html's `th[data-sort]` values (#35). */
+const DEMO_SORT = Object.freeze({ NAME: 'name', TYPE: 'type', MAP: 'map', DATE: 'date' });
+let demoSortColumn = null; // a DEMO_SORT value
 let demoSortAscending = true;
 
 const TEAM_COLORS = {
@@ -742,10 +753,10 @@ function sortedFilteredDemos() {
     list = list.slice().sort((a, b) => {
       let cmp;
       switch (demoSortColumn) {
-        case 'name': cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
-        case 'type': cmp = demoTypeOf(a).localeCompare(demoTypeOf(b)); break;
-        case 'map': cmp = (a.map_name || '').toLowerCase().localeCompare((b.map_name || '').toLowerCase()); break;
-        case 'date': cmp = a.modified_unix_secs - b.modified_unix_secs; break;
+        case DEMO_SORT.NAME: cmp = a.name.toLowerCase().localeCompare(b.name.toLowerCase()); break;
+        case DEMO_SORT.TYPE: cmp = demoTypeOf(a).localeCompare(demoTypeOf(b)); break;
+        case DEMO_SORT.MAP: cmp = (a.map_name || '').toLowerCase().localeCompare((b.map_name || '').toLowerCase()); break;
+        case DEMO_SORT.DATE: cmp = a.modified_unix_secs - b.modified_unix_secs; break;
         default: cmp = 0;
       }
       return demoSortAscending ? cmp : -cmp;
@@ -956,9 +967,11 @@ function initAnalyzerBrowser() {
 // noted for render_status in ipc_bridge.js — analyzer_progress is throttled
 // to ~30fps backend-side (Rust `analyze_demo_full`), so no further
 // throttling is needed on the receiving end.
+// Each event names its demo: an earlier click's analysis still running in
+// the background reports too, and mixing the two made the % jump around.
 listen('analyzer_progress', (event) => {
-  if (!analyzerLoadInProgress) return;
-  const { processed, total } = event.payload || {};
+  const { processed, total, path } = event.payload || {};
+  if (!analyzerLoadingPath || path !== analyzerLoadingPath) return;
   if (!total) return;
   const pct = Math.min(100, Math.round((processed / total) * 100));
   const container = document.querySelector('#analyzer-tab-content');
@@ -1083,26 +1096,55 @@ export async function openAnalyzerDemo(path) {
 }
 
 async function loadAnalyzerDemo(path) {
+  // Already being analysed: a second run of the same demo would only race
+  // the first one's progress.
+  if (analyzerLoadingPath === path) return;
   const container = document.querySelector('#analyzer-tab-content');
   if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
-  analyzerLoadInProgress = true;
+  // The last demo's multi-map notice isn't about this one.
+  renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
+  const seq = ++analyzerLoadSeq;
+  analyzerLoadingPath = path;
   try {
-    report = await analyzeDemoFull(path);
+    const result = await analyzeDemoFull(path);
+    if (seq !== analyzerLoadSeq) return; // another demo was picked meanwhile
+    report = result;
     highlightedPlayerId = null;
     selectedPlayerId = null;
     setAnalyzerFileIndicator(report.file_name);
     browserSelectedDemo = path;
     renderDemoTable();
     renderActiveTab();
+    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
   } catch (err) {
+    if (seq !== analyzerLoadSeq) return;
     if (container) {
       container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
   } finally {
-    analyzerLoadInProgress = false;
+    if (seq === analyzerLoadSeq) analyzerLoadingPath = null;
   }
+}
+
+// #217: Split now on a demo that recorded more than one map. Writes each map
+// (but the stub of a next map) as a demo next to this one, with `update`
+// fed native's progress, lists them in the Explorer when it shows that
+// folder, and opens the first.
+async function splitAnalyzedDemo(path, update) {
+  const unlisten = await listen('split_progress', (event) => {
+    if (event.payload?.path === path) update(event.payload.progress);
+  });
+  let written;
+  try {
+    written = await splitDemoAuto(path, SHORT_MAP_SECONDS);
+  } finally {
+    unlisten();
+  }
+  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
+  if (currentDir && currentDir === parentDirOf(path)) await setCurrentDir(currentDir);
+  if (written.length) await loadAnalyzerDemo(written[0].path);
 }
 
 function renderActiveTab() {
@@ -1119,6 +1161,7 @@ function renderActiveTab() {
     case 'team-details': renderTeamDetailsTab(container); break;
     case 'timeline': renderTimelineTab(container); break;
     case 'rounds': renderRoundsTab(container); break;
+    case 'kill-map': renderKillMapTab(container); break;
     case 'flags': renderFlagsTab(container, report, { esc, teamColor, teamLabel, durSecs, formatMMSS }); break;
     case 'chat': renderChatTab(container); break;
   }
@@ -1751,6 +1794,134 @@ function initTimelineTooltip(canvas, tooltip, points) {
     }
   });
   canvas.addEventListener('mouseleave', () => { tooltip.style.display = 'none'; });
+}
+
+// ── Kill Map (#448) ───────────────────────────────────────────────────────────
+
+// One overview lookup per demo, shared by every visit to the tab: it reads and
+// base64-encodes an image, so it is not redone on each render.
+let overviewLookup = { key: null, promise: null };
+
+function overviewForReport(r) {
+  const key = `${r.file_path}|${r.demo_info.map_name}`;
+  if (overviewLookup.key !== key) {
+    const gamePath = document.querySelector('#hl-path-input')?.value?.trim() || '';
+    overviewLookup = { key, promise: loadMapOverview(gamePath, r.file_path, r.demo_info.map_name) };
+  }
+  return overviewLookup.promise;
+}
+
+function renderKillMapTab(container) {
+  const r = report;
+  const st = r.state;
+  const kills = st.kill_positions || [];
+  const isPov = r.demo_info.demo_type !== 'HLTV';
+
+  container.innerHTML = `
+    <h3 class="analyzer-heading">${esc(STRINGS.ANALYZER.KILL_MAP_TITLE)}</h3>
+    ${isPov ? `<p class="analyzer-note">${esc(STRINGS.ANALYZER.KILL_MAP_POV_NOTE)}</p>` : ''}
+    <div id="analyzer-killmap-area"><p class="analyzer-empty">${esc(STRINGS.ANALYZER.KILL_MAP_LOADING)}</p></div>
+    <h3 class="analyzer-heading">${esc(STRINGS.ANALYZER.ENGAGEMENT_TITLE)}</h3>
+    <p class="analyzer-note">${esc(STRINGS.ANALYZER.ENGAGEMENT_EXPLAINER)}</p>
+    ${engagementTable(kills)}`;
+
+  if (kills.length === 0) {
+    container.querySelector('#analyzer-killmap-area').innerHTML = `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.KILL_MAP_NO_KILLS)}</p>`;
+    return;
+  }
+
+  overviewForReport(r).then((overview) => {
+    // The user may have moved on while the image loaded.
+    if (report !== r || activeSubTab !== 'kill-map') return;
+    const area = container.querySelector('#analyzer-killmap-area');
+    if (!area) return;
+    if (!overview) {
+      area.innerHTML = `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.killMapNoOverview(r.demo_info.map_name))}</p>`;
+      return;
+    }
+    drawKillMap(area, overview, kills, st);
+  });
+}
+
+function drawKillMap(area, overview, kills, st) {
+  const names = new Map((st.players || []).map((p) => [p.id, p.name]));
+  const nameOf = (id) => (id && names.get(id)) || STRINGS.ANALYZER.KILL_MAP_UNKNOWN_PLAYER;
+  const alliesTeam = st.allies_are_british ? 'British' : 'Allies';
+  const placed = kills.filter((k) => k.victim_origin);
+
+  area.innerHTML = `
+    <div class="analyzer-timeline-legend">
+      <span><span class="legend-swatch" style="background:${teamColor(alliesTeam)};"></span>${esc(STRINGS.ANALYZER.killMapDiedLegend(teamLabel(alliesTeam, st.allies_are_british)))}</span>
+      <span><span class="legend-swatch" style="background:${teamColor('Axis')};"></span>${esc(STRINGS.ANALYZER.killMapDiedLegend(STRINGS.ANALYZER.AXIS_LABEL))}</span>
+      <span>${esc(STRINGS.ANALYZER.killMapCoverage(placed.length, kills.length))}</span>
+    </div>
+    <div class="analyzer-killmap">
+      <img alt="${esc(STRINGS.ANALYZER.KILL_MAP_TITLE)}" />
+      <div class="analyzer-timeline-tooltip" style="display:none;"></div>
+    </div>`;
+
+  const wrap = area.querySelector('.analyzer-killmap');
+  const img = wrap.querySelector('img');
+  const tooltip = wrap.querySelector('.analyzer-timeline-tooltip');
+  img.addEventListener('load', () => {
+    // The SVG uses the image's own pixels as its coordinates, so markers stay
+    // on their spot at any size the image is shown.
+    const w = img.naturalWidth || 1024;
+    const h = img.naturalHeight || 768;
+    const radius = Math.max(4, w / 180);
+    const circles = placed.map((k, i) => {
+      const { u, v } = worldToOverview(k.victim_origin, overview.placement);
+      return `<circle data-i="${i}" cx="${(u * w).toFixed(1)}" cy="${(v * h).toFixed(1)}" r="${radius.toFixed(1)}" fill="${teamColor(k.victim_team)}" />`;
+    }).join('');
+    wrap.insertAdjacentHTML('beforeend', `<svg viewBox="0 0 ${w} ${h}">${circles}</svg>`);
+
+    const svg = wrap.querySelector('svg');
+    svg.addEventListener('mouseover', (e) => {
+      const i = e.target?.dataset?.i;
+      if (i === undefined) return;
+      const k = placed[Number(i)];
+      const killer = k.killer ? nameOf(k.killer) : null;
+      const rows = [`<strong>${esc(STRINGS.ANALYZER.killMapTooltip(nameOf(k.victim), killer, weaponName(k.weapon)))}</strong>${k.teamkill ? ` (${esc(STRINGS.ANALYZER.KILL_MAP_TEAMKILL_TAG)})` : ''}`];
+      if (typeof k.distance === 'number') {
+        rows.push(`${esc(STRINGS.ANALYZER.KILL_MAP_TOOLTIP_DISTANCE_LABEL)} ${esc(STRINGS.ANALYZER.metres(unitsToMetres(k.distance)))}`);
+      }
+      rows.push(`${esc(STRINGS.ANALYZER.KILL_MAP_TOOLTIP_TIME_LABEL)} ${esc(formatGameTime(durSecs(k.time.viewdemo_offset)))}`);
+      tooltip.innerHTML = rows.join('<br>');
+      const box = wrap.getBoundingClientRect();
+      const dot = e.target.getBoundingClientRect();
+      tooltip.style.display = 'block';
+      tooltip.style.left = `${Math.min(dot.right - box.left + 8, box.width - 220)}px`;
+      tooltip.style.top = `${Math.max(dot.top - box.top - 10, 0)}px`;
+    });
+    svg.addEventListener('mouseout', (e) => {
+      if (e.target?.dataset?.i !== undefined) tooltip.style.display = 'none';
+    });
+  }, { once: true });
+  img.src = overview.image_data_url;
+}
+
+function engagementTable(kills) {
+  const rows = engagementByWeapon(kills);
+  const overall = engagementOverall(kills);
+  if (!overall) return `<p class="analyzer-empty">${esc(STRINGS.ANALYZER.NO_ENGAGEMENT_DATA)}</p>`;
+  const m = (units) => esc(STRINGS.ANALYZER.metres(unitsToMetres(units)));
+  const row = (label, r, bold) => `
+    <tr${bold ? ' style="font-weight:600;"' : ''}>
+      <td>${esc(label)}</td>
+      <td style="text-align:right;">${r.count}</td>
+      <td style="text-align:right;">${m(r.average)}</td>
+      <td style="text-align:right;">${m(r.longest)}</td>
+    </tr>`;
+  return `
+    <div class="table-wrapper">
+      <table class="analyzer-table">
+        <thead><tr><th>${STRINGS.ANALYZER.COL_WEAPON}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_KILLS_MEASURED}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_AVERAGE_DISTANCE}</th><th style="text-align:right;">${STRINGS.ANALYZER.COL_LONGEST_DISTANCE}</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => row(weaponName(r.weapon), r, false)).join('')}
+          ${row(STRINGS.ANALYZER.ALL_WEAPONS_LABEL, overall, true)}
+        </tbody>
+      </table>
+    </div>`;
 }
 
 // ── 6. Rounds ─────────────────────────────────────────────────────────────────

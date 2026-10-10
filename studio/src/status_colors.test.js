@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { STATUS_COLORS, statusColor, statusCountColor } from './status_colors.js';
+import { STATUS_COLORS, HIGHLIGHT_STATUS, statusColor, statusCountColor } from './status_colors.js';
 import { STRINGS } from './strings.js';
+
+describe('HIGHLIGHT_STATUS (#35)', () => {
+  it('is exactly what the status dropdown offers', () => {
+    expect(Object.values(HIGHLIGHT_STATUS).sort()).toEqual([...STRINGS.HIGHLIGHTS.STATUS_OPTIONS].sort());
+    expect(HIGHLIGHT_STATUS.NONE).toBe(STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT);
+  });
+});
 
 describe('highlight status colours (#527)', () => {
   it('Pending is orange, Captured blue, Rendered green, None grey', () => {

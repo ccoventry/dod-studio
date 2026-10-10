@@ -1,4 +1,5 @@
 mod audit_manager;
+mod blender_manager;
 mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
@@ -566,7 +567,9 @@ async fn analyze_demo_full(
                 last_emit = now;
                 let _ = app_handle.emit(
                     "analyzer_progress",
-                    serde_json::json!({ "processed": processed, "total": total }),
+                    // The path lets the page ignore an earlier click's
+                    // analysis still running beside this one.
+                    serde_json::json!({ "processed": processed, "total": total, "path": demo_path }),
                 );
             }
         };
@@ -611,6 +614,29 @@ async fn analyze_demo_full(
 #[tauri::command]
 fn get_weapon_display_names() -> std::collections::HashMap<String, String> {
     analysis::all_weapon_display_names()
+}
+
+/// The overview image for `map_name` and how it lies over the world, for the
+/// Demo Analyzer's kill map (#448). `None` when no `overviews/` folder near
+/// the game or the demo has one the app can show -- not an error, since
+/// custom maps often ship without.
+#[tauri::command]
+async fn load_map_overview(
+    game_path: Option<String>,
+    demo_path: String,
+    map_name: String,
+) -> Result<Option<native::map_overview::MapOverview>, String> {
+    messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let game = game_path
+            .filter(|p| !p.trim().is_empty())
+            .map(std::path::PathBuf::from);
+        let dirs = native::map_overview::overview_search_dirs(
+            game.as_deref(),
+            std::path::Path::new(&demo_path),
+        );
+        Ok(native::map_overview::find_map_overview(&dirs, &map_name))
+    }))
+    .await
 }
 
 // ── App entry point ────────────────────────────────────────────────────────────
@@ -658,6 +684,7 @@ pub fn run() {
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
         .manage(hd_manager::HdManager::default())
+        .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
         .setup(|app| {
             // Dev/debug builds find the repo-root `localizations/` folder via
@@ -687,6 +714,7 @@ pub fn run() {
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
+            load_map_overview,
             start_capture_batch,
             launch_demo_preview,
             generate_all_previews,
@@ -738,6 +766,7 @@ pub fn run() {
             demo_split_manager::cancel_multi_map_scan,
             demo_split_manager::demo_map_segments,
             demo_split_manager::split_demo_maps,
+            demo_split_manager::split_demo_auto,
             delete_audit_files,
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
@@ -781,6 +810,10 @@ pub fn run() {
             hd_manager::hd_remove_style,
             hd_manager::hd_save_map_list,
             hd_manager::hd_preview,
+            blender_manager::blender_status,
+            blender_manager::blender_set_exe,
+            blender_manager::blender_run,
+            blender_manager::blender_cancel,
             updater_manager::check_for_update,
             updater_manager::download_and_install_update,
             updater_manager::restart_app,

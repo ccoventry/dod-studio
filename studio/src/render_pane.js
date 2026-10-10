@@ -22,11 +22,14 @@ import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { getClipNameTemplate, clipNameTemplateErrors } from './clip_name_ui.js';
 import { STRINGS } from './strings.js';
-import { sortJobs, nextSort, batchProgress } from './render_jobs.js';
+import { historySummary, historyLines } from './render_history.js';
+import { sortJobs, nextSort, batchProgress, JOB_STATUS } from './render_jobs.js';
 import { markerCsv, markerRows } from './marker_list.js';
 import { save } from '@tauri-apps/plugin-dialog';
 import { notify } from './os_notifications.js';
+import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // id:status pairs from the last snapshot Export Pool Free/Required
@@ -53,10 +56,10 @@ function syncCustomCodecVisibility() {
 
 function statusColor(status) {
   switch (status) {
-    case 'Finished': return '#4caf50';
-    case 'Error': return '#f44336';
-    case 'Cancelled': return '#ffeb3b';
-    case 'Rendering': return '#7ec8e3';
+    case JOB_STATUS.FINISHED: return '#4caf50';
+    case JOB_STATUS.ERROR: return '#f44336';
+    case JOB_STATUS.CANCELLED: return '#ffeb3b';
+    case JOB_STATUS.RENDERING: return '#7ec8e3';
     default: return '#ffffff';
   }
 }
@@ -88,9 +91,9 @@ function updateFooterQueueSummary() {
   updateBatchProgress();
   const el = document.querySelector('#render-footer-queue-summary');
   if (!el) return;
-  const queued = jobs.filter((j) => j.status === 'Queued').length;
-  const rendering = jobs.filter((j) => j.status === 'Rendering').length;
-  const done = jobs.filter((j) => j.status === 'Finished' || j.status === 'Error' || j.status === 'Cancelled').length;
+  const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+  const rendering = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
+  const done = jobs.filter((j) => j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR || j.status === JOB_STATUS.CANCELLED).length;
   el.textContent = STRINGS.RENDER.queueSummary(queued, rendering, done);
 }
 
@@ -138,23 +141,23 @@ function initSortableHeaders() {
  */
 function actionsCellHtml(j) {
   let html = '';
-  if (j.status === 'Rendering' || j.status === 'Queued') {
+  if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) {
     html += `<button class="render-job-cancel-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.CANCEL_JOB_TITLE}">✖</button>`;
-  } else if (j.status === 'Cancelled' || j.status === 'Finished' || j.status === 'Error') {
+  } else if (j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR) {
     html += `<button class="render-job-reset-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.RESET_JOB_TITLE}">🔄</button>`;
   }
   // Coexists with either button above — a Queued job can be removed directly
   // without cancelling it first, same as a Cancelled/Finished/Error one. Only
   // withheld while actually Rendering, where removing the row out from under
   // a live ffmpeg process has no defined outcome.
-  if (j.status !== 'Rendering') {
+  if (j.status !== JOB_STATUS.RENDERING) {
     html += `<button class="render-job-remove-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.REMOVE_JOB_TITLE}">🗑</button>`;
   }
   if (j.error_log) {
     html += `<button class="render-job-view-log-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.VIEW_LOG_TITLE}">${STRINGS.RENDER.VIEW_LOG_BUTTON}</button>`;
   }
-  if ((j.status === 'Finished' && j.output_path) || j.take_folder) {
-    const useOutput = j.status === 'Finished' && j.output_path;
+  if ((j.status === JOB_STATUS.FINISHED && j.output_path) || j.take_folder) {
+    const useOutput = j.status === JOB_STATUS.FINISHED && j.output_path;
     html += `<button class="render-job-reveal-btn" data-job-id="${esc(j.id)}" title="${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_FOLDER_TITLE : STRINGS.RENDER.OPEN_TAKE_FOLDER_TITLE}">${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_BUTTON : STRINGS.RENDER.OPEN_TAKE_FOLDER_BUTTON}</button>`;
   }
   return html;
@@ -174,7 +177,7 @@ function wireActionsCell(cell) {
     btn.addEventListener('click', () => {
       const job = jobs.find((j) => j.id === btn.dataset.jobId);
       if (!job) return;
-      const target = (job.status === 'Finished' && job.output_path) ? job.output_path : job.take_folder;
+      const target = (job.status === JOB_STATUS.FINISHED && job.output_path) ? job.output_path : job.take_folder;
       if (target) revealInExplorer(target).catch(() => {});
     });
   });
@@ -192,7 +195,7 @@ function wireActionsCell(cell) {
 }
 
 function settingsCellHtml(j) {
-  const showSkipToggle = j.skip_available && j.status === 'Queued';
+  const showSkipToggle = j.skip_available && j.status === JOB_STATUS.QUEUED;
   const toggle = showSkipToggle
     ? `<label class="render-skip-toggle" title="${STRINGS.RENDER.SKIP_TOGGLE_TITLE}" style="margin-left:6px; font-size:11px; white-space:nowrap;">
          <input type="checkbox" class="render-job-skip-checkbox" data-job-id="${esc(j.id)}" ${j.codec_id === 'source_copy' ? 'checked' : ''} /> ${STRINGS.RENDER.SKIP_TOGGLE_LABEL}
@@ -251,6 +254,7 @@ function createJobRow(j) {
     <td class="rj-speed"></td>
     <td><div class="progress-bar-container" style="margin-top:0;"><div class="progress-bar-fill rj-progress-fill" style="width:0%;"></div></div></td>
     <td class="rj-file-size"></td>
+    <td class="rj-history"></td>
     <td class="rj-actions"></td>`;
   updateJobRow(row, j);
   return row;
@@ -298,12 +302,20 @@ function updateJobRow(row, j) {
     row.dataset.lastCustomArgs = j.custom_codec_args || '';
   }
 
-  const settingsKey = `${j.settings_summary}|${j.skip_available}|${j.status === 'Queued'}|${j.codec_id}`;
+  const settingsKey = `${j.settings_summary}|${j.skip_available}|${j.status === JOB_STATUS.QUEUED}|${j.codec_id}`;
   if (settingsKey !== row.dataset.settingsKey) {
     const cell = row.querySelector('.rj-settings');
     cell.innerHTML = settingsCellHtml(j);
     wireSettingsCell(cell);
     row.dataset.settingsKey = settingsKey;
+  }
+
+  // #438: rebuilt only when the history changes; the open/closed state is
+  // kept on the row, so a rebuild doesn't fold it shut.
+  const historyKey = JSON.stringify(j.history || []);
+  if (historyKey !== row.dataset.historyKey) {
+    renderHistoryCell(row, j.history || []);
+    row.dataset.historyKey = historyKey;
   }
 
   const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}`;
@@ -315,13 +327,49 @@ function updateJobRow(row, j) {
   }
 }
 
+/** The History cell (#438): the summary, and a ▸ that lists every attempt. */
+function renderHistoryCell(row, history) {
+  const cell = row.querySelector('.rj-history');
+  const { label, bytes } = historySummary(history);
+  const summary = document.createElement('span');
+  summary.textContent = bytes > 0 ? `${label}, ${formatFileSize(bytes)}` : label;
+  if (!history.length) {
+    cell.replaceChildren(summary);
+    return;
+  }
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'rj-history-toggle';
+  toggle.title = STRINGS.RENDER.HISTORY_TOGGLE_TITLE;
+  toggle.style.cssText = 'background: transparent; border: none; color: inherit; cursor: pointer; padding: 0 4px 0 0;';
+  const list = document.createElement('div');
+  list.className = 'rj-history-list';
+  list.style.cssText = 'font-size: 0.85em; opacity: 0.85; margin-top: 2px; white-space: nowrap;';
+  historyLines(history, formatFileSize).forEach((line) => {
+    const div = document.createElement('div');
+    div.textContent = line;
+    list.appendChild(div);
+  });
+  const sync = () => {
+    const open = row.dataset.historyOpen === '1';
+    toggle.textContent = open ? '▾' : '▸';
+    list.style.display = open ? '' : 'none';
+  };
+  toggle.addEventListener('click', () => {
+    row.dataset.historyOpen = row.dataset.historyOpen === '1' ? '0' : '1';
+    sync();
+  });
+  sync();
+  cell.replaceChildren(toggle, summary, list);
+}
+
 function renderJobsTable() {
   updateFooterQueueSummary();
   const tbody = document.querySelector('#render-jobs-tbody');
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
     return;
   }
 
@@ -428,7 +476,7 @@ export async function checkRenderRecoveryOnStartup(onRecovered) {
 /** The output files of this session's finished render jobs, in table order,
  *  for Combine Clips (#107). */
 export function finishedRenderOutputs() {
-  return jobs.filter((j) => j.status === 'Finished' && j.output_path).map((j) => j.output_path);
+  return jobs.filter((j) => j.status === JOB_STATUS.FINISHED && j.output_path).map((j) => j.output_path);
 }
 
 /** Export Marker List (#110): a CSV of every captured highlight. */
@@ -509,7 +557,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         // sharing one take_key, so this fires twice per take — the second
         // pass is just a no-op instead of a double-toast.
         if (streak.statusByHand) markCleared = true;
-        if (setVerifiedStatus(streak, 'Rendered')) advanced += 1;
+        if (setVerifiedStatus(streak, HIGHLIGHT_STATUS.RENDERED)) advanced += 1;
       });
     });
 
@@ -529,8 +577,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   listen('render_jobs_snapshot', (event) => {
     jobs = event.payload || [];
     renderJobsTable();
-    const queuedCount = jobs.filter((j) => j.status === 'Queued').length;
-    const renderingCount = jobs.filter((j) => j.status === 'Rendering').length;
+    const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+    const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
     const activeOrQueued = queuedCount + renderingCount;
     if (renderStatusEl) {
       renderStatusEl.textContent = renderingCount > 0
@@ -547,7 +595,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // Mirror each bulk button's per-row equivalent: Reset All wants at least
     // one Cancelled/Finished/Error row, Remove All wants at least one row
     // that isn't actively Rendering.
-    const resettableCount = jobs.filter((j) => j.status === 'Cancelled' || j.status === 'Finished' || j.status === 'Error').length;
+    const resettableCount = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR).length;
     if (resetAllRenderBtn) resetAllRenderBtn.disabled = resettableCount === 0;
     if (removeAllRenderBtn) removeAllRenderBtn.disabled = jobs.length - renderingCount === 0;
 
@@ -567,7 +615,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     if (scanRenderBtn) scanRenderBtn.disabled = false;
     if (startRenderBtn) startRenderBtn.disabled = true;
     if (cancelRenderBtn) cancelRenderBtn.disabled = true;
-    const resettableCount = jobs.filter((j) => j.status === 'Cancelled' || j.status === 'Finished' || j.status === 'Error').length;
+    const resettableCount = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR).length;
     if (resetAllRenderBtn) resetAllRenderBtn.disabled = resettableCount === 0;
     if (removeAllRenderBtn) removeAllRenderBtn.disabled = jobs.length === 0;
     // Counted, not `some()`. The old check asked "was anything cancelled?"
@@ -575,11 +623,13 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // size reported the whole batch as cancelled — including the common case
     // of cancelling the takes you did not want and letting the rest run, where
     // it read as though nothing had rendered at all.
-    const finished = jobs.filter((j) => j.status === 'Finished').length;
-    const failed = jobs.filter((j) => j.status === 'Error').length;
-    const cancelled = jobs.filter((j) => j.status === 'Cancelled').length;
+    const finished = jobs.filter((j) => j.status === JOB_STATUS.FINISHED).length;
+    const failed = jobs.filter((j) => j.status === JOB_STATUS.ERROR).length;
+    const cancelled = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
 
-    if (jobs.length > 0) {
+    // A batch the finish step (#440) queued has already said how it ended, in
+    // its own words ("12 clips ready") — a second toast would repeat it.
+    if (jobs.length > 0 && !finishClipsOwnsJobs(jobs)) {
       // Severity follows what actually happened rather than what is present:
       // a deliberate partial cancel where the rest rendered is a success, not
       // an "info" event. Only a real failure is an error.
