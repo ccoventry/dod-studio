@@ -78,6 +78,11 @@ pub fn demo_file_not_found(demo_path: &str) -> String {
     format!("Demo file not found: {}", demo_path)
 }
 
+/// The Demo Auditor's renamer was given a folder that isn't there (#469).
+pub fn rename_folder_not_found(folder: &str) -> String {
+    format!("Folder not found: {folder}")
+}
+
 // Why a scan skipped a demo, in the user's words (#23). The scanner's own
 // error text ("failed to fill whole buffer") still goes to the log.
 /// The Demo Analyzer's Cache all, clicked while a run is going (#569).
