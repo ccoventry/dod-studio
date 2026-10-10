@@ -60,7 +60,6 @@
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
 
-use std::ffi::CStr;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU8, AtomicUsize, Ordering};
 
@@ -543,26 +542,6 @@ fn status() -> String {
     text
 }
 
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return Vec::new();
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(
-                unsafe { CStr::from_ptr(ptr) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .collect()
-}
-
 /// Runs one subcommand, returning what to print.
 fn dispatch(argv: &[String]) -> String {
     // argv[0] is the command name itself, so a bare invocation is a query.
@@ -591,7 +570,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("objicons: {} -> {}", argv.join(" "), reply.trim())) };

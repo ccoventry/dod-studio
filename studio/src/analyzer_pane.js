@@ -15,6 +15,7 @@ import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
+import { clockFloor as formatMMSS } from './time_format.js';
 import { initDemoCache } from './demo_cache.js';
 import { unloadedOpenNodes } from './tree_loads.js';
 import { escapeHtml as esc } from './html.js';
@@ -149,13 +150,6 @@ function formatDuration(totalSecs) {
   const m = Math.floor((totalSecs % 3600) / 60);
   const s = totalSecs % 60;
   return STRINGS.ANALYZER.durationLong(h, m, s);
-}
-
-function formatMMSS(totalSecs) {
-  totalSecs = Math.max(0, Math.floor(totalSecs || 0));
-  const m = Math.floor(totalSecs / 60);
-  const s = totalSecs % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 function formatGameTime(totalSecs) {

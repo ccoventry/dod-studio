@@ -9,6 +9,7 @@ import { open, save } from '@tauri-apps/plugin-dialog';
 import { combinePlan, combineClips, combineCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { clockRound } from './time_format.js';
 
 const VIDEO_EXTENSIONS = ['mp4', 'mov', 'mkv', 'avi'];
 
@@ -47,12 +48,6 @@ export function defaultOutput(first, streamCopy) {
   const ext = streamCopy && dot > 0 ? name.slice(dot + 1) : 'mp4';
   const folder = String(first).slice(0, String(first).length - name.length);
   return `${folder}${stem}_combined.${ext}`;
-}
-
-/** Seconds as m:ss. */
-function clock(secs) {
-  const s = Math.round(secs || 0);
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
 /**
@@ -97,8 +92,8 @@ export function initCombineClips({ finishedRenders, ffmpegPath }) {
       if (token !== planToken) return;
       plan = result;
       planEl.textContent = result.stream_copy
-        ? STRINGS.COMBINE.planCopy(clock(result.total_secs))
-        : STRINGS.COMBINE.planEncode(clock(result.total_secs), result.clips[0].width, result.clips[0].height, result.clips[0].fps);
+        ? STRINGS.COMBINE.planCopy(clockRound(result.total_secs))
+        : STRINGS.COMBINE.planEncode(clockRound(result.total_secs), result.clips[0].width, result.clips[0].height, result.clips[0].fps);
     } catch (err) {
       if (token !== planToken) return;
       planEl.textContent = STRINGS.COMBINE.planFailed(err);

@@ -104,7 +104,7 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
     loop {
         crate::sys::process::refresh(sys);
-        if !crate::sys::process::any_named(sys, &["hl.exe"]) {
+        if !crate::sys::process::is_game_in(sys) {
             return;
         }
         if std::time::Instant::now() >= deadline {
@@ -112,6 +112,14 @@ fn wait_for_hl_exe_to_exit(sys: &mut sysinfo::System) {
         }
         std::thread::sleep(std::time::Duration::from_millis(100));
     }
+}
+
+/// Ends every `hl.exe` and waits for it to go, as [`wait_for_hl_exe_to_exit`]
+/// describes. Every way out of a batch's loop that leaves the game running
+/// goes through here.
+fn kill_hl_exe_and_wait(sys: &mut sysinfo::System) {
+    crate::sys::process::kill_game();
+    wait_for_hl_exe_to_exit(sys);
 }
 
 struct CaptureCleanupGuard {
@@ -778,7 +786,7 @@ pub fn spawn_capture_engine(
                 {
                     last_process_check = Some(std::time::Instant::now());
                     crate::sys::process::refresh(&mut sys);
-                    hl_alive_cached = crate::sys::process::any_named(&sys, &["hl.exe"]);
+                    hl_alive_cached = crate::sys::process::is_game_in(&sys);
                 }
                 let hl_alive = {
                     let alive = hl_alive_cached;
@@ -831,21 +839,8 @@ pub fn spawn_capture_engine(
                 if last_dialog_check.is_none_or(|t| t.elapsed() >= std::time::Duration::from_secs(1)) {
                     last_dialog_check = Some(std::time::Instant::now());
                     let launcher_pid = child.id();
-                    let game_pids: Vec<u32> = sys
-                        .processes()
-                        .values()
-                        .filter(|p| crate::sys::process::is_named(p, &["hl.exe"]))
-                        .map(|p| p.pid().as_u32())
-                        .collect();
-                    let mut launcher_pids: Vec<u32> = sys
-                        .processes()
-                        .values()
-                        .filter(|p| {
-                            crate::sys::process::is_named(p, &["injector.exe"])
-                                && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
-                        })
-                        .map(|p| p.pid().as_u32())
-                        .collect();
+                    let game_pids = crate::sys::process::game_pids_in(&sys);
+                    let mut launcher_pids = crate::sys::process::injector_pids_in(&sys, launcher_pid);
                     if !launcher_exit_logged {
                         launcher_pids.push(launcher_pid);
                     }
@@ -858,14 +853,13 @@ pub fn spawn_capture_engine(
                         ));
                         failure_reason = Some(dialog.summary());
                         for pid in launcher_pids.iter().filter(|&&pid| pid != launcher_pid) {
-                            std::process::Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).output().ok();
+                            crate::sys::process::kill_pid(*pid);
                         }
                         if !launcher_exit_logged {
                             let _ = child.kill();
                             let _ = child.wait();
                         }
-                        std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                        wait_for_hl_exe_to_exit(&mut sys);
+                        kill_hl_exe_and_wait(&mut sys);
                         // A game already exiting when its box came up (the
                         // Anniversary !m_bMounted assert, after the user
                         // clicked the Steam box themselves) can't be killed:
@@ -897,8 +891,7 @@ pub fn spawn_capture_engine(
                         let _ = child.wait();
                         log_markdown("[HLAE] Closed the launcher too: it had not handed off to hl.exe yet");
                     }
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 // Counts from the last marker, or from hl.exe first appearing
@@ -924,8 +917,7 @@ pub fn spawn_capture_engine(
                             } else {
                                 "the batch stopped progressing while hl.exe was still running — no console markers arrived for several minutes"
                             }.into());
-                            std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                            wait_for_hl_exe_to_exit(&mut sys);
+                            kill_hl_exe_and_wait(&mut sys);
                             break;
                         }
                 // OBS gone for good, after a reconnect was already tried.
@@ -934,8 +926,7 @@ pub fn spawn_capture_engine(
                 if obs_session.as_ref().is_some_and(|s| s.is_dead()) {
                     log_markdown("[HLAE] OBS is unreachable and could not be reconnected — aborting rather than finishing the batch with nothing recorded.");
                     failure_reason = Some("lost contact with OBS mid-batch and could not reconnect".into());
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 if start_time.elapsed().as_secs() > 10
@@ -955,8 +946,7 @@ pub fn spawn_capture_engine(
                         start_time.elapsed().as_secs_f32(),
                         via
                     ));
-                    std::process::Command::new("taskkill").args(["/F", "/IM", "hl.exe"]).output().ok();
-                    wait_for_hl_exe_to_exit(&mut sys);
+                    kill_hl_exe_and_wait(&mut sys);
                     break;
                 }
                 // Only treat this as a real failure once the launcher has handed off

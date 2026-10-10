@@ -100,11 +100,23 @@ pub unsafe fn call_real(real: &AtomicUsize) {
 /// The current command's arguments after its name, as the engine tokenised
 /// them. Main thread only, inside a command handler.
 pub fn args() -> Vec<String> {
+    tokens_from(1)
+}
+
+/// The whole current command line as the engine tokenised it, name first
+/// (`argv[0]`), for handlers that echo the full line into their log. Main
+/// thread only, inside a command handler. Empty while engfuncs isn't resolved
+/// yet, so callers must not assume `argv[0]` exists.
+pub fn argv() -> Vec<String> {
+    tokens_from(0)
+}
+
+fn tokens_from(first: i32) -> Vec<String> {
     let Some(engfuncs) = engine::engfuncs() else {
         return Vec::new();
     };
     let argc = unsafe { (engfuncs.cmd_argc)() };
-    (1..argc)
+    (first..argc)
         .filter_map(|i| {
             let ptr = unsafe { (engfuncs.cmd_argv)(i) };
             (!ptr.is_null()).then(|| {
