@@ -6,7 +6,7 @@
 use native::demo_rename::{self, DemoFacts, RenameOutcome, RenamePair, UndoableBatch};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use tauri::{AppHandle, Emitter};
 
 /// Progress events at most this often (CLAUDE.md's ~30fps).
@@ -40,20 +40,26 @@ pub async fn demo_rename_list(
         }
         let demos = demo_rename::demos_in(&root);
         let total = demos.len();
-        // The demos the analyzer cache already has go first: each takes
-        // milliseconds, so the count jumps to "cached of total" at once and
-        // only the parses (about a second each) are left to wait for.
+        // The demos the analyzer cache already has go first, then the parses
+        // largest first (`analysis::cache::work_order`). The bytes left to
+        // parse give the page a steady time left: demo sizes vary too much
+        // (5 MB tests, 90 MB matches) for a time per demo.
         let cache_root = native::analyzer_cache_root();
         let fresh: Vec<bool> = demos
             .iter()
             .map(|d| analysis::cache::is_fresh(&cache_root, d))
             .collect();
+        let sizes: Vec<u64> = demos
+            .iter()
+            .map(|d| std::fs::metadata(d).map_or(0, |m| m.len()))
+            .collect();
         let cached = fresh.iter().filter(|f| **f).count();
-        let mut order: Vec<usize> = (0..total).collect();
-        order.sort_by_key(|&i| !fresh[i]);
+        let bytes_to_parse: u64 = (0..total).filter(|&i| !fresh[i]).map(|i| sizes[i]).sum();
+        let order = analysis::cache::work_order(&fresh, &sizes);
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(0);
         let parsed = AtomicUsize::new(0);
+        let bytes_parsed = AtomicU64::new(0);
         let started = std::time::Instant::now();
         // Milliseconds since `started` of the last event, so the workers
         // share one throttle without a lock.
@@ -70,6 +76,8 @@ pub async fn demo_rename_list(
                         "total": total,
                         "cached": cached,
                         "parsed": parsed.load(Ordering::Relaxed),
+                        "bytes_to_parse": bytes_to_parse,
+                        "bytes_parsed": bytes_parsed.load(Ordering::Relaxed),
                     }),
                 );
             }
@@ -94,6 +102,7 @@ pub async fn demo_rename_list(
                             mine.push((i, demo_rename::facts(&demos[i])));
                             if !fresh[i] {
                                 parsed.fetch_add(1, Ordering::Relaxed);
+                                bytes_parsed.fetch_add(sizes[i], Ordering::Relaxed);
                             }
                             let now_done = done.fetch_add(1, Ordering::Relaxed) + 1;
                             // A parse takes about a second, so each one may

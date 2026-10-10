@@ -2082,6 +2082,7 @@ export const STRINGS = {
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
     readingCached: (cached) => ` (${cached} from the analyzer cache)`,
+    CHECKING_CACHE: 'Checking the analyzer cache…',
     timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
     CANCELLED: 'Stopped. The demos read so far are listed.',

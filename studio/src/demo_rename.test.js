@@ -215,6 +215,14 @@ describe('listProgressView', () => {
       .toBe('Reading demos: 8 / 10 · about 2 s left');
   });
 
+  it('measures the time left by bytes when the event has them', () => {
+    // A 90 MB parse took 3 s; 10 MB is left of 100 MB: about 0.3 s, so 1 s.
+    // By count (1 of 2 parses in 3 s) it would have said 3 s.
+    expect(listProgressView({
+      done: 6, total: 7, cached: 5, parsed: 1, bytes_to_parse: 100e6, bytes_parsed: 90e6,
+    }, 3000).text).toBe('Reading demos: 6 / 7 (5 from the analyzer cache) · about 1 s left');
+  });
+
   it('says no time left once nothing is left to parse', () => {
     expect(listProgressView({ done: 6, total: 6, cached: 5, parsed: 1 }, 1000).text)
       .toBe('Reading demos: 6 / 6 (5 from the analyzer cache)');

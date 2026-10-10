@@ -130,6 +130,25 @@ pub fn is_fresh(root: &Path, demo_path: &Path) -> bool {
     ))
 }
 
+/// The order to read a list of demos in, by index: the ones with a fresh
+/// entry first (milliseconds each, so a count jumps to "cached of total" at
+/// once), in list order; then the rest, largest file first, so the last
+/// parses running on several workers are small ones and no worker sits idle
+/// behind one big demo at the end. Results go back in list order; only the
+/// work order changes.
+pub fn work_order(fresh: &[bool], sizes: &[u64]) -> Vec<usize> {
+    let mut order: Vec<usize> = (0..fresh.len()).collect();
+    order.sort_by_key(|&i| {
+        let size = sizes.get(i).copied().unwrap_or(0);
+        if fresh[i] {
+            (0, 0)
+        } else {
+            (1, u64::MAX - size)
+        }
+    });
+    order
+}
+
 /// Saves `analysis` as `demo_path`'s entry, and returns where. Best-effort:
 /// `None` on any failure, which must never fail the caller.
 ///
@@ -363,6 +382,17 @@ mod tests {
         assert!(load(&root, &demo).is_none());
         assert!(!is_fresh(&root, &demo));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn work_order_reads_cached_demos_first_then_the_largest_parse() {
+        // 0: 5 MB uncached, 1: cached, 2: 90 MB uncached, 3: cached, 4: 40 MB uncached.
+        let fresh = [false, true, false, true, false];
+        let sizes = [5, 80, 90, 10, 40];
+        assert_eq!(work_order(&fresh, &sizes), [1, 3, 2, 4, 0]);
+        // Same-size parses keep list order.
+        assert_eq!(work_order(&[false, false], &[7, 7]), [0, 1]);
+        assert!(work_order(&[], &[]).is_empty());
     }
 
     #[test]

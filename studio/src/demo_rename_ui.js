@@ -61,7 +61,11 @@ function showListProgress(p) {
   const bar = $('#rename-progress');
   if (!p) parsesStartedAt = null;
   else if (parsesStartedAt === null && p.done >= p.cached) parsesStartedAt = Date.now();
-  const view = listProgressView(p || {}, parsesStartedAt === null ? 0 : Date.now() - parsesStartedAt);
+  // Before the first event the backend is still checking which demos the
+  // cache has (a moment, longer for thousands of demos on a slow drive).
+  const view = p
+    ? listProgressView(p, parsesStartedAt === null ? 0 : Date.now() - parsesStartedAt)
+    : { pct: 0, text: STRINGS.DEMO_RENAME.CHECKING_CACHE };
   if (bar) {
     bar.hidden = false;
     bar.querySelector('.progress-bar-fill').style.width = `${view.pct}%`;

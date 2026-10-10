@@ -170,7 +170,7 @@ test('List Demos shows a bar from the first moment, counting cached demos first'
   const bar = page.locator('#rename-progress');
   // The harness has no stylesheet, so the bar has no height: check hidden.
   await expect(bar).toHaveJSProperty('hidden', false);
-  await expect(page.locator('#rename-status')).toHaveText('Reading demos: 0 / 0');
+  await expect(page.locator('#rename-status')).toHaveText('Checking the analyzer cache…');
   await page.evaluate(() => window.__mockEmit('demo_rename_progress', { done: 5, total: 6, cached: 5, parsed: 0 }));
   await expect(page.locator('#rename-status')).toHaveText('Reading demos: 5 / 6 (5 from the analyzer cache)');
   await expect(bar.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 83%/);

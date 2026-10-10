@@ -88,18 +88,27 @@ export function nameWithoutTag(name, tag) {
 
 /**
  * List Demos' progress, from a `demo_rename_progress` event
- * (`{ done, total, cached, parsed }`: the cached demos are read first, then
- * the rest are parsed). `parseMs` is how long the parses have been running.
- * Returns `{ pct, text }`; the text adds a time left once a parse has
- * finished to measure the pace by.
+ * (`{ done, total, cached, parsed, bytes_to_parse, bytes_parsed }`: the
+ * cached demos are read first, then the rest are parsed, largest first).
+ * `parseMs` is how long the parses have been running. Returns
+ * `{ pct, text }`; the text adds a time left once a parse has finished to
+ * measure the pace by, from bytes (demo sizes vary too much for a time per
+ * demo) and from the demo count when the event has no byte counts.
  */
-export function listProgressView({ done = 0, total = 0, cached = 0, parsed = 0 } = {}, parseMs = 0) {
+export function listProgressView({
+  done = 0, total = 0, cached = 0, parsed = 0, bytes_to_parse: bytesToParse = 0, bytes_parsed: bytesParsed = 0,
+} = {}, parseMs = 0) {
   const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
   const D = STRINGS.DEMO_RENAME;
   let text = D.reading(done, total);
   if (cached > 0) text += D.readingCached(cached);
   const left = total - cached - parsed;
-  if (parsed > 0 && left > 0 && parseMs > 0) text += D.timeLeft(Math.round((parseMs / parsed) * left / 1000));
+  if (parsed > 0 && left > 0 && parseMs > 0) {
+    const msLeft = bytesToParse > 0 && bytesParsed > 0
+      ? (parseMs / bytesParsed) * (bytesToParse - bytesParsed)
+      : (parseMs / parsed) * left;
+    text += D.timeLeft(Math.round(msLeft / 1000));
+  }
   return { pct, text };
 }
 
