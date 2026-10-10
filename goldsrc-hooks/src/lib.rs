@@ -160,6 +160,7 @@
 //! the command that started the session.
 
 mod anim_fix;
+mod batch;
 mod batch_end;
 mod clan_text;
 mod cmd_list;
@@ -185,6 +186,7 @@ mod folder_counts;
 mod frame_esc;
 mod hand_signals;
 mod hide_asset;
+mod hlae_window;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;

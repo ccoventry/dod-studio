@@ -8,6 +8,7 @@ Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s rep
 
 - **`BANNED_COMMANDS`** — refused **everywhere**, Initial and Scheduled alike. Two different reasons land a command here:
   - *The pipeline owns it outright* (`mirv_recordmovie_start`/`_stop`, `mirv_movie_ffmpeg`, `host_framerate`). No setting corresponds to any of them, and a user's own value misroutes footage or desyncs playback with no visible failure.
+  - *The hook DLL's batch runners* (`dodstudio_batch`, `dodstudio_schedule`, #434). One started from a batch's own commands would replace the batch that is running.
   - *DoD's client quits the game over it* (`r_drawentities`, `cl_lw`). `CHud::Redraw` forces the value back, prints an error and calls `quit` if either is not `1` (binary-level evidence: `docs/goldsrc_client_dll_internals.md` §5).
 
   Reachability differs between those two, and `FATAL_CVARS` encodes it: `cl_lw` always takes the value it is given, whereas GoldSrc itself clamps `r_drawentities` back to `1.0` while `sv_cheats` is `0`, making a config line setting it inert. Both stay refused as *typed commands* — cheap, and `cfg_scan` cannot see what else a user's configs did — but only `cl_lw` is reported as a fatal config cvar unconditionally.

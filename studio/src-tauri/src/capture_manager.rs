@@ -176,6 +176,8 @@ pub struct CapturePayload {
     pub obs_password: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
+    #[serde(default)]
+    pub hook_runs_batch: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
@@ -439,6 +441,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
         password: payload.obs_password.clone(),
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
+    cfg.hook_runs_batch = payload.hook_runs_batch;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
@@ -1050,6 +1053,13 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
+        // Kept for the hook-run route, which places each tick by the kills'
+        // demo-player times (#434).
+        let planned_streaks = if patcher_config.hook_runs_batch {
+            raw_streaks.clone()
+        } else {
+            Vec::new()
+        };
         let (patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
@@ -1113,6 +1123,21 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
+        // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
+        let runtime_batch = if patcher_config.hook_runs_batch {
+            match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
+                Ok(file) => Some(file),
+                Err(why) => {
+                    log_markdown(&format!(
+                        "ℹ️ **Seek Between Clips is on, but this batch is patched as before** — {why}"
+                    ));
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // ── Write each job's patched demo before the capture engine copies it ───
         // build_batch_queue only plans where each patched demo should land
         // (output_demo paths, drive routing, scheduled commands) — it never
@@ -1120,7 +1145,6 @@ pub async fn start_capture_batch_impl(
         // before spawn_capture_engine tries to copy patched_demo_path into
         // the game's dod/ directory (it would otherwise fail with "file not
         // found" since output_demo never existed).
-        let total_patch_jobs = patch_jobs.len() as u32;
         // Known upfront from the same per-job block lists build_batch_queue
         // already produced — cheap, and lets the demo-loading notification
         // show "X of Y clips total" without any per-demo lookback.
@@ -1131,16 +1155,25 @@ pub async fn start_capture_batch_impl(
             .flat_map(|j| j.blocks.iter())
             .map(|b| i64::from(b.record_stop_tick) - i64::from(b.record_start_tick))
             .collect();
+        // The hook plays the original demos: nothing to patch or copy.
+        let patch_jobs = if runtime_batch.is_some() {
+            Vec::new()
+        } else {
+            patch_jobs
+        };
+        let total_patch_jobs = patch_jobs.len() as u32;
         // One start + one end notification for the whole patching phase, not
         // per-demo like capture_demo_loading -- decal clearing means patching
         // is no longer instant, but a toast per demo patched would still be
         // noise (see issue #98 discussion).
-        let _ = app_handle_clone.emit(
-            "capture_patching_started",
-            serde_json::json!({
-                "total": total_patch_jobs,
-            }),
-        );
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_started",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
         // Completed-count progress rather than positional index -- jobs
         // finish out of order once patched concurrently, so "which index is
         // running" no longer means anything.
@@ -1282,12 +1315,14 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
-        let _ = app_handle_clone.emit(
-            "capture_patching_finished",
-            serde_json::json!({
-                "total": total_patch_jobs,
-            }),
-        );
+        if total_patch_jobs > 0 {
+            let _ = app_handle_clone.emit(
+                "capture_patching_finished",
+                serde_json::json!({
+                    "total": total_patch_jobs,
+                }),
+            );
+        }
 
         let capture_jobs: Vec<CaptureJob> = patch_jobs
             .into_iter()
@@ -1520,6 +1555,7 @@ pub async fn start_capture_batch_impl(
             patcher_config,
             drive_headroom,
             obs_take_folders,
+            runtime_batch,
         );
     });
 
@@ -3460,6 +3496,7 @@ mod tests {
             obs_port: 0,
             obs_password: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: false,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,

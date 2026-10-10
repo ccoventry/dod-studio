@@ -373,6 +373,16 @@ pub fn poll() {
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
 }
 
+/// Whether a seek is still on its way (a stepped one, or one waiting to land),
+/// for the capture batch (#434), which runs nothing until it has.
+pub fn seeking() -> bool {
+    match PENDING.try_lock() {
+        Ok(pending) => pending.is_some(),
+        // Held only by `poll` and a seek starting, both mid-seek.
+        Err(_) => true,
+    }
+}
+
 /// Where the demo player is, for the review mode (#623).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Clock {

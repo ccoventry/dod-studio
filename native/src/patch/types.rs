@@ -445,6 +445,11 @@ pub struct PatcherConfig {
     pub primary_media_dir: Option<std::path::PathBuf>,
     pub movie_config: String,
     pub save_local_patched_copy: bool,
+    /// Run the batch from the hook DLL on the original demos, seeking between
+    /// clips, instead of patching a copy of each demo (#434). Falls back to
+    /// patching when the batch can't run that way (`patch::runtime_batch`).
+    #[serde(default)]
+    pub hook_runs_batch: bool,
     pub session_id: String,
     pub hlae_path: String,
     pub game_path: String,
@@ -756,6 +761,7 @@ impl Default for PatcherConfig {
             primary_media_dir: None,
             movie_config: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: false,
             session_id: String::new(),
             hlae_path: String::new(),
             game_path: String::new(),

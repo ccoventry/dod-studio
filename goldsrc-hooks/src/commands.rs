@@ -583,6 +583,7 @@ pub fn poll() {
     crate::studio_panel::poll();
     crate::review::poll();
     crate::schedule::poll();
+    crate::batch::poll();
 }
 
 /// Writes `level: maps/<name>.bsp` to the log whenever the loaded level
@@ -1445,6 +1446,7 @@ pub fn install() {
     add_command(crate::studio_panel::NAME, crate::studio_panel::command);
     add_command(crate::review::NAME, crate::review::command);
     add_command(crate::schedule::NAME, crate::schedule::command);
+    add_command(crate::batch::NAME, crate::batch::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
