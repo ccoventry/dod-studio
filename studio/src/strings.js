@@ -1269,12 +1269,24 @@ export const STRINGS = {
       'The pipeline (or the engine itself) always overrides or drops these before they could ever apply — not wrong, just wasted keystrokes.',
     NOOP_REASONS: {
       mirv_movie_filename: 'the pipeline sets this itself before every clip is captured',
-      exec: 'GoldSrc drops this when injected into a demo',
-      quit: 'GoldSrc drops this when injected into a demo',
     },
     noopRow: (command, reason, source) => {
       const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
       return isPlainSource ? `${command} — ${reason}` : `${command} — ${reason} (${source})`;
+    },
+    // #679: the engine's filter for commands a demo carries.
+    FILTERED_TITLE: 'The game drops these commands without running them:',
+    FILTERED_ADVICE:
+      "Initial and Scheduled Commands reach the game inside the demo, and the game filters every command a demo carries. With no message, it drops any command whose name contains bind, _set, kill, exit, quit, retry, _restart, writecfg, motdfile or motd_write, any name starting with connect, any alias, and any line containing exec. A config file the game runs at start-up isn't filtered.",
+    filteredRow: (command, rule, pattern) => {
+      const why = {
+        nameContains: `its name contains '${pattern}'`,
+        nameStartsWith: `its name starts with '${pattern}'`,
+        lineStartsWith: `it starts with '${pattern}'`,
+        lineContains: `it contains '${pattern}'`,
+        wordStartsWith: `it has a word starting with '${pattern}'`,
+      }[rule];
+      return why ? `${command} — dropped: ${why}` : `${command} — dropped`;
     },
   },
 
@@ -1800,7 +1812,7 @@ export const STRINGS = {
     OWNED_BY_STUDIO: "DoD Studio sets this itself, so it's refused here.",
     GAME_QUITS_OVER: "DoD quits the game if this isn't 1, so it's refused here.",
     SCHEDULED_BANNED: "Initial Commands only: it's refused as a Scheduled Command.",
-    NOOP_EVERYWHERE: 'Does nothing from a demo: the game drops it.',
+    droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
     describe: (source, kind, builds) => {

@@ -608,23 +608,169 @@ pub const SCHEDULED_BANNED_COMMANDS: &[&str] = &[
     "mirv_agr",
 ];
 
-/// Commands GoldSrc itself silently drops whenever they arrive via a demo's
-/// own message stream — Initial Commands (STUFFTEXT, injected right after
-/// `DemoStart`) and Scheduled Commands (injected `ConsoleCommand` frames)
-/// alike, since the engine's filter does not care when in the stream a
-/// command arrives. Confirmed the hard way, twice: `dod-studio` originally
-/// planned to `exec` a per-demo generated config to set `mirv_movie_filename`
-/// (dodging the quoting/escaping an alias would need) and to inject `quit` at
-/// batch end to close the game automatically — neither ever did anything.
-/// See `docs/hlae_protocols.md`'s "Sandbox Escape" entry, which documents the
-/// actual workaround this pipeline ships instead of `quit` (a
-/// `mirv_movie_filename` exit-trigger folder, polled for by the orchestrator).
+// ── The demo command filter (#679) ──────────────────────────────────────────
+//
+// Every type-3 `ConsoleCommand` frame a demo carries goes through the same
+// filter as `svc_stufftext` before it reaches the command buffer (`hw+0x1dce0`
+// pre-Anniversary, `hw+0x1aaa30` on the 25th Anniversary build;
+// `docs/goldsrc_hw_dll_survey.md` §13.3). A command it matches is dropped with
+// nothing printed. Initial Commands and Scheduled Commands are both written
+// into the patched demo as `ConsoleCommand` frames (`engine.rs`), so both are
+// filtered; a config the engine execs at start-up is a different path and is
+// not. The lists below are the filter's own, read offline from `hw.dll`.
+//
+// This is the tier `exec` and `quit` used to have to themselves: `dod-studio`
+// once planned to `exec` a per-demo config and to inject `quit` at batch end,
+// and neither ever did anything (`docs/hlae_protocols.md`, "Sandbox Escape").
+// Both are just two cases of this filter.
+//
+// The third stage of the filter, which runs only when `cl_filterstuffcmd` is
+// non-zero (default `0`), is not modelled.
+
+/// Dropped when the command's name contains one of these, any case. A
+/// substring test, so HLAE's `mirv_matte_setcolor` is dropped for `_set`.
+pub const DEMO_FILTER_NAME_CONTAINS: &[&str] = &[
+    "bind",
+    "_set",
+    "unbind",
+    "retry",
+    "quit",
+    "_restart",
+    "motd_write",
+    "motdfile",
+    "kill",
+    "exit",
+    "writecfg",
+    "cl_filterstuffcmd",
+    "unbindall",
+];
+
+/// Dropped when the command's name starts with one of these, any case.
+pub const DEMO_FILTER_NAME_STARTS_WITH: &[&str] = &["connect"];
+
+/// Dropped when the whole line starts with one of these.
+pub const DEMO_FILTER_LINE_STARTS_WITH: &[&str] = &["alias "];
+
+/// Dropped when one of these appears anywhere on the line, arguments
+/// included. `exec` is exempt only in the `tfc` game directory, never in DoD.
+pub const DEMO_FILTER_LINE_CONTAINS: &[&str] = &[
+    "bind ",
+    "unbind ",
+    "_restart",
+    "exit",
+    "writecfg",
+    "cl_filterstuffcmd",
+    "unbindall",
+    "exec",
+];
+
+/// Dropped when one of these starts a word anywhere on the line: at the
+/// start, or after a space, `;` or newline. So `reconnect ` is not caught by
+/// `connect `, but `echo got a kill` is caught by `kill`.
+pub const DEMO_FILTER_WORD_STARTS_WITH: &[&str] = &[
+    "connect ",
+    "motd_write",
+    "motdfile",
+    "retry",
+    "_set",
+    "quit",
+    "kill",
+];
+
+/// Which of the filter's rules dropped a command, and the text it matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DemoFilterRule {
+    NameContains(&'static str),
+    NameStartsWith(&'static str),
+    LineStartsWith(&'static str),
+    LineContains(&'static str),
+    WordStartsWith(&'static str),
+}
+
+impl DemoFilterRule {
+    /// The rule's kind, as the frontend's strings key it.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::NameContains(_) => "nameContains",
+            Self::NameStartsWith(_) => "nameStartsWith",
+            Self::LineStartsWith(_) => "lineStartsWith",
+            Self::LineContains(_) => "lineContains",
+            Self::WordStartsWith(_) => "wordStartsWith",
+        }
+    }
+
+    /// The text the rule matched, without the trailing space some carry.
+    pub fn pattern(&self) -> &'static str {
+        match self {
+            Self::NameContains(p)
+            | Self::NameStartsWith(p)
+            | Self::LineStartsWith(p)
+            | Self::LineContains(p)
+            | Self::WordStartsWith(p) => p.trim_end(),
+        }
+    }
+}
+
+/// The first of the filter's rules `command` matches, in the engine's order
+/// (name first, then the whole line), or `None` when the command gets
+/// through. The name is the first word, as `Cmd_Argv(0)` sees it.
 ///
-/// Does NOT apply to a command inside a game config the engine execs
-/// normally at boot (`config.cfg`, `movie.cfg`, ...) — that is a completely
-/// different code path from the demo's own message stream, and an `exec`
-/// inside one of those is exactly how config chaining works.
-pub const NOOP_EVERYWHERE_COMMANDS: &[&str] = &["exec", "quit"];
+/// The name stage is case-insensitive in the engine. Whether the line stage
+/// is was not read, so it is matched case-insensitively too: a false "this is
+/// dropped" costs a glance, a missed one costs a clip.
+pub fn demo_filter_rule(command: &str) -> Option<DemoFilterRule> {
+    let line = command.trim().to_ascii_lowercase();
+    let name = line.split_whitespace().next()?.trim_matches('"');
+
+    if let Some(p) = DEMO_FILTER_NAME_CONTAINS.iter().find(|p| name.contains(*p)) {
+        return Some(DemoFilterRule::NameContains(p));
+    }
+    if let Some(p) = DEMO_FILTER_NAME_STARTS_WITH
+        .iter()
+        .find(|p| name.starts_with(*p))
+    {
+        return Some(DemoFilterRule::NameStartsWith(p));
+    }
+    if let Some(p) = DEMO_FILTER_LINE_STARTS_WITH
+        .iter()
+        .find(|p| line.starts_with(*p))
+    {
+        return Some(DemoFilterRule::LineStartsWith(p));
+    }
+    if let Some(p) = DEMO_FILTER_LINE_CONTAINS.iter().find(|p| line.contains(*p)) {
+        return Some(DemoFilterRule::LineContains(p));
+    }
+    let starts_a_word = |p: &str| {
+        line.match_indices(p)
+            .any(|(i, _)| i == 0 || matches!(line.as_bytes()[i - 1], b' ' | b';' | b'\n'))
+    };
+    DEMO_FILTER_WORD_STARTS_WITH
+        .iter()
+        .find(|p| starts_a_word(p))
+        .map(|p| DemoFilterRule::WordStartsWith(p))
+}
+
+/// A command the demo filter drops, and the rule that drops it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DemoFiltered {
+    /// The whole command, trimmed.
+    pub command: String,
+    pub rule: DemoFilterRule,
+}
+
+/// Every command in `commands` the demo filter drops, in order. Applies to
+/// Initial and Scheduled Commands alike: both reach the game as demo frames.
+pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
+    commands
+        .iter()
+        .filter_map(|raw| {
+            demo_filter_rule(raw).map(|rule| DemoFiltered {
+                command: raw.trim().to_string(),
+                rule,
+            })
+        })
+        .collect()
+}
 
 /// Commands that do nothing specifically in Initial Commands (or a config
 /// the engine executes) — not because the engine drops them, but because the
@@ -633,20 +779,10 @@ pub const NOOP_EVERYWHERE_COMMANDS: &[&str] = &["exec", "quit"];
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
 pub const NOOP_IN_INIT_COMMANDS: &[&str] = &["mirv_movie_filename"];
 
-/// `NOOP_IN_INIT_COMMANDS` and `NOOP_EVERYWHERE_COMMANDS` combined, checked
-/// against Initial Commands.
+/// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
+/// filter drops is reported separately, by `demo_filtered_commands`.
 pub fn noop_commands_in_init(commands: &[String]) -> Vec<(String, String)> {
-    let mut hits = commands_matching(NOOP_IN_INIT_COMMANDS, commands);
-    hits.extend(commands_matching(NOOP_EVERYWHERE_COMMANDS, commands));
-    hits
-}
-
-/// The Scheduled Commands half of the same check — `NOOP_EVERYWHERE_COMMANDS`
-/// only. `NOOP_IN_INIT_COMMANDS` entries are dangerous rather than inert once
-/// scheduled (see `SCHEDULED_BANNED_COMMANDS`), so they are refused there,
-/// not reported here.
-pub fn noop_commands_in_scheduled(commands: &[String]) -> Vec<(String, String)> {
-    commands_matching(NOOP_EVERYWHERE_COMMANDS, commands)
+    commands_matching(NOOP_IN_INIT_COMMANDS, commands)
 }
 
 /// Commands from `SCHEDULED_BANNED_COMMANDS` present in `commands`. Only
@@ -1548,7 +1684,8 @@ mod tests {
     }
 
     #[test]
-    fn noop_commands_in_init_covers_mirv_movie_filename_and_engine_dropped_commands() {
+    fn noop_commands_in_init_covers_only_mirv_movie_filename() {
+        // exec and quit are the demo filter's now (demo_filtered_commands).
         let hits = noop_commands_in_init(&[
             "sensitivity 3".to_string(),
             "mirv_movie_filename foo".to_string(),
@@ -1557,21 +1694,160 @@ mod tests {
         ]);
 
         let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["mirv_movie_filename", "exec", "quit"]);
+        assert_eq!(flagged, vec!["mirv_movie_filename"]);
     }
 
     #[test]
-    fn noop_commands_in_scheduled_covers_only_the_engine_dropped_commands() {
-        // mirv_movie_filename is dangerous, not merely inert, once scheduled
-        // — refused via scheduled_banned_commands, not reported here.
-        let hits = noop_commands_in_scheduled(&[
-            "mirv_movie_filename foo".to_string(),
-            "exec somefile.cfg".to_string(),
+    fn the_demo_filter_drops_a_name_containing_any_of_its_substrings() {
+        use DemoFilterRule::NameContains;
+        assert_eq!(
+            demo_filter_rule("mirv_matte_setcolor 255 0 255"),
+            Some(NameContains("_set"))
+        );
+        assert_eq!(
+            demo_filter_rule("mirv_draw_sv_hitboxes_setucolor 255 0 0"),
+            Some(NameContains("_set"))
+        );
+        assert_eq!(demo_filter_rule("kill"), Some(NameContains("kill")));
+        assert_eq!(
+            demo_filter_rule("cl_killsound 0"),
+            Some(NameContains("kill"))
+        );
+        assert_eq!(
+            demo_filter_rule("bind f7 screenshot"),
+            Some(NameContains("bind"))
+        );
+        assert_eq!(demo_filter_rule("quit"), Some(NameContains("quit")));
+        assert_eq!(demo_filter_rule("exit"), Some(NameContains("exit")));
+        assert_eq!(
+            demo_filter_rule("sv_restart 1"),
+            Some(NameContains("_restart"))
+        );
+        assert_eq!(
+            demo_filter_rule("writecfg mine"),
+            Some(NameContains("writecfg"))
+        );
+    }
+
+    #[test]
+    fn the_demo_filter_name_test_ignores_case() {
+        assert_eq!(
+            demo_filter_rule("MIRV_Matte_SetColor 255 0 255"),
+            Some(DemoFilterRule::NameContains("_set"))
+        );
+        assert_eq!(
+            demo_filter_rule("  Kill  "),
+            Some(DemoFilterRule::NameContains("kill"))
+        );
+    }
+
+    #[test]
+    fn the_demo_filter_drops_a_name_starting_with_connect_but_not_reconnect() {
+        assert_eq!(
+            demo_filter_rule("connect 127.0.0.1"),
+            Some(DemoFilterRule::NameStartsWith("connect"))
+        );
+        assert_eq!(
+            demo_filter_rule("connectionless"),
+            Some(DemoFilterRule::NameStartsWith("connect"))
+        );
+        assert_eq!(demo_filter_rule("reconnect"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_drops_an_alias_line_and_exec_anywhere() {
+        assert_eq!(
+            demo_filter_rule("alias foo \"echo hi\""),
+            Some(DemoFilterRule::LineStartsWith("alias "))
+        );
+        assert_eq!(
+            demo_filter_rule("exec movie.cfg"),
+            Some(DemoFilterRule::LineContains("exec"))
+        );
+        // Anywhere on the line, an argument included.
+        assert_eq!(
+            demo_filter_rule("echo executed"),
+            Some(DemoFilterRule::LineContains("exec"))
+        );
+        // Only `alias ` with its space: a name that merely starts with it
+        // is not an alias line.
+        assert_eq!(demo_filter_rule("aliases"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_drops_a_word_starting_with_a_filtered_prefix_anywhere() {
+        use DemoFilterRule::WordStartsWith;
+        assert_eq!(
+            demo_filter_rule("echo got a kill"),
+            Some(WordStartsWith("kill"))
+        );
+        assert_eq!(
+            demo_filter_rule("echo hi;quit"),
+            Some(WordStartsWith("quit"))
+        );
+        assert_eq!(
+            demo_filter_rule("echo _settings"),
+            Some(WordStartsWith("_set"))
+        );
+        // Inside a word is fine for these.
+        assert_eq!(demo_filter_rule("echo skill"), None);
+        assert_eq!(demo_filter_rule("echo reconnect now"), None);
+    }
+
+    #[test]
+    fn the_demo_filter_lets_ordinary_commands_through() {
+        for command in [
+            "echo ok",
+            "sensitivity 3",
+            "mirv_fov 90",
+            "spec_autodirector 1",
+            "mirv_movie_fps 60",
+            "sys_autodir",
+            "sys_record_start",
+            "dodstudio_chain_01_route_0",
+            "dodstudio_chain_01_next",
+            "echo \"[dod-studio] BREADCRUMB - Tick 500\"",
+            "",
+            "   ",
+        ] {
+            assert_eq!(demo_filter_rule(command), None, "{command:?}");
+        }
+    }
+
+    #[test]
+    fn demo_filtered_commands_reports_each_dropped_command_in_order() {
+        let hits = demo_filtered_commands(&[
+            "sensitivity 3".to_string(),
+            "  exec somefile.cfg ".to_string(),
+            "mirv_matte_setcolor 255 0 255".to_string(),
             "quit".to_string(),
         ]);
+        let got: Vec<(&str, &str, &str)> = hits
+            .iter()
+            .map(|h| (h.command.as_str(), h.rule.kind(), h.rule.pattern()))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("exec somefile.cfg", "lineContains", "exec"),
+                ("mirv_matte_setcolor 255 0 255", "nameContains", "_set"),
+                ("quit", "nameContains", "quit"),
+            ]
+        );
+    }
 
-        let flagged: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
-        assert_eq!(flagged, vec!["exec", "quit"]);
+    #[test]
+    fn no_command_the_pipeline_owns_is_dropped_by_the_demo_filter() {
+        // A tiered command the filter also dropped would be reported twice
+        // and refused for the wrong reason.
+        for name in BANNED_COMMANDS
+            .iter()
+            .chain(SCHEDULED_BANNED_COMMANDS)
+            .chain(MID_DEMO_HAZARDS)
+            .chain(NOOP_IN_INIT_COMMANDS)
+        {
+            assert_eq!(demo_filter_rule(&format!("{name} 1")), None, "{name}");
+        }
     }
 
     #[test]

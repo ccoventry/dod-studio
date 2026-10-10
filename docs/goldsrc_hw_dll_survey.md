@@ -946,18 +946,19 @@ and two more). During demo playback it always runs. In order:
    and a dozen more, any `cl_`/`gl_`/`m_`/`r_`/`hud_` token, and any
    non-printable character.
 
-That is `cfg_scan.rs`'s `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`) proven
-offline, and it shows the list is a subset. Two consequences worth knowing:
+That is what `cfg_scan.rs`'s old `NOOP_EVERYWHERE_COMMANDS` (`exec`, `quit`)
+was a subset of. Two consequences worth knowing:
 
 - **The name test is a substring test.** Any command whose *name* contains
   `_set`, `kill`, `exit`, `bind` or `quit` is dropped when it arrives through a
   demo's message stream — HLAE's `mirv_matte_setcolor` and
-  `mirv_draw_sv_hitboxes_setucolor` included. Nothing reports it.
+  `mirv_draw_sv_hitboxes_setucolor` included.
 - **`exec` is dropped for DoD specifically**; the `tfc` exemption is a
   game-directory check, not a setting.
 
-Neither is acted on here; both belong to `cfg_scan.rs` and to #434's move away
-from demo-borne commands, which sidesteps the filter entirely.
+Stages 1 and 2 are now `cfg_scan.rs`'s `DEMO_FILTER_*` lists, reported for
+Initial and Scheduled Commands (#679; `docs/command_tiers.md`). #434's move
+away from demo-borne commands would sidestep the filter entirely.
 
 ### 13.4 The Anniversary build
 
