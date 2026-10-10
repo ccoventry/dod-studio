@@ -149,6 +149,58 @@ pub fn work_order(fresh: &[bool], sizes: &[u64]) -> Vec<usize> {
     order
 }
 
+/// How a scan reads a list of demos: which ones the cache has, each file's
+/// size, and the [`work_order`]. List Demos, Cache all and the Master Queue
+/// scan all build it here so their order can't drift apart (#687).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkPlan {
+    /// Per demo, in list order: [`is_fresh`].
+    pub fresh: Vec<bool>,
+    /// Per demo, in list order: the file's size, 0 when it can't be read.
+    pub sizes: Vec<u64>,
+    /// Indices into the list, in the order to read them.
+    pub order: Vec<usize>,
+}
+
+impl WorkPlan {
+    /// Checks each demo against the cache under `root`: 200 bytes of entry
+    /// per demo, so a whole folder takes a fraction of a second.
+    pub fn new<P: AsRef<Path>>(root: &Path, demos: &[P]) -> Self {
+        let fresh = demos.iter().map(|d| is_fresh(root, d.as_ref())).collect();
+        let sizes = demos
+            .iter()
+            .map(|d| std::fs::metadata(d).map_or(0, |m| m.len()))
+            .collect();
+        Self::from_parts(fresh, sizes)
+    }
+
+    pub fn from_parts(fresh: Vec<bool>, sizes: Vec<u64>) -> Self {
+        let order = work_order(&fresh, &sizes);
+        Self {
+            fresh,
+            sizes,
+            order,
+        }
+    }
+
+    /// Demos the cache has.
+    pub fn cached(&self) -> usize {
+        self.fresh.iter().filter(|f| **f).count()
+    }
+
+    /// The bytes of the demos that need a parse. Progress divides the parse
+    /// time so far by the bytes parsed for its time left: demo sizes vary too
+    /// much (5 MB tests, 90 MB matches) for a time per demo.
+    pub fn bytes_to_parse(&self) -> u64 {
+        self.fresh
+            .iter()
+            .zip(&self.sizes)
+            .filter(|(fresh, _)| !**fresh)
+            .map(|(_, size)| size)
+            .sum()
+    }
+}
+
 /// Saves `analysis` as `demo_path`'s entry, and returns where. Best-effort:
 /// `None` on any failure, which must never fail the caller.
 ///
@@ -393,6 +445,32 @@ mod tests {
         // Same-size parses keep list order.
         assert_eq!(work_order(&[false, false], &[7, 7]), [0, 1]);
         assert!(work_order(&[], &[]).is_empty());
+    }
+
+    #[test]
+    fn a_work_plan_counts_the_cached_demos_and_the_bytes_to_parse() {
+        let plan = WorkPlan::from_parts(vec![false, true, false], vec![5, 80, 90]);
+        assert_eq!(plan.order, [1, 2, 0]);
+        assert_eq!(plan.cached(), 1);
+        assert_eq!(plan.bytes_to_parse(), 95);
+
+        let dir = scratch("plan");
+        let root = dir.join("cache");
+        let (cached, uncached) = (dir.join("a.dem"), dir.join("b.dem"));
+        std::fs::write(&cached, b"cached demo").unwrap();
+        std::fs::write(&uncached, b"a demo never analysed").unwrap();
+        store(
+            &root,
+            &cached,
+            &FileInfo::of(&cached).unwrap(),
+            &Analysis::default(),
+        )
+        .unwrap();
+        let plan = WorkPlan::new(&root, &[&uncached, &cached]);
+        assert_eq!(plan.fresh, [false, true]);
+        assert_eq!(plan.sizes, [21, 11]);
+        assert_eq!(plan.order, [1, 0]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -52,7 +52,7 @@ Every visible label comes from `studio/src/strings.js`, which overwrites the fal
 
 ### 2.2 Studio → Capture
 
-**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with a set number of parallel workers (Configuration → Pipeline, 1–8, default 2). The status line shows `Scanning n / N — <demo>` from the start. Each demo is fully analysed, and the result also warms the analyzer cache. Cancel Scan stops it.
+**Directory Scan & Management.** Add Demo Files or Add Folder, then the scan runs with a set number of parallel workers (Configuration → Pipeline, 1–8, default 2). The status line shows `Scanning n / N — <demo>` from the start. The demos the analyzer cache has go first, then the rest largest first (#687); the line then adds `(n from the analyzer cache)` and a time left measured in bytes. Each demo is fully analysed, and the result also warms the analyzer cache. Cancel Scan stops it.
 
 - **Known demos are skipped.** A demo already in the queue whose file is unchanged is not parsed again. Unchanged means the same path and the same size plus hash of the first 64 KiB. The toast counts these separately. A changed file is rescanned, and the rescan keeps its statuses, selection, notes and kill ranges.
 - **Adding a folder always scans it**, including a folder that was added before. A folder that no longer exists gives a "Not found" error.
@@ -116,7 +116,7 @@ One folder picker, then a tab per tool:
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
-- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
+- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Those go first, then the rest largest first, with a time left measured in bytes (#687). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
 - **A demo that recorded more than one map** (#217): the report covers only the first map, up to the next map change, as the game's `viewdemo` stops there too (cache 7; before, a first map with no gameplay was skipped). A notice above the tabs lists the maps (from the analysis's `signon_maps`) and offers **Split now**: the same split as the Demo Auditor's Split Maps, on this demo, keeping every map of a minute or more. The demos written appear next to the original, which is kept, and the first one opens.
 - **Report**, nine sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.

@@ -2055,6 +2055,14 @@ export const STRINGS = {
     },
   },
 
+  // ── scan_progress.js: what every scan reading demos one by one adds to
+  //    its progress line (List Demos, Cache all, the Master Queue scan; #687)
+  SCAN_PROGRESS: {
+    fromCache: (cached) => ` (${cached} from the analyzer cache)`,
+    CHECKING_CACHE: 'Checking the analyzer cache…',
+    timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
+  },
+
   // #441: clip names, their template and its checks.
   // ── demo_rename_ui.js: the Demo Auditor's renamer (#469) ─────────────────
   DEMO_RENAME: {
@@ -2081,9 +2089,6 @@ export const STRINGS = {
     NO_DEMOS: 'No demos in this folder.',
     CHOOSE_FOLDER_FIRST: 'Choose a Target Folder first.',
     reading: (done, total) => `Reading demos: ${done} / ${total}`,
-    readingCached: (cached) => ` (${cached} from the analyzer cache)`,
-    CHECKING_CACHE: 'Checking the analyzer cache…',
-    timeLeft: (seconds) => (seconds >= 90 ? ` · about ${Math.round(seconds / 60)} min left` : ` · about ${Math.max(1, seconds)} s left`),
     listed: (count, renames) => `${count} demo${count === 1 ? '' : 's'}, ${renames} to rename.`,
     CANCELLED: 'Stopped. The demos read so far are listed.',
     STATUS_SAME: 'already named this way',
