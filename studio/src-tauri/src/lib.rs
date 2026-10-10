@@ -1,4 +1,5 @@
 mod audit_manager;
+mod batch_eta;
 mod blender_manager;
 mod capture_manager;
 mod combine_manager;
