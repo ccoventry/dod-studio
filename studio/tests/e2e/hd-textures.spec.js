@@ -231,6 +231,29 @@ test('the largest size goes into the build and the cfg lines, and says what it c
   await expect(page.locator('#hd-build-cap')).toHaveValue('2048');
 });
 
+test('no gl_max_size in the status report (an older backend) shows no line (#680)', async ({ page }) => {
+  await loadHarness(page, { status: STATUS });
+  await page.click('#hd-refresh-btn');
+  await expect(page.locator('#hd-cfg-lines')).toContainText('gl_max_size 1024');
+  await expect(page.locator('#hd-gl-max-size')).toHaveJSProperty('hidden', true);
+});
+
+test('the install\'s gl_max_size names where it comes from, and warns below the build size picked (#680)', async ({ page }) => {
+  const status = { ...STATUS, gl_max_size: { value: '1024', shows_at: 1024, source: { kind: 'config', file: 'movie.cfg', line: 4 } } };
+  await loadHarness(page, { status });
+  await page.click('#hd-refresh-btn');
+  const line = page.locator('#hd-gl-max-size');
+  await expect(line).toHaveJSProperty('hidden', false);
+  await expect(line).toContainText('gl_max_size 1024 (movie.cfg line 4)');
+  await expect(line).not.toHaveClass(/hd-gl-max-size-low/);
+
+  // Building at 2048 while the game shows 1024 at most.
+  await page.selectOption('#hd-build-cap', '2048');
+  await expect(line).toHaveClass(/hd-gl-max-size-low/);
+  await expect(line).toContainText('1024 px at most');
+  await expect(line).toContainText('Copy the gl_max_size line above into movie.cfg');
+});
+
 test('build progress, the finished line, and cancel', async ({ page }) => {
   await loadHarness(page, { status: STATUS });
   await page.click('#hd-refresh-btn');
