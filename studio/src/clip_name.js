@@ -87,7 +87,15 @@ export function parseTemplate(template, rules = CLIP_RULES) {
     const inner = text.slice(i + 1, close);
     const [spec, fallback] = inner.split('|', 2);
     const [name, modifier] = spec.split(':', 2);
-    const part = { raw, name: name.trim(), modifier: modifier?.trim() || null, fallback: fallback ?? null };
+    // {MAP}, {Map} and {map} are the same placeholder: the case of a name
+    // never changes the value's case (that's :lower / :upper). The fallback
+    // word keeps the case it was typed in.
+    const part = {
+      raw,
+      name: name.trim().toLowerCase(),
+      modifier: modifier?.trim().toLowerCase() || null,
+      fallback: fallback ?? null,
+    };
     if (!part.name) errors.push(STRINGS.CLIP_NAME.EMPTY_PLACEHOLDER);
     else if (!placeholders.includes(part.name)) errors.push(STRINGS.CLIP_NAME.unknownPlaceholder(raw));
     else if (part.modifier !== null && !MODIFIERS.includes(part.modifier)) errors.push(STRINGS.CLIP_NAME.unknownModifier(raw));
