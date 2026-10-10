@@ -9,6 +9,7 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { blenderStatus, blenderSetExe, blenderRun, blenderCancel, revealInExplorer } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { elapsedWords } from './time_format.js';
 
 // Per-viewer conveniences only: the last take and assets folder picked.
 const STORE_AGR = 'dodstudio.blender.agr';
@@ -21,12 +22,6 @@ function load(key) {
 
 function save(key, value) {
   try { localStorage.setItem(key, value); } catch { /* storage unavailable */ }
-}
-
-function formatElapsed(secs) {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
 }
 
 // `<agr folder>\<agr name>_blender`, as native::blender::WorkFiles names it.
@@ -163,9 +158,9 @@ export function initBlenderPane() {
         style: styleSelect.value,
         step,
       });
-      progressText.textContent = STRINGS.BLENDER.done(label, formatElapsed(outcome.elapsed_secs));
+      progressText.textContent = STRINGS.BLENDER.done(label, elapsedWords(outcome.elapsed_secs));
       showResults(outcome);
-      showToast(STRINGS.BLENDER.done(label, formatElapsed(outcome.elapsed_secs)), 'success');
+      showToast(STRINGS.BLENDER.done(label, elapsedWords(outcome.elapsed_secs)), 'success');
     } catch (err) {
       progressText.textContent = err === 'cancelled' ? STRINGS.BLENDER.CANCELLED : STRINGS.BLENDER.failed(label);
     } finally {
@@ -177,7 +172,7 @@ export function initBlenderPane() {
   listen('blender_progress', (event) => {
     const p = event.payload;
     if (!busy) return;
-    const elapsed = formatElapsed(p.elapsed_secs ?? Math.round((Date.now() - started) / 1000));
+    const elapsed = elapsedWords(p.elapsed_secs ?? Math.round((Date.now() - started) / 1000));
     if (p.total) {
       progressText.textContent = STRINGS.BLENDER.frames(p.done, p.total, p.frame_secs, elapsed);
     }

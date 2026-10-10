@@ -15,6 +15,7 @@ import {
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
+import { elapsedWords } from './time_format.js';
 import { mostPerType, styleGaps, gapsSentence } from './hd_coverage.js';
 import { glMaxSizeLine } from './hd_gl_max_size.js';
 
@@ -22,12 +23,6 @@ function formatSize(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
   if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)} MB`;
   return `${Math.max(1, Math.round(bytes / 1024))} KB`;
-}
-
-function formatElapsed(secs) {
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return m ? `${m}m ${String(s).padStart(2, '0')}s` : `${s}s`;
 }
 
 // The order the build runs types in (quickest first), as build_all.py's TYPES.
@@ -1024,7 +1019,7 @@ export function initHdPane() {
     const p = buildStep;
     const type = STRINGS.HD.TYPE_NAMES[p.asset_type] || p.asset_type;
     const secs = Math.max(p.elapsed_secs, Math.floor((Date.now() - buildStartedAt) / 1000));
-    buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, formatElapsed(secs));
+    buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, elapsedWords(secs));
   };
 
   listen('hd_build_progress', (event) => {
@@ -1066,7 +1061,7 @@ export function initHdPane() {
     buildClock = setInterval(showBuildStep, 1000);
     try {
       const outcome = await hdBuild(gamePath(), request);
-      buildProgress.textContent = STRINGS.HD.buildDone(outcome.steps, formatElapsed(outcome.elapsed_secs), outcome.log_path);
+      buildProgress.textContent = STRINGS.HD.buildDone(outcome.steps, elapsedWords(outcome.elapsed_secs), outcome.log_path);
     } catch (err) {
       buildProgress.textContent = err === 'cancelled' ? STRINGS.HD.BUILD_CANCELLED : STRINGS.IPC.hdBuildFailed(err);
     } finally {
