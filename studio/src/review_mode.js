@@ -7,6 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
 import { buildReviewQueue, applyReviewAnswer, fastForwardGap } from './review_queue.js';
+import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -48,6 +49,9 @@ export function initReviewMode({ getDemos, getCheckedPaths, onChanged }) {
     }
     btn.disabled = true;
     try {
+      // A game started with other launch settings is closed and started
+      // again, if the user says so; otherwise nothing is sent (#666).
+      if (!(await closeGameWithOtherSettings())) return;
       const gap = fastForwardGap(
         document.querySelector('#review-fast-forward-cb')?.checked === true,
         document.querySelector('#review-fast-forward-gap')?.value,

@@ -138,6 +138,7 @@ pub mod decal_strip;
 pub mod engine;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
+pub mod launch_settings;
 pub mod map_check;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod map_fetch;

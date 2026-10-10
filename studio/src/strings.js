@@ -1839,6 +1839,35 @@ export const STRINGS = {
     BATCH_NOT_STARTED_STATUS: "Status: Not started — Steam wasn't running and signed in.",
     NOT_SIGNED_IN: "Steam still isn't signed in after 2 minutes, so nothing was launched. Sign in, then try again.",
   },
+  // ── running_game_guard.js: a running game started with other launch
+  // settings (#666) ──────────────────────────────────────────────────────
+  RUNNING_GAME: {
+    TITLE: 'Day of Defeat is running with other settings',
+    CLOSE_AND_RESTART: 'Close it and start again',
+    CANCEL: 'Cancel',
+    CLOSING: 'Closing Day of Defeat…',
+    RUNNING_EXE: 'Running now',
+    STUDIO_EXE: "DoD Studio's Half-Life Executable",
+    // Beside Start Capture Batch when the user kept the running game.
+    BATCH_NOT_STARTED_STATUS: 'Status: Not started — Day of Defeat is running with other launch settings.',
+    /** "DoD is running from X at 1920×1080; DoD Studio is set to Y at
+     *  3440×1440", naming only what differs. `check` is check_running_game's
+     *  mismatch answer. */
+    message({ running, wanted, differs }) {
+      const install = differs.includes('install');
+      const resolution = differs.includes('resolution');
+      const size = (s) => `${s.width}×${s.height}`;
+      const now = [
+        install && `from "${running.install}"`,
+        resolution && `at ${size(running)}`,
+      ].filter(Boolean).join(' ');
+      const set = [
+        install && `"${wanted.install}"`,
+        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+      ].filter(Boolean).join(' ');
+      return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
+    },
+  },
   // ── overviews_pane.js: the Overviews page (#371) ────────────────────────
   OVERVIEWS: {
     MAPS_TITLE: 'Maps',
