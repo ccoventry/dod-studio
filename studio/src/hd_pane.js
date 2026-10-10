@@ -16,6 +16,7 @@ import {
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { mostPerType, styleGaps, gapsSentence } from './hd_coverage.js';
+import { glMaxSizeLine } from './hd_gl_max_size.js';
 
 function formatSize(bytes) {
   if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
@@ -39,6 +40,7 @@ export function initHdPane() {
   const refreshBtn = document.querySelector('#hd-refresh-btn');
   const styleSelect = document.querySelector('#hd-style-select');
   const cfgLines = document.querySelector('#hd-cfg-lines');
+  const glMaxSize = document.querySelector('#hd-gl-max-size');
   const copyBtn = document.querySelector('#hd-copy-cfg-btn');
   const toolsText = document.querySelector('#hd-tools-text');
   const upscalerPickBtn = document.querySelector('#hd-upscaler-pick-btn');
@@ -162,6 +164,14 @@ export function initHdPane() {
     if (styleCoverage) {
       styleCoverage.textContent = gaps;
       styleCoverage.hidden = !gaps;
+    }
+    // #680: what the install's own configs leave gl_max_size at, against the
+    // size the build makes.
+    const gl = glMaxSizeLine(lastStatus?.gl_max_size, cap());
+    if (glMaxSize) {
+      glMaxSize.textContent = gl?.text || '';
+      glMaxSize.hidden = !gl;
+      glMaxSize.classList.toggle('hd-gl-max-size-low', Boolean(gl?.low));
     }
   }
 

@@ -1586,6 +1586,16 @@ export const STRINGS = {
       return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
     },
     cfgGapsComment: (sentence) => `// ${sentence}`,
+    // #680: the gl_max_size the selected install runs with (native::hd::gl_max_size).
+    glMaxSizeSource: (source) => ({
+      initial_commands: "Studio's Initial Commands",
+      config: `${source?.file} line ${source?.line}`,
+      engine_default: "nothing sets it, so it's the game's default",
+    })[source?.kind] || '',
+    glMaxSizeOk: (value, source, px) => `This install runs with gl_max_size ${value} (${source}): HD textures show at up to ${px} px.`,
+    glMaxSizeLow: (value, source, px, cap, fix) => `This install runs with gl_max_size ${value} (${source}), so HD textures show at ${px} px at most, smaller than the ${cap} they are built at. ${fix}`,
+    GL_MAX_SIZE_FIX_CFG: 'Copy the gl_max_size line above into movie.cfg, then restart the game.',
+    GL_MAX_SIZE_FIX_INITIAL: 'Raise it in Initial Commands (Configuration), or take that line out and set it in movie.cfg.',
     hdRootFound: (path) => `HD folder: ${path}`,
     hdRootMissing: (path) => `No HD folder yet. The build creates ${path}.`,
     stylesBuilt: (styles) => `Built styles: ${styles.join(', ')}.`,
