@@ -79,6 +79,7 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 - **Locked Files:** Do not modify build/deployment configs, environment files, lint rules, or public APIs unless explicitly requested.
 - **Code Edits:** Apply minimal changes directly to files. Never rewrite unchanged lines or entire files unnecessarily.
 - **Ambiguity:** State critical technical assumptions once and proceed. Fail loudly on blocking errors.
+- **`studio/src/main.js` only wires:** it holds the app state, the factories' wiring and the boot order. A new queue, project or settings feature goes in its own module with a `createX({ getDemos, ... })` factory (`project_session.js`, `queue_scan.js` are the pattern), and `main_js_budget.test.js` fails when main.js passes its line budget (#683).
 
 ### Comments & Docs
 - **Comments say why, in the present tense.** No session narrative ("the user asked…", "per user", "tonight") and no decision dates: cite the issue or PR (`#214`) and let git history hold the story. Keep a date only when it dates a measurement. (#649 removed ~40 such comments.)
