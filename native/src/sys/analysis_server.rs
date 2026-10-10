@@ -13,8 +13,14 @@
 //! One request per connection, text lines:
 //!
 //! - the game: `analyze <absolute path to the .dem>`
-//! - Studio: `progress <0-100>` while it reads, then `done` or
-//!   `failed <reason>`.
+//! - Studio: `progress <0-100>` while it reads, then `cache v<N>` and `done`,
+//!   or `failed <reason>`.
+//!
+//! `cache v<N>` is the analyzer cache version Studio saved the result in
+//! (`analysis::cache::SCHEMA_VERSION`). A hook DLL built for another version
+//! reads another folder and would find nothing, so it says so instead of
+//! reporting the result missing (#684). A hook from before the line ignores
+//! it, as it ignores any line it doesn't know.
 //!
 //! The pipe takes local clients only, and a request only ever reads a `.dem`
 //! file and writes its cache entry.
@@ -128,10 +134,9 @@ fn handle_client(pipe: std::fs::File) {
             let _ = reply(&mut writer, &format!("progress {percent}"));
         }
     });
-    let _ = match result {
-        Ok(_) => reply(&mut writer, "done"),
-        Err(why) => reply(&mut writer, &format!("failed {}", one_line(&why))),
-    };
+    for line in final_reply(result.map(|_| ())) {
+        let _ = reply(&mut writer, &line);
+    }
     let _ = writer.flush();
     // Safety: the pipe's own handle; lets the game read the last line before
     // the handle closes.
@@ -158,6 +163,18 @@ pub fn parse_request(line: &str) -> Result<PathBuf, String> {
         return Err("no such demo".to_string());
     }
     Ok(path.to_path_buf())
+}
+
+/// The lines that end a request: which cache the result went to, then
+/// `done`; or why it failed.
+fn final_reply(result: Result<(), String>) -> Vec<String> {
+    match result {
+        Ok(()) => vec![
+            format!("cache v{}", analysis::cache::SCHEMA_VERSION),
+            "done".to_string(),
+        ],
+        Err(why) => vec![format!("failed {}", one_line(&why))],
+    }
 }
 
 fn progress(done: usize, total: usize) -> u32 {
@@ -230,6 +247,21 @@ mod tests {
         assert_eq!(progress(300, 200), 100);
         // No overflow however big the counts.
         assert_eq!(progress(usize::MAX / 2, usize::MAX), 49);
+    }
+
+    #[test]
+    fn a_finished_request_names_its_cache_version_before_done() {
+        assert_eq!(
+            final_reply(Ok(())),
+            [
+                format!("cache v{}", analysis::cache::SCHEMA_VERSION),
+                "done".to_string()
+            ]
+        );
+        assert_eq!(
+            final_reply(Err("bad\r\nframe".to_string())),
+            ["failed bad  frame".to_string()]
+        );
     }
 
     /// A real round trip through the pipe: a file that isn't a demo comes
