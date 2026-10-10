@@ -361,10 +361,11 @@ pub fn poll() {
                 engine::client_cmd(&line);
             }
             format!(
-                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms",
+                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms; client clock {:.2}",
                 seek.target,
                 seek.steps,
-                seek.started.elapsed().as_millis()
+                seek.started.elapsed().as_millis(),
+                engine::engine_client_time().unwrap_or(-1.0)
             )
         }
         Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),

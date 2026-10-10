@@ -9,10 +9,19 @@
 //!   `viewdemo` clock, the server time each kill's `viewdemo_times` entry is in.
 //!   A tick is placed by the nearest kill of the same demo: that kill's
 //!   `viewdemo` time, plus the playback time between the two frames.
-//! - **Fast-forward becomes a seek.** Each `sys_fast_forward` jumps to where
-//!   the next `sys_normal_speed` drops back to real time, which is the pre-roll
-//!   of the next clip. The first one, before clip 1, jumps there as soon as
-//!   the demo has loaded.
+//! - **Most of each fast-forward becomes a seek.** Each `sys_fast_forward`
+//!   jumps to [`SETTLE_SECONDS`] before the next `sys_normal_speed` (the next
+//!   clip's pre-roll) and fast-forwards the rest, as the patched demo does. The
+//!   first one, before clip 1, jumps as soon as the demo has loaded. A gap
+//!   shorter than that is fast-forwarded whole.
+//!
+//!   The fast-forwarded stretch is there because a seek moves the demo's clock
+//!   but not the engine's client clock (`cl.time`: +6.5 s across an 800 s
+//!   seek, measured 2026-10-10). Everything the seek replays on its way --
+//!   kill-feed lines, centre text, the clan-match countdown, dead bodies --
+//!   lands with a fresh client-clock timestamp and would still be on screen at
+//!   the clip. Fast-forward moves both clocks together, so those expire as
+//!   they would in a demo played straight through.
 //! - **`<demo>_next` becomes `next`.** The hook loads the next demo itself; the
 //!   alias (`playdemo` of the next patched copy) would not exist.
 //! - The 64-byte `build_safe_echos` splitting and the breadcrumbs stay out:
@@ -27,6 +36,11 @@ pub const HEADER: &str = "dodstudio-batch 1";
 
 /// The hook DLL's decal clear (goldsrc-hooks `commands.rs`).
 pub const CLEAR_DECALS: &str = "dodstudio_clear_decals";
+
+/// How much of the run-up to each clip is fast-forwarded rather than jumped
+/// over (see the module doc): longer than the kill feed's longest usual hold
+/// (`hud_deathnotice_time`, 12 s set by the user) and the game's text holds.
+pub const SETTLE_SECONDS: f64 = 30.0;
 
 /// The hook DLL's batch command.
 pub const BATCH_COMMAND: &str = "dodstudio_batch";
@@ -164,10 +178,25 @@ pub fn batch_file(
             if command == "sys_fast_forward" {
                 // Nothing after it to seek to: the demo ends here.
                 if let Some(to) = pre_roll_after(i) {
-                    let to = seconds_text(clock.seconds(to));
-                    out.push(format!("seek\t{}\t{to}", seconds_text(at)));
+                    let to = clock.seconds(to);
+                    let settle_from = to - SETTLE_SECONDS;
+                    // Before clip 1 the clock starts wherever the demo does,
+                    // so the first jump is always worth making.
+                    if first_fast == Some(*tick) || settle_from > at + 1.0 {
+                        out.push(format!(
+                            "seek\t{}\t{}",
+                            seconds_text(at),
+                            seconds_text(settle_from)
+                        ));
+                        out.push(format!(
+                            "at\t{}\t{command}",
+                            seconds_text(settle_from.max(at))
+                        ));
+                    } else {
+                        out.push(format!("at\t{}\t{command}", seconds_text(at)));
+                    }
                     if clear_decals {
-                        out.push(format!("at\t{to}\t{CLEAR_DECALS}"));
+                        out.push(format!("at\t{}\t{CLEAR_DECALS}", seconds_text(to)));
                     }
                 }
             } else if next_alias.as_deref() == Some(command.as_str()) {
@@ -281,14 +310,17 @@ mod tests {
                 HEADER,
                 "demo\ta.dem",
                 "init\tmirv_movie_fps 60",
-                // The first fast-forward seeks to clip 1's pre-roll at once.
-                "seek\t0.000\t325.000",
+                // The first fast-forward seeks at once to 30 s before clip 1's
+                // pre-roll and fast-forwards the rest.
+                "seek\t0.000\t295.000",
+                "at\t295.000\tsys_fast_forward",
                 "at\t0.000\techo [dod-studio] DEMO_START 1 1 2",
                 "at\t325.000\tsys_normal_speed",
                 "at\t329.000\tsys_record_start",
                 "at\t335.000\tsys_record_stop",
                 // Nearest kill is now the second one.
-                "seek\t336.000\t385.500",
+                "seek\t336.000\t355.500",
+                "at\t355.500\tsys_fast_forward",
                 "at\t385.500\tsys_normal_speed",
                 "at\t391.500\tsys_record_stop",
                 // The last fast-forward has nothing to seek to.
@@ -334,9 +366,27 @@ mod tests {
         )];
         let text = batch_file(&jobs, &streaks, true).unwrap();
         assert!(
-            text.contains("seek\t0.000\t325.000\nat\t325.000\tdodstudio_clear_decals\n"),
+            text.contains("at\t325.000\tdodstudio_clear_decals\n"),
             "{text}"
         );
+    }
+
+    #[test]
+    fn a_gap_shorter_than_the_settle_is_fast_forwarded_whole() {
+        let streaks = [streak("a.dem", &[(3000, 330.0)], 100.0)];
+        // Clip ends at 336 s, the next pre-roll starts at 356 s: 20 s apart.
+        let jobs = [job(
+            "a.dem",
+            &[
+                (200, "sys_fast_forward"),
+                (2500, "sys_normal_speed"),
+                (3600, "sys_fast_forward"),
+                (5600, "sys_normal_speed"),
+            ],
+        )];
+        let text = batch_file(&jobs, &streaks, false).unwrap();
+        assert_eq!(text.matches("seek\t").count(), 1, "{text}");
+        assert!(text.contains("at\t336.000\tsys_fast_forward\n"), "{text}");
     }
 
     #[test]

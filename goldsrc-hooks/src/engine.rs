@@ -125,6 +125,8 @@ pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char)
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
 pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
 pub type GetViewModelFn = unsafe extern "C" fn() -> *mut ClEntityS;
+/// `GetClientTime`: `cl.time`.
+pub type GetClientTimeFn = unsafe extern "C" fn() -> f32;
 pub type GetEntityByIndexFn = unsafe extern "C" fn(index: i32) -> *mut ClEntityS;
 pub type ConsoleCommandFn = unsafe extern "C" fn();
 pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: ConsoleCommandFn);
@@ -555,7 +557,9 @@ pub struct ClEngineFuncsPartial {
     pub get_local_player: GetLocalPlayerFn,
     pub get_view_model: GetViewModelFn,
     pub get_entity_by_index: GetEntityByIndexFn,
-    _slots_before_weapon_anim: [*mut c_void; 12], // GetClientTime .. pfnPlaybackEvent
+    /// Slot 54: the engine's client clock (`cl.time`), the one HUD timers run on.
+    pub pfn_get_client_time: GetClientTimeFn,
+    _slots_before_weapon_anim: [*mut c_void; 11], // V_CalcShake .. pfnPlaybackEvent
     pub pfn_weapon_anim: WeaponAnimFn,
     _slots_before_hook_event: [*mut c_void; 2], // pfnRandomFloat, pfnRandomLong
     /// Slot 69. See [`HookEventFn`].
@@ -876,6 +880,15 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
 /// engine gives no clean signal to reset on. Monotonic within a session, which
 /// is all either caller needs.
 static DEMO_ELAPSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The engine's own client clock (`cl.time`), which the game's HUD timers
+/// (kill feed, centre text, the clan countdown) run on; `None` before the
+/// engine is ready.
+pub fn engine_client_time() -> Option<f32> {
+    let engfuncs = engfuncs()?;
+    // Safety: the engine's own accessor, called on its thread.
+    Some(unsafe { (engfuncs.pfn_get_client_time)() })
+}
 
 /// Seconds of playback elapsed, or 0 before the first frame.
 pub fn client_time() -> f64 {
