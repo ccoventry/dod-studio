@@ -1737,7 +1737,7 @@ fn locate_missing_demos_within(
         .filter(|d| !Path::new(&d.path).is_file())
         .enumerate()
         .filter_map(|(i, d)| {
-            let size = d.file_key.split_once('-')?.0.parse().ok()?;
+            let size = native::utils::demo_hasher::FileKey::from_text(&d.file_key)?.size;
             Some((i, d.file_key.as_str(), size))
         })
         .collect();
@@ -2470,21 +2470,8 @@ pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::
                 launcher_running = false;
             }
             native::sys::process::refresh(&mut sys);
-            let game_pids: Vec<u32> = sys
-                .processes()
-                .values()
-                .filter(|p| native::sys::process::is_named(p, &["hl.exe"]))
-                .map(|p| p.pid().as_u32())
-                .collect();
-            let mut launcher_pids: Vec<u32> = sys
-                .processes()
-                .values()
-                .filter(|p| {
-                    native::sys::process::is_named(p, &["injector.exe"])
-                        && p.parent().map(|parent| parent.as_u32()) == Some(launcher_pid)
-                })
-                .map(|p| p.pid().as_u32())
-                .collect();
+            let game_pids = native::sys::process::game_pids_in(&sys);
+            let mut launcher_pids = native::sys::process::injector_pids_in(&sys, launcher_pid);
             if launcher_running {
                 launcher_pids.push(launcher_pid);
             }
@@ -2516,7 +2503,7 @@ pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::
 /// Process ids of every running `hl.exe` -- the games Studio could be talking
 /// to. `hlae.exe` is left out: it is the launcher, not the game.
 pub(crate) fn running_game_pids() -> Vec<u32> {
-    native::sys::process::pids_named(&["hl.exe"])
+    native::sys::process::game_pids()
 }
 
 /// Launch Preview for a game that is already running (#413): patches the

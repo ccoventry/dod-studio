@@ -316,10 +316,10 @@ pub fn check_sources_unchanged(streaks: &[CaptureStreak]) -> Result<(), String> 
             .file_name()
             .unwrap_or(path.as_os_str())
             .to_string_lossy();
-        let Some(key) = crate::utils::demo_hasher::calculate_demo_key(path) else {
+        let Some(key) = crate::utils::demo_hasher::demo_key_text(path) else {
             return Err(crate::messages::source_demo_unreadable(name));
         };
-        if crate::utils::demo_hasher::key_text(key) != expected {
+        if key != expected {
             return Err(crate::messages::source_demo_changed(name));
         }
     }

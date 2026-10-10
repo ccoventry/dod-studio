@@ -148,16 +148,7 @@ pub fn fetch_map(
 }
 
 fn download(url: &str) -> Result<Vec<u8>, String> {
-    let mut response = ureq::get(url)
-        .call()
-        .map_err(|e| crate::messages::labeled(url, e))?;
-
-    let status = response.status();
-    if !status.is_success() {
-        return Err(crate::messages::url_returned_status(url, status));
-    }
-
-    response
+    crate::utils::http::get(url)?
         .body_mut()
         .with_config()
         .limit(MAX_MAP_BYTES)

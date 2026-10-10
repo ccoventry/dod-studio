@@ -8,7 +8,8 @@ import { STRINGS } from './strings.js';
 import { automaticClipName } from './clip_name.js';
 import { getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { confirmOverLimit } from './packet_entity_limit.js';
-import { highlightStartSeconds, highlightDurationSeconds, formatClock } from './highlight_time.js';
+import { highlightStartSeconds, highlightDurationSeconds } from './highlight_time.js';
+import { clockFloor, clockRound } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
@@ -144,7 +145,7 @@ export function updateStreakVisuals(streak) {
   streak.kill_count = slice.length;
 
   const totalSecs = Math.round(Math.max(slice[slice.length - 1][1] - slice[0][1], 0));
-  streak.duration_string = `${Math.floor(totalSecs / 60)}:${String(totalSecs % 60).padStart(2, '0')}`;
+  streak.duration_string = clockRound(totalSecs);
 
   const parts = slice.map(([, absTime, weapon], i) => {
     // Falls back to a labelled placeholder rather than an empty string so an
@@ -154,7 +155,7 @@ export function updateStreakVisuals(streak) {
     const weaponClean = String(weapon || '').replace(/^Weapon::/, '').trim() || STRINGS.ANALYZER.WEAPON_UNKNOWN;
     if (i === 0) return weaponClean;
     const gapSec = Math.round(Math.max(absTime - slice[i - 1][1], 0));
-    return `(+${Math.floor(gapSec / 60)}:${String(gapSec % 60).padStart(2, '0')}) ${weaponClean}`;
+    return `(+${clockRound(gapSec)}) ${weaponClean}`;
   });
   streak.timeline_string = parts.join(', ');
 }
@@ -493,7 +494,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
     // Time matches the demo player's clock; see highlight_time.js (#464).
     const durSecs = highlightDurationSeconds(streak, demo.tickrate).toFixed(1);
-    const timeStr = formatClock(highlightStartSeconds(streak, demo.tickrate));
+    const timeStr = clockFloor(highlightStartSeconds(streak, demo.tickrate));
 
     // Details: precomputed weapon/timing chain from the backend
     // (e.g. "Rifle (+0:03) Rifle" — first kill weapon + gap + weapon chain).
@@ -511,7 +512,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // (builder.rs's merge loop) — surfaced so it's obvious at a glance why
     // two rows flipped to Captured together instead of independently.
     const mergedBadge = streak.mergedTakeKey
-      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop())}</span>`
+      ? `<span title="${STRINGS.HIGHLIGHTS.mergedBadgeTitle(streak.mergedCount)}" style="margin-left:6px;font-size:0.75em;color:#ff9800;border:1px solid #ff9800;border-radius:2px;padding:1px 4px;cursor:help;">${escapeHtml(STRINGS.HIGHLIGHTS.mergedTakeBadge(streak.mergedTakeKey.split('/').pop()))}</span>`
       : '';
 
     const byHandMark = streak.statusByHand
@@ -557,7 +558,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
       <td style="padding: 8px;">
         <textarea class="streak-notes-input" rows="2" placeholder="${escapeHtml(STRINGS.HIGHLIGHTS.NOTES_PLACEHOLDER)}">${escapeHtml(streak.notes)}</textarea>
       </td>
-      <td class="details-cell" title="${timelineText}">${timelineText}</td>
+      <td class="details-cell" title="${escapeHtml(timelineText)}">${escapeHtml(timelineText)}</td>
     `;
 
     const cb = tr.querySelector('.streak-select-cb');

@@ -291,29 +291,9 @@ fn apply(list: &mut Vec<Entry>, rest: &[String]) -> String {
     }
 }
 
-fn args() -> Vec<String> {
-    let Some(engfuncs) = crate::engine::engfuncs() else {
-        return Vec::new();
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(
-                unsafe { std::ffi::CStr::from_ptr(ptr) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .collect()
-}
-
 fn dispatch(argv: &[String]) -> String {
     // argv[0] is the command name itself, so a bare invocation (or a
-    // genuinely empty argv, which args() returns when engfuncs isn't
+    // genuinely empty argv, which cmd_list::argv() returns when engfuncs isn't
     // resolved yet) is a query -- not `&argv[1..]`, which panics on an empty
     // slice and aborts the whole process under this DLL's release
     // `panic = "abort"` profile.
@@ -330,7 +310,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     // Particles are made where `HUD_AddEntity` never looks: hook their makers
     // the first time anything is hidden (#614).
     if argv
@@ -510,7 +490,7 @@ mod tests {
 
     #[test]
     fn a_genuinely_empty_argv_is_also_a_status_query() {
-        // args() returns Vec::new() whenever engine::engfuncs() isn't
+        // cmd_list::argv() returns Vec::new() whenever engine::engfuncs() isn't
         // resolved yet, not just a one-element argv0-only vec -- `&argv[1..]`
         // panics on that, and this DLL ships with `panic = "abort"`.
         let reply = dispatch(&[]);

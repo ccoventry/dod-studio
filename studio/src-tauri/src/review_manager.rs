@@ -47,7 +47,7 @@ fn start_line(queue: &std::path::Path) -> String {
 /// Sends `line` to the first running game that takes commands, and says
 /// which. `Ok(None)` when none does.
 fn send_to_any_game(line: &str) -> Result<Option<u32>, String> {
-    for pid in native::sys::process::pids_named(&["hl.exe"]) {
+    for pid in native::sys::process::game_pids() {
         match game_remote::send_console_commands(pid, &[line.to_string()])
             .map_err(crate::messages::failed_to_send_review)?
         {
@@ -82,7 +82,7 @@ fn ensure_listener(app: AppHandle, pid: u32) {
 fn listen(app: &AppHandle, pid: u32) {
     let name = game_remote::events_pipe_name(pid);
     loop {
-        if !native::sys::process::pids_named(&["hl.exe"]).contains(&pid) {
+        if !native::sys::process::game_pids().contains(&pid) {
             log::info!("[review] game {pid} has closed; no more answers to read");
             let _ = app.emit(
                 EVENT,
@@ -131,7 +131,7 @@ pub async fn start_highlight_review(
     let (pid, launched) = match sent {
         Some(pid) => (pid, false),
         None => {
-            if !native::sys::process::pids_named(&["hl.exe"]).is_empty() {
+            if !native::sys::process::game_pids().is_empty() {
                 return Err(crate::messages::REVIEW_GAME_NOT_FROM_STUDIO.to_string());
             }
             crate::capture_manager::launch_standalone_game(app.clone()).await?;
