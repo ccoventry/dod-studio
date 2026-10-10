@@ -126,6 +126,12 @@ that panics the parser cannot take down the run:
 | `tempentity_scan` | Every `SvcTempEntity` in a time window, by variant. |
 | `patch_resource_url` | Replaces a demo's recorded `SvcResourceLocation` (download URL). |
 
+### Grouping demos
+
+| Probe | What it does |
+| --- | --- |
+| `match_half_probe` | Groups a folder's demos by match and half from their contents, scored against the file names (#685). |
+
 ## What they established
 
 Measured across 624 demos — a mixed POV library plus 126 LAN HLTV recordings.
