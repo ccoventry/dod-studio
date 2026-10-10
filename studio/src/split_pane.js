@@ -8,6 +8,7 @@ import {
   findMultiMapDemos, cancelMultiMapScan, demoMapSegments, splitDemoMaps, revealInExplorer,
 } from './ipc_bridge.js';
 import { escapeHtml } from './html.js';
+import { splitProgressBar } from './split_progress.js';
 import { STRINGS } from './strings.js';
 
 /** A map shorter than this is ticked off by default: almost always the next
@@ -142,7 +143,11 @@ export function initSplitPane() {
       return;
     }
     go.disabled = true;
-    result.textContent = STRINGS.SPLIT.SPLITTING;
+    const bar = splitProgressBar();
+    result.replaceChildren(bar.el);
+    const unlisten = await listen('split_progress', (event) => {
+      if (event.payload?.path === demo.path) bar.update(event.payload.progress);
+    }).catch(() => () => {});
     try {
       const written = await splitDemoMaps(demo.path, keep);
       result.innerHTML = `${escapeHtml(STRINGS.SPLIT.wrote(written.length))}<ul class="split-written">${
@@ -155,6 +160,7 @@ export function initSplitPane() {
     } catch (err) {
       result.textContent = STRINGS.SPLIT.splitFailed(err);
     } finally {
+      unlisten();
       go.disabled = false;
     }
   }

@@ -8,7 +8,10 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers } from './ipc_bridge.js';
+import { analyzeDemoFull, browseDirectory, defaultBrowseDir, countDemoFiles, scanDemoFolders, getWeaponDisplayNames, loadMapOverview, indexDemoPlayers, splitDemoAuto } from './ipc_bridge.js';
+import { renderMultiMapBanner } from './analyzer_multimap.js';
+import { SHORT_MAP_SECONDS, fileName } from './split_pane.js';
+import { showToast } from './toast.js';
 import { worldToOverview, engagementByWeapon, engagementOverall, unitsToMetres } from './kill_map.js';
 import { groupPlayers, parsePlayerQuery, findPlayer } from './player_filter.js';
 import { STRINGS } from './strings.js';
@@ -26,7 +29,11 @@ function setAnalyzerFileIndicator(text) {
 }
 
 let report = null;
-let analyzerLoadInProgress = false;
+// The demo whose analysis the page is waiting on (null when none), and a
+// count of loads: clicking a second demo before the first finishes leaves
+// both analyses running, and only the latest may show its progress or result.
+let analyzerLoadingPath = null;
+let analyzerLoadSeq = 0;
 let activeSubTab = 'summary';
 let highlightedPlayerId = null; // shared selection: Scoreboard row <-> Player Details dropdown
 let selectedPlayerId = null;
@@ -960,9 +967,11 @@ function initAnalyzerBrowser() {
 // noted for render_status in ipc_bridge.js — analyzer_progress is throttled
 // to ~30fps backend-side (Rust `analyze_demo_full`), so no further
 // throttling is needed on the receiving end.
+// Each event names its demo: an earlier click's analysis still running in
+// the background reports too, and mixing the two made the % jump around.
 listen('analyzer_progress', (event) => {
-  if (!analyzerLoadInProgress) return;
-  const { processed, total } = event.payload || {};
+  const { processed, total, path } = event.payload || {};
+  if (!analyzerLoadingPath || path !== analyzerLoadingPath) return;
   if (!total) return;
   const pct = Math.min(100, Math.round((processed / total) * 100));
   const container = document.querySelector('#analyzer-tab-content');
@@ -1087,26 +1096,55 @@ export async function openAnalyzerDemo(path) {
 }
 
 async function loadAnalyzerDemo(path) {
+  // Already being analysed: a second run of the same demo would only race
+  // the first one's progress.
+  if (analyzerLoadingPath === path) return;
   const container = document.querySelector('#analyzer-tab-content');
   if (container) container.innerHTML = `<p class="analyzer-empty">${STRINGS.ANALYZER.ANALYZING_DEMO_ELLIPSIS}</p>`;
   setAnalyzerFileIndicator(STRINGS.ANALYZER.ANALYZING_ELLIPSIS);
-  analyzerLoadInProgress = true;
+  // The last demo's multi-map notice isn't about this one.
+  renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), null);
+  const seq = ++analyzerLoadSeq;
+  analyzerLoadingPath = path;
   try {
-    report = await analyzeDemoFull(path);
+    const result = await analyzeDemoFull(path);
+    if (seq !== analyzerLoadSeq) return; // another demo was picked meanwhile
+    report = result;
     highlightedPlayerId = null;
     selectedPlayerId = null;
     setAnalyzerFileIndicator(report.file_name);
     browserSelectedDemo = path;
     renderDemoTable();
     renderActiveTab();
+    renderMultiMapBanner(document.querySelector('#analyzer-multimap-banner'), report, (update) => splitAnalyzedDemo(path, update));
   } catch (err) {
+    if (seq !== analyzerLoadSeq) return;
     if (container) {
       container.innerHTML = `<p class="analyzer-empty" style="color:#f44336;">${STRINGS.ANALYZER.analyzeFailed(esc(String(err)))}</p>`;
     }
     setAnalyzerFileIndicator('');
   } finally {
-    analyzerLoadInProgress = false;
+    if (seq === analyzerLoadSeq) analyzerLoadingPath = null;
   }
+}
+
+// #217: Split now on a demo that recorded more than one map. Writes each map
+// (but the stub of a next map) as a demo next to this one, with `update`
+// fed native's progress, lists them in the Explorer when it shows that
+// folder, and opens the first.
+async function splitAnalyzedDemo(path, update) {
+  const unlisten = await listen('split_progress', (event) => {
+    if (event.payload?.path === path) update(event.payload.progress);
+  });
+  let written;
+  try {
+    written = await splitDemoAuto(path, SHORT_MAP_SECONDS);
+  } finally {
+    unlisten();
+  }
+  showToast(STRINGS.ANALYZER.multiMapSplitDone(written.map((w) => fileName(w.path))), 'success', 6000);
+  if (currentDir && currentDir === parentDirOf(path)) await setCurrentDir(currentDir);
+  if (written.length) await loadAnalyzerDemo(written[0].path);
 }
 
 function renderActiveTab() {

@@ -1,0 +1,31 @@
+<!doctype html>
+<!--
+  Minimal harness for the Demo Analyzer's multi-map notice (#217) -- see
+  tests/e2e/README.md for the general shape. Carries the banner, the report
+  panel and one sub-tab. A test controls the backend with `analyze_demo_full`,
+  `demo_map_segments` and `split_demo_maps` handlers on
+  window.__mockInvokeHandlers, then calls window.__openDemo(path).
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>analyzer_pane.js multi-map test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <span id="analyzer-current-file"></span>
+  <div class="analyzer-subtabs">
+    <button class="analyzer-subtab-btn active" data-subtab="summary">Summary</button>
+  </div>
+  <div id="analyzer-multimap-banner" class="analyzer-warning-banner analyzer-multimap-banner" hidden></div>
+  <div id="analyzer-tab-content" class="analyzer-tab-content" style="width: 900px;"></div>
+
+  <script type="module">
+    import { initAnalyzerPane, openAnalyzerDemo } from '/src/analyzer_pane.js';
+
+    initAnalyzerPane();
+    window.__openDemo = openAnalyzerDemo;
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

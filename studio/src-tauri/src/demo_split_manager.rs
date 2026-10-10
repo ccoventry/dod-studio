@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use native::demo_maps_scan::{DemoMaps, find_multi_map_demos};
-use native::demo_split::{MapSegment, Written, demo_segments, split_file};
+use native::demo_split::{
+    Keep, MapSegment, SplitProgress, Written, demo_segments, split_file_with_progress,
+};
 use tauri::{AppHandle, Emitter};
 
 use crate::settings_manager::SettingsManager;
@@ -78,20 +80,46 @@ pub async fn demo_map_segments(path: String) -> Result<Vec<MapSegment>, String> 
     .await
 }
 
+/// Writes the ticked maps (`keep`) of the demo at `path` as demos of their own.
 #[tauri::command]
 pub async fn split_demo_maps(
+    app_handle: AppHandle,
     settings: tauri::State<'_, SettingsManager>,
     path: String,
     keep: Vec<usize>,
 ) -> Result<Vec<Written>, String> {
-    // The game's own maps folder, for a map whose BSP the demo's folder lacks.
+    let map_dirs = game_map_dirs(&settings);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        split_with_events(&app_handle, &path, Keep::These(&keep), &map_dirs)
+    }))
+    .await
+}
+
+/// Split now (#217): every map at least `min_seconds` long, with one parse of
+/// the demo (the maps' lengths come from it too).
+#[tauri::command]
+pub async fn split_demo_auto(
+    app_handle: AppHandle,
+    settings: tauri::State<'_, SettingsManager>,
+    path: String,
+    min_seconds: f32,
+) -> Result<Vec<Written>, String> {
+    let map_dirs = game_map_dirs(&settings);
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        split_with_events(&app_handle, &path, Keep::AtLeast(min_seconds), &map_dirs)
+    }))
+    .await
+}
+
+/// The game's own maps folders, for a map whose BSP the demo's folder lacks.
+fn game_map_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
     let hl_path = settings
         .inner
         .lock()
         .unwrap_or_else(|p| p.into_inner())
         .hl_path
         .clone();
-    let map_dirs: Vec<PathBuf> = Path::new(&hl_path)
+    Path::new(&hl_path)
         .parent()
         .map(|game| {
             ["dod", "dod_downloads", "dod_addon"]
@@ -99,9 +127,33 @@ pub async fn split_demo_maps(
                 .map(|d| game.join(d).join("maps"))
                 .collect()
         })
-        .unwrap_or_default();
-    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        split_file(Path::new(&path), &keep, &map_dirs)
-    }))
-    .await
+        .unwrap_or_default()
+}
+
+/// Runs a split, emitting `split_progress` (the demo's path plus
+/// [`SplitProgress`]) at most every [`PROGRESS_EVERY_MS`], and always at a new
+/// stage or map, so a stage change is never dropped.
+fn split_with_events(
+    app_handle: &AppHandle,
+    path: &str,
+    keep: Keep,
+    map_dirs: &[PathBuf],
+) -> Result<Vec<Written>, String> {
+    let started = std::time::Instant::now();
+    let last = AtomicU32::new(0);
+    let mut last_step = (String::new(), 0usize);
+    split_file_with_progress(Path::new(path), keep, map_dirs, &mut |p: SplitProgress| {
+        let now = started.elapsed().as_millis() as u32;
+        let step = (p.stage.to_string(), p.part);
+        if step == last_step && now.saturating_sub(last.load(Ordering::Relaxed)) < PROGRESS_EVERY_MS
+        {
+            return;
+        }
+        last_step = step;
+        last.store(now, Ordering::Relaxed);
+        let _ = app_handle.emit(
+            "split_progress",
+            serde_json::json!({ "path": path, "progress": p }),
+        );
+    })
 }

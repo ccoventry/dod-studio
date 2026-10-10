@@ -115,6 +115,7 @@ One folder picker, then a tab per tool:
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
 - **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
+- **A demo that recorded more than one map** (#217): the report covers only the first map, up to the next map change, as the game's `viewdemo` stops there too (cache 7; before, a first map with no gameplay was skipped). A notice above the tabs lists the maps (from the analysis's `signon_maps`) and offers **Split now**: the same split as the Demo Auditor's Split Maps, on this demo, keeping every map of a minute or more. The demos written appear next to the original, which is kept, and the first one opens.
 - **Report**, nine sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
