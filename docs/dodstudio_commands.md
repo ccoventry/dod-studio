@@ -236,10 +236,14 @@ number (a path stays the same across demos):
 It is an allow-list, not a blanket toggle: `all` is refused. It was
 `dodstudio_hide_sprite`, then `dodstudio_hide_entity` (#333); neither was in
 a release, and both names are gone. "Asset" because #614 extends it to the
-same paths drawn as temporary effects (bullet-impact dust and the like).
+same paths drawn as temporary effects and particles.
 
-It reaches only entities rendered through the engine's normal entity list
-(`HUD_AddEntity`). DoD draws some sprite-looking things -- the crosshair, the
+It checks the same list in each place DoD draws a model or sprite (#614):
+world entities and the engine's temporary effects (shell casings, blood
+sprites, popped helmets) in `HUD_AddEntity`, and DoD's own particles (impact
+debris, the grenade dirt cloud `sprites/effects/adrian/dirt_puff.spr`, smoke
+trails, splashes, snow) where they are made. The status says where each path
+was seen: `seen as an entity`, `an effect` or `a particle`. DoD draws some sprite-looking things -- the crosshair, the
 capture-area icon -- as ordinary 2D HUD elements instead, which this command
 can never reach regardless of path spelling
 (`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
