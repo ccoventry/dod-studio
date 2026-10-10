@@ -204,6 +204,12 @@ pub unsafe extern "C" fn command() {
 
 /// Runs every frame: the commands due on the demo player's clock.
 pub fn poll() {
+    // Nothing loaded: don't touch the demo player at all. Reading its clock
+    // every frame from start-up crashed demoplayer.dll before it was ready
+    // (demoplayer.dll+0x2fe6 on PRE, +0x3086 on POST, 2026-10-10).
+    if lock().is_none() {
+        return;
+    }
     let Some(clock) = crate::demo_seek::clock() else {
         return;
     };
