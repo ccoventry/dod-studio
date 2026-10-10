@@ -2902,13 +2902,26 @@ input[type="checkbox"].hd-box-pattern {
   color: #ef5350;
 }
 
+/* One row per placeholder group: its label, then its chips (#469). */
 .rename-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 10px;
   align-items: center;
   margin: 4px 0 8px;
   font-size: 0.85em;
+}
+
+.rename-chip-group-label {
+  color: var(--text-muted);
+  font-size: 0.95em;
+  text-align: right;
+}
+
+.rename-chip-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .rename-chip {

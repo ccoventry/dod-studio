@@ -27,6 +27,16 @@ export const POV_ONLY = new Set([
   'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'team_name', 'opponent',
 ]);
 
+/** The chip rows, by what each placeholder holds: the recording player,
+ *  the sides (Allies / Axis), the teams' names, and the demo itself. Every
+ *  placeholder is in exactly one. */
+export const DEMO_PLACEHOLDER_GROUPS = [
+  { key: 'player', names: ['name', 'full_name', 'kills', 'deaths'] },
+  { key: 'sides', names: ['faction', 'enemy_faction'] },
+  { key: 'teams', names: ['team_name', 'opponent', 'allies', 'axis', 'team1', 'team2'] },
+  { key: 'demo', names: ['map', 'date', 'demo_type', 'demo'] },
+];
+
 /** The placeholders a demo type has, in chip order. */
 export function placeholdersFor(demoType) {
   return demoType === 'hltv' ? DEMO_PLACEHOLDERS.filter((p) => !POV_ONLY.has(p)) : DEMO_PLACEHOLDERS;

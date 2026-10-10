@@ -7,7 +7,7 @@
 import { listen } from '@tauri-apps/api/event';
 import { MODIFIERS } from './clip_name.js';
 import {
-  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, placeholdersFor,
+  DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDER_GROUPS, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
@@ -92,9 +92,10 @@ let chipsKey = null;
 function renderChips() {
   const box = $('#rename-chips');
   if (!box) return;
-  // Every placeholder, always in the same place; the ones the focused
-  // template's demo type doesn't have are greyed out and say why. Each shows
-  // its value for the first demo of that type.
+  // Every placeholder, always in the same place, one row per group
+  // (DEMO_PLACEHOLDER_GROUPS) and a Format row for the modifiers; the ones
+  // the focused template's demo type doesn't have are greyed out and say
+  // why. Each shows its value for the first demo of that type.
   const type = chipType();
   const first = facts.find((f) => !f.error && (f.demo_type === 'hltv' ? 'hltv' : 'pov') === type);
   const values = first ? demoValues(first, getProjectTeams()) : null;
@@ -115,14 +116,21 @@ function renderChips() {
     return b;
   };
   const usable = new Set(placeholdersFor(type));
-  const label = document.createElement('span');
-  label.textContent = D.INSERT_LABEL;
+  const row = (key, chips) => {
+    const label = document.createElement('span');
+    label.className = 'rename-chip-group-label';
+    label.textContent = D.GROUPS[key];
+    const list = document.createElement('div');
+    list.className = 'rename-chip-group';
+    list.dataset.group = key;
+    list.append(...chips);
+    return [label, list];
+  };
   box.replaceChildren(
-    label,
-    ...DEMO_PLACEHOLDERS.map((name) => (usable.has(name)
+    ...DEMO_PLACEHOLDER_GROUPS.flatMap((g) => row(g.key, g.names.map((name) => (usable.has(name)
       ? chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name]))
-      : chip(`{${name}}`, D.povOnly(`{${name}}`), false))),
-    ...MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m])),
+      : chip(`{${name}}`, D.povOnly(`{${name}}`), false))))),
+    ...row('format', MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m]))),
   );
 }
 

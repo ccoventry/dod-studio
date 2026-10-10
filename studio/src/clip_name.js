@@ -17,7 +17,7 @@ export const PLACEHOLDERS = [
   'player', 'faction', 'enemy_faction', 'map', 'kills', 'weapons', 'first_weapon',
   'victims', 'first_victim', 'row', 'time', 'demo', 'date', 'team_name', 'opponent',
 ];
-export const MODIFIERS = ['lower', 'upper'];
+export const MODIFIERS = ['lower', 'upper', 'first'];
 
 /** The only placeholders that can be missing, so the only ones with a fallback. */
 const WITH_FALLBACK = new Set(['team_name', 'opponent']);
@@ -194,6 +194,13 @@ function applyModifier(value, modifier) {
   return value;
 }
 
+/** `:first`: the value up to its first space, read before the value is
+ *  cleaned (so "m00cat :D" gives "m00cat", not "m00cat_D"). */
+function firstWord(value) {
+  const text = String(value ?? '').trim();
+  return text.split(/\s+/)[0] || text;
+}
+
 /**
  * Builds a name from a parsed template. Each placeholder's value is cleaned
  * for a file name; a missing one gives its fallback word, else `unknown`.
@@ -206,9 +213,10 @@ export function buildName(parsed, values, { maxLength } = {}) {
     // Shown as typed, so the preview points at it (the error says why).
     if (!(parsed.placeholders || PLACEHOLDERS).includes(p.name)) return { text: p.raw, name: null };
     const value = values[p.name];
-    const text = value === null || value === undefined || value === ''
-      ? cleanValue(p.fallback ?? STRINGS.CLIP_NAME.MISSING_VALUE)
-      : cleanValue(value);
+    const raw = value === null || value === undefined || value === ''
+      ? (p.fallback ?? STRINGS.CLIP_NAME.MISSING_VALUE)
+      : value;
+    const text = cleanValue(p.modifier === 'first' ? firstWord(raw) : raw);
     return { text: applyModifier(text, p.modifier), name: p.name };
   });
   const joined = () => pieces.map((p) => p.text).join('').replace(/[. ]+$/, '');

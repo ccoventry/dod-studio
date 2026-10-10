@@ -87,6 +87,14 @@ describe('buildName', () => {
     expect(buildName(parseTemplate('{team_name}_{row}'), v).name).toBe('unknown_01');
   });
 
+  it(':first keeps the first word, read before the value is cleaned', () => {
+    const s = streak();
+    const v = { ...highlightValues(demo([s]), s), player: 'm00cat :D' };
+    expect(buildName(parseTemplate('{player:first}_{row}'), v).name).toBe('m00cat_01');
+    // A one-word value is kept whole; a missing one still falls back.
+    expect(buildName(parseTemplate('{map:first}_{team_name:first}_{row}'), v).name).toMatch(/^[a-z0-9]+_unknown_01$/);
+  });
+
   it('cuts victims, demo, then weapons to fit, never row or time', () => {
     const s = streak({ victims: ['a'.repeat(40), 'b'.repeat(40), 'c', 'd'] });
     const v = highlightValues(demo([s]), s);

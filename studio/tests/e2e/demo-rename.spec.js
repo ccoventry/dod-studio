@@ -105,6 +105,10 @@ test('the HLTV template keeps every chip but greys out the POV-only ones', async
   await expect(faction).toBeDisabled();
   await expect(faction).toHaveAttribute('title', /only works in the POV template/);
   await expect(page.locator('.rename-chip:text-is("{allies}")')).toBeEnabled();
+  // One labelled row per group, the modifiers (with :first) last.
+  await expect(page.locator('.rename-chip-group-label')).toHaveText(['Player', 'Sides', 'Teams', 'Demo', 'Format']);
+  await expect(page.locator('.rename-chip-group[data-group="player"] .rename-chip:disabled')).toHaveCount(4);
+  await expect(page.locator('.rename-chip-group[data-group="format"] .rename-chip')).toHaveText([':lower', ':upper', ':first']);
 
   await page.fill('#rename-hltv-template', '{kills}_{map}');
   await expect(page.locator('#rename-hltv-errors')).toContainText('only works in the POV template');

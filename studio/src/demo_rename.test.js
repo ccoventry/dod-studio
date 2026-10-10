@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
-  placeholdersFor, nameWithoutTag,
+  placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS,
 } from './demo_rename.js';
 import { emptyProjectTeams } from './project_teams.js';
 
@@ -159,10 +159,31 @@ describe('POV-only placeholders', () => {
     expect(parseDemoTemplate('{faction}_{kills}k', 'pov').errors).toEqual([]);
   });
 
-  it('are left out of the HLTV chips', () => {
+  it('are not usable in the HLTV template', () => {
     expect(placeholdersFor('hltv')).not.toContain('name');
     expect(placeholdersFor('hltv')).toContain('allies');
     expect(placeholdersFor('pov')).toContain('faction');
+  });
+});
+
+describe('DEMO_PLACEHOLDER_GROUPS', () => {
+  it('holds every placeholder exactly once', () => {
+    const grouped = DEMO_PLACEHOLDER_GROUPS.flatMap((g) => g.names);
+    expect([...grouped].sort()).toEqual([...DEMO_PLACEHOLDERS].sort());
+    expect(new Set(grouped).size).toBe(grouped.length);
+  });
+});
+
+describe(':first', () => {
+  it('keeps the first word of a name, before it is made plain', () => {
+    expect(parseDemoTemplate('{name:first}', 'pov').errors).toEqual([]);
+    const facts = pov('a.dem', { name: 'm00cat :D', side: 'Allies' });
+    expect(plan([facts], { povTemplate: '{name}_{map}' })[0].to).toBe('m00cat_D_anzio.dem');
+    expect(plan([facts], { povTemplate: '{name:first}_{map}' })[0].to).toBe('m00cat_anzio.dem');
+  });
+
+  it('leaves a one-word value as it is', () => {
+    expect(plan([pov('a.dem')], { povTemplate: '{name:first}_{map:first}' })[0].to).toBe('krod_anzio.dem');
   });
 });
 

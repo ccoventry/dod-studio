@@ -2064,7 +2064,6 @@ export const STRINGS = {
     HLTV_LABEL: 'HLTV demos:',
     RESET_BUTTON: 'Default',
     RESET_TITLE: 'Go back to the default template.',
-    INSERT_LABEL: 'Insert:',
     LOWERCASE_LABEL: 'Lowercase the whole name',
     LOWERCASE_TITLE: 'Every new name in lower case, both templates, without :lower on each placeholder.',
     LIST_BUTTON: 'List Demos',
@@ -2116,8 +2115,17 @@ export const STRINGS = {
       demo: 'The current file name, without .dem',
       lower: 'Add after a placeholder name to lower-case it: {map:lower}',
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
+      first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
     },
     chipTitle: (description, value) => (value ? `${description}. First demo: ${value}` : description),
+    // The chip rows, by what the placeholders hold.
+    GROUPS: {
+      player: 'Player',
+      sides: 'Sides',
+      teams: 'Teams',
+      demo: 'Demo',
+      format: 'Format',
+    },
   },
 
   CLIP_NAME: {
@@ -2160,6 +2168,7 @@ export const STRINGS = {
       opponent: 'The other team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
       lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
+      first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',
     },
     chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
