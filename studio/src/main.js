@@ -1,4 +1,4 @@
-import { open, save, confirm } from '@tauri-apps/plugin-dialog';
+import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -14,25 +14,35 @@ import {
   linkHlaeFfmpeg,
   diagnoseExecutablePaths,
   launchObs,
-  defaultProjectsDir,
   systemMemoryBytes
 } from './ipc_bridge.js';
+import { createQueueSplit } from './queue_split.js';
 import { renderMasterList, initMasterPane } from './master_pane.js';
 import { initMapWarnings, refreshMapWarnings, resetMapWarnings } from './map_warnings.js';
 import { initRollFloors } from './roll_floors.js';
 
-import { renderDetailView, initDetailPane, updateStreakVisuals } from './detail_pane.js';
-import { initCaptureUI, getCommandsState, hydrateCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
+import { renderDetailView, initDetailPane } from './detail_pane.js';
+import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, runObsConnectionTest, renderTimingDiagram, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
-import { initRenderUI, checkRenderRecoveryOnStartup } from './render_pane.js';
+import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
+import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
+import { refreshPacketEntityLimit } from './packet_entity_limit.js';
+import { initAuditorTabs } from './auditor_tabs.js';
+import { initSplitPane } from './split_pane.js';
+import { initCombineClips } from './combine_clips.js';
+import { initDemoRenamePane, getDemoRenameTemplates, setDemoRenameTemplates } from './demo_rename_ui.js';
 import { initThemedConfirm, themedConfirm } from './themed_confirm.js';
 import { initAnalyzerPane } from './analyzer_pane.js';
 import { initHdPane } from './hd_pane.js';
+import { initBlenderPane } from './blender_pane.js';
+import { initOverviewsPane } from './overviews_pane.js';
 import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { showToast } from './toast.js';
 import { createListEditor } from './list_editor.js';
-import { preserveHighlightState, streakUid, pruneTakeIndex, isDemoTracked } from './take_index.js';
+import { preserveHighlightState, isDemoTracked } from './take_index.js';
+import { emptyProjectTeams, demoHasTeams } from './project_teams.js';
+import { initTeamsPane, refreshTeamsPane } from './teams_pane.js';
 import { getCheckedDemoPaths, clearCheckedPaths, setCheckedDemoPaths, getVisibleDemos, recordingPlayerStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
@@ -42,9 +52,14 @@ import { initOsNotifications, updateNotificationSettings } from './os_notificati
 import { initUpdater, checkForUpdatesNow, isLocalOrDebugBuild } from './updater_pane.js';
 import { initAppMenu } from './app_menu.js';
 import { numberField } from './number_field.js';
-import { projectFolders, pinnedFoldersOnly } from './project_paths.js';
+import { initClipNameSettings, setClipNameTemplate, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
+import { clipNamesForTakes, maxNameLength } from './clip_name.js';
+import { initCommandProfiles, setCommandProfiles, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { initRenderPresets, setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { pinnedFoldersOnly } from './project_paths.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { createProjectDemos } from './project_demos.js';
+import { createProjectSession } from './project_session.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { initReviewMode } from './review_mode.js';
 
@@ -177,6 +192,7 @@ function applyCaptureModeUI() {
   const mode = currentCaptureMode();
   const video = mode === 'direct_to_video';
   const obs = mode === 'obs';
+  const agr = mode === 'agr';
 
   // Kept in step rather than read: the backend still accepts `ffmpeg_capture`
   // from older payloads, and leaving it stale would make the two disagree for
@@ -203,7 +219,17 @@ function applyCaptureModeUI() {
   // OBS, which has its own separate OBS Capture FPS field below — showing
   // both invites setting the wrong one.
   const captureFpsGroup = document.querySelector('#capture-fps-group');
-  if (captureFpsGroup) captureFpsGroup.style.display = obs ? 'none' : '';
+  if (captureFpsGroup) captureFpsGroup.style.display = obs || agr ? 'none' : '';
+
+  // AGR mode records no video, so Capture FPS gives way to its own rate. An
+  // empty AGR FPS still means "the same as Capture FPS", so the placeholder
+  // shows the number that will actually be used.
+  const agrFpsGroup = document.querySelector('#agr-fps-group');
+  if (agrFpsGroup) agrFpsGroup.style.display = agr ? '' : 'none';
+  const agrFpsInput = document.querySelector('#config-agr-fps');
+  if (agrFpsInput) {
+    agrFpsInput.placeholder = String(numberField('#config-capture-fps', 300, { integer: true, positive: true }));
+  }
 
   // The OBS block follows the same rule: hidden rather than disabled,
   // because showing a dead connection form in frame-sequence mode would
@@ -331,64 +357,61 @@ window.addEventListener("DOMContentLoaded", async () => {
   let renderExportDirs = []; // JIT multi-drive export pool for Render Studio
   let currentScannedDemos = [];
   let selectedDemoIdx = null;
-  // The project session file last loaded or saved in this window, if any —
-  // once set, "Save Session" writes straight back to it instead of asking
-  // Save-As every time (matches Ctrl+S's behavior in every other app).
-  let currentSessionPath = null;
   // take_key -> uid[]. Recorded by capture_pane.js when a batch verifies a
   // block on disk; resolved by render_pane.js when that take finishes
   // rendering, so status can auto-advance even after a restart or re-scan
   // replaced the original streak objects. Persisted in the project file.
   let takeIndex = {};
-  // True whenever project state (scanned demos, takeIndex, scanPaths) has
-  // changed since the last successful save or load — gates the "unsaved
-  // changes" prompt on window close. Cleared by saveProjectSession() and
-  // Load Session; set by markProjectDirty() at every mutation site.
-  let hasUnsavedChanges = false;
-  /** Every highlight's durable uid across every currently-scanned demo — the
-   *  "still exists" set pruneTakeIndex() checks the take index against on save. */
-  function collectAllUids() {
-    const uids = [];
-    currentScannedDemos.forEach(demo => {
-      (demo.streaks || []).forEach(streak => uids.push(streakUid(demo.path, streak)));
-    });
-    return uids;
-  }
-
-  // Whether saveProjectSession() would actually have something to write: a
-  // non-empty queue is always savable, but so is an emptied one once a
-  // session file exists to write it back to — clearing everything is a
-  // real, meaningful change relative to that file, not a no-op.
-  function hasSavableProject() {
-    return currentScannedDemos.length > 0 || !!currentSessionPath;
-  }
-
-  function updateSessionFileIndicator() {
-    const el = document.querySelector('#session-file-indicator');
-    if (!el) return;
-    const dirtySuffix = hasUnsavedChanges ? ' • unsaved' : '';
-    if (currentSessionPath) {
-      const filename = currentSessionPath.split(/[\\/]/).pop() || currentSessionPath;
-      el.textContent = filename + dirtySuffix;
-      el.title = currentSessionPath;
-    } else {
-      el.textContent = STRINGS.NAV.NO_SESSION_LOADED + dirtySuffix;
-      el.title = '';
-    }
-  }
-
-  // Marks Capture Studio's project state as changed since the last save —
-  // called at every mutation site for currentScannedDemos/takeIndex/
-  // scanPaths. Gates the close-window "unsaved changes" prompt below.
-  function markProjectDirty() {
-    hasUnsavedChanges = true;
-    updateSessionFileIndicator();
-  }
+  // The Teams list's user-owned half (#445): display names and merges, keyed
+  // on the detected tag (project_teams.js). Project state rather than demo
+  // state, so a re-scan never touches it. Persisted in the project file.
+  let projectTeams = emptyProjectTeams();
+  // Save / Load / New Session, the unsaved-changes prompt and the header's
+  // session indicator: project_session.js. checkMissingDemos is declared
+  // further down this scope, so it's reached through a closure.
+  const {
+    markProjectDirty,
+    saveProjectSession,
+    needsSavePrompt,
+    requestUnsavedChangesConfirmation,
+  } = createProjectSession({
+    getDemos: () => currentScannedDemos,
+    replaceDemos: (demos) => replaceScannedDemos(demos),
+    loadDemos: (demos) => {
+      currentScannedDemos = demos;
+      selectedDemoIdx = currentScannedDemos.length > 0 ? 0 : null;
+      renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
+      if (currentScannedDemos.length > 0) {
+        selectDemoAndRenderDetail(currentScannedDemos[0], selectedDemoIdx);
+      }
+      updateDemoFooter(currentScannedDemos);
+    },
+    getTakeIndex: () => takeIndex,
+    setTakeIndex: (index) => { takeIndex = index; },
+    getProjectTeams: () => projectTeams,
+    setProjectTeams: (teams) => { projectTeams = teams; },
+    checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+  });
 
   // Initialize modular UI panes
   initThemedConfirm();
   initAuditorPane();
+  initAuditorTabs();
+  initSplitPane();
+  initDemoRenamePane({
+    projectTeams: () => projectTeams,
+    onChange: () => persistAppSettings(),
+  });
   initHdPane();
+  initBlenderPane();
+  initOverviewsPane();
+  initTeamsPane({
+    getDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
+    onChange: markProjectDirty,
+    // triggerAutoScan is a hoisted declaration further down this scope.
+    onReadMissing: (paths) => triggerAutoScan(paths),
+  });
 
   async function pickTargetDrive() {
     try {
@@ -463,6 +486,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     const goldsrcHooksDllPath = document.querySelector('#goldsrc-hooks-dll-path-input')?.value?.trim() || null;
     const captureFps = numberField('#config-capture-fps', 300, { integer: true, positive: true });
     const obsCaptureFps = numberField('#config-obs-capture-fps', 120, { integer: true, positive: true });
+    // 0 = empty = "the same as Capture FPS" (PatcherConfig::effective_agr_fps).
+    const agrFps = numberField('#config-agr-fps', 0, { integer: true, positive: true });
     const preRoll = numberField('#config-pre-roll', 2.0);
     const postRoll = numberField('#config-post-roll', 0.6);
 
@@ -510,6 +535,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     const renderFps = parseInt(document.querySelector('#render-fps-input')?.value, 10) || 300;
     const renderMaxConcurrent = parseInt(document.querySelector('#render-max-concurrent-input')?.value, 10) || 2;
     const scanWorkers = readScanWorkers();
+    // "When a batch finishes" (#440). Off unless the select says otherwise.
+    const finishClipsAfterBatch = document.querySelector('#config-finish-clips')?.value === 'finish';
+    const finishCodecObs = document.querySelector('#config-finish-codec-obs')?.value || 'source_copy';
+    const finishCodecVideo = document.querySelector('#config-finish-codec-video')?.value || 'render_tab';
+    const finishCodecFrames = document.querySelector('#config-finish-codec-frames')?.value || 'render_tab';
 
     const { init_commands, custom_commands } = getCommandsState();
 
@@ -525,6 +555,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       language: "en",
       capture_fps: captureFps,
       obs_capture_fps: obsCaptureFps,
+      agr_fps: agrFps,
       pre_roll_seconds: preRoll,
       post_roll_seconds: postRoll,
       resolution_width: resWidth,
@@ -549,6 +580,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       notify_updates: notifyUpdates,
       update_channel: updateChannel,
       auto_check_updates: autoCheckUpdates,
+      clip_name_template: getClipNameTemplate(),
+      demo_rename_pov_template: getDemoRenameTemplates().pov,
+      demo_rename_hltv_template: getDemoRenameTemplates().hltv,
+      demo_rename_lowercase: getDemoRenameTemplates().lowercase,
       record_start_lead: recordStartLead,
       record_stop_trail: recordStopTrail,
       initial_delay: initialDelay,
@@ -556,13 +591,20 @@ window.addEventListener("DOMContentLoaded", async () => {
       target_drives: targetDrives,
       init_commands,
       custom_commands,
+      command_profiles: getCommandProfiles(),
+      command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
       render_max_concurrent: renderMaxConcurrent,
+      render_presets: getRenderPresets(),
       scan_workers: scanWorkers,
-      render_export_dirs: renderExportDirs
+      render_export_dirs: renderExportDirs,
+      finish_clips_after_batch: finishClipsAfterBatch,
+      finish_codec_obs: finishCodecObs,
+      finish_codec_video: finishCodecVideo,
+      finish_codec_frames: finishCodecFrames
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -622,6 +664,11 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (settings.obs_capture_fps) {
         const inputEl = document.querySelector('#config-obs-capture-fps');
         if (inputEl) inputEl.value = settings.obs_capture_fps;
+      }
+      // 0 is "the same as Capture FPS" and stays an empty box.
+      if (settings.agr_fps > 0) {
+        const inputEl = document.querySelector('#config-agr-fps');
+        if (inputEl) inputEl.value = settings.agr_fps;
       }
       // `!= null`, not truthiness: 0 is a real value for the five timing
       // fields, and a truthy check skipped restoring it.
@@ -694,6 +741,10 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (updateChannelEl) updateChannelEl.value = settings.update_channel || 'stable';
       const autoCheckUpdatesEl = document.querySelector('#config-auto-check-updates');
       if (autoCheckUpdatesEl) autoCheckUpdatesEl.checked = settings.auto_check_updates !== false;
+      setClipNameTemplate(settings.clip_name_template);
+      setDemoRenameTemplates(
+        settings.demo_rename_pov_template, settings.demo_rename_hltv_template, settings.demo_rename_lowercase,
+      );
       if (settings.record_start_lead != null) {
         const inputEl = document.querySelector('#config-record-start-lead');
         if (inputEl) inputEl.value = settings.record_start_lead;
@@ -731,10 +782,20 @@ window.addEventListener("DOMContentLoaded", async () => {
         const inputEl = document.querySelector('#render-max-concurrent-input');
         if (inputEl) inputEl.value = settings.render_max_concurrent;
       }
+      setRenderPresets(settings.render_presets);
       if (settings.scan_workers) {
         const inputEl = document.querySelector('#config-scan-workers');
         if (inputEl) inputEl.value = settings.scan_workers;
       }
+      const finishClipsEl = document.querySelector('#config-finish-clips');
+      if (finishClipsEl) finishClipsEl.value = settings.finish_clips_after_batch ? 'finish' : 'off';
+      [['#config-finish-codec-obs', settings.finish_codec_obs],
+       ['#config-finish-codec-video', settings.finish_codec_video],
+       ['#config-finish-codec-frames', settings.finish_codec_frames]].forEach(([sel, value]) => {
+        const el = document.querySelector(sel);
+        // Only a value the select offers — assigning an unknown one blanks it.
+        if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
+      });
       if (Array.isArray(settings.pinned_folders) && settings.pinned_folders.length > 0) {
         // Folders only: older builds added every file picked with
         // + Add Demo Files, one path per demo. Cleaned up once, here.
@@ -758,6 +819,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         renderExportDirsEditor.render();
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
+      setCommandProfiles(settings.command_profiles, settings.command_profile_active);
       // Both halves of the question are now in the DOM: the game path, and the
       // commands that will run against whatever its configs set.
       refreshInitCommandWarnings();
@@ -772,152 +834,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initAppMenu();
   if (pinnedListCleaned) persistAppSettings();
 
-  // Save Project Session — also called from the Clear All modal's "Save
-  // Session First" action, so it lives here as a plain function rather than
-  // only inline in the button's click handler. Returns whether it actually
-  // wrote a file (false on "nothing to save" or a cancelled Save-As dialog).
-  async function saveProjectSession() {
-    if (!hasSavableProject()) {
-      showToast(STRINGS.MAIN.NOTHING_TO_SAVE, 'info');
-      return false;
-    }
-    // Already matches what's on disk — skip the write and the misleading
-    // "saved" toast, but still report success so callers that gate on the
-    // return value (Clear All's Save-First, the close-window prompt) treat
-    // this the same as an actual save rather than a failure.
-    if (!hasUnsavedChanges) {
-      showToast(STRINGS.MAIN.ALREADY_SAVED, 'info');
-      return true;
-    }
-    try {
-      // Once a session's been loaded or saved once in this window, keep
-      // writing back to that same file instead of asking Save-As again.
-      const projectsDir = currentSessionPath ? null : await defaultProjectsDir();
-      const filePath = currentSessionPath || await save({
-        title: STRINGS.MAIN.SAVE_PROJECT_SESSION_TITLE,
-        defaultPath: projectsDir ? `${projectsDir}\\dod_project.json` : 'dod_project.json',
-        filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
-      });
-      if (!filePath) return false;
-
-      const hlaePath = document.querySelector('#hlae-path-input')?.value || "";
-      const hlPath = document.querySelector('#hl-path-input')?.value || "";
-      const projectData = JSON.stringify({
-        version: "0.12.0",
-        // The folders this project's demos are in, not the app-wide pinned
-        // list (that is every folder ever added, nothing to do with the
-        // project). Read back only to look for demos that have moved (#21).
-        scanPaths: projectFolders(currentScannedDemos),
-        demos: currentScannedDemos,
-        hlaePath: hlaePath,
-        hlPath: hlPath,
-        // Pruned against what's actually still scanned so the index
-        // doesn't accumulate uids for demos removed from the project.
-        takeIndex: pruneTakeIndex(takeIndex, collectAllUids()),
-        // Kept for older-file/older-version compatibility — nothing on the
-        // reading side branches on it any more (Quick-Clip mode is gone).
-        mode: 'workspace'
-      }, null, 2);
-      await invoke('save_project_session', { path: filePath, contents: projectData });
-      currentSessionPath = filePath;
-      hasUnsavedChanges = false;
-      updateSessionFileIndicator();
-      showToast(STRINGS.MAIN.projectSavedToast(filePath), 'success');
-      return true;
-    } catch (err) {
-      console.error("Save project error:", err);
-      showToast(STRINGS.MAIN.SAVE_PROJECT_ERROR, 'error');
-      return false;
-    }
-  }
-
   const viewLogsBtn = document.querySelector('#view-logs-btn');
   if (viewLogsBtn) {
     viewLogsBtn.addEventListener('click', () => openActivityLog());
-  }
-
-  const saveProjectBtn = document.querySelector('#save-project-btn');
-  if (saveProjectBtn) {
-    saveProjectBtn.addEventListener('click', () => saveProjectSession());
-  }
-
-  // Load Project Session
-  const loadProjectBtn = document.querySelector('#load-project-btn');
-  if (loadProjectBtn) {
-    loadProjectBtn.addEventListener('click', async () => {
-      // Loading replaces currentScannedDemos/takeIndex wholesale — same
-      // data-loss risk as closing the window, so it gets the same prompt
-      // before that happens. Identical guard to the window-close handler
-      // below, reusing the same modal (requestUnsavedChangesConfirmation,
-      // hoisted function declaration defined later in this scope).
-      if (hasUnsavedChanges && hasSavableProject()) {
-        const outcome = await requestUnsavedChangesConfirmation();
-        if (!outcome) return; // Cancel — abort the load, keep current state
-        // 'save' already wrote the file inside the modal's Save button
-        // handler; 'discard' falls through to load over it either way.
-      }
-      try {
-        const projectsDir = await defaultProjectsDir();
-        const selected = await open({
-          multiple: false,
-          ...(projectsDir ? { defaultPath: projectsDir } : {}),
-          filters: [{ name: STRINGS.MAIN.JSON_PROJECT_FILTER_NAME, extensions: ['json'] }]
-        });
-        if (selected) {
-          const content = await invoke('load_project_session', { path: selected });
-          const data = JSON.parse(content);
-          if (data) {
-            currentSessionPath = selected;
-            hasUnsavedChanges = false;
-            updateSessionFileIndicator();
-            // Load Session is reachable from any tab (#122) — jump to Studio
-            // so the loaded project is actually visible, same cross-tab-jump
-            // pattern as detail_pane.js's "View Match Telemetry" button.
-            switchNavTab('workspace');
-            clearCheckedPaths();
-            if (data.hlaePath) {
-              const hlaeInput = document.querySelector('#hlae-path-input');
-              if (hlaeInput) hlaeInput.value = data.hlaePath;
-            }
-            if (data.hlPath) {
-              const hlInput = document.querySelector('#hl-path-input');
-              if (hlInput) hlInput.value = data.hlPath;
-            }
-            // Tolerant: a 0.10.0 project file has no takeIndex at all — load
-            // as empty rather than reject the file. Auto-Rendered just won't
-            // retroactively apply to takes captured before this existed.
-            takeIndex = data.takeIndex || {};
-            // Deliberately verbose: this is the only place takeIndex is ever
-            // populated from disk, so logging it here — with exactly what
-            // came out of the file, before anything else touches it — is
-            // what makes it possible to prove a later auto-Rendered flip
-            // came from this loaded data and not a leftover in-memory state.
-            console.log(`[take-index] Loaded from ${selected}: ${Object.keys(takeIndex).length} take(s)`, takeIndex);
-            if (data.demos) {
-              currentScannedDemos = data.demos;
-              // timeline_string is a derived field, saved as a convenience
-              // snapshot rather than the source of truth — recompute it from
-              // each streak's raw kills on every load so a display-only fix
-              // (e.g. a weapon-name-resolution bug) shows correctly for
-              // sessions saved before the fix, instead of replaying whatever
-              // text got baked in at save time.
-              currentScannedDemos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
-              selectedDemoIdx = currentScannedDemos.length > 0 ? 0 : null;
-              renderMasterList(currentScannedDemos, selectedDemoIdx, selectDemoAndRenderDetail);
-              if (currentScannedDemos.length > 0) {
-                selectDemoAndRenderDetail(currentScannedDemos[0], selectedDemoIdx);
-              }
-              updateDemoFooter(currentScannedDemos);
-              showToast(STRINGS.MAIN.loadedDemosToast(currentScannedDemos.length), 'success');
-              await checkMissingDemos(selected, data.scanPaths || []);
-            }
-          }
-        }
-      } catch (err) {
-        console.error("Load project error:", err);
-        showToast(STRINGS.MAIN.LOAD_PROJECT_ERROR, 'error');
-      }
-    });
   }
 
   function refreshAfterRelocation(changed) {
@@ -945,26 +864,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
   });
 
-  // New Session (#122/#149) — resets to the same blank state the app starts
-  // in: no session file, no demos, no take index. Reuses replaceScannedDemos
-  // (defined below, hoisted) for the demo-queue reset — same as Clear All —
-  // then overrides the dirty flag it sets, since a brand new untitled
-  // session has nothing to prompt about saving.
-  async function newSession() {
-    if (hasUnsavedChanges && hasSavableProject()) {
-      const outcome = await requestUnsavedChangesConfirmation();
-      if (!outcome) return; // Cancel — abort, keep current state
-    }
-    replaceScannedDemos([]);
-    currentSessionPath = null;
-    takeIndex = {};
-    hasUnsavedChanges = false;
-    updateSessionFileIndicator();
-    switchNavTab('workspace');
-    showToast(STRINGS.MAIN.NEW_SESSION_TOAST, 'success');
-  }
-
-  document.querySelector('#new-session-btn')?.addEventListener('click', () => newSession());
+  // Demos that recorded more than one map (#217): queue_split.js.
+  const { splitQueuedDemo, captureDemosReady } = createQueueSplit({
+    getDemos: () => currentScannedDemos,
+    removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
+    scan: (paths, opts) => triggerAutoScan(paths, opts),
+    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    pickedDemosPresent,
+  });
 
   // Executable & Path Browse Dialog Pickers
   const hlaeBrowseBtn = document.querySelector('#hlae-browse-btn');
@@ -1300,9 +1207,11 @@ window.addEventListener("DOMContentLoaded", async () => {
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key) are scanned.
+      // re-parsed; ones from an older project (no file_key, no map_name:
+      // saved before clip names, #441, no teams: #445, or no map list: #217)
+      // are scanned.
       const known = currentScannedDemos
-        .filter((d) => d.file_key)
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -1361,6 +1270,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         newlyScanned.map((d) => d.path),
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
+      refreshTeamsPane();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
@@ -1550,14 +1460,30 @@ window.addEventListener("DOMContentLoaded", async () => {
     scanPaths,
     targetDrives,
     currentScannedDemos
-  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, pickedDemosPresent);
+  }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
+  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
+  initRenderPresets({ onChange: persistAppSettings });
+  initCombineClips({
+    finishedRenders: () => finishedRenderOutputs(),
+    ffmpegPath: () => document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null,
+  });
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
     onStatusChange: onHighlightStatusChange
+  });
+
+  // "When a batch finishes" (#440): queues a verified batch's takes into the
+  // Render tab's own queue. capture_pane.js hands it each verified batch.
+  initFinishClips({
+    getExportDirs: () => renderExportDirs,
+    getClipNames: (exportDirs) => clipNamesForTakes(
+      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+    ),
+    onSettingsChange: persistAppSettings,
   });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
@@ -1584,14 +1510,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!(await confirmCloseDuringBatch({ isRunning: isCaptureRunning, isLocalBuild: isLocalOrDebugBuild }))) return;
     // Capture Studio project state (scanned demos, takeIndex, scanPaths)
     // changed since the last save — offer to save, discard, or cancel the
-    // close before losing it. See markProjectDirty() call sites above.
-    // Gated on hasSavableProject() too, matching saveProjectSession()'s own
-    // guard — without this, clearing a *fresh, never-saved* queue to empty
-    // then closing would show the prompt but "Save & Close" would just hit
-    // the "Nothing to save" toast and leave the modal stuck open. Emptying
-    // a queue that *did* come from a loaded session is still real, savable
-    // work (writes the now-empty project back), so that case still prompts.
-    if (hasUnsavedChanges && hasSavableProject()) {
+    // close before losing it (project_session.js's needsSavePrompt says
+    // when). See markProjectDirty() call sites above.
+    if (needsSavePrompt()) {
       const outcome = await requestUnsavedChangesConfirmation();
       if (!outcome) return; // Cancel — leave the window open
       // 'save' already wrote the file inside the modal's Save button
@@ -1609,7 +1530,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // platform restriction against sites faking dialogs); setting returnValue
   // is what triggers it, and its own text is what's shown, not this string.
   window.addEventListener('beforeunload', (event) => {
-    if (hasUnsavedChanges && hasSavableProject()) {
+    if (needsSavePrompt()) {
       event.preventDefault();
       event.returnValue = '';
     }
@@ -1770,38 +1691,6 @@ window.addEventListener("DOMContentLoaded", async () => {
     });
   }
 
-  // Unsaved-changes prompt, shown by the window close handler above whenever
-  // hasUnsavedChanges is set. Same Promise-resolution shape as the modal
-  // above, but its own two-way branch ('save'/'discard') since closing is a
-  // binary "keep the work or don't" rather than a "confirm a removal."
-  let pendingUnsavedChangesResolve = null;
-  const unsavedChangesModal = document.querySelector('#unsaved-changes-modal');
-
-  function requestUnsavedChangesConfirmation() {
-    if (unsavedChangesModal) unsavedChangesModal.style.display = 'flex';
-    return new Promise(resolve => { pendingUnsavedChangesResolve = resolve; });
-  }
-
-  if (unsavedChangesModal) {
-    document.querySelector('#unsaved-changes-cancel-btn')?.addEventListener('click', () => {
-      unsavedChangesModal.style.display = 'none';
-      pendingUnsavedChangesResolve?.(false);
-      pendingUnsavedChangesResolve = null;
-    });
-    document.querySelector('#unsaved-changes-discard-btn')?.addEventListener('click', () => {
-      unsavedChangesModal.style.display = 'none';
-      pendingUnsavedChangesResolve?.('discard');
-      pendingUnsavedChangesResolve = null;
-    });
-    document.querySelector('#unsaved-changes-save-btn')?.addEventListener('click', async () => {
-      const saved = await saveProjectSession();
-      if (!saved) return; // Save-As cancelled/failed — leave the modal open
-      unsavedChangesModal.style.display = 'none';
-      pendingUnsavedChangesResolve?.('save');
-      pendingUnsavedChangesResolve = null;
-    });
-  }
-
   // Clear Selected — removes checked rows regardless of status, same in
   // both modes (the user explicitly checked them). Whenever any checked
   // demo is tracked, escalate from a plain confirm() to the shared modal.
@@ -1894,7 +1783,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     return !!outcome;
   }
 
-  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]));
+  initMasterPane(onDeleteDemo, requestTrackedDeleteConfirm, locateDemoByHand, (demo) => useFoundCopies([demo]), (demo, update) => splitQueuedDemo(demo, { update }));
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
@@ -1907,7 +1796,31 @@ window.addEventListener("DOMContentLoaded", async () => {
   if (hlPathInput) {
     refreshInitCommandWarnings();
     hlPathInput.addEventListener('change', () => refreshInitCommandWarnings());
+    // Which engine it is decides which demos the Master Queue marks (#207).
+    const markDemosOverLimit = () => refreshPacketEntityLimit(hlPathInput.value.trim())
+      .then(() => renderMasterList(currentScannedDemos, selectedDemoIdx));
+    markDemosOverLimit();
+    hlPathInput.addEventListener('change', markDemosOverLimit);
   }
+  // #441: the preview uses the selected demo's first checked highlight (its
+  // first highlight when none is checked); a settled template change is
+  // saved and redraws the automatic names in Highlight Details.
+  initClipNameSettings({
+    getHighlight: () => {
+      const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
+      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const streak = own.find((s) => s.selected) || own[0];
+      return streak ? { demo, streak } : null;
+    },
+    getExportDirList: () => renderExportDirs,
+    onChange: () => {
+      persistAppSettings();
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+    },
+  });
+
   initDetailPane(() => currentScannedDemos, () => {
     // Fired on every detail-pane re-render, not just edits (also runs when
     // switching the selected demo, or after a capture/render completes) —
@@ -1917,6 +1830,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // Must NOT mark the project dirty — see onDirty below for that.
     refreshLaunchGuard({ targetDrives, currentScannedDemos });
     renderMasterList(currentScannedDemos, selectedDemoIdx);
+    refreshClipNamePreview();
   }, () => {
     // Fired only from an actual highlights-table field edit (selection,
     // kill range, status, notes) — all of it is part of the `demos` written

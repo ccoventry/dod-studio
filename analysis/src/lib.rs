@@ -3,13 +3,18 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+pub mod entity_replay;
+/// What a highlight is, and whose, for every list of them (#573).
+pub mod highlights;
 mod kill;
 mod localization;
 mod mortality;
 mod objective;
 mod player;
+mod position;
 mod round;
 mod scoreboard;
+mod team_tag;
 #[cfg(test)]
 mod tests_fixture;
 mod time;
@@ -26,11 +31,15 @@ use crate::{
     mortality::with_mortality_detection,
     objective::use_objective_updates,
     player::use_player_updates,
+    position::use_position_updates,
     round::use_rounds_updates,
     scoreboard::{TeamScores, use_scoreboard_updates, use_team_score_updates},
     time::{GameTime, use_timing_updates},
 };
-use dem::types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage};
+use dem::{
+    bit::BitSliceCast,
+    types::{Demo, EngineMessage, Frame, FrameData, MessageData, NetMessage},
+};
 use dod::UserMessage;
 use std::time::Duration;
 
@@ -43,7 +52,9 @@ pub use crate::{
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
+    position::{KillPosition, PlayerPose},
     round::Round,
+    team_tag::{TeamTag, detect_team_tag, team_tags},
 };
 pub use dod::{Team, Weapon};
 
@@ -97,10 +108,16 @@ pub struct AnalyzerState {
     pub ended_early: bool,
     pub first_time_left: Option<std::time::Duration>,
     pub last_time_left: Option<std::time::Duration>,
-    /// The demo kept recording through a level change after the match, to
-    /// another map or the same one; everything from there on is ignored
-    /// (`use_segment_boundary`).
+    /// The demo kept recording through a level change, to another map or
+    /// the same one; everything from there on is ignored, as the game's
+    /// `viewdemo` stops there too (`use_segment_boundary`).
     pub map_changed: bool,
+    /// The map of every signon in the demo, in order, including the ones the
+    /// analysis ignores: two or more is a demo that can be split into one per
+    /// map (#624). Defaulted so an older cache entry still loads; empty there
+    /// means "not recorded", not "no maps".
+    #[serde(default)]
+    pub signon_maps: Vec<String>,
     pub initial_map_name: Option<String>,
     pub current_time: GameTime,
 
@@ -115,6 +132,13 @@ pub struct AnalyzerState {
     pub allies_are_british: bool,
     pub server_name: Option<String>,
     pub server_address: Option<String>,
+    /// Every kill, with where both players stood (#448). Defaulted so a
+    /// cache entry written before it existed still loads.
+    #[serde(default)]
+    pub kill_positions: Vec<KillPosition>,
+    /// Working state for `kill_positions`; never serialized.
+    #[serde(skip)]
+    positions: position::PositionTracker,
     /// Flag layout, ownership, captures and capture attempts (#192).
     #[serde(default)]
     pub objectives: Objectives,
@@ -145,6 +169,41 @@ pub struct DemoInfo {
 
     /// Map checksum / CRC.
     pub map_checksum: u32,
+
+    /// The most entities any one snapshot carries (`svc_packetentities` or
+    /// `svc_deltapacketentities`). The pre-Anniversary engine closes to the
+    /// desktop at the first snapshot over 256 (#207), so this says before a
+    /// capture whether a demo can play there. `None` in an analysis cached
+    /// before it was counted.
+    #[serde(default)]
+    pub peak_packet_entities: Option<u32>,
+}
+
+/// The most entities in any one snapshot of `demo` (#207).
+fn peak_packet_entities(demo: &Demo) -> u32 {
+    let mut peak = 0;
+    for entry in &demo.directory.entries {
+        for frame in &entry.frames {
+            let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+                continue;
+            };
+            let MessageData::Parsed(msgs) = &box_type.1.messages else {
+                continue;
+            };
+            for msg in msgs {
+                let NetMessage::EngineMessage(eng_msg) = msg else {
+                    continue;
+                };
+                let count = match &**eng_msg {
+                    EngineMessage::SvcPacketEntities(pe) => pe.entity_count.to_u32(),
+                    EngineMessage::SvcDeltaPacketEntities(pe) => pe.entity_count.to_u32(),
+                    _ => continue,
+                };
+                peak = peak.max(count);
+            }
+        }
+    }
+    peak
 }
 
 impl From<&Demo> for DemoInfo {
@@ -211,6 +270,7 @@ impl From<&Demo> for DemoInfo {
             game_directory,
             demo_type,
             map_checksum: value.header.map_checksum,
+            peak_packet_entities: Some(peak_packet_entities(value)),
         }
     }
 }
@@ -351,6 +411,20 @@ fn extract_ip_port(s: &str) -> Option<String> {
     None
 }
 
+/// Records every signon's map in `signon_maps`, before the segment gate, so
+/// the ones after the match are listed too.
+pub fn use_signon_maps(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    if let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event {
+        let file = String::from_utf8_lossy(&msg.map_file_name);
+        let map = file
+            .trim_end_matches('\0')
+            .trim_start_matches("maps/")
+            .trim_end_matches(".bsp")
+            .to_string();
+        state.signon_maps.push(map);
+    }
+}
+
 /// Ends the analysed demo at a second signon (#217).
 ///
 /// `SvcServerInfo` starts every signon. A second one means the server changed
@@ -359,9 +433,11 @@ fn extract_ip_port(s: &str) -> Option<String> {
 /// it re-sends teams, classes and the clock from scratch, so letting it
 /// through resets every player to Unassigned and restarts the demo clock.
 ///
-/// Once the first segment has gameplay it is the match, and nothing after
-/// the boundary is analysed. Before that (a warm-up map, then the real one)
-/// a *different* map replaces the first segment outright.
+/// The first map is the one analysed, gameplay or not, and nothing after the
+/// boundary is. The game's `viewdemo` stops at that same boundary, so the
+/// analysis (and every highlight built from it) covers exactly what the game
+/// can play. A demo with more than one map is split instead
+/// (`signon_maps`, the Demo Analyzer's and the Master Queue's Split).
 ///
 /// Runs before every other hook, so none of them sees the new signon: the
 /// POV hook would otherwise take the new connection's player slot.
@@ -369,36 +445,19 @@ pub fn use_segment_boundary(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     let AnalyzerEvent::EngineMessage(EngineMessage::SvcServerInfo(msg)) = event else {
         return;
     };
+    if state.initial_map_name.is_some() {
+        state.map_changed = true;
+        return;
+    }
     let map_name = String::from_utf8_lossy(&msg.map_file_name)
         .trim_end_matches('\0')
         .to_string();
-    let clean_map = map_name
-        .trim_start_matches("maps/")
-        .trim_end_matches(".bsp")
-        .to_string();
-    let Some(ref initial) = state.initial_map_name else {
-        state.initial_map_name = Some(clean_map);
-        return;
-    };
-    let has_gameplay = state
-        .rounds
-        .iter()
-        .any(|r| matches!(r, Round::Completed { .. }))
-        || state
-            .players
-            .iter()
-            .any(|p| p.stats.0 > 0 || p.stats.1 > 0 || p.stats.2 > 0);
-    if has_gameplay {
-        state.map_changed = true;
-    } else if initial != &clean_map {
-        state.initial_map_name = Some(clean_map);
-        state.players.clear();
-        state.rounds.clear();
-        state.team_scores.reset();
-        state.objectives = Objectives::default();
-        state.clan_match_detected = false;
-        state.clan_match_detection = ClanMatchDetection::WaitingForReset;
-    }
+    state.initial_map_name = Some(
+        map_name
+            .trim_start_matches("maps/")
+            .trim_end_matches(".bsp")
+            .to_string(),
+    );
 }
 
 pub fn use_general_finalization(state: &mut AnalyzerState, event: &AnalyzerEvent) {
@@ -627,6 +686,13 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
                     chat.sender_team = Some(Team::British);
                 }
             }
+            for kill in &mut state.kill_positions {
+                for team in [&mut kill.killer_team, &mut kill.victim_team] {
+                    if *team == Some(Team::Allies) {
+                        *team = Some(Team::British);
+                    }
+                }
+            }
         }
     }
 }
@@ -634,6 +700,7 @@ fn check_and_promote_british(state: &mut AnalyzerState) {
 /// Feeds one event through every analyzer, in order. Shared with the
 /// optimised-vs-unoptimised test so its reference pass can't drift from this.
 fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
+    use_signon_maps(state, event);
     if !state.map_changed {
         use_segment_boundary(state, event);
     }
@@ -642,6 +709,7 @@ fn run_analyzers(state: &mut AnalyzerState, event: &AnalyzerEvent) {
     }
     use_timing_updates(state, event);
     use_player_updates(state, event);
+    use_position_updates(state, event);
     with_mortality_detection(state, event);
     use_scoreboard_updates(state, event);
     use_kill_streak_updates(state, event);
@@ -801,14 +869,6 @@ impl AnalyzerState {
     fn find_player_by_id_mut(&mut self, id: &PlayerGlobalId) -> Option<&mut Player> {
         self.players.iter_mut().find(|player| player.id == *id)
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DemoFingerprint {
-    pub map_name: String,
-    pub server_ip: String,
-    pub player_roster_hash: u64,
-    pub event_signature: Vec<String>,
 }
 
 pub fn parse_fingerprint(
@@ -1022,20 +1082,6 @@ pub fn parse_fingerprint(
         event_signature,
         recorder_id,
     ))
-}
-
-pub fn extract_match_fingerprint(bytes: &[u8]) -> Result<DemoFingerprint, String> {
-    match parse_fingerprint(bytes) {
-        Ok((map_name, server_ip, player_roster_hash, event_signature, _recorder_id)) => {
-            Ok(DemoFingerprint {
-                map_name,
-                server_ip,
-                player_roster_hash,
-                event_signature,
-            })
-        }
-        Err(e) => Err(e.to_string()),
-    }
 }
 
 #[cfg(test)]
@@ -1544,7 +1590,9 @@ mod tests {
     }
 
     #[test]
-    fn a_different_map_before_gameplay_replaces_the_warm_up() {
+    fn a_different_map_before_gameplay_still_ends_the_demo() {
+        // viewdemo stops at the first level change, warm-up or not, so the
+        // analysis keeps the first map rather than skipping to the next.
         let mut state = AnalyzerState::default();
         use_segment_boundary(
             &mut state,
@@ -1555,13 +1603,13 @@ mod tests {
             &mut state,
             &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
         );
-        assert!(!state.map_changed);
-        assert!(state.players.is_empty());
-        assert_eq!(state.initial_map_name.as_deref(), Some("dod_anzio"));
+        assert!(state.map_changed);
+        assert_eq!(state.players.len(), 1);
+        assert_eq!(state.initial_map_name.as_deref(), Some("dod_warmup"));
     }
 
     #[test]
-    fn a_same_map_signon_before_gameplay_changes_nothing() {
+    fn a_same_map_signon_before_gameplay_ends_the_demo_too() {
         let mut state = AnalyzerState::default();
         use_segment_boundary(
             &mut state,
@@ -1572,7 +1620,7 @@ mod tests {
             &mut state,
             &AnalyzerEvent::EngineMessage(&server_info("dod_anzio")),
         );
-        assert!(!state.map_changed);
+        assert!(state.map_changed);
         assert_eq!(state.players.len(), 1);
     }
 

@@ -27,6 +27,7 @@ fn test_build_batch_queue_grouping() {
         frame_times: Arc::new(vec![]),
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
+        source_key: None,
     };
 
     let streak2 = CaptureStreak {
@@ -47,6 +48,7 @@ fn test_build_batch_queue_grouping() {
         frame_times: Arc::new(vec![]),
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
+        source_key: None,
     };
 
     let streak3 = CaptureStreak {
@@ -67,6 +69,7 @@ fn test_build_batch_queue_grouping() {
         frame_times: Arc::new(vec![]),
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
+        source_key: None,
     };
 
     let raw_streaks = vec![streak1, streak2, streak3];

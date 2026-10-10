@@ -137,6 +137,7 @@ python build_all.py --types sprites,sky   only some types
 - **`blend`** is made from `x4plus` and `plain` (50/50), so build those first. The default order does.
 - **`--also <another Half-Life folder>`** also builds that install's models and sprites. Use it if you keep a stock install next to a modded one: its versions get HD copies too, so they're ready if you ever copy them over. Files are matched by their pixels, so both versions can share one folder.
 - **`--extra-models <folder>`** adds any other folder of `.mdl` files.
+- **`--cap 2048`** (or `4096`) builds bigger files where there is anything to gain; see below.
 
 ## Only the maps you use
 
@@ -148,6 +149,16 @@ Map textures and skies are the bulk of the build, and a public-server map you ne
 `build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
 
 A map left out simply shows its original textures in game, and `dodstudio_debug_hd_misses` lists it.
+
+## Bigger than 1024
+
+Every file is built at 4x its original, up to 1024 a side. Two things decide whether you ever see more than that.
+
+**What the game shows.** `gl_max_size` in the game caps every texture, HD or not, and the game's own default is 256, which shrinks every HD file back down. `movie.cfg` needs `gl_max_size 1024` for the usual files (DoD Studio's HD page writes that line for you), `2048` or `4096` for bigger ones. The hook lets the engine take up to 4096x4096; the stock engine stops at 512x1024.
+
+**What is built.** `--cap 2048` (`--cap 4096`, or "Largest size" on DoD Studio's HD page) raises the ceiling on the 4x. That only changes files whose 4x is over 1024: detail textures (most are 512 a side, so 1024 becomes 2048), a few large map textures and model skins. Map textures are mostly 128 or 256 to begin with, so they end at 512 or 1024 whatever the cap. A file already built smaller than the new cap makes it is built again; nothing else is touched. Detail textures stop at 2048 and skies at 1024 whatever the cap: the game allocates their buffers afresh on every load, so the hook keeps those small.
+
+Before building everything at 2048, try one map (`hd_maps.txt`) and play a demo on it. A 2048 file is 16 MB uncompressed, four times a 1024 one, and the game is a 32-bit program: a map with many large textures at 2048 can run it out of memory where 1024 was fine.
 
 ## Upscale your own files
 
@@ -166,6 +177,8 @@ python sky_hd.py     %OUT%\sky\ultrasharp     dod_mymap
 
 Set `HD_STYLE` to build a style other than `ultrasharp` (for example `set HD_STYLE=remacri`). Run any script with no arguments for its usage.
 
+Every script upscales 250 files at a time and writes each batch before starting the next, so a stopped build keeps what it finished. `HD_BATCH` changes the batch size (for example `set HD_BATCH=100`). Each extra batch costs about a second to restart the upscaler.
+
 **Replacing one texture by hand.** Name it the way the hook expects and drop it into `overrides`:
 
 - **Map textures:** `<name>_<hash>.tga`
@@ -183,11 +196,15 @@ python compare.py compare.png
 
 This makes one sheet with the original and every built style side by side, for a few sample textures, model skins, sprites, detail textures and a sky. Pass your own samples to compare something specific; run it with no arguments for the format.
 
+To see your own maps instead of the fixed samples, `--map dod_anzio` takes that map's most detailed textures that have an HD file, plus its sky, and `--auto` picks a few of your maps for you. `--styles ultrasharp,plain` keeps the sheet to the styles you're choosing between. DoD Studio's HD Textures page makes the same sheet under **Compare styles**.
+
 In game, `dodstudio_hd_style <name>` in `movie.cfg` picks the style. It's read once per game session.
 
 ## Make your own style
 
 The game loads whatever style folder you name, so you can make as many as you like without touching any code:
+
+DoD Studio's HD Textures page has a form for this (Your own styles) that writes the same file. By hand:
 
 1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:

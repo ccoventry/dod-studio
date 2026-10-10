@@ -617,12 +617,6 @@ pub struct PlayersIn {
     pub required_players_to_capture: u8,
 }
 
-/// - Length: 3
-pub struct ProgUpdate {
-    pub area_index: u8,
-    pub team: Team,
-}
-
 /// Sent when the POV has completed a reload.
 ///
 /// Reloading a weapon will emit:

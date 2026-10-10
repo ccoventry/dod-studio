@@ -23,6 +23,14 @@
 //!
 //! It only exists in a game launched by Studio, the only way this DLL is
 //! loaded. On by default; `GOLDSRC_HOOKS_REMOTE=0` turns it off.
+//!
+//! ## Not before the game is up
+//!
+//! The pipe opens, and the first frame runs, while the engine is still
+//! starting: a `viewdemo` sent the moment the pipe accepted once crashed the
+//! Anniversary `hw.dll` mid-start-up, calling a function pointer it had not
+//! filled yet (#564). So commands wait in the queue until `GameUI.dll` has
+//! been loaded for [`STARTUP_HOLD`] ([`StartupGate`]), then run as before.
 
 // The pipe itself is 32-bit only; a host build compiles the rest for the tests.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -41,6 +49,42 @@ const MAX_COMMAND: usize = 1024;
 const MAX_MESSAGE: usize = 64 * 1024;
 /// The most commands run in one frame, so a burst can't stall a frame.
 const PER_FRAME: usize = 32;
+/// How long after `GameUI.dll` is loaded commands still wait (#564).
+const STARTUP_HOLD: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Whether the game is far enough into start-up to run commands: open once
+/// `GameUI.dll` has been seen loaded for [`STARTUP_HOLD`], and open for good
+/// after that.
+#[derive(Debug, Default)]
+pub struct StartupGate {
+    gameui_seen: Option<std::time::Instant>,
+    open: bool,
+}
+
+impl StartupGate {
+    /// Whether commands may run now, given whether `GameUI.dll` is loaded.
+    pub fn check(&mut self, gameui_loaded: bool, now: std::time::Instant) -> bool {
+        if self.open {
+            return true;
+        }
+        if !gameui_loaded {
+            return false;
+        }
+        let seen = *self.gameui_seen.get_or_insert(now);
+        self.open = now.duration_since(seen) >= STARTUP_HOLD;
+        self.open
+    }
+}
+
+static GATE: Mutex<StartupGate> = Mutex::new(StartupGate {
+    gameui_seen: None,
+    open: false,
+});
+
+fn gameui_loaded() -> bool {
+    use windows_sys::Win32::System::LibraryLoader::GetModuleHandleA;
+    !unsafe { GetModuleHandleA(c"GameUI.dll".as_ptr() as *const u8) }.is_null()
+}
 
 /// Where Studio finds this game: named after the process, so two games (or
 /// a stale pipe) can never be confused.
@@ -201,6 +245,22 @@ pub fn start() {
 
 /// Runs what Studio has sent, from `commands::poll` on the main thread.
 pub fn poll() {
+    {
+        let Ok(mut gate) = GATE.try_lock() else {
+            return;
+        };
+        let was_open = gate.open;
+        if !gate.check(gameui_loaded(), std::time::Instant::now()) {
+            return;
+        }
+        if !was_open {
+            unsafe {
+                crate::debug::report(
+                    "remote: the game is up (GameUI loaded 1 s ago); running Studio's commands from here on (#564)",
+                )
+            };
+        }
+    }
     let Ok(queue) = QUEUE.try_lock() else {
         return;
     };
@@ -227,6 +287,18 @@ mod tests {
     #[test]
     fn the_pipe_is_named_after_the_process() {
         assert_eq!(pipe_name(4242), r"\\.\pipe\dodstudio-hl-4242");
+    }
+
+    #[test]
+    fn commands_wait_until_gameui_has_been_loaded_a_while() {
+        let start = std::time::Instant::now();
+        let mut gate = StartupGate::default();
+        assert!(!gate.check(false, start));
+        assert!(!gate.check(true, start));
+        assert!(!gate.check(true, start + std::time::Duration::from_millis(999)));
+        assert!(gate.check(true, start + STARTUP_HOLD));
+        // Open for good, whatever comes after.
+        assert!(gate.check(false, start + STARTUP_HOLD * 2));
     }
 
     #[test]

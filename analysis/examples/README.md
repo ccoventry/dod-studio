@@ -22,10 +22,14 @@ documented in its own `//!` header.
 | `reconcile_probe` | Do derived kill counts agree with the server's own frag counter? |
 | `reconnect_probe` | What does a reconnect do to the server's score counters? |
 | `capwindow_probe` | How far is a flag capture from the objective-score credits it earned? |
+| `userinfo_times` | When did a player's name first reach the recording, and when did it change? |
+| `seek_burst` | How much network data can a few seconds of a demo hold (the stepped seek's budget, #596)? |
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
+| `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
+| `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
 
 `weapon_switch_probe` exists because `goldsrc-hooks`' log cannot answer "where
 in the demo was that?". Its clock counts from when the *client* loaded and
