@@ -2363,6 +2363,10 @@ pub async fn launch_demo_preview(
             patcher_config.resolution_width,
             patcher_config.resolution_height,
         ) = resolution;
+        // The original demo, untouched, when the game can play it in place (#434).
+        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+            return crate::preview_in_place::launch(app, &patcher_config, &arg);
+        }
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()
@@ -2390,7 +2394,7 @@ pub async fn launch_demo_preview(
 /// `external_error` event, each box once. Report only, unlike a batch: the
 /// user is at the game, so the box stays for them to close. Stops once the
 /// launcher has exited and no game has been running for 5 seconds.
-fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
+pub(crate) fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Child) {
     std::thread::spawn(move || {
         let launcher_pid = launcher.id();
         let mut launcher_running = true;
@@ -2448,7 +2452,7 @@ fn watch_for_error_dialogs(app: tauri::AppHandle, mut launcher: std::process::Ch
 
 /// Process ids of every running `hl.exe` -- the games Studio could be talking
 /// to. `hlae.exe` is left out: it is the launcher, not the game.
-fn running_game_pids() -> Vec<u32> {
+pub(crate) fn running_game_pids() -> Vec<u32> {
     native::sys::process::pids_named(&["hl.exe"])
 }
 
@@ -2474,6 +2478,9 @@ pub async fn send_preview_to_running_game(
         }
         let (patcher_config, dod_dir) =
             resolve_preview_env(&hlae_path, &game_path, goldsrc_hooks_dll_path)?;
+        if let Some(arg) = crate::preview_in_place::plan(&patcher_config, &dod_dir, &streaks) {
+            return crate::preview_in_place::send_to_running(&pids, &arg);
+        }
         let (jobs, _generated) = patch_bookmark_previews(streaks, &dod_dir, &patcher_config)?;
         let job = jobs
             .first()

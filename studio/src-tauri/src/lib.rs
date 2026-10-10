@@ -13,6 +13,7 @@ mod map_manager;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
+mod preview_in_place;
 mod render_manager;
 mod review_manager;
 mod settings_manager;

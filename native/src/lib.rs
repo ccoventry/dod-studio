@@ -46,6 +46,10 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
+/// Launch Preview without patching (#434, step 2).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod preview_in_place;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
