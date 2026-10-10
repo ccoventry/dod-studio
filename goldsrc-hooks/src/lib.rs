@@ -319,7 +319,8 @@ unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32
     );
     // Studio falls back to qconsole.log without it, so on unless asked not to.
     events::ENABLED.store(env_flag("GOLDSRC_HOOKS_EVENTS", true), Ordering::Relaxed);
-    // HD textures: on when there's a dod/dodstudio_hd folder to load from,
+    // HD textures: on when there's a dodstudio_hd folder to load from (in
+    // dod_addon, or dod for an install from before #415),
     // unless GOLDSRC_HOOKS_TEXTURE_HIRES says otherwise (see
     // texture_hires::starts_on for why startup decides). `dodstudio_hd_enabled` turns
     // it on and off in game.

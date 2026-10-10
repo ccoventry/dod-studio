@@ -3,7 +3,7 @@ map from its BSP, light it and render previews.
 
 Takes the .blend `agr_import.py` saved and adds:
 
-- model textures: HD from `dod/dodstudio_hd/models/<style>/` (the hook's
+- model textures: HD from `dod_addon/dodstudio_hd/models/<style>/` (the hook's
   `<name>_<fnv1a32>.tga` naming), else Crowbar's BMPs, else the .mdl's own
   palette;
 - the map: every brush model of the BSP, with HD world textures when built,
@@ -131,7 +131,11 @@ def mdl_textures(path):
     return out
 
 def hd_root():
-    return os.path.join(GAME, "dod", "dodstudio_hd")
+    # Picks like the hook and native::hd::hd_root (#415): dod_addon, or dod
+    # while only an install built before #415 has it there.
+    addon = os.path.join(GAME, "dod_addon", "dodstudio_hd")
+    dod = os.path.join(GAME, "dod", "dodstudio_hd")
+    return dod if os.path.isdir(dod) and not os.path.isdir(addon) else addon
 
 def pick_style():
     global STYLE
