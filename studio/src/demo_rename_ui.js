@@ -11,6 +11,7 @@ import {
   parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
+import { parseClock } from './scan_progress.js';
 import { themedConfirm } from './themed_confirm.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -56,16 +57,15 @@ let chipTarget = null;
 
 // List Demos' bar: the cached demos come first and fill it fast, then the
 // parses; the time left is measured from when the parses started.
-let parsesStartedAt = null;
+const parses = parseClock();
 function showListProgress(p) {
   const bar = $('#rename-progress');
-  if (!p) parsesStartedAt = null;
-  else if (parsesStartedAt === null && p.done >= p.cached) parsesStartedAt = Date.now();
+  if (!p) parses.reset();
   // Before the first event the backend is still checking which demos the
   // cache has (a moment, longer for thousands of demos on a slow drive).
   const view = p
-    ? listProgressView(p, parsesStartedAt === null ? 0 : Date.now() - parsesStartedAt)
-    : { pct: 0, text: STRINGS.DEMO_RENAME.CHECKING_CACHE };
+    ? listProgressView(p, parses.elapsed(p.done, p.cached))
+    : { pct: 0, text: STRINGS.SCAN_PROGRESS.CHECKING_CACHE };
   if (bar) {
     bar.hidden = false;
     bar.querySelector('.progress-bar-fill').style.width = `${view.pct}%`;
