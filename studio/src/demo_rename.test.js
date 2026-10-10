@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
-  placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS,
+  placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, listProgressView,
 } from './demo_rename.js';
 import { emptyProjectTeams } from './project_teams.js';
 
@@ -200,5 +200,23 @@ describe('nameWithoutTag', () => {
     expect(nameWithoutTag('m00cat', null)).toBe('m00cat');
     expect(nameWithoutTag('dicE', 'dicE')).toBe('dicE');
     expect(nameWithoutTag(null, 'dicE')).toBe(null);
+  });
+});
+
+describe('listProgressView', () => {
+  it('counts the cached demos, then the time left from the pace of the parses', () => {
+    expect(listProgressView({ done: 0, total: 6, cached: 0, parsed: 0 })).toEqual({ pct: 0, text: 'Reading demos: 0 / 6' });
+    expect(listProgressView({ done: 5, total: 6, cached: 5, parsed: 0 }).text)
+      .toBe('Reading demos: 5 / 6 (5 from the analyzer cache)');
+    // 2 parses in 2 s, 400 to go: about 400 s.
+    expect(listProgressView({ done: 7, total: 407, cached: 5, parsed: 2 }, 2000))
+      .toEqual({ pct: 2, text: 'Reading demos: 7 / 407 (5 from the analyzer cache) · about 7 min left' });
+    expect(listProgressView({ done: 8, total: 10, cached: 0, parsed: 8 }, 8000).text)
+      .toBe('Reading demos: 8 / 10 · about 2 s left');
+  });
+
+  it('says no time left once nothing is left to parse', () => {
+    expect(listProgressView({ done: 6, total: 6, cached: 5, parsed: 1 }, 1000).text)
+      .toBe('Reading demos: 6 / 6 (5 from the analyzer cache)');
   });
 });

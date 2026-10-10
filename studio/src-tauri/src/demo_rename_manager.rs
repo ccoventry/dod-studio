@@ -40,8 +40,20 @@ pub async fn demo_rename_list(
         }
         let demos = demo_rename::demos_in(&root);
         let total = demos.len();
+        // The demos the analyzer cache already has go first: each takes
+        // milliseconds, so the count jumps to "cached of total" at once and
+        // only the parses (about a second each) are left to wait for.
+        let cache_root = native::analyzer_cache_root();
+        let fresh: Vec<bool> = demos
+            .iter()
+            .map(|d| analysis::cache::is_fresh(&cache_root, d))
+            .collect();
+        let cached = fresh.iter().filter(|f| **f).count();
+        let mut order: Vec<usize> = (0..total).collect();
+        order.sort_by_key(|&i| !fresh[i]);
         let next = AtomicUsize::new(0);
         let done = AtomicUsize::new(0);
+        let parsed = AtomicUsize::new(0);
         let started = std::time::Instant::now();
         // Milliseconds since `started` of the last event, so the workers
         // share one throttle without a lock.
@@ -53,7 +65,12 @@ pub async fn demo_rename_list(
                 last_emit.store(now, Ordering::Relaxed);
                 let _ = app_handle.emit(
                     "demo_rename_progress",
-                    serde_json::json!({ "done": done, "total": total }),
+                    serde_json::json!({
+                        "done": done,
+                        "total": total,
+                        "cached": cached,
+                        "parsed": parsed.load(Ordering::Relaxed),
+                    }),
                 );
             }
         };
@@ -71,10 +88,19 @@ pub async fn demo_rename_list(
                             if cancel.load(Ordering::Relaxed) {
                                 break;
                             }
-                            let i = next.fetch_add(1, Ordering::Relaxed);
-                            let Some(path) = demos.get(i) else { break };
-                            mine.push((i, demo_rename::facts(path)));
-                            emit(done.fetch_add(1, Ordering::Relaxed) + 1, false);
+                            let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed)) else {
+                                break;
+                            };
+                            mine.push((i, demo_rename::facts(&demos[i])));
+                            if !fresh[i] {
+                                parsed.fetch_add(1, Ordering::Relaxed);
+                            }
+                            let now_done = done.fetch_add(1, Ordering::Relaxed) + 1;
+                            // A parse takes about a second, so each one may
+                            // report; so does the last cached demo, which a
+                            // throttle could otherwise hold back until the
+                            // first parse ends.
+                            emit(now_done, !fresh[i] || now_done == cached);
                         }
                         mine
                     })

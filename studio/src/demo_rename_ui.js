@@ -8,7 +8,7 @@ import { listen } from '@tauri-apps/api/event';
 import { MODIFIERS } from './clip_name.js';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, WITH_FALLBACK, placeholdersFor,
-  parseDemoTemplate, demoValues, planRenames, renamePairs,
+  parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView,
 } from './demo_rename.js';
 import { demoRenameList, demoRenameCancel, demoRenameApply, demoRenameUndo, demoRenameUndoable } from './ipc_bridge.js';
 import { themedConfirm } from './themed_confirm.js';
@@ -53,6 +53,26 @@ let busy = false;
 let getProjectTeams = () => null;
 // The template field the chips insert into: the last one focused.
 let chipTarget = null;
+
+// List Demos' bar: the cached demos come first and fill it fast, then the
+// parses; the time left is measured from when the parses started.
+let parsesStartedAt = null;
+function showListProgress(p) {
+  const bar = $('#rename-progress');
+  if (!p) parsesStartedAt = null;
+  else if (parsesStartedAt === null && p.done >= p.cached) parsesStartedAt = Date.now();
+  const view = listProgressView(p || {}, parsesStartedAt === null ? 0 : Date.now() - parsesStartedAt);
+  if (bar) {
+    bar.hidden = false;
+    bar.querySelector('.progress-bar-fill').style.width = `${view.pct}%`;
+  }
+  setStatus(view.text);
+}
+
+function hideListProgress() {
+  const bar = $('#rename-progress');
+  if (bar) bar.hidden = true;
+}
 
 function setStatus(text) {
   const el = $('#rename-status');
@@ -262,7 +282,7 @@ async function listDemos() {
   listing = true;
   facts = [];
   refresh();
-  setStatus(STRINGS.DEMO_RENAME.reading(0, 0));
+  showListProgress(null);
   let cancelled = false;
   try {
     facts = await demoRenameList(folder);
@@ -273,6 +293,7 @@ async function listDemos() {
   } finally {
     listing = false;
     cancelRequested = false;
+    hideListProgress();
   }
   selected = new Set(facts.map((f) => f.path));
   listedOnce = true;
@@ -394,7 +415,7 @@ export function initDemoRenamePane({ projectTeams, onChange } = {}) {
   $('#rename-apply-btn')?.addEventListener('click', applyRenames);
   $('#rename-undo-btn')?.addEventListener('click', undoLast);
   listen('demo_rename_progress', (event) => {
-    if (listing) setStatus(STRINGS.DEMO_RENAME.reading(event.payload.done, event.payload.total));
+    if (listing) showListProgress(event.payload);
   });
   refresh();
   refreshUndo();

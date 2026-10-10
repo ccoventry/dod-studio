@@ -160,3 +160,20 @@ test('Undo is ready at start when an earlier batch can be put back', async ({ pa
   await expect(page.locator('#rename-undo-btn')).toBeEnabled();
   await expect(page.locator('#rename-undo-btn')).toHaveAttribute('title', /Put back the 4 demos renamed/);
 });
+
+test('List Demos shows a bar from the first moment, counting cached demos first', async ({ page }) => {
+  await loadHarness(page);
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.demo_rename_list = () => new Promise((resolve) => { window.__finishList = resolve; });
+  });
+  await page.click('#rename-list-btn');
+  const bar = page.locator('#rename-progress');
+  // The harness has no stylesheet, so the bar has no height: check hidden.
+  await expect(bar).toHaveJSProperty('hidden', false);
+  await expect(page.locator('#rename-status')).toHaveText('Reading demos: 0 / 0');
+  await page.evaluate(() => window.__mockEmit('demo_rename_progress', { done: 5, total: 6, cached: 5, parsed: 0 }));
+  await expect(page.locator('#rename-status')).toHaveText('Reading demos: 5 / 6 (5 from the analyzer cache)');
+  await expect(bar.locator('.progress-bar-fill')).toHaveAttribute('style', /width: 83%/);
+  await page.evaluate(() => window.__finishList([]));
+  await expect(bar).toHaveJSProperty('hidden', true);
+});

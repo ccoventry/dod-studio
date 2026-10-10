@@ -86,6 +86,23 @@ export function nameWithoutTag(name, tag) {
   return rest || name;
 }
 
+/**
+ * List Demos' progress, from a `demo_rename_progress` event
+ * (`{ done, total, cached, parsed }`: the cached demos are read first, then
+ * the rest are parsed). `parseMs` is how long the parses have been running.
+ * Returns `{ pct, text }`; the text adds a time left once a parse has
+ * finished to measure the pace by.
+ */
+export function listProgressView({ done = 0, total = 0, cached = 0, parsed = 0 } = {}, parseMs = 0) {
+  const pct = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  const D = STRINGS.DEMO_RENAME;
+  let text = D.reading(done, total);
+  if (cached > 0) text += D.readingCached(cached);
+  const left = total - cached - parsed;
+  if (parsed > 0 && left > 0 && parseMs > 0) text += D.timeLeft(Math.round((parseMs / parsed) * left / 1000));
+  return { pct, text };
+}
+
 /** A file name made plain: letters, digits, `-` and `_` only. Anything
  *  else (spaces, brackets, `#`, emoji) becomes `_`, accents are dropped,
  *  runs of `_` collapse, and none is left at either end. */

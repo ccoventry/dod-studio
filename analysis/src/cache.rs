@@ -109,6 +109,27 @@ pub fn load(root: &Path, demo_path: &Path) -> Option<(FileInfo, Analysis)> {
         .then_some((entry.file_info, entry.analysis))
 }
 
+/// Whether `demo_path` has an entry for the file as it is now, without
+/// reading the whole entry (megabytes): its stamp is the entry's first two
+/// keys, so the first few hundred bytes say. For ordering work, e.g. listing
+/// the cached demos of a folder before the ones that need a parse.
+pub fn is_fresh(root: &Path, demo_path: &Path) -> bool {
+    use std::io::Read;
+    let Some((size_bytes, modified_unix_secs)) = stamp(demo_path) else {
+        return false;
+    };
+    let Some(Ok(file)) = entry_path(root, demo_path).map(std::fs::File::open) else {
+        return false;
+    };
+    let mut head = Vec::with_capacity(200);
+    if file.take(200).read_to_end(&mut head).is_err() {
+        return false;
+    }
+    String::from_utf8_lossy(&head).starts_with(&format!(
+        "{{\"size_bytes\":{size_bytes},\"modified_unix_secs\":{modified_unix_secs},"
+    ))
+}
+
 /// Saves `analysis` as `demo_path`'s entry, and returns where. Best-effort:
 /// `None` on any failure, which must never fail the caller.
 ///
@@ -337,8 +358,20 @@ mod tests {
         assert_eq!(fill_missing_players(&root), 0);
 
         // A different size: the entry no longer describes the file.
+        assert!(is_fresh(&root, &demo));
         std::fs::write(&demo, b"a longer demo than before").unwrap();
         assert!(load(&root, &demo).is_none());
+        assert!(!is_fresh(&root, &demo));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_demo_with_no_entry_is_not_fresh() {
+        let dir = scratch("fresh");
+        let demo = dir.join("y.dem");
+        std::fs::write(&demo, b"never analysed").unwrap();
+        assert!(!is_fresh(&dir.join("cache"), &demo));
+        assert!(!is_fresh(&dir.join("cache"), &dir.join("missing.dem")));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
