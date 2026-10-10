@@ -1,6 +1,6 @@
 # HD asset build scripts
 
-These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod\dodstudio_hd\`, which you can delete to go back to stock.
+These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
 
 The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
@@ -29,7 +29,7 @@ The first installs three Python packages. The second downloads the upscaler (abo
 python build_all.py ultrasharp
 ```
 
-This finds your DoD install by itself (the one DoD Studio launches) and fills `dod\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
+This finds your DoD install by itself (the one DoD Studio launches) and fills `dod_addon\dodstudio_hd`. It can take an hour for a large map collection. It keeps going if you leave the PC; if it stops or you close the window, run the same line again and it carries on where it left off.
 
 **5. Start the game from DoD Studio.** That's it: DoD Studio's hook DLL sees the new `dodstudio_hd` folder and turns HD on by itself. In game, `dodstudio_debug_status` in the console shows how many textures were replaced.
 
@@ -71,8 +71,8 @@ python build_all.py --game "C:\Program Files (x86)\Steam\steamapps\common\Half-L
 **You downloaded a new custom map** called `dod_mymap`:
 
 ```
-python world_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\world\ultrasharp" dod_mymap
-python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sky\ultrasharp" dod_mymap
+python world_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\world\ultrasharp" dod_mymap
+python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\sky\ultrasharp" dod_mymap
 ```
 
 (`python build_all.py ultrasharp` does the same, for every map that's new.)
@@ -80,8 +80,8 @@ python sky_hd.py   "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\
 **You have a custom weapon model or sprite** somewhere on your PC:
 
 ```
-python models_hd.py  "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\models\ultrasharp" "C:\Users\me\Downloads\v_garand.mdl"
-python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod\dodstudio_hd\sprites\ultrasharp" "C:\Users\me\Downloads\muzzleflash1.spr"
+python models_hd.py  "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\models\ultrasharp" "C:\Users\me\Downloads\v_garand.mdl"
+python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\dod_addon\dodstudio_hd\sprites\ultrasharp" "C:\Users\me\Downloads\muzzleflash1.spr"
 ```
 
 **See the styles side by side** before choosing one; this writes `compare.png` here, which you can open:
@@ -90,7 +90,7 @@ python sprites_hd.py "C:\Program Files (x86)\Steam\steamapps\common\Half-Life\do
 python compare.py compare.png
 ```
 
-**Go back to stock:** put `dodstudio_hd_enabled 0` in `movie.cfg`, or delete the `dod\dodstudio_hd` folder.
+**Go back to stock:** put `dodstudio_hd_enabled 0` in `movie.cfg`, or delete the `dod_addon\dodstudio_hd` folder.
 
 ## What you need
 
@@ -143,7 +143,7 @@ python build_all.py --types sprites,sky   only some types
 
 Map textures and skies are the bulk of the build, and a public-server map you never film is wasted time and disk. To build only some maps:
 
-1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod\dodstudio_hd` folder (e.g. `...\Half-Life\dod\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
+1. Copy `hd_maps.example.txt` to `hd_maps.txt` in the game's `dod_addon\dodstudio_hd` folder (e.g. `...\Half-Life\dod_addon\dodstudio_hd\hd_maps.txt`), next to the files it decides about.
 2. List the maps, one per line. `*` matches anything and `?` one character, like a Windows folder search: `dod_railroad2*` covers every railroad2 build. A name without them matches only that map.
 
 `build_all.py` then builds map textures and skies for those maps only, and says how many it picked at the top of `build_all.log`. A line that matches no map is reported rather than ignored. Model skins, sprites and detail textures aren't tied to a map, so they're always built in full. Delete `hd_maps.txt` to build every map again.
@@ -165,7 +165,7 @@ Before building everything at 2048, try one map (`hd_maps.txt`) and play a demo 
 Each type's script takes an output folder and what to build. Put the output in the style you use, or in `overrides`, which wins over any style:
 
 ```
-set OUT=C:\...\Half-Life\dod\dodstudio_hd
+set OUT=C:\...\Half-Life\dod_addon\dodstudio_hd
 
 python world_hd.py   %OUT%\world\ultrasharp   dod_mymap dod_othermap
 python models_hd.py  %OUT%\models\ultrasharp  C:\path\to\v_mycustomgun.mdl
@@ -206,7 +206,7 @@ The game loads whatever style folder you name, so you can make as many as you li
 
 DoD Studio's HD Textures page has a form for this (Your own styles) that writes the same file. By hand:
 
-1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod\dodstudio_hd` folder and open it in Notepad.
+1. Copy `my_styles.example.txt` to `my_styles.txt` in the game's `dod_addon\dodstudio_hd` folder and open it in Notepad.
 2. Add one line per style. There are three kinds:
 
    ```
@@ -231,7 +231,7 @@ Style names are lowercase letters, digits, `-` and `_`, because they become fold
 
 ## Where your lists live
 
-`hd_maps.txt` and `my_styles.txt` belong to one game install, so they live in its `dod\dodstudio_hd` folder rather than here. A second install (a stock one next to a movie one) keeps its own, and updating or re-downloading DoD Studio never touches them. Deleting `dodstudio_hd` deletes them too. `HD_MAPS` and `HD_MY_STYLES` point at a file anywhere else.
+`hd_maps.txt` and `my_styles.txt` belong to one game install, so they live in its `dod_addon\dodstudio_hd` folder rather than here. A second install (a stock one next to a movie one) keeps its own, and updating or re-downloading DoD Studio never touches them. Deleting `dodstudio_hd` deletes them too. `HD_MAPS` and `HD_MY_STYLES` point at a file anywhere else.
 
 Lists saved in this folder by an older version still work while the install has none of its own: the build says so at the top of `build_all.log`, with the path to move each one to.
 

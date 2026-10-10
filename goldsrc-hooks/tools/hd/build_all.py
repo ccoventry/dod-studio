@@ -1,5 +1,5 @@
 """Build every HD asset type in the chosen styles into
-<game>/dod/dodstudio_hd/<type>/<style>.
+<game>/dod_addon/dodstudio_hd/<type>/<style> (dod/ for an install built before #415).
 
 Resumable: each step skips files that already exist, so re-running after an
 interruption (or after adding maps and models) only builds what's missing.

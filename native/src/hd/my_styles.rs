@@ -2,7 +2,7 @@
 //! page's lists, and written by its custom-style form.
 //!
 //! The file is the scripts' (`tools/hd/styles.py`'s `load_my_styles`, which
-//! documents the format), in the install's `dod\dodstudio_hd` folder
+//! documents the format), in the install's HD folder (`super::hd_root`)
 //! (`hdcommon.user_file`, #385). The command line and the page share it, so
 //! this module follows the scripts' rules exactly and never rewrites more of
 //! the file than the one line a change is about: comments and the user's own
