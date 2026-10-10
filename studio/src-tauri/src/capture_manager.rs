@@ -1316,9 +1316,9 @@ pub async fn start_capture_batch_impl(
                 let mut last_name = String::new();
                 // Time left (#643): from when the engine starts, priced by
                 // the clips done so far.
-                let mut eta = crate::batch_eta::BatchEta::new(clip_frames);
+                let eta = crate::batch_eta::BatchEta::new(clip_frames);
                 let mut started: Option<std::time::Instant> = None;
-                let mut seconds_left = |started: Option<std::time::Instant>, done: u32| {
+                let seconds_left = |started: Option<std::time::Instant>, done: u32| {
                     let elapsed = started?.elapsed().as_secs_f64();
                     eta.seconds_left(done, elapsed)
                 };
