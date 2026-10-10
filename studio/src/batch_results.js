@@ -10,7 +10,8 @@
 // dispatch)` from capture_takes_verified, in whichever order they arrive.
 
 import { revealInExplorer } from './ipc_bridge.js';
-import { formatClock, highlightStartSeconds } from './highlight_time.js';
+import { highlightStartSeconds } from './highlight_time.js';
+import { clockFloor } from './time_format.js';
 import { STRINGS } from './strings.js';
 
 let state = null; // { endedAt, kind, text, rows, totals } once a batch ends
@@ -34,7 +35,7 @@ export function takeLabel(block, dispatch) {
   const parts = [block.demo_name];
   if (streak.target_player) parts.push(streak.target_player);
   parts.push(STRINGS.BATCH_RESULTS.kills(streak.kill_count));
-  parts.push(formatClock(highlightStartSeconds(streak)));
+  parts.push(clockFloor(highlightStartSeconds(streak)));
   const label = parts.filter(Boolean).join(' · ');
   return indices.length > 1 ? `${label} ${STRINGS.BATCH_RESULTS.merged(indices.length - 1)}` : label;
 }

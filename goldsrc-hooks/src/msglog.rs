@@ -344,26 +344,6 @@ fn usage() -> String {
     )
 }
 
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return Vec::new();
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(
-                unsafe { CStr::from_ptr(ptr) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .collect()
-}
-
 /// Resolves a list of typed tokens against [`MESSAGES`], case-insensitively.
 /// Pure -- touches no global state -- so the "reject the whole list on any
 /// unknown name" rule is unit-testable without the shared-static problem
@@ -386,7 +366,7 @@ fn resolve_names(rest: &[String]) -> Result<Vec<String>, Vec<String>> {
 
 fn dispatch(argv: &[String]) -> String {
     // argv[0] is the command name itself, so a bare invocation (or an empty
-    // argv, which args() returns when engfuncs isn't resolved yet) is a
+    // argv, which cmd_list::argv() returns when engfuncs isn't resolved yet) is a
     // query -- not `&argv[1..]`, which panics on an empty slice and aborts
     // the whole process under this DLL's release `panic = "abort"` profile.
     let rest = if argv.len() > 1 { &argv[1..] } else { &[] };
@@ -432,7 +412,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("msglog: {} -> {}", argv.join(" "), reply.trim())) };
@@ -512,7 +492,7 @@ mod tests {
 
     #[test]
     fn a_genuinely_empty_argv_is_also_a_status_query() {
-        // args() returns Vec::new() whenever engine::engfuncs() isn't
+        // cmd_list::argv() returns Vec::new() whenever engine::engfuncs() isn't
         // resolved yet, not just a one-element argv0-only vec -- `&argv[1..]`
         // panics on that, and this DLL ships with `panic = "abort"`.
         let reply = dispatch(&[]);

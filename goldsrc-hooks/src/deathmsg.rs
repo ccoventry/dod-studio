@@ -1260,26 +1260,6 @@ fn parse_weapon(arg: &str) -> Result<i32, String> {
     ))
 }
 
-fn args() -> Vec<String> {
-    let Some(engfuncs) = engine::engfuncs() else {
-        return Vec::new();
-    };
-    let argc = unsafe { (engfuncs.cmd_argc)() };
-    (0..argc)
-        .filter_map(|i| {
-            let ptr = unsafe { (engfuncs.cmd_argv)(i) };
-            if ptr.is_null() {
-                return None;
-            }
-            Some(
-                unsafe { CStr::from_ptr(ptr) }
-                    .to_string_lossy()
-                    .into_owned(),
-            )
-        })
-        .collect()
-}
-
 /// Runs one subcommand, returning what to print.
 fn dispatch(argv: &[String]) -> String {
     // argv[0] is the command name itself, so a bare invocation is a query.
@@ -1372,7 +1352,7 @@ fn dispatch(argv: &[String]) -> String {
 }
 
 pub unsafe extern "C" fn command() {
-    let argv = args();
+    let argv = crate::cmd_list::argv();
     let reply = dispatch(&argv);
     crate::commands::console_print(&reply);
     unsafe { crate::debug::report(&format!("deathmsg: {} -> {}", argv.join(" "), reply.trim())) };

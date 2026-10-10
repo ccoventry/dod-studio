@@ -40,9 +40,3 @@ export function highlightDurationSeconds(streak, tickrate) {
   }
   return (streak.end_tick - streak.start_tick) / (tickrate || 100);
 }
-
-/** m:ss, as the Time column shows it. */
-export function formatClock(seconds) {
-  const total = Math.max(Math.floor(seconds || 0), 0);
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
-}

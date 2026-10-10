@@ -57,11 +57,15 @@ pub struct CvarSetting {
 
 impl CvarSetting {
     pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
+        display_name(&self.file)
     }
+}
+
+/// A config's file name for a warning, or the whole path when it has none.
+fn display_name(path: &Path) -> String {
+    path.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.to_string_lossy().to_string())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -503,10 +507,7 @@ pub struct FatalCvarSetting {
 
 impl FatalCvarSetting {
     pub fn file_name(&self) -> String {
-        self.file
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| self.file.to_string_lossy().to_string())
+        display_name(&self.file)
     }
 }
 
@@ -1021,6 +1022,16 @@ mod tests {
 
     fn scratch(tag: &str) -> Scratch {
         Scratch::new(format_args!("cfg_scan_{tag}"))
+    }
+
+    #[test]
+    fn a_warning_names_the_file_or_falls_back_to_the_whole_path() {
+        assert_eq!(
+            display_name(&Path::new("dod").join("movie.cfg")),
+            "movie.cfg"
+        );
+        // `..` has no file name, so the whole path is shown instead.
+        assert_eq!(display_name(Path::new("..")), "..");
     }
 
     #[test]
