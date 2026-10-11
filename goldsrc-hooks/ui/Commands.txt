@@ -41,6 +41,8 @@ HUD
 DEMO PLAYBACK
   dodstudio_run_in_background 0/1
       Run at full speed while another window is in front, so a capture batch doesn't need the screen.
+  dodstudio_pov_live_bob 0/1
+      POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
   dodstudio_seek_to <time>
       Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
   dodstudio_seek_by <seconds>

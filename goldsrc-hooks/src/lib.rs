@@ -204,6 +204,7 @@ mod patch;
 mod pe;
 mod pmove_guard;
 mod position;
+mod pov_live_bob;
 mod remote;
 mod review;
 mod run_in_background;
