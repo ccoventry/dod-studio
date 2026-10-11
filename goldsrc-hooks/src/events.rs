@@ -104,6 +104,7 @@ pub(crate) fn send(label: &str) {
 unsafe extern "C" fn wrapped_echo() {
     if let Some(line) = marker_line(&cmd_list::args()) {
         crate::batch_end::on_marker(&line);
+        crate::schedule::note_marker(&line);
         emit(line);
     }
     unsafe { call_real(&REAL_ECHO) };
