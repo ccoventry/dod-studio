@@ -579,6 +579,7 @@ pub fn poll() {
     crate::spectator_follow::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
+    crate::run_in_background::poll();
     crate::studio_panel::poll();
     crate::review::poll();
     crate::schedule::poll();
@@ -1570,6 +1571,9 @@ pub fn install() {
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
         crate::overview_marker::set_cvar(marker);
     }
+    if let Some(background) = register(crate::run_in_background::NAME, "0") {
+        crate::run_in_background::set_cvar(background);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1722,6 +1726,7 @@ mod tests {
             crate::spectator_follow::TARGET_NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
+            crate::run_in_background::NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }
