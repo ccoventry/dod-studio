@@ -487,6 +487,27 @@ export async function removeNonRenderingRenderJobs() {
     });
 }
 
+/** Delete Take (#644): checks each take folder and measures it for the
+ *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
+ *  with the reason when any take can't be deleted. */
+export async function measureTakeFolders(takeFolders) {
+  return invoke("measure_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (measure_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Delete Take (#644): sends the take folders to the Recycle Bin and takes
+ *  their rows out of the list. Resolves to `{ deleted, failed }`. */
+export async function deleteTakeFolders(takeFolders) {
+  return invoke("delete_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (delete_take_folders):", err);
+      throw err;
+    });
+}
+
 export async function setRenderJobCodec(jobId, codec, customCodecArgs) {
   return invoke("set_render_job_codec", { jobId, codec, customCodecArgs: customCodecArgs ?? null })
     .catch((err) => {

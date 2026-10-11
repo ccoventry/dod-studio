@@ -501,3 +501,66 @@ test.describe('issue #40 — sortable columns and the batch progress bar', () =>
     await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 75%');
   });
 });
+
+test.describe('issue #644 — Delete Take', () => {
+  const TAKE = 'D:/captures/session_1/chain_01_b0/take0000';
+
+  test('is off while either half of the take is queued or rendering', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Rendering', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeDisabled();
+
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Finished', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeEnabled();
+  });
+
+  test('confirms with the folder and its size, then sends the take once', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((take) => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'session_1/chain_01_b0', size_bytes: 3 * 1024 * 1024 * 1024 }));
+      window.__mockInvokeHandlers.delete_take_folders = ({ takeFolders }) => ({
+        deleted: takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 3 * 1024 * 1024 * 1024 })),
+        failed: [],
+      });
+      window.__take = take;
+    }, TAKE);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Finished', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    const modal = page.locator('#themed-confirm-modal');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Move this take (3.00 GB) to the Recycle Bin?');
+    await expect(modal).toContainText(TAKE);
+    // Every Delete Take is off while the dialog is open.
+    await expect(page.locator('tr[data-job-id="1"] .render-job-delete-take-btn')).toBeDisabled();
+
+    await page.locator('#themed-confirm-ok-btn').click();
+    await expect.poll(() => invocationsFor(page, 'delete_take_folders')).toEqual([{ takeFolders: [TAKE] }]);
+    expect(await invocationsFor(page, 'measure_take_folders')).toEqual([{ takeFolders: [TAKE] }]);
+    await expect(page.locator('#toast-container')).toContainText('Take moved to the Recycle Bin (3.00 GB).');
+    await expect(page.locator('#render-take-delete-progress')).toBeHidden();
+  });
+
+  test('cancelling the confirm deletes nothing', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 1024 }));
+    });
+    await emitSnapshot(page, [job({ id: '0', status: 'Cancelled', take_folder: TAKE })]);
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    await page.locator('#themed-confirm-cancel-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeEnabled();
+    expect(await invocationsFor(page, 'delete_take_folders')).toEqual([]);
+  });
+});

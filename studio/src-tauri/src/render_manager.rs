@@ -294,6 +294,46 @@ impl RenderManager {
         }
     }
 
+    /// The statuses of the jobs rendering from `take_folder`: two for a take
+    /// with a HUD pair, none for a take not in the list. Delete Take (#644)
+    /// refuses on these.
+    pub(crate) fn take_statuses(&self, take_folder: &str) -> Vec<String> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| j.clip.take_folder == take_folder)
+            .map(|j| j.status.clone())
+            .collect()
+    }
+
+    /// Takes these takes' rows out of the list before their folders go to the
+    /// Recycle Bin (#644), checking under the same lock that none is queued or
+    /// rendering, so a Reset can't start one in between.
+    pub(crate) fn remove_take_rows(
+        &self,
+        app: &AppHandle,
+        take_folders: &[String],
+    ) -> Result<(), String> {
+        {
+            let mut jobs = self.jobs.lock().unwrap();
+            for folder in take_folders {
+                let statuses: Vec<&str> = jobs
+                    .iter()
+                    .filter(|j| &j.clip.take_folder == folder)
+                    .map(|j| j.status.as_str())
+                    .collect();
+                if let Some(refusal) = crate::take_delete_manager::refusal(folder, &statuses) {
+                    return Err(refusal);
+                }
+            }
+            jobs.retain(|j| !take_folders.contains(&j.clip.take_folder));
+        }
+        clear_batch_state_if_empty(self);
+        emit_jobs_snapshot(app, &self.jobs);
+        Ok(())
+    }
+
     fn handles(&self) -> SchedulerHandles {
         SchedulerHandles {
             jobs: self.jobs.clone(),
