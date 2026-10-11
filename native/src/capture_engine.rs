@@ -657,10 +657,16 @@ pub fn spawn_capture_engine(
             // The HLAE alpha flags that used to be composed here now live in
             // `build_hlae_process` itself, so every `-customLoader` launch this
             // app makes carries them, not just a capture batch.
-            let extra_args = format!(
-                "+exec dodstudio_helper.cfg +playdemo {}",
-                crate::shared::paths::PRIMER_DEMO_STEM
+            //
+            // The first demo starts over the hook's pipe once the game is up,
+            // so its map loads after config.cfg/movie.cfg set the user's
+            // brightness and gamma (`game_handoff`).
+            let (extra_args, first_lines) = crate::game_handoff::first_demo_start(
+                crate::shared::paths::PRIMER_DEMO_STEM,
+                config.goldsrc_hooks_dll().is_some(),
             );
+            let mut handoff = (!first_lines.is_empty())
+                .then(|| crate::game_handoff::GameHandoff::new(first_lines));
 
             let dummy_path = active_export_dir.join("DOD_BATCH_DONE");
             let _ = std::fs::remove_dir_all(&dummy_path);
@@ -796,6 +802,23 @@ pub fn spawn_capture_engine(
                     }
                     alive
                 };
+
+                if let Some(handoff) = handoff.as_mut() {
+                    use crate::game_handoff::Handoff;
+                    match handoff.poll(&crate::sys::process::game_pids_in(&sys)) {
+                        Handoff::Waiting | Handoff::Sent => {}
+                        Handoff::JustSent(pid) => log_markdown(&format!(
+                            "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
+                            handoff.lines.join("; ")
+                        )),
+                        Handoff::Failed(why) => {
+                            log_markdown(&format!("[HLAE] {why}"));
+                            failure_reason = Some(why);
+                            kill_hl_exe_and_wait(&mut sys);
+                            break;
+                        }
+                    }
+                }
 
                 // Is the engine actually writing the console log? Checked once,
                 // after the game has had long enough to produce startup output.
