@@ -1278,6 +1278,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
     const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
     const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked || false;
+    const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
 
     const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;
     const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
@@ -1329,6 +1330,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       obs_password: obsPasswordVal,
       save_local_patched_copy: saveLocalPatchedCopyVal,
       hook_runs_batch: hookRunsBatchVal,
+      keep_game_behind: keepGameBehindVal,
       streaks: selectedStreaks,
       pre_roll_seconds: preRollVal,
       post_roll_seconds: postRollVal,

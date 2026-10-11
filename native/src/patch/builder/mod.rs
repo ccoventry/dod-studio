@@ -149,8 +149,14 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
     // engine waits up to 20 ms for input every frame while it isn't the active
     // app, which slows the fast-forward between clips 5-8x (measured on both
     // builds). The hook DLL's setting; without the hook it is an unknown
-    // command and does nothing.
+    // command and does nothing. Whether the window stays behind is a separate
+    // setting, sent as 0 too when the user wants to watch, so a game left
+    // running from an earlier batch (#666) drops it.
     out.push(format!("{RUN_IN_BACKGROUND} 1"));
+    out.push(format!(
+        "{STAY_BEHIND} {}",
+        u8::from(config.keep_game_behind)
+    ));
 
     // OBS mode is real time: HLAE issues no `mirv_movie_start` at all, so
     // `mirv_movie_fps` above is inert on this path — nothing reads it. What
@@ -210,6 +216,10 @@ pub const IN_EYE: &str = "spec_mode 4";
 /// The hook DLL's `dodstudio_run_in_background` (goldsrc-hooks
 /// `run_in_background.rs`), which every batch turns on.
 pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
+
+/// The hook DLL's `dodstudio_stay_behind` (goldsrc-hooks `hlae_window.rs`),
+/// which every batch sets from `PatcherConfig::keep_game_behind`.
+pub const STAY_BEHIND: &str = "dodstudio_stay_behind";
 
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,

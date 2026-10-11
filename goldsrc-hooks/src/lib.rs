@@ -51,6 +51,8 @@
 //!   player being watched in HLTV with his team's camera icon (#304).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
+//! - `hlae_window`: `dodstudio_stay_behind`, the game window stays behind
+//!   the user's windows while a batch records.
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in

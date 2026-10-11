@@ -670,7 +670,7 @@ pub fn spawn_capture_engine(
             let (extra_args, early_lines, first_lines) = match runtime_batch.as_deref() {
                 Some(file) => (
                     "+exec dodstudio_helper.cfg".to_string(),
-                    crate::patch::runtime_batch::early_lines(),
+                    crate::patch::runtime_batch::early_lines(config.keep_game_behind),
                     crate::patch::runtime_batch::start_lines(file),
                 ),
                 None => {
