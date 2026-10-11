@@ -14,9 +14,14 @@ import { clockFloor, clockRound } from './time_format.js';
 import { refreshAfterTyping } from './input_refresh.js';
 import { statusColor as colorOfStatus } from './status_colors.js';
 import { escapeHtml } from './html.js';
+import { playersOf, matchesPlayer } from './detail_player_filter.js';
 
 let currentDemo = null;
 let currentDemoIdx = null;
+// The Player filter's pick (a name, '' for everyone), for a demo with no
+// single recorder (#247). Kept across demos; a demo without that player
+// shows everyone (detail_player_filter.js).
+let detailPlayer = '';
 // Getter supplied by main.js so "Generate All Previews" can aggregate selected
 // streaks across every loaded demo, not just the one currently displayed.
 let currentGetAllDemos = null;
@@ -378,6 +383,8 @@ function isVisibleStreak(demo, streak, minKills) {
   if (!demo || !streak) return false;
   if (demo.local_player_index !== null && demo.local_player_index !== undefined) {
     if (streak.player_index !== demo.local_player_index) return false;
+  } else if (!matchesPlayer(demo, streak, detailPlayer)) {
+    return false;
   }
   const threshold = minKills ?? parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
   return streak.kill_count >= threshold;
@@ -692,7 +699,34 @@ export function renderDetailView(demo, selectedDemoIdx) {
     });
   }
 
+  if (showPlayer) container.appendChild(playerFilterRow(demo, minKills));
   tableWrapper.appendChild(table);
   container.appendChild(tableWrapper);
+}
+
+/** The Player filter above an HLTV demo's table: everyone, or one player's
+ *  highlights, each with how many Min Kills keeps. */
+function playerFilterRow(demo, minKills) {
+  const players = playersOf(demo, minKills);
+  const row = document.createElement('div');
+  row.className = 'detail-player-filter-row';
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;';
+  const label = document.createElement('label');
+  label.htmlFor = 'detail-player-filter';
+  label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
+  const select = document.createElement('select');
+  select.id = 'detail-player-filter';
+  select.title = STRINGS.HIGHLIGHTS.PLAYER_FILTER_TITLE;
+  select.style.cssText = 'padding:3px 6px;font-size:12px;background:#1a1a1a;color:#fff;border:1px solid #444;border-radius:3px;max-width:260px;';
+  const total = players.reduce((n, p) => n + p.count, 0);
+  const all = new Option(STRINGS.HIGHLIGHTS.playerFilterAll(total), '');
+  select.append(all, ...players.map((p) => new Option(STRINGS.HIGHLIGHTS.playerFilterOption(p.name, p.count), p.name)));
+  select.value = players.some((p) => p.name === detailPlayer) ? detailPlayer : '';
+  select.addEventListener('change', (e) => {
+    detailPlayer = e.target.value || '';
+    renderDetailView(currentDemo, currentDemoIdx);
+  });
+  row.append(label, select);
+  return row;
 }
 
