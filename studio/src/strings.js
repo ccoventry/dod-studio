@@ -162,6 +162,10 @@ export const STRINGS = {
     // #247: an HLTV demo lists every player's highlights; a capture follows that player.
     COL_PLAYER: 'Player',
     COL_PLAYER_TITLE: 'Whose highlight. An HLTV demo lists every player\'s, and its capture keeps the camera on that player.',
+    PLAYER_FILTER_LABEL: 'Player:',
+    PLAYER_FILTER_TITLE: 'Show one player\'s highlights. An HLTV demo lists everyone\'s; the pick carries over to the next HLTV demo that has the same name.',
+    playerFilterAll: (n) => `All players (${n})`,
+    playerFilterOption: (name, n) => `${name} (${n})`,
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.
