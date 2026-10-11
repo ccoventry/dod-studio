@@ -18,7 +18,7 @@ Enforcement runs twice, independently: in `map_manager::scan_game_configs`'s rep
   - any line that **starts with** `alias `, or **contains** `exec` (only `tfc` is exempt, not DoD), `exit`, `_restart`, `writecfg`, `bind ` and a few more, or has a **word starting with** `kill`, `quit`, `_set`, `retry` or `connect `. Arguments count, so `echo got a kill` is dropped too.
 
   `exec` and `quit` used to have this tier to themselves, as `NOOP_EVERYWHERE_COMMANDS`, before the whole filter was read out of `hw.dll`. A config the engine execs at start-up is not filtered, so configs are not checked against it. Launch Preview carries neither list, and the hook's pipe (`ClientCmd`) skips the filter, which is why #434 moving the schedule into the hook would make this tier moot. The rules were read offline (pre-Anniversary in full, Anniversary rechecked); `native/examples/stufftext_probe.rs` writes a demo for the in-game check. Only the name stage is known to be case-insensitive; `cfg_scan` matches the line stage case-insensitively too, preferring a spare warning to a missed one. The stage that runs only when `cl_filterstuffcmd` is non-zero (default `0`) is not modelled.
-- **`NOOP_IN_INIT_COMMANDS`** (`mirv_movie_filename`) — reported as doing nothing: the pipeline overwrites it before anything reads it.
+- **`NOOP_IN_INIT_COMMANDS`** (`mirv_movie_filename`, `dodstudio_run_in_background`) — reported as doing nothing: the pipeline overwrites it before anything reads it (every batch turns `dodstudio_run_in_background` on).
 
 ## Adding a pipeline-internal command
 

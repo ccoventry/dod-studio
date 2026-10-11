@@ -26,6 +26,9 @@ mod messages;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod capture_engine;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub mod game_handoff;
+
 /// Maps a session crashed on with a known cause, for the next batch's warning
 /// (#207).
 #[cfg(not(target_arch = "wasm32"))]
