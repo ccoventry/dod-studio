@@ -159,6 +159,11 @@ pub struct CaptureStreak {
     /// before this field existed, which are not checked.
     #[serde(default)]
     pub source_key: Option<String>,
+    /// An HLTV demo's highlight: the camera follows no one by itself, so a
+    /// capture puts it on this player (`dodstudio_spec_target`, #247). False
+    /// for a POV demo, whose footage is its recorder's.
+    #[serde(default)]
+    pub spectated: bool,
 }
 
 impl CaptureStreak {
