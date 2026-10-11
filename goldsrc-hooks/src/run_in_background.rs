@@ -21,7 +21,7 @@
 //! 0.05`) went from 11.7x real time to 2.2x (PRE) or 1.5x (25th Anniversary)
 //! as soon as another window took the foreground. Recording looked unaffected
 //! only because HLAE brings the game window to the front while it records;
-//! `dodstudio_stay_behind` (`hlae_window.rs`) stops that, so the wait has to
+//! `dodstudio_stay_behind_while_capturing` (`hlae_window.rs`) stops that, so the wait has to
 //! go for the recording too.
 //!
 //! With the `jne` made a `jmp`, the wait never happens: the game runs as if

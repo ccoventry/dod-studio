@@ -217,9 +217,9 @@ pub const IN_EYE: &str = "spec_mode 4";
 /// `run_in_background.rs`), which every batch turns on.
 pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 
-/// The hook DLL's `dodstudio_stay_behind` (goldsrc-hooks `hlae_window.rs`),
+/// The hook DLL's `dodstudio_stay_behind_while_capturing` (goldsrc-hooks `hlae_window.rs`),
 /// which every batch sets from `PatcherConfig::keep_game_behind`.
-pub const STAY_BEHIND: &str = "dodstudio_stay_behind";
+pub const STAY_BEHIND: &str = "dodstudio_stay_behind_while_capturing";
 
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,

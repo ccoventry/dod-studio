@@ -441,13 +441,16 @@ mod tests {
             early_lines(true),
             [
                 "dodstudio_run_in_background 1",
-                "dodstudio_stay_behind 1",
+                "dodstudio_stay_behind_while_capturing 1",
                 "dodstudio_batch away"
             ]
         );
         assert_eq!(
             early_lines(false),
-            ["dodstudio_run_in_background 1", "dodstudio_stay_behind 0"]
+            [
+                "dodstudio_run_in_background 1",
+                "dodstudio_stay_behind_while_capturing 0"
+            ]
         );
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),

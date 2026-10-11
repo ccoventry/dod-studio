@@ -1,4 +1,4 @@
-//! `dodstudio_stay_behind`: keeps a background capture in the background.
+//! `dodstudio_stay_behind_while_capturing`: keeps a background capture in the background.
 //! With it on, HLAE no longer pulls the game window to the front when a
 //! recording starts, and a minimised game is put back behind the other
 //! windows instead, since a minimised game draws nothing (#434). Its own
@@ -40,7 +40,7 @@ use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering}
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
 
-pub const NAME: &str = console_name!("stay_behind");
+pub const NAME: &str = console_name!("stay_behind_while_capturing");
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 

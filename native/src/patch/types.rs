@@ -455,7 +455,7 @@ pub struct PatcherConfig {
     /// patching when the batch can't run that way (`patch::runtime_batch`).
     #[serde(default)]
     pub hook_runs_batch: bool,
-    /// The hook DLL's `dodstudio_stay_behind` for the batch: the game stays
+    /// The hook DLL's `dodstudio_stay_behind_while_capturing` for the batch: the game stays
     /// behind the user's windows. Off, it comes to the front while it records,
     /// so the user can watch. Full speed either way
     /// (`dodstudio_run_in_background`).
