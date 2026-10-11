@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Checks `detail_cache.rs`'s patterns against real `hw.dll` files.
 
-`detail_cache.rs` resets the three values `DT_SetRenderState` caches (the
-last detail texture bound on unit 2 and the last scale set). The unit test
-proves each offset sits after the instruction that reads it; only the
-binaries can prove:
+`detail_cache.rs` makes `DT_SetRenderState` skip its cache (the last detail
+texture bound on unit 2 and the last scale set) by turning two branches into
+plain jumps. The unit tests prove each offset sits on the instruction it
+names; only the binaries can prove:
 
   1. Each build's pattern matches exactly once in its own `hw.dll`, and not at
      all in the other build's.
@@ -17,6 +17,10 @@ binaries can prove:
   4. The function binds texture 0xDE1 (GL_TEXTURE_2D) and sets the texture
      matrix (`push 0x1702`, GL_TEXTURE) after the check -- what the cache
      lets it skip.
+  5. The `je` at `bind_jump_at` goes to the path that stores the texture
+     (`mov ecx, [esi+x]; mov [texture], ecx`), and the `jp` at
+     `scale_jump_at` goes to the path that stores the horizontal scale -- so
+     making both unconditional always takes the "different" side.
 
 Patterns and offsets are read out of `detail_cache.rs` rather than restated.
 
@@ -46,9 +50,10 @@ RUST = Path(__file__).resolve().parent.parent / "src" / "detail_cache.rs"
 
 def sites():
     text = RUST.read_text(encoding="utf-8")
-    out = [(m.group(1), m.group(2), int(m.group(3)), int(m.group(4)), int(m.group(5)))
+    out = [(m.group(1), m.group(2), *(int(m.group(i)) for i in range(3, 8)))
            for m in re.finditer(r'build: "([^"]+)".*?pattern: "([^"]+)".*?texture_at: (\d+).*?'
-                                r'hscale_at: (\d+).*?vscale_at: (\d+)', text, re.S)]
+                                r'hscale_at: (\d+).*?vscale_at: (\d+).*?bind_jump_at: (\d+).*?'
+                                r'scale_jump_at: (\d+)', text, re.S)]
     if len(out) != 2:
         sys.exit(f"expected 2 sites in {RUST}, found {len(out)}")
     return out
@@ -71,7 +76,7 @@ def check(path, all_sites):
     loader = image.find(b"\x68" + struct.pack("<I", base + text_at)) if text_at >= 0 else -1
     ok = True
     matched = []
-    for build, pattern, texture_at, hscale_at, vscale_at in all_sites:
+    for build, pattern, texture_at, hscale_at, vscale_at, bind_at, scale_at in all_sites:
         hits = [m.start() for m in compile_pattern(pattern).finditer(image)]
         if not hits:
             continue
@@ -93,6 +98,21 @@ def check(path, all_sites):
         after = image[at:at + 0x100]
         if b"\x68\xe1\x0d\x00\x00" not in after or b"\x68\x02\x17\x00\x00" not in after:
             print(f"  FAIL {build}: no glBindTexture(GL_TEXTURE_2D) / GL_TEXTURE matrix after the check")
+            ok = False
+            continue
+        bind_target = at + bind_at + 2 + struct.unpack("<b", image[at + bind_at + 1:at + bind_at + 2])[0]
+        scale_target = at + scale_at + 2 + struct.unpack("<b", image[at + scale_at + 1:at + scale_at + 2])[0]
+        # `mov ecx, [esi+x]; mov [texture], ecx` (8B 4E xx 89 0D <texture>).
+        stores_texture = (image[bind_target:bind_target + 2] == bytes([0x8B, 0x4E])
+                          and image[bind_target + 3:bind_target + 9]
+                          == bytes([0x89, 0x0D]) + struct.pack("<I", texture))
+        # `fstp [hscale]` (D9 1D) or `movss [hscale], xmm1` (F3 0F 11 0D).
+        fstp = bytes([0xD9, 0x1D]) + struct.pack("<I", h)
+        movss = bytes([0xF3, 0x0F, 0x11, 0x0D]) + struct.pack("<I", h)
+        stores_scale = any(image[k:k + 6] == fstp or image[k:k + 8] == movss
+                           for k in range(scale_target, scale_target + 16))
+        if image[at + bind_at] != 0x74 or image[at + scale_at] != 0x7A or not stores_texture or not stores_scale:
+            print(f"  FAIL {build}: the branches at +{at + bind_at:#x} / +{at + scale_at:#x} don't lead to the stores")
             ok = False
             continue
         print(f"  ok   {build}: DT_SetRenderState's cache at +{texture - base:#x} (texture), "
