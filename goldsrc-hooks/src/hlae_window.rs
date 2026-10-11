@@ -72,6 +72,12 @@ static WINDOW: AtomicUsize = AtomicUsize::new(0);
 
 /// How often the minimised check runs, in frames.
 const CHECK_EVERY: u32 = 30;
+/// Checks a minimised game that still has the foreground waits for Windows to
+/// hand it on, before it is shown again anyway (it draws nothing minimised).
+const FOREGROUND_WAIT_CHECKS: u32 = 4;
+/// Consecutive checks that found the game minimised and still in the
+/// foreground.
+static WAITED: AtomicU32 = AtomicU32::new(0);
 
 const SW_SHOWNOACTIVATE: i32 = 4;
 const SW_MINIMIZE: i32 = 6;
@@ -90,6 +96,7 @@ unsafe extern "system" {
     fn IsWindowVisible(hwnd: *mut c_void) -> i32;
     fn IsWindow(hwnd: *mut c_void) -> i32;
     fn IsIconic(hwnd: *mut c_void) -> i32;
+    fn GetForegroundWindow() -> *mut c_void;
     fn GetClassNameA(hwnd: *mut c_void, name: *mut u8, max: i32) -> i32;
     fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
     fn SetWindowPos(
@@ -201,8 +208,14 @@ fn window() -> Option<*mut c_void> {
 /// Shows a minimised game again behind every other window, without taking
 /// the foreground.
 fn put_behind(hwnd: *mut c_void) {
+    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+    send_to_bottom(hwnd);
+}
+
+/// Moves the game to the bottom of the window stack, leaving the foreground
+/// where it is.
+fn send_to_bottom(hwnd: *mut c_void) {
     unsafe {
-        ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         SetWindowPos(
             hwnd,
             HWND_BOTTOM,
@@ -215,12 +228,29 @@ fn put_behind(hwnd: *mut c_void) {
     }
 }
 
-/// Gets the game out of the way: minimising hands the foreground to the next
-/// window, and the next check puts the game back behind it.
+fn has_foreground(hwnd: *mut c_void) -> bool {
+    let foreground = unsafe { GetForegroundWindow() };
+    foreground == hwnd
+}
+
+/// Gets the game out of the way. Without the foreground it only goes to the
+/// bottom of the window stack. With it, minimising hands the foreground to the
+/// next window, and a later check puts the game back behind it.
+///
+/// Minimising a game that didn't have the foreground gave it the foreground:
+/// the restore right after it activated the window, and the game kept the
+/// keyboard for 4.3 s until the next step aside (POST, 2026-10-11, a
+/// foreground log).
 pub fn step_aside() {
-    if let Some(hwnd) = window() {
+    let Some(hwnd) = window() else {
+        return;
+    };
+    if has_foreground(hwnd) {
         unsafe { ShowWindow(hwnd, SW_MINIMIZE) };
-        report("stepped aside: the game runs behind the other windows");
+        report("stepped aside: minimised, so the foreground goes to the next window");
+    } else {
+        send_to_bottom(hwnd);
+        report("stepped aside: behind the other windows");
     }
 }
 
@@ -237,14 +267,22 @@ pub fn poll() {
     {
         return;
     }
-    if let Some(hwnd) = window()
-        && unsafe { IsIconic(hwnd) } != 0
-    {
-        put_behind(hwnd);
-        report(
-            "the game was minimised, which stops it drawing; it runs behind the other windows instead",
-        );
+    let Some(hwnd) = window() else {
+        return;
+    };
+    if unsafe { IsIconic(hwnd) } == 0 {
+        WAITED.store(0, Ordering::Relaxed);
+        return;
     }
+    // Shown again while it still has the foreground, it would keep it.
+    if has_foreground(hwnd) && WAITED.fetch_add(1, Ordering::Relaxed) < FOREGROUND_WAIT_CHECKS {
+        return;
+    }
+    WAITED.store(0, Ordering::Relaxed);
+    put_behind(hwnd);
+    report(
+        "the game was minimised, which stops it drawing; it runs behind the other windows instead",
+    );
 }
 
 #[cfg(test)]
