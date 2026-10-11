@@ -46,7 +46,7 @@ pub const NAME: &str = console_name!("batch");
 /// The batch file's first line.
 pub(crate) const HEADER: &str = "dodstudio-batch 1";
 
-const USAGE: &str = "start \"<batch file>\" | stop (bare: where it is)";
+const USAGE: &str = "start \"<batch file>\" | away | stop (bare: where it is)";
 
 /// How long a demo may take to load before the batch skips it.
 const LOAD_TIMEOUT: Duration = Duration::from_secs(180);
@@ -546,6 +546,16 @@ pub unsafe extern "C" fn command() {
             None => say(&format!("no batch running; usage: {NAME} {USAGE}")),
         },
         Some("start") => start(args[1..].join(" ").trim().trim_matches('"')),
+        // Studio sends this the moment the game takes commands, ahead of
+        // `start`, so the game leaves the user's screen and keyboard as
+        // early as it can.
+        Some("away") => {
+            if crate::run_in_background::wanted() {
+                crate::hlae_window::step_aside();
+            } else {
+                say("away needs dodstudio_run_in_background 1 first");
+            }
+        }
         Some("stop") => {
             if lock().take().is_some() {
                 run("mirv_recordmovie_stop");

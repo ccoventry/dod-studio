@@ -142,7 +142,10 @@ Anniversary `DemoPlayer.dll`.
 
 A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
-game; a 20-minute jump takes a few hundred frames. Anything after the time is
+game; a 20-minute jump takes a few hundred frames. The console commands it
+replays (a POV demo's key presses) are dropped and the keys let go on landing,
+since the engine would run them one a frame long after it (#702). Anything
+after the time is
 a command to run once the jump has landed:
 `dodstudio_seek_to 1335.3 dodstudio_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
@@ -182,7 +185,8 @@ while a seek is on its way. A demo that doesn't load in three minutes, stops,
 or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
 `stop` ends the batch; bare says where it is. With
 `dodstudio_run_in_background` on when it starts, the game steps aside behind
-the other windows. Source: `goldsrc-hooks/src/batch.rs`.
+the other windows; `away` does that on its own, and Studio sends it the
+moment the game takes commands, before the batch starts. Source: `goldsrc-hooks/src/batch.rs`.
 
 ### `dodstudio_review`
 

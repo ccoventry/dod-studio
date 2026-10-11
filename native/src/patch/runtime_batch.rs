@@ -244,16 +244,23 @@ pub fn batch_file(
     Ok(out.join("\n"))
 }
 
-/// The console lines that start `file`. The background setting goes first:
-/// the batch's own init commands set it too, but only once the first demo has
-/// loaded, and an unfocused game loads a demo several times slower without it
-/// (85 s for a 21-minute HLTV demo, measured). On, the batch also starts with
-/// the game out of the way (goldsrc-hooks `hlae_window.rs`).
-pub fn start_lines(file: &Path) -> Vec<String> {
+/// The console lines sent the moment the game takes commands: the background
+/// setting, then the game stepping out of the way (goldsrc-hooks
+/// `hlae_window.rs`). The batch's own init commands set the setting too, but
+/// only once the first demo has loaded, and an unfocused game loads a demo
+/// several times slower without it (85 s for a 21-minute HLTV demo,
+/// measured). Sent ahead of [`start_lines`]' settle, so the game holds the
+/// user's screen and mouse for as short a time as it can.
+pub fn early_lines() -> Vec<String> {
     vec![
         format!("{} 1", crate::patch::builder::RUN_IN_BACKGROUND),
-        format!("{BATCH_COMMAND} start \"{}\"", file.display()),
+        format!("{BATCH_COMMAND} away"),
     ]
+}
+
+/// The console line that starts `file`, once the game has settled.
+pub fn start_lines(file: &Path) -> Vec<String> {
+    vec![format!("{BATCH_COMMAND} start \"{}\"", file.display())]
 }
 
 #[cfg(test)]
@@ -421,13 +428,14 @@ mod tests {
     }
 
     #[test]
-    fn the_start_lines_turn_on_the_background_setting_and_quote_the_file() {
+    fn the_early_lines_step_aside_and_the_start_line_quotes_the_file() {
+        assert_eq!(
+            early_lines(),
+            ["dodstudio_run_in_background 1", "dodstudio_batch away"]
+        );
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),
-            [
-                "dodstudio_run_in_background 1",
-                "dodstudio_batch start \"C:/x y/b.txt\""
-            ]
+            ["dodstudio_batch start \"C:/x y/b.txt\""]
         );
     }
 }

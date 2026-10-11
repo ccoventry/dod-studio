@@ -667,18 +667,23 @@ pub fn spawn_capture_engine(
             // so its map loads after config.cfg/movie.cfg set the user's
             // brightness and gamma (`game_handoff`). A batch the hook runs
             // starts the same way, with its batch file instead of the primer.
-            let (extra_args, first_lines) = match runtime_batch.as_deref() {
+            let (extra_args, early_lines, first_lines) = match runtime_batch.as_deref() {
                 Some(file) => (
                     "+exec dodstudio_helper.cfg".to_string(),
+                    crate::patch::runtime_batch::early_lines(),
                     crate::patch::runtime_batch::start_lines(file),
                 ),
-                None => crate::game_handoff::first_demo_start(
-                    crate::shared::paths::PRIMER_DEMO_STEM,
-                    config.goldsrc_hooks_dll().is_some(),
-                ),
+                None => {
+                    let (args, lines) = crate::game_handoff::first_demo_start(
+                        crate::shared::paths::PRIMER_DEMO_STEM,
+                        config.goldsrc_hooks_dll().is_some(),
+                    );
+                    (args, Vec::new(), lines)
+                }
             };
-            let mut handoff = (!first_lines.is_empty())
-                .then(|| crate::game_handoff::GameHandoff::new(first_lines));
+            let mut handoff = (!first_lines.is_empty()).then(|| {
+                crate::game_handoff::GameHandoff::with_early(early_lines, first_lines)
+            });
 
             let dummy_path = active_export_dir.join("DOD_BATCH_DONE");
             let _ = std::fs::remove_dir_all(&dummy_path);
