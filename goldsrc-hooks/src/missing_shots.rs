@@ -40,7 +40,7 @@
 //!   event; one that arrives, either side of it, cancels the stand-in.
 //!
 //! Only while an HLTV demo plays (`IsSpectateOnly()`), and only with
-//! `dodstudio_spec_match_pov 1`. Off by default. `2` also logs every round it
+//! `ds_spec_match_pov 1`. Off by default. `2` also logs every round it
 //! plays, not only the first twenty.
 //!
 //! ## What it cannot do
@@ -234,7 +234,7 @@ const TRACKING_GAP_SECONDS: f64 = 0.5;
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
-/// `dodstudio_spec_match_pov 2`: a log line for every round, not only the first
+/// `ds_spec_match_pov 2`: a log line for every round, not only the first
 /// few. For checking a session against the offline probe.
 static EVERY_ROUND: AtomicBool = AtomicBool::new(false);
 /// What to do when there is no cvar to read: the fallback command's value.
@@ -672,7 +672,7 @@ fn stand_in(slot: usize, entity: &ClEntityS, weapon: Option<usize>, held: *mut M
     STANDING_IN.store(false, Ordering::Relaxed);
 }
 
-/// One `dodstudio_debug_status` line, once the switch has been on.
+/// One `ds_debug_status` line, once the switch has been on.
 pub fn status_line() -> Option<String> {
     let played = PLAYED.load(Ordering::Relaxed);
     (WANTED.load(Ordering::Relaxed) || played != 0).then(|| {

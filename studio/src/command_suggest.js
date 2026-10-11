@@ -19,7 +19,7 @@ export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
 export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'mirv_agr'];
-export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background'];
+export const NOOP_IN_INIT = ['mirv_movie_filename', 'ds_run_in_background'];
 // The game's filter for commands a demo carries (#679): cfg_scan's DEMO_FILTER_*.
 export const DEMO_FILTER_NAME_CONTAINS = ['bind', '_set', 'unbind', 'retry', 'quit', '_restart', 'motd_write',
   'motdfile', 'kill', 'exit', 'writecfg', 'cl_filterstuffcmd', 'unbindall'];
@@ -76,13 +76,22 @@ export function typedName(value, cursor = value.length) {
   return before.trimStart();
 }
 
+/** The hook's console prefix before #555 (native::patch::console_prefix). */
+export const OLD_PREFIX = 'dodstudio_';
+
+/** `typed` with the pre-#555 prefix swapped for `ds_`, so an old name lists
+ *  the name that replaced it and taking it fixes the line. */
+export function currentPrefix(typed) {
+  return typed.startsWith(OLD_PREFIX) ? `ds_${typed.slice(OLD_PREFIX.length)}` : typed;
+}
+
 /**
  * The names starting with `prefix` (case doesn't matter), an exact match
  * first, then alphabetical; at most `limit`. Each carries its `note` for
  * Initial (`scheduled: false`) or Scheduled Commands.
  */
 export function suggestions(prefix, { scheduled = false, limit = MAX_SUGGESTIONS } = {}) {
-  const p = String(prefix || '').toLowerCase();
+  const p = currentPrefix(String(prefix || '').toLowerCase());
   if (!p) return [];
   const hits = ALL.filter((e) => e.name.startsWith(p));
   hits.sort((a, b) => (b.name === p) - (a.name === p));

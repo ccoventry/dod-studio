@@ -1,4 +1,4 @@
-//! `dodstudio_schedule`: runs console commands at demo-player times, from the
+//! `ds_schedule`: runs console commands at demo-player times, from the
 //! hook instead of from frames patched into the demo (issue #434, step 3).
 //!
 //! ## Why
@@ -16,9 +16,9 @@
 //! ## The schedule file
 //!
 //! [`HEADER`] on the first line, then one command per line: the time on the
-//! demo player's clock (the one `dodstudio_seek_to` takes), a tab, the
+//! demo player's clock (the one `ds_seek_to` takes), a tab, the
 //! command. Blank lines and lines starting with `//` are skipped.
-//! `dodstudio_schedule load "<file>"` reads it; each command then runs once,
+//! `ds_schedule load "<file>"` reads it; each command then runs once,
 //! on the first frame at or past its time while a `viewdemo` demo plays. A
 //! jump back (a seek) re-arms the commands after the new time, so a replayed
 //! stretch runs them again; a jump forward runs the ones it passed, late.

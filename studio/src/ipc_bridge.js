@@ -979,7 +979,7 @@ export async function hdSetPython(path) {
     });
 }
 
-/** { command, report }: the newest list `dodstudio_debug_hd_misses` wrote to
+/** { command, report }: the newest list `ds_debug_hd_misses` wrote to
  *  the hook log (null when there is none yet), and the command. No toast: the HD page shows the error in
  *  place. */
 export async function hdMisses() {

@@ -29,8 +29,8 @@ const STATUS = {
   built_styles: ['plain'],
   known_styles: ['ultrasharp', 'remacri', 'siax', 'generalv3', 'x4plus', 'plain', 'blend'],
   default_style: 'ultrasharp',
-  enabled_cvar: 'dodstudio_hd_enabled',
-  style_cvar: 'dodstudio_hd_style',
+  enabled_cvar: 'ds_hd_enabled',
+  style_cvar: 'ds_hd_style',
   tools: {
     dir: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan',
     upscaler: 'C:/Users/me/AppData/Roaming/dod-studio/hd_tools/realesrgan/realesrgan-ncnn-vulkan.exe',
@@ -100,11 +100,11 @@ test('a status report fills the table, picks the built style and writes the cfg 
 
   // The default isn't built, so the built one is picked.
   await expect(page.locator('#hd-style-select')).toHaveValue('plain');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 1024');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 1024');
   await expect(page.locator('#hd-style-select option[value="ultrasharp"]')).toContainText('(default) (not built yet)');
 
   await page.selectOption('#hd-style-select', 'remacri');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024');
 
   await expect(page.locator('#hd-tools-text')).toContainText('Upscaler: none found');
   await expect(page.locator('#hd-realesrgan-line')).toHaveText(`set REALESRGAN=${STATUS.tools.upscaler}`);
@@ -219,7 +219,7 @@ test('the largest size goes into the build and the cfg lines, and says what it c
 
   await page.selectOption('#hd-build-cap', '2048');
   await expect(page.locator('#hd-build-cap-hint')).toContainText('detail textures');
-  await expect(page.locator('#hd-cfg-lines')).toHaveText('dodstudio_hd_enabled 1\ndodstudio_hd_style plain\ngl_max_size 2048');
+  await expect(page.locator('#hd-cfg-lines')).toHaveText('ds_hd_enabled 1\nds_hd_style plain\ngl_max_size 2048');
   await page.check('#hd-build-styles input[value="plain"]');
   await page.click('#hd-build-btn');
   const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args.request);
@@ -460,12 +460,12 @@ test('a partial style says what it is missing, in the table, beside the style an
     + ' Wherever it has none, the game shows the stock texture.';
   await expect(page.locator('#hd-style-coverage')).toHaveText(sentence);
   await expect(page.locator('#hd-cfg-lines')).toHaveText(
-    `dodstudio_hd_enabled 1\ndodstudio_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
+    `ds_hd_enabled 1\nds_hd_style remacri\ngl_max_size 1024\n// ${sentence}`);
 });
 
 /** native::hd::misses::MissesView, as serde sends it. */
 const MISSES = {
-  command: 'dodstudio_debug_hd_misses',
+  command: 'ds_debug_hd_misses',
   report: {
     log_file: 'C:/Users/me/AppData/Roaming/dod-studio/logs/dodstudio_goldsrc_hooks_20260924.log',
     date: '2026-09-24',
@@ -503,9 +503,9 @@ const MISSES = {
 };
 
 test('misses: nothing in the log says how to get a list, and names the command', async ({ page }) => {
-  await loadHarness(page, { status: STATUS, misses: { command: 'dodstudio_debug_hd_misses', report: null } });
+  await loadHarness(page, { status: STATUS, misses: { command: 'ds_debug_hd_misses', report: null } });
   await page.click('.nav-tab-btn[data-nav="hd-textures"]');
-  await expect(page.locator('#hd-misses-command')).toHaveText('dodstudio_debug_hd_misses');
+  await expect(page.locator('#hd-misses-command')).toHaveText('ds_debug_hd_misses');
   await expect(page.locator('#hd-misses-text')).toContainText('No list in the game');
   await expect(page.locator('#hd-misses-maps details')).toHaveCount(0);
 });

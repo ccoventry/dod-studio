@@ -28,8 +28,15 @@ describe('suggestions (#215)', () => {
     expect(one('cl_xhair_style')).toMatchObject({ source: 'game', kind: 'cvar' });
     expect(one('viewdemo')).toMatchObject({ source: 'game', kind: 'cmd' });
     expect(one('mirv_fov')).toMatchObject({ source: 'hlae' });
-    expect(one('dodstudio_spec_lock')).toMatchObject({ source: 'dodstudio' });
+    expect(one('ds_spec_lock')).toMatchObject({ source: 'dodstudio' });
     expect(one('gl_use_shaders')).toMatchObject({ builds: 'post' });
+  });
+
+  it('lists the ds_ name for a name typed with the old dodstudio_ prefix (#555)', () => {
+    expect(suggestions('dodstudio_spec_lo')[0].name).toBe('ds_spec_lock');
+    expect(suggestions('DodStudio_hide_scoreboard')[0].name).toBe('ds_hide_scoreboard');
+    expect(acceptSuggestion('dodstudio_spec_lock 1', 'ds_spec_lock')).toBe('ds_spec_lock 1');
+    expect(suggestions('dodstudio_').every((s) => s.name.startsWith('ds_'))).toBe(true);
   });
 
   it('stops at the limit', () => {
@@ -77,7 +84,7 @@ describe('droppedFromDemo (#679)', () => {
   });
 
   it('lets ordinary names through', () => {
-    for (const name of ['echo', 'sensitivity', 'mirv_fov', 'spec_autodirector', 'dodstudio_spec_lock']) {
+    for (const name of ['echo', 'sensitivity', 'mirv_fov', 'spec_autodirector', 'ds_spec_lock']) {
       expect(droppedFromDemo(name)).toBeNull();
     }
   });
@@ -130,7 +137,7 @@ describe('kept in step with the code', () => {
       else if (p.endsWith('.rs')) {
         // Code only, as console_names.py reads it: names.rs's doc comment shows the macro with made-up names.
         const code = fs.readFileSync(p, 'utf8').split('\n').filter((l) => !l.trimStart().startsWith('//')).join('\n');
-        for (const m of code.matchAll(/console_name!\("([a-z0-9_]+)"\)/g)) names.add(`dodstudio_${m[1]}`);
+        for (const m of code.matchAll(/console_name!\("([a-z0-9_]+)"\)/g)) names.add(`ds_${m[1]}`);
       }
     });
     walk(path.join(repo, 'goldsrc-hooks', 'src'));

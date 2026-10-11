@@ -21,7 +21,7 @@ pub struct HighlightKill {
     pub frame_index: usize,
     /// Seconds from the start of the recording.
     pub real_secs: f32,
-    /// Seconds on the `viewdemo` bar (what `dodstudio_seek_to` takes).
+    /// Seconds on the `viewdemo` bar (what `ds_seek_to` takes).
     pub viewdemo_secs: f32,
     pub weapon: Weapon,
 }

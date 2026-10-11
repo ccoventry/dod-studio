@@ -1,9 +1,9 @@
-//! `dodstudio_review`: plays every highlight Studio queued, one after another,
+//! `ds_review`: plays every highlight Studio queued, one after another,
 //! and sends what the user makes of each back to Studio (issue #623).
 //!
 //! ## The flow
 //!
-//! Studio writes the queue to a file and sends `dodstudio_review start
+//! Studio writes the queue to a file and sends `ds_review start
 //! "<file>"` over the game's pipe (#413). For each highlight the review loads
 //! its demo with `viewdemo` (unless it is the one already in the player),
 //! waits for the whole file to be read, seeks to [`LEAD`] seconds before the
@@ -725,7 +725,7 @@ fn rest_of_line(from: i32) -> String {
 
 const USAGE: &str = "start \"<queue file>\" | yes | no | replay | next | back | range <from> <to> | note <text> | stop";
 
-/// `dodstudio_review <what>`.
+/// `ds_review <what>`.
 pub unsafe extern "C" fn command() {
     let sub = rest_of_line(1);
     let mut words = sub.split_whitespace();

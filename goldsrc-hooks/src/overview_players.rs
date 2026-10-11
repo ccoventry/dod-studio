@@ -1,4 +1,4 @@
-//! `dodstudio_hud_map_players`: which players get an icon on DoD's overview
+//! `ds_hud_map_players`: which players get an icon on DoD's overview
 //! map (issue #304).
 //!
 //! ## What the game does
@@ -262,7 +262,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, once the setting has left 0.
+/// One line for `ds_debug_status`, once the setting has left 0.
 pub fn status_line() -> Option<String> {
     let mode = MODE.load(Ordering::Relaxed);
     (INSTALLED_BASE.load(Ordering::Relaxed) != 0 || mode != GAME)

@@ -267,11 +267,11 @@ It logs to `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, and
 
 **Batch end without Studio.** If a batch's `BATCH_COMPLETE` marker goes by and no Studio is reading the events pipe five seconds later (Studio was closed mid-batch), the game quits itself instead of sitting there (issue #545). A connected Studio still ends the game as before.
 
-**In-game window.** `dodstudio_panel` opens DoD Studio's own window inside the game, with Playback, Demos, Highlights, Console, Settings, Commands and Studio tabs. It reads the analyzer cache for the Highlights tab. The game launches with `-addons` so the hook's own main menu can load from `dod_addon`. See `docs/dodstudio_commands.md`.
+**In-game window.** `ds_panel` opens DoD Studio's own window inside the game, with Playback, Demos, Highlights, Console, Settings, Commands and Studio tabs. It reads the analyzer cache for the Highlights tab. The game launches with `-addons` so the hook's own main menu can load from `dod_addon`. See `docs/dodstudio_commands.md`.
 
 ### 5.2 Console commands
 
-The DLL is how the app and a person reach into a running game: kill-feed, HUD and spectator controls, HD textures, demo seeking, and Studio's own in-game window. Every name starts `dodstudio_` and none is saved into `config.cfg`. The names, defaults and what each does are in [`docs/dodstudio_commands.md`](dodstudio_commands.md), which is what the code registers on `dev`. Which of them work on which game build is in section 10.
+The DLL is how the app and a person reach into a running game: kill-feed, HUD and spectator controls, HD textures, demo seeking, and Studio's own in-game window. Every name starts `ds_` and none is saved into `config.cfg`. The names, defaults and what each does are in [`docs/dodstudio_commands.md`](dodstudio_commands.md), which is what the code registers on `dev`. Which of them work on which game build is in section 10.
 
 Four fixes have no console name and are on by default: the **temp-entity crash fix** (DoD's own NULL-sprite crash, `GOLDSRC_HOOKS_TEMPENT_FIX=0` turns it off), the **hull-trace guard** (the #384 crash after a `playdemo` map change, both builds, `GOLDSRC_HOOKS_HULL_TRACE_GUARD=0` turns it off), and the **sprite-blend upload fix** (`gl_spriteblend 0` at the first sprite load no longer darkens sprites for the session, #467, both builds, `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0` turns it off), and the **first-demo pmove guard** (a session's first demo sending `InitHUD` in its first packets no longer crashes while DoD places the map's models, #546, both builds, `GOLDSRC_HOOKS_PMOVE_GUARD=0` turns it off).
 
@@ -389,7 +389,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 | Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, HLTV text, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | Both builds | also the ESC fix that keeps GameUI windows open (#396) and the hull-trace guard (#393) |
 | PRE only | decal clear, HD textures, first-load lighting fix (#397) |
-| Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
+| Anniversary only | world shaders (`ds_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
 
 Open PRs close most of the rest of the gap: #398 (decals, `ex_interp`) and #399 (HD textures).

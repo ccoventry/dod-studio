@@ -160,7 +160,7 @@ pub struct CaptureStreak {
     #[serde(default)]
     pub source_key: Option<String>,
     /// An HLTV demo's highlight: the camera follows no one by itself, so a
-    /// capture puts it on this player (`dodstudio_spec_target`, #247). False
+    /// capture puts it on this player (`ds_spec_target`, #247). False
     /// for a POV demo, whose footage is its recorder's.
     #[serde(default)]
     pub spectated: bool,
@@ -700,7 +700,7 @@ impl PatcherConfig {
         // Say either way. "Optional" used to mean this resolved to nothing and
         // the launch proceeded in silence, which is indistinguishable from the
         // DLL loading and doing nothing -- the same log file stays empty and
-        // the dodstudio_* commands are equally absent. That cost a live-testing
+        // the ds_* commands are equally absent. That cost a live-testing
         // session to diagnose, so the absent case is now a warning naming every
         // path that was tried.
         match &goldsrc_hooks_dll_str {
@@ -710,7 +710,7 @@ impl PatcherConfig {
             }
             None => log::warn!(
                 "goldsrc-hooks: no dodstudio_goldsrc_hooks.dll found, so the sound/animation fixes and the \
-                 dodstudio_* console commands will be absent this session. Tried: override={:?}, \
+                 ds_* console commands will be absent this session. Tried: override={:?}, \
                  bundled default={:?}, legacy spot beside hlae.exe={:?}. In a dev build only the \
                  override is ever present -- set Studio -> Configuration -> Paths -> GoldSrc Hooks DLL.",
                 self.goldsrc_hooks_dll_path,

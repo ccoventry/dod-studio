@@ -1,4 +1,4 @@
-//! `dodstudio_objectives` — where DoD 1.3 draws the objective (territory flag)
+//! `ds_objectives` — where DoD 1.3 draws the objective (territory flag)
 //! icons and the objective timer beside them.
 //!
 //! Both sit in the top-left corner, and both move down the screen while the DoD

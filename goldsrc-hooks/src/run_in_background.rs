@@ -1,4 +1,4 @@
-//! `dodstudio_run_in_background`: the game runs at full speed while another
+//! `ds_run_in_background`: the game runs at full speed while another
 //! window has the foreground, so a capture batch doesn't need the screen.
 //!
 //! ## What the engine does

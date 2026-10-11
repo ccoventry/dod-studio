@@ -16,7 +16,7 @@
 //! | minimap (`_cl_minimap 2`) | -- | cached y + `round(54 * H / 480)` (`client+0x22ac1`) |
 //!
 //! So at 1280x716 the bar ends at 95 and the objectives start at 81: they draw
-//! over it. With `dodstudio_hide_spectator_bars 1` the bar is gone but the
+//! over it. With `ds_hide_spectator_bars 1` the bar is gone but the
 //! gap stays.
 //!
 //! ## What this does instead
@@ -25,12 +25,12 @@
 //! demo, moved down by the bar's real height, or by nothing while the bar is
 //! hidden:
 //!
-//! - the objective icons and timer, through `dodstudio_objectives`' detours;
-//! - the kill feed, through `dodstudio_deathmsg offset`'s detour, except while
+//! - the objective icons and timer, through `ds_objectives`' detours;
+//! - the kill feed, through `ds_deathmsg offset`'s detour, except while
 //!   the minimap is up: the game then puts the feed under the minimap itself
 //!   (`round(2 * H / 480)` below its bottom edge), and moving the minimap
 //!   moves it;
-//! - the minimap, by shifting its cached rect the way `dodstudio_overviewmap`
+//! - the minimap, by shifting its cached rect the way `ds_overviewmap`
 //!   writes it.
 //!
 //! A value typed with any of those three commands still wins. `_cl_minimap 1`

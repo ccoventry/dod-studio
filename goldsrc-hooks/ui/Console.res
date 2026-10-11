@@ -54,7 +54,7 @@
 		"enabled"		"1"
 		"labelText"		"Use this tab as the console (the console key opens it)"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_console_in_panel 1"
-		"helptext"		"Turns on dodstudio_console_in_panel: the console key opens this tab."
+		"Command"		"engine ds_console_in_panel 1"
+		"helptext"		"Turns on ds_console_in_panel: the console key opens this tab."
 	}
 }

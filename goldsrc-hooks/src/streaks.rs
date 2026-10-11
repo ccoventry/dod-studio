@@ -18,7 +18,7 @@
 //! ## Times
 //!
 //! A streak's time is its first kill's on the `viewdemo` bar, the units
-//! `dodstudio_seek_to` takes (`analysis`' `viewdemo_offset`).
+//! `ds_seek_to` takes (`analysis`' `viewdemo_offset`).
 
 // Only the 32-bit build has the window; a host check still compiles this.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
@@ -48,7 +48,7 @@ pub struct Streak {
     /// before: "K98, (+0:04) K98, (+0:12) Grenade", the Capture page's
     /// Details column (`CaptureStreak::update_visuals`).
     pub details: String,
-    /// The player's number (entity index, what `dodstudio_spec_target`
+    /// The player's number (entity index, what `ds_spec_target`
     /// takes), when they were still in the game at the demo's end.
     pub player_number: Option<u8>,
 }

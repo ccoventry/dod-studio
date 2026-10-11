@@ -201,15 +201,15 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
 /// The hook DLL's camera follow for HLTV demos (goldsrc-hooks
 /// `spectator_follow.rs`, #206): the command that puts the camera on a
 /// player by number, and the setting that keeps it there through their death.
-pub const SPEC_TARGET: &str = "dodstudio_spec_target";
-pub const SPEC_LOCK: &str = "dodstudio_spec_lock";
+pub const SPEC_TARGET: &str = "ds_spec_target";
+pub const SPEC_LOCK: &str = "ds_spec_lock";
 /// The game's first-person spectator mode (HL's `OBS_IN_EYE`): an HLTV demo
 /// otherwise plays in a chase camera behind the player.
 pub const IN_EYE: &str = "spec_mode 4";
 
-/// The hook DLL's `dodstudio_run_in_background` (goldsrc-hooks
+/// The hook DLL's `ds_run_in_background` (goldsrc-hooks
 /// `run_in_background.rs`), which every batch turns on.
-pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
+pub const RUN_IN_BACKGROUND: &str = "ds_run_in_background";
 
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,

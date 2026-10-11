@@ -1,6 +1,6 @@
 # The crosshair: hiding it, and matching it while spectating
 
-`dodstudio_hide_crosshair` and the crosshair half of `dodstudio_spec_match_pov`.
+`ds_hide_crosshair` and the crosshair half of `ds_spec_match_pov`.
 Split out of `docs/goldsrc_hud_suppression.md` (which holds the shared
 patch-instead-of-edit-a-file pattern and the per-frame re-apply loop, there §4
 and §1). Same method and verification: offline analysis of DoD 1.3's
@@ -13,7 +13,7 @@ is needed at all is the fork §1 had to map.
 
 ---
 
-## 1. `dodstudio_hide_crosshair`
+## 1. `ds_hide_crosshair`
 
 ### Why the stock cvar is not enough
 
@@ -53,7 +53,7 @@ Issue #265's idea — write `CHudBase::Draw`'s address into vftable slot 3 — i
 one dword and cheaper. It also needs the vftable's address at runtime, which
 means resolving RTTI in the loaded module or signature-matching the constructor
 that stores it. Patching the function needs neither. The general
-`dodstudio_hudelement` command in #265 (shipped as `dodstudio_hide_hudelement`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
+`dodstudio_hudelement` command in #265 (shipped as `ds_hide_hudelement`, see `docs/goldsrc_hud_elements.md`) is still worth having; this is not it and
 does not block it.
 
 ### Both the POV and the spectator crosshair
@@ -84,12 +84,12 @@ is.
 
 ---
 
-## 2. The spectator crosshair (`dodstudio_spec_match_pov`)
+## 2. The spectator crosshair (`ds_spec_match_pov`)
 
 > This had a cvar of its own, `dodstudio_match_pov_crosshair`, until
-> 2026-10-01. It is now one of the things `dodstudio_spec_match_pov` turns
+> 2026-10-01. It is now one of the things `ds_spec_match_pov` turns
 > on. Where the text below says `dodstudio_match_pov_crosshair`, read
-> `dodstudio_spec_match_pov`.
+> `ds_spec_match_pov`.
 
 The other half of §1's finding. Mapping the fork to prove the hide covered both
 crosshairs also showed *why* they never look alike:
@@ -162,7 +162,7 @@ stock rect alone rather than guessing.
 The spectator branch draws its crosshair whenever the camera is in a player's
 eyes. The player's own view does not: `ShouldDrawCrossHair` (`client+0x2d0e0`)
 hides it while the gun is lowered and for weapons that have none. With
-`dodstudio_spec_match_pov 1` the spectated view hides it in the same states
+`ds_spec_match_pov 1` the spectated view hides it in the same states
 (#310).
 
 **The reference is the game being played, not a POV demo.** The two differ.
@@ -237,7 +237,7 @@ is the one frame at a change.
 
 ### It loses to §1, by construction
 
-`dodstudio_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
+`ds_hide_crosshair` stubs `Draw`'s prologue, so neither branch runs. This
 patches instructions *inside* a function that is then never reached, so hiding
 wins with no interlock written anywhere.
 

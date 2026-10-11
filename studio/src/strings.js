@@ -1284,6 +1284,14 @@ export const STRINGS = {
       const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
       return isPlainSource ? `${command} — ${reason}` : `${command} — ${reason} (${source})`;
     },
+    // #555: the hook's console names went from dodstudio_ to ds_.
+    RENAMED_TITLE: 'These DoD Studio commands have new names:',
+    RENAMED_ADVICE:
+      "DoD Studio's in-game commands now start with ds_ instead of dodstudio_. The old names do nothing in the game any more, so change these lines to the new name. DoD Studio never changes your config files.",
+    renamedRow: (oldName, newName, source) => {
+      const isPlainSource = source === 'Initial Commands' || source === 'Scheduled Commands';
+      return isPlainSource ? `${oldName} → ${newName}` : `${oldName} → ${newName} (${source})`;
+    },
     // #679: the engine's filter for commands a demo carries.
     FILTERED_TITLE: 'The game drops these commands without running them:',
     FILTERED_ADVICE:
@@ -1721,7 +1729,7 @@ export const STRINGS = {
       blend: () => `${def.percent}% ${def.a}, ${100 - def.percent}% ${def.b}`,
     })[def.kind](),
     STYLE_NEEDS_MODEL: ' (needs its model)',
-    // The misses view: what dodstudio_debug_hd_misses last wrote to the hook log.
+    // The misses view: what ds_debug_hd_misses last wrote to the hook log.
     MISSES_TITLE: 'Textures that kept their original',
     MISSES_BUTTON: "Read the game's log",
     MISSES_READING: 'Reading...',

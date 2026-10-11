@@ -8,7 +8,7 @@
 //! Every life with a kill is listed; a Min kills box narrows the list. A POV
 //! demo lists only the recording player's (the footage follows no one else).
 //! An HLTV demo lists everyone's, a Player box narrows them, and Go also puts
-//! the camera on the streak's player (`dodstudio_spec_target`).
+//! the camera on the streak's player (`ds_spec_target`).
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};

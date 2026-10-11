@@ -182,7 +182,7 @@ pub fn poll() {
     };
 }
 
-/// The `dodstudio_debug_status` line, or `None` when it was never installed.
+/// The `ds_debug_status` line, or `None` when it was never installed.
 pub fn status_line() -> Option<String> {
     INSTALLED.load(Ordering::Relaxed).then(|| {
         format!(

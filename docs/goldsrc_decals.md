@@ -1,6 +1,6 @@
 # Clearing GoldSrc decals at runtime
 
-How `dodstudio_clear_decals` works, and why the pipeline's existing decal
+How `ds_clear_decals` works, and why the pipeline's existing decal
 hygiene had to be so much more elaborate. Answers the R&D question in #290.
 
 > **Status 2026-10:** shipped in PR #297 (`goldsrc-hooks/src/decals.rs`).
@@ -77,7 +77,7 @@ the surfaces are being rebuilt in the same breath. Mid-demo it is a use of
 freed structure contents.
 
 What makes the engine's own *remove* functions safe is that they unlink first.
-So `dodstudio_clear_decals` is that loop with the flag test dropped:
+So `ds_clear_decals` is that loop with the flag test dropped:
 
 ```rust
 for slot in pool {
@@ -139,7 +139,7 @@ that invalidates the decal's cache entry as well as detaching it.
 
 ## 6. What this does not replace yet
 
-`dodstudio_clear_decals` is a console command that clears on demand. The capture
+`ds_clear_decals` is a console command that clears on demand. The capture
 pipeline still does its own thing, because wiring the two together is a
 separate decision:
 
@@ -149,5 +149,5 @@ separate decision:
 - but the flush burst is live-proven and this is not, so nothing was switched
   over on the strength of a static analysis.
 
-The obvious first live test is: load a demo, shoot a wall, `dodstudio_clear_decals`,
+The obvious first live test is: load a demo, shoot a wall, `ds_clear_decals`,
 and see whether the holes go and the game keeps running.

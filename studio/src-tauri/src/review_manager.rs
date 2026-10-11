@@ -2,7 +2,7 @@
 //! after another, and passes each answer it sends back to the frontend.
 //!
 //! The queue goes in a file (`review_queue.tsv` in the app data folder); the
-//! game is told to read it with `dodstudio_review start "<file>"` over its
+//! game is told to read it with `ds_review start "<file>"` over its
 //! command pipe (#413). When no game is running, DoD Studio starts one as the
 //! Launch Game button does and waits for its pipe; a running game started
 //! with other launch settings is not reused (#666). The answers come back as
@@ -41,7 +41,7 @@ pub struct ReviewStarted {
 /// The console line that starts a review of `queue`.
 fn start_line(queue: &std::path::Path) -> String {
     format!(
-        "dodstudio_review start \"{}\"",
+        "ds_review start \"{}\"",
         queue.to_string_lossy().replace('\\', "/")
     )
 }
@@ -195,7 +195,7 @@ pub async fn stop_highlight_review() -> Result<(), String> {
     let pid = *LISTENING.lock().unwrap_or_else(|e| e.into_inner());
     let Some(pid) = pid else { return Ok(()) };
     crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        game_remote::send_console_commands(pid, &["dodstudio_review stop".to_string()])
+        game_remote::send_console_commands(pid, &["ds_review stop".to_string()])
             .map(|_| ())
             .map_err(crate::messages::failed_to_send_review)
     }))
@@ -213,7 +213,7 @@ mod tests {
         ));
         assert_eq!(
             line,
-            "dodstudio_review start \"C:/Users/me/AppData/Roaming/dod-studio/review_queue.tsv\""
+            "ds_review start \"C:/Users/me/AppData/Roaming/dod-studio/review_queue.tsv\""
         );
         assert!(game_remote::check_command(&line).is_ok());
     }

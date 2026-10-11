@@ -216,7 +216,7 @@ pub async fn hd_set_upscaler(path: Option<String>) -> Result<(), String> {
     .await
 }
 
-/// The newest list `dodstudio_debug_hd_misses` wrote to the hook log (none
+/// The newest list `ds_debug_hd_misses` wrote to the hook log (none
 /// when no log has one yet), and the command itself.
 #[tauri::command]
 pub async fn hd_misses() -> Result<misses::MissesView, String> {

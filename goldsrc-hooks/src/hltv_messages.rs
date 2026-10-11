@@ -1,4 +1,4 @@
-//! `dodstudio_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
+//! `ds_hide_hltv_messages`: hide the text an HLTV proxy puts on screen
 //! during playback -- "You're watching HLTV. Visit www.valvesoftware.com",
 //! and any line a proxy operator sends with `msg` -- without patching the
 //! demo (issue #30).
@@ -35,7 +35,7 @@
 //! And a message already on screen when the cvar is turned on stays until it
 //! fades on its own; only the ones after that are dropped.
 //!
-//! Default 0, like every other `dodstudio_` switch.
+//! Default 0, like every other `ds_` switch.
 
 use std::sync::atomic::{AtomicPtr, AtomicU32, Ordering};
 
@@ -107,7 +107,7 @@ pub fn should_drop(buf: &[u8]) -> bool {
     true
 }
 
-/// A `dodstudio_debug_status` line, or `None` while off and never used.
+/// A `ds_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let on = enabled();
     let dropped = DROPPED.load(Ordering::Relaxed);

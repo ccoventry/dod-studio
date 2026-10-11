@@ -1,4 +1,4 @@
-# `dodstudio_hide_hudelement` and the CHudDoD* element notes
+# `ds_hide_hudelement` and the CHudDoD* element notes
 
 Split out of `docs/goldsrc_hud_suppression.md` (the shared pattern, voice
 muting and the per-frame re-apply loop stay there; the crosshair is in
@@ -11,7 +11,7 @@ Same method as the rest: offline `client.dll` analysis, plus
 
 ---
 
-## `dodstudio_hide_hudelement` -- the general case
+## `ds_hide_hudelement` -- the general case
 
 The voice mute, the crosshair hide and the spectator crosshair each patch one function for one purpose, and the crosshair hide's
 own module doc says why it is not this: patching a function needs no vftable
@@ -97,7 +97,7 @@ cvar or hook:
   no calls. The overview map is rendered some other way entirely; not yet
   found, plausibly VGUI2 like the scoreboard. *(Update: the map's placement is
   cached geometry in `.data`, not drawn by a `Draw` override, and
-  `dodstudio_overviewmap` (`goldsrc-hooks/src/overview_map.rs`, see
+  `ds_overviewmap` (`goldsrc-hooks/src/overview_map.rs`, see
   `docs/goldsrc_client_dll_survey.md` §5) moves and resizes it. Hiding it
   outright is still not done.)*
 - `CMortarHud::Draw` (`client+0x3e720`) calls one `gHUD` helper that checks a
