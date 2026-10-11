@@ -49,6 +49,8 @@ DEMO PLAYBACK
       Play the last demo again.
   dodstudio_review yes|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
+  dodstudio_schedule load "<file>"|clear
+      Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
   dodstudio_clear_decals
       Clear every decal (bullet holes, blood, sprays).
   dodstudio_ex_interp_max <ms>

@@ -152,6 +152,20 @@ No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
 
+### `dodstudio_schedule`
+
+R&D for #434 (the hook runs a batch's commands instead of frames patched into
+the demo). `load "<file>"` reads a schedule: `dodstudio-schedule 1` on the
+first line, then `<seconds>`, a tab and a command per line, the seconds on the
+demo player's clock (the one `dodstudio_seek_to` takes). While a `viewdemo`
+demo plays, each command runs once through the engine's `pfnClientCmd`, on
+the first frame at or past its time; a seek back re-arms the commands after
+it, and a jump forward runs the ones it passed, late. The hook log has each
+command's due time and how late it ran, and, while a schedule is loaded, every
+`[dod-studio]` marker `echo`ed from any route on the same clock. `clear` drops
+the schedule; bare says how far it got. Commands run this way skip the demo
+command filter (#679). Source: `goldsrc-hooks/src/schedule.rs`.
+
 ### `dodstudio_review`
 
 DoD Studio's **Review highlights** (#623): plays each queued highlight at

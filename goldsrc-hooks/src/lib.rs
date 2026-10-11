@@ -205,6 +205,7 @@ mod position;
 mod remote;
 mod review;
 mod scan;
+mod schedule;
 mod scoreboard;
 mod server_query;
 mod spectator_bars;
