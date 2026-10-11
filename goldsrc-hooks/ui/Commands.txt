@@ -99,3 +99,5 @@ DEBUG
       Log who the spectator camera follows.
   dodstudio_debug_log_texture_loads 0/1
       Log every HD texture load.
+  dodstudio_debug_keep_detail_cache 0/1
+      Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
