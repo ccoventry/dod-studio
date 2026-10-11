@@ -1631,3 +1631,40 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
             .any(|c| c.starts_with("dodstudio_spec"))
     );
 }
+
+#[test]
+fn the_batch_estimate_bills_each_highlight_and_never_under_counts_a_merge() {
+    let mut config = PatcherConfig::default();
+    config.resolution_width = 100;
+    config.resolution_height = 100;
+    config.capture_fps = 10;
+    let streak = |start, end| CaptureStreak {
+        start_tick: start,
+        end_tick: end,
+        source_demo: "demo1.dem".to_string(),
+        target_player: None,
+        kill_count: 3,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 0,
+        kills: Vec::new(),
+        start_index: 0,
+        end_index: 2,
+        total_demo_frames: 3000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated: false,
+        status: Default::default(),
+    };
+    // Two seconds each at 100 ticks a second.
+    let streaks = vec![streak(1000, 1200), streak(1100, 1300)];
+    let one = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 2.0);
+    assert_eq!(estimate_batch_capture_bytes(&streaks, &config), 2 * one);
+    // The two overlap and merge into one three-second block, which needs less.
+    let merged = crate::sys::disk::calculate_raw_sequence_bytes(100, 100, 10, 3.0);
+    assert!(merged <= estimate_batch_capture_bytes(&streaks, &config));
+    assert_eq!(estimate_batch_capture_bytes(&[], &config), 0);
+}

@@ -73,7 +73,7 @@ fn unique(take_folders: Vec<String>) -> Vec<String> {
 
 /// The configured Destinations folders: the only places a take is ever
 /// deleted from.
-fn capture_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
+pub(crate) fn capture_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
     settings
         .inner
         .lock()

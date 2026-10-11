@@ -12,6 +12,7 @@ import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { getTakeCleanupSetting, setTakeCleanupSetting } from './take_cleanup.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -146,7 +147,9 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_clips_after_batch: finishClipsAfterBatch,
       finish_codec_obs: finishCodecObs,
       finish_codec_video: finishCodecVideo,
-      finish_codec_frames: finishCodecFrames
+      finish_codec_frames: finishCodecFrames,
+      // "After a clip is finished" (#644).
+      ...getTakeCleanupSetting()
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -343,4 +346,5 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     // Only a value the select offers — assigning an unknown one blanks it.
     if (el && value && [...el.options].some((o) => o.value === value)) el.value = value;
   });
+  setTakeCleanupSetting(settings.take_after_finish, settings.take_delete_only_when_space_needed);
 }

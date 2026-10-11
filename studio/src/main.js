@@ -16,6 +16,7 @@ import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsSta
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
+import { initTakeCleanup } from './take_cleanup.js';
 import { initAuditorPane } from './auditor_pane.js';
 import { refreshPacketEntityLimit } from './packet_entity_limit.js';
 import { initAuditorTabs } from './auditor_tabs.js';
@@ -504,6 +505,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     ),
     onSettingsChange: persistAppSettings,
   });
+  // "After a clip is finished" (#644): the setting, and the backend's reports.
+  initTakeCleanup({ onSettingsChange: persistAppSettings });
 
   // Render-batch crash-recovery prompt — checked once on startup, same
   // pattern as dev's StartupState::PendingRenderRecovery. Render is now a

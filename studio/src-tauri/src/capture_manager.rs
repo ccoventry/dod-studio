@@ -1055,6 +1055,49 @@ pub async fn start_capture_batch_impl(
             return;
         }
 
+        // #644: with "Only when space is needed", finished takes make room on
+        // the capture drives before build_batch_queue routes blocks to them.
+        // The Capture footer shows each step.
+        if crate::take_cleanup_manager::makes_room(&app_handle_clone) {
+            let need = native::hlcr::take_cleanup::SpaceNeed {
+                targets: patcher_config.capture_directories.clone(),
+                needed_bytes: native::patch::estimate_batch_capture_bytes(
+                    &raw_streaks,
+                    &patcher_config,
+                ),
+                headroom_bytes: native::sys::disk::MIN_DRIVE_HEADROOM_BYTES,
+            };
+            crate::take_cleanup_manager::make_room(
+                &app_handle_clone,
+                crate::take_cleanup_manager::RoomFor::Capture,
+                need,
+                Some(&cancel_token_arc),
+                |line, done, total| {
+                    let _ = app_handle_clone.emit(
+                        "capture_status",
+                        serde_json::json!({
+                            "running": true,
+                            "status": line,
+                            "index": done,
+                            "total": total
+                        }),
+                    );
+                },
+            );
+            if cancel_token_arc.load(std::sync::atomic::Ordering::Relaxed) {
+                let mut running = is_running_arc.lock().unwrap_or_else(|p| p.into_inner());
+                *running = false;
+                let _ = app_handle_clone.emit(
+                    "capture_status",
+                    serde_json::json!({
+                        "running": false,
+                        "status": crate::messages::CAPTURE_CANCELLED_WHILE_MAKING_ROOM
+                    }),
+                );
+                return;
+            }
+        }
+
         let (patch_jobs, drive_headroom) = match build_batch_queue(
             raw_streaks,
             &patcher_config,
