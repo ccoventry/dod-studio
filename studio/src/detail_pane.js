@@ -710,7 +710,8 @@ function playerFilterRow(demo, minKills) {
   const players = playersOf(demo, minKills);
   const row = document.createElement('div');
   row.className = 'detail-player-filter-row';
-  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;';
+  // Sticky: an HLTV table runs to 150+ rows, and the filter is what shortens it.
+  row.style.cssText = 'display:flex;align-items:center;gap:6px;margin:4px 0 6px;padding:4px 0;position:sticky;top:0;z-index:2;background:#1e1e1e;';
   const label = document.createElement('label');
   label.htmlFor = 'detail-player-filter';
   label.textContent = STRINGS.HIGHLIGHTS.PLAYER_FILTER_LABEL;
