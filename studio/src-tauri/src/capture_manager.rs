@@ -303,6 +303,10 @@ pub struct SerializedStreak {
     /// projects saved before it existed.
     #[serde(default)]
     pub source_key: Option<String>,
+    /// `CaptureStreak::spectated`. Absent from projects saved before it
+    /// existed: such a demo is scanned again (queue_scan.js).
+    #[serde(default)]
+    pub spectated: bool,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -327,6 +331,7 @@ impl From<SerializedStreak> for CaptureStreak {
             match_start_tick: s.match_start_tick,
             status: native::patch::types::HighlightStatus::Pending,
             source_key: s.source_key,
+            spectated: s.spectated,
         }
     }
 }
@@ -1664,6 +1669,7 @@ impl From<CaptureStreak> for SerializedStreak {
             victims: Vec::new(),
             victim_factions: Vec::new(),
             source_key: c.source_key,
+            spectated: c.spectated,
         }
     }
 }

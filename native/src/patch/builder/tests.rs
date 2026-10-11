@@ -66,6 +66,7 @@ fn test_build_batch_queue_merging() {
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
             source_key: None,
+            spectated: false,
             status: Default::default(),
         },
         CaptureStreak {
@@ -86,6 +87,7 @@ fn test_build_batch_queue_merging() {
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
             source_key: None,
+            spectated: false,
             status: Default::default(),
         },
         CaptureStreak {
@@ -106,6 +108,7 @@ fn test_build_batch_queue_merging() {
             frame_times: std::sync::Arc::new(Vec::new()),
             match_start_tick: None,
             source_key: None,
+            spectated: false,
             status: Default::default(),
         },
     ];
@@ -207,6 +210,7 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
         source_key: None,
+        spectated: false,
         status: Default::default(),
     };
     build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
@@ -254,6 +258,7 @@ fn every_injected_command_fits_a_console_command_frame_and_passes_the_demo_filte
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
         source_key: None,
+        spectated: false,
         status: Default::default(),
     }];
 
@@ -445,6 +450,7 @@ fn streak_with_kills(start_tick: i32, end_tick: i32, kill_frames: &[i32]) -> Cap
         frame_times: std::sync::Arc::new(Vec::new()),
         match_start_tick: None,
         source_key: None,
+        spectated: false,
         status: Default::default(),
     }
 }
@@ -1546,4 +1552,82 @@ fn dropping_the_workspace_guard_keeps_demos_when_a_local_copy_was_requested() {
     assert!(dod.join("dodstudio_chain_01.dem").exists());
 
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// An HLTV highlight puts the camera on its player at the start and at every
+/// drop back to real time, and locks it there; a POV highlight does neither
+/// (#247).
+#[test]
+fn an_hltv_highlight_points_the_camera_at_its_player() {
+    let mut config = PatcherConfig::default();
+    let temp_game_path = std::env::temp_dir().join("dod_test_mock_hltv_247");
+    std::fs::create_dir_all(temp_game_path.join("dod")).expect("Failed to create dummy dod dir");
+    config.game_path = temp_game_path.to_string_lossy().to_string();
+    config.primary_media_dir = Some(temp_game_path.clone());
+    let streak = |start: i32, spectated: bool| CaptureStreak {
+        start_tick: start,
+        end_tick: start,
+        source_demo: "demo1.dem".to_string(),
+        target_player: Some("Player".to_string()),
+        kill_count: 1,
+        timeline_string: String::new(),
+        duration_string: String::new(),
+        player_index: 6,
+        kills: vec![(start, start as f32 / 100.0, "Kar".to_string())],
+        start_index: 0,
+        end_index: 0,
+        total_demo_frames: 20_000,
+        demo_fps: 100.0,
+        viewdemo_times: Vec::new(),
+        frame_times: std::sync::Arc::new(Vec::new()),
+        match_start_tick: None,
+        source_key: None,
+        spectated,
+        status: Default::default(),
+    };
+
+    let (jobs, _) = build_batch_queue(
+        vec![streak(5000, true), streak(12_000, true)],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    let targets = job
+        .scheduled_commands
+        .iter()
+        .filter(|(_, c)| c == "dodstudio_spec_target 7")
+        .count();
+    // The start, and the drop back to real time before each of the two clips.
+    assert_eq!(targets, 3, "{:?}", job.scheduled_commands);
+    assert!(
+        job.init_commands
+            .iter()
+            .any(|c| c == "dodstudio_spec_lock 1")
+    );
+    // First person, each time the camera is pointed.
+    let in_eye = job
+        .scheduled_commands
+        .iter()
+        .filter(|(_, c)| c == "spec_mode 4")
+        .count();
+    assert_eq!(in_eye, 3, "{:?}", job.scheduled_commands);
+
+    let (jobs, _) = build_batch_queue(
+        vec![streak(5000, false)],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+    let job = jobs.iter().find(|j| !j.blocks.is_empty()).unwrap();
+    assert!(
+        !job.scheduled_commands
+            .iter()
+            .any(|(_, c)| c.starts_with("dodstudio_spec") || c.starts_with("spec_mode"))
+    );
+    assert!(
+        !job.init_commands
+            .iter()
+            .any(|c| c.starts_with("dodstudio_spec"))
+    );
 }

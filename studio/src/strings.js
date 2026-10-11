@@ -159,6 +159,9 @@ export const STRINGS = {
     COL_SEL: 'Sel',
     COL_KILL_RANGE: 'Kill Range',
     COL_KILLS: 'Kills',
+    // #247: an HLTV demo lists every player's highlights; a capture follows that player.
+    COL_PLAYER: 'Player',
+    COL_PLAYER_TITLE: 'Whose highlight. An HLTV demo lists every player\'s, and its capture keeps the camera on that player.',
     COL_TIME: 'Time',
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.

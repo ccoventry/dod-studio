@@ -120,10 +120,12 @@ export function createQueueScan({
     try {
       // Demos already queued and unchanged on disk are skipped, not
       // re-parsed; ones from an older project (no file_key, no map_name:
-      // saved before clip names, #441, no teams: #445, or no map list: #217)
-      // are scanned.
+      // saved before clip names, #441, no teams: #445, no map list: #217, or
+      // highlights without `spectated`: saved before an HLTV demo listed
+      // everyone's, #247) are scanned.
       const known = getDemos()
-        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined)
+        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined
+          && (d.streaks || []).every((s) => s.spectated !== undefined))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the

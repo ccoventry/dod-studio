@@ -254,6 +254,7 @@ mod tests {
             status: Default::default(),
             match_start_tick: None,
             source_key: None,
+            spectated: false,
         }
     }
 

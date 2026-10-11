@@ -202,6 +202,15 @@ pub fn final_init_commands(config: &PatcherConfig) -> Vec<String> {
 /// `run_in_background.rs`), which every batch turns on.
 pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 
+/// The hook DLL's camera follow for HLTV demos (goldsrc-hooks
+/// `spectator_follow.rs`, #206): the command that puts the camera on a
+/// player by number, and the setting that keeps it there through their death.
+pub const SPEC_TARGET: &str = "dodstudio_spec_target";
+pub const SPEC_LOCK: &str = "dodstudio_spec_lock";
+/// The game's first-person spectator mode (HL's `OBS_IN_EYE`): an HLTV demo
+/// otherwise plays in a chase camera behind the player.
+pub const IN_EYE: &str = "spec_mode 4";
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
@@ -473,6 +482,15 @@ pub fn build_batch_queue(
 
         let total_demo_frames = streaks.first().map(|s| s.total_demo_frames).unwrap_or(0);
 
+        // An HLTV demo's camera follows no one by itself (#247): every clip
+        // puts it on the highlight's player, by number (slot + 1), and the
+        // lock keeps it there through their death. A job is one player's
+        // highlights (grouped by demo and player above).
+        let spectate = streaks
+            .first()
+            .filter(|s| s.spectated)
+            .map(|s| format!("{SPEC_TARGET} {}", s.player_index + 1));
+
         // One svc_director STUFFTEXT event per streak — label mirrors the highlight table:
         // "#<row>: <kill_count> kills: <timeline_string>"
         let mut director_events: Vec<(i32, String)> = streaks
@@ -694,6 +712,10 @@ pub fn build_batch_queue(
         // Initialize Engine Speed after Initial Load Delay
         let initial_delay_ticks = (config.initial_delay * demo_fps) as i32;
         scheduled_commands.push((initial_delay_ticks, "sys_fast_forward".to_string()));
+        if let Some(target) = &spectate {
+            scheduled_commands.push((initial_delay_ticks, IN_EYE.to_string()));
+            scheduled_commands.push((initial_delay_ticks, target.clone()));
+        }
 
         // One marker per demo, at its very first scheduled tick — the engine's
         // own live signal that this demo has started playing. Read back by
@@ -931,6 +953,13 @@ pub fn build_batch_queue(
             let resumes_from_fast_forward = !chained_to_previous.get(i).copied().unwrap_or(false);
 
             if resumes_from_fast_forward {
+                // Back on the player as playback drops to real time: the
+                // camera may have been moved while fast-forwarding.
+                if let Some(target) = &spectate {
+                    scheduled_commands.push((s_speed_tick, IN_EYE.to_string()));
+                    scheduled_commands.push((s_speed_tick, target.clone()));
+                }
+
                 // At Speed Flush (Stage 1)
                 scheduled_commands.push((s_speed_tick, "sys_normal_speed".to_string()));
                 scheduled_commands.push((s_speed_tick + 1, "sys_normal_speed".to_string()));
@@ -1038,7 +1067,10 @@ pub fn build_batch_queue(
         // Sort scheduled_commands by tick
         scheduled_commands.sort_by_key(|(tick, _)| *tick);
 
-        let final_init_commands = final_init_commands(config);
+        let mut final_init_commands = final_init_commands(config);
+        if spectate.is_some() {
+            final_init_commands.push(format!("{SPEC_LOCK} 1"));
+        }
 
         jobs.push(PatchJob {
             source_demo: source_demo.to_string(),

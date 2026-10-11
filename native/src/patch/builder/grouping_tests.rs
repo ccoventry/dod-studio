@@ -28,6 +28,7 @@ fn test_build_batch_queue_grouping() {
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
         source_key: None,
+        spectated: false,
     };
 
     let streak2 = CaptureStreak {
@@ -49,6 +50,7 @@ fn test_build_batch_queue_grouping() {
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
         source_key: None,
+        spectated: false,
     };
 
     let streak3 = CaptureStreak {
@@ -70,6 +72,7 @@ fn test_build_batch_queue_grouping() {
         status: crate::patch::types::HighlightStatus::None,
         match_start_tick: None,
         source_key: None,
+        spectated: false,
     };
 
     let raw_streaks = vec![streak1, streak2, streak3];

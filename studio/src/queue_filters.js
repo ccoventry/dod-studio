@@ -14,9 +14,9 @@
  * which also fires on an ordinary player-recorded demo whenever an HLTV
  * caster was merely spectating the live match (server-broadcast messages
  * every connected client picks up), so it's not a reliable "no single
- * owner" signal. True HLTV proxy files are already rejected earlier in the
- * pipeline (scan_demo_for_highlights), so None here means "no resolvable
- * owner", not "is_pov".
+ * owner" signal. The scanner leaves the index null for a demo with no single
+ * recorder (an HLTV demo, or a POV demo whose recorder can't be told: #247,
+ * D18), and then every player's streaks count.
  */
 export function recordingPlayerStreaks(demo) {
   const streaks = demo.streaks || [];

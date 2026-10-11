@@ -362,9 +362,10 @@ window.addEventListener("DOMContentLoaded", () => {
  *     streaks — everyone in the server. Gated on `local_player_index` rather
  *     than `demo.is_pov`, because is_pov fires on any demo containing
  *     SvcHltv/SvcDirector messages, which a normal player recording also picks
- *     up when an HLTV caster happens to be spectating. `scan_demo_for_highlights`
- *     already rejects true HLTV proxy files, so a missing index means "no
- *     resolvable owner", not "spectator demo".
+ *     up when an HLTV caster happens to be spectating. The scanner leaves the
+ *     index null when the demo has no single recorder (an HLTV demo, or a POV
+ *     demo whose recorder can't be told: #247, D18), and then every player's
+ *     rows show.
  *  2. **Min Kills.**
  *
  * Select All uses this too. When it did not, it checked highlights belonging to
@@ -439,6 +440,10 @@ export function renderDetailView(demo, selectedDemoIdx) {
     return;
   }
 
+  // A demo with no single recorder (an HLTV demo) lists every player's
+  // highlights, so each row says whose it is (#247, D18).
+  const showPlayer = demo.local_player_index === null || demo.local_player_index === undefined;
+
   const tableWrapper = document.createElement('div');
   tableWrapper.className = 'table-wrapper';
   const table = document.createElement('table');
@@ -450,6 +455,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <th>${STRINGS.HIGHLIGHTS.COL_SEL} <input type="checkbox" id="detail-select-all-cb" title="${STRINGS.HIGHLIGHTS.SELECT_ALL_CB_TITLE}" /></th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILL_RANGE}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_KILLS}</th>
+        ${showPlayer ? `<th title="${STRINGS.HIGHLIGHTS.COL_PLAYER_TITLE}">${STRINGS.HIGHLIGHTS.COL_PLAYER}</th>` : ''}
         <th>${STRINGS.HIGHLIGHTS.COL_TIME}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_DUR}</th>
         <th>${STRINGS.HIGHLIGHTS.COL_STATUS}</th>
@@ -541,6 +547,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         </div>
       </td>
       <td style="padding: 8px; font-weight: bold;">${streak.kill_count}</td>
+      ${showPlayer ? `<td class="streak-player" style="padding: 8px;">${escapeHtml(streak.target_player || '')}</td>` : ''}
       <td style="padding: 8px;">${timeStr}</td>
       <td style="padding: 8px;">${STRINGS.HIGHLIGHTS.secondsSuffix(durSecs)}</td>
       <td style="padding: 8px;">
