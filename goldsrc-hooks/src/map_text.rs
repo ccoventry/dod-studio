@@ -6,7 +6,9 @@
 //! Measured offline across the whole local demo library
 //! (`analysis/examples/map_text_probe.rs`): every map-authored line arrives as
 //! the **`HudText` user message**. `svc_temp_entity`/`TE_TEXTMESSAGE` and
-//! `svc_centerprint` carry nothing at all. Three kinds were seen:
+//! `svc_centerprint` carry none of it. (`TE_TEXTMESSAGE` does carry server
+//! plugins' HUD messages in the newer match demos -- KTP's ready lists --
+//! which `server_hud_text` hides, #677.) Three kinds were seen:
 //!
 //! - `dod_score_ent`'s `message` -- the round result (`MAP_ALLIED_VICTORY2`),
 //!   at the frames the win music plays;
@@ -72,7 +74,10 @@ pub(crate) const MESSAGE: &str = "HudText";
 /// Entities whose `message` is on-screen text. `ambient_generic` uses the same
 /// key for a `.wav` path, which is why the classname decides rather than the
 /// key. `game_text` is here for completeness: no demo in the library carries
-/// one on `HudText`, but a string it declares is still the map's own.
+/// one on `HudText`, but a string it declares is still the map's own. It
+/// arrives as a `TE_TEXTMESSAGE`, whose `HudText` the engine hands to every
+/// record rather than the newest, so this module's hook can't drop it; the
+/// list still tells `server_hud_text` to leave it alone (#677).
 const TEXT_CLASSES: [&[u8]; 3] = [b"dod_score_ent", b"env_message", b"game_text"];
 
 /// Largest entity lump read. The biggest in a 249-map install is ~440 KB
@@ -207,6 +212,26 @@ fn is_declared(declared: &BTreeSet<Vec<u8>>, payload: &[u8]) -> bool {
     !token.is_empty() && declared.contains(token)
 }
 
+/// Whether a `TE_TEXTMESSAGE`'s text is the declared `message`. The engine
+/// turns a keyvalue's `\n` into a newline when the game allocates the string
+/// (`ED_NewString`), so the declared side is unescaped first; whitespace at
+/// either end is ignored, as everywhere here.
+fn same_text(declared: &[u8], sent: &[u8]) -> bool {
+    let mut unescaped = Vec::with_capacity(declared.len());
+    let mut i = 0;
+    while i < declared.len() {
+        if declared[i] == b'\\' && declared.get(i + 1) == Some(&b'n') {
+            unescaped.push(b'\n');
+            i += 2;
+        } else {
+            unescaped.push(declared[i]);
+            i += 1;
+        }
+    }
+    let sent = trim(sent);
+    !sent.is_empty() && trim(&unescaped) == sent
+}
+
 /// `maps/dod_anzio.bsp` -> `dod_anzio`.
 fn short_name(level: &str) -> &str {
     let base = level.rsplit(['/', '\\']).next().unwrap_or(level);
@@ -314,6 +339,15 @@ pub(crate) fn hide(payload: &[u8]) -> bool {
     hidden
 }
 
+/// Whether `text`, a `TE_TEXTMESSAGE`'s resolved text, is one the loaded map
+/// declares -- a `game_text`'s line -- so `server_hud_text` leaves it alone.
+/// The strings are read while either cvar is on.
+pub(crate) fn declares_sent_text(text: &[u8]) -> bool {
+    TEXT.read()
+        .map(|t| t.strings.iter().any(|declared| same_text(declared, text)))
+        .unwrap_or(false)
+}
+
 /// Our `HudText` handler: drops the message when [`hide`] says so, and
 /// otherwise hands the game the same buffer, untouched.
 unsafe extern "C" fn hooked_hud_text(name: *const c_char, size: i32, buf: *mut c_void) -> i32 {
@@ -367,8 +401,10 @@ pub fn poll() {
         };
     }
     // Off leaves any installed record in place: it forwards everything while
-    // WANTED is false, and there is no unhook to ask the engine for.
-    if !wanted {
+    // WANTED is false, and there is no unhook to ask the engine for. The
+    // map's strings are still read while dodstudio_hide_server_hud_text is
+    // on, which keeps a map's own game_text (#677).
+    if !wanted && !crate::server_hud_text::wanted() {
         return;
     }
     let Some(level) = level_name() else {
@@ -378,7 +414,7 @@ pub fn poll() {
     if LOADED_LEVEL.swap(hash, Ordering::Relaxed) != hash {
         load(&level);
     }
-    if !crate::msglog::watching(MESSAGE) {
+    if wanted && !crate::msglog::watching(MESSAGE) {
         install_hook();
     }
 }
@@ -580,6 +616,25 @@ mod tests {
             None
         );
         assert_eq!(entity_lump_bounds(&[0; 8]), None);
+    }
+
+    #[test]
+    fn a_game_texts_line_matches_what_the_engine_sends() {
+        assert!(same_text(b"Allies win!", b"Allies win!"));
+        assert!(same_text(b"  Allies win! ", b"Allies win!\n"));
+        // `\n` in the keyvalue is a newline by the time it is sent.
+        assert!(same_text(
+            br"Round over\nAllies win",
+            b"Round over\nAllies win"
+        ));
+        assert!(!same_text(
+            br"Round over\nAllies win",
+            br"Round over\nAllies win"
+        ));
+        assert!(!same_text(b"Allies win!", b"Axis win!"));
+        assert!(!same_text(b"", b""));
+        // A lone backslash at the end is kept as it is.
+        assert!(same_text(br"C:\", br"C:\"));
     }
 
     #[test]

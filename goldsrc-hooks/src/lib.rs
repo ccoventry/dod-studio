@@ -140,6 +140,16 @@
 //! - `spectator_text`: the `dodstudio_hide_spectator_text` cvar -- hide the
 //!   camera mode's name and the green "Press DUCK for Spectator Menu" when
 //!   the view becomes a spectator camera (#677).
+//! - `engine_center_print`: the `hw.dll` half of `dodstudio_hide_center_text`
+//!   -- the engine's own `svc_centerprint`, per engine build (#677).
+//! - `server_hud_text`: the `dodstudio_hide_server_hud_text` cvar -- hide
+//!   server plugins' coloured HUD messages (`TE_TEXTMESSAGE`) by pointing one
+//!   `hw.dll` call at a filter, per engine build (#677).
+//! - `vgui_menus`: the `dodstudio_hide_menus` cvar -- drop the team menu,
+//!   class menu and MOTD a POV demo replays, during demos only (#677).
+//! - `hw_call_site`: one `call rel32` in `hw.dll` found per engine build and
+//!   rewritten while a setting is on (`engine_center_print`,
+//!   `server_hud_text`).
 //! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -187,6 +197,7 @@ mod demo_seek;
 mod detour;
 mod engine;
 mod engine_buttons;
+mod engine_center_print;
 mod events;
 mod ex_interp;
 mod fire_sounds;
@@ -197,6 +208,7 @@ mod hide_asset;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
+mod hw_call_site;
 mod lightmap_gamma;
 mod map_text;
 mod missing_shots;
@@ -220,6 +232,7 @@ mod run_in_background;
 mod scan;
 mod schedule;
 mod scoreboard;
+mod server_hud_text;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
@@ -234,6 +247,7 @@ mod streaks;
 mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
+mod vgui_menus;
 mod voice;
 mod window_layout;
 mod world_shaders;

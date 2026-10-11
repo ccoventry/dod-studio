@@ -1,6 +1,11 @@
-//! `dodstudio_hide_center_text`: drop every `TextMsg` the server sends to the
-//! middle of the screen (`HUD_PRINTCENTER`, destination 4) -- match plugins'
-//! `print_center` countdowns and notices among them (#677).
+//! `dodstudio_hide_center_text`: hide all the text the server prints in the
+//! middle of the screen (#677) -- every `TextMsg` to `HUD_PRINTCENTER`
+//! (destination 4), such as match plugins' `print_center` countdowns and
+//! notices, and the engine's own `svc_centerprint` (`engine_center_print`).
+//!
+//! One setting for both, because the server picks the channel, not the movie
+//! maker: a plugin's centre line arrives on whichever one its author used, and
+//! looks the same on screen either way.
 //!
 //! ## Where it comes from
 //!
@@ -23,7 +28,8 @@
 //!   anything, uses it has not been looked into.
 //! - The clan-match countdown: `ClanTimer` posts to the same object every
 //!   frame without a `TextMsg`; `dodstudio_hide_clan_text` covers it.
-//! - The engine's own `svc_centerprint`, which `client.dll` never sees.
+//! - The engine's own `svc_centerprint`, which `client.dll` never sees:
+//!   `engine_center_print` patches `hw.dll` for that, under this same cvar.
 //!
 //! ## Mechanism
 //!
@@ -31,7 +37,8 @@
 //! list on every level, so its filter asks [`hide`] rather than a second
 //! handler taking turns with it. Turning the cvar on also ends the line on
 //! screen at that moment (`clan_text::end_center_line`), so a notice isn't
-//! left up for its last 4 s.
+//! left up for its last 4 s. The `hw.dll` patch is checked every frame once
+//! the cvar has been on, and put back at 0.
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 
@@ -51,6 +58,13 @@ static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static WANTED: AtomicBool = AtomicBool::new(false);
 /// Messages hidden this session.
 static HIDDEN: AtomicU32 = AtomicU32::new(0);
+/// Set the first time the cvar is on, so a session that never asks for it
+/// never scans `hw.dll`.
+static TOUCHED: AtomicBool = AtomicBool::new(false);
+/// Whether `svc_centerprint` is hidden right now.
+static ENGINE_HIDDEN: AtomicBool = AtomicBool::new(false);
+/// Whether the `hw.dll` patch's failure has been reported, so it is said once.
+static ENGINE_COMPLAINED: AtomicBool = AtomicBool::new(false);
 
 /// Called by `commands.rs` once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
@@ -95,6 +109,12 @@ pub fn poll() {
         return;
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
+    if wanted {
+        TOUCHED.store(true, Ordering::Relaxed);
+    }
+    if TOUCHED.load(Ordering::Relaxed) {
+        poll_engine(wanted);
+    }
     if wanted == WANTED.swap(wanted, Ordering::Relaxed) {
         return;
     }
@@ -118,6 +138,36 @@ pub fn poll() {
     };
 }
 
+/// Puts `svc_centerprint`'s `hw.dll` patch in the wanted state: a byte
+/// compare unless it changes.
+fn poll_engine(wanted: bool) {
+    match crate::engine_center_print::apply(wanted) {
+        Ok(wrote) => {
+            ENGINE_COMPLAINED.store(false, Ordering::Relaxed);
+            ENGINE_HIDDEN.store(wanted, Ordering::Relaxed);
+            if wrote {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "center_text: the engine's svc_centerprint {} ({} hw.dll)",
+                        if wanted { "hidden" } else { "shows again" },
+                        crate::engine_center_print::build_name().unwrap_or("unknown")
+                    ))
+                };
+            }
+        }
+        Err(why) => {
+            ENGINE_HIDDEN.store(false, Ordering::Relaxed);
+            if wanted && !ENGINE_COMPLAINED.swap(true, Ordering::Relaxed) {
+                unsafe {
+                    crate::debug::report(&format!(
+                        "center_text: svc_centerprint not hidden -- {why}"
+                    ))
+                };
+            }
+        }
+    }
+}
+
 /// A `dodstudio_debug_status` line, or `None` while off and never used.
 pub fn status_line() -> Option<String> {
     let wanted = WANTED.load(Ordering::Relaxed);
@@ -125,8 +175,15 @@ pub fn status_line() -> Option<String> {
     if !wanted && hidden == 0 {
         return None;
     }
+    let engine = if !wanted {
+        ""
+    } else if ENGINE_HIDDEN.load(Ordering::Relaxed) {
+        "; the engine's svc_centerprint is hidden too"
+    } else {
+        "; the engine's svc_centerprint is NOT hidden (see the log)"
+    };
     Some(format!(
-        "{NAME} = {} -- {hidden} centre-text message(s) hidden this session",
+        "{NAME} = {} -- {hidden} TextMsg centre line(s) hidden this session{engine}",
         u8::from(wanted)
     ))
 }
