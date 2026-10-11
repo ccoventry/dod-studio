@@ -580,6 +580,7 @@ pub fn poll() {
     crate::overview_players::poll();
     crate::overview_marker::poll();
     crate::run_in_background::poll();
+    crate::screen_effects::poll();
     crate::studio_panel::poll();
     crate::review::poll();
     crate::schedule::poll();
@@ -1574,6 +1575,12 @@ pub fn install() {
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
     }
+    if let (Some(flash), Some(shake)) = (
+        register(crate::screen_effects::FLASH_NAME, "0"),
+        register(crate::screen_effects::SHAKE_NAME, "0"),
+    ) {
+        crate::screen_effects::set_cvars(flash, shake);
+    }
     let texture_hires_log_cvar = register(
         TEXTURE_HIRES_LOG_NAME,
         bit(texture_hires::LOG_TEXTURE_LOADS.load(Ordering::Relaxed)),
@@ -1727,6 +1734,8 @@ mod tests {
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
             crate::run_in_background::NAME,
+            crate::screen_effects::FLASH_NAME,
+            crate::screen_effects::SHAKE_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
         }

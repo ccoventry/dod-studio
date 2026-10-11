@@ -15,6 +15,10 @@ HUD
       Stop a POV demo's recorded TAB presses showing the scoreboard.
   dodstudio_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
+  dodstudio_hide_head_hit_flash 0/1
+      POV demos: no red screen when the player is hit in the head.
+  dodstudio_hide_screen_shake 0/1
+      POV demos: no screen shake from grenades going off nearby.
   dodstudio_hide_hand_signals 0/1
       Replace players' hand-signal animations.
   dodstudio_mute_voice_commands 0/1
