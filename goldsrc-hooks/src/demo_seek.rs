@@ -390,6 +390,15 @@ pub struct Clock {
 
 /// The demo player's clock, or `None` with no demo player (or one of a
 /// build this was not checked against).
+/// The demo player's `IDemoPlayer` interface, for checking a GameUI dialog
+/// points at the same player (#663).
+pub fn player_object() -> Option<*mut std::ffi::c_void> {
+    #[cfg(target_arch = "x86")]
+    return player::find().ok().map(|(p, _)| p);
+    #[cfg(not(target_arch = "x86"))]
+    None
+}
+
 pub fn clock() -> Option<Clock> {
     #[cfg(target_arch = "x86")]
     return player::clock();
@@ -464,7 +473,7 @@ mod player {
 
     /// The `IDemoPlayer` singleton, once `DemoPlayer.dll` is loaded and is a
     /// build in [`BUILDS`].
-    fn find() -> Result<(*mut c_void, &'static Build), String> {
+    pub(super) fn find() -> Result<(*mut c_void, &'static Build), String> {
         let module = unsafe { GetModuleHandleA(c"DemoPlayer.dll".as_ptr() as *const u8) };
         if module.is_null() {
             return Err("DemoPlayer.dll is not loaded; start the demo with viewdemo".into());
