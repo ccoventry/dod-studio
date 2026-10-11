@@ -52,6 +52,11 @@ struct Anchor {
     viewdemo: f64,
 }
 
+/// How many of the nearest kills place a tick (see `Clock::seconds`).
+const NEAREST_ANCHORS: usize = 7;
+/// How far, in playback seconds, a kill may be from the tick to count.
+const NEAR_SECONDS: f64 = 30.0;
+
 /// Places ticks of one demo on the `viewdemo` clock.
 struct Clock<'a> {
     anchors: Vec<Anchor>,
@@ -68,6 +73,31 @@ impl Clock<'_> {
     }
 
     fn seconds(&self, tick: i32) -> f64 {
+        // With frame times, the demo clock is playback time plus an offset,
+        // and each kill gives one reading of it. One kill's reading is off by
+        // up to a network frame (the kill's server time is its packet's), so
+        // the median of the nearest few is used.
+        if let Some(at) = self.playback(tick) {
+            let mut near: Vec<(i64, f64)> = self
+                .anchors
+                .iter()
+                .filter_map(|a| {
+                    let played = self.playback(a.tick)?;
+                    // Only kills close by: the offset can step at a pause.
+                    ((played - at).abs() <= NEAR_SECONDS).then(|| {
+                        let distance = (i64::from(a.tick) - i64::from(tick)).abs();
+                        (distance, a.viewdemo - played)
+                    })
+                })
+                .collect();
+            if !near.is_empty() {
+                near.sort_by_key(|&(distance, _)| distance);
+                near.truncate(NEAREST_ANCHORS);
+                let mut offsets: Vec<f64> = near.iter().map(|&(_, o)| o).collect();
+                offsets.sort_by(f64::total_cmp);
+                return (at + offsets[offsets.len() / 2]).max(0.0);
+            }
+        }
         let anchor = self
             .anchors
             .iter()
