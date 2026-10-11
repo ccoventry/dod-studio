@@ -140,8 +140,8 @@ ever been seen to make it draw:
 
 ### `vgui2print` is narrower than its name suggests
 
-`CHudVGUI2Print` has three real callers, but only one goes through the
-vtable slot this element hides:
+`CHudVGUI2Print` has two queueing methods and a drawing method. Only the
+queued text goes through the vtable slot this element hides:
 
 - `CHudDoDCommon` (key `Dod_mg_reload` -- "Deploy your machine gun to
   Reload!") calls a *queueing* method (`client+0x3a990`) that only writes
@@ -149,6 +149,17 @@ vtable slot this element hides:
   are drawn later, when `CHudVGUI2Print::Draw` itself runs and reads that
   state -- the vtable-dispatched path this element's hide actually
   intercepts. Live-confirmed.
+- A second queueing method (`client+0x3a830`, the same fields) takes every
+  centre-print: each `HUD_PRINTCENTER` `TextMsg` (`MsgFunc_TextMsg`'s
+  destination-4 branch, `client+0x4c3e9`), which includes the spectator
+  camera mode's name (`CHudSpectator::SetMode` calls `MsgFunc_TextMsg`
+  directly), and the clan-match countdown (`DrawClanTimer`,
+  `client+0x2d3f7`). `CHudVGUI2Print::Draw` (`client+0x3aa10`) draws these
+  too, so hiding `vgui2print` should hide **all centre text** along with the
+  MG-reload hint. Found offline (#677), not checked in the game. The narrow
+  switches are `dodstudio_hide_center_text` (server centre text),
+  `dodstudio_hide_spectator_text` (the camera mode's name) and
+  `dodstudio_hide_clan_text` (the countdown).
 - `CObjectiveIcons` (key `clan_warmup_mode` -- "Warmup Mode") calls a
   *drawing* method (`client+0x3a3f0`) that renders immediately via a shared
   low-level helper (`client+0x3a4b0`) at a fixed address, never touching
@@ -160,9 +171,9 @@ vtable slot this element hides:
   `menu`'s own vftable hide is what stops this, by not letting
   `CHudMenu::Draw` run at all.
 
-So `vgui2print` only ever hides queued, timed prompts like the MG-reload
-message. Anything drawn immediately through the shared helper is a different
-code path this element's vtable slot cannot see.
+So `vgui2print` only ever hides queued, timed prompts: the MG-reload message
+and every centre-print. Anything drawn immediately through the shared helper
+is a different code path this element's vtable slot cannot see.
 
 ### `all 1` is refused
 

@@ -124,8 +124,8 @@
 //!
 //! ## `vgui2print` is narrower than its name suggests
 //!
-//! `CHudVGUI2Print` has three real callers, not one, but only one of them goes
-//! through the vtable slot this element hides:
+//! `CHudVGUI2Print` has two queueing methods and a drawing method, and only
+//! the queued text goes through the vtable slot this element hides:
 //!
 //! - `CHudDoDCommon` (`client+0x3c007`, key `Dod_mg_reload` -- "Deploy your
 //!   machine gun to Reload!") calls a *queueing* method (`client+0x3a990`)
@@ -133,6 +133,12 @@
 //!   fields. The pixels are drawn later, when `CHudVGUI2Print::Draw` itself
 //!   runs and reads that state -- the vtable-dispatched path this element's
 //!   hide actually intercepts. Live-confirmed.
+//! - The second queueing method (`client+0x3a830`, the same fields) takes
+//!   every centre-print: `MsgFunc_TextMsg`'s `HUD_PRINTCENTER` branch
+//!   (`client+0x4c3e9`), and through it the spectator camera mode's name, and
+//!   the clan countdown (`client+0x2d3f7`). `Draw` (`client+0x3aa10`) shows
+//!   them until the time at `+0x14`, so hiding `vgui2print` should take all
+//!   centre text too -- offline (#677), not checked in the game.
 //! - `CObjectiveIcons` (`client+0x300f4`, key `clan_warmup_mode` -- "Warmup
 //!   Mode") calls a *drawing* method (`client+0x3a3f0`) that renders
 //!   immediately by calling a shared low-level helper (`client+0x3a4b0`) at
@@ -144,9 +150,10 @@
 //!   untouched by hiding `vgui2print` -- `menu`'s own vftable hide is what
 //!   stops this, by not letting `CHudMenu::Draw` run at all.
 //!
-//! So `vgui2print` only ever hides queued, timed prompts like the MG-reload
-//! message -- anything drawn immediately through the shared helper is a
-//! different code path this element's vtable slot cannot see.
+//! So `vgui2print` only ever hides queued, timed prompts -- the MG-reload
+//! message and centre text -- and anything drawn immediately through the
+//! shared helper is a different code path this element's vtable slot cannot
+//! see.
 //!
 //! ## Re-applied every frame
 //!
@@ -251,7 +258,7 @@ pub const ELEMENTS: &[Element] = &[
         name: "vgui2print",
         class: ".?AVCHudVGUI2Print@@",
         vftable_rva: 0xac3e0,
-        what: "queued timed text prompts, e.g. the MG \"Deploy...to Reload!\" message (see module docs)",
+        what: "queued timed text prompts: the MG \"Deploy...to Reload!\" message and centre text (see module docs)",
     },
 ];
 
