@@ -181,6 +181,7 @@ mod ex_interp;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod gun_log;
 mod hand_signals;
 mod hide_asset;
 mod hltv_messages;

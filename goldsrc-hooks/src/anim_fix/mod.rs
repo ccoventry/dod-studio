@@ -854,7 +854,9 @@ pub fn apply() {
     };
     crate::spectator_crosshair::set_pov_hides(crosshair_rule::hidden_because(&pov_view, now));
     // After hidden_because, which keeps the prone timer current.
-    crate::spectator_gun::set_lowered(crosshair_rule::gun_lowered(&pov_view, now));
+    let lowered = crosshair_rule::gun_lowered_code(&pov_view, now);
+    crate::spectator_gun::set_lowered(lowered != 0);
+    crate::gun_log::note_spec_reason(lowered);
 
     PREVIOUS_DEPLOY_STATE.store(deploy_state_to_i32(state), Ordering::Relaxed);
     PREVIOUS_SEQUENCE.store(spectated.curstate.sequence, Ordering::Relaxed);
