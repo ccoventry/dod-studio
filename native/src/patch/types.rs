@@ -580,6 +580,7 @@ impl PatcherConfig {
         };
         super::launch_settings::LaunchSettings {
             game_path: self.game_path.clone(),
+            game_folder: crate::shared::paths::game_folder(),
             width: self.resolution_width,
             height: self.resolution_height,
             afx_hook_dll,
@@ -594,6 +595,7 @@ impl PatcherConfig {
         // new one can't skip the running-game check (#666).
         let super::launch_settings::LaunchSettings {
             game_path: hl_exe,
+            game_folder,
             width,
             height,
             afx_hook_dll: dll_path,
@@ -673,10 +675,16 @@ impl PatcherConfig {
         // app starts the game gets it: a capture batch, a preview, and Launch
         // Game (which used to ignore the setting altogether, #226).
         //
+        // `-game` names the Game folder setting, `dod` by default (#402); the
+        // hook DLL reads it back off this command line to find the same
+        // folder on disk.
+        //
         // `-addons` makes the engine search `dod_addon` ahead of `dod`, which
         // is where DoD Studio's own UI files go (`.res` layouts, menu
         // entries) so the user's own `dod/resource` is never written (#408).
         // Tested live: without it the engine ignores `dod_addon` entirely.
+        // The engine names the addon folder after `-game`'s, so another game
+        // folder gets its own `<folder>_addon`.
         //
         // `-demoedit` turns on the demo player's edit row (Master, Events,
         // Save). Both hw.dll builds pass `COM_CheckParm("-demoedit")` to
@@ -685,8 +693,8 @@ impl PatcherConfig {
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game dod -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
-            width, height, extra_engine_args
+            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            game_folder, width, height, extra_engine_args
         );
 
         let mut cmd = std::process::Command::new(hlae_exe);

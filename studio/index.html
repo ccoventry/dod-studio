@@ -223,6 +223,14 @@
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
+              <!-- The <mod> of -game <mod> (#402): game_folder_ui.js lists the
+                   folders beside hl.exe, or shows the text box when it can't. -->
+              <div class="input-row" data-str-title="CAPTURE_CONFIG.GAME_FOLDER_TIP" title="The folder beside hl.exe that DoD Studio starts with -game">
+                <label data-str="CAPTURE_CONFIG.GAME_FOLDER_LABEL">Game Folder:</label>
+                <select id="config-game-folder" style="flex: 1;"></select>
+                <input type="text" id="config-game-folder-text" placeholder="dod" style="flex: 1; display: none;" />
+              </div>
+              <div id="config-game-folder-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
                 <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />
