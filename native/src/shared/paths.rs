@@ -202,9 +202,8 @@ pub fn preview_sidecar(demo: &Path) -> Option<PathBuf> {
 pub const PRIMER_DEMO_STEM: &str = "dodstudio_primer";
 
 /// Prefix of every patched chain demo `build_batch_queue` writes into the game
-/// folder,
-/// followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for why the
-/// `dodstudio_` part is there.
+/// folder, followed by a zero-padded job number. See [`PRIMER_DEMO_STEM`] for
+/// why the `dodstudio_` part is there.
 pub const CHAIN_DEMO_PREFIX: &str = "dodstudio_chain_";
 
 /// True for exactly the filenames `build_batch_queue` gives patched chain
