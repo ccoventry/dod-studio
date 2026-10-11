@@ -233,7 +233,8 @@ pub fn scan_demo_for_highlights_with_analysis(
     // itself (`isVisibleStreak`), and saved projects index these rows in this
     // order. Skips players no longer in a connected slot: capture needs a slot
     // to anchor the patcher.
-    for highlight in &analysis::highlights::highlights(&analysis).all {
+    let highlights = analysis::highlights::highlights(&analysis);
+    for highlight in &highlights.all {
         let Some(slot) = highlight.slot else {
             continue;
         };
@@ -270,12 +271,22 @@ pub fn scan_demo_for_highlights_with_analysis(
             status: HighlightStatus::None,
             match_start_tick: analysis.state.match_start_tick,
             source_key: Some(source_key.clone()),
+            spectated: highlights.hltv,
         };
         streak.update_visuals();
         streaks.push(streak);
     }
 
-    let local_player_index = analysis.state.pov_player_index.map(|idx| idx as usize);
+    // The player the Highlights table keeps (D18, `analysis::highlights::Rule`):
+    // a POV demo's recorder. None lists everyone's -- an HLTV demo, whose
+    // `svc_serverinfo` names the proxy's slot 0 (#247), or a POV demo whose
+    // recorder can't be told.
+    let local_player_index = match highlights.rule {
+        analysis::highlights::Rule::Recorder => {
+            analysis.state.pov_player_index.map(|idx| idx as usize)
+        }
+        analysis::highlights::Rule::Everyone => None,
+    };
     let demo_type_is_pov = analysis.demo_info.demo_type == "POV";
     let playback_frames = analysis.demo_info.playback_frames;
     let match_start_tick = analysis.state.match_start_tick;
@@ -351,6 +362,7 @@ mod source_check_tests {
             status: HighlightStatus::None,
             match_start_tick: None,
             source_key: key,
+            spectated: false,
         }
     }
 
