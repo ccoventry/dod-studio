@@ -208,6 +208,7 @@ mod remote;
 mod review;
 mod run_in_background;
 mod scan;
+mod schedule;
 mod scoreboard;
 mod server_query;
 mod spectator_bars;
