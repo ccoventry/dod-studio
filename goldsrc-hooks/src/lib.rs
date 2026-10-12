@@ -160,7 +160,9 @@
 //! the command that started the session.
 
 mod anim_fix;
+mod batch;
 mod batch_end;
+mod behind_imports;
 mod clan_text;
 mod cmd_list;
 mod commands;
@@ -180,11 +182,13 @@ mod engine;
 mod engine_buttons;
 mod events;
 mod ex_interp;
+mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
 mod hand_signals;
 mod hide_asset;
+mod hlae_window;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
@@ -270,6 +274,8 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // Before the game opens its window.
+    hlae_window::start_behind_if_asked();
     // First, so the file is there before GameUI reads the main menu.
     if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
         studio_panel::write_game_menu();
