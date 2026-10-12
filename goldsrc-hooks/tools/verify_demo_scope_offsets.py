@@ -187,11 +187,25 @@ def check_view_operands(path):
         problems.append(f"origin reads {[hex(a) for a in origin]}, not v_origin {v_origin:#x}")
     if angles != [v_angles, v_angles + 4, v_angles + 8]:
         problems.append(f"angle copy reads {[hex(a) for a in angles]}, not v_angles {v_angles:#x}")
+    m = re.search(r'const SETTLE_PATTERN: &str = "([^"]*)";', text)
+    if not m:
+        return [f"{path}: no SETTLE_PATTERN in {RUST}"]
+    settle_hits = [h.start() for h in compile_pattern(m.group(1)).finditer(image)]
+    settle = settle_hits[0] if len(settle_hits) == 1 else None
+    if settle is None:
+        problems.append(f"SETTLE_PATTERN matches {len(settle_hits)} times, expected 1")
+    else:
+        jne = image[settle + 8:settle + 10]
+        target = settle + 14 + struct.unpack_from("<i", image, settle + 10)[0]
+        if jne != b"\x0f\x85" or target != SWITCH_DEFAULT:
+            problems.append(f"zoom-settled test at +{settle:#x} is {jne.hex(' ')} to +{target:#x}, "
+                            f"not jne to the no-scope exit +{SWITCH_DEFAULT:#x}")
     if problems:
         return [f"{path}: {p}" for p in problems]
     return [
         f"{path.parents[2].name}: OK -- quad origin reads at +{at:#x} read v_origin "
-        f"+{v_origin - base:#x}; the angle copy reads v_angles +{v_angles - base:#x}"
+        f"+{v_origin - base:#x}; the angle copy reads v_angles +{v_angles - base:#x}; "
+        f"zoom-settled jne at +{settle + 8:#x} goes to the no-scope exit"
     ]
 
 

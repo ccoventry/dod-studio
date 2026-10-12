@@ -112,7 +112,7 @@
 //! blink fires only on a `Scope` message (`SetScope` sets its dirty flag at
 //! `+0x4640e`); the store here does not, so no blink.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
@@ -144,6 +144,13 @@ const ORIGIN_PATTERN: &str = "D8 05 ?? ?? ?? ?? D9 5C 24 5C D9 05 ?? ?? ?? ?? D8
                               8B 4C 24 5C 89 4C 24 38 8B 0D ?? ?? ?? ?? D9 5C 24 60 \
                               8B 54 24 60 DD D8 D9 05 ?? ?? ?? ?? D8 84 24 AC 00 00 00";
 const ORIGIN_OPERANDS_AT: [usize; 3] = [2, 12, 44];
+/// The end of the hardware gate and the zoom-settled test (`+0x46718`):
+/// `test eax, eax; jne +2; xor bl, bl; cmp edi, ebp; jne <no scope>;
+/// test bl, bl; je <no scope>`. The far `jne` is wildcarded: it is what
+/// `skip_settle_check` blanks.
+const SETTLE_PATTERN: &str = "85 C0 75 02 32 DB 3B FD ?? ?? ?? ?? ?? ?? 84 DB 0F 84";
+/// The 6-byte `jne rel32` within it.
+const SETTLE_JNE_AT: usize = 8;
 /// The low byte of the in-eye store's imm32 (`mov dword [esi+0x14], imm32`).
 const IN_EYE_ID_AT: usize = 16;
 /// The `je` that skips the `xor bl, bl`.
@@ -180,6 +187,13 @@ static STOCK_OPERANDS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 static DRAWN_ORIGIN: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 /// The origin reads' stock operands (`v_origin`).
 static STOCK_ORIGIN_OPERANDS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+static SETTLE_ADDRESS: AtomicUsize = AtomicUsize::new(0);
+static SETTLE_SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
+/// The zoom-settled `jne`'s own 6 bytes, kept before it is first blanked,
+/// with bit 48 set once kept (0: not kept yet). An atomic, not a lock: it is
+/// read every frame.
+static SETTLE_STOCK: AtomicU64 = AtomicU64::new(0);
+const KEPT: u64 = 1 << 48;
 static ORIGIN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static ORIGIN_SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
@@ -367,6 +381,59 @@ fn point_operands(
     Ok(wrote)
 }
 
+/// Removes (`skip`) or restores the "has the zoom settled" test,
+/// `cmp edi, ebp; jne <no scope>` at `+0x4671e`: the HUD's FOV against
+/// `in_fov`, the client data's. In HLTV in-eye the HUD takes the watched
+/// player's FOV from the `HLTV` message while the client data keeps the
+/// spectator's 90, so the two never meet and the scope never drew (the user,
+/// 2026-10-11, POST). Returns whether it wrote.
+fn skip_settle_check(skip: bool) -> Result<bool, String> {
+    let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
+    let at = if SETTLE_SCANNED_BASE.load(Ordering::Acquire) == base
+        && SETTLE_ADDRESS.load(Ordering::Acquire) != 0
+    {
+        SETTLE_ADDRESS.load(Ordering::Acquire)
+    } else {
+        // Safety: a mapped module, for the session.
+        let found = unsafe { scan::find_unique(base, SETTLE_PATTERN) }
+            .map_err(|why| format!("could not find the scope's zoom-settled test -- {why}"))?;
+        SETTLE_ADDRESS.store(found, Ordering::Release);
+        SETTLE_SCANNED_BASE.store(base, Ordering::Release);
+        found
+    };
+    let address = at + SETTLE_JNE_AT;
+    // Safety: inside the pattern just matched, so mapped code.
+    let present: [u8; 6] = unsafe { std::ptr::read_unaligned(address as *const [u8; 6]) };
+    let nops = [0x90u8; 6];
+    let mut stock = SETTLE_STOCK.load(Ordering::Acquire);
+    if stock & KEPT == 0 {
+        if present == nops {
+            return Err(
+                "the scope's zoom-settled test is already gone, with no stock bytes kept".into(),
+            );
+        }
+        let mut bytes = [0u8; 8];
+        bytes[..6].copy_from_slice(&present);
+        stock = u64::from_le_bytes(bytes) | KEPT;
+        SETTLE_STOCK.store(stock, Ordering::Release);
+    }
+    let mut kept = [0u8; 6];
+    kept.copy_from_slice(&stock.to_le_bytes()[..6]);
+    let want = if skip { nops } else { kept };
+    if present == want {
+        return Ok(false);
+    }
+    if present != kept && present != nops {
+        return Err(format!(
+            "the scope's zoom-settled test holds {present:02x?} -- something else has patched it"
+        ));
+    }
+    if !unsafe { crate::patch::write_code_bytes(address, &want) } {
+        return Err("could not make the scope's zoom-settled test writable".into());
+    }
+    Ok(true)
+}
+
 /// The start of [`ORIGIN_PATTERN`] in the loaded `client.dll`.
 fn origin_site() -> Result<usize, String> {
     let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
@@ -431,6 +498,9 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         "the scope's origin reads",
     )?;
     let view = view || angles || origin;
+    let in_eye = in_demo && crate::spectator_target::in_eye_target().is_some();
+    let settle = skip_settle_check(in_eye)?;
+    let view = view || settle;
     let id = if on {
         watched_scope_id()
     } else {
