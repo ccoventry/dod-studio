@@ -83,8 +83,9 @@ state, not the state from before that line ran.
 
 ### `dodstudio_deathmsg`
 
-Raises DoD's hard-coded four-line cap on the kill feed, moves it, hides
-frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
+Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
+one by hand, or changes the names' font. The font takes effect on the next
+frame (#562). HLAE's own `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
 
@@ -99,6 +100,8 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block clear` | stop hiding anything |
 | `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
+| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font, the icon stays as it is (#728); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
+| `dodstudio_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 
 A `block` id is any of:
 
