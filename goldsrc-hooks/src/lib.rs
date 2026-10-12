@@ -162,6 +162,7 @@
 mod anim_fix;
 mod batch;
 mod batch_end;
+mod behind_imports;
 mod clan_text;
 mod cmd_list;
 mod commands;

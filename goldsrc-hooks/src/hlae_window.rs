@@ -300,6 +300,8 @@ pub fn start_behind_if_asked() {
     report(&format!(
         "{START_BEHIND_FLAG}: the window stays behind from the moment it opens"
     ));
+    crate::behind_imports::STARTING_BEHIND.store(true, Ordering::Release);
+    crate::behind_imports::install_loaded();
     std::thread::spawn(watch_start);
 }
 
@@ -351,6 +353,10 @@ fn watch_start() {
     let mut put_backs = 0;
     while started.elapsed() < START_WATCH && !crate::run_in_background::wanted() {
         std::thread::sleep(START_WATCH_EVERY);
+        // The game's modules load as it starts: hook each as it appears.
+        if !crate::behind_imports::all_installed() {
+            crate::behind_imports::install_loaded();
+        }
         let now = cursor();
         let Some(hwnd) = window() else {
             last = now;
@@ -396,6 +402,7 @@ fn watch_start() {
         }
         last = now;
     }
+    crate::behind_imports::STARTING_BEHIND.store(false, Ordering::Release);
     report(&format!(
         "start-up watch ended after {} ms",
         started.elapsed().as_millis()
@@ -413,6 +420,10 @@ pub fn poll(on: bool) {
             .is_multiple_of(CHECK_EVERY)
     {
         return;
+    }
+    // Turned on without the launch flag, or a module that loaded late.
+    if !crate::behind_imports::all_installed() {
+        crate::behind_imports::install_loaded();
     }
     let Some(hwnd) = window() else {
         return;
