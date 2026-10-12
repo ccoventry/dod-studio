@@ -3,6 +3,8 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+/// The clock offset between two recordings of one half (#708).
+mod clock_offset;
 pub mod entity_replay;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
@@ -48,6 +50,7 @@ pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
+    clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
     localization::{get_active_language, set_active_language, translate_key},
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
