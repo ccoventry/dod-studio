@@ -196,6 +196,21 @@ included, and the catch-up leaves entities out. Backward jumps replay nothing
 either way, so going back past a join or a team change still shows the later
 state. `dodstudio_seek_skip_between 1` jumps at once, as before.
 
+### The replayed console commands (#702)
+
+A POV demo's type-3 frames (`+forward`, `-moveleft`, `+speed`...) are
+replayed by the steps too, into `hw.dll`'s `filteredcmd_text`, the 16 KB
+buffer for text the game didn't type itself. `Cbuf_Execute` runs that buffer
+**one command per frame** (both builds), so a 30-minute jump's ~15,000
+commands overflowed it about 6,600 times and then drained for 40 seconds of
+the demo after the landing, one stale key press a frame. DoD's gun lowering
+reads those keys, so the crosshair blinked through the first clip of a
+capture batch. A stepped seek now empties that buffer every frame until it
+lands, then sends `-forward`, `-speed` and the rest
+(`goldsrc-hooks/src/filtered_commands.rs`). The 31:01 clip of
+wsod25_grp2_h1_m00cat (PRE): 18 blinks under 0.1 s before, none after, the
+same as reaching it by fast-forward.
+
 ## What this means for moving the batch
 
 Nothing found blocks it. Today's patched chain demos would run under
