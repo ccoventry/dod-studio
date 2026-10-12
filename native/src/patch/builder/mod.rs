@@ -211,6 +211,12 @@ pub const IN_EYE: &str = "spec_mode 4";
 /// `run_in_background.rs`), which every batch turns on.
 pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 
+/// On a capture batch's game launch line: the hook DLL keeps the window
+/// behind from the moment it opens, before the pipe can carry the setting
+/// (goldsrc-hooks `hlae_window::START_BEHIND_FLAG`; keep the two in step). The
+/// engine ignores a `-` argument it doesn't know.
+pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,

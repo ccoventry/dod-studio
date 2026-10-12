@@ -5,6 +5,8 @@ pub mod analysis_server;
 pub mod dialogs;
 pub mod disk;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod foreground_lock;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod game_remote;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod minimize;
