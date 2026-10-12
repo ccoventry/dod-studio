@@ -279,7 +279,7 @@ mod tests {
     fn game(pid: u32, exe: &str, width: i32, height: i32) -> RunningGame {
         let mut cmd = vec![format!("\"{exe}\"")];
         cmd.extend(
-            format!("-game dod -insecure -addons -demoedit -windowed -w {width} -h {height} -gl -condebug")
+            format!("-game dod -insecure -addons -demoedit -windowed -w {width} -h {height} -afxForceAlpha8 1 -condebug")
                 .split(' ')
                 .map(String::from),
         );
@@ -367,7 +367,7 @@ mod tests {
         assert_eq!(resolution_from_cmd(&split), Some((1920, 1080)));
         let whole = vec![
             PRE.to_string(),
-            "-game dod -windowed -w 3440 -h 1440 -gl".to_string(),
+            "-game dod -windowed -w 3440 -h 1440 -afxForceAlpha8 1".to_string(),
         ];
         assert_eq!(resolution_from_cmd(&whole), Some((3440, 1440)));
         let quoted = vec![

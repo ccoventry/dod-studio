@@ -191,10 +191,10 @@ Every launch (batch, preview, Launch Game) uses one command line:
       -hookDllPath <HLAE>\AfxHookGoldSrc.dll
       [-hookDllPath dodstudio_goldsrc_hooks.dll]
       -programPath <hl.exe>
-      -cmdLine "-game dod -insecure -addons -windowed -w W -h H -gl -32bpp
-                -afxRenderMode standard -afxForceAlpha8 1 -condebug <extra>"
+      -cmdLine "-game dod -insecure -addons -demoedit -windowed -w W -h H
+                -afxForceAlpha8 1 -condebug <extra>"
 
-A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-addons` (PR #412) is on every launch, right after `-game dod`; `-demoedit` (PR #401) is not on `dev` yet.
+A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-addons` (PR #412) is on every launch, right after `-game dod`, and so is `-demoedit` (PR #401). `-afxForceAlpha8 1` is the only HLAE alpha flag: a bisect showed `-gl`, `-32bpp` and `-afxRenderMode standard` change nothing in a separate-HUD capture (#69).
 
 While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 

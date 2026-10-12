@@ -664,9 +664,10 @@ pub fn spawn_capture_engine(
             // only text folded into this string reaches `hl.exe`, via the
             // single `-cmdLine` value `build_hlae_process` composes below.
             //
-            // The HLAE alpha flags that used to be composed here now live in
-            // `build_hlae_process` itself, so every `-customLoader` launch this
-            // app makes carries them, not just a capture batch.
+            // HLAE's alpha flag (`-afxForceAlpha8 1`, the only one that matters,
+            // #69) lives in `build_hlae_process` itself, so every
+            // `-customLoader` launch this app makes carries it, not just a
+            // capture batch.
             //
             // The first demo starts over the hook's pipe once the game is up,
             // so its map loads after config.cfg/movie.cfg set the user's

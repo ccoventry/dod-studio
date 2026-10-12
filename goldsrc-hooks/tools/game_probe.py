@@ -615,8 +615,8 @@ def run(args):
     console = Tail(install / "qconsole.log")
     hooklog = Tail(hook_log_path())
     # The same line Studio builds (native::patch::types::build_hlae_process).
-    game_cmd = (f"-game dod -insecure -windowed -w {args.width} -h {args.height} -gl -32bpp "
-                "-afxRenderMode standard -afxForceAlpha8 1 -condebug"
+    game_cmd = (f"-game dod -insecure -windowed -w {args.width} -h {args.height} "
+                "-afxForceAlpha8 1 -condebug"
                 + (" -addons" if args.addons else ""))
     probe_copy = None
     if args.demo and args.at_launch:

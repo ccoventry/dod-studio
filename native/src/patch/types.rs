@@ -648,11 +648,16 @@ impl PatcherConfig {
         // the observed behaviour: the flag parses, and the captured hudAlpha
         // bitmaps come out byte-for-byte identical to a run without it.
         //
-        // `-afxRenderMode` takes one of standard|fBO|memoryDC the same way.
-        // `-32bpp` because a framebuffer that is not 32-bit has no alpha bits
-        // to force in the first place. `-afxOptimizeCaptureVis` is left out:
-        // it is a visibility optimisation unrelated to alpha, and would be one
-        // more variable over the capture itself.
+        // `-afxForceAlpha8 1` is the only alpha flag sent. A bisect on the
+        // pre-Anniversary build removed one flag per separate-HUD capture
+        // (#69): without `-gl`, `-32bpp` or `-afxRenderMode standard` the
+        // `hudalpha`, `hudcolor` and `all` streams measured the same, with the
+        // same frame count and capture time, and only dropping
+        // `-afxForceAlpha8 1` flattened `hudalpha` to 255. The engine already
+        // runs OpenGL with a 32-bit framebuffer, and `standard` is HLAE's
+        // default render mode. `-afxOptimizeCaptureVis` is left out: it is a
+        // visibility optimisation unrelated to alpha, and would be one more
+        // variable over the capture itself.
         //
         // NOT gated on a "Separate HUD" setting. One used to exist and gated
         // this from inside `capture_engine`, which meant the two hand-driven
@@ -690,7 +695,7 @@ impl PatcherConfig {
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game dod -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            "-game dod -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {}",
             width, height, extra_engine_args
         );
 
@@ -922,14 +927,13 @@ mod launch_args_tests {
                 line.contains("-afxForceAlpha8 1"),
                 "alpha flag missing for extra={extra:?}: {line}"
             );
-            assert!(
-                line.contains("-32bpp"),
-                "missing -32bpp for extra={extra:?}: {line}"
-            );
-            assert!(
-                line.contains("-afxRenderMode standard"),
-                "missing render mode for extra={extra:?}: {line}"
-            );
+            // The flags #69's bisect showed change nothing stay off.
+            for unneeded in ["-gl", "-32bpp", "-afxRenderMode"] {
+                assert!(
+                    !line.split(' ').any(|token| token == unneeded),
+                    "{unneeded} is sent again for extra={extra:?}: {line}"
+                );
+            }
         }
     }
 
