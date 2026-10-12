@@ -125,6 +125,8 @@ pub type GetGameDirectoryFn = unsafe extern "C" fn(sz_get_game_dir: *mut c_char)
 pub type IsSpectateOnlyFn = unsafe extern "C" fn() -> i32;
 pub type GetLevelNameFn = unsafe extern "C" fn() -> *const c_char;
 pub type GetViewModelFn = unsafe extern "C" fn() -> *mut ClEntityS;
+/// `GetClientTime`: `cl.time`.
+pub type GetClientTimeFn = unsafe extern "C" fn() -> f32;
 pub type GetEntityByIndexFn = unsafe extern "C" fn(index: i32) -> *mut ClEntityS;
 pub type ConsoleCommandFn = unsafe extern "C" fn();
 pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: ConsoleCommandFn);
@@ -509,13 +511,19 @@ impl StudioSeqDescPartial {
 }
 
 /// Partial mirror of `engine_studio_api_s` (`common/r_studioint.h`) up
-/// through `GetModelByIndex` -- the only two functions this crate calls.
+/// through `GetViewInfo` -- the functions this crate calls, in order.
 #[repr(C)]
 pub struct EngineStudioApiPartial {
     _slots_before: [*mut c_void; 3], // Mem_Calloc, Cache_Check, LoadCacheFile
     _mod_for_name: *mut c_void,
     pub mod_extradata: unsafe extern "C" fn(model: *mut ModelSPartial) -> *mut c_void,
     pub get_model_by_index: unsafe extern "C" fn(index: i32) -> *mut ModelSPartial,
+    // GetCurrentEntity, PlayerInfo, GetPlayerState, GetViewEntity, GetTimes,
+    // GetCvar.
+    _slots_before_view_info: [*mut c_void; 6],
+    /// `void GetViewInfo(float *origin, float *upv, float *rightv, float *vpnv)`:
+    /// the frame's render origin and axes (`r_origin`, `vup`, `vright`, `vpn`).
+    pub get_view_info: unsafe extern "C" fn(*mut f32, *mut f32, *mut f32, *mut f32),
 }
 
 /// Partial, offset-accurate mirror of `cl_enginefuncs_s` (see
@@ -555,7 +563,9 @@ pub struct ClEngineFuncsPartial {
     pub get_local_player: GetLocalPlayerFn,
     pub get_view_model: GetViewModelFn,
     pub get_entity_by_index: GetEntityByIndexFn,
-    _slots_before_weapon_anim: [*mut c_void; 12], // GetClientTime .. pfnPlaybackEvent
+    /// Slot 54: the engine's client clock (`cl.time`), the one HUD timers run on.
+    pub pfn_get_client_time: GetClientTimeFn,
+    _slots_before_weapon_anim: [*mut c_void; 11], // V_CalcShake .. pfnPlaybackEvent
     pub pfn_weapon_anim: WeaponAnimFn,
     _slots_before_hook_event: [*mut c_void; 2], // pfnRandomFloat, pfnRandomLong
     /// Slot 69. See [`HookEventFn`].
@@ -738,6 +748,9 @@ const SLOT_INITIALIZE: usize = 0;
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
 const SLOT_CALC_REFDEF: usize = 19;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
+/// Checked 2026-10-11: `F` stores `HUD_DrawTransparentTriangles`
+/// (`+0x4c830`) at its table's slot 23.
+const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
 const SLOT_HUD_FRAME: usize = 33;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
 /// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
@@ -748,6 +761,7 @@ const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
+        && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
@@ -764,6 +778,8 @@ type GetStudioModelInterfaceFn =
 /// `ent` is passed through opaquely -- nothing here reads its fields, only
 /// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
+/// `void HUD_DrawTransparentTriangles(void)`.
+type DrawTransparentTrianglesFn = unsafe extern "C" fn();
 /// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
 /// message, with the opcode and length byte already stripped.
 type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
@@ -775,6 +791,7 @@ type ClientApiFn = unsafe extern "C" fn(*mut *mut c_void);
 static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -876,6 +893,15 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
 /// engine gives no clean signal to reset on. Monotonic within a session, which
 /// is all either caller needs.
 static DEMO_ELAPSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The engine's own client clock (`cl.time`), which the game's HUD timers
+/// (kill feed, centre text, the clan countdown) run on; `None` before the
+/// engine is ready.
+pub fn engine_client_time() -> Option<f32> {
+    let engfuncs = engfuncs()?;
+    // Safety: the engine's own accessor, called on its thread.
+    Some(unsafe { (engfuncs.pfn_get_client_time)() })
+}
 
 /// Seconds of playback elapsed, or 0 before the first frame.
 pub fn client_time() -> f64 {
@@ -1109,6 +1135,18 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
+/// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
+/// scope is drawn), after `demo_scope` has read the frame's render view.
+unsafe extern "C" fn tramp_draw_transparent_triangles() {
+    let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    crate::demo_scope::before_transparent_triangles();
+    let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
+    unsafe { real() };
+}
+
 /// Called once per entity the engine is about to add to the render list.
 /// Returning 0 suppresses that one entity; see `hide_asset.rs`'s module doc
 /// for the evidence behind that contract and why it isn't patched.
@@ -1244,6 +1282,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
         );
         swap_slot(
             table,
+            SLOT_DRAW_TRANSPARENT_TRIANGLES,
+            &REAL_DRAW_TRANSPARENT_TRIANGLES,
+            tramp_draw_transparent_triangles as *mut c_void,
+            "HUD_DrawTransparentTriangles",
+        );
+        swap_slot(
+            table,
             SLOT_HUD_DIRECTOR_MESSAGE,
             &REAL_HUD_DIRECTOR_MESSAGE,
             tramp_hud_director_message as *mut c_void,
@@ -1364,6 +1409,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_AddEntity" => {
             REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
             tramp_hud_add_entity as *mut c_void
+        }
+        "HUD_DrawTransparentTriangles" => {
+            REAL_DRAW_TRANSPARENT_TRIANGLES.store(result, Ordering::Release);
+            tramp_draw_transparent_triangles as *mut c_void
         }
         "HUD_DirectorMessage" => {
             REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);

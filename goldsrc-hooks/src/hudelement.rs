@@ -98,12 +98,8 @@
 //!   slot.
 //! - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
 //!   observer-mode global, then unconditionally returns 1 without drawing.
-//!   The actual scope vignette is a `ScreenFade` engine call inside
-//!   `CHudScope::Think` (vftable slot 4, not 3), gated on the *local*
-//!   player's own current weapon -- which is never populated while
-//!   spectating, live-confirmed: no scope overlay ever appears in a demo.
-//!   Reaching the real effect would mean hooking `Think`/`ScreenFade`
-//!   instead, a materially different job (issue #307/#308 territory).
+//!   The scope is drawn by `CHudScope::DrawTriApiScope` (`client+0x46690`),
+//!   which refuses while a demo plays; `demo_scope` lifts that (#307).
 //!
 //! ## One more excluded, for a third reason: never observed to fire
 //!
