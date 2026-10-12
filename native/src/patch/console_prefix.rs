@@ -19,14 +19,18 @@ pub const PREFIX: &str = "ds_";
 pub const OLD_PREFIX: &str = "dodstudio_";
 
 /// Every name the hook registered when the prefix changed, without the prefix.
-/// Frozen: a name added since never had the old prefix. The rest of each name
+/// Frozen, plus the three that shipped on `dev` with the old prefix while #555
+/// was open (`batch` #702, `debug_keep_detail_cache` #718, `show_demo_scope`
+/// #721); a name added since never had the old prefix. The rest of each name
 /// did not change, so the new name is [`PREFIX`] plus the same suffix.
 pub const RENAMED: &[&str] = &[
     "allow_shaders",
+    "batch",
     "clear_decals",
     "console_in_panel",
     "deathmsg",
     "debug_hd_misses",
+    "debug_keep_detail_cache",
     "debug_log_spectator_target",
     "debug_log_texture_loads",
     "debug_log_weapon_model",
@@ -63,6 +67,7 @@ pub const RENAMED: &[&str] = &[
     "seek_by",
     "seek_skip_between",
     "seek_to",
+    "show_demo_scope",
     "spec_lock",
     "spec_match_pov",
     "spec_target",

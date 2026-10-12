@@ -111,11 +111,17 @@ cvar or hook:
   checks observer mode and conditionally calls a method on what looks like a
   VGUI2 interface pointer, plausibly telling a panel to hide, but never draws.
 - `CHudScope::Draw` (`client+0x46590`, 22 bytes) reads one flag and one
-  observer-mode global, then unconditionally returns 1. The actual scope
-  vignette is a `ScreenFade` engine call inside `CHudScope::Think` (vftable
-  slot 4, not 3), gated on the *local* player's own current weapon -- never
-  populated while spectating, live-confirmed: no scope overlay appears in a
-  demo, matching the disassembly exactly.
+  observer-mode global, then unconditionally returns 1. The `ScreenFade` in
+  `CHudScope::Think` (vftable slot 4) is only the black blink when a `Scope`
+  message changes the rifle. The scope itself is
+  `CHudScope::DrawTriApiScope` (`client+0x46690`): the rifle's `scope_*.spr`
+  as four TriAPI quads, refused outright while a demo plays
+  (`IsPlayingback()`, `+0x46701`), which is why no demo showed it.
+  `ds_show_demo_scope` now lifts that gate, so the scope shows in a
+  POV demo whenever the recorder zoomed, and in-eye it gives the watched
+  player's rifle instead of the Springfield DoD forces there (#307,
+  `goldsrc-hooks/src/demo_scope.rs`). Hiding it needs nothing: it already
+  draws only on request.
 
 Writing `CHudBase::Draw` over a function that already draws nothing changes
 nothing observable, so offering these five would only mislead.
@@ -189,7 +195,7 @@ way to keep one and drop the other without patching inside the function.
 
 It does **not** reach the VGUI2 spectator bars (`goldsrc_spectator_bars.md`) or the auto-help panel
 (#286). Those are not HUD elements and are not on this list. It also does not
-reach the overview map, a mortar aiming HUD, or the sniper scope vignette --
-see the five exclusions above, none of which turned out to be drawn by any
-`Draw` override at all.
+reach the overview map, a mortar aiming HUD, or the sniper scope -- see the
+five exclusions above, none of which turned out to be drawn by any `Draw`
+override at all.
 

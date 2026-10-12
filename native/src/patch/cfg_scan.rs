@@ -452,11 +452,16 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   `sv_cheats` is `0` the engine resets it to `1.0` and the value never
 ///   survives long enough for DoD's client to see it. Verified live and in
 ///   the binaries — `hw.dll` `0x1d455c9`, gated on `sv_cheats` at `0x1e56404`.
+/// - `ds_batch` / `ds_schedule` — the hook DLL's runners for a
+///   batch run without patched demos (#434). One started from a batch's own
+///   commands would replace the batch that is running.
 pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_recordmovie_start",
     "mirv_recordmovie_stop",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "ds_batch",
+    "ds_schedule",
     "r_drawentities",
     "cl_lw",
 ];

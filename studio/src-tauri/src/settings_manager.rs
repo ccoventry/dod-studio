@@ -148,6 +148,9 @@ pub struct AppSettings {
     pub command_profile_active: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
+    /// `PatcherConfig::hook_runs_batch` (#434).
+    #[serde(default)]
+    pub hook_runs_batch: bool,
     #[serde(default = "default_render_codec")]
     pub render_codec: String,
     /// Raw FFmpeg args, only meaningful when `render_codec == "custom"`.
@@ -372,6 +375,7 @@ impl Default for AppSettings {
             command_profiles: Vec::new(),
             command_profile_active: String::new(),
             save_local_patched_copy: false,
+            hook_runs_batch: false,
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
