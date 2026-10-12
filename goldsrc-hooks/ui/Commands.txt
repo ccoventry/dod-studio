@@ -47,6 +47,8 @@ HUD
       The camera icon on the overview map: 0 the game's own, 1 his team's icon in HLTV too, 2 none.
   dodstudio_hud_map_hide_speaker 0/1
       Leave the speaker icon off the players on the overview map.
+  dodstudio_show_demo_scope 0/1
+      Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
 DEMO PLAYBACK
   dodstudio_run_in_background 0/1
@@ -63,6 +65,8 @@ DEMO PLAYBACK
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   dodstudio_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
+  dodstudio_batch start "<file>"|away|stop
+      Run a DoD Studio capture batch on the original demos, seeking between clips (Studio sends this).
   dodstudio_clear_decals
       Clear every decal (bullet holes, blood, sprays).
   dodstudio_ex_interp_max <ms>
@@ -109,3 +113,5 @@ DEBUG
       Log who the spectator camera follows.
   dodstudio_debug_log_texture_loads 0/1
       Log every HD texture load.
+  dodstudio_debug_keep_detail_cache 0/1
+      Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
