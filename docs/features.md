@@ -162,7 +162,7 @@ There is no fourth mode and no Separate HUD setting. The alpha launch flags are 
 
 ### 3.2 Planning
 
-For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 1.0 s for HLAE (a guess; issue #9) and 2.0 s for OBS (measured). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
+For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 0.5 s for HLAE and 2.0 s for OBS, both measured: HLAE takes about 0.28 s to finalise a take and loses frames from a restart sooner than that (#9). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
 
 Each block gets a disk estimate, and blocks are packed onto the Destinations with first-fit-decreasing. A drive must keep 15 GiB free.
 

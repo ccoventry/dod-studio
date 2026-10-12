@@ -332,11 +332,10 @@ impl CaptureMode {
 
 /// Minimum gap between one take's stop and the next one's start, for OBS.
 ///
-/// `builder::MIN_TAKE_SEPARATION_SECONDS` is 1.0 s and was derived for HLAE as
-/// a deliberately conservative guess, because the demo side cannot observe how
-/// long HLAE needs to finalise a take. The OBS figure is not a guess: OBS took
-/// **~1.065 s** to finalise a file after `StopRecord` returned, measured
-/// repeatedly — so the existing guard is already too tight for this path.
+/// `builder::MIN_TAKE_SEPARATION_SECONDS` is HLAE's, 0.5 s from HLAE's
+/// measured ~0.28 s finalise (#9). OBS took **~1.065 s** to finalise a file
+/// after `StopRecord` returned, measured repeatedly, so HLAE's guard is far
+/// too tight for this path.
 ///
 /// 2.0 s rather than 1.1 s because the measurement is one machine writing one
 /// container, the cost of being wrong is a lost take, and the cost of being
