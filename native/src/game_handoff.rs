@@ -33,6 +33,9 @@ pub enum Handoff {
 
 pub struct GameHandoff {
     pub lines: Vec<String>,
+    /// Sent the moment the pipe answers, before [`SETTLE`]: what should not
+    /// wait (the game stepping out of the way).
+    early: Vec<String>,
     started: Instant,
     answered: Option<(u32, Instant)>,
     sent: bool,
@@ -40,8 +43,14 @@ pub struct GameHandoff {
 
 impl GameHandoff {
     pub fn new(lines: Vec<String>) -> Self {
+        Self::with_early(Vec::new(), lines)
+    }
+
+    /// `early` goes the moment the pipe answers, `lines` after [`SETTLE`].
+    pub fn with_early(early: Vec<String>, lines: Vec<String>) -> Self {
         Self {
             lines,
+            early,
             started: Instant::now(),
             answered: None,
             sent: false,
@@ -69,8 +78,9 @@ impl GameHandoff {
             };
         }
         for &pid in game_pids {
-            // An empty message checks the pipe without running anything.
-            if matches!(send_console_commands(pid, &[]), Ok(Sent::Delivered)) {
+            // The early lines double as the check that the pipe is open; with
+            // none, an empty message checks it without running anything.
+            if matches!(send_console_commands(pid, &self.early), Ok(Sent::Delivered)) {
                 self.answered = Some((pid, Instant::now()));
                 return Handoff::Waiting;
             }
