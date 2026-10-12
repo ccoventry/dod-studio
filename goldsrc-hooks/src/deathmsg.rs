@@ -464,7 +464,7 @@ const USERINFO_LEN: usize = 256;
 ///
 /// Safety: `name` is the pointer `pfnGetPlayerInfo` returned, into the
 /// engine's static player array, whose earlier bytes are always mapped.
-unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
+pub(crate) unsafe fn steam_id_from_record(name: *const c_char) -> u64 {
     if name.is_null() {
         return 0;
     }

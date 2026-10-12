@@ -85,6 +85,8 @@ HD TEXTURES
       Load the HD textures built by DoD Studio's HD page.
   dodstudio_hd_style <name>
       Which HD style to use (ultrasharp by default).
+  dodstudio_spray [<name>|players]
+      Make logos\<name>.png your spray (writes tempdecal.wad, shows from the next connect) and map it for HD playback; bare lists the PNGs.
   dodstudio_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
 

@@ -319,6 +319,13 @@ those files; see its README. It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
 
+`src/spray.rs` does the same for player sprays (#428): a spray reaching the
+upload is keyed by its content and replaced from the PNG
+`dod\logos\dodstudio_sprays.txt` maps it to, and `dodstudio_spray <name>`
+makes a `logos\<name>.png` the user's own spray by writing the game's
+`tempdecal.wad` (with a backup) and mapping it. `tools/spray_key.py` prints
+the keys of spray WADs and `custom.hpk` entries.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise

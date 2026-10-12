@@ -738,6 +738,10 @@ static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Decals seen, and how many were replaced (#729).
 static DECAL_SEEN: AtomicU32 = AtomicU32::new(0);
 static DECAL_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// Of the decals, player sprays (`spray.rs`, #428): seen, and replaced from
+/// a mapped PNG. Counted among the decals too.
+static SPRAY_SEEN: AtomicU32 = AtomicU32::new(0);
+static SPRAY_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
 static ANY_SEEN: AtomicU32 = AtomicU32::new(0);
 
@@ -2232,6 +2236,103 @@ fn replaceable_i_type(texture_type: u32, i_type: u32) -> bool {
     }
 }
 
+/// Texture gamma on the colour of every pixel, alpha kept as the file has
+/// it: what a spray gets instead of [`match_engine_expansion`], whose cut-out
+/// threshold would throw the PNG's soft edges away.
+fn match_engine_gamma_keep_alpha(pixels: &mut [u8], gamma: &[u8; 256]) {
+    for px in pixels.as_chunks_mut::<4>().0 {
+        for c in &mut px[..3] {
+            *c = gamma[*c as usize];
+        }
+    }
+}
+
+/// The spray arm of [`decide`]: a `GLT_DECAL` upload made while the engine
+/// builds a player's custom logo. Looks the content key up in the mapping
+/// (`spray.rs`) and uploads the PNG it names; a spray with no line is
+/// recorded as a miss under its key, which is how the key is found.
+fn spray_upload(
+    identifier: &str,
+    key: Option<crate::spray::Key>,
+    width: u32,
+    height: u32,
+    i_type: u32,
+    log: bool,
+) -> *const AtomicUsize {
+    SPRAY_SEEN.fetch_add(1, Ordering::Relaxed);
+    let Some(key) = key else {
+        record_miss(
+            Miss::OnPurpose,
+            "decal",
+            &format!("spray {identifier}"),
+            || format!("{width}x{height}, a player spray with a palette this hook doesn't read"),
+        );
+        return std::ptr::null();
+    };
+    let hexed = crate::spray::hex(&key);
+    let shown = format!("spray {hexed}");
+    let Some(path) = crate::spray::png_for_key(&key) else {
+        if log {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: key {hexed}, no line in {}",
+                    crate::spray::mapping_path().display()
+                ))
+            };
+        }
+        record_miss(Miss::NoFile, "decal", &shown, || {
+            format!(
+                "{width}x{height}, a player spray with no line in logos\\{} (add `{hexed}<tab><name>.png`)",
+                crate::spray::MAPPING_FILE
+            )
+        });
+        return std::ptr::null();
+    };
+    let mut img = match crate::spray::load_png_fit(&path, replacement_cap()) {
+        Ok(img) => img,
+        Err(why) => {
+            crate::spray::warn_once(&path, &why);
+            record_miss(Miss::Failed, "decal", &shown, || {
+                format!("{width}x{height}, {}: {why}", path.display())
+            });
+            return std::ptr::null();
+        }
+    };
+    // Safety: read out of GL_Upload8's own instructions and checked at install.
+    let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
+    match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
+
+    let Ok(mut owned) = PENDING_PIXELS.lock() else {
+        return std::ptr::null();
+    };
+    *owned = img.pixels;
+    PENDING[0].store(owned.as_mut_ptr() as usize, Ordering::Release);
+    PENDING[1].store(img.width as usize, Ordering::Release);
+    PENDING[2].store(img.height as usize, Ordering::Release);
+    drop(owned);
+
+    DECAL_REPLACED.fetch_add(1, Ordering::Relaxed);
+    SPRAY_REPLACED.fetch_add(1, Ordering::Relaxed);
+    if let Ok(mut last) = LAST_REPLACED.lock() {
+        *last = Some(LastReplaced {
+            name: shown,
+            from: (width, height),
+            to: (img.width, img.height),
+        });
+    }
+    if log {
+        unsafe {
+            crate::debug::report(&format!(
+                "texture_hires: spray {identifier:?} {width}x{height} iType {i_type} key {hexed} -> {}x{} from {}",
+                img.width,
+                img.height,
+                path.display()
+            ))
+        };
+    }
+    PENDING.as_ptr()
+}
+
 /// Called by the swap stub with `GL_LoadTexture2`'s frame pointer and the
 /// cache record it's filling. Returns `PENDING`'s address to upload a
 /// replacement, or null to carry on unchanged.
@@ -2359,6 +2460,13 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
             Miss::OnPurpose,
             "a skin recoloured per player, which this hook doesn't replace",
         );
+    }
+    // A player's spray: a decal by upload, but named after the slot, so it is
+    // keyed by its content and mapped to a PNG (#428, `spray.rs`).
+    if texture_type == GLT_DECAL && crate::spray::is_custom_upload(&identifier) {
+        // Safety: the same arguments `indices` and `pal` were just made from.
+        let key = unsafe { crate::spray::upload_key(data, palette, width, height) };
+        return spray_upload(&identifier, key, width, height, i_type, log);
     }
 
     let index = index.get(build);
@@ -3525,13 +3633,16 @@ pub fn status() -> String {
             .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
     let decals = format!(
-        "{} of {} decal load(s) replaced ({})",
+        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) from logos\\{}",
         DECAL_REPLACED.load(Ordering::Relaxed),
         DECAL_SEEN.load(Ordering::Relaxed),
         DECAL_INDEX
             .peek()
             .map(|i| format!("{} file(s)", i.files.len()))
-            .unwrap_or_else(|| not_read(&DECAL_SEEN, "restart the game"))
+            .unwrap_or_else(|| not_read(&DECAL_SEEN, "restart the game")),
+        SPRAY_REPLACED.load(Ordering::Relaxed),
+        SPRAY_SEEN.load(Ordering::Relaxed),
+        crate::spray::MAPPING_FILE
     );
     let renamed = match RENAMED.load(Ordering::Relaxed) {
         0 => String::new(),
