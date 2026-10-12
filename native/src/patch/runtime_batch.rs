@@ -429,10 +429,7 @@ mod tests {
 
     #[test]
     fn the_early_lines_step_aside_and_the_start_line_quotes_the_file() {
-        assert_eq!(
-            early_lines(),
-            ["ds_run_in_background 1", "ds_batch away"]
-        );
+        assert_eq!(early_lines(), ["ds_run_in_background 1", "ds_batch away"]);
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),
             ["ds_batch start \"C:/x y/b.txt\""]
