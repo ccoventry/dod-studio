@@ -227,6 +227,7 @@ mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
 mod spray;
+mod spray_hltv;
 mod sprite_blend;
 mod streaks;
 mod studio_panel;
