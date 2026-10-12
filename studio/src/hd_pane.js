@@ -26,7 +26,7 @@ function formatSize(bytes) {
 }
 
 // The order the build runs types in (quickest first), as build_all.py's TYPES.
-const BUILD_TYPES = ['sky', 'sprites', 'models', 'detail', 'world'];
+const BUILD_TYPES = ['sky', 'decals', 'sprites', 'models', 'detail', 'world'];
 
 export function initHdPane() {
   const statusText = document.querySelector('#hd-status-text');

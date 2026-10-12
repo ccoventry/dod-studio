@@ -13,7 +13,7 @@
 //! The layout and names here mirror the hook's and the scripts', and must stay
 //! in step with both:
 //!
-//! - `texture_hires.rs`: the five type folders, `overrides`, and the default
+//! - `texture_hires.rs`: the six type folders, `overrides`, and the default
 //!   style;
 //! - `tools/hd/styles.py`: the built-in styles and their model files.
 
@@ -33,7 +33,7 @@ use serde::Serialize;
 
 /// The asset types, one folder each under `dodstudio_hd`, in the order the
 /// hook's own docs list them.
-pub const ASSET_TYPES: [&str; 5] = ["world", "models", "sprites", "detail", "sky"];
+pub const ASSET_TYPES: [&str; 6] = ["world", "models", "sprites", "decals", "detail", "sky"];
 
 /// Per-file picks that win over any style (`texture_hires.rs`'s `OVERRIDES`).
 pub const OVERRIDES: &str = "overrides";

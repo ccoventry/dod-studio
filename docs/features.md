@@ -283,7 +283,7 @@ Four fixes have no console name and are on by default: the **temp-entity crash f
 
 ## 6. HD textures
 
-**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
+**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `decals` (#729), `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide.
 
 **The page** (HD Textures tab):
 
