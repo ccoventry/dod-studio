@@ -62,6 +62,11 @@
 //! hundred frames. `dodstudio_seek_skip_between 1` seeks still jump at once:
 //! they skip the in-between on purpose.
 //!
+//! The console commands the steps replay are the exception: the engine runs
+//! only one of those a frame, so a POV demo's key presses from the whole jump
+//! would play on for tens of seconds after the landing. A stepped seek drops
+//! them and lets go of the keys once it lands (`filtered_commands.rs`, #702).
+//!
 //! A command after the time (`dodstudio_seek_to <seconds> <command ...>`) runs
 //! one frame after the seek lands, once the landing frame has reached the
 //! client: the Highlights tab's Go uses it to put the camera on a player who
@@ -137,6 +142,9 @@ struct Pending {
     /// Frames spent waiting for the player to send the last step.
     waited: u32,
     steps: u32,
+    /// Bytes of replayed console commands a stepped seek dropped
+    /// (`filtered_commands`).
+    dropped: usize,
     started: std::time::Instant,
 }
 
@@ -348,6 +356,13 @@ pub fn poll() {
     let Some(seek) = pending.as_mut() else {
         return;
     };
+    // A stepped seek drops the console commands each step replays: the
+    // engine runs only one a frame, so they would play on long after the
+    // landing (`filtered_commands`).
+    let stepped = seek.steps > 0 || !seek.landed;
+    if stepped {
+        seek.dropped += crate::filtered_commands::clear().unwrap_or(0);
+    }
     #[cfg(target_arch = "x86")]
     let done = player::step(seek);
     #[cfg(not(target_arch = "x86"))]
@@ -355,22 +370,41 @@ pub fn poll() {
     let line = match done {
         Ok(false) => return,
         Ok(true) => {
+            // What the dropped commands pressed would stay down.
+            if stepped
+                && let Ok(line) =
+                    std::ffi::CString::new(format!("{}\n", crate::filtered_commands::RELEASE_KEYS))
+            {
+                engine::client_cmd(&line);
+            }
             if let Some(then) = &seek.then
                 && let Ok(line) = std::ffi::CString::new(format!("{then}\n"))
             {
                 engine::client_cmd(&line);
             }
             format!(
-                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms",
+                "{SEEK_TO_NAME}: at {:.2} s after {} step(s), {} ms, {} bytes of replayed commands dropped; client clock {:.2}",
                 seek.target,
                 seek.steps,
-                seek.started.elapsed().as_millis()
+                seek.started.elapsed().as_millis(),
+                seek.dropped,
+                engine::engine_client_time().unwrap_or(-1.0)
             )
         }
         Err(why) => format!("{SEEK_TO_NAME}: stopped stepping: {why}"),
     };
     *pending = None;
     unsafe { crate::debug::report(&format!("demo_seek: {line}")) };
+}
+
+/// Whether a seek is still on its way (a stepped one, or one waiting to land),
+/// for the capture batch (#434), which runs nothing until it has.
+pub fn seeking() -> bool {
+    match PENDING.try_lock() {
+        Ok(pending) => pending.is_some(),
+        // Held only by `poll` and a seek starting, both mid-seek.
+        Err(_) => true,
+    }
 }
 
 /// Where the demo player is, for the review mode (#623).
@@ -655,6 +689,7 @@ mod player {
                     last_set: now,
                     waited: 0,
                     steps: 0,
+                    dropped: 0,
                     started: std::time::Instant::now(),
                 });
                 return Ok(format!(
@@ -671,6 +706,7 @@ mod player {
                 last_set: to,
                 waited: 0,
                 steps: 0,
+                dropped: 0,
                 started: std::time::Instant::now(),
             });
             drop(pending);
