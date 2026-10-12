@@ -121,6 +121,7 @@ unsafe extern "system" {
     fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
     fn GetWindow(hwnd: *mut c_void, cmd: u32) -> *mut c_void;
     fn GetClientRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
+    fn GetWindowRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
     // `[x, y]`, as `studio_panel` declares `GetCursorPos`: one signature per
     // name across the crate.
     fn ClientToScreen(hwnd: *mut c_void, point: *mut [i32; 2]) -> i32;
@@ -307,7 +308,7 @@ fn cursor() -> Option<Point> {
     (unsafe { GetCursorPos(&mut p) } != 0).then_some(Point { x: p[0], y: p[1] })
 }
 
-/// Where the game puts the pointer: the centre of its client area.
+/// The centre of the game's client area, for the log.
 fn client_centre(hwnd: *mut c_void) -> Option<Point> {
     let mut r = Rect::default();
     if unsafe { GetClientRect(hwnd, &mut r) } == 0 {
@@ -317,8 +318,27 @@ fn client_centre(hwnd: *mut c_void) -> Option<Point> {
     (unsafe { ClientToScreen(hwnd, &mut p) } != 0).then_some(Point { x: p[0], y: p[1] })
 }
 
-fn near(a: Point, b: Point) -> bool {
-    (a.x - b.x).abs() <= 2 && (a.y - b.y).abs() <= 2
+/// The game window on screen, frame included.
+fn window_rect(hwnd: *mut c_void) -> Option<Rect> {
+    let mut r = Rect::default();
+    (unsafe { GetWindowRect(hwnd, &mut r) } != 0).then_some(r)
+}
+
+fn inside(p: Point, r: &Rect) -> bool {
+    p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom
+}
+
+/// A move between two samples 5 ms apart that a hand doesn't make: a fast
+/// flick covers about 250 px in 30 ms (the foreground logs), 40-50 px in 5 ms.
+const JUMP_PX: i32 = 150;
+
+/// Whether the pointer went from `before` to `after` in one jump, landing on
+/// the game's window: the game moving it, not the user. Not "to the centre":
+/// on PRE it landed 28 px off the client area's centre (2026-10-11), and a
+/// window as big as the screen covers wherever it started.
+fn jumped_into(before: Point, after: Point, window: &Rect) -> bool {
+    let (dx, dy) = (after.x - before.x, after.y - before.y);
+    dx * dx + dy * dy >= JUMP_PX * JUMP_PX && inside(after, window)
 }
 
 /// Off the game's thread: until the setting arrives over the pipe, keeps the
@@ -360,16 +380,16 @@ fn watch_start() {
                 );
             }
         }
-        if let (Some(before), Some(after), Some(centre)) = (last, now, client_centre(hwnd))
-            && near(after, centre)
-            && !near(before, centre)
+        if let (Some(before), Some(after), Some(rect)) = (last, now, window_rect(hwnd))
+            && jumped_into(before, after, &rect)
             && put_backs < MAX_POINTER_PUT_BACKS
         {
             unsafe { SetCursorPos(before.x, before.y) };
             put_backs += 1;
+            let centre = client_centre(hwnd).unwrap_or_default();
             report(&format!(
-                "the game moved the pointer to its centre ({}, {}); put it back at ({}, {})",
-                after.x, after.y, before.x, before.y
+                "the game moved the pointer to ({}, {}) (its client centre is ({}, {})); put it back at ({}, {})",
+                after.x, after.y, centre.x, centre.y, before.x, before.y
             ));
             last = Some(before);
             continue;
@@ -441,9 +461,36 @@ mod tests {
     }
 
     #[test]
-    fn near_allows_two_pixels() {
-        let c = Point { x: 1720, y: 699 };
-        assert!(near(Point { x: 1722, y: 697 }, c));
-        assert!(!near(Point { x: 1723, y: 699 }, c));
+    fn a_jump_onto_the_window_is_the_game_and_a_flick_is_not() {
+        let screen = Rect {
+            left: 0,
+            top: 0,
+            right: 3440,
+            bottom: 1440,
+        };
+        // Measured on PRE: one 20 ms sample, onto the window's middle.
+        assert!(jumped_into(
+            Point { x: 2308, y: 544 },
+            Point { x: 1692, y: 695 },
+            &screen
+        ));
+        // A fast hand flick, sampled every 5 ms.
+        assert!(!jumped_into(
+            Point { x: 1000, y: 700 },
+            Point { x: 1050, y: 690 },
+            &screen
+        ));
+        // Off the window.
+        let small = Rect {
+            left: 0,
+            top: 0,
+            right: 1280,
+            bottom: 720,
+        };
+        assert!(!jumped_into(
+            Point { x: 100, y: 100 },
+            Point { x: 2000, y: 900 },
+            &small
+        ));
     }
 }
