@@ -217,6 +217,22 @@ pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 /// engine ignores a `-` argument it doesn't know.
 pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
 
+/// Whether a patched batch plays the primer demo before its first chain job,
+/// given whether the launch injects the hook DLL (`config.goldsrc_hooks_dll()`,
+/// the test `build_hlae_process` makes).
+///
+/// The primer loads the first map once so the real first demo isn't dark, and
+/// plays [`crate::patch::PRIMER_DELAY_TICKS`] before `playdemo`. With the hook
+/// DLL neither is needed (#365): its `lightmap_gamma` fixes the first load's
+/// lighting (#397), the first demo goes over its pipe only after config.cfg
+/// and movie.cfg have run (#705), and `GameHandoff`'s settle wait covers the
+/// delay. Every chain job carries `init_commands` and `sys_autodir` itself
+/// ([`final_init_commands`]). Without the DLL nothing else covers the first
+/// two, so the primer stays.
+pub fn plays_primer(hook_dll: bool) -> bool {
+    !hook_dll
+}
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
@@ -430,9 +446,15 @@ pub fn build_batch_queue(
         ));
     }
 
-    // 1. Primer Job. Always first when there is any work, so a test asserting
-    // on this queue gets one job more than the streak groups it passed in.
     if total_jobs > 0 {
+        helper_cfg_content.push_str("# Demo specific next demos\n");
+    }
+
+    // 1. Primer Job, only when the launch has no hook DLL ([`plays_primer`],
+    // #365). It is then first, so a test asserting on this queue gets one job
+    // more than the streak groups it passed in; with the DLL the game starts
+    // on dodstudio_chain_01 directly.
+    if total_jobs > 0 && plays_primer(config.goldsrc_hooks_dll().is_some()) {
         let first_source = sorted_groups[0].0.0.to_string();
         let mut primer_init = config.init_commands.clone();
         primer_init.push("sys_autodir".to_string());
@@ -450,7 +472,6 @@ pub fn build_batch_queue(
         // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
         // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
         let mut primer_scheduled = Vec::new();
-        helper_cfg_content.push_str("# Demo specific next demos\n");
         let primer_next_alias = format!("{PRIMER_DEMO_STEM}_next");
         helper_cfg_content.push_str(&format!(
             "alias {primer_next_alias} \"playdemo {CHAIN_DEMO_PREFIX}01\"\n"

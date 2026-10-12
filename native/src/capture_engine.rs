@@ -11,6 +11,16 @@ pub struct CaptureJob {
     pub patched_demo_path: std::path::PathBuf,
 }
 
+/// The demo a patched batch starts on: its first job, which is the primer when
+/// `build_batch_queue` planned one and dodstudio_chain_01 when it didn't
+/// (`patch::builder::plays_primer`, #365). Read from the plan rather than
+/// decided again, so the start can't name a demo the batch never wrote. Named
+/// as the copy into `dod/` names the file.
+fn first_demo_stem(jobs: &[CaptureJob]) -> Option<String> {
+    let stem = jobs.first()?.patched_demo_path.file_stem()?;
+    Some(stem.to_string_lossy().replace('-', "_"))
+}
+
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
     Starting(usize),
@@ -670,8 +680,9 @@ pub fn spawn_capture_engine(
             //
             // The first demo starts over the hook's pipe once the game is up,
             // so its map loads after config.cfg/movie.cfg set the user's
-            // brightness and gamma (`game_handoff`). A batch the hook runs
-            // starts the same way, with its batch file instead of the primer.
+            // brightness and gamma (`game_handoff`). With the hook that demo
+            // is dodstudio_chain_01 itself, without it the primer (#365). A
+            // batch the hook runs starts the same way, with its batch file.
             let start_behind = crate::patch::builder::START_BEHIND_ARG;
             let (extra_args, early_lines, first_lines) = match runtime_batch.as_deref() {
                 Some(file) => (
@@ -681,7 +692,7 @@ pub fn spawn_capture_engine(
                 ),
                 None => {
                     let (args, lines) = crate::game_handoff::first_demo_start(
-                        crate::shared::paths::PRIMER_DEMO_STEM,
+                        &first_demo_stem(&jobs).unwrap_or_default(),
                         config.goldsrc_hooks_dll().is_some(),
                     );
                     (format!("{start_behind} {args}"), Vec::new(), lines)
@@ -749,7 +760,7 @@ pub fn spawn_capture_engine(
             // `exit_trigger`) restarts the whole demo from the top as a side
             // effect — harmless in frame-sequence mode (which is already
             // mid-movie-recording throughout), but in OBS mode it replayed
-            // dodstudio_primer.dem *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
+            // the primer (when there is one) *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
             // a real batch before `exit_trigger` ever got written. The
             // BATCH_COMPLETE marker already exists and already fires
             // `ObsSession::on_marker`'s `end_block()` moments before this —
@@ -1309,5 +1320,25 @@ mod tests {
 
         assert!(dod.join("dodstudio_primer.dem").exists());
         assert!(dod.join("dodstudio_chain_01.dem").exists());
+    }
+
+    /// The batch starts on whatever the plan put first: the primer without the
+    /// hook DLL, dodstudio_chain_01 with it (#365).
+    #[test]
+    fn the_batch_starts_on_its_first_planned_demo() {
+        let job = |name: &str| CaptureJob {
+            patched_demo_path: PathBuf::from("game").join("dod").join(name),
+        };
+        let with_primer = [job("dodstudio_primer.dem"), job("dodstudio_chain_01.dem")];
+        assert_eq!(
+            first_demo_stem(&with_primer).as_deref(),
+            Some("dodstudio_primer")
+        );
+        let without = [job("dodstudio_chain_01.dem"), job("dodstudio_chain_02.dem")];
+        assert_eq!(
+            first_demo_stem(&without).as_deref(),
+            Some("dodstudio_chain_01")
+        );
+        assert_eq!(first_demo_stem(&[]), None);
     }
 }
