@@ -58,7 +58,9 @@
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
 //!
-//! `font` -- the names in a font of our own -- lives in [`font`] (#562).
+//! `font` -- the names in a font of our own -- lives in [`font`] (#562), and
+//! `scale` -- the icons S times bigger, lines spaced to match -- in [`scale`]
+//! (#728).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -71,6 +73,7 @@ use crate::names::console_name;
 use crate::scan;
 
 mod font;
+mod scale;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -1044,6 +1047,7 @@ pub fn poll() {
         install_hook();
     }
     font::poll();
+    scale::poll();
 }
 
 /// Field offsets inside a `DeathNoticeItem` that [`restamp_display_time`] needs.
@@ -1216,9 +1220,14 @@ fn usage() -> String {
          \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
          \x20                               draw the names in that font (size {}..{} px), live;\n\
          \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
-         \x20 {COMMAND} font default       the game's own font again\n",
+         \x20 {COMMAND} font default       the game's own font again\n\
+         \x20 {COMMAND} scale <{}..{}>          draw the weapon icons that many times their size,\n\
+         \x20                               lines spaced and right-aligned to match (default 1)\n\
+         \x20 {COMMAND} scale default      the game's own size again\n",
         font::MIN_TALL,
-        font::MAX_TALL
+        font::MAX_TALL,
+        scale::MIN_SCALE,
+        scale::MAX_SCALE
     )
 }
 
@@ -1237,9 +1246,10 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, {}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, {}, blocking {block}\n",
         if max == 0 { STOCK_MAX } else { max },
         font::describe(),
+        scale::describe(),
     )
 }
 
@@ -1349,6 +1359,19 @@ fn dispatch(argv: &[String]) -> String {
                     Err(why) => format!("{COMMAND} font: {why}\n"),
                 },
                 Err(why) => format!("{COMMAND} font: {why}\n"),
+            }
+        }
+        "scale" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", scale::describe(), usage());
+            }
+            match scale::parse_args(rest) {
+                Ok(s) => match scale::apply(s) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} scale: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} scale: {why}\n"),
             }
         }
         "fake" => {

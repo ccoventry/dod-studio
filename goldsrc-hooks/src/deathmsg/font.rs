@@ -36,8 +36,9 @@
 //! [`hook::set_text_color`] records the colour the game asked for, since each
 //! name is coloured by a call just before it. A 16-byte detour at the line
 //! step makes it `max(icon height, font height)`, so taller text does not
-//! overlap the next line. The icon stays where the layout puts it, at its own
-//! size (#728 is scaling it).
+//! overlap the next line. The icon stays where the layout puts it; its size
+//! is [`super::scale`]'s (#728), which rewrites three more operands in the
+//! same span and shares this module's pattern match.
 //!
 //! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. Each change
 //! makes a **new** handle: `CFontManager::AddGlyphSetToFont` returns false
@@ -104,13 +105,14 @@ const SITES: &[(usize, Call)] = &[
     (0x133, Call::Draw),
 ];
 
-/// Two more `call [gEngfuncs+N]` in the same span, left alone but read: the
-/// icon's `SPR_Set` (slot 4, `+0x2b0de`) and `SPR_DrawHoles` (slot 6,
-/// `+0x2b0f1`). They pin `gEngfuncs` independently of the six above.
-const ANCHORS: &[(usize, usize)] = &[(0xdc, 4), (0xef, 6)];
+/// One more `call [gEngfuncs+N]` in the same span, left alone but read: the
+/// icon's `SPR_Set` (slot 4, `+0x2b0de`). It pins `gEngfuncs` independently
+/// of the six above. The `SPR_DrawHoles` call after it (slot 6, `+0x2b0f1`)
+/// is not an anchor: `scale` redirects it (#728).
+const ANCHORS: &[(usize, usize)] = &[(0xdc, 4)];
 
 /// `FF 15 imm32`, the same length as `E8 rel32` plus one `nop`.
-const CALL_LEN: usize = 6;
+pub(super) const CALL_LEN: usize = 6;
 
 /// Where the line step is computed, from the match: `+0x2b13e`.
 const STEP_AT: usize = 0x13c;
@@ -223,7 +225,7 @@ pub(super) fn parse_args(rest: &[String]) -> Result<Option<FontSpec>, String> {
 /// `call rel32; nop` from `site` to `target`: the six bytes that replace a
 /// `call [gEngfuncs+N]`. On 32-bit the displacement wraps, so any target is
 /// in reach.
-fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
+pub(super) fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
     let rel = (target as u32)
         .wrapping_sub((site + 5) as u32)
         .to_le_bytes();
@@ -231,11 +233,21 @@ fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
 }
 
 /// `call [gengfuncs + slot*4]`, the shipped bytes at a site; what
-/// `hook::gengfuncs_of` reads back.
+/// [`gengfuncs_of`] reads back.
 #[cfg(test)]
-fn stock_bytes(gengfuncs: usize, slot: usize) -> [u8; CALL_LEN] {
+pub(super) fn stock_bytes(gengfuncs: usize, slot: usize) -> [u8; CALL_LEN] {
     let abs = ((gengfuncs + slot * 4) as u32).to_le_bytes();
     [0xff, 0x15, abs[0], abs[1], abs[2], abs[3]]
+}
+
+/// `gEngfuncs` from a stock `call [gEngfuncs + slot*4]`, or `None` for
+/// anything else.
+pub(super) fn gengfuncs_of(bytes: &[u8; CALL_LEN], slot: usize) -> Option<usize> {
+    if bytes[..2] != [0xff, 0x15] {
+        return None;
+    }
+    let abs = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
+    abs.checked_sub(slot * 4)
 }
 
 /// The step stub, hand-assembled:
@@ -323,6 +335,13 @@ static COLOR: AtomicI32 = AtomicI32::new(-1);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// The `client.dll` the sites were rewritten in, 0 before.
 static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
+
+/// Our font's height in pixels, 0 while the game's font is in use: the floor
+/// the step stub applies, so `scale` centres the icon on the same line height
+/// the step uses.
+pub(super) fn tall() -> i32 {
+    FONT_TALL.load(Ordering::Relaxed)
+}
 
 /// What `status` says about the font.
 pub(super) fn describe() -> String {
@@ -565,14 +584,10 @@ mod hook {
         out
     }
 
-    /// `gEngfuncs` from a stock `call [gEngfuncs + slot*4]`, or `None` for
-    /// anything else.
-    fn gengfuncs_of(bytes: &[u8; CALL_LEN], slot: usize) -> Option<usize> {
-        if bytes[..2] != [0xff, 0x15] {
-            return None;
-        }
-        let abs = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
-        abs.checked_sub(slot * 4)
+    /// The [`PATTERN`] match in the module at `base`, for `scale`, whose
+    /// sites are offsets from the same match.
+    pub(in crate::deathmsg) fn draw_site(base: usize) -> Result<usize, String> {
+        site(base)
     }
 
     /// Rewrites the six sites and installs the step detour in the module at
@@ -774,6 +789,11 @@ pub(super) fn poll() {
     #[cfg(target_arch = "x86")]
     hook::poll();
 }
+
+/// `Draw`'s span in the module at `base` -- the [`PATTERN`] match -- for
+/// `scale`, whose three operands are offsets from the same match.
+#[cfg(target_arch = "x86")]
+pub(super) use hook::draw_site;
 
 #[cfg(test)]
 mod tests {

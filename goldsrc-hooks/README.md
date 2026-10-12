@@ -48,7 +48,10 @@ is the complete list):
   players (by slot, SteamID or `self`), injects one by hand, or draws the
   names in a Windows font of your choice, live (`font "Verdana" 28 bold
   shadow`: the names go through the engine's vgui2 surface with a font handle
-  the hook owns; `src/deathmsg/font.rs`, #562). HLAE's `mirv_deathmsg` supports only
+  the hook owns; `src/deathmsg/font.rs`, #562), or draws the weapon icons
+  bigger with the lines spaced to match (`scale 2`: the game's own sprite
+  draw under a scaled modelview, its rect table swapped for a scaled copy;
+  `src/deathmsg/scale.rs`, #728). HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen

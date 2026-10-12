@@ -84,8 +84,9 @@ state, not the state from before that line ran.
 ### `dodstudio_deathmsg`
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
-one by hand, or changes the names' font. The font takes effect on the next
-frame (#562). HLAE's own `mirv_deathmsg` supports only
+one by hand, changes the names' font, or scales the weapon icons. The font
+(#562) and the scale (#728) take effect on the next frame. HLAE's own
+`mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
 
@@ -100,8 +101,10 @@ frame (#562). HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block clear` | stop hiding anything |
 | `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
-| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font, the icon stays as it is (#728); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
+| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font (`scale` sizes the icon); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
 | `dodstudio_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
+| `dodstudio_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
+| `dodstudio_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
 
 A `block` id is any of:
 
