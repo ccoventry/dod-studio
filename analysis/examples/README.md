@@ -25,6 +25,7 @@ documented in its own `//!` header.
 | `userinfo_times` | When did a player's name first reach the recording, and when did it change? |
 | `seek_burst` | How much network data can a few seconds of a demo hold (the stepped seek's budget, #596)? |
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
+| `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
