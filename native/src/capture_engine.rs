@@ -63,6 +63,11 @@ const MARKER_STALL_FLOOR: std::time::Duration = std::time::Duration::from_secs(3
 /// is broken when it is fine.
 const CONDEBUG_WRITE_GRACE: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long the game is kept from taking the foreground at most, when the
+/// batch never starts in it (no hook DLL, a patched batch): long enough for
+/// its window to open, short enough that nothing else is held up for long.
+const FOREGROUND_LOCK_MAX: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Size of the engine's console log, or 0 if it is not there.
 ///
 /// Read through an *open handle* rather than `fs::metadata(path)`: on Windows a
@@ -696,6 +701,14 @@ pub fn spawn_capture_engine(
 
             log_markdown(&format!("[HLAE] Spawning: {:?} {:?}", cmd.get_program(), cmd.get_args().collect::<Vec<_>>()));
 
+            // Held until the batch starts in the game (it has stepped aside by
+            // then) or FOREGROUND_LOCK_MAX passes; dropped on every way out.
+            let mut foreground_lock = crate::sys::foreground_lock::ForegroundLock::take();
+            let foreground_locked_at = std::time::Instant::now();
+            if foreground_lock.locked() {
+                log_markdown("[HLAE] The game can't take the foreground while it starts");
+            }
+
             let mut child = match cmd.spawn() {
                 Ok(c) => c,
                 Err(e) => {
@@ -821,14 +834,21 @@ pub fn spawn_capture_engine(
                     alive
                 };
 
+                if foreground_locked_at.elapsed() > FOREGROUND_LOCK_MAX {
+                    foreground_lock.release();
+                }
+
                 if let Some(handoff) = handoff.as_mut() {
                     use crate::game_handoff::Handoff;
                     match handoff.poll(&crate::sys::process::game_pids_in(&sys)) {
                         Handoff::Waiting | Handoff::Sent => {}
-                        Handoff::JustSent(pid) => log_markdown(&format!(
-                            "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
-                            handoff.lines.join("; ")
-                        )),
+                        Handoff::JustSent(pid) => {
+                            foreground_lock.release();
+                            log_markdown(&format!(
+                                "[HLAE] The game is up (PID {pid}); started the batch: `{}`",
+                                handoff.lines.join("; ")
+                            ))
+                        }
                         Handoff::Failed(why) => {
                             log_markdown(&format!("[HLAE] {why}"));
                             failure_reason = Some(why);
