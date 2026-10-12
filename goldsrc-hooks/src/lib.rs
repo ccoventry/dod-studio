@@ -177,6 +177,7 @@ mod demo_list_folders;
 mod demo_reload;
 mod demo_rosters;
 mod demo_seek;
+mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
