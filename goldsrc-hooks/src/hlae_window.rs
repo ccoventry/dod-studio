@@ -31,6 +31,16 @@
 //!
 //! Found by a byte pattern in HLAE's DLL. Another HLAE version may not match:
 //! the log says so, and recording pulls the window to the front as before.
+//!
+//! ## Before Studio can reach the game
+//!
+//! The setting arrives over the pipe, about a second after the window opens.
+//! Until then the window opened on top of the user's, and on the
+//! pre-Anniversary build the game moved the pointer to the centre of its
+//! window once (measured with a foreground logger, 2026-10-11). So a capture
+//! batch's launch line carries [`START_BEHIND_FLAG`], and a thread started as
+//! the DLL loads keeps the window at the bottom of the stack and puts the
+//! pointer back, until the setting takes over.
 
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
@@ -79,12 +89,41 @@ const FOREGROUND_WAIT_CHECKS: u32 = 4;
 /// foreground.
 static WAITED: AtomicU32 = AtomicU32::new(0);
 
+/// On a capture batch's launch line (`native::patch::builder::START_BEHIND_ARG`; keep
+/// the two in step): the window stays behind from the moment it opens.
+pub const START_BEHIND_FLAG: &str = "-dodstudio_start_behind";
+/// How long the start-up watch runs at most, if the setting never arrives.
+const START_WATCH: std::time::Duration = std::time::Duration::from_secs(120);
+/// How often it looks.
+const START_WATCH_EVERY: std::time::Duration = std::time::Duration::from_millis(5);
+/// Pointer moves it undoes at most, in case something keeps moving it.
+const MAX_POINTER_PUT_BACKS: u32 = 20;
+
 const SW_SHOWNOACTIVATE: i32 = 4;
 const SW_MINIMIZE: i32 = 6;
 const HWND_BOTTOM: isize = 1;
 const SWP_NOSIZE: u32 = 0x1;
 const SWP_NOMOVE: u32 = 0x2;
 const SWP_NOACTIVATE: u32 = 0x10;
+/// From another thread, so the call never waits on the game's message loop.
+const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
+const GW_HWNDNEXT: u32 = 2;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+struct Point {
+    x: i32,
+    y: i32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct Rect {
+    left: i32,
+    top: i32,
+    right: i32,
+    bottom: i32,
+}
 
 #[link(name = "user32")]
 unsafe extern "system" {
@@ -99,6 +138,14 @@ unsafe extern "system" {
     fn GetForegroundWindow() -> *mut c_void;
     fn GetClassNameA(hwnd: *mut c_void, name: *mut u8, max: i32) -> i32;
     fn ShowWindow(hwnd: *mut c_void, cmd: i32) -> i32;
+    fn GetWindow(hwnd: *mut c_void, cmd: u32) -> *mut c_void;
+    fn GetClientRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
+    fn GetWindowRect(hwnd: *mut c_void, rect: *mut Rect) -> i32;
+    // `[x, y]`, as `studio_panel` declares `GetCursorPos`: one signature per
+    // name across the crate.
+    fn ClientToScreen(hwnd: *mut c_void, point: *mut [i32; 2]) -> i32;
+    fn GetCursorPos(point: *mut [i32; 2]) -> i32;
+    fn SetCursorPos(x: i32, y: i32) -> i32;
     fn SetWindowPos(
         hwnd: *mut c_void,
         after: isize,
@@ -254,6 +301,133 @@ pub fn step_aside() {
     }
 }
 
+/// Whether `args` (the game's command line, program first) asks for the
+/// window to stay behind from the start.
+fn asks_start_behind<S: AsRef<str>>(args: &[S]) -> bool {
+    args.iter()
+        .skip(1)
+        .any(|a| a.as_ref().eq_ignore_ascii_case(START_BEHIND_FLAG))
+}
+
+/// Starts the start-up watch when the launch line asks for it. Called once,
+/// from the DLL's worker thread, before the game opens its window.
+pub fn start_behind_if_asked() {
+    let args: Vec<String> = std::env::args().collect();
+    if !asks_start_behind(&args) {
+        return;
+    }
+    report(&format!(
+        "{START_BEHIND_FLAG}: the window stays behind from the moment it opens"
+    ));
+    crate::behind_imports::STARTING_BEHIND.store(true, Ordering::Release);
+    crate::behind_imports::install_loaded();
+    std::thread::spawn(watch_start);
+}
+
+fn cursor() -> Option<Point> {
+    let mut p = [0; 2];
+    (unsafe { GetCursorPos(&mut p) } != 0).then_some(Point { x: p[0], y: p[1] })
+}
+
+/// The centre of the game's client area, for the log.
+fn client_centre(hwnd: *mut c_void) -> Option<Point> {
+    let mut r = Rect::default();
+    if unsafe { GetClientRect(hwnd, &mut r) } == 0 {
+        return None;
+    }
+    let mut p = [(r.right - r.left) / 2, (r.bottom - r.top) / 2];
+    (unsafe { ClientToScreen(hwnd, &mut p) } != 0).then_some(Point { x: p[0], y: p[1] })
+}
+
+/// The game window on screen, frame included.
+fn window_rect(hwnd: *mut c_void) -> Option<Rect> {
+    let mut r = Rect::default();
+    (unsafe { GetWindowRect(hwnd, &mut r) } != 0).then_some(r)
+}
+
+fn inside(p: Point, r: &Rect) -> bool {
+    p.x >= r.left && p.x < r.right && p.y >= r.top && p.y < r.bottom
+}
+
+/// A move between two samples 5 ms apart that a hand doesn't make: a fast
+/// flick covers about 250 px in 30 ms (the foreground logs), 40-50 px in 5 ms.
+const JUMP_PX: i32 = 150;
+
+/// Whether the pointer went from `before` to `after` in one jump, landing on
+/// the game's window: the game moving it, not the user. Not "to the centre":
+/// on PRE it landed 28 px off the client area's centre (2026-10-11), and a
+/// window as big as the screen covers wherever it started.
+fn jumped_into(before: Point, after: Point, window: &Rect) -> bool {
+    let (dx, dy) = (after.x - before.x, after.y - before.y);
+    dx * dx + dy * dy >= JUMP_PX * JUMP_PX && inside(after, window)
+}
+
+/// Off the game's thread: until the setting arrives over the pipe, keeps the
+/// window at the bottom of the stack and undoes the game moving the pointer to
+/// its centre while another window has the foreground.
+fn watch_start() {
+    let started = std::time::Instant::now();
+    let mut seen = false;
+    let mut last = cursor();
+    let mut put_backs = 0;
+    while started.elapsed() < START_WATCH && !wanted() {
+        std::thread::sleep(START_WATCH_EVERY);
+        // The game's modules load as it starts: hook each as it appears.
+        if !crate::behind_imports::all_installed() {
+            crate::behind_imports::install_loaded();
+        }
+        let now = cursor();
+        let Some(hwnd) = window() else {
+            last = now;
+            continue;
+        };
+        if !seen {
+            seen = true;
+            report(&format!(
+                "the window opened {} ms in; keeping it behind",
+                started.elapsed().as_millis()
+            ));
+        }
+        if has_foreground(hwnd) {
+            last = now;
+            continue;
+        }
+        if !unsafe { GetWindow(hwnd, GW_HWNDNEXT) }.is_null() {
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_BOTTOM,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOSIZE | SWP_NOMOVE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS,
+                );
+            }
+        }
+        if let (Some(before), Some(after), Some(rect)) = (last, now, window_rect(hwnd))
+            && jumped_into(before, after, &rect)
+            && put_backs < MAX_POINTER_PUT_BACKS
+        {
+            unsafe { SetCursorPos(before.x, before.y) };
+            put_backs += 1;
+            let centre = client_centre(hwnd).unwrap_or_default();
+            report(&format!(
+                "the game moved the pointer to ({}, {}) (its client centre is ({}, {})); put it back at ({}, {})",
+                after.x, after.y, centre.x, centre.y, before.x, before.y
+            ));
+            last = Some(before);
+            continue;
+        }
+        last = now;
+    }
+    crate::behind_imports::STARTING_BEHIND.store(false, Ordering::Release);
+    report(&format!(
+        "start-up watch ended after {} ms",
+        started.elapsed().as_millis()
+    ));
+}
+
 /// Follows the setting. Called every frame from `commands::poll`.
 pub fn poll() {
     let on = wanted();
@@ -266,6 +440,10 @@ pub fn poll() {
             .is_multiple_of(CHECK_EVERY)
     {
         return;
+    }
+    // Turned on without the launch flag, or a module that loaded late.
+    if !crate::behind_imports::all_installed() {
+        crate::behind_imports::install_loaded();
     }
     let Some(hwnd) = window() else {
         return;
@@ -293,5 +471,57 @@ mod tests {
     fn the_pattern_starts_with_the_byte_it_swaps() {
         assert!(ENTER_PATTERN.starts_with("55 "));
         assert!(crate::scan::Pattern::parse(ENTER_PATTERN).is_ok());
+    }
+
+    #[test]
+    fn the_start_behind_flag_is_a_whole_argument_after_the_program() {
+        assert!(asks_start_behind(&[
+            "hl.exe",
+            "-game",
+            "dod",
+            "-dodstudio_start_behind"
+        ]));
+        assert!(asks_start_behind(&["hl.exe", "-DODSTUDIO_START_BEHIND"]));
+        assert!(!asks_start_behind(&["-dodstudio_start_behind"]));
+        assert!(!asks_start_behind(&["hl.exe", "-dodstudio_start_behind_x"]));
+        assert!(!asks_start_behind(&[
+            "hl.exe",
+            "+exec",
+            "dodstudio_helper.cfg"
+        ]));
+    }
+
+    #[test]
+    fn a_jump_onto_the_window_is_the_game_and_a_flick_is_not() {
+        let screen = Rect {
+            left: 0,
+            top: 0,
+            right: 3440,
+            bottom: 1440,
+        };
+        // Measured on PRE: one 20 ms sample, onto the window's middle.
+        assert!(jumped_into(
+            Point { x: 2308, y: 544 },
+            Point { x: 1692, y: 695 },
+            &screen
+        ));
+        // A fast hand flick, sampled every 5 ms.
+        assert!(!jumped_into(
+            Point { x: 1000, y: 700 },
+            Point { x: 1050, y: 690 },
+            &screen
+        ));
+        // Off the window.
+        let small = Rect {
+            left: 0,
+            top: 0,
+            right: 1280,
+            bottom: 720,
+        };
+        assert!(!jumped_into(
+            Point { x: 100, y: 100 },
+            Point { x: 2000, y: 900 },
+            &small
+        ));
     }
 }

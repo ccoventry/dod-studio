@@ -221,6 +221,12 @@ pub const RUN_IN_BACKGROUND: &str = "dodstudio_run_in_background";
 /// which every batch sets from `PatcherConfig::keep_game_behind`.
 pub const STAY_BEHIND: &str = "dodstudio_stay_behind_while_capturing";
 
+/// On a capture batch's game launch line, with `keep_game_behind` on: the hook
+/// DLL keeps the window behind from the moment it opens, before the pipe can
+/// carry the setting (goldsrc-hooks `hlae_window::START_BEHIND_FLAG`; keep the
+/// two in step). The engine ignores a `-` argument it doesn't know.
+pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
