@@ -186,8 +186,11 @@ push "filteredcmd_text"
 call SZ_Alloc
 ```
 
-GoldSrc's command buffer is **16 KB**, and `hw.dll` contains no string
-containing "Cbuf" at all — there is no overflow message to hit.
+GoldSrc's command buffers are **16 KB**. (This section used to say `hw.dll`
+holds no "Cbuf" string; it holds two, `Cbuf_AddTextToBuffer: overflow` and
+`Cbuf_InsertText: overflow`, both for the 16 KB limit. A long stepped seek in a
+POV demo hits the first one thousands of times: `filteredcmd_text` runs one
+command a frame, see `goldsrc_viewdemo.md`, #702.)
 
 The 64 is real, but it is the **demo file format**: a Type-3 `ConsoleCommand`
 frame carries a fixed `char command[64]`. This project's own reader says so —
