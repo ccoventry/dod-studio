@@ -21,7 +21,9 @@
 //!   kill-feed lines, centre text, the clan-match countdown, dead bodies --
 //!   lands with a fresh client-clock timestamp and would still be on screen at
 //!   the clip. Fast-forward moves both clocks together, so those expire as
-//!   they would in a demo played straight through.
+//!   they would in a demo played straight through. It is the helper cfg's
+//!   `sys_fast_forward`, so it runs uncapped and undrawn here too
+//!   (`builder/speed.rs`, #724); the seek's own stepped frames still draw.
 //! - **`<demo>_next` becomes `next`.** The hook loads the next demo itself; the
 //!   alias (`playdemo` of the next patched copy) would not exist.
 //! - The 64-byte `build_safe_echos` splitting and the breadcrumbs stay out:

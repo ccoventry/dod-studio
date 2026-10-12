@@ -213,9 +213,9 @@ Every command must also fit a demo's 64-byte command field, which holds 63 chara
 
 | Tier | Commands | What happens |
 |---|---|---|
-| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
+| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_norefresh`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
 | Banned when scheduled | `r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename` | Fine in Initial Commands, refused in Scheduled |
-| Mid-demo hazards | the pipeline-owned commands, as a warning | Shadowed with a warning, not refused |
+| Mid-demo hazards | the pipeline-owned commands, as a warning; `fps_override`, `fps_max`, `gl_vsync` when scheduled (the fast-forward sets them and every clip's pre-roll puts the Initial Commands value back) | Shadowed with a warning, not refused |
 | No effect | `exec`, `quit` everywhere; `mirv_movie_filename` in Initial | Reported as doing nothing |
 | Fatal config values | `cl_lw` not 1; `r_drawentities` not 1 while `sv_cheats` is on | Reported from your game configs; DoD's client quits over these |
 
