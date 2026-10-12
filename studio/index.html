@@ -469,6 +469,11 @@
                   <label for="config-decal-flush" data-str="CAPTURE_CONFIG.DECAL_FLUSH_LABEL" data-str-title="CAPTURE_CONFIG.DECAL_FLUSH_TITLE">Flush Decals Between Clips</label>
                 </div>
                 <div class="control-group">
+                  <!-- #434: the hook DLL runs the batch on the original demos. -->
+                  <input type="checkbox" id="config-hook-runs-batch" />
+                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
+                </div>
+                <div class="control-group">
                   <input type="checkbox" id="config-save-local-patched" />
                   <label for="config-save-local-patched" data-str="CAPTURE_CONFIG.SAVE_LOCAL_PATCHED_LABEL">Save Local Patched Copy</label>
                 </div>
