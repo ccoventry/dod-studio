@@ -94,11 +94,18 @@
 //! `75 24`, so live play still draws along the client's angles.
 //!
 //! `v_angles` alone still left the overlay swaying sideways as the recorded
-//! player moved: ±80 px at 1280x720 in a rendered clip, so in a POV demo it
-//! isn't the angles the frame ends up drawn with. So the copy's three
-//! absolute operands are pointed at [`DRAWN_ANGLES`] as well, which
-//! `engine::tramp_calc_refdef` fills from `V_CalcRefdef`'s result every frame:
-//! the scope is then drawn square to the camera.
+//! player moved: ±80 px at 1280x720 in a rendered clip. In POV playback the
+//! engine copies the recorded view over what `V_CalcRefdef` worked out
+//! (`pov_live_bob`'s override), so neither `v_angles` nor `V_CalcRefdef`'s
+//! result is the view the frame is drawn from. So the copy's three absolute
+//! operands are pointed at [`DRAWN_ANGLES`] as well, which
+//! [`before_transparent_triangles`] fills from the engine's own render axes
+//! (`GetViewInfo`) just before the scope is drawn. The quads are also placed
+//! from `v_origin`, which carries `V_CalcRefdef`'s sideways bob the recorded
+//! view doesn't have, and they sit a few units in front of the eye, so that
+//! alone moved the scope sideways as he walked. The three origin reads
+//! (`+0x46856`) go to [`DRAWN_ORIGIN`], the engine's render origin, the same
+//! way. Then the scope is square to the camera and centred on it.
 //!
 //! The function reads `m_iWeaponId` at entry, before the in-eye store, so a
 //! change shows one frame after it is written. `CHudScope::Think`'s black
@@ -130,6 +137,13 @@ const VIEW_SKIP_STORE: u8 = 0x07;
 /// The absolute addresses the copy reads pitch, yaw and roll from
 /// (`mov edx, [a]; mov eax, [a+4]; mov ecx, [a+8]`): `v_angles`, stock.
 const ANGLE_OPERANDS_AT: [usize; 3] = [22, 27, 33];
+/// Where the quads are placed (`+0x46856`): `v_origin.x/y/z` plus the scaled
+/// forward vector, `fadd [x]`, `fld [y]`, `fld [z]`. The operands are
+/// wildcards, written like the angle copy's.
+const ORIGIN_PATTERN: &str = "D8 05 ?? ?? ?? ?? D9 5C 24 5C D9 05 ?? ?? ?? ?? D8 C1 \
+                              8B 4C 24 5C 89 4C 24 38 8B 0D ?? ?? ?? ?? D9 5C 24 60 \
+                              8B 54 24 60 DD D8 D9 05 ?? ?? ?? ?? D8 84 24 AC 00 00 00";
+const ORIGIN_OPERANDS_AT: [usize; 3] = [2, 12, 44];
 /// The low byte of the in-eye store's imm32 (`mov dword [esi+0x14], imm32`).
 const IN_EYE_ID_AT: usize = 16;
 /// The `je` that skips the `xor bl, bl`.
@@ -156,11 +170,18 @@ const SCOPE_IDS: [u8; 5] = [
     WEAPON_BINOC,
 ];
 
-/// The angles the last frame was drawn with, as `V_CalcRefdef` left them, as
-/// f32 bits. The patched copy reads these three cells in place.
+/// The angles this frame is drawn with (pitch, yaw, roll), as f32 bits. The
+/// patched copy reads these three cells in place.
 static DRAWN_ANGLES: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 /// The copy's stock operands (`v_angles`), read before the first patch.
 static STOCK_OPERANDS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+/// The origin this frame is drawn from, as f32 bits, read in place like
+/// [`DRAWN_ANGLES`].
+static DRAWN_ORIGIN: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+/// The origin reads' stock operands (`v_origin`).
+static STOCK_ORIGIN_OPERANDS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+static ORIGIN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
+static ORIGIN_SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
@@ -260,54 +281,107 @@ fn watched_scope_id() -> Option<u8> {
     scope_id_for_model(&unsafe { (*model).name_str() })
 }
 
-/// Keeps the angles the frame is drawn with. Called from
-/// `engine::tramp_calc_refdef` after the client's `V_CalcRefdef`.
-pub fn after_calc_refdef(pparams: &engine::RefParamsPartial) {
-    for (cell, value) in DRAWN_ANGLES.iter().zip(pparams.viewangles) {
+/// Pitch, yaw and roll in degrees from GoldSrc's `AngleVectors` axes:
+/// forward `(cp cy, cp sy, -sp)`, right z `-sr cp`, up z `cr cp`.
+fn angles_from_axes(forward: [f32; 3], right: [f32; 3], up: [f32; 3]) -> [f32; 3] {
+    let pitch = (-forward[2]).clamp(-1.0, 1.0).asin().to_degrees();
+    let yaw = forward[1].atan2(forward[0]).to_degrees();
+    let roll = (-right[2]).atan2(up[2]).to_degrees();
+    [pitch, yaw, roll]
+}
+
+/// Keeps the view this frame is drawn from, from the engine's render origin
+/// and axes.
+/// Called from `engine::tramp_draw_transparent_triangles`, just before the
+/// client draws the scope; only while the setting is on.
+pub fn before_transparent_triangles() {
+    if !ON.load(Ordering::Relaxed) {
+        return;
+    }
+    let Some(studio) = engine::engine_studio() else {
+        return;
+    };
+    let (mut origin, mut up, mut right, mut forward) = ([0f32; 3], [0f32; 3], [0f32; 3], [0f32; 3]);
+    // Safety: the engine's own accessor, writing three floats into each.
+    unsafe {
+        (studio.get_view_info)(
+            origin.as_mut_ptr(),
+            up.as_mut_ptr(),
+            right.as_mut_ptr(),
+            forward.as_mut_ptr(),
+        )
+    };
+    for (cell, value) in DRAWN_ANGLES
+        .iter()
+        .zip(angles_from_axes(forward, right, up))
+    {
+        cell.store(value.to_bits(), Ordering::Relaxed);
+    }
+    for (cell, value) in DRAWN_ORIGIN.iter().zip(origin) {
         cell.store(value.to_bits(), Ordering::Relaxed);
     }
 }
 
-/// Where the patched copy reads angle `k` from.
-fn drawn_operand(k: usize) -> u32 {
-    // The DLL is 32-bit: a static's address fits.
-    &DRAWN_ANGLES[k] as *const AtomicU32 as usize as u32
-}
-
-/// Points the copy at [`DRAWN_ANGLES`] (`drawn`) or back at `v_angles`.
-/// Returns whether it wrote.
-fn point_angles(at: usize, drawn: bool) -> Result<bool, String> {
+/// Points three absolute operands (`site + offsets`) at `cells` (`drawn`) or
+/// back at what they read stock, kept in `stock` the first time. Returns
+/// whether it wrote.
+fn point_operands(
+    site: usize,
+    offsets: &[usize; 3],
+    cells: &'static [AtomicU32; 3],
+    stock: &[AtomicU32; 3],
+    drawn: bool,
+    what: &str,
+) -> Result<bool, String> {
     let mut wrote = false;
-    for (k, offset) in ANGLE_OPERANDS_AT.iter().enumerate() {
-        let address = at + offset;
-        // Safety: inside the pattern `site()` matched, so mapped code.
+    for (k, offset) in offsets.iter().enumerate() {
+        let address = site + offset;
+        // Safety: inside a pattern the caller matched, so mapped code.
         let present = unsafe { std::ptr::read_unaligned(address as *const u32) };
-        let ours = drawn_operand(k);
-        let mut stock = STOCK_OPERANDS[k].load(Ordering::Acquire);
-        if stock == 0 {
+        // The DLL is 32-bit: a static's address fits.
+        let ours = &cells[k] as *const AtomicU32 as usize as u32;
+        let mut kept = stock[k].load(Ordering::Acquire);
+        if kept == 0 {
             if present == ours {
-                return Err(
-                    "the scope's angle copy already reads ours, with no stock address kept".into(),
-                );
+                return Err(format!(
+                    "{what} already reads ours, with no stock address kept"
+                ));
             }
-            STOCK_OPERANDS[k].store(present, Ordering::Release);
-            stock = present;
+            stock[k].store(present, Ordering::Release);
+            kept = present;
         }
-        let want = if drawn { ours } else { stock };
+        let want = if drawn { ours } else { kept };
         if present == want {
             continue;
         }
-        if present != stock && present != ours {
+        if present != kept && present != ours {
             return Err(format!(
-                "the scope's angle copy reads {present:#x}, neither v_angles ({stock:#x}) nor ours -- something else has patched it"
+                "{what} reads {present:#x}, neither its own ({kept:#x}) nor ours -- something else has patched it"
             ));
         }
         if !unsafe { crate::patch::write_code_bytes(address, &want.to_le_bytes()) } {
-            return Err("could not make the scope's angle copy writable".into());
+            return Err(format!("could not make {what} writable"));
         }
         wrote = true;
     }
     Ok(wrote)
+}
+
+/// The start of [`ORIGIN_PATTERN`] in the loaded `client.dll`.
+fn origin_site() -> Result<usize, String> {
+    let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
+    if ORIGIN_SCANNED_BASE.load(Ordering::Acquire) == base {
+        let cached = ORIGIN_ADDRESS.load(Ordering::Acquire);
+        if cached != 0 {
+            return Ok(cached);
+        }
+    }
+    // Safety: a mapped module, for the session.
+    let found = unsafe { scan::find_unique(base, ORIGIN_PATTERN) }
+        .map_err(|why| format!("could not find the scope's origin reads -- {why}"))?;
+    ORIGIN_ADDRESS.store(found, Ordering::Release);
+    ORIGIN_SCANNED_BASE.store(base, Ordering::Release);
+    Ok(found)
 }
 
 fn playing_demo() -> bool {
@@ -340,7 +414,23 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         &[VIEW_SKIP_BOTH, VIEW_SKIP_STORE],
         "the scope's view-angle branch",
     )?;
-    let view = point_angles(at, in_demo)? || view;
+    let angles = point_operands(
+        at,
+        &ANGLE_OPERANDS_AT,
+        &DRAWN_ANGLES,
+        &STOCK_OPERANDS,
+        in_demo,
+        "the scope's angle copy",
+    )?;
+    let origin = point_operands(
+        origin_site()?,
+        &ORIGIN_OPERANDS_AT,
+        &DRAWN_ORIGIN,
+        &STOCK_ORIGIN_OPERANDS,
+        in_demo,
+        "the scope's origin reads",
+    )?;
+    let view = view || angles || origin;
     let id = if on {
         watched_scope_id()
     } else {
@@ -416,6 +506,33 @@ mod tests {
 
     fn tokens() -> Vec<&'static str> {
         PATTERN.split_whitespace().collect()
+    }
+
+    #[test]
+    fn the_operand_offsets_index_wildcards_after_their_opcodes() {
+        let t = tokens();
+        for (at, opcode) in ANGLE_OPERANDS_AT
+            .iter()
+            .zip([["8B", "15"], ["15", "A1"], ["8B", "0D"]])
+        {
+            assert!(
+                t[*at..at + 4].iter().all(|b| *b == "??"),
+                "angle operand at {at}"
+            );
+            assert_eq!(t[at - 1], opcode[1], "angle operand at {at}");
+        }
+        let o: Vec<&str> = ORIGIN_PATTERN.split_whitespace().collect();
+        for (at, opcode) in
+            ORIGIN_OPERANDS_AT
+                .iter()
+                .zip([["D8", "05"], ["D9", "05"], ["D9", "05"]])
+        {
+            assert!(
+                o[*at..at + 4].iter().all(|b| *b == "??"),
+                "origin operand at {at}"
+            );
+            assert_eq!(&o[at - 2..*at], &opcode, "origin operand at {at}");
+        }
     }
 
     #[test]
@@ -528,6 +645,30 @@ mod tests {
     fn stock_id_is_the_springfield() {
         assert_eq!(STOCK_IN_EYE_ID, 9);
         assert_eq!(sprite_name(STOCK_IN_EYE_ID), "scope_spring");
+    }
+
+    /// GoldSrc's `AngleVectors`, to check the inverse against.
+    fn axes(pitch: f32, yaw: f32, roll: f32) -> ([f32; 3], [f32; 3], [f32; 3]) {
+        let (sp, cp) = pitch.to_radians().sin_cos();
+        let (sy, cy) = yaw.to_radians().sin_cos();
+        let (sr, cr) = roll.to_radians().sin_cos();
+        (
+            [cp * cy, cp * sy, -sp],
+            [-sr * sp * cy + cr * sy, -sr * sp * sy - cr * cy, -sr * cp],
+            [cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp],
+        )
+    }
+
+    #[test]
+    fn the_render_axes_give_back_their_angles() {
+        for (p, y, r) in [(10.0, 30.0, 0.0), (-45.0, -120.0, 5.0), (0.0, 179.0, -3.0)] {
+            let (f, rt, u) = axes(p, y, r);
+            let [p2, y2, r2] = angles_from_axes(f, rt, u);
+            assert!(
+                (p - p2).abs() < 1e-3 && (y - y2).abs() < 1e-3 && (r - r2).abs() < 1e-3,
+                "{p} {y} {r} -> {p2} {y2} {r2}"
+            );
+        }
     }
 
     #[test]

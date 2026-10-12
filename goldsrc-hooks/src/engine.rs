@@ -511,13 +511,19 @@ impl StudioSeqDescPartial {
 }
 
 /// Partial mirror of `engine_studio_api_s` (`common/r_studioint.h`) up
-/// through `GetModelByIndex` -- the only two functions this crate calls.
+/// through `GetViewInfo` -- the functions this crate calls, in order.
 #[repr(C)]
 pub struct EngineStudioApiPartial {
     _slots_before: [*mut c_void; 3], // Mem_Calloc, Cache_Check, LoadCacheFile
     _mod_for_name: *mut c_void,
     pub mod_extradata: unsafe extern "C" fn(model: *mut ModelSPartial) -> *mut c_void,
     pub get_model_by_index: unsafe extern "C" fn(index: i32) -> *mut ModelSPartial,
+    // GetCurrentEntity, PlayerInfo, GetPlayerState, GetViewEntity, GetTimes,
+    // GetCvar.
+    _slots_before_view_info: [*mut c_void; 6],
+    /// `void GetViewInfo(float *origin, float *upv, float *rightv, float *vpnv)`:
+    /// the frame's render origin and axes (`r_origin`, `vup`, `vright`, `vpn`).
+    pub get_view_info: unsafe extern "C" fn(*mut f32, *mut f32, *mut f32, *mut f32),
 }
 
 /// Partial, offset-accurate mirror of `cl_enginefuncs_s` (see
@@ -742,6 +748,9 @@ const SLOT_INITIALIZE: usize = 0;
 /// (`pfnCalcRefdef` in Xash3D's `cldll_func_src_t`).
 const SLOT_CALC_REFDEF: usize = 19;
 const SLOT_HUD_ADD_ENTITY: usize = 20;
+/// Checked 2026-10-11: `F` stores `HUD_DrawTransparentTriangles`
+/// (`+0x4c830`) at its table's slot 23.
+const SLOT_DRAW_TRANSPARENT_TRIANGLES: usize = 23;
 const SLOT_HUD_FRAME: usize = 33;
 /// Re-checked 2026-09-29 against both installs' `client.dll` (byte-identical):
 /// `F` writes `HUD_DirectorMessage` (`+0x2a6a0`) here.
@@ -752,6 +761,7 @@ const _: () = assert!(
     SLOT_INITIALIZE < CLDLL_FUNC_SLOTS
         && SLOT_CALC_REFDEF < CLDLL_FUNC_SLOTS
         && SLOT_HUD_ADD_ENTITY < CLDLL_FUNC_SLOTS
+        && SLOT_DRAW_TRANSPARENT_TRIANGLES < CLDLL_FUNC_SLOTS
         && SLOT_HUD_FRAME < CLDLL_FUNC_SLOTS
         && SLOT_HUD_DIRECTOR_MESSAGE < CLDLL_FUNC_SLOTS
         && SLOT_GET_STUDIO_MODEL_INTERFACE < CLDLL_FUNC_SLOTS,
@@ -768,6 +778,8 @@ type GetStudioModelInterfaceFn =
 /// `ent` is passed through opaquely -- nothing here reads its fields, only
 /// `modelname`, so there's no need to model `cl_entity_t`'s own layout.
 type HudAddEntityFn = unsafe extern "C" fn(i32, *mut c_void, *const c_char) -> i32;
+/// `void HUD_DrawTransparentTriangles(void)`.
+type DrawTransparentTrianglesFn = unsafe extern "C" fn();
 /// `void (*pfnDirectorMessage)(int iSize, void *pbuf)`: one `svc_director`
 /// message, with the opcode and length byte already stripped.
 type HudDirectorMessageFn = unsafe extern "C" fn(i32, *mut c_void);
@@ -779,6 +791,7 @@ type ClientApiFn = unsafe extern "C" fn(*mut *mut c_void);
 static REAL_F: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_INITIALIZE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_ADD_ENTITY: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
+static REAL_DRAW_TRANSPARENT_TRIANGLES: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_CALC_REFDEF: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_FRAME: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
 static REAL_HUD_DIRECTOR_MESSAGE: AtomicPtr<c_void> = AtomicPtr::new(std::ptr::null_mut());
@@ -1118,10 +1131,18 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
-    if !pparams.is_null() {
-        // Safety: as above. Last, so it keeps the angles the frame is drawn with.
-        crate::demo_scope::after_calc_refdef(unsafe { &*pparams });
+}
+
+/// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
+/// scope is drawn), after `demo_scope` has read the frame's render view.
+unsafe extern "C" fn tramp_draw_transparent_triangles() {
+    let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
     }
+    crate::demo_scope::before_transparent_triangles();
+    let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
+    unsafe { real() };
 }
 
 /// Called once per entity the engine is about to add to the render list.
@@ -1259,6 +1280,13 @@ unsafe extern "C" fn hook_f(table: *mut *mut c_void) {
         );
         swap_slot(
             table,
+            SLOT_DRAW_TRANSPARENT_TRIANGLES,
+            &REAL_DRAW_TRANSPARENT_TRIANGLES,
+            tramp_draw_transparent_triangles as *mut c_void,
+            "HUD_DrawTransparentTriangles",
+        );
+        swap_slot(
+            table,
             SLOT_HUD_DIRECTOR_MESSAGE,
             &REAL_HUD_DIRECTOR_MESSAGE,
             tramp_hud_director_message as *mut c_void,
@@ -1379,6 +1407,10 @@ unsafe extern "system" fn hook_get_proc_address(module: HMODULE, name: *const u8
         "HUD_AddEntity" => {
             REAL_HUD_ADD_ENTITY.store(result, Ordering::Release);
             tramp_hud_add_entity as *mut c_void
+        }
+        "HUD_DrawTransparentTriangles" => {
+            REAL_DRAW_TRANSPARENT_TRIANGLES.store(result, Ordering::Release);
+            tramp_draw_transparent_triangles as *mut c_void
         }
         "HUD_DirectorMessage" => {
             REAL_HUD_DIRECTOR_MESSAGE.store(result, Ordering::Release);

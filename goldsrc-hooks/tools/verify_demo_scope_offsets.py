@@ -162,12 +162,45 @@ def check(path, pattern, in_eye_at, je_at, ids):
     ]
 
 
+def check_view_operands(path):
+    """The angle copy reads v_angles and the quad placement reads v_origin:
+    the six absolute operands demo_scope.rs repoints. v_angles is what
+    V_CalcRefdef's tail stores at +0x5128f; v_origin at +0x512a8."""
+    text = RUST.read_text(encoding="utf-8")
+    m = re.search(r'const ORIGIN_PATTERN: &str = "((?:[^"\\]|\\.)*)";', text, re.S)
+    if not m:
+        return [f"{path}: no ORIGIN_PATTERN in {RUST}"]
+    origin_pattern = " ".join(m.group(1).replace(chr(92), " ").split())
+    pe = pefile.PE(str(path), fast_load=True)
+    image = bytes(pe.get_memory_mapped_image())
+    base = pe.OPTIONAL_HEADER.ImageBase
+    hits = [h.start() for h in compile_pattern(origin_pattern).finditer(image)]
+    if len(hits) != 1:
+        return [f"{path}: ORIGIN_PATTERN matches {len(hits)} times, expected 1"]
+    at = hits[0]
+    v_origin = struct.unpack_from("<I", image, 0x512A8 + 1)[0]
+    v_angles = struct.unpack_from("<I", image, 0x5128F + 1)[0]
+    origin = [struct.unpack_from("<I", image, at + o)[0] for o in (2, 12, 44)]
+    angles = [struct.unpack_from("<I", image, EXPECTED_SITE + o)[0] for o in (22, 27, 33)]
+    problems = []
+    if origin != [v_origin, v_origin + 4, v_origin + 8]:
+        problems.append(f"origin reads {[hex(a) for a in origin]}, not v_origin {v_origin:#x}")
+    if angles != [v_angles, v_angles + 4, v_angles + 8]:
+        problems.append(f"angle copy reads {[hex(a) for a in angles]}, not v_angles {v_angles:#x}")
+    if problems:
+        return [f"{path}: {p}" for p in problems]
+    return [
+        f"{path.parents[2].name}: OK -- quad origin reads at +{at:#x} read v_origin "
+        f"+{v_origin - base:#x}; the angle copy reads v_angles +{v_angles - base:#x}"
+    ]
+
+
 def main():
     dlls = [Path(p) for p in sys.argv[1:]] or DEFAULT_DLLS
     pattern, in_eye_at, je_at, ids = constants()
     failed = False
     for dll in dlls:
-        for line in check(dll, pattern, in_eye_at, je_at, ids):
+        for line in check(dll, pattern, in_eye_at, je_at, ids) + check_view_operands(dll):
             print(line)
             failed |= ": OK --" not in line
     sys.exit(1 if failed else 0)
