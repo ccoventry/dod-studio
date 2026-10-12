@@ -1,7 +1,8 @@
 //! Keeps a background capture in the background: with
 //! `dodstudio_run_in_background` on, HLAE no longer pulls the game window to
-//! the front when a recording starts, and a minimised game is put back behind
-//! the other windows instead, since a minimised game draws nothing (#434).
+//! the front when a recording starts, and a minimised game is parked
+//! off-screen instead, since a minimised game records black frames (#434,
+//! #723).
 //!
 //! ## What HLAE does
 //!
@@ -23,9 +24,20 @@
 //!   minimised.
 //!
 //! So the popup is skipped (the entry function returns at once; the exit
-//! function then skips itself, as it only undoes an entry that ran), and a
-//! game that gets minimised is shown again, without taking the foreground, at
-//! the bottom of the window stack.
+//! function then skips itself, as it only undoes an entry that ran).
+//!
+//! ## A minimised game is parked off-screen (#723)
+//!
+//! Neither `hw.dll` checks for a minimised window: the engine keeps drawing
+//! and swapping, but an iconic window's default framebuffer owns no pixels, so
+//! HLAE's `glReadPixels` reads black. A window that isn't iconic but lies
+//! wholly off the desktop records full, right frames (measured from outside
+//! the game, PRE, `SetWindowPos` to x = -6000). So a minimise is turned into
+//! that: the window is restored without being activated and moved left of the
+//! virtual desktop, keeping its size and taskbar button. When the user
+//! activates it (its taskbar button, alt-tab), or the setting goes off, it
+//! moves back where it was. With [`CLOAK_NAME`] on it is DWM-cloaked in place
+//! instead, to compare: from outside the process Windows refuses the cloak.
 //!
 //! Found by a byte pattern in HLAE's DLL. Another HLAE version may not match:
 //! the log says so, and recording pulls the window to the front as before.
@@ -43,7 +55,17 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{
+    AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicU32, AtomicUsize, Ordering,
+};
+
+use crate::engine::CvarSPartial;
+use crate::names::console_name;
+
+/// Debug: a minimised game is DWM-cloaked instead of parked off-screen, to
+/// compare the two (#723).
+pub const CLOAK_NAME: &str = console_name!("debug_cloak_instead");
+static CLOAK_CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 
 /// The start of HLAE's "make the window a popup" function. The exit function
 /// starts the same way but has `0F 84` for the second jump and `56 6A EC`
@@ -64,11 +86,31 @@ static WINDOW: AtomicUsize = AtomicUsize::new(0);
 /// How often the minimised check runs, in frames.
 const CHECK_EVERY: u32 = 30;
 /// Checks a minimised game that still has the foreground waits for Windows to
-/// hand it on, before it is shown again anyway (it draws nothing minimised).
+/// hand it on, before it is parked anyway (it records black minimised).
 const FOREGROUND_WAIT_CHECKS: u32 = 4;
 /// Consecutive checks that found the game minimised and still in the
 /// foreground.
 static WAITED: AtomicU32 = AtomicU32::new(0);
+/// The setting's value at the last frame, to notice it going off.
+static WAS_ON: AtomicBool = AtomicBool::new(false);
+
+/// How a minimise was turned into something that still records (#723).
+const SHOWN: u8 = 0;
+const PARKED: u8 = 1;
+const CLOAKED: u8 = 2;
+static HIDDEN: AtomicU8 = AtomicU8::new(SHOWN);
+/// Whether the game had the foreground at the last check while hidden: only
+/// gaining it brings the window back, so a game that kept the foreground
+/// through its minimise isn't brought straight back.
+static FOREGROUND_BEFORE: AtomicBool = AtomicBool::new(false);
+/// The [`Parking`] while [`PARKED`]; only the game thread touches them.
+static HOME_X: AtomicI32 = AtomicI32::new(0);
+static HOME_Y: AtomicI32 = AtomicI32::new(0);
+static PARKED_X: AtomicI32 = AtomicI32::new(0);
+static PARKED_Y: AtomicI32 = AtomicI32::new(0);
+/// Room between the parked window and the desktop's left edge, so no frame
+/// shadow shows.
+const PARK_GAP: i32 = 100;
 
 /// On a capture batch's launch line (`native::patch::builder::START_BEHIND_ARG`; keep
 /// the two in step): the window stays behind from the moment it opens.
@@ -83,9 +125,13 @@ const MAX_POINTER_PUT_BACKS: u32 = 20;
 const SW_SHOWNOACTIVATE: i32 = 4;
 const SW_MINIMIZE: i32 = 6;
 const HWND_BOTTOM: isize = 1;
+const SW_SHOWMINNOACTIVE: u32 = 7;
 const SWP_NOSIZE: u32 = 0x1;
 const SWP_NOMOVE: u32 = 0x2;
+const SWP_NOZORDER: u32 = 0x4;
 const SWP_NOACTIVATE: u32 = 0x10;
+const SM_XVIRTUALSCREEN: i32 = 76;
+const DWMWA_CLOAK: u32 = 13;
 /// From another thread, so the call never waits on the game's message loop.
 const SWP_ASYNCWINDOWPOS: u32 = 0x4000;
 const GW_HWNDNEXT: u32 = 2;
@@ -98,12 +144,23 @@ struct Point {
 }
 
 #[repr(C)]
-#[derive(Default)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
 struct Rect {
     left: i32,
     top: i32,
     right: i32,
     bottom: i32,
+}
+
+#[repr(C)]
+#[derive(Default)]
+struct WindowPlacement {
+    length: u32,
+    flags: u32,
+    show_cmd: u32,
+    min_position: [i32; 2],
+    max_position: [i32; 2],
+    normal_position: Rect,
 }
 
 #[link(name = "user32")]
@@ -135,6 +192,19 @@ unsafe extern "system" {
         w: i32,
         h: i32,
         flags: u32,
+    ) -> i32;
+    fn GetSystemMetrics(index: i32) -> i32;
+    fn GetWindowPlacement(hwnd: *mut c_void, placement: *mut WindowPlacement) -> i32;
+    fn SetWindowPlacement(hwnd: *mut c_void, placement: *const WindowPlacement) -> i32;
+}
+
+#[link(name = "dwmapi")]
+unsafe extern "system" {
+    fn DwmSetWindowAttribute(
+        hwnd: *mut c_void,
+        attribute: u32,
+        value: *const c_void,
+        size: u32,
     ) -> i32;
 }
 
@@ -233,11 +303,239 @@ fn window() -> Option<*mut c_void> {
     (!found.is_null()).then_some(found)
 }
 
-/// Shows a minimised game again behind every other window, without taking
-/// the foreground.
-fn put_behind(hwnd: *mut c_void) {
-    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+pub fn set_cloak_cvar(cvar: *mut CvarSPartial) {
+    CLOAK_CVAR.store(cvar, Ordering::Release);
+}
+
+fn cloak_wanted() -> bool {
+    let cvar = CLOAK_CVAR.load(Ordering::Acquire);
+    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+}
+
+/// The left edge that puts a window `width` wide wholly left of a virtual
+/// desktop starting at `virtual_left` (negative with a monitor left of the
+/// primary one).
+fn parked_x(virtual_left: i32, width: i32) -> i32 {
+    virtual_left
+        .saturating_sub(width.max(0))
+        .saturating_sub(PARK_GAP)
+}
+
+/// Where a parked window came from and where it was put, top-left corners in
+/// screen coordinates (the size never changes).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+struct Parking {
+    home: Point,
+    parked: Point,
+}
+
+impl Parking {
+    /// Parks a window `width` wide whose top-left was `home`: same row, left
+    /// of the virtual desktop.
+    fn new(home: Point, width: i32, virtual_left: i32) -> Self {
+        Self {
+            home,
+            parked: Point {
+                x: parked_x(virtual_left, width),
+                y: home.y,
+            },
+        }
+    }
+
+    /// Where to move the window back to, seen at `now`: home while it is still
+    /// where it was parked, nothing once something else moved it (HLAE's popup,
+    /// where the pattern wasn't found), as that move is the newer one.
+    fn way_back(&self, now: Point) -> Option<Point> {
+        (now == self.parked).then_some(self.home)
+    }
+
+    /// `r`, a rect of the parked window, moved back by the distance it was
+    /// parked. A distance, so it holds in any coordinates that only differ from
+    /// the screen's by an offset (a placement's workspace coordinates).
+    fn unpark_rect(&self, r: Rect) -> Rect {
+        let dx = self.home.x.saturating_sub(self.parked.x);
+        let dy = self.home.y.saturating_sub(self.parked.y);
+        Rect {
+            left: r.left.saturating_add(dx),
+            top: r.top.saturating_add(dy),
+            right: r.right.saturating_add(dx),
+            bottom: r.bottom.saturating_add(dy),
+        }
+    }
+}
+
+fn remembered() -> Option<Parking> {
+    (HIDDEN.load(Ordering::Acquire) == PARKED).then(|| Parking {
+        home: Point {
+            x: HOME_X.load(Ordering::Relaxed),
+            y: HOME_Y.load(Ordering::Relaxed),
+        },
+        parked: Point {
+            x: PARKED_X.load(Ordering::Relaxed),
+            y: PARKED_Y.load(Ordering::Relaxed),
+        },
+    })
+}
+
+fn remember(p: Parking) {
+    HOME_X.store(p.home.x, Ordering::Relaxed);
+    HOME_Y.store(p.home.y, Ordering::Relaxed);
+    PARKED_X.store(p.parked.x, Ordering::Relaxed);
+    PARKED_Y.store(p.parked.y, Ordering::Relaxed);
+    HIDDEN.store(PARKED, Ordering::Release);
+}
+
+/// Whether the user brought a hidden game forward since the last check.
+fn activated(before: bool, now: bool) -> bool {
+    now && !before
+}
+
+fn top_left(r: &Rect) -> Point {
+    Point {
+        x: r.left,
+        y: r.top,
+    }
+}
+
+/// Cloaks or uncloaks the game window from inside its own process, logging
+/// the result. True when DWM accepted it.
+fn set_cloak(hwnd: *mut c_void, on: bool) -> bool {
+    let value: i32 = on.into();
+    let hr = unsafe {
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAK,
+            (&value as *const i32).cast(),
+            size_of::<i32>() as u32,
+        )
+    };
+    report(&format!(
+        "DwmSetWindowAttribute(DWMWA_CLOAK, {}) returned {hr:#010x}{}",
+        u8::from(on),
+        if hr == 0 { " (accepted)" } else { " (refused)" }
+    ));
+    hr == 0
+}
+
+/// Turns a minimise into a window that still records: restored without
+/// activation, then parked off-screen (or cloaked, with [`CLOAK_NAME`] on).
+fn hide(hwnd: *mut c_void) {
+    // Minimised again while parked: restoring it lands it on the parked spot,
+    // so the home it had before still holds.
+    let earlier = remembered();
+    // Still iconic: at the bottom, the restore doesn't flash it over the
+    // user's window before the move.
     send_to_bottom(hwnd);
+    if cloak_wanted() {
+        // Cloaked before the restore, so it never shows.
+        if set_cloak(hwnd, true) {
+            unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+            HIDDEN.store(CLOAKED, Ordering::Release);
+            FOREGROUND_BEFORE.store(has_foreground(hwnd), Ordering::Relaxed);
+            report(&format!(
+                "the game was minimised, which records black frames; cloaked in place instead ({CLOAK_NAME} 1)"
+            ));
+            return;
+        }
+        report("the cloak was refused; parking off-screen instead");
+    }
+    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+    // The restored window's own rect is the normal rect GetWindowPlacement
+    // holds, in screen coordinates; the placement's is in workspace
+    // coordinates, off by the taskbar when it is docked left or top.
+    let Some(rect) = window_rect(hwnd) else {
+        report(
+            "the game was minimised; restored behind the other windows (its rect wasn't readable, so not parked)",
+        );
+        return;
+    };
+    let home = earlier.map_or(top_left(&rect), |p| p.home);
+    let virtual_left = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
+    let parking = Parking::new(home, rect.right - rect.left, virtual_left);
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            0,
+            parking.parked.x,
+            parking.parked.y,
+            0,
+            0,
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
+        );
+    }
+    remember(parking);
+    FOREGROUND_BEFORE.store(has_foreground(hwnd), Ordering::Relaxed);
+    report(&format!(
+        "the game was minimised, which records black frames; parked off-screen at ({}, {}) instead, {}x{}, home ({}, {}); activating it brings it back",
+        parking.parked.x,
+        parking.parked.y,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        home.x,
+        home.y
+    ));
+}
+
+/// Puts a hidden game back where it was, without activating it. `why` is for
+/// the log.
+fn bring_back(why: &str) {
+    let parking = remembered();
+    let how = HIDDEN.swap(SHOWN, Ordering::AcqRel);
+    if how == SHOWN {
+        return;
+    }
+    let Some(hwnd) = window() else {
+        return;
+    };
+    if how == CLOAKED {
+        set_cloak(hwnd, false);
+        report(&format!("uncloaked: {why}"));
+        return;
+    }
+    let Some(parking) = parking else { return };
+    if unsafe { IsIconic(hwnd) } != 0 {
+        // Minimised on the parked spot: move the rect it restores to back by
+        // the distance it was parked, which holds in the placement's workspace
+        // coordinates too, and leave it minimised.
+        let mut wp = WindowPlacement {
+            length: size_of::<WindowPlacement>() as u32,
+            ..Default::default()
+        };
+        if unsafe { GetWindowPlacement(hwnd, &mut wp) } == 0 {
+            return;
+        }
+        wp.normal_position = parking.unpark_rect(wp.normal_position);
+        wp.show_cmd = SW_SHOWMINNOACTIVE;
+        unsafe { SetWindowPlacement(hwnd, &wp) };
+        report(&format!(
+            "minimised on the parked spot; it restores at ({}, {}) again: {why}",
+            parking.home.x, parking.home.y
+        ));
+        return;
+    }
+    let now = window_rect(hwnd).map(|r| top_left(&r));
+    match now.and_then(|now| parking.way_back(now)) {
+        Some(home) => {
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    0,
+                    home.x,
+                    home.y,
+                    0,
+                    0,
+                    SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOSIZE,
+                );
+            }
+            report(&format!(
+                "back on screen at ({}, {}): {why}",
+                home.x, home.y
+            ));
+        }
+        None => report(&format!(
+            "something else moved the window off the parked spot; left where it is: {why}"
+        )),
+    }
 }
 
 /// Moves the game to the bottom of the window stack, leaving the foreground
@@ -263,7 +561,7 @@ fn has_foreground(hwnd: *mut c_void) -> bool {
 
 /// Gets the game out of the way. Without the foreground it only goes to the
 /// bottom of the window stack. With it, minimising hands the foreground to the
-/// next window, and a later check puts the game back behind it.
+/// next window, and a later check parks the game off-screen (#723).
 ///
 /// Minimising a game that didn't have the foreground gave it the foreground:
 /// the restore right after it activated the window, and the game kept the
@@ -414,6 +712,11 @@ pub fn poll(on: bool) {
     if on != SKIPPING.load(Ordering::Acquire) {
         set_skipping(on);
     }
+    // Followed apart from SKIPPING, which stays false when HLAE's popup isn't
+    // found.
+    if WAS_ON.swap(on, Ordering::AcqRel) && !on {
+        bring_back(&format!("{} is off", crate::run_in_background::NAME));
+    }
     if !on
         || !FRAMES
             .fetch_add(1, Ordering::Relaxed)
@@ -428,8 +731,26 @@ pub fn poll(on: bool) {
     let Some(hwnd) = window() else {
         return;
     };
-    if unsafe { IsIconic(hwnd) } == 0 {
+    let iconic = unsafe { IsIconic(hwnd) } != 0;
+    if !iconic {
         WAITED.store(0, Ordering::Relaxed);
+        if HIDDEN.load(Ordering::Acquire) != SHOWN {
+            let foreground = has_foreground(hwnd);
+            if activated(
+                FOREGROUND_BEFORE.swap(foreground, Ordering::Relaxed),
+                foreground,
+            ) {
+                bring_back("the game was activated");
+            } else if let Some(parking) = remembered()
+                && window_rect(hwnd).is_some_and(|r| parking.way_back(top_left(&r)).is_none())
+            {
+                // Moved by something else (HLAE's popup when its pattern
+                // wasn't found): that position wins, and a later minimise
+                // parks from there.
+                HIDDEN.store(SHOWN, Ordering::Release);
+                report("something else moved the window off the parked spot; no longer parked");
+            }
+        }
         return;
     }
     // Shown again while it still has the foreground, it would keep it.
@@ -437,10 +758,7 @@ pub fn poll(on: bool) {
         return;
     }
     WAITED.store(0, Ordering::Relaxed);
-    put_behind(hwnd);
-    report(
-        "the game was minimised, which stops it drawing; it runs behind the other windows instead",
-    );
+    hide(hwnd);
 }
 
 #[cfg(test)]
@@ -469,6 +787,63 @@ mod tests {
             "+exec",
             "dodstudio_helper.cfg"
         ]));
+    }
+
+    #[test]
+    fn a_parked_window_sits_wholly_left_of_the_virtual_desktop() {
+        // One monitor: the desktop starts at 0.
+        assert_eq!(parked_x(0, 1296), -1396);
+        // A monitor left of the primary one.
+        assert_eq!(parked_x(-2560, 1296), -3956);
+        assert!(parked_x(-2560, 1296) + 1296 < -2560);
+        // Nonsense in, no overflow out.
+        assert_eq!(parked_x(i32::MIN, 1296), i32::MIN);
+        assert_eq!(parked_x(0, -5), -PARK_GAP);
+    }
+
+    #[test]
+    fn parking_keeps_the_row_and_goes_home_only_from_the_parked_spot() {
+        let home = Point { x: 400, y: 200 };
+        let p = Parking::new(home, 1296, 0);
+        assert_eq!(p.parked, Point { x: -1396, y: 200 });
+        assert_eq!(p.way_back(p.parked), Some(home));
+        // HLAE's popup put it at the top-left: that move wins.
+        assert_eq!(p.way_back(Point { x: 0, y: 0 }), None);
+    }
+
+    #[test]
+    fn a_minimised_parked_window_restores_at_home() {
+        let p = Parking::new(Point { x: 400, y: 200 }, 1296, 0);
+        // The placement's workspace coordinates, 48 px off the screen's
+        // with the taskbar docked left: the distance still holds.
+        let parked = Rect {
+            left: -1396 - 48,
+            top: 200,
+            right: -1396 - 48 + 1296,
+            bottom: 200 + 759,
+        };
+        assert_eq!(
+            p.unpark_rect(parked),
+            Rect {
+                left: 400 - 48,
+                top: 200,
+                right: 400 - 48 + 1296,
+                bottom: 200 + 759,
+            }
+        );
+    }
+
+    #[test]
+    fn only_gaining_the_foreground_brings_it_back() {
+        assert!(activated(false, true));
+        assert!(!activated(true, true), "kept it through the minimise");
+        assert!(!activated(false, false));
+        assert!(!activated(true, false));
+    }
+
+    #[test]
+    fn the_cloak_name_is_a_debug_cvar() {
+        assert_eq!(CLOAK_NAME, "dodstudio_debug_cloak_instead");
     }
 
     #[test]

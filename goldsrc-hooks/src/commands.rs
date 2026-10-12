@@ -1585,6 +1585,9 @@ pub fn install() {
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
     }
+    if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
+        crate::hlae_window::set_cloak_cvar(cloak);
+    }
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
         crate::detail_cache::set_keep_cvar(keep);
     }
@@ -1742,6 +1745,7 @@ mod tests {
             crate::overview_marker::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
+            crate::hlae_window::CLOAK_NAME,
             crate::detail_cache::KEEP_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
