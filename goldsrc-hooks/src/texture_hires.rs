@@ -172,7 +172,34 @@
 //! like: normal and additive sprites are opaque RGB, alpha-test sprites cut
 //! out like masked world textures, and index-alpha sprites (smoke) use only
 //! the file's alpha -- the colour is always palette entry 255's, as in the
-//! engine. HUD sprites are not replaced (see `GLT_SPRITE`).
+//! engine.
+//!
+//! HUD sprites (`GLT_HUDSPRITE`, 2: the `hud.txt` atlases, the crosshairs,
+//! the scopes, the HLTV icons; #728) come from the same `Mod_LoadSpriteFrame`
+//! under the same `"%s_%i"` name, so they share the `sprites\` folder and
+//! its naming; `pfnSPR_Load` only clears a flag around the load that makes
+//! the frame type 2 with `mipmap = 0` instead of type 5 with `mipmap = 1`.
+//! The HUD draws them as a quad of exactly the `hud.txt` rect's pixels with
+//! texture coordinates `(rect ± 0.5) / frame width|height` -- the frame's
+//! logical size, never the GL texture's (`Draw_SpriteFrameGeneric`,
+//! pre-Anniversary `hw+0x3d280`, Anniversary `hw+0x23b1c0`) -- so a bigger
+//! upload with the logical size kept draws in the same place at the same
+//! size, as for walls. What made them worth skipping before was filtering:
+//! `GL_Upload32` with `mipmap = 0` uploads one level and sets MIN and MAG to
+//! its `filter` argument (`GL_LINEAR`), so a 4x atlas drawn at 1:1 would
+//! sample 2x2 of its 4x4 texels per pixel and shimmer. The swap stub
+//! therefore passes `mipmap = 1` for a replaced type-2 upload (the engine's
+//! own value for every other type, and the original path is untouched):
+//! `GL_Upload32` then builds the mip chain itself, halving down to 1x1
+//! (pre-Anniversary through `GL_MipMap`, `hw+0x3e0f0`; Anniversary inlined),
+//! and sets MIN to `gl_filter_min` (trilinear by default) and MAG to
+//! `gl_filter_max`. At 1:1 the HUD then samples level 2 of a 4x file, a
+//! clean box reduction, and a scaled draw (the scopes, a bigger kill feed)
+//! gets the finer levels. Read on both builds: the `mipmap` test is at
+//! `hw+0x3e492` / `hw+0x23d473`, the single-level filter at `hw+0x3e4bf` /
+//! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
+//! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
+//! `gl_max_size 1024`, which the HD `movie.cfg` lines already set.
 //!
 //! Decals (`GLT_DECAL`: bullet holes, blood, scorch marks, the map logos,
 //! from `decals.wad`; #729) go in `decals\<style>\<name>_<hash>.tga`, where
@@ -473,12 +500,13 @@ const MIN_GL_MAX_SIZE: u32 = 128;
 /// wider than this. A texture uploaded at its own size is never resampled.
 const MAX_OUTPUT_WIDTH: u32 = 1024;
 
-/// `GLT_DECAL` / `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE` in GoldSrc's
-/// `GL_TEXTURETYPE`: decals, model skins, map textures and world sprite
-/// frames, the four this module replaces. HUD sprites (`GLT_HUDSPRITE`, 2)
-/// are left alone: the HUD draws them pixel for pixel, without mipmaps, so a
-/// bigger copy would only be shrunk back down, badly.
+/// `GLT_DECAL` / `GLT_HUDSPRITE` / `GLT_STUDIO` / `GLT_WORLD` / `GLT_SPRITE`
+/// in GoldSrc's `GL_TEXTURETYPE`: decals, HUD sprites, model skins, map
+/// textures and world sprite frames, the five this module replaces. A HUD
+/// sprite is uploaded without mipmaps and drawn pixel for pixel, so its
+/// replacement goes up with `mipmap = 1` ([`replacement_mipmap`], #728).
 const GLT_DECAL: u32 = 1;
+const GLT_HUDSPRITE: u32 = 2;
 const GLT_STUDIO: u32 = 3;
 const GLT_WORLD: u32 = 4;
 const GLT_SPRITE: u32 = 5;
@@ -735,6 +763,11 @@ static MODEL_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Sprite frames seen, and how many were replaced.
 static SPRITE_SEEN: AtomicU32 = AtomicU32::new(0);
 static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
+/// HUD sprite frames seen, and how many were replaced (#728). Counted apart
+/// from world sprites, though they share the folder: a HUD load is one
+/// atlas for a whole screen of icons, so the two counts say different things.
+static HUD_SEEN: AtomicU32 = AtomicU32::new(0);
+static HUD_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Decals seen, and how many were replaced (#729).
 static DECAL_SEEN: AtomicU32 = AtomicU32::new(0);
 static DECAL_REPLACED: AtomicU32 = AtomicU32::new(0);
@@ -934,7 +967,8 @@ const TOOL_TEXTURES: &[&str] = &[
 ];
 
 /// How a load is shown in the miss list: a model skin as `<model> <skin>`,
-/// a sprite frame as its sprite (its frames are counted, not listed).
+/// a sprite frame (world or HUD) as its sprite (its frames are counted, not
+/// listed).
 fn miss_display_name(texture_type: u32, identifier: &str) -> String {
     let lower = identifier.to_ascii_lowercase();
     match texture_type {
@@ -944,7 +978,7 @@ fn miss_display_name(texture_type: u32, identifier: &str) -> String {
             }
             _ => identifier.to_string(),
         },
-        GLT_SPRITE => match lower.rfind(".spr_") {
+        GLT_SPRITE | GLT_HUDSPRITE => match lower.rfind(".spr_") {
             Some(at) => identifier[..at + 4].to_string(),
             None => identifier.to_string(),
         },
@@ -1016,7 +1050,7 @@ fn misses_report(only_map: Option<&str>) -> Vec<String> {
             }
             let loads = match (*kind, entry.loads) {
                 (_, 1) => String::new(),
-                ("sprite", n) => format!(" ({n} frame loads)"),
+                ("sprite" | "hud", n) => format!(" ({n} frame loads)"),
                 (_, n) => format!(" ({n} loads)"),
             };
             let others = others_of(entry);
@@ -1401,10 +1435,12 @@ static SKY_CURRENT_DIMS: Mutex<(u32, u32)> = Mutex::new((SKY_STOCK_SIDE, SKY_STO
 static SKY_REPLACED: AtomicU32 = AtomicU32::new(0);
 static SKY_INDEX: Cached<HashMap<String, String>> = Cached::new();
 
-/// `{ data, width, height }`, read by the swap stub as `[eax]`, `[eax+4]`,
-/// `[eax+8]` -- three `usize`s are three contiguous dwords on this 32-bit
-/// target.
-static PENDING: [AtomicUsize; 3] = [const { AtomicUsize::new(0) }; 3];
+/// `{ data, width, height, mipmap }`, read by the swap stub as `[eax]`,
+/// `[eax+4]`, `[eax+8]`, `[eax+0xc]` -- four `usize`s are four contiguous
+/// dwords on this 32-bit target. `mipmap` is what the replacement upload
+/// passes to `GL_Upload32`: the engine's own value, except `1` for a HUD
+/// sprite ([`replacement_mipmap`]).
+static PENDING: [AtomicUsize; 4] = [const { AtomicUsize::new(0) }; 4];
 /// Owns the pixels `PENDING` points at. Replaced on the next swap, by which
 /// time `GL_Upload32` has long since copied them into its own buffer.
 static PENDING_PIXELS: Mutex<Vec<u8>> = Mutex::new(Vec::new());
@@ -2216,19 +2252,34 @@ unsafe fn upload_hash(data: *const u8, palette: *const u8, width: u32, height: u
 
 /// Whether `GL_Upload8` would expand an upload of this `textureType` and
 /// `iType` in a way [`match_engine_expansion`] copies. Walls and skins come
-/// as `TEX_TYPE_NONE` or `TEX_TYPE_ALPHA`; sprites also as
-/// `TEX_TYPE_ALPHA_GRADIENT` (index-alpha), while ones already in RGBA
-/// (`TEX_TYPE_RGBA`) take `GL_Upload32` directly and are never replaced;
-/// decals only ever as `TEX_TYPE_ALPHA` (`{`) or `TEX_TYPE_ALPHA_GRADIENT`
-/// (`}`), the two `Draw_MiptexTexture` sends (see the module doc).
+/// as `TEX_TYPE_NONE` or `TEX_TYPE_ALPHA`; sprites, world and HUD alike
+/// (one loader), also as `TEX_TYPE_ALPHA_GRADIENT` (index-alpha), while ones
+/// already in RGBA (`TEX_TYPE_RGBA`) take `GL_Upload32` directly and are
+/// never replaced; decals only ever as `TEX_TYPE_ALPHA` (`{`) or
+/// `TEX_TYPE_ALPHA_GRADIENT` (`}`), the two `Draw_MiptexTexture` sends (see
+/// the module doc).
 fn replaceable_i_type(texture_type: u32, i_type: u32) -> bool {
     match texture_type {
         GLT_DECAL => matches!(i_type, TEX_TYPE_ALPHA | TEX_TYPE_ALPHA_GRADIENT),
-        GLT_SPRITE => matches!(
+        GLT_SPRITE | GLT_HUDSPRITE => matches!(
             i_type,
             TEX_TYPE_NONE | TEX_TYPE_ALPHA | TEX_TYPE_ALPHA_GRADIENT
         ),
         _ => matches!(i_type, TEX_TYPE_NONE | TEX_TYPE_ALPHA),
+    }
+}
+
+/// The `mipmap` a replacement upload passes to `GL_Upload32`: the engine's
+/// own for every type but a HUD sprite, which the engine uploads with `0`
+/// (one level, `GL_LINEAR` both ways) and whose 4x replacement would then
+/// shimmer at the HUD's 1:1 draw. With `1`, `GL_Upload32` builds the mip
+/// chain and uses `gl_filter_min`, so the HUD samples the level that matches
+/// its draw size (#728; see the module doc for where this was read).
+fn replacement_mipmap(texture_type: u32, engine_mipmap: u32) -> u32 {
+    if texture_type == GLT_HUDSPRITE {
+        1
+    } else {
+        engine_mipmap
     }
 }
 
@@ -2247,6 +2298,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let texture_type = arg(0x0c);
     let (width, height) = (arg(0x10), arg(0x14));
     let data = arg(0x18) as *const u8;
+    let mipmap = arg(0x1c);
     let i_type = arg(0x20);
     let palette = arg(0x24) as *const u8;
 
@@ -2281,6 +2333,14 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
             &SPRITE_INDEX,
             build_sprite_index,
         ),
+        // Same loader, same names, same folder as world sprites (#728).
+        GLT_HUDSPRITE if i_type != TEX_TYPE_RGBA => (
+            &HUD_SEEN,
+            &HUD_REPLACED,
+            "hud",
+            &SPRITE_INDEX,
+            build_sprite_index,
+        ),
         GLT_DECAL => (
             &DECAL_SEEN,
             &DECAL_REPLACED,
@@ -2299,7 +2359,7 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
     let name = match texture_type {
         GLT_STUDIO => studio_texture_name(&identifier).to_string(),
-        GLT_SPRITE => sprite_frame_name(&identifier),
+        GLT_SPRITE | GLT_HUDSPRITE => sprite_frame_name(&identifier),
         _ => identifier.to_string(),
     };
     let log = LOG_TEXTURE_LOADS.load(Ordering::Relaxed);
@@ -2431,6 +2491,10 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     PENDING[0].store(owned.as_mut_ptr() as usize, Ordering::Release);
     PENDING[1].store(img.width as usize, Ordering::Release);
     PENDING[2].store(img.height as usize, Ordering::Release);
+    PENDING[3].store(
+        replacement_mipmap(texture_type, mipmap) as usize,
+        Ordering::Release,
+    );
     drop(owned);
 
     replaced.fetch_add(1, Ordering::Relaxed);
@@ -2453,6 +2517,11 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
     }
     PENDING.as_ptr()
 }
+
+/// `push dword ptr [eax+0xc]`: the replacement's `mipmap` from [`PENDING`],
+/// where both builds' swap stubs used to push the engine's `[ebp+0x1c]`.
+/// Same length, so neither stub's branch offsets move.
+const PUSH_MIPMAP: [u8; 3] = [0xFF, 0x70, 0x0C];
 
 /// Appends `FF 15`/`FF 25 <abs32>`: an indirect call/jump through `slot`.
 fn indirect(code: &mut Vec<u8>, modrm: u8, slot: &AtomicUsize) {
@@ -2478,7 +2547,7 @@ const JMP: u8 = 0x25;
 /// swap:
 ///     push [ebp+0x28]               ; filter
 ///     push [ebp+0x20]               ; iType
-///     push [ebp+0x1c]               ; mipmap
+///     push [eax+0xc]                ; mipmap (the engine's, or 1 for a HUD sprite)
 ///     push [eax+8]                  ; replacement height
 ///     push [eax+4]                  ; replacement width
 ///     push [eax]                    ; replacement pixels
@@ -2503,7 +2572,7 @@ fn swap_stub() -> Vec<u8> {
     // swap:
     code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
     code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
-    code.extend_from_slice(&[0xFF, 0x75, 0x1C]); // push [ebp+0x1c]
+    code.extend_from_slice(&PUSH_MIPMAP); // push [eax+0xc]
     code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
     code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
     code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
@@ -3217,7 +3286,7 @@ mod anniversary {
     /// swap:
     ///     push [ebp+0x28]               ; filter
     ///     push [ebp+0x20]               ; iType
-    ///     push [ebp+0x1c]               ; mipmap
+    ///     push [eax+0xc]                ; mipmap (the engine's, or 1 for a HUD sprite)
     ///     push [eax+8]                  ; replacement height
     ///     push [eax+4]                  ; replacement width
     ///     push [eax]                    ; replacement pixels
@@ -3242,7 +3311,7 @@ mod anniversary {
         // swap:
         code.extend_from_slice(&[0xFF, 0x75, 0x28]); // push [ebp+0x28]
         code.extend_from_slice(&[0xFF, 0x75, 0x20]); // push [ebp+0x20]
-        code.extend_from_slice(&[0xFF, 0x75, 0x1C]); // push [ebp+0x1c]
+        code.extend_from_slice(&PUSH_MIPMAP); // push [eax+0xc]
         code.extend_from_slice(&[0xFF, 0x70, 0x08]); // push [eax+8]
         code.extend_from_slice(&[0xFF, 0x70, 0x04]); // push [eax+4]
         code.extend_from_slice(&[0xFF, 0x30]); // push [eax]
@@ -3524,6 +3593,12 @@ pub fn status() -> String {
             .map(|i| format!("{} file(s)", i.files.len()))
             .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
+    // Same folder as the world sprites, so no file count of its own.
+    let hud = format!(
+        "{} of {} HUD sprite load(s) replaced (from the sprites folder, uploaded with mipmaps)",
+        HUD_REPLACED.load(Ordering::Relaxed),
+        HUD_SEEN.load(Ordering::Relaxed),
+    );
     let decals = format!(
         "{} of {} decal load(s) replaced ({})",
         DECAL_REPLACED.load(Ordering::Relaxed),
@@ -3566,7 +3641,7 @@ pub fn status() -> String {
         })
         .unwrap_or_default();
     format!(
-        "{NAME}: {HD_NAME} {}{}; style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {decals}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
+        "{NAME}: {HD_NAME} {}{}; style {:?}; {replaced} of {world} world texture load(s) replaced{renamed}{last}{leftovers}; {files}; {models}; {sprites}; {hud}; {decals}; {} sky face(s) from {SKY_DIR}; ceiling {}; detail textures {}, {} loaded from {DETAIL_DIR} (logging {}){misses}",
         if enabled() { "1 (on)" } else { "0 (off)" },
         if CHANGED_MID_SESSION.load(Ordering::Relaxed) {
             ", changed this session: some of what's loaded is still the old way until a restart"
@@ -3784,10 +3859,56 @@ mod tests {
         assert_eq!(&code[22..24], &[0xFF, 0x25], "jmp [RESUME]");
         assert_eq!(swap, 28);
         assert_eq!(&code[swap..swap + 3], &[0xFF, 0x75, 0x28]);
+        // filter, iType, then the mipmap from PENDING, not the engine's frame (#728).
+        assert_eq!(&code[swap + 6..swap + 9], &PUSH_MIPMAP);
         assert_eq!(
             &code[code.len() - 6..code.len() - 4],
             &[0xFF, 0x25],
             "jmp [AFTER]"
+        );
+    }
+
+    /// #728: a replaced HUD sprite goes up with mipmaps, everything else with
+    /// whatever the engine asked for; the stubs read it from `PENDING`'s
+    /// fourth dword, which is why that slot exists.
+    #[test]
+    fn hud_sprite_replacements_are_mipmapped() {
+        assert_eq!(replacement_mipmap(GLT_HUDSPRITE, 0), 1);
+        assert_eq!(replacement_mipmap(GLT_HUDSPRITE, 1), 1);
+        for kind in [GLT_WORLD, GLT_STUDIO, GLT_SPRITE, GLT_DECAL] {
+            assert_eq!(replacement_mipmap(kind, 0), 0);
+            assert_eq!(replacement_mipmap(kind, 1), 1);
+        }
+        assert_eq!(PENDING.len(), 4);
+        assert_eq!(PUSH_MIPMAP, [0xFF, 0x70, 0x0C], "push dword ptr [eax+0xc]");
+        assert_eq!(
+            PUSH_MIPMAP.len(),
+            3,
+            "same length as the old push [ebp+0x1c]"
+        );
+    }
+
+    /// #728: HUD atlases are sprites to everything but the counters -- same
+    /// iTypes, same file names, same miss display -- so `sprites_hd.py`'s
+    /// output for them needs no HUD-specific naming.
+    #[test]
+    fn hud_sprites_are_keyed_like_world_sprites() {
+        for i_type in [TEX_TYPE_NONE, TEX_TYPE_ALPHA, TEX_TYPE_ALPHA_GRADIENT] {
+            assert_eq!(
+                replaceable_i_type(GLT_HUDSPRITE, i_type),
+                replaceable_i_type(GLT_SPRITE, i_type)
+            );
+        }
+        assert!(!replaceable_i_type(GLT_HUDSPRITE, TEX_TYPE_RGBA));
+        assert_eq!(sprite_frame_name("sprites/weapons1.spr_0"), "weapons1_0");
+        assert_eq!(sprite_frame_name("sprites/scope_k43.spr_3"), "scope_k43_3");
+        assert_eq!(
+            miss_display_name(GLT_HUDSPRITE, "sprites/hud_icons.spr_0"),
+            "sprites/hud_icons.spr"
+        );
+        assert_eq!(
+            owner_of("hud", "sprites/Weapons1.spr_0"),
+            "hud:sprites/weapons1.spr_0"
         );
     }
 
@@ -3887,6 +4008,8 @@ mod tests {
         // jnz at [13]: target = 15 + 0x12 = the first push.
         assert_eq!(&code[13..15], &[0x75, 0x12]);
         assert_eq!(&code[15 + 0x12..15 + 0x12 + 3], &[0xFF, 0x75, 0x28]);
+        // filter, iType, then the mipmap from PENDING, not the engine's frame (#728).
+        assert_eq!(&code[15 + 0x12 + 6..15 + 0x12 + 9], &PUSH_MIPMAP);
         // The stolen compare, then a jne +6 that skips exactly the RESUME jump.
         assert_eq!(&code[15..19], &BRANCH_STOLEN[..4]);
         assert_eq!(&code[19..21], &[0x75, 0x06]);
