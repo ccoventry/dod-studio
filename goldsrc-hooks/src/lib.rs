@@ -52,6 +52,8 @@
 //!   leaves the camera icon off the map (`2`, #677).
 //! - `overview_speaker`: `dodstudio_hud_map_hide_speaker`, which leaves the
 //!   speaker icon off the players' overview map icons (#677).
+//! - `demo_scope`: `dodstudio_show_demo_scope`, which draws the sniper scope
+//!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
@@ -168,7 +170,9 @@
 //! the command that started the session.
 
 mod anim_fix;
+mod batch;
 mod batch_end;
+mod behind_imports;
 mod center_text;
 mod clan_text;
 mod cmd_list;
@@ -183,17 +187,21 @@ mod demo_file;
 mod demo_list_folders;
 mod demo_reload;
 mod demo_rosters;
+mod demo_scope;
 mod demo_seek;
+mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
 mod events;
 mod ex_interp;
+mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
 mod hand_signals;
 mod hide_asset;
+mod hlae_window;
 mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
@@ -281,6 +289,8 @@ const SPEC_MATCH_POV_DEFAULT: i32 = anim_fix::LEVEL_OFF;
 static TEXTURE_HIRES_ENABLED: AtomicBool = AtomicBool::new(false);
 
 unsafe extern "system" fn worker_thread(_lp_param: *mut std::ffi::c_void) -> u32 {
+    // Before the game opens its window.
+    hlae_window::start_behind_if_asked();
     // First, so the file is there before GameUI reads the main menu.
     if env_flag("GOLDSRC_HOOKS_GAME_MENU", true) {
         studio_panel::write_game_menu();
