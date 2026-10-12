@@ -37,6 +37,8 @@ HUD
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
   dodstudio_hud_map_team_marker 0/1
       HLTV: mark the watched player on the overview map with his team's camera icon.
+  dodstudio_show_demo_scope 0/1
+      Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
 DEMO PLAYBACK
   dodstudio_run_in_background 0/1
@@ -103,3 +105,5 @@ DEBUG
       Log who the spectator camera follows.
   dodstudio_debug_log_texture_loads 0/1
       Log every HD texture load.
+  dodstudio_debug_keep_detail_cache 0/1
+      Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.

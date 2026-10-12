@@ -49,6 +49,8 @@
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `dodstudio_hud_map_team_marker`, which marks the
 //!   player being watched in HLTV with his team's camera icon (#304).
+//! - `demo_scope`: `dodstudio_show_demo_scope`, which draws the sniper scope
+//!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
 //! - `hlae_window`: `dodstudio_stay_behind_while_capturing`, the game window stays behind
@@ -178,7 +180,9 @@ mod demo_file;
 mod demo_list_folders;
 mod demo_reload;
 mod demo_rosters;
+mod demo_scope;
 mod demo_seek;
+mod detail_cache;
 mod detour;
 mod engine;
 mod engine_buttons;
