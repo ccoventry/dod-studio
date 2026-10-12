@@ -120,6 +120,15 @@ def check(path, pattern, in_eye_at, je_at, ids):
     if mode != G_IUSER1:
         problems.append(f"first operand is +{mode:#x}, not g_iUser1 +{G_IUSER1:#x}")
 
+    # The "not in-eye" jne: stock 75 24 past the store and the v_angles
+    # copy; the module's 75 07 (in a demo) lands on the copy instead.
+    view_jne = image[at + 11:at + 13]
+    if view_jne != bytes.fromhex("75 24"):
+        problems.append(f"in-eye jne is {view_jne.hex(' ')}, not 75 24")
+    copy = image[at + 13 + 7:at + 13 + 9]
+    if copy != bytes.fromhex("8B 15"):
+        problems.append(f"jne +7 lands on {copy.hex(' ')}, not the v_angles copy (8b 15)")
+
     store = image[at + in_eye_at - 3:at + in_eye_at + 4]
     if store != bytes.fromhex("C7 46 14 09 00 00 00"):
         problems.append(f"in-eye store is {store.hex(' ')}, not c7 46 14 09 00 00 00")

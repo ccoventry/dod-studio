@@ -73,6 +73,27 @@
 //! third-person model of their own (no `p_binoc*.mdl` ships), so they are
 //! not told apart from what the player last held.
 //!
+//! ## Where the scope points, in a POV demo
+//!
+//! The quads are drawn in front of the view along `GetViewAngles()`: the
+//! *client's* angles, which in a POV demo are the viewer's own mouse, not the
+//! recorded view the frame is drawn from. So the overlay hung still in the
+//! world while the recorded view swung past it, and bounced around the screen
+//! (the user, 2026-10-11, PRE). Only in-eye does the function copy `v_angles`,
+//! the angles the frame is drawn with, into its view:
+//!
+//! ```text
+//!     +0x466d2  jne  +0x466f8                 ; 75 24: not in-eye, skip both
+//!     +0x466d4  mov  dword [esi+0x14], 9      ; the in-eye rifle (7 bytes)
+//!     +0x466db  ...  view = v_angles          ; 29 bytes
+//!     +0x466f8  ...                           ; the demo gate
+//! ```
+//!
+//! While a demo plays, with the setting on, the `jne` lands on the copy
+//! instead (`75 07`), skipping only the rifle store: the overlay stays on the
+//! screen as it does in live play. Outside a demo it stays `75 24`, so live
+//! play still draws along the client's angles.
+//!
 //! The function reads `m_iWeaponId` at entry, before the in-eye store, so a
 //! change shows one frame after it is written. `CHudScope::Think`'s black
 //! blink fires only on a `Scope` message (`SetScope` sets its dirty flag at
@@ -86,14 +107,20 @@ use crate::scan;
 
 pub const NAME: &str = console_name!("show_demo_scope");
 
-/// From the `g_iUser1` load to the `xor bl, bl` the demo gate skips. The two
+/// From the `g_iUser1` load to the `xor bl, bl` the demo gate skips. The
 /// bytes this module writes are wildcards, so a rescan finds the site in
-/// either state; `site()` checks them instead.
-const PATTERN: &str = "A1 ?? ?? ?? ?? 83 C4 04 83 F8 04 75 24 \
+/// any state; `put_byte` checks them instead.
+const PATTERN: &str = "A1 ?? ?? ?? ?? 83 C4 04 83 F8 04 75 ?? \
                        C7 46 14 ?? 00 00 00 \
                        8B 15 ?? ?? ?? ?? A1 ?? ?? ?? ?? 8B 0D ?? ?? ?? ?? \
                        89 54 24 54 89 44 24 58 89 4C 24 5C \
                        8B 15 ?? ?? ?? ?? FF 52 04 85 C0 ?? 02 32 DB";
+/// The rel8 of the "not in-eye" `jne`.
+const VIEW_JNE_REL_AT: usize = 12;
+/// Stock: past the rifle store and the `v_angles` copy.
+const VIEW_SKIP_BOTH: u8 = 0x24;
+/// In a demo: past the 7-byte rifle store only, onto the `v_angles` copy.
+const VIEW_SKIP_STORE: u8 = 0x07;
 /// The low byte of the in-eye store's imm32 (`mov dword [esi+0x14], imm32`).
 const IN_EYE_ID_AT: usize = 16;
 /// The `je` that skips the `xor bl, bl`.
@@ -218,7 +245,16 @@ fn watched_scope_id() -> Option<u8> {
     scope_id_for_model(&unsafe { (*model).name_str() })
 }
 
-/// Applies or removes both patches, returning whether a byte was written.
+fn playing_demo() -> bool {
+    let Some(engfuncs) = engine::engfuncs() else {
+        return false;
+    };
+    let api = engfuncs.p_demo_api;
+    // Safety: the engine's own demo API table, for the session.
+    !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
+}
+
+/// Applies or removes the patches, returning whether a byte was written.
 /// Decides from the bytes, so it is cheap to call every frame.
 pub fn set_on(on: bool) -> Result<bool, String> {
     let at = site()?;
@@ -227,6 +263,16 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         if on { JMP } else { JE },
         &[JE, JMP],
         "the scope's demo gate",
+    )?;
+    let view = put_byte(
+        at + VIEW_JNE_REL_AT,
+        if on && playing_demo() {
+            VIEW_SKIP_STORE
+        } else {
+            VIEW_SKIP_BOTH
+        },
+        &[VIEW_SKIP_BOTH, VIEW_SKIP_STORE],
+        "the scope's view-angle branch",
     )?;
     let id = if on {
         watched_scope_id()
@@ -238,7 +284,7 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         None => false,
     };
     ON.store(on, Ordering::Release);
-    Ok(gate || rifle)
+    Ok(gate || view || rifle)
 }
 
 fn describe(on: bool) -> &'static str {
@@ -316,7 +362,33 @@ mod tests {
         assert_eq!(t[IN_EYE_ID_AT], "??", "the byte this module writes");
         assert_eq!(&t[IN_EYE_ID_AT + 1..IN_EYE_ID_AT + 4], &["00", "00", "00"]);
         // The in-eye test right before it.
-        assert_eq!(&t[8..13], &["83", "F8", "04", "75", "24"]);
+        assert_eq!(&t[8..12], &["83", "F8", "04", "75"]);
+    }
+
+    #[test]
+    fn the_view_branch_skips_the_store_or_both() {
+        let t = tokens();
+        assert_eq!(t[VIEW_JNE_REL_AT - 1], "75", "jne rel8");
+        assert_eq!(t[VIEW_JNE_REL_AT], "??", "the byte this module writes");
+        // The store is 7 bytes; the v_angles copy runs from just past it to
+        // the demo gate's `mov edx, [pDemoAPI]`.
+        let after_jne = VIEW_JNE_REL_AT + 1;
+        assert_eq!(&t[after_jne..after_jne + 3], &["C7", "46", "14"]);
+        assert_eq!(
+            &t[after_jne + VIEW_SKIP_STORE as usize..][..2],
+            &["8B", "15"],
+            "lands on the v_angles copy"
+        );
+        assert_eq!(
+            &t[after_jne + VIEW_SKIP_BOTH as usize..][..2],
+            &["8B", "15"],
+            "lands on the demo gate"
+        );
+        assert_eq!(
+            &t[after_jne + VIEW_SKIP_BOTH as usize + 6..][..3],
+            &["FF", "52", "04"],
+            "call [edx+4], IsPlayingback"
+        );
     }
 
     #[test]
