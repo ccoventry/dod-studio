@@ -40,8 +40,9 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
-| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. HLAE's recording itself isn't slowed and records right covered or minimised (minimised on the 25th Anniversary build records slowly: cover it instead). A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
+| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. It also stops HLAE bringing the game window to the front, topmost, for every recording (`hlae_window.rs`), and puts a minimised game back behind the other windows instead, since a minimised game draws nothing. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
 | `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
+| `dodstudio_show_demo_scope` | `0` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever he zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307) | `goldsrc-hooks/src/demo_scope.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
@@ -51,6 +52,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
 | `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `dodstudio_debug_keep_detail_cache` | `0` | puts the engine's detail texture cache back, to compare. By default the hook bypasses that cache (#463, #703): `DT_SetRenderState` skips binding a detail texture it thinks is still bound, and nothing ever resets what it remembers, so a run of surfaces can draw with no detail, or another surface's, depending on where the camera stands. Seen on the 25th Anniversary build: the wall left of the double doors leaving harrington's Allied spawn | `goldsrc-hooks/src/detail_cache.rs` |
 | `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 | `dodstudio_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders (and `../`) and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
 | `dodstudio_demo_list_hide_empty` | `1` | while folders are listed, a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
@@ -142,7 +144,10 @@ Anniversary `DemoPlayer.dll`.
 
 A forward jump of more than 5 seconds moves 5 seconds per frame until it lands
 (#596), so the names, teams and scores of everything jumped over reach the
-game; a 20-minute jump takes a few hundred frames. Anything after the time is
+game; a 20-minute jump takes a few hundred frames. The console commands it
+replays (a POV demo's key presses) are dropped and the keys let go on landing,
+since the engine would run them one a frame long after it (#702). Anything
+after the time is
 a command to run once the jump has landed:
 `dodstudio_seek_to 1335.3 dodstudio_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
@@ -166,6 +171,24 @@ command's due time and how late it ran, and, while a schedule is loaded, every
 `[dod-studio]` marker `echo`ed from any route on the same clock. `clear` drops
 the schedule; bare says how far it got. Commands run this way skip the demo
 command filter (#679). Source: `goldsrc-hooks/src/schedule.rs`.
+
+### `dodstudio_batch`
+
+Studio's **Seek Between Clips** (#434): runs a capture batch on the original
+demos instead of patched copies. `start "<file>"` reads the batch file Studio
+wrote (`native::patch::runtime_batch`): `dodstudio-batch 1`, then per demo a
+`demo <path>` line, its `init` commands, and `at <seconds> <command>`,
+`seek <seconds> <to>` and `next <seconds>` lines on the demo player's clock,
+and `end` commands after the last demo, all tab-separated. Each demo is loaded
+with `viewdemo`; once it has loaded, the init commands run, then each timed
+line runs once on the first frame at or past its time, and where the patched
+demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
+while a seek is on its way. A demo that doesn't load in three minutes, stops,
+or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
+`stop` ends the batch; bare says where it is. With
+`dodstudio_run_in_background` on when it starts, the game steps aside behind
+the other windows; `away` does that on its own, and Studio sends it the
+moment the game takes commands, before the batch starts. Source: `goldsrc-hooks/src/batch.rs`.
 
 ### `dodstudio_review`
 

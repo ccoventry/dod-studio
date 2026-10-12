@@ -89,6 +89,11 @@ is the complete list):
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
   map's one team test in `client.dll`; see `src/overview_players.rs`.
+- **Sniper scope in demos** (`dodstudio_show_demo_scope 1`): the game turns
+  the scope off for demo playback; this turns it back on, so a POV demo shows
+  it whenever the recorder zoomed, and in-eye it is the watched player's rifle
+  rather than the Springfield DoD always picks there. Two one-byte patches in
+  `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307).
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark
@@ -228,9 +233,9 @@ is the complete list):
   menu is left out on purpose: it's already fully gated behind `cl_hud_ammo`,
   no hook needed. The overview map, the mortar HUD, the spectator overlay, and
   the sniper scope overlay are also left out -- their `Draw` functions turned
-  out not to draw anything at all in this build, hook or no hook; the scope's
-  real effect lives in `Think`, gated on the local player's own weapon, so it
-  never fires while spectating either way.) Run it with no
+  out not to draw anything at all in this build, hook or no hook; the scope
+  is drawn by `CHudScope::DrawTriApiScope` instead, which
+  `dodstudio_show_demo_scope` reaches.) Run it with no
   arguments to list them. `dodstudio_hide_hudelement all 0` puts everything
   back. Writes `CHudBase::Draw` into the element's vftable slot 3 -- one
   dword, no code patch -- see `docs/goldsrc_hud_elements.md`.

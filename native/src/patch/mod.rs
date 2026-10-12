@@ -147,6 +147,8 @@ pub mod map_text;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod reachability;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod runtime_batch;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod scanner;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sound_mute;
