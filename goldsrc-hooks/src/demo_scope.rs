@@ -90,16 +90,22 @@
 //! ```
 //!
 //! While a demo plays, with the setting on, the `jne` lands on the copy
-//! instead (`75 07`), skipping only the rifle store: the overlay stays on the
-//! screen as it does in live play. Outside a demo it stays `75 24`, so live
-//! play still draws along the client's angles.
+//! instead (`75 07`), skipping only the rifle store. Outside a demo it stays
+//! `75 24`, so live play still draws along the client's angles.
+//!
+//! `v_angles` alone still left the overlay swaying sideways as the recorded
+//! player moved: ±80 px at 1280x720 in a rendered clip, so in a POV demo it
+//! isn't the angles the frame ends up drawn with. So the copy's three
+//! absolute operands are pointed at [`DRAWN_ANGLES`] as well, which
+//! `engine::tramp_calc_refdef` fills from `V_CalcRefdef`'s result every frame:
+//! the scope is then drawn square to the camera.
 //!
 //! The function reads `m_iWeaponId` at entry, before the in-eye store, so a
 //! change shows one frame after it is written. `CHudScope::Think`'s black
 //! blink fires only on a `Scope` message (`SetScope` sets its dirty flag at
 //! `+0x4640e`); the store here does not, so no blink.
 
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
 
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
@@ -121,6 +127,9 @@ const VIEW_JNE_REL_AT: usize = 12;
 const VIEW_SKIP_BOTH: u8 = 0x24;
 /// In a demo: past the 7-byte rifle store only, onto the `v_angles` copy.
 const VIEW_SKIP_STORE: u8 = 0x07;
+/// The absolute addresses the copy reads pitch, yaw and roll from
+/// (`mov edx, [a]; mov eax, [a+4]; mov ecx, [a+8]`): `v_angles`, stock.
+const ANGLE_OPERANDS_AT: [usize; 3] = [22, 27, 33];
 /// The low byte of the in-eye store's imm32 (`mov dword [esi+0x14], imm32`).
 const IN_EYE_ID_AT: usize = 16;
 /// The `je` that skips the `xor bl, bl`.
@@ -146,6 +155,12 @@ const SCOPE_IDS: [u8; 5] = [
     WEAPON_ENFIELD,
     WEAPON_BINOC,
 ];
+
+/// The angles the last frame was drawn with, as `V_CalcRefdef` left them, as
+/// f32 bits. The patched copy reads these three cells in place.
+static DRAWN_ANGLES: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
+/// The copy's stock operands (`v_angles`), read before the first patch.
+static STOCK_OPERANDS: [AtomicU32; 3] = [const { AtomicU32::new(0) }; 3];
 
 static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
 static ADDRESS: AtomicUsize = AtomicUsize::new(0);
@@ -245,6 +260,56 @@ fn watched_scope_id() -> Option<u8> {
     scope_id_for_model(&unsafe { (*model).name_str() })
 }
 
+/// Keeps the angles the frame is drawn with. Called from
+/// `engine::tramp_calc_refdef` after the client's `V_CalcRefdef`.
+pub fn after_calc_refdef(pparams: &engine::RefParamsPartial) {
+    for (cell, value) in DRAWN_ANGLES.iter().zip(pparams.viewangles) {
+        cell.store(value.to_bits(), Ordering::Relaxed);
+    }
+}
+
+/// Where the patched copy reads angle `k` from.
+fn drawn_operand(k: usize) -> u32 {
+    // The DLL is 32-bit: a static's address fits.
+    &DRAWN_ANGLES[k] as *const AtomicU32 as usize as u32
+}
+
+/// Points the copy at [`DRAWN_ANGLES`] (`drawn`) or back at `v_angles`.
+/// Returns whether it wrote.
+fn point_angles(at: usize, drawn: bool) -> Result<bool, String> {
+    let mut wrote = false;
+    for (k, offset) in ANGLE_OPERANDS_AT.iter().enumerate() {
+        let address = at + offset;
+        // Safety: inside the pattern `site()` matched, so mapped code.
+        let present = unsafe { std::ptr::read_unaligned(address as *const u32) };
+        let ours = drawn_operand(k);
+        let mut stock = STOCK_OPERANDS[k].load(Ordering::Acquire);
+        if stock == 0 {
+            if present == ours {
+                return Err(
+                    "the scope's angle copy already reads ours, with no stock address kept".into(),
+                );
+            }
+            STOCK_OPERANDS[k].store(present, Ordering::Release);
+            stock = present;
+        }
+        let want = if drawn { ours } else { stock };
+        if present == want {
+            continue;
+        }
+        if present != stock && present != ours {
+            return Err(format!(
+                "the scope's angle copy reads {present:#x}, neither v_angles ({stock:#x}) nor ours -- something else has patched it"
+            ));
+        }
+        if !unsafe { crate::patch::write_code_bytes(address, &want.to_le_bytes()) } {
+            return Err("could not make the scope's angle copy writable".into());
+        }
+        wrote = true;
+    }
+    Ok(wrote)
+}
+
 fn playing_demo() -> bool {
     let Some(engfuncs) = engine::engfuncs() else {
         return false;
@@ -264,9 +329,10 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         &[JE, JMP],
         "the scope's demo gate",
     )?;
+    let in_demo = on && playing_demo();
     let view = put_byte(
         at + VIEW_JNE_REL_AT,
-        if on && playing_demo() {
+        if in_demo {
             VIEW_SKIP_STORE
         } else {
             VIEW_SKIP_BOTH
@@ -274,6 +340,7 @@ pub fn set_on(on: bool) -> Result<bool, String> {
         &[VIEW_SKIP_BOTH, VIEW_SKIP_STORE],
         "the scope's view-angle branch",
     )?;
+    let view = point_angles(at, in_demo)? || view;
     let id = if on {
         watched_scope_id()
     } else {

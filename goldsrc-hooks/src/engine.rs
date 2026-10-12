@@ -1118,6 +1118,10 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    if !pparams.is_null() {
+        // Safety: as above. Last, so it keeps the angles the frame is drawn with.
+        crate::demo_scope::after_calc_refdef(unsafe { &*pparams });
+    }
 }
 
 /// Called once per entity the engine is about to add to the render list.
