@@ -53,10 +53,28 @@ impl Found {
     }
 }
 
+/// What the visitor wants done after an entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Go on; a [`Kind::Dir`] is entered.
+    Enter,
+    /// Go on; a [`Kind::Dir`] is not entered.
+    Skip,
+    /// End the walk here.
+    Stop,
+}
+
+impl From<bool> for Step {
+    /// `true` enters, `false` skips.
+    fn from(enter: bool) -> Self {
+        if enter { Step::Enter } else { Step::Skip }
+    }
+}
+
 /// How a walk ended.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Outcome {
-    /// False when the entry budget stopped it short.
+    /// False when the entry budget, or the visitor, stopped it short.
     pub complete: bool,
     /// Entries read.
     pub entries: usize,
@@ -108,12 +126,29 @@ impl Walker {
         self
     }
 
-    /// Calls `visit` for every entry under `root`. For a [`Kind::Dir`] the
-    /// return value says whether to go into it; for anything else it is
-    /// ignored. `root` itself is read through even when it is a link: it is
-    /// the folder the caller asked for.
-    pub fn walk(&self, root: &Path, visit: &mut dyn FnMut(&Found) -> bool) -> Outcome {
-        let mut pending: VecDeque<(PathBuf, usize)> = VecDeque::from([(root.to_path_buf(), 0)]);
+    /// Calls `visit` for every entry under `root`. `root` itself is read
+    /// through even when it is a link: it is the folder the caller asked for.
+    pub fn walk(&self, root: &Path, visit: &mut dyn FnMut(&Found) -> Step) -> Outcome {
+        self.walk_roots(&[root], visit)
+    }
+
+    /// [`Walker::walk`] over several roots with one budget: depth-first,
+    /// each root in turn; breadth-first, every root's own entries before any
+    /// subfolder's, so a nearby find does not wait behind a big root listed
+    /// earlier.
+    pub fn walk_roots<P: AsRef<Path>>(
+        &self,
+        roots: &[P],
+        visit: &mut dyn FnMut(&Found) -> Step,
+    ) -> Outcome {
+        let mut pending: VecDeque<(PathBuf, usize)> = roots
+            .iter()
+            .map(|r| (r.as_ref().to_path_buf(), 0))
+            .collect();
+        if !self.breadth_first {
+            // Popped from the back: the first root goes first.
+            pending = pending.into_iter().rev().collect();
+        }
         let mut entries = 0usize;
         while let Some((dir, depth)) = if self.breadth_first {
             pending.pop_front()
@@ -151,9 +186,17 @@ impl Walker {
                     depth: depth + 1,
                     kind,
                 };
-                let enter = visit(&found);
-                if kind == Kind::Dir && enter && found.depth < self.max_depth {
-                    found_dirs.push((found.path, found.depth));
+                match visit(&found) {
+                    Step::Enter if kind == Kind::Dir && found.depth < self.max_depth => {
+                        found_dirs.push((found.path, found.depth));
+                    }
+                    Step::Enter | Step::Skip => {}
+                    Step::Stop => {
+                        return Outcome {
+                            complete: false,
+                            entries,
+                        };
+                    }
                 }
             }
             if self.breadth_first {
@@ -175,7 +218,7 @@ impl Walker {
             if found.is_demo() {
                 demos.push(found.path.clone());
             }
-            true
+            Step::Enter
         });
         demos.sort();
         demos
@@ -188,7 +231,7 @@ impl Walker {
             if found.kind == Kind::File {
                 files.push(found.path.clone());
             }
-            true
+            Step::Enter
         });
         files
     }
@@ -247,7 +290,7 @@ mod tests {
         let mut seen = 0;
         let outcome = Walker::new().max_entries(2).walk(&root, &mut |_| {
             seen += 1;
-            true
+            Step::Enter
         });
         assert_eq!(seen, 2);
         assert_eq!(
@@ -257,24 +300,59 @@ mod tests {
                 entries: 2
             }
         );
-        let outcome = Walker::new().walk(&root, &mut |_| true);
+        let outcome = Walker::new().walk(&root, &mut |_| Step::Enter);
         assert!(outcome.complete);
         assert_eq!(outcome.entries, 6, "two folders, four files");
         let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
-    fn the_visitor_can_keep_a_folder_out() {
+    fn the_visitor_can_keep_a_folder_out_or_stop() {
         let root = scratch("walk_skip");
         let mut demos = Vec::new();
         Walker::new().walk(&root, &mut |found| {
             if found.is_demo() {
                 demos.push(found.path.clone());
             }
-            found.file_name() != "deeper"
+            (found.file_name() != "deeper").into()
         });
         demos.sort();
         assert_eq!(relative(&root, &demos), ["a.dem", "sub/b.DEM"]);
+
+        let mut seen = 0;
+        let outcome = Walker::new().walk(&root, &mut |_| {
+            seen += 1;
+            if seen == 3 { Step::Stop } else { Step::Enter }
+        });
+        assert_eq!(seen, 3);
+        assert!(!outcome.complete);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn several_roots_share_one_walk_and_budget() {
+        let root = scratch("walk_roots");
+        let other = root.join("other");
+        std::fs::create_dir_all(other.join("deep")).unwrap();
+        std::fs::write(other.join("deep/z.dem"), b"").unwrap();
+        let mut demos = Vec::new();
+        Walker::new().breadth_first().walk_roots(
+            &[root.join("sub"), other.clone()],
+            &mut |found| {
+                if found.is_demo() {
+                    demos.push(found.path.clone());
+                }
+                Step::Enter
+            },
+        );
+        assert_eq!(
+            relative(&root, &demos),
+            ["sub/b.DEM", "sub/deeper/c.dem", "other/deep/z.dem"]
+        );
+        let outcome = Walker::new()
+            .max_entries(3)
+            .walk_roots(&[root.join("sub"), other], &mut |_| Step::Enter);
+        assert!(!outcome.complete);
         let _ = std::fs::remove_dir_all(&root);
     }
 
@@ -288,7 +366,7 @@ mod tests {
             if found.is_demo() {
                 order.push(found.path.clone());
             }
-            true
+            Step::Enter
         });
         let order = relative(&root, &order);
         assert_eq!(order[0], "a.dem");
@@ -322,7 +400,7 @@ mod tests {
                 Kind::File if found.is_demo() => demos.push(found.path.clone()),
                 _ => {}
             }
-            true
+            Step::Enter
         });
         assert!(outcome.complete);
         assert_eq!(relative(&root, &links), ["sub/loop"]);

@@ -279,7 +279,9 @@ pub fn scan_folder_background(
             continue;
         }
 
+        // walkdir does not follow links by default; the depth cap is #376's.
         for entry in WalkDir::new(&source_folder)
+            .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
             .into_iter()
             .filter_entry(|e| !is_bmp_stream_folder(e))
             .filter_map(|e| e.ok())

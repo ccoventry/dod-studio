@@ -1516,7 +1516,10 @@ fn build_sky_index() -> HashMap<String, String> {
 /// winning), keyed by its lowercased path relative to that folder, mapped to
 /// its path relative to [`hd_base`] (and so to the engine's search paths).
 fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
-    fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
+    // `file_type` never follows a junction, so a link is indexed as a name
+    // and never entered; the depth cap bounds the rest (#376).
+    const MAX_DEPTH: usize = 16;
+    fn walk(dir: &Path, rel: &str, depth: usize, out: &mut std::collections::HashSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -1524,7 +1527,9 @@ fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             let rel = format!("{rel}{name}");
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                walk(&entry.path(), &format!("{rel}/"), out);
+                if depth < MAX_DEPTH {
+                    walk(&entry.path(), &format!("{rel}/"), depth + 1, out);
+                }
             } else {
                 out.insert(rel);
             }
@@ -1533,7 +1538,7 @@ fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for sub in style_dirs(type_dir) {
         let mut found = std::collections::HashSet::new();
-        walk(&hd_base().join(&sub), "", &mut found);
+        walk(&hd_base().join(&sub), "", 0, &mut found);
         unsafe {
             crate::debug::report(&format!(
                 "texture_hires: indexed {} {what} in {sub}",
