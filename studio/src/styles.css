@@ -46,18 +46,68 @@ html {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   font-size: 13px;
   line-height: 1.4;
-  color: #d0d0d0;
-  background-color: #121212;
+  color: var(--text);
+  background-color: var(--bg-dark);
 
+  /* Design tokens. New styles take their colours, spacing, radii and type
+   * sizes from here rather than writing a hex or px value, so a facelift
+   * changes one line instead of every screen. */
+
+  /* Surfaces, darkest first */
   --bg-dark: #121212;
-  --bg-panel: #1e1e1e;
-  --bg-card: #252525;
   --bg-input: #181818;
+  --surface-sunken: #1a1a1a;
+  --bg-panel: #1e1e1e;
+  --surface-raised: #222222;
+  --bg-card: #252525;
+  --surface-hover: #2a2a2a;
+
+  /* Borders */
+  --border-subtle: #282828;
+  --border-soft: #333333;
   --border-color: #383838;
+  --border-input: #444444;
   --border-accent: #555555;
+
+  /* Text, brightest first */
+  --text-strong: #ffffff;
+  --text-bright: #dddddd;
+  --text: #d0d0d0;
+  --text-soft: #cccccc;
+  --text-dim: #aaaaaa;
+  --text-faint: #999999;
+  --text-muted: #888888;
+
+  /* Accent */
   --primary-accent: #2b5c8f;
   --primary-hover: #3772b0;
-  --text-muted: #888888;
+  --primary-light: #4a82bd;
+
+  /* Status */
+  --danger: #ff5555;
+  --danger-strong: #f44336;
+  --danger-soft: #ef5350;
+  --warning: #ffb74d;
+
+  /* Spacing scale */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 10px;
+  --space-6: 12px;
+  --space-7: 16px;
+  --space-8: 20px;
+
+  /* Radii */
+  --radius-sm: 2px;
+  --radius: 3px;
+  --radius-lg: 8px;
+
+  /* Type sizes (the base is 13px, set above) */
+  --font-xs: 11px;
+  --font-sm: 12px;
+  --font-note: 0.85em;
 }
 
 body {
@@ -65,7 +115,7 @@ body {
   width: 100vw;
   overflow: hidden;
   background: var(--bg-dark);
-  color: #d0d0d0;
+  color: var(--text);
   user-select: none;
 }
 
@@ -81,7 +131,7 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
   padding: 4px 12px;
   height: 52px;
@@ -104,7 +154,7 @@ body {
 }
 
 .brand-title {
-  color: #ffffff;
+  color: var(--text-strong);
   font-size: 17px;
   white-space: nowrap;
 }
@@ -116,8 +166,8 @@ body {
 }
 
 .nav-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -127,8 +177,8 @@ body {
 
 .nav-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 /* Same button:hover:not(:disabled) specificity override as
@@ -136,8 +186,8 @@ body {
    top-level tab's blue background flips to the generic hover gray. */
 .nav-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 .nav-actions {
@@ -167,7 +217,7 @@ body {
 
 .menu-dropdown-btn {
   background: transparent;
-  color: #aaaaaa;
+  color: var(--text-dim);
   border: 1px solid transparent;
   border-radius: 2px;
   padding: 4px 8px;
@@ -180,9 +230,9 @@ body {
 
 .menu-dropdown-btn:hover,
 .menu-dropdown.open .menu-dropdown-btn {
-  background: #222222;
+  background: var(--surface-raised);
   border-color: var(--border-color);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .menu-update-dot {
@@ -229,7 +279,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   background: transparent;
-  color: #d0d0d0;
+  color: var(--text);
   border: none;
   border-radius: 2px;
   padding: 6px 10px;
@@ -241,7 +291,7 @@ body {
 
 .menu-dropdown-item:hover {
   background: var(--primary-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .menu-shortcut-hint {
@@ -316,7 +366,7 @@ body {
 .info-icon:hover,
 .info-icon:focus-visible {
   opacity: 1;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* Custom tooltip for .info-icon — see info_tooltip.js and #164. Position is
@@ -331,7 +381,7 @@ body {
   border: 1px solid var(--border-color);
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  color: #d0d0d0;
+  color: var(--text);
   font-size: 11px;
   line-height: 1.4;
   pointer-events: none;
@@ -342,7 +392,7 @@ body {
 }
 
 .setting-label.active {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -430,7 +480,7 @@ body {
 }
 
 #pane-details-config {
-  background: #1a1a1a;
+  background: var(--surface-sunken);
 }
 
 /* egui Panel Styling */
@@ -450,7 +500,7 @@ body {
 .panel-header h2, .panel-header h3 {
   font-size: 14px;
   font-weight: 600;
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 /* The Demo Analyzer's Cache all, beside the Demos title (#569). */
@@ -509,12 +559,12 @@ body {
 .input-row label {
   min-width: 150px;
   font-weight: 500;
-  color: #cccccc;
+  color: var(--text-soft);
 }
 
 input[type="text"], input[type="number"], input[type="search"], select {
   background: var(--bg-input);
-  color: #ffffff;
+  color: var(--text-strong);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 8px;
@@ -560,8 +610,8 @@ select {
 }
 
 button {
-  background: #2a2a2a;
-  color: #dddddd;
+  background: var(--surface-hover);
+  color: var(--text-bright);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 10px;
@@ -572,7 +622,7 @@ button {
 button:hover:not(:disabled) {
   background: #383838;
   border-color: var(--border-accent);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 button:disabled {
@@ -582,8 +632,8 @@ button:disabled {
 
 button.primary-btn {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 button.primary-btn:hover:not(:disabled) {
@@ -617,7 +667,7 @@ button.primary-btn:hover:not(:disabled) {
 /* Outranks the global button:hover:not(:disabled) background. */
 .clearable-x:hover:not(:disabled) {
   background: transparent;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* Master Demo Queue Table */
@@ -635,8 +685,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 #master-demo-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
@@ -655,7 +705,7 @@ button.primary-btn:hover:not(:disabled) {
 
 #master-demo-table td {
   padding: 6px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 #master-demo-table tr:hover {
@@ -727,8 +777,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .config-tab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -736,16 +786,16 @@ button.primary-btn:hover:not(:disabled) {
 
 .config-tab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .config-tab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 .config-tab-content {
@@ -851,7 +901,7 @@ button.primary-btn:hover:not(:disabled) {
 /* The two fixed kill anchors (0.0s and the illustrative streak end) stand
    out from the four fields' derived offsets around them. */
 .timing-diagram-anchor td {
-  color: #ffffff;
+  color: var(--text-strong);
   font-weight: 600;
 }
 
@@ -990,7 +1040,7 @@ button.primary-btn:hover:not(:disabled) {
 .progress-bar-container {
   width: 100%;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-hover);
   border-radius: 2px;
   overflow: hidden;
   margin-top: 6px;
@@ -1034,7 +1084,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .list-editor-browse-btn:hover,
 .list-editor-move-btn:hover:not(:disabled) {
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .list-editor-remove-btn:hover {
@@ -1131,13 +1181,13 @@ button.primary-btn:hover:not(:disabled) {
   gap: 4px;
   flex-shrink: 0;
   padding: 8px 12px;
-  background: #181818;
+  background: var(--bg-input);
   border-bottom: 1px solid var(--border-color);
 }
 
 .capture-detail-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1145,8 +1195,8 @@ button.primary-btn:hover:not(:disabled) {
 
 .capture-detail-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 /* Matches button.primary-btn:hover's own override below — the generic
@@ -1155,8 +1205,8 @@ button.primary-btn:hover:not(:disabled) {
    the active tab's blue background would flip to the generic hover gray. */
 .capture-detail-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 /* ── Demo Analyzer ─────────────────────────────────────────────────────────── */
@@ -1171,8 +1221,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-subtab-btn {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   border: 1px solid var(--border-color);
   border-radius: 2px;
   padding: 4px 12px;
@@ -1180,16 +1230,16 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-subtab-btn.active {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 /* Same button:hover:not(:disabled) specificity override as the other
    .active:hover tab-button rules in this file. */
 .analyzer-subtab-btn.active:hover {
   background: var(--primary-accent);
-  color: #ffffff;
-  border-color: #4a82bd;
+  color: var(--text-strong);
+  border-color: var(--primary-light);
 }
 
 .analyzer-tab-content {
@@ -1206,7 +1256,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-heading {
   font-size: 15px;
-  color: #fff;
+  color: var(--text-strong);
   margin-bottom: 10px;
 }
 
@@ -1216,7 +1266,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-section-title {
   font-size: 12px;
-  color: #ccc;
+  color: var(--text-soft);
   border-bottom: 1px solid var(--border-color);
   padding-bottom: 4px;
   margin-bottom: 6px;
@@ -1260,8 +1310,8 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-table th {
-  background: #222222;
-  color: #aaaaaa;
+  background: var(--surface-raised);
+  color: var(--text-dim);
   padding: 6px 8px;
   border-bottom: 1px solid var(--border-color);
   font-weight: 600;
@@ -1271,13 +1321,13 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-table td {
   padding: 5px 8px;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .scoreboard-group-header td {
   padding-top: 10px;
   font-weight: 700;
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border-soft);
 }
 
 .scoreboard-spacer-row td {
@@ -1292,7 +1342,7 @@ button.primary-btn:hover:not(:disabled) {
 .analyzer-total-row td {
   border-top: 1px solid var(--border-color);
   font-weight: 600;
-  color: #ccc;
+  color: var(--text-soft);
 }
 
 .analyzer-warning-banner {
@@ -1356,7 +1406,7 @@ button.primary-btn:hover:not(:disabled) {
 .analyzer-hero-name {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .analyzer-hero-sub {
@@ -1378,7 +1428,7 @@ button.primary-btn:hover:not(:disabled) {
   padding-top: 8px;
   border-top: 1px solid var(--border-color);
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-soft);
 }
 
 /* #207: a demo this install's game can't play. */
@@ -1386,8 +1436,8 @@ button.primary-btn:hover:not(:disabled) {
   flex-shrink: 0;
   font-size: 0.75em;
   font-weight: normal;
-  color: #ffb74d;
-  border: 1px solid #ffb74d;
+  color: var(--warning);
+  border: 1px solid var(--warning);
   border-radius: 2px;
   padding: 0 4px;
   cursor: help;
@@ -1498,7 +1548,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .batch-results-error {
-  color: #ef5350;
+  color: var(--danger-soft);
 }
 
 .batch-results-wrap {
@@ -1506,11 +1556,11 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .batch-results-row-missing td:first-child {
-  color: #ef5350;
+  color: var(--danger-soft);
 }
 
 .batch-results-row-unrenderable td:first-child {
-  color: #ffb74d;
+  color: var(--warning);
 }
 
 .batch-results-row-ok td:first-child {
@@ -1560,13 +1610,13 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .command-suggest-refused .command-suggest-name {
-  color: #ef5350;
+  color: var(--danger-soft);
   text-decoration: line-through;
 }
 
 .command-suggest-refused .command-suggest-meta,
 .command-suggest-warned .command-suggest-meta {
-  color: #ffb74d;
+  color: var(--warning);
 }
 
 .command-suggest-noop .command-suggest-name {
@@ -1594,7 +1644,7 @@ button.primary-btn:hover:not(:disabled) {
   align-items: center;
   margin-top: 8px;
   font-size: 11px;
-  color: #ccc;
+  color: var(--text-soft);
 }
 
 .analyzer-copy-btn {
@@ -1627,7 +1677,7 @@ button.primary-btn:hover:not(:disabled) {
 .stat-value {
   font-size: 20px;
   font-weight: 700;
-  color: #fff;
+  color: var(--text-strong);
   margin-top: 4px;
 }
 
@@ -1650,7 +1700,7 @@ button.primary-btn:hover:not(:disabled) {
   display: inline-block;
   width: 60px;
   height: 6px;
-  background: #2a2a2a;
+  background: var(--surface-hover);
   border-radius: 2px;
   overflow: hidden;
   vertical-align: middle;
@@ -1663,12 +1713,12 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-progress-label {
   font-size: 10.5px;
-  color: #999;
+  color: var(--text-faint);
   margin-left: 4px;
 }
 
 .killstreak-subrow td {
-  color: #999;
+  color: var(--text-faint);
   border-bottom: none;
 }
 
@@ -1731,7 +1781,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-killmap circle:hover {
-  stroke: #fff;
+  stroke: var(--text-strong);
   stroke-width: 2.5;
 }
 
@@ -1931,7 +1981,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .quicklink-row.selected {
   background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .quicklink-pin-btn {
@@ -1990,7 +2040,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .tree-row.selected .tree-label {
   background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .tree-toggle {
@@ -2040,7 +2090,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-explorer-settings summary:hover {
-  color: #dddddd;
+  color: var(--text-bright);
 }
 
 .settings-checkbox-row {
@@ -2081,7 +2131,7 @@ button.primary-btn:hover:not(:disabled) {
 }
 
 .analyzer-table th[data-sort]:hover {
-  color: #dddddd;
+  color: var(--text-bright);
 }
 
 .analyzer-demo-row {
@@ -2094,7 +2144,7 @@ button.primary-btn:hover:not(:disabled) {
 
 .analyzer-demo-row.selected {
   background: rgba(43, 92, 143, 0.35);
-  color: #ffffff;
+  color: var(--text-strong);
 }
 
 .text-muted {
@@ -2141,26 +2191,26 @@ tr.keyboard-selected {
   padding: 5px 12px;
   text-align: left;
   white-space: nowrap;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 /* #426: fewer files than the fullest style, and the biggest size built. */
 #hd-status-table td.hd-cell-partial {
-  color: #ffb74d;
+  color: var(--warning);
 }
 
 .hd-cell-largest {
   font-size: 11px;
-  color: #888888;
+  color: var(--text-muted);
 }
 
 .hd-style-coverage,
 .hd-gl-max-size-low {
-  color: #ffb74d;
+  color: var(--warning);
 }
 
 #hd-status-table th {
-  color: #aaaaaa;
+  color: var(--text-dim);
   font-weight: 600;
   border-bottom-color: var(--border-color);
 }
@@ -2452,7 +2502,7 @@ tr.keyboard-selected {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #aaaaaa;
+  color: var(--text-dim);
 }
 
 .ov-map-list {
@@ -2472,7 +2522,7 @@ tr.keyboard-selected {
   font-size: 12px;
   background: none;
   border: none;
-  border-bottom: 1px solid #282828;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .ov-map-row span:first-child {
@@ -2553,7 +2603,7 @@ tr.keyboard-selected {
 }
 
 .ov-swatch.active {
-  outline: 2px solid #fff;
+  outline: 2px solid var(--text-strong);
 }
 
 .ov-checks {
@@ -2734,7 +2784,7 @@ tr.keyboard-selected {
 }
 
 .hd-chip-x:hover {
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* Clicking a map's box that a pattern picked points at the pattern's chip. */
@@ -2787,7 +2837,7 @@ input[type="checkbox"].hd-box-pattern {
   text-align: center;
   line-height: 13px;
   font-size: 11px;
-  color: #fff;
+  color: var(--text-strong);
 }
 
 .hd-tick::after {
@@ -2847,7 +2897,7 @@ input[type="checkbox"].hd-box-pattern {
 
 /* Misses view: one collapsible block per map. */
 .hd-miss-map {
-  border-top: 1px solid #282828;
+  border-top: 1px solid var(--border-subtle);
   padding: 6px 0;
 }
 
@@ -2860,7 +2910,7 @@ input[type="checkbox"].hd-box-pattern {
   margin-top: 8px;
   font-size: 12px;
   font-weight: 600;
-  color: #aaaaaa;
+  color: var(--text-dim);
 }
 
 .hd-miss-list {
@@ -2901,9 +2951,9 @@ input[type="checkbox"].hd-box-pattern {
   min-height: 3.2em;
   resize: both;
   padding: 2px 4px;
-  background: #1a1a1a;
-  color: #fff;
-  border: 1px solid #444;
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  border: 1px solid var(--border-input);
   border-radius: 3px;
   font-family: inherit;
   font-size: 12px;
@@ -2928,7 +2978,7 @@ input[type="checkbox"].hd-box-pattern {
 
 .rename-errors {
   margin: 2px 0 4px;
-  color: #ef5350;
+  color: var(--danger-soft);
 }
 
 /* One row per placeholder group: its label, then its chips (#469). */
@@ -3008,7 +3058,7 @@ input[type="checkbox"].hd-box-pattern {
 }
 
 #rename-table td.rename-numbered {
-  color: #ffb74d;
+  color: var(--warning);
 }
 
 .rename-type {
@@ -3031,3 +3081,145 @@ input[type="checkbox"].hd-box-pattern {
   background: rgba(206, 147, 216, 0.12);
 }
 
+
+/* ── Shared layout and component classes ─────────────────────────────────────
+ * What index.html used to write as inline style= attributes. Utilities name a
+ * step on the --space-* scale (mt-4 is var(--space-4), 8px), widths name px. */
+
+/* Flex */
+.flex-row { display: flex; align-items: center; }
+.flex-col { display: flex; flex-direction: column; }
+.flex-1 { flex: 1; }
+.flex-wrap { flex-wrap: wrap; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.gap-1 { gap: var(--space-1); }
+.gap-2 { gap: var(--space-2); }
+.gap-3 { gap: var(--space-3); }
+.gap-4 { gap: var(--space-4); }
+.gap-5 { gap: var(--space-5); }
+
+/* Spacing */
+.mt-0 { margin-top: 0; }
+.mt-2 { margin-top: var(--space-2); }
+.mt-3 { margin-top: var(--space-3); }
+.mt-4 { margin-top: var(--space-4); }
+.mt-5 { margin-top: var(--space-5); }
+.mt-6 { margin-top: var(--space-6); }
+.mt-7 { margin-top: var(--space-7); }
+.mb-6 { margin-bottom: var(--space-6); }
+
+/* Sizes */
+.w-44 { width: 44px; }
+.w-50 { width: 50px; }
+.w-60 { width: 60px; }
+.w-70 { width: 70px; }
+.w-80 { width: 80px; }
+.w-140 { width: 140px; }
+.w-180 { width: 180px; }
+.w-260 { width: 260px; }
+.w-6em { width: 6em; }
+.w-10em { width: 10em; }
+.w-full { width: 100%; }
+.max-w-220 { max-width: 220px; }
+.max-w-420 { max-width: 420px; }
+.max-h-280 { max-height: 280px; }
+.max-h-360 { max-height: 360px; }
+.max-h-400 { max-height: 400px; }
+
+/* Text */
+.text-center { text-align: center; }
+.text-note { font-size: var(--font-note); }
+.text-danger-soft { color: var(--danger-soft); }
+.font-mono { font-family: monospace; }
+.pre-line { white-space: pre-line; }
+.status-note { font-size: var(--font-note); opacity: 0.85; }
+.alert-text { color: var(--danger-strong); font-weight: 600; }
+.help-text {
+  font-size: var(--font-sm);
+  color: var(--text-muted);
+  margin: 0 0 var(--space-4);
+}
+
+/* A destructive button: Clear All, Delete Selected, Discard... It keeps its
+   red through the generic button:hover, which outranks a bare class. */
+button.btn-danger,
+button.btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Compact filter controls in a table's toolbar. Element-qualified to outrank
+   the generic input[type="text"] rule, and the border stays put on focus. */
+input.toolbar-field,
+select.toolbar-field {
+  padding: 3px var(--space-3);
+  font-size: var(--font-sm);
+  background: var(--surface-sunken);
+  color: var(--text-strong);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius);
+}
+input.toolbar-field:focus,
+select.toolbar-field:focus {
+  border-color: var(--border-input);
+}
+input.toolbar-field-roomy { padding: var(--space-2) var(--space-4); }
+input.toolbar-field-tight { padding: var(--space-1) var(--space-2); }
+.toolbar-check {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: var(--font-sm);
+}
+
+/* Count line under a table */
+.list-footer {
+  padding: var(--space-2) var(--space-4);
+  font-size: var(--font-xs);
+  color: var(--text-muted);
+  border-top: 1px solid var(--border-color);
+}
+
+.section-divider {
+  margin-top: var(--space-6);
+  border-top: 1px solid var(--border-color);
+  padding-top: var(--space-5);
+}
+
+.clip-name-preview {
+  margin-top: var(--space-2);
+  font-size: var(--font-note);
+  opacity: 0.9;
+  word-break: break-all;
+}
+
+/* Modals */
+.modal-sm, .modal-md, .modal-lg { padding: var(--space-8); }
+.modal-sm { max-width: 420px; }
+.modal-md { max-width: 480px; }
+.modal-lg { max-width: 640px; }
+.modal-actions {
+  display: flex;
+  gap: var(--space-4);
+  margin-top: var(--space-7);
+  justify-content: flex-end;
+}
+.modal-actions.justify-center { justify-content: center; }
+.error-log {
+  max-height: 360px;
+  overflow: auto;
+  white-space: pre-wrap;
+  background: var(--bg-dark);
+  padding: var(--space-5);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+}
+.update-version-line { margin: calc(-1 * var(--space-2)) 0 var(--space-4); }
+.about-version-line { margin: var(--space-2) 0 var(--space-6); }
+.about-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-4);
+}

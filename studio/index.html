@@ -104,37 +104,37 @@
           <div id="master-pane" class="egui-panel">
             <div class="panel-header flex-between">
               <h3 data-str="WORKSPACE.MASTER_QUEUE_TITLE">Master Demo Queue</h3>
-              <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
-                <input type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." style="padding: 4px 8px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
-                <select id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 220px;">
+              <div class="flex-row gap-3 flex-wrap">
+                <input class="toolbar-field toolbar-field-roomy" type="text" id="demo-search-input" data-str-placeholder="WORKSPACE.SEARCH_PLACEHOLDER" placeholder="Search filename or map..." />
+                <select class="toolbar-field max-w-220" id="master-player-filter" data-str-title="WORKSPACE.PLAYER_FILTER_TITLE">
                   <option value="" data-str="WORKSPACE.PLAYER_FILTER_ALL">All players</option>
                 </select>
                 <button id="teams-btn" data-str="TEAMS.BUTTON" data-str-title="TEAMS.BUTTON_TITLE">Teams</button>
                 <!-- #54: quick filters. -->
-                <select id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                <select class="toolbar-field" id="master-kills-filter" data-str-title="WORKSPACE.KILLS_FILTER_TITLE">
                   <option value="all" data-str="WORKSPACE.KILLS_FILTER_ALL">All demos</option>
                   <option value="with_kills" data-str="WORKSPACE.KILLS_FILTER_WITH_KILLS">With kills</option>
                   <option value="multi_kill" data-str="WORKSPACE.KILLS_FILTER_MULTI_KILL">With a multi-kill</option>
                 </select>
-                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
+                <label class="toolbar-check" data-str-title="WORKSPACE.OWNER_ONLY_TITLE">
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
-                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
+                <label class="toolbar-check" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
                 </label>
                 <!-- #665: gaps between kills play fast. -->
-                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.FAST_FORWARD_TITLE">
+                <label class="toolbar-check" data-str-title="REVIEW.FAST_FORWARD_TITLE">
                   <input type="checkbox" id="review-fast-forward-cb" checked />
                   <span data-str="REVIEW.FAST_FORWARD_LABEL">Fast-forward gaps over</span>
-                  <input type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" style="width: 44px; padding: 2px 4px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;" />
+                  <input class="toolbar-field toolbar-field-tight w-44" type="number" id="review-fast-forward-gap" value="8" min="7" max="120" step="1" />
                   <span data-str="REVIEW.FAST_FORWARD_UNIT">s</span>
                 </label>
                 <button id="clear-untracked-btn" disabled data-str="WORKSPACE.CLEAR_UNTRACKED_BUTTON" data-str-title="WORKSPACE.CLEAR_UNTRACKED_TITLE">Clear Untracked</button>
                 <button id="clear-selected-btn" disabled data-str="WORKSPACE.CLEAR_SELECTED_BUTTON" data-str-title="WORKSPACE.CLEAR_SELECTED_TITLE_DEFAULT">Clear Selected</button>
-                <button id="clear-all-btn" disabled style="color: #ff5555; border-color: #ff5555;" data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
+                <button class="btn-danger" id="clear-all-btn" disabled data-str="WORKSPACE.CLEAR_ALL_BUTTON" data-str-title="WORKSPACE.CLEAR_ALL_TITLE_TOOLTIP">Clear All</button>
               </div>
             </div>
             <!-- Populated by map_warnings.js when a scanned demo needs a map
@@ -161,7 +161,7 @@
                   </tr>
                 </tbody>
               </table>
-              <div id="demo-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="WORKSPACE.DEMO_LIST_FOOTER_DEFAULT">Loaded Demos: 0 | Total Highlights: 0</div>
+              <div class="list-footer" id="demo-list-footer" data-str="WORKSPACE.DEMO_LIST_FOOTER_DEFAULT">Loaded Demos: 0 | Total Highlights: 0</div>
             </div>
           </div>
         </section>
@@ -172,22 +172,22 @@
           <!-- Detail View: Highlight Rules -->
           <div id="detail-pane" class="egui-panel">
             <div class="panel-header flex-between">
-              <div class="header-title-group" style="display: flex; gap: 8px; align-items: center;">
+              <div class="header-title-group flex-row gap-4">
                 <h3 id="detail-demo-title" data-str="HIGHLIGHTS.DEFAULT_TITLE">Highlight Details</h3>
                 <button id="btn-launch-preview" disabled data-str="HIGHLIGHTS.LAUNCH_PREVIEW_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_PREVIEW_TITLE">Launch Preview</button>
               </div>
-              <div class="header-controls" style="display: flex; gap: 8px; align-items: center;">
+              <div class="header-controls flex-row gap-4">
                 <button id="view-telemetry-btn" disabled data-str="HIGHLIGHTS.VIEW_TELEMETRY_BUTTON">View Match Telemetry</button>
                 <button id="btn-generate-all-previews" disabled data-str="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_BUTTON" data-str-title="HIGHLIGHTS.GENERATE_ALL_PREVIEWS_TITLE">Generate All Previews</button>
                 <button id="btn-launch-standalone-game" data-str="HIGHLIGHTS.LAUNCH_STANDALONE_BUTTON" data-str-title="HIGHLIGHTS.LAUNCH_STANDALONE_TITLE">Launch Game (HLAE)</button>
                 <div class="control-group">
                   <label for="input-min-kills" data-str="HIGHLIGHTS.MIN_KILLS_LABEL">Min Kills:</label>
-                  <input type="number" id="input-min-kills" value="1" min="1" style="width: 50px;" />
+                  <input class="w-50" type="number" id="input-min-kills" value="1" min="1" />
                 </div>
               </div>
             </div>
             <div id="detail-streaks-container">
-              <p class="placeholder-text" style="color: #888;" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
+              <p class="placeholder-text text-muted" data-str="HIGHLIGHTS.EMPTY_SELECT_DEMO">Select a demo in the Master List to view its killstreak details.</p>
             </div>
             <!-- Last Batch (#172): batch_results.js, shown once a batch ends. -->
             <div id="batch-results" class="batch-results" hidden></div>
@@ -219,31 +219,31 @@
                    consequence of the two rows above and belongs after them. -->
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HL_EXEC_LABEL">Half-Life Executable:</label>
-                <input type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" style="flex: 1;" />
+                <input class="flex-1" type="text" id="hl-path-input" data-str-placeholder="CAPTURE_CONFIG.HL_EXEC_PLACEHOLDER" placeholder="Path to hl.exe" />
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
-                <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />
+                <input class="flex-1" type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" />
                 <button id="hlae-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hlae-path-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.FFMPEG_OVERRIDE_LABEL">FFmpeg Override Path:</label>
-                <input type="text" id="ffmpeg-override-path-input" data-str-placeholder="CAPTURE_CONFIG.FFMPEG_OVERRIDE_PLACEHOLDER" placeholder="Optional path to ffmpeg.exe" style="flex: 1;" />
+                <input class="flex-1" type="text" id="ffmpeg-override-path-input" data-str-placeholder="CAPTURE_CONFIG.FFMPEG_OVERRIDE_PLACEHOLDER" placeholder="Optional path to ffmpeg.exe" />
                 <button id="ffmpeg-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="ffmpeg-path-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.GOLDSRC_HOOKS_LABEL">GoldSrc Hooks DLL:</label>
-                <input type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" style="flex: 1;" />
+                <input class="flex-1" type="text" id="goldsrc-hooks-dll-path-input" data-str-placeholder="CAPTURE_CONFIG.GOLDSRC_HOOKS_PLACEHOLDER" placeholder="Optional path to dodstudio_goldsrc_hooks.dll (blank = bundled default)" />
                 <button id="goldsrc-hooks-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="goldsrc-hooks-path-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_FFMPEG_LABEL">HLAE FFmpeg:</label>
-                <span id="hlae-ffmpeg-status" style="flex: 1; font-size: 0.85em; opacity: 0.85;"></span>
+                <span class="flex-1 status-note" id="hlae-ffmpeg-status"></span>
                 <button id="hlae-ffmpeg-link-btn" data-str="CAPTURE_CONFIG.HLAE_FFMPEG_LINK_BUTTON" style="display: none;">Point HLAE at FFmpeg</button>
               </div>
             </div>
@@ -258,15 +258,15 @@
               <div class="inline-controls">
                 <div class="control-group">
                   <label for="config-res-width" data-str="CAPTURE_CONFIG.WIDTH_LABEL">Width:</label>
-                  <input type="number" id="config-res-width" value="1280" style="width: 80px;" />
+                  <input class="w-80" type="number" id="config-res-width" value="1280" />
                 </div>
                 <div class="control-group">
                   <label for="config-res-height" data-str="CAPTURE_CONFIG.HEIGHT_LABEL">Height:</label>
-                  <input type="number" id="config-res-height" value="720" style="width: 80px;" />
+                  <input class="w-80" type="number" id="config-res-height" value="720" />
                 </div>
                 <div class="control-group" id="capture-fps-group">
                   <label for="config-capture-fps" data-str="CAPTURE_CONFIG.CAPTURE_FPS_LABEL" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE">Capture FPS:</label>
-                  <input type="number" id="config-capture-fps" value="300" style="width: 80px;" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
+                  <input class="w-80" type="number" id="config-capture-fps" value="300" data-str-title="CAPTURE_CONFIG.CAPTURE_FPS_TITLE" />
                 </div>
                 <!-- A two-state choice rather than an option you switch on:
                      the alternative to video is not "no capture", it is a BMP
@@ -309,7 +309,7 @@
                      placeholder names the number it will use. -->
                 <div class="control-group" id="agr-fps-group" style="display: none;">
                   <label for="config-agr-fps" data-str="CAPTURE_CONFIG.AGR_FPS_LABEL" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE">AGR FPS:</label>
-                  <input type="number" id="config-agr-fps" min="1" style="width: 80px;" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
+                  <input class="w-80" type="number" id="config-agr-fps" min="1" data-str-title="CAPTURE_CONFIG.AGR_FPS_TITLE" />
                 </div>
                 <div class="control-group" id="capture-codec-group">
                   <label for="config-capture-codec" data-str="CAPTURE_CONFIG.CAPTURE_CODEC_LABEL"
@@ -348,22 +348,22 @@
                      the user's own software, not ours to manage. -->
                 <div class="control-group">
                   <label for="config-obs-exe-path" data-str="CAPTURE_CONFIG.OBS_EXE_PATH_LABEL">OBS Path:</label>
-                  <input type="text" id="config-obs-exe-path" data-str-placeholder="CAPTURE_CONFIG.OBS_EXE_PATH_PLACEHOLDER" placeholder="Path to obs64.exe" style="flex: 1; max-width: 420px;" />
+                  <input class="flex-1 max-w-420" type="text" id="config-obs-exe-path" data-str-placeholder="CAPTURE_CONFIG.OBS_EXE_PATH_PLACEHOLDER" placeholder="Path to obs64.exe" />
                   <button id="obs-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
                   <button id="obs-launch-btn" data-str="CAPTURE_CONFIG.OBS_LAUNCH_BUTTON">Launch OBS</button>
                 </div>
                 <div class="control-group">
                   <label for="config-obs-host" data-str="CAPTURE_CONFIG.OBS_HOST_LABEL">Host:</label>
-                  <input type="text" id="config-obs-host" value="127.0.0.1" style="width: 10em;" />
+                  <input class="w-10em" type="text" id="config-obs-host" value="127.0.0.1" />
                   <label for="config-obs-port" data-str="CAPTURE_CONFIG.OBS_PORT_LABEL">Port:</label>
-                  <input type="number" id="config-obs-port" value="4455" min="1" max="65535" style="width: 6em;" />
+                  <input class="w-6em" type="number" id="config-obs-port" value="4455" min="1" max="65535" />
                 </div>
                 <div class="control-group">
                   <label for="config-obs-password" data-str="CAPTURE_CONFIG.OBS_PASSWORD_LABEL">Password:</label>
-                  <input type="password" id="config-obs-password"
+                  <input class="flex-1 max-w-420" type="password" id="config-obs-password"
                          data-str-placeholder="CAPTURE_CONFIG.OBS_PASSWORD_PLACEHOLDER"
                          data-str-title="CAPTURE_CONFIG.OBS_PASSWORD_TITLE"
-                         placeholder="From Tools → WebSocket Server Settings" style="flex: 1; max-width: 420px;" />
+                         placeholder="From Tools → WebSocket Server Settings" />
                   <button id="obs-test-btn" data-str="CAPTURE_CONFIG.OBS_TEST_BUTTON">Test Connection</button>
                 </div>
                 <p class="setting-hint" data-str="CAPTURE_CONFIG.OBS_ENABLE_HINT">
@@ -371,7 +371,7 @@
                 </p>
                 <div class="control-group">
                   <label for="config-obs-capture-fps" data-str="CAPTURE_CONFIG.OBS_CAPTURE_FPS_LABEL" data-str-title="CAPTURE_CONFIG.OBS_CAPTURE_FPS_TITLE">OBS Capture FPS:</label>
-                  <input type="number" id="config-obs-capture-fps" value="120" style="width: 80px;" data-str-title="CAPTURE_CONFIG.OBS_CAPTURE_FPS_TITLE" />
+                  <input class="w-80" type="number" id="config-obs-capture-fps" value="120" data-str-title="CAPTURE_CONFIG.OBS_CAPTURE_FPS_TITLE" />
                 </div>
                 <p class="setting-hint" data-str="CAPTURE_CONFIG.OBS_CAPTURE_FPS_WARNING">
                   Too high for your machine and OBS drops frames — test a short capture first.
@@ -394,42 +394,42 @@
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-initial-delay" data-str="CAPTURE_CONFIG.INITIAL_DELAY_LABEL">Initial Delay (s):</label>
-                    <input type="number" step="0.1" id="config-initial-delay" value="3.0" style="width: 80px;" />
+                    <input class="w-80" type="number" step="0.1" id="config-initial-delay" value="3.0" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.INITIAL_DELAY_HINT">Time between the demo loading and fast-forward starting.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-pre-roll" data-str="CAPTURE_CONFIG.PRE_ROLL_LABEL">Pre-roll (s):</label>
-                    <input type="number" step="0.1" id="config-pre-roll" value="2.0" style="width: 80px;" />
+                    <input class="w-80" type="number" step="0.1" id="config-pre-roll" value="2.0" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.PRE_ROLL_HINT">Time between fast-forward stopping and capture starting.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-start-lead" data-str="CAPTURE_CONFIG.START_LEAD_LABEL">Start Lead (s):</label>
-                    <input type="number" step="0.1" id="config-record-start-lead" value="0.0" style="width: 80px;" />
+                    <input class="w-80" type="number" step="0.1" id="config-record-start-lead" value="0.0" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.START_LEAD_HINT">Time between capture starting and the first kill.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-record-stop-trail" data-str="CAPTURE_CONFIG.STOP_TRAIL_LABEL">Stop Trail (s):</label>
-                    <input type="number" step="0.1" id="config-record-stop-trail" value="0.0" style="width: 80px;" />
+                    <input class="w-80" type="number" step="0.1" id="config-record-stop-trail" value="0.0" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.STOP_TRAIL_HINT">Time between the last kill and capture stopping.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-post-roll" data-str="CAPTURE_CONFIG.POST_ROLL_LABEL">Post-roll (s):</label>
-                    <input type="number" step="0.1" id="config-post-roll" value="0.6" style="width: 80px;" />
+                    <input class="w-80" type="number" step="0.1" id="config-post-roll" value="0.6" />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.POST_ROLL_HINT">Time between capture stopping and fast-forward resuming.</p>
                 </div>
                 <div class="control-group control-group-stacked">
                   <div class="control-group">
                     <label for="config-fast-forward-speed" data-str="CAPTURE_CONFIG.FF_SPEED_LABEL">FF Speed (x):</label>
-                    <input type="number" step="0.01" id="config-fast-forward-speed" value="0.05" style="width: 80px;" disabled data-str-title="CAPTURE_CONFIG.FF_SPEED_TITLE" title="Locked, matching dev — not currently user-editable." />
+                    <input class="w-80" type="number" step="0.01" id="config-fast-forward-speed" value="0.05" disabled data-str-title="CAPTURE_CONFIG.FF_SPEED_TITLE" title="Locked, matching dev — not currently user-editable." />
                   </div>
                   <p class="setting-hint" data-str="CAPTURE_CONFIG.FF_SPEED_HINT">How fast playback races toward each clip between kills, as a multiple of real time. Locked at 0.05x, matching dev — not currently user-editable.</p>
                 </div>
@@ -499,7 +499,7 @@
               </div>
               <div class="input-row">
                 <label for="config-scan-workers" data-str="CAPTURE_CONFIG.SCAN_WORKERS_LABEL" data-str-title="CAPTURE_CONFIG.SCAN_WORKERS_TITLE">Demo Scan Workers:</label>
-                <input type="number" id="config-scan-workers" value="2" min="1" max="8" style="width: 60px;" />
+                <input class="w-60" type="number" id="config-scan-workers" value="2" min="1" max="8" />
                 <span id="config-scan-workers-hint" class="text-muted"></span>
               </div>
             </div>
@@ -507,11 +507,11 @@
             <!-- Tab Content: Initial + Scheduled Commands -->
             <div id="tab-custom-commands" class="config-tab-content" style="display: none;">
               <!-- #442: named sets of both lists below. -->
-              <div class="input-row" style="margin-bottom: 12px;">
+              <div class="input-row mb-6">
                 <label for="command-profile-select" data-str="CAPTURE_CONFIG.PROFILE_LABEL" data-str-title="CAPTURE_CONFIG.PROFILE_TITLE">Profile:</label>
                 <select id="command-profile-select"><option value="">—</option></select>
                 <button id="command-profile-save-changes" style="display: none;" data-str="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_CHANGES_TITLE">Save Changes</button>
-                <input type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" style="width: 180px;" />
+                <input class="w-180" type="text" id="command-profile-name" data-str-placeholder="CAPTURE_CONFIG.PROFILE_NAME_PLACEHOLDER" placeholder="Name for these commands" />
                 <button id="command-profile-save" data-str="CAPTURE_CONFIG.PROFILE_SAVE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_SAVE_TITLE">Save Profile</button>
                 <button id="command-profile-rename" disabled data-str="CAPTURE_CONFIG.PROFILE_RENAME_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_RENAME_TITLE">Rename</button>
                 <button id="command-profile-delete" disabled data-str="CAPTURE_CONFIG.PROFILE_DELETE_BUTTON" data-str-title="CAPTURE_CONFIG.PROFILE_DELETE_TITLE">Delete</button>
@@ -528,7 +528,7 @@
               <button id="add-init-command-btn" data-str="CAPTURE_CONFIG.ADD_INIT_COMMAND_BUTTON">+ Add Initial Command</button>
               <button id="import-cfg-btn" data-str="CAPTURE_CONFIG.IMPORT_CFG_BUTTON">Import Config...</button>
 
-              <div class="input-row" style="margin-top: 16px;">
+              <div class="input-row mt-7">
                 <strong data-str="CAPTURE_CONFIG.CUSTOM_COMMANDS_LABEL">Scheduled Commands (run relative to each highlight):</strong>
               </div>
               <div id="scheduled-commands-warning-banner" hidden></div>
@@ -541,9 +541,9 @@
                  shared location list, not two — see #81).
                  (id kept as tab-drive-overrides: internal hook, not user-visible) -->
             <div id="tab-drive-overrides" class="config-tab-content" style="display: none;">
-              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 8px;" data-str="CAPTURE_CONFIG.DESTINATIONS_HELP_TEXT">Captures are written here, and Render Studio scans these same locations for takes to render.</p>
+              <p class="help-text" data-str="CAPTURE_CONFIG.DESTINATIONS_HELP_TEXT">Captures are written here, and Render Studio scans these same locations for takes to render.</p>
               <div class="input-row">
-                <input type="text" id="drive-path-input" data-str-placeholder="CAPTURE_CONFIG.OUTPUT_DIR_PLACEHOLDER" placeholder="Capture output directory path..." style="flex: 1;" />
+                <input class="flex-1" type="text" id="drive-path-input" data-str-placeholder="CAPTURE_CONFIG.OUTPUT_DIR_PLACEHOLDER" placeholder="Capture output directory path..." />
                 <button id="add-drive-btn" data-str="CAPTURE_CONFIG.ADD_DIRECTORY_BUTTON">Add Directory</button>
                 <button id="browse-drive-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
@@ -572,35 +572,35 @@
                 </div>
                 <div class="control-group" id="render-custom-codec-group" style="display: none;">
                   <label for="render-custom-codec-input" data-str="RENDER.CUSTOM_CODEC_LABEL">Custom FFmpeg args:</label>
-                  <input type="text" id="render-custom-codec-input" data-str-placeholder="RENDER.CUSTOM_CODEC_PLACEHOLDER" placeholder="-c:v mpeg4 -q:v 3" style="width: 260px;" />
+                  <input class="w-260" type="text" id="render-custom-codec-input" data-str-placeholder="RENDER.CUSTOM_CODEC_PLACEHOLDER" placeholder="-c:v mpeg4 -q:v 3" />
                 </div>
                 <div class="control-group">
                   <label for="render-fps-input" data-str="RENDER.SOURCE_FPS_LABEL">Source FPS:</label>
-                  <input type="number" id="render-fps-input" value="300" min="1" max="1000" style="width: 70px;" />
+                  <input class="w-70" type="number" id="render-fps-input" value="300" min="1" max="1000" />
                 </div>
                 <div class="control-group">
                   <label for="render-max-concurrent-input" data-str="RENDER.MAX_CONCURRENT_LABEL">Max Concurrent Renders:</label>
-                  <input type="number" id="render-max-concurrent-input" value="2" min="1" max="8" style="width: 60px;" />
+                  <input class="w-60" type="number" id="render-max-concurrent-input" value="2" min="1" max="8" />
                 </div>
               </div>
 
               <!-- #108: named render setups. -->
-              <div class="input-row" style="margin-top: 6px;">
+              <div class="input-row mt-3">
                 <label for="render-preset-select" data-str="RENDER.PRESET_LABEL" data-str-title="RENDER.PRESET_TITLE">Preset:</label>
                 <select id="render-preset-select"><option value="">—</option></select>
-                <input type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" style="width: 180px;" />
+                <input class="w-180" type="text" id="render-preset-name" data-str-placeholder="RENDER.PRESET_NAME_PLACEHOLDER" placeholder="Name for these settings" />
                 <button id="render-preset-save" data-str="RENDER.PRESET_SAVE_BUTTON" data-str-title="RENDER.PRESET_SAVE_TITLE">Save Preset</button>
                 <button id="render-preset-delete" disabled data-str="RENDER.PRESET_DELETE_BUTTON" data-str-title="RENDER.PRESET_DELETE_TITLE">Delete</button>
               </div>
 
               <!-- JIT multi-drive export pool — first drive with 20GB+ free wins per job. -->
-              <div class="input-row" style="margin-top: 6px;">
-                <input type="text" id="render-export-dir-input" data-str-placeholder="RENDER.EXPORT_DIR_PLACEHOLDER" placeholder="Add export drive/folder..." style="flex: 1;" />
+              <div class="input-row mt-3">
+                <input class="flex-1" type="text" id="render-export-dir-input" data-str-placeholder="RENDER.EXPORT_DIR_PLACEHOLDER" placeholder="Add export drive/folder..." />
                 <button id="add-render-export-dir-btn" data-str="RENDER.ADD_DRIVE_BUTTON">Add Drive</button>
                 <button id="browse-render-export-btn" data-str="RENDER.BROWSE_DRIVE_BUTTON">Browse Drive</button>
               </div>
               <div id="render-export-dir-list" class="list-editor-list"></div>
-              <div class="input-row" style="margin-top: 4px; align-items: center;">
+              <div class="input-row mt-2 items-center">
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
               </div>
@@ -610,7 +610,7 @@
                    uses, so the codec per capture mode is all it adds. There is
                    no "keep as captured" for Video or Frame sequence: only an
                    OBS take already carries its own sound. -->
-              <div class="inline-controls" style="margin-top: 10px;">
+              <div class="inline-controls mt-5">
                 <div class="control-group">
                   <label for="config-finish-clips" data-str="FINISH.WHEN_LABEL" data-str-title="FINISH.WHEN_TITLE">When a batch finishes:</label>
                   <select id="config-finish-clips" data-str-title="FINISH.WHEN_TITLE">
@@ -654,15 +654,15 @@
               </div>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
-              <div class="input-row" style="margin-top: 10px;">
+              <div class="input-row mt-5">
                 <label for="config-clip-name-template" data-str="CLIP_NAME.TEMPLATE_LABEL" data-str-title="CLIP_NAME.TEMPLATE_TITLE">Clip Name Template:</label>
-                <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
+                <input class="flex-1 font-mono" type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" />
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
-              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
-              <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
-              <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
-              <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
+              <div class="flex-row gap-2 flex-wrap mt-2 text-note" id="config-clip-name-chips"></div>
+              <div id="config-clip-name-errors" class="path-warning mt-2 text-danger-soft" style="display: none;"></div>
+              <div id="config-clip-name-warnings" class="path-warning mt-2" style="display: none;"></div>
+              <div class="clip-name-preview" id="config-clip-name-preview"></div>
             </div>
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
@@ -734,7 +734,7 @@
               <h2 data-str="RENDER.PANEL_TITLE">Render Studio</h2>
             </div>
 
-            <div class="action-row" style="margin-top: 8px;">
+            <div class="action-row mt-4">
               <button id="scan-render-btn" data-str="RENDER.SCAN_FOR_TAKES_BUTTON">Scan for Takes</button>
               <button id="combine-open-btn" data-str="COMBINE.OPEN_BUTTON" data-str-title="COMBINE.OPEN_TITLE" title="Join rendered clips into one video">Combine Clips…</button>
               <button id="export-marker-list-btn" data-str="RENDER.EXPORT_MARKERS_BUTTON" data-str-title="RENDER.EXPORT_MARKERS_TITLE">Export Marker List…</button>
@@ -743,7 +743,7 @@
 
             <!-- Per-job render queue table — replaces the old single global
                  status line + progress bar with real per-clip rows. -->
-            <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
+            <div class="table-wrapper mt-4 max-h-280">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
@@ -754,7 +754,7 @@
                     <th data-str-title="RENDER.TABLE_HEADER_SETTINGS_TITLE" data-str="RENDER.TABLE_HEADER_SETTINGS" title="Codec/FPS this job is queued to render with — its own setting, not necessarily what Configuration currently shows">Settings</th>
                     <th data-sort="status" data-str="RENDER.TABLE_HEADER_STATUS">Status</th>
                     <th data-str="RENDER.TABLE_HEADER_SPEED">Speed</th>
-                    <th style="width: 140px;" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
+                    <th class="w-140" data-str="RENDER.TABLE_HEADER_PROGRESS">Progress</th>
                     <th data-sort="size" data-str-title="RENDER.TABLE_HEADER_FILE_SIZE_TITLE" data-str="RENDER.TABLE_HEADER_FILE_SIZE" title="The real encoded size, once finished — not shown ahead of time, since it can't be predicted accurately (see Required (Over-estimated) in the footer).">File Size</th>
                     <th data-str="RENDER.TABLE_HEADER_HISTORY" data-str-title="RENDER.TABLE_HEADER_HISTORY_TITLE">History</th>
                     <th data-str="RENDER.TABLE_HEADER_ACTIONS">Actions</th>
@@ -766,7 +766,7 @@
               </table>
             </div>
 
-            <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
+            <div class="action-footer flex-between section-divider">
               <div class="action-buttons">
                 <button id="start-render-btn" class="primary-btn" data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
                 <button id="cancel-render-btn" disabled data-str="RENDER.CANCEL_ALL_BUTTON">Cancel All</button>
@@ -788,7 +788,7 @@
             <div class="panel-body">
               <div class="input-row">
                 <label data-str="AUDITOR.TARGET_FOLDER_LABEL">Target Folder:</label>
-                <input type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." style="flex: 1;" />
+                <input class="flex-1" type="text" id="audit-target-folder-input" data-str-placeholder="AUDITOR.TARGET_FOLDER_PLACEHOLDER" placeholder="Folder of demos..." />
                 <button id="audit-browse-folder-btn" data-str="AUDITOR.BROWSE_BUTTON">Browse</button>
               </div>
               <!-- One tab per tool; all of them work on the folder above (#624). -->
@@ -801,7 +801,7 @@
           </div>
 
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
-            <div class="egui-panel" style="margin-top: 10px;">
+            <div class="egui-panel mt-5">
               <div class="panel-body">
                 <div class="row-inputs">
                   <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
@@ -814,12 +814,12 @@
               </div>
             </div>
 
-          <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
+          <div id="auditor-results-pane" class="egui-panel mt-5">
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
-              <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Delete Selected Files</button>
+              <button class="btn-danger" id="delete-selected-audits-btn" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Delete Selected Files</button>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
+            <div class="table-wrapper max-h-400">
               <table id="audit-results-table">
                 <thead>
                   <tr>
@@ -837,14 +837,14 @@
                 </tbody>
               </table>
             </div>
-            <div id="audit-list-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
+            <div class="list-footer" id="audit-list-footer" data-str="AUDITOR.FOOTER_DEFAULT">Duplicates Found: 0 | Wasted Space: 0.00 GB</div>
           </div>
           </div>
 
           <!-- Split Maps (#624): split_pane.js. Demos that recorded more than
                one map, split into one demo per map. -->
           <div class="auditor-tab-panel" data-auditor-panel="split" hidden>
-            <div class="egui-panel" style="margin-top: 10px;">
+            <div class="egui-panel mt-5">
               <div class="panel-header">
                 <h3 data-str="SPLIT.TITLE">Demos With More Than One Map</h3>
               </div>
@@ -863,7 +863,7 @@
 
           <!-- Rename Demos (#469): demo_rename_ui.js. Uses the Target Folder above. -->
           <div class="auditor-tab-panel" data-auditor-panel="rename" hidden>
-          <div id="rename-pane" class="egui-panel" style="margin-top: 10px;">
+          <div id="rename-pane" class="egui-panel mt-5">
             <div class="panel-header flex-between">
               <h3 data-str="DEMO_RENAME.PANEL_TITLE">Rename Demos</h3>
             </div>
@@ -892,7 +892,7 @@
               <div id="rename-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
               <p class="status-indicator"><span id="rename-status"></span></p>
             </div>
-            <div class="table-wrapper" style="max-height: 400px;">
+            <div class="table-wrapper max-h-400">
               <table id="rename-table" class="analyzer-table rename-table">
                 <colgroup>
                   <col class="rename-col-check" />
@@ -1443,7 +1443,7 @@
                 <input type="text" id="analyzer-filter-date-start" data-str-placeholder="ANALYZER.MIN_DATE_PLACEHOLDER" placeholder="Min Date (YYYY-MM-DD)" />
                 <input type="text" id="analyzer-filter-date-end" data-str-placeholder="ANALYZER.MAX_DATE_PLACEHOLDER" placeholder="Max Date (YYYY-MM-DD)" />
                 <button id="analyzer-filter-reset" data-str="ANALYZER.RESET_BUTTON">Reset</button>
-                <span id="analyzer-player-status" class="text-muted" style="font-size: 0.85em;"></span>
+                <span id="analyzer-player-status" class="text-muted text-note"></span>
               </div>
               <div class="table-wrapper analyzer-demos-table-wrap">
                 <table class="analyzer-table" id="analyzer-demo-table">
@@ -1463,7 +1463,7 @@
             <div class="egui-panel analyzer-report-panel">
               <div class="panel-header flex-between">
                 <h3 data-str="ANALYZER.ANALYZER_TITLE">Demo Analyzer</h3>
-                <div style="display: flex; gap: 10px; align-items: center;">
+                <div class="flex-row gap-5">
                   <span id="analyzer-current-file" class="status-text"></span>
                   <button id="analyzer-browse-btn" data-str="ANALYZER.BROWSE_DEMO_BUTTON">Browse Demo...</button>
                 </div>
@@ -1493,7 +1493,7 @@
       <footer id="pinned-action-bar">
         <div id="footer-capture-studio" class="pinned-footer-content capture-studio-footer">
           <!-- #443: how the batch is about to run; each part opens its setting. -->
-          <div id="capture-summary-strip" class="status-text" style="font-size: 0.85em;"></div>
+          <div id="capture-summary-strip" class="status-text text-note"></div>
           <!-- Grid, not flex: puts export-pool-free-indicator in a true
                center column regardless of how wide the left/right groups
                are, rather than just being the next item in a packed flex
@@ -1514,7 +1514,7 @@
                lands in one place, with the whole row's width, and the space
                readouts above stay centred like the Render footer's. -->
           <p id="batch-status" class="status-text" data-str="CAPTURE_CONFIG.STATUS_WAITING">Status: Waiting...</p>
-          <p id="disk-space-warning-banner" style="display: none; color: #f44336; font-weight: 600; white-space: pre-line;"></p>
+          <p class="alert-text pre-line" id="disk-space-warning-banner" style="display: none;"></p>
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
@@ -1528,12 +1528,12 @@
              Matches the same inner-wrapper pattern the Capture footer row
              above already uses for the same reason. -->
         <div id="footer-render-studio" class="pinned-footer-content" style="display: none;">
-          <div class="footer-row-grid-centered" style="flex: 1;">
-            <div style="display: flex; flex-direction: column; gap: 2px;">
+          <div class="footer-row-grid-centered flex-1">
+            <div class="flex-col gap-1">
               <div id="render-footer-queue-summary" data-str="RENDER.QUEUE_SUMMARY_DEFAULT">0 queued &middot; 0 rendering &middot; 0 done</div>
               <!-- #40: the whole batch at a glance. -->
-              <div id="render-batch-progress" style="display: none; align-items: center; gap: 6px;">
-                <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <div class="items-center gap-3" id="render-batch-progress" style="display: none;">
+                <div class="progress-bar-container mt-0 w-140"><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <span id="render-batch-progress-label"></span>
               </div>
             </div>
@@ -1571,13 +1571,13 @@
     <!-- Half-Life Preview Detector — pre-flight guard shown when hl.exe/hlae.exe
          is already running before launching a new preview. -->
     <div id="process-detector-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 480px; padding: 20px;">
+      <div class="modal-content modal-md">
         <h2 id="process-modal-title" data-str="PROCESS_DETECTOR_MODAL.TITLE">Half-Life Preview Detector</h2>
-        <p id="process-modal-body" style="color: #f44336; font-weight: 600;" data-str="PROCESS_DETECTOR_MODAL.BODY">
+        <p class="alert-text" id="process-modal-body" data-str="PROCESS_DETECTOR_MODAL.BODY">
           The Half-Life engine is already running (hl.exe / hlae.exe). Launching a new preview
           now can corrupt the capture session — close the running instance first, or force a relaunch.
         </p>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
+        <div class="modal-actions flex-wrap">
           <button id="process-modal-force-relaunch-btn" class="primary-btn" data-str="PROCESS_DETECTOR_MODAL.FORCE_RELAUNCH_BUTTON">Force Relaunch</button>
           <button id="process-modal-copy-command-btn" data-str="PROCESS_DETECTOR_MODAL.COPY_VIEW_COMMAND_BUTTON">Copy View Command</button>
           <button id="process-modal-cancel-btn" data-str="PROCESS_DETECTOR_MODAL.CANCEL_BUTTON">Cancel</button>
@@ -1590,12 +1590,12 @@
          tracked work. Enumerates what would be lost and offers to save
          first. -->
     <div id="clear-all-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 480px; padding: 20px;">
+      <div class="modal-content modal-md">
         <h2 id="clear-all-title" data-str="CLEAR_ALL_MODAL.TITLE_DEFAULT">Clear All Demos</h2>
         <p id="clear-all-summary"></p>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
+        <div class="modal-actions flex-wrap">
           <button id="clear-all-save-first-btn" class="primary-btn" data-str="CLEAR_ALL_MODAL.SAVE_SESSION_FIRST_BUTTON">Save Session First</button>
-          <button id="clear-all-confirm-btn" style="color: #ff5555; border-color: #ff5555;" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
+          <button class="btn-danger" id="clear-all-confirm-btn" data-str="CLEAR_ALL_MODAL.CLEAR_ANYWAY_DEFAULT">Clear Anyway</button>
           <button id="clear-all-cancel-btn" data-str="CLEAR_ALL_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -1605,12 +1605,12 @@
          Capture Studio project state (main.js's onCloseRequested handler).
          Same three-button shape as #clear-all-modal above. -->
     <div id="unsaved-changes-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 480px; padding: 20px;">
+      <div class="modal-content modal-md">
         <h2 id="unsaved-changes-title" data-str="UNSAVED_CHANGES_MODAL.TITLE">Unsaved Changes</h2>
         <p id="unsaved-changes-summary" data-str="UNSAVED_CHANGES_MODAL.MESSAGE">DoD Studio has unsaved changes. Save your session before closing?</p>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
+        <div class="modal-actions flex-wrap">
           <button id="unsaved-changes-save-btn" class="primary-btn" data-str="UNSAVED_CHANGES_MODAL.SAVE_BUTTON">Save & Close</button>
-          <button id="unsaved-changes-discard-btn" style="color: #ff5555; border-color: #ff5555;" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
+          <button class="btn-danger" id="unsaved-changes-discard-btn" data-str="UNSAVED_CHANGES_MODAL.DISCARD_BUTTON">Close Without Saving</button>
           <button id="unsaved-changes-cancel-btn" data-str="UNSAVED_CHANGES_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -1621,11 +1621,11 @@
          delete-confirmation call sites that don't need Clear All's
          Save-First escalation above. See issue #43. -->
     <div id="themed-confirm-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 420px; padding: 20px;">
+      <div class="modal-content modal-sm">
         <h2 id="themed-confirm-title" data-str="THEMED_CONFIRM_MODAL.TITLE_DEFAULT">Confirm</h2>
-        <p id="themed-confirm-message" style="white-space: pre-line;"></p>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
-          <button id="themed-confirm-ok-btn" style="color: #ff5555; border-color: #ff5555;" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
+        <p class="pre-line" id="themed-confirm-message"></p>
+        <div class="modal-actions">
+          <button class="btn-danger" id="themed-confirm-ok-btn" data-str="THEMED_CONFIRM_MODAL.CONFIRM_BUTTON">Confirm</button>
           <button id="themed-confirm-cancel-btn" data-str="THEMED_CONFIRM_MODAL.CANCEL_BUTTON">Cancel</button>
         </div>
       </div>
@@ -1654,10 +1654,10 @@
     </div>
 
     <div id="render-error-log-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+      <div class="modal-content modal-lg">
         <h2 id="render-error-log-title" data-str="ERROR_LOG_MODAL.TITLE_DEFAULT">FFmpeg Error Log</h2>
-        <pre id="render-error-log-body" style="max-height: 360px; overflow: auto; white-space: pre-wrap; background: #121212; padding: 10px; border-radius: 2px; border: 1px solid #333;"></pre>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <pre class="error-log" id="render-error-log-body"></pre>
+        <div class="modal-actions">
           <button id="render-error-log-close-btn" data-str="ERROR_LOG_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
@@ -1667,12 +1667,12 @@
          .render_autosave.json is found (the batch didn't finish cleanly
          last session). Mirrors dev's own "Render Batch Interrupted" modal. -->
     <div id="render-recovery-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 480px; padding: 20px;">
+      <div class="modal-content modal-md">
         <h2 data-str="RENDER_RECOVERY_MODAL.TITLE">🎬 Render Batch Interrupted</h2>
         <p data-str="RENDER_RECOVERY_MODAL.BODY">The last render batch didn't finish cleanly (app closed or crashed mid-batch).</p>
         <p><span data-str="RENDER_RECOVERY_MODAL.SOURCE_LABEL">Source:</span> <span id="render-recovery-source"></span></p>
         <p><span data-str="RENDER_RECOVERY_MODAL.COMPLETED_LABEL">✅ Completed:</span> <span id="render-recovery-completed"></span> &nbsp; <span data-str="RENDER_RECOVERY_MODAL.PENDING_LABEL">⏳ Pending:</span> <span id="render-recovery-pending"></span></p>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <div class="modal-actions">
           <button id="render-recovery-recover-btn" class="primary-btn" data-str="RENDER_RECOVERY_MODAL.RECOVER_BUTTON">🔄 Recover Render Batch</button>
           <button id="render-recovery-discard-btn" data-str="RENDER_RECOVERY_MODAL.DISCARD_BUTTON">🗑 Discard</button>
         </div>
@@ -1683,13 +1683,13 @@
          previews (identified by their hidden .dodstudio_preview sidecar) and
          lets the user purge them. -->
     <div id="clear-previews-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+      <div class="modal-content modal-lg">
         <div class="panel-header flex-between">
           <h2 data-str="CLEAR_PREVIEWS_MODAL.TITLE">Clear Previews</h2>
           <button id="clear-previews-select-all-btn" data-str="CLEAR_PREVIEWS_MODAL.SELECT_ALL_BUTTON">Select All</button>
         </div>
         <p id="clear-previews-status" class="status-text" data-str="CLEAR_PREVIEWS_MODAL.SCANNING_STATUS">Scanning for orphaned preview demos...</p>
-        <div class="table-wrapper" style="max-height: 360px;">
+        <div class="table-wrapper max-h-360">
           <table id="clear-previews-table">
             <thead>
               <tr>
@@ -1706,9 +1706,9 @@
             </tbody>
           </table>
         </div>
-        <div id="clear-previews-footer" style="padding: 4px 8px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);" data-str="CLEAR_PREVIEWS_MODAL.FOOTER_DEFAULT">Found: 0 | Reclaimable: 0.00 GB</div>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; flex-wrap: wrap;">
-          <button id="clear-previews-delete-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
+        <div class="list-footer" id="clear-previews-footer" data-str="CLEAR_PREVIEWS_MODAL.FOOTER_DEFAULT">Found: 0 | Reclaimable: 0.00 GB</div>
+        <div class="modal-actions flex-wrap">
+          <button class="btn-danger" id="clear-previews-delete-btn" disabled data-str="CLEAR_PREVIEWS_MODAL.DELETE_SELECTED_BUTTON">Delete Selected</button>
           <button id="clear-previews-close-btn" data-str="CLEAR_PREVIEWS_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
@@ -1718,14 +1718,14 @@
          with the name clip names use for it. Filled by teams_pane.js; the
          names and merges are saved in the project file. -->
     <div id="teams-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 640px; padding: 20px;">
+      <div class="modal-content modal-lg">
         <h2 data-str="TEAMS.TITLE">Teams</h2>
         <p class="status-text" data-str="TEAMS.INTRO"></p>
         <div id="teams-unread-row" class="teams-unread-row" hidden>
           <span id="teams-unread-note"></span>
           <button id="teams-read-btn" data-str="TEAMS.READ_BUTTON" data-str-title="TEAMS.READ_BUTTON_TITLE">Read Their Teams</button>
         </div>
-        <div class="table-wrapper" style="max-height: 360px;">
+        <div class="table-wrapper max-h-360">
           <table id="teams-table">
             <thead>
               <tr>
@@ -1738,7 +1738,7 @@
             <tbody id="teams-table-body"></tbody>
           </table>
         </div>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <div class="modal-actions">
           <button id="teams-close-btn" data-str="TEAMS.CLOSE_BUTTON">Close</button>
         </div>
       </div>
@@ -1750,9 +1750,9 @@
          entirely separate GitHub Releases (see updater_manager.rs); this
          select only changes which manifest URL gets polled. -->
     <div id="update-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 480px; padding: 20px;">
+      <div class="modal-content modal-md">
         <h2 data-str="UPDATE_MODAL.TITLE">Check for Updates</h2>
-        <p id="update-modal-current-version" class="status-text" style="margin: -4px 0 8px;"></p>
+        <p id="update-modal-current-version" class="status-text update-version-line"></p>
         <div class="input-row">
           <label for="config-update-channel" data-str="UPDATE_MODAL.CHANNEL_LABEL">Update Channel:</label>
           <select id="config-update-channel">
@@ -1760,7 +1760,7 @@
             <option value="experimental" data-str="UPDATE_MODAL.CHANNEL_EXPERIMENTAL">Experimental (from dev, on-demand builds)</option>
           </select>
         </div>
-        <div class="notification-settings-grid" style="margin-top: 8px;">
+        <div class="notification-settings-grid mt-4">
           <div class="setting-toggle">
             <span class="setting-label" data-str="UPDATE_MODAL.AUTO_CHECK_LABEL">Automatically Check on Startup</span>
             <label class="setting-switch">
@@ -1776,14 +1776,14 @@
             </label>
           </div>
         </div>
-        <div class="input-row" style="margin-top: 12px; align-items: center; gap: 10px;">
+        <div class="input-row mt-6 items-center gap-5">
           <button id="check-updates-now-btn" data-str="UPDATE_MODAL.CHECK_NOW_BUTTON">Check for Updates Now</button>
           <span id="update-status-text" data-str="UPDATE_MODAL.STATUS_UP_TO_DATE">Up to date.</span>
         </div>
-        <div id="update-progress-container" style="display: none; margin-top: 8px;">
-          <progress id="update-progress-bar" max="100" value="0" style="width: 100%;"></progress>
+        <div class="mt-4" id="update-progress-container" style="display: none;">
+          <progress class="w-full" id="update-progress-bar" max="100" value="0"></progress>
         </div>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end;">
+        <div class="modal-actions">
           <button id="download-install-update-btn" style="display: none;" data-str="UPDATE_MODAL.DOWNLOAD_INSTALL_BUTTON">Download & Install</button>
           <button id="restart-to-apply-btn" style="display: none;" data-str="UPDATE_MODAL.RESTART_BUTTON">Restart to Apply</button>
           <button id="update-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
@@ -1793,16 +1793,16 @@
 
     <!-- About (issue #122) — reachable from the Help menu on every tab. -->
     <div id="about-modal" class="modal" style="display: none;">
-      <div class="modal-content" style="max-width: 420px; padding: 20px; text-align: center;">
-        <img src="/src/icon.png" alt="" style="width: 64px; height: 64px; border-radius: 8px; margin-bottom: 8px;" />
+      <div class="modal-content modal-sm text-center">
+        <img class="about-icon" src="/src/icon.png" alt="" />
         <h2 data-str="NAV.APP_TITLE">DoD Studio</h2>
-        <p id="about-modal-version" class="status-text" style="margin: 4px 0 12px;"></p>
+        <p id="about-modal-version" class="status-text about-version-line"></p>
         <p data-str="ABOUT_MODAL.BLURB">A capture, patching, and analytics pipeline for Day of Defeat 1.3 demos — batch-records highlight clips through HLAE and parses matches for scoreboards, kills, chat, and rounds.</p>
-        <p style="margin-top: 12px; color: var(--text-muted);" data-str="ABOUT_MODAL.CREDIT">Built by ccoventry</p>
-        <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 8px;">
+        <p class="mt-6 text-muted" data-str="ABOUT_MODAL.CREDIT">Built by ccoventry</p>
+        <div class="flex-col gap-2 mt-4">
           <a href="https://github.com/ccoventry/dod-studio" target="_blank" rel="noopener" data-str="ABOUT_MODAL.GITHUB_LINK">github.com/ccoventry/dod-studio</a>
         </div>
-        <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
+        <div class="modal-actions justify-center">
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
         </div>
       </div>
