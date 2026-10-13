@@ -55,6 +55,10 @@
 //! frame like `font`, re-applied should `client.dll` be loaded afresh. At S =
 //! 1 a frame costs one pointer copy and a forwarded call per line.
 
+// The patching runs only in the 32-bit DLL; a host build (workspace clippy,
+// tests) keeps the tables and helpers for the unit tests alone.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
+
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use super::font;
