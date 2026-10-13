@@ -43,6 +43,7 @@
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
+                <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
               </div>
             </div>
@@ -141,6 +142,9 @@
                  that is missing or is a different build than it was recorded
                  on. Stays hidden when the library is complete. -->
             <div id="map-warning-banner" hidden></div>
+            <!-- Setup checklist (#599), setup_card.js: shown while something
+                 Start needs is missing; it stands in for the empty queue. -->
+            <div id="setup-card" class="setup-card" hidden></div>
             <div class="table-wrapper">
               <table id="master-demo-table">
                 <thead>
@@ -1804,6 +1808,25 @@
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup window (#599), setup_window.js: opens by itself on a first
+         launch or when a required path is missing, and from Help > Setup….
+         The step's content is drawn by the module; only the frame is here. -->
+    <div id="setup-modal" class="modal" style="display: none;">
+      <div class="modal-content setup-modal-content" role="dialog" aria-labelledby="setup-step-title">
+        <div class="setup-header">
+          <ol id="setup-steps" class="setup-steps"></ol>
+          <h2 id="setup-step-title"></h2>
+        </div>
+        <div id="setup-step-content" class="setup-content"></div>
+        <div class="setup-footer">
+          <button id="setup-skip-btn" class="setup-skip" data-str="SETUP.SKIP_SETUP" data-str-title="SETUP.SKIP_SETUP_TITLE">Skip setup for now</button>
+          <span class="setup-footer-spacer"></span>
+          <button id="setup-back-btn" data-str="SETUP.BACK">Back</button>
+          <button id="setup-next-btn" class="primary-btn" data-str="SETUP.NEXT">Next</button>
         </div>
       </div>
     </div>

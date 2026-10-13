@@ -10,6 +10,8 @@ import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs } f
 import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
 import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
+// The Steam-install check (#373) is shared with the Setup window (#599).
+import { isSteamPlayInstall } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
@@ -24,17 +26,6 @@ const PATH_FIELDS = [
   ['#ffmpeg-override-path-input', '#ffmpeg-path-warning'],
   ['#goldsrc-hooks-dll-path-input', '#goldsrc-hooks-path-warning'],
 ];
-
-/**
- * Whether `hlPath` is the hl.exe in Steam's own `steamapps/common/Half-Life`
- * folder -- normally the copy people play online with, which must never have
- * HLAE or our hook DLL loaded into it (docs/vac_safety.md, #373). A warning,
- * not a block: someone may keep only that one install and never play online.
- */
-function isSteamPlayInstall(hlPath) {
-  const normalised = (hlPath || '').trim().replace(/\\/g, '/').toLowerCase();
-  return normalised.endsWith('/steamapps/common/half-life/hl.exe');
-}
 
 export async function refreshPathWarnings() {
   const rows = PATH_FIELDS
@@ -271,6 +262,54 @@ export async function refreshHlaeFfmpegStatus() {
 }
 
 /**
+ * Writes HLAE's ffmpeg.ini so HLAE finds the FFmpeg the app uses. Shared by
+ * the Configuration button and the Setup window's FFmpeg step (#599); the
+ * status row is refreshed afterwards either way.
+ */
+export async function linkHlaeToFfmpeg() {
+  const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim() || "";
+  // Whatever Render Studio was told to use, so both halves of the pipeline
+  // encode with the same build. Empty means "system ffmpeg", which the
+  // backend resolves to an absolute path — HLAE's ini cannot take a bare
+  // command name.
+  const ffmpegPath =
+    document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || "ffmpeg";
+  try {
+    let result = await linkHlaeFfmpeg(hlaePath, ffmpegPath);
+
+    // HLAE can live anywhere — zip or installer — so a protected location
+    // like Program Files is a real possibility rather than a rare one. Ask
+    // before raising the UAC prompt, so the prompt is never a surprise, and
+    // say what it is for.
+    if (result?.needs_elevation) {
+      const agreed = await confirm(
+        STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_PROMPT(result.ini),
+        {
+          title: STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_TITLE,
+          okLabel: STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_CONFIRM
+        }
+      );
+      // Say so rather than going quiet. Declining is a choice, but a button
+      // that does nothing visible reads as a button that failed.
+      if (!agreed) {
+        showToast(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_REFUSED, 'info');
+        return;
+      }
+      result = await linkHlaeFfmpeg(hlaePath, ffmpegPath, true);
+    }
+
+    if (result?.ini && !result.needs_elevation) {
+      showToast(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_LINKED_OK(result.ini), 'success');
+    }
+  } catch {
+    // The bridge already toasted the reason, which for a refusal is the
+    // point — an existing ini is reported, never replaced.
+  } finally {
+    await refreshHlaeFfmpegStatus();
+  }
+}
+
+/**
  * Wires Configuration's path, capture-mode, OBS and HLAE FFmpeg controls.
  * @param {object} app  persistAppSettings() from settings_sync.js
  */
@@ -389,47 +428,11 @@ export function initConfigWiring({ persistAppSettings }) {
   const hlaeFfmpegLinkBtn = document.querySelector('#hlae-ffmpeg-link-btn');
   if (hlaeFfmpegLinkBtn) {
     hlaeFfmpegLinkBtn.addEventListener('click', async () => {
-      const hlaePath = document.querySelector('#hlae-path-input')?.value?.trim() || "";
-      // Whatever Render Studio was told to use, so both halves of the pipeline
-      // encode with the same build. Empty means "system ffmpeg", which the
-      // backend resolves to an absolute path — HLAE's ini cannot take a bare
-      // command name.
-      const ffmpegPath =
-        document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || "ffmpeg";
       hlaeFfmpegLinkBtn.disabled = true;
       try {
-        let result = await linkHlaeFfmpeg(hlaePath, ffmpegPath);
-
-        // HLAE can live anywhere — zip or installer — so a protected location
-        // like Program Files is a real possibility rather than a rare one. Ask
-        // before raising the UAC prompt, so the prompt is never a surprise, and
-        // say what it is for.
-        if (result?.needs_elevation) {
-          const agreed = await confirm(
-            STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_PROMPT(result.ini),
-            {
-              title: STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_TITLE,
-              okLabel: STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_CONFIRM
-            }
-          );
-          // Say so rather than going quiet. Declining is a choice, but a button
-          // that does nothing visible reads as a button that failed.
-          if (!agreed) {
-            showToast(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_ELEVATE_REFUSED, 'info');
-            return;
-          }
-          result = await linkHlaeFfmpeg(hlaePath, ffmpegPath, true);
-        }
-
-        if (result?.ini && !result.needs_elevation) {
-          showToast(STRINGS.CAPTURE_CONFIG.HLAE_FFMPEG_LINKED_OK(result.ini), 'success');
-        }
-      } catch {
-        // The bridge already toasted the reason, which for a refusal is the
-        // point — an existing ini is reported, never replaced.
+        await linkHlaeToFfmpeg();
       } finally {
         hlaeFfmpegLinkBtn.disabled = false;
-        await refreshHlaeFfmpegStatus();
       }
     });
   }
