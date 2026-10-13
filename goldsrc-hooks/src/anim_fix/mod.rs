@@ -70,6 +70,7 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod sprint_turn;
 mod trace;
 
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
@@ -846,6 +847,11 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
+    sprint_turn::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        spectated.curstate.origin.x,
+        spectated.curstate.origin.y,
+    );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),
         gait: gait_label.as_deref().unwrap_or(""),
