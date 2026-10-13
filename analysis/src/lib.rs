@@ -8,6 +8,8 @@ mod clock_offset;
 pub mod entity_replay;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
+/// Whether every delta decodes against a frame the file has (#41).
+pub mod integrity;
 mod kill;
 mod localization;
 mod mortality;
