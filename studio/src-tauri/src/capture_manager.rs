@@ -178,6 +178,9 @@ pub struct CapturePayload {
     pub save_local_patched_copy: bool,
     #[serde(default)]
     pub hook_runs_batch: bool,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "crate::settings_manager::default_keep_game_behind")]
+    pub keep_game_behind: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
@@ -447,6 +450,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
     cfg.hook_runs_batch = payload.hook_runs_batch;
+    cfg.keep_game_behind = payload.keep_game_behind;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
@@ -3546,6 +3550,7 @@ mod tests {
             obs_password: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            keep_game_behind: true,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,

@@ -7,7 +7,7 @@ use crate::*;
 use dod::Class;
 use std::collections::HashMap;
 
-fn fixture() -> Vec<u8> {
+pub(crate) fn fixture() -> Vec<u8> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test-fixtures/ci_fixture.dem"
@@ -15,7 +15,7 @@ fn fixture() -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-fn analysis() -> &'static Analysis {
+pub(crate) fn analysis() -> &'static Analysis {
     static ANALYSIS: std::sync::OnceLock<Analysis> = std::sync::OnceLock::new();
     ANALYSIS.get_or_init(|| Analysis::try_from_bytes(&fixture()).unwrap())
 }
@@ -132,6 +132,34 @@ fn flag_captures() {
         .collect();
     assert_eq!(by_recorder, ["POINT_ANZIO_HILL", "POINT_ANZIO_HILL"]);
 }
+
+#[test]
+fn highlights_keep_their_kill_time_slots() {
+    // Everyone is still in the game at this demo's end, so each highlight's
+    // slot is also the one they end in, and none is dropped.
+    let found = crate::highlights::highlights(analysis());
+    let mut per_player: Vec<(&str, usize)> = Vec::new();
+    for h in &found.all {
+        let p = player(&h.player);
+        let Connection::Connected { client_id } = p.connection else {
+            panic!("{} left before the end", h.player);
+        };
+        assert_eq!(h.slot, Some(client_id), "{}", h.player);
+        match per_player.iter_mut().find(|(name, _)| *name == p.name) {
+            Some((_, n)) => *n += 1,
+            None => per_player.push((p.name.as_str(), 1)),
+        }
+    }
+    assert_eq!(per_player, EXPECTED_HIGHLIGHTS);
+}
+
+/// Highlights per player, in the analysis' player order.
+const EXPECTED_HIGHLIGHTS: [(&str, usize); 4] = [
+    ("Cpl. Preddy", 1),
+    ("CI_FIXTURE DEMO TESTER", 3),
+    ("Pvt. Clopton", 1),
+    ("Gefr. Fortune", 2),
+];
 
 #[test]
 fn optimized_matches_unoptimized() {
