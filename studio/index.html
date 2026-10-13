@@ -715,7 +715,7 @@
             </div>
 
             <!-- Start/Cancel Batch and everything read alongside them (status,
-                 progress, the focus reminder, the disk-space warning, the
+                 progress, the disk-space warning, the
                  Capture Output Free/Required figures) live in
                  #footer-capture-studio now, not here — batch control used to
                  only be reachable from this Configuration subtab, so starting
@@ -1518,15 +1518,6 @@
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
-          <!-- Shown only while a batch is running. Not a setting — there is
-               nothing here to configure, and no capture mode it does not
-               apply to. It is a reminder, and the moment it is worth reading
-               is the moment the user is about to go and do something else. -->
-          <p id="batch-focus-reminder" class="status-text" style="display: none;"
-             data-str="CAPTURE_CONFIG.FOCUS_REMINDER">
-            Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses
-            focus, and the batch takes far longer.
-          </p>
         </div>
         <!-- footer-row-grid-centered lives on this inner div, not
              #footer-render-studio itself — nav.js sets that element's

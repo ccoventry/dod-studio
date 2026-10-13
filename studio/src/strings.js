@@ -266,15 +266,6 @@ export const STRINGS = {
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
-    // Shown beside the progress bar while a batch runs, not in the settings —
-    // there is nothing to configure and no mode it does not apply to. The
-    // throttle is the engine's: GoldSrc slows its frame loop when the window is
-    // not focused and `host_framerate` fast-forward stops with it, so the gaps
-    // between clips play out in real time. Nothing is lost and no HLAE flag
-    // defeats it — `engine_no_focus_sleep` is Source 2 only. See
-    // docs/goldsrc_dod_quirks.md.
-    FOCUS_REMINDER:
-        'Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses focus, and the batch takes far longer.',
     // ── OBS connection ──────────────────────────────────────────────────────
     OBS_SECTION_TITLE: 'OBS Connection',
     OBS_EXE_PATH_LABEL: 'OBS Path:',
