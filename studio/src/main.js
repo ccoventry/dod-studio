@@ -43,6 +43,7 @@ import { numberField } from './number_field.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles } from './command_profiles_ui.js';
+import { renderCaptureSummary } from './capture_summary_ui.js';
 import { initRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
@@ -480,7 +481,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
-  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
+  // Saving, renaming or deleting a profile changes its name in the capture
+  // summary strip without touching a field the strip listens to.
+  initCommandProfiles({
+    getLists: getCommandsState,
+    applyLists: applyCommandsState,
+    onChange: () => { persistAppSettings(); renderCaptureSummary(); },
+  });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
