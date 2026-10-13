@@ -129,7 +129,8 @@ Keep checks thorough and wall-clock short; the reasons live as comments in `ci.y
 - **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
 - **Tests that need a real demo:** use `test-fixtures/ci_fixture.dem` (a real POV recording with bots, tracked; see its README) so CI runs them. For more or longer demos, take the path from an env var with the PRE install's `dod\` folder as the fallback (`DOD_ANALYSIS_DEMOS`, `DOD_ROUNDTRIP_DEMO`), never a file in `local/` (it gets cleaned, and #652's test silently lost its four demos that way); such a test is `#[ignore]`d and fails loudly when it finds no demo. Don't add more large demos to the tree without asking.
 - **Error text names what failed and prints paths with `.display()`,** not `{:?}`, which quotes them and doubles every backslash (#648).
-- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes. Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber.
+- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes, and add a step to `analysis/src/cache/migrations.rs` when the new fields can be worked out from the old entry (else the bump re-parses every cached demo). Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber, its migration step too.
+- **After resolving a merge conflict in Rust, check that every `fn` in a test module still has its `#[test]`:** keeping both sides of a block whose `#[test]` line was shared context leaves the second function without one, and the test silently stops running (#743).
 
 ---
 
