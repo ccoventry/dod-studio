@@ -9,12 +9,14 @@
 // Written twice per batch: once when the batch is planned (`outcome:
 // "planned"`, no verdicts), and again when it ends (`"complete"` or
 // `"cancelled"`, with each block's verification verdict). A batch that dies in
-// between leaves the planned file, which is itself the useful signal.
+// between leaves the planned file, which is itself the useful signal. Since
+// #545 it is also how Studio catches up on a batch that ran while it was
+// closed (`batch_catch_up`), which rewrites the file as `"unwatched"`.
 //
 // Best-effort throughout: a failed write is logged and never fails a batch.
 
 use crate::capture_manager::{CaptureManifest, VerifiedBlock};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Manifests kept; older ones are deleted when a new one is written.
@@ -23,12 +25,20 @@ const KEEP_MANIFESTS: usize = 50;
 #[derive(Serialize)]
 struct ManifestFile<'a> {
     session_id: &'a str,
-    /// "planned", "complete" or "cancelled".
+    /// "planned", "complete", "cancelled" or "unwatched".
     outcome: &'a str,
     /// Seconds since the Unix epoch.
     written_at_unix: u64,
     capture_fps: i32,
+    capture_mode: &'a str,
+    agr_fps: i32,
     blocks: &'a [native::patch::CaptureBlock],
+    /// Which highlight each payload index is, so a batch Studio stopped
+    /// watching can be caught up on after a restart (#545).
+    streak_uids: &'a [String],
+    streak_sources: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_path: Option<&'a str>,
     /// Present once the batch has ended.
     #[serde(skip_serializing_if = "Option::is_none")]
     verified: Option<&'a [VerifiedBlock]>,
@@ -70,7 +80,7 @@ pub fn write(manifest: &CaptureManifest, outcome: &str, verified: Option<&[Verif
     write_in(&manifests_dir(), manifest, outcome, verified);
 }
 
-fn write_in(
+pub(crate) fn write_in(
     dir: &Path,
     manifest: &CaptureManifest,
     outcome: &str,
@@ -81,7 +91,12 @@ fn write_in(
         outcome,
         written_at_unix: unix_now(),
         capture_fps: manifest.capture_fps,
+        capture_mode: &manifest.capture_mode,
+        agr_fps: manifest.agr_fps,
         blocks: &manifest.blocks,
+        streak_uids: &manifest.streak_uids,
+        streak_sources: &manifest.streak_sources,
+        project_path: manifest.project_path.as_deref(),
         verified,
     };
     let result = (|| -> std::io::Result<PathBuf> {
@@ -107,6 +122,33 @@ fn write_in(
             None
         }
     }
+}
+
+/// A manifest file read back: its outcome and the batch it planned.
+#[derive(Deserialize)]
+struct ManifestRecord {
+    outcome: String,
+    #[serde(flatten)]
+    manifest: CaptureManifest,
+}
+
+/// Every manifest in `dir` whose batch never reached an outcome: still
+/// "planned", so Studio stopped watching it before it ended (#545). A file
+/// that does not parse is skipped; these are best-effort records.
+pub fn read_planned_in(dir: &Path) -> Vec<CaptureManifest> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    let mut planned: Vec<CaptureManifest> = entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        .filter_map(|p| serde_json::from_slice::<ManifestRecord>(&std::fs::read(p).ok()?).ok())
+        .filter(|r| r.outcome == "planned")
+        .map(|r| r.manifest)
+        .collect();
+    planned.sort_by(|a, b| a.session_id.cmp(&b.session_id));
+    planned
 }
 
 /// Deletes all but the `keep` most recently modified `.json` files in `dir`.
@@ -140,7 +182,50 @@ mod tests {
             capture_fps: 300,
             capture_mode: String::new(),
             agr_fps: 0,
+            streak_uids: Vec::new(),
+            streak_sources: Vec::new(),
+            project_path: None,
         }
+    }
+
+    #[test]
+    fn only_planned_manifests_are_read_back_with_what_they_recorded() {
+        let dir = Scratch::new("manifest_file_read_planned");
+        let mut open = manifest("session_open");
+        open.streak_uids = vec!["a.dem#1#10#20".to_string()];
+        open.streak_sources = vec!["a.dem".to_string()];
+        open.project_path = Some("p.json".to_string());
+        open.capture_mode = "agr".to_string();
+        open.agr_fps = 60;
+        write_in(&dir, &open, "planned", None).expect("written");
+        write_in(&dir, &manifest("session_done"), "complete", Some(&[])).expect("written");
+        std::fs::write(dir.path().join("broken.json"), "{ not json").unwrap();
+
+        let planned = read_planned_in(&dir);
+        assert_eq!(planned.len(), 1);
+        let m = &planned[0];
+        assert_eq!(m.session_id, "session_open");
+        assert_eq!(m.streak_uids, open.streak_uids);
+        assert_eq!(m.streak_sources, open.streak_sources);
+        assert_eq!(m.project_path.as_deref(), Some("p.json"));
+        assert_eq!(
+            (m.capture_mode.as_str(), m.agr_fps, m.capture_fps),
+            ("agr", 60, 300)
+        );
+    }
+
+    #[test]
+    fn a_manifest_from_before_the_highlight_ids_still_reads() {
+        let dir = Scratch::new("manifest_file_read_old");
+        std::fs::write(
+            dir.path().join("session_old.json"),
+            r#"{"session_id":"session_old","outcome":"planned","written_at_unix":1,"capture_fps":300,"blocks":[]}"#,
+        )
+        .unwrap();
+        let planned = read_planned_in(&dir);
+        assert_eq!(planned.len(), 1);
+        assert!(planned[0].streak_uids.is_empty());
+        assert!(planned[0].project_path.is_none());
     }
 
     #[test]
