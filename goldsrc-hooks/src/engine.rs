@@ -1192,7 +1192,9 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 }
 
 /// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
-/// adjust the viewmodel it just placed (`spectator_gun`).
+/// replace the camera for a dead player (`spectator_deathcam`, before the
+/// position is recorded, so the recorded view is the drawn one) and adjust
+/// the viewmodel it just placed (`spectator_gun`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
@@ -1200,6 +1202,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     }
     let real: CalcRefdefFn = unsafe { std::mem::transmute(real) };
     unsafe { real(pparams) };
+    unsafe { crate::spectator_deathcam::after_calc_refdef(pparams) };
     if !pparams.is_null() {
         // Safety: the engine's ref_params_s for this view, valid for the call.
         crate::position::record(unsafe { &*pparams });

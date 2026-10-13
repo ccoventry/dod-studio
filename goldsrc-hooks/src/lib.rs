@@ -28,6 +28,12 @@
 //!     are drawn by different code paths and do not otherwise share a look.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
+//!   - `spectator_gun`: the gun drops off the bottom of the screen when the
+//!     player's own would (sprint, jump, prone, ladder).
+//! - `spectator_deathcam`: `dodstudio_spec_deathcam`, the game's own death cam
+//!   when the watched player dies, as his recording shows it, instead of the
+//!   rolled view from his dead eyes. Its own switch: a movie wants it, a
+//!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
 //! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
@@ -224,6 +230,7 @@ mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
+mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;

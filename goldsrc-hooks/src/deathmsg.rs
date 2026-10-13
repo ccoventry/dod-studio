@@ -1001,6 +1001,8 @@ unsafe extern "C" fn hooked_death_msg(name: *const c_char, size: i32, buf: *mut 
     if size >= 3 && !buf.is_null() {
         let bytes = unsafe { std::slice::from_raw_parts(buf as *const u8, 3) };
         let (killer, victim) = (bytes[0] as i32, bytes[1] as i32);
+        // The death happened whether or not the feed shows it.
+        crate::spectator_deathcam::note_death(killer, victim);
         let blocked = BLOCK
             .lock()
             .map(|list| list.blocks_slots(killer, victim))
@@ -1036,7 +1038,9 @@ fn install_hook() {
 
 /// Called once per frame from [`crate::commands::poll`].
 pub fn poll() {
-    if HOOK_WANTED.load(Ordering::Relaxed) {
+    // `spec_deathcam` needs every kill noted, so the handler is kept
+    // installed while that switch is on too, with an empty block list.
+    if HOOK_WANTED.load(Ordering::Relaxed) || crate::spectator_deathcam::enabled() {
         install_hook();
     }
 }

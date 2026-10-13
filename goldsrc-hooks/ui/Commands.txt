@@ -3,6 +3,8 @@ SPECTATING (HLTV demos)
       Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
   dodstudio_spec_lock 0/1
       Keep the camera on the player you are watching when he dies.
+  dodstudio_spec_deathcam 0/1
+      When the player you are watching dies, show the death cam his own recording shows (2.4 s behind his body, turning to the killer), then his eyes again.
   dodstudio_spec_target <player>
       Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
