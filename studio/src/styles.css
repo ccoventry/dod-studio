@@ -2965,6 +2965,17 @@ input[type="checkbox"].hd-box-pattern {
   cursor: not-allowed;
 }
 
+/* The Master Queue grouped by match (#685): one header line per match. */
+#master-demo-table .queue-match-header td {
+  padding: 6px 8px 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: default;
+}
+
 /* The list: the shared .analyzer-table look, with fixed columns so the two
    names share the width evenly and a long one ends in … (full on hover). */
 .rename-table {

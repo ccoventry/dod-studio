@@ -58,7 +58,7 @@ pub use crate::{
     localization::{get_active_language, set_active_language, translate_key},
     match_group::{
         Half, HalfCall, HalfReason, MatchGroup, MatchHalf, MatchTeam, Side, find_demo,
-        group_matches, half_of,
+        group_matches, half_of, trim_for_grouping,
     },
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},

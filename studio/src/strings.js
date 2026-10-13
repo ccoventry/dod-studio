@@ -85,6 +85,17 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    // #685: the queue grouped by match, with a header line per match.
+    GROUP_BY_MATCH_LABEL: 'Group by match',
+    GROUP_BY_MATCH_TITLE: 'Put the demos of one match together: the HLTV demo and every POV of each half, under a line naming the match. '
+      + 'Which match and half a demo is comes from what it recorded (the players, their sides, the kills and the chat), never from its file name. '
+      + 'The same numbers feed {match} and {half} in clip names.',
+    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
+    matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
+    matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
+    UNGROUPED_HEADER: 'Not in a match: these demos could not be read',
+    halfTooltip: (detail) => `What decided the half: ${detail}`,
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Pending/Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
@@ -2042,6 +2053,7 @@ export const STRINGS = {
     auditFailed: (err) => `Audit failed: ${err}`,
     combineFailed: (err) => `Combining the clips failed: ${err}`,
     demoRenameFailed: (err) => `Renaming demos failed: ${err}`,
+    matchGroupsFailed: (err) => `Grouping the demos by match failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
@@ -2176,7 +2188,7 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
-    fallbackNotAllowed: (raw) => `${raw}: only the name, faction and team placeholders take a word after |.`,
+    fallbackNotAllowed: (raw) => `${raw}: only the name, faction, team, half and match placeholders take a word after |.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
     DESCRIPTIONS: {
       name: "The recording player's name without their team's tag",
@@ -2195,6 +2207,9 @@ export const STRINGS = {
       team1: 'The two teams in alphabetical order, so both halves agree: the first',
       team2: 'The second of the two teams in alphabetical order',
       demo: 'The current file name, without .dem',
+      half: 'Which half of its match the demo records, h1 or h2, told from the players\' sides and the chat across the demos listed together. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The match\'s number among the demos listed together, by date. Every demo of one match gets the same number: the HLTV demo and each POV of both halves',
       lower: 'Add after a placeholder name to lower-case it: {map:lower}',
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
       first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
@@ -2225,7 +2240,7 @@ export const STRINGS = {
     EMPTY_PLACEHOLDER: '"{}" has no placeholder name in it.',
     unknownPlaceholder: (raw) => `${raw} isn't a placeholder. Pick one from the list below.`,
     unknownModifier: (raw) => `${raw}: only :lower and :upper can follow a placeholder name.`,
-    fallbackNotAllowed: (raw) => `${raw}: only {team_name} and {opponent} take a word after |.`,
+    fallbackNotAllowed: (raw) => `${raw}: only {team_name}, {opponent}, {half} and {match} take a word after |.`,
     invalidCharacters: (text) => `Windows doesn't allow \\ / : * ? " < > | in a file name: ${text}`,
     EMPTY_TEMPLATE: 'This template gives an empty name.',
     NO_DISTINGUISHING: 'No {row}, {time} or {demo}, so two highlights can get the same name. Their files still stay separate (a _2 is added), but the names won\'t say which is which.',
@@ -2251,6 +2266,9 @@ export const STRINGS = {
       date: 'The demo file\'s date, YYYY-MM-DD',
       team_name: 'Their team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
       opponent: 'The other team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
+      half: 'Which half of its match the demo records, h1 or h2, as the Master Demo Queue\'s match grouping tells it from the demos\' contents. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The demo\'s match number in the Master Demo Queue\'s match grouping: every demo of one match shares it',
       lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
       first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',

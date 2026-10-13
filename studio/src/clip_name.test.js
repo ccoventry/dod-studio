@@ -55,7 +55,7 @@ describe('parseTemplate', () => {
     expect(parseTemplate('{map_{row}').errors[0]).toContain('never closed');
     expect(parseTemplate('map}_{row}').errors[0]).toContain('no "{"');
     expect(parseTemplate('{map}?{row}').errors[0]).toContain("Windows doesn't allow");
-    expect(parseTemplate('{map|x}_{row}').errors[0]).toContain('only {team_name} and {opponent}');
+    expect(parseTemplate('{map|x}_{row}').errors[0]).toContain('only {team_name}, {opponent}, {half} and {match}');
     expect(parseTemplate('   ').errors[0]).toContain('empty');
   });
 

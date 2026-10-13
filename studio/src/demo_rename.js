@@ -6,9 +6,9 @@
 //
 // The facts come from native::demo_rename::DemoFacts:
 // `{ path, file_name, map, modified_unix_secs, demo_type, name, kills,
-//    deaths, side, teams: [{ side, tag }], error }`.
+//    deaths, side, teams: [{ side, tag }], half, match_number, error }`.
 
-import { parseTemplate, buildName } from './clip_name.js';
+import { parseTemplate, buildName, halfWord } from './clip_name.js';
 import { sideTag, teamName } from './project_teams.js';
 import { fromCacheText, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
@@ -19,7 +19,7 @@ export const DEFAULT_HLTV_TEMPLATE = '{allies}_v_{axis}_{map}_{date}';
 
 export const DEMO_PLACEHOLDERS = [
   'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'map', 'date', 'demo_type',
-  'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2', 'demo',
+  'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2', 'demo', 'half', 'match',
 ];
 
 /** About the recording player, so only a POV demo has them: an HLTV
@@ -35,7 +35,7 @@ export const DEMO_PLACEHOLDER_GROUPS = [
   { key: 'player', names: ['name', 'full_name', 'kills', 'deaths'] },
   { key: 'sides', names: ['faction', 'enemy_faction'] },
   { key: 'teams', names: ['team_name', 'opponent', 'allies', 'axis', 'team1', 'team2'] },
-  { key: 'demo', names: ['map', 'date', 'demo_type', 'demo'] },
+  { key: 'demo', names: ['map', 'date', 'demo_type', 'demo', 'half', 'match'] },
 ];
 
 /** The placeholders a demo type has, in chip order. */
@@ -46,6 +46,7 @@ export function placeholdersFor(demoType) {
 /** The ones a demo can be without, so the ones that take `|fallback`. */
 export const WITH_FALLBACK = new Set([
   'name', 'full_name', 'faction', 'enemy_faction', 'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2',
+  'half', 'match',
 ]);
 
 const DEMO_RULES = {
@@ -159,6 +160,10 @@ export function demoValues(facts, projectTeams) {
     team1,
     team2,
     demo: facts?.file_name ? facts.file_name.replace(/\.dem$/i, '') : null,
+    // Decided over every demo listed together (#685); null is "nothing
+    // said", never a guessed first half.
+    half: halfWord(facts?.half),
+    match: number(facts?.match_number),
   };
 }
 
