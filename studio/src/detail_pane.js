@@ -166,12 +166,10 @@ export function updateStreakVisuals(streak) {
   streak.timeline_string = parts.join(', ');
 }
 
-/** Selects every currently-visible (POV + Min Kills filtered) streak in
+/** Selects every currently-visible (Player + Min Kills filtered) streak in
  *  `currentDemo` — the header checkbox's checked state. Only the rows on
- *  screen. `demo.streaks` holds every player's streaks, and the table shows
- *  the recording player's at or above Min Kills — so selecting the raw list
- *  checked highlights belonging to other players that were never rendered
- *  and could not be unchecked. The batch groups by (demo, target player), so
+ *  screen: selecting the raw list once checked highlights that were never
+ *  rendered and could not be unchecked. The batch groups by (demo, target player), so
  *  each of those became its own chained demo: one 15-row table produced five
  *  passes over the same file. */
 function selectAllVisibleStreaks() {
@@ -361,36 +359,34 @@ window.addEventListener("DOMContentLoaded", () => {
 /**
  * Whether a streak is one of the rows the Highlights table actually shows.
  *
- * Two filters, and both matter to anything that acts on "all" of them:
+ * Whose highlights `demo.streaks` holds is the scan's decision, the same one
+ * the in-game Highlights tab makes (`analysis::highlights`: a POV demo's
+ * recorder's, an HLTV demo's everyone's; #247 D18, #573). The table only
+ * narrows them, and both filters matter to anything that acts on "all" rows:
  *
- *  1. **The recording player only.** `demo.streaks` holds every player's
- *     streaks — everyone in the server. Gated on `local_player_index` rather
- *     than `demo.is_pov`, because is_pov fires on any demo containing
- *     SvcHltv/SvcDirector messages, which a normal player recording also picks
- *     up when an HLTV caster happens to be spectating. The scanner leaves the
- *     index null when the demo has no single recorder (an HLTV demo, or a POV
- *     demo whose recorder can't be told: #247, D18), and then every player's
- *     rows show.
+ *  1. **The Player filter,** shown when the rows are every player's.
  *  2. **Min Kills.**
  *
- * Select All uses this too. When it did not, it checked highlights belonging to
- * other players that were never rendered and could not be unchecked — and since
- * the batch builder groups by (demo, target player), each of those became its
- * own chained demo. One fifteen-row table turned into five passes over the same
- * file.
+ * Select All uses this too. When it did not, it checked highlights that were
+ * never rendered and could not be unchecked — and since the batch builder
+ * groups by (demo, target player), each of those became its own chained demo.
+ * One fifteen-row table turned into five passes over the same file.
  */
 function isVisibleStreak(demo, streak, minKills) {
   if (!demo || !streak) return false;
-  if (demo.local_player_index !== null && demo.local_player_index !== undefined) {
-    if (streak.player_index !== demo.local_player_index) return false;
-  } else if (!matchesPlayer(demo, streak, detailPlayer)) {
-    return false;
-  }
+  if (listsEveryPlayer(demo) && !matchesPlayer(demo, streak, detailPlayer)) return false;
   const threshold = minKills ?? parseInt(document.querySelector('#input-min-kills')?.value || "1", 10);
   return streak.kill_count >= threshold;
 }
 
-/** Every one of `demo`'s highlights for the recording player, regardless of
+/** The rows are every player's, each naming whose it is: the demo has no
+ *  single recorder (an HLTV demo, or a POV demo whose recorder can't be
+ *  told), which the scan says by leaving `local_player_index` null. */
+function listsEveryPlayer(demo) {
+  return demo.local_player_index === null || demo.local_player_index === undefined;
+}
+
+/** Every one of `demo`'s highlights, regardless of
  *  Min Kills or checkbox selection (minKills 0 bypasses that half of
  *  isVisibleStreak's filter, keeping only the player filter). Previewing is
  *  how you decide what's worth checking in the first place, not a view of
@@ -449,7 +445,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
 
   // A demo with no single recorder (an HLTV demo) lists every player's
   // highlights, so each row says whose it is (#247, D18).
-  const showPlayer = demo.local_player_index === null || demo.local_player_index === undefined;
+  const showPlayer = listsEveryPlayer(demo);
 
   const tableWrapper = document.createElement('div');
   tableWrapper.className = 'table-wrapper';

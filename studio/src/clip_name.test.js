@@ -78,10 +78,9 @@ describe('highlightValues', () => {
     });
   });
 
-  it('numbers rows among the recording player\'s highlights only', () => {
-    const other = streak({ player_index: 5 });
+  it('numbers rows in the order the scan listed them', () => {
     const second = streak({ start_tick: 5000 });
-    const d = demo([streak(), other, second]);
+    const d = demo([streak(), second]);
     expect(highlightRow(d, second)).toBe(2);
   });
 });
