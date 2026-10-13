@@ -454,6 +454,12 @@ pub struct PatcherConfig {
     /// patching when the batch can't run that way (`patch::runtime_batch`).
     #[serde(default)]
     pub hook_runs_batch: bool,
+    /// The hook DLL's `dodstudio_stay_behind_while_capturing` for the batch: the game stays
+    /// behind the user's windows. Off, it comes to the front while it records,
+    /// so the user can watch. Full speed either way
+    /// (`dodstudio_run_in_background`).
+    #[serde(default = "default_keep_game_behind")]
+    pub keep_game_behind: bool,
     pub session_id: String,
     pub hlae_path: String,
     pub game_path: String,
@@ -494,6 +500,10 @@ pub struct PatcherConfig {
 }
 
 fn default_decal_flush() -> bool {
+    true
+}
+
+fn default_keep_game_behind() -> bool {
     true
 }
 
@@ -771,6 +781,7 @@ impl Default for PatcherConfig {
             movie_config: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            keep_game_behind: default_keep_game_behind(),
             session_id: String::new(),
             hlae_path: String::new(),
             game_path: String::new(),
