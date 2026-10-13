@@ -503,6 +503,19 @@ mod tests {
             settings.scan_workers,
             crate::capture_manager::SCAN_CONCURRENCY as i32
         );
+        // Settings saved before #599 still open Setup when a path is missing.
+        assert!(!settings.setup_dismissed);
+    }
+
+    #[test]
+    fn test_setup_dismissed_roundtrip() {
+        let original = AppSettings {
+            setup_dismissed: true,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert!(restored.setup_dismissed);
     }
 
     #[test]
