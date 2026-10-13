@@ -16,7 +16,7 @@ test('lists the folders beside hl.exe and saves the one picked', async ({ page }
   await page.evaluate(async () => { window.__setGameFolder('dod'); await window.__refresh(); });
   const select = page.locator('#config-game-folder');
   await expect(select).toBeVisible();
-  await expect(page.locator('#config-game-folder-text')).toBeHidden();
+  await expect(select).toBeEnabled();
   await expect(select.locator('option')).toHaveText(['dod', 'dod_1_2', 'dod_movies']);
   await expect(select).toHaveValue('dod');
   const [call] = await page.evaluate(() => window.__mockInvocations.filter((i) => i.cmd === 'list_game_folders'));
@@ -37,23 +37,24 @@ test('a saved folder that is not there stays, marked, with a warning', async ({ 
   expect(await page.evaluate(() => window.__persisted)).toBe(0);
 });
 
-test('with nothing to list, a text field takes the name and refuses a path', async ({ page }) => {
+test('with nothing to list, the dropdown is disabled on the saved value and says why', async ({ page }) => {
   await loadHarness(page, null);
-  await page.evaluate(async () => { window.__setGameFolder(''); await window.__refresh(); });
-  const text = page.locator('#config-game-folder-text');
-  await expect(text).toBeVisible();
-  await expect(page.locator('#config-game-folder')).toBeHidden();
-  await expect(text).toHaveValue('dod');
-
-  await text.fill('../elsewhere');
-  await text.dispatchEvent('change');
-  await expect(page.locator('#config-game-folder-warning')).toBeVisible();
-  expect(await page.evaluate(() => window.__gameFolder())).toBe('dod');
+  await page.evaluate(async () => { window.__setGameFolder('dod_movies'); await window.__refresh(); });
+  const select = page.locator('#config-game-folder');
+  await expect(select).toBeVisible();
+  await expect(select).toBeDisabled();
+  await expect(select.locator('option')).toHaveText(['dod_movies']);
+  await expect(select).toHaveValue('dod_movies');
+  await expect(page.locator('#config-game-folder-warning')).toContainText('Set the Half-Life Executable');
+  expect(await page.evaluate(() => window.__gameFolder())).toBe('dod_movies');
   expect(await page.evaluate(() => window.__persisted)).toBe(0);
 
-  await text.fill('dod_movies');
-  await text.dispatchEvent('change');
+  // The folders turn up once hl.exe points somewhere real.
+  await page.evaluate(() => {
+    window.__mockInvokeHandlers.list_game_folders = () => ['dod', 'dod_movies'];
+  });
+  await page.evaluate(() => window.__refresh());
+  await expect(select).toBeEnabled();
+  await expect(select.locator('option')).toHaveText(['dod', 'dod_movies']);
   await expect(page.locator('#config-game-folder-warning')).toBeHidden();
-  expect(await page.evaluate(() => window.__gameFolder())).toBe('dod_movies');
-  expect(await page.evaluate(() => window.__persisted)).toBe(1);
 });

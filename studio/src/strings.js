@@ -253,6 +253,7 @@ export const STRINGS = {
     gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
     gameFolderMissing: (name) =>
         `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
