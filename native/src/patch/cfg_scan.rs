@@ -788,9 +788,14 @@ pub fn demo_filtered_commands(commands: &[String]) -> Vec<DemoFiltered> {
 /// pipeline itself always overwrites the value before anything downstream
 /// could read it. Scheduling one instead is a different, genuinely dangerous
 /// story — see `SCHEDULED_BANNED_COMMANDS`.
-/// `dodstudio_run_in_background` is turned on by every batch after the
-/// user's own commands.
-pub const NOOP_IN_INIT_COMMANDS: &[&str] = &["mirv_movie_filename", "dodstudio_run_in_background"];
+/// `dodstudio_run_in_background` and `dodstudio_stay_behind_while_capturing` are set by every
+/// batch after the user's own commands, the second from
+/// `PatcherConfig::keep_game_behind`.
+pub const NOOP_IN_INIT_COMMANDS: &[&str] = &[
+    "mirv_movie_filename",
+    "dodstudio_run_in_background",
+    "dodstudio_stay_behind_while_capturing",
+];
 
 /// `NOOP_IN_INIT_COMMANDS` checked against Initial Commands. What the demo
 /// filter drops is reported separately, by `demo_filtered_commands`.

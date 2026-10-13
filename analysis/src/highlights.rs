@@ -32,8 +32,11 @@ pub struct Highlight {
     pub player: String,
     /// The analysis' player id: a SteamID64 when the demo has one.
     pub player_id: String,
-    /// The player's slot (0-based; their entity number is this + 1), while
-    /// they were still in the game at the demo's end. Capture needs it.
+    /// The player's slot (0-based; their entity number is this + 1) when
+    /// they scored these kills, which capture spectates (#706): theirs then,
+    /// even if they left or changed slots before the demo ended. An analysis
+    /// cached before streaks kept it falls back to the slot they held at the
+    /// demo's end; `None` only when neither is known.
     pub slot: Option<u8>,
     /// They recorded this POV demo.
     pub recorder: bool,
@@ -81,16 +84,19 @@ pub fn highlights(analysis: &Analysis) -> Highlights {
         .players
         .iter()
         .flat_map(|player| {
-            let slot = match player.connection {
+            let end_slot = match player.connection {
                 Connection::Connected { client_id } => Some(client_id),
                 Connection::Disconnected => None,
             };
-            let recorder = !hltv && slot.is_some() && slot == recorder_slot;
+            // Who recorded a POV demo is a person, told by the slot they
+            // still hold at its end.
+            let recorder = !hltv && end_slot.is_some() && end_slot == recorder_slot;
             player
                 .kill_streaks
                 .iter()
                 .filter(|s| !s.kills.is_empty())
                 .map(move |streak| {
+                    let slot = streak.slot.or(end_slot);
                     let kills: Vec<HighlightKill> = streak
                         .kills
                         .iter()
@@ -179,6 +185,76 @@ mod tests {
         assert_eq!(shown, ["brain"]);
         list.rule = Rule::Everyone;
         assert_eq!(list.shown().count(), 2);
+    }
+
+    /// One DeathMsg (1-based client indices) through the analyzers that
+    /// record streaks.
+    fn death(analysis: &mut Analysis, killer: u8, victim: u8) {
+        let Ok(msg) = dod::UserMessage::new(b"DeathMsg", &[killer, victim, 10]) else {
+            panic!("DeathMsg did not parse");
+        };
+        let event = crate::AnalyzerEvent::UserMessage(msg);
+        crate::mortality::with_mortality_detection(&mut analysis.state, &event);
+        crate::kill::use_kill_streak_updates(&mut analysis.state, &event);
+    }
+
+    fn hltv_analysis() -> Analysis {
+        let mut analysis = Analysis::default();
+        analysis.demo_info.demo_type = "HLTV".to_string();
+        for (slot, name, team) in [
+            (3, "leaver", dod::Team::Axis),
+            (1, "allies", dod::Team::Allies),
+            (2, "allies2", dod::Team::Allies),
+        ] {
+            let mut player = crate::Player::new_mock(slot, name);
+            player.team = Some(team);
+            analysis.state.players.push(player);
+        }
+        analysis
+    }
+
+    #[test]
+    fn a_player_who_left_keeps_the_slot_they_scored_from() {
+        let mut analysis = hltv_analysis();
+        death(&mut analysis, 4, 2); // leaver (slot 3) kills allies
+        death(&mut analysis, 4, 3);
+        analysis.state.players[0].connection = Connection::Disconnected;
+        let found = highlights(&analysis);
+        let leaver: Vec<_> = found
+            .all
+            .iter()
+            .filter(|h| h.player == "leaver")
+            .map(|h| (h.slot, h.kills.len()))
+            .collect();
+        assert_eq!(leaver, [(Some(3), 2)]);
+    }
+
+    #[test]
+    fn a_player_who_changed_slots_has_each_streaks_own_slot() {
+        let mut analysis = hltv_analysis();
+        death(&mut analysis, 4, 2); // slot 3
+        death(&mut analysis, 2, 4); // allies kills him: his life ends
+        analysis.state.players[0].connection = Connection::Connected { client_id: 7 };
+        death(&mut analysis, 8, 3); // back in slot 7
+        let slots: Vec<_> = highlights(&analysis)
+            .all
+            .iter()
+            .filter(|h| h.player == "leaver")
+            .map(|h| h.slot)
+            .collect();
+        assert_eq!(slots, [Some(3), Some(7)]);
+    }
+
+    #[test]
+    fn a_streak_cached_without_its_slot_falls_back_to_the_end_slot() {
+        let mut analysis = hltv_analysis();
+        death(&mut analysis, 4, 2);
+        for streak in &mut analysis.state.players[0].kill_streaks {
+            streak.slot = None;
+        }
+        assert_eq!(highlights(&analysis).all[0].slot, Some(3));
+        analysis.state.players[0].connection = Connection::Disconnected;
+        assert_eq!(highlights(&analysis).all[0].slot, None);
     }
 
     #[test]
