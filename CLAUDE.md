@@ -92,6 +92,7 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 
 ### GitHub Issues & PRs
 - **Every PR targets `dev`** — always pass `gh pr create -B dev`. `main` is the default branch, so omitting `-B` opens the PR against `main`, which is how #325 skipped `dev`. The only PR into `main` is a `dev` → `main` release; the `Main only from dev` check refuses anything else. When syncing `main` back into `dev`, use a merge commit, never squash (#340 → #341).
+- **Every PR body starts with a `Release note:` line** (`.github/pull_request_template.md`): one plain-language line for players, not developers, optionally prefixed `New:`, `Fixed:` or `Changed:`; write `none` for internal work (CI, tests, refactors, docs). The release workflows build the release notes from these lines (`docs/versioning_and_releases.md`).
 - **After creating a PR**, check whether a GitHub issue already exists for the same work. If one does, link it to the PR via GraphQL, not just a `Closes #NN` line in the PR body — that text alone does not populate the issue's `closedByPullRequestsReferences`, so a "yes there's a PR" check on the issue can miss it:
       PR_ID=$(gh api repos/<owner>/<repo>/pulls/<pr-number> --jq .node_id)
       ISSUE_ID=$(gh api repos/<owner>/<repo>/issues/<issue-number> --jq .node_id)
