@@ -14,6 +14,13 @@ impl Display for PlayerGlobalId {
     }
 }
 
+/// The SteamID64 in a player's global id, when it is one: a 17-digit number.
+/// A demo with no SteamIDs (a bot's, a LAN server's) falls back to
+/// `PLAYER_<n>` or `CONNECTION_<n>` ids, which name nobody outside it.
+pub fn steam_id_of(id: &str) -> Option<String> {
+    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct Player {
     pub id: PlayerGlobalId,

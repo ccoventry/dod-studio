@@ -164,6 +164,15 @@ pub struct CaptureStreak {
     /// for a POV demo, whose footage is its recorder's.
     #[serde(default)]
     pub spectated: bool,
+    /// The player's SteamID64, when the demo carries one, so the UI can
+    /// name them beyond this demo (#573).
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// The player recorded this POV demo (`analysis::highlights::Highlight::
+    /// recorder`). Which rows exist is decided before this is set (D18, #573);
+    /// this only lets the UI badge the recorder's rows.
+    #[serde(default)]
+    pub recorded_this_demo: bool,
 }
 
 impl CaptureStreak {
