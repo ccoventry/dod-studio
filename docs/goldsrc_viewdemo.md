@@ -211,6 +211,28 @@ lands, then sends `-forward`, `-speed` and the rest
 wsod25_grp2_h1_m00cat (PRE): 18 blinks under 0.1 s before, none after, the
 same as reaching it by fast-forward.
 
+## Demos on another drive (#376)
+
+`viewdemo` and `playdemo` take a path relative to `dod\`, `../` included,
+and nothing else: an absolute path is put after each search path, and the
+Anniversary build asserts on a `:`. A relative path cannot change drive, so
+a demo on `D:\` needs a path under `dod\`. A directory junction gives it one
+with no copy and no engine change: Studio's + Link Folder to Game makes
+`dod\demos\<name>` point at the folder (`native::demo_links`), and the game
+follows it like any folder, for opening and for the Load Demo list (#409).
+
+The link's rules, each there so no folder walk can loop through it: it
+points at the folder picked, never a drive root; a folder that holds the
+install or is inside it is refused, as are links and network paths; Remove
+unlinks the junction only (`RemoveDirectoryW` on the link, never a
+recursive delete). Studio's own walks skip every junction and symlink and
+stop at a depth cap (`native::sys::folder_walk`); the hook's walks read the
+entry kind from the listing, which never follows a link.
+
+Still to check in game, both installs: `viewdemo "demos/<link>/<demo>"` from
+the console, and the same path on the launch line (`+viewdemo
+"demos/<link>/<demo>"`).
+
 ## What this means for moving the batch
 
 Nothing found blocks it. Today's patched chain demos would run under

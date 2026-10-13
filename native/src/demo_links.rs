@@ -89,7 +89,7 @@ pub fn list(game_dir: &Path) -> Vec<DemoLink> {
             })
         })
         .collect();
-    links.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    links.sort_by_key(|l| l.name.to_lowercase());
     links
 }
 
