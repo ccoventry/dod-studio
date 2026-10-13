@@ -49,6 +49,11 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
+/// Linking a demo folder on another drive into the game folder, so
+/// `viewdemo` can play from it in place (#376).
+#[cfg(windows)]
+pub mod demo_links;
+
 /// Launch Preview without patching (#434, step 2).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
