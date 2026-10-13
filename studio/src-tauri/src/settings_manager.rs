@@ -423,11 +423,44 @@ impl AppSettings {
         let path = settings_path();
         if path.exists()
             && let Ok(content) = fs::read_to_string(&path)
-            && let Ok(settings) = serde_json::from_str::<AppSettings>(&content)
+            && let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content)
         {
+            if settings.migrate_console_names() {
+                // Saved at once, so the file on disk matches what Studio shows.
+                let _ = settings.save();
+            }
             return settings;
         }
         Self::default()
+    }
+
+    /// Moves every hook console name from before #555 (`dodstudio_*`) in
+    /// Initial Commands, Scheduled Commands and the command profiles to its
+    /// `ds_` name (`native::patch::console_prefix::migrated`). The game has no
+    /// aliases for the old names, so a list left as it was would do nothing.
+    /// True when anything changed.
+    pub fn migrate_console_names(&mut self) -> bool {
+        fn fix(command: &mut String, changed: &mut bool) {
+            if let Some(new) = native::patch::console_prefix::migrated(command) {
+                *command = new;
+                *changed = true;
+            }
+        }
+        let mut changed = false;
+        let lists = std::iter::once((&mut self.init_commands, &mut self.custom_commands)).chain(
+            self.command_profiles
+                .iter_mut()
+                .map(|p| (&mut p.init_commands, &mut p.custom_commands)),
+        );
+        for (init, scheduled) in lists {
+            for command in init.iter_mut() {
+                fix(command, &mut changed);
+            }
+            for payload in scheduled.iter_mut() {
+                fix(&mut payload.command, &mut changed);
+            }
+        }
+        changed
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -550,6 +583,58 @@ mod tests {
             restored.command_profiles[0].custom_commands[0].offset_seconds,
             1.5
         );
+    }
+
+    /// #555: Initial Commands, Scheduled Commands and every profile move from
+    /// the old `dodstudio_` hook names to `ds_`; anything else is kept as is.
+    #[test]
+    fn test_old_console_names_migrate_on_load() {
+        let scheduled = |command: &str| CustomCommandPayload {
+            command: command.to_string(),
+            relation: "Before".to_string(),
+            offset_seconds: 1.0,
+        };
+        let mut settings = AppSettings {
+            init_commands: vec![
+                "dodstudio_hide_scoreboard 1".to_string(),
+                "mirv_fov 90".to_string(),
+                "dodstudio_deathmsg block !76561197962734863".to_string(),
+            ],
+            custom_commands: vec![
+                scheduled("dodstudio_spec_lock 1"),
+                scheduled("host_timescale 0.5"),
+            ],
+            command_profiles: vec![CommandProfile {
+                name: "Old".to_string(),
+                init_commands: vec!["dodstudio_clear_decals".to_string()],
+                custom_commands: vec![scheduled("dodstudio_seek_by -10;dodstudio_spec_target 3")],
+            }],
+            ..AppSettings::default()
+        };
+
+        assert!(settings.migrate_console_names());
+        assert_eq!(
+            settings.init_commands,
+            [
+                "ds_hide_scoreboard 1",
+                "mirv_fov 90",
+                "ds_deathmsg block !76561197962734863"
+            ]
+        );
+        assert_eq!(settings.custom_commands[0].command, "ds_spec_lock 1");
+        assert_eq!(settings.custom_commands[1].command, "host_timescale 0.5");
+        assert_eq!(
+            settings.command_profiles[0].init_commands,
+            ["ds_clear_decals"]
+        );
+        assert_eq!(
+            settings.command_profiles[0].custom_commands[0].command,
+            "ds_seek_by -10;ds_spec_target 3"
+        );
+
+        // Already moved: nothing to do, so nothing is saved again.
+        assert!(!settings.migrate_console_names());
+        assert!(!AppSettings::default().migrate_console_names());
     }
 
     #[test]

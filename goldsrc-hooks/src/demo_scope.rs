@@ -1,4 +1,4 @@
-//! `dodstudio_show_demo_scope`: draw the sniper scope while a demo plays
+//! `ds_show_demo_scope`: draw the sniper scope while a demo plays
 //! (#307).
 //!
 //! ## What the game does
@@ -551,7 +551,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, while it is on: the setting, and
+/// One line for `ds_debug_status`, while it is on: the setting, and
 /// the rifle the in-eye camera currently draws.
 pub fn status_line() -> Option<String> {
     if !ON.load(Ordering::Relaxed) {

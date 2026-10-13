@@ -213,3 +213,35 @@ test.describe('demo command filter', () => {
     await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
   });
 });
+
+// #555: the hook's console names went from dodstudio_ to ds_, with no aliases.
+test.describe('renamed hook names', () => {
+  test('a config line and an Initial Command show under Initial Commands, with the new name', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      renamed: [
+        { old: 'dodstudio_hide_scoreboard', new: 'ds_hide_scoreboard', source: 'movie.cfg, line 4' },
+        { old: 'dodstudio_spec_lock', new: 'ds_spec_lock', source: 'Initial Commands' },
+      ],
+    });
+
+    const banner = page.locator('#init-commands-warning-banner');
+    await expect(banner).toContainText('These DoD Studio commands have new names:');
+    const rows = banner.locator('li code');
+    await expect(rows).toHaveCount(2);
+    await expect(rows.nth(0)).toHaveText('dodstudio_hide_scoreboard → ds_hide_scoreboard (movie.cfg, line 4)');
+    await expect(rows.nth(1)).toHaveText('dodstudio_spec_lock → ds_spec_lock');
+    await expect(page.locator('#scheduled-commands-warning-banner')).toBeHidden();
+  });
+
+  test('a Scheduled Command shows under Scheduled Commands', async ({ page }) => {
+    await loadHarness(page, {
+      ...EMPTY_REPORT,
+      renamed: [{ old: 'dodstudio_seek_by', new: 'ds_seek_by', source: 'Scheduled Commands' }],
+    });
+
+    const banner = page.locator('#scheduled-commands-warning-banner');
+    await expect(banner).toContainText('dodstudio_seek_by → ds_seek_by');
+    await expect(page.locator('#init-commands-warning-banner')).toBeHidden();
+  });
+});

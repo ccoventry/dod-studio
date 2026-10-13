@@ -21,21 +21,21 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
 
 ## The hook DLL (`goldsrc-hooks`)
-- [dodstudio_commands.md](dodstudio_commands.md) — every `dodstudio_*` cvar and command. Also the source of the wiki's Commands page.
+- [dodstudio_commands.md](dodstudio_commands.md) — every `ds_*` cvar and command. Also the source of the wiki's Commands page.
 - [goldsrc_client_dll_internals.md](goldsrc_client_dll_internals.md) — how DoD's `client.dll` is wired and how the hook reaches it.
 - [goldsrc_client_dll_survey.md](goldsrc_client_dll_survey.md) — what in `client.dll` can be controlled.
 - [goldsrc_hw_dll_survey.md](goldsrc_hw_dll_survey.md) — what in `hw.dll` HLAE already owns, and what is left.
 - [goldsrc_viewdemo.md](goldsrc_viewdemo.md) — how `viewdemo` plays and seeks a demo.
 
 ### Per feature
-- [goldsrc_death_notices.md](goldsrc_death_notices.md) — the kill feed (`dodstudio_deathmsg`).
+- [goldsrc_death_notices.md](goldsrc_death_notices.md) — the kill feed (`ds_deathmsg`).
 - [goldsrc_decals.md](goldsrc_decals.md) — clearing decals at runtime.
 - [goldsrc_ex_interp.md](goldsrc_ex_interp.md) — raising the interpolation ceiling.
 - [goldsrc_hltv_animation_fix.md](goldsrc_hltv_animation_fix.md) — gun animations in HLTV demos.
 - [goldsrc_hltv_missing_gunshots.md](goldsrc_hltv_missing_gunshots.md) — putting back the gunshots HLTV demos lose.
 - [goldsrc_hud_suppression.md](goldsrc_hud_suppression.md) — the shared pattern for hiding or silencing what DoD draws, plus voice-command muting.
 - [goldsrc_crosshair.md](goldsrc_crosshair.md) — hiding the crosshair, and the spectator crosshair under `spec_match_pov`.
-- [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — hiding any HUD element by name (`dodstudio_hide_hudelement`), and why some are not offered.
+- [goldsrc_hud_elements.md](goldsrc_hud_elements.md) — hiding any HUD element by name (`ds_hide_hudelement`), and why some are not offered.
 - [goldsrc_objective_icons.md](goldsrc_objective_icons.md) — placing the objective icons.
 - [goldsrc_scoreboard.md](goldsrc_scoreboard.md) — hiding the scoreboard.
 - [goldsrc_spectator_bars.md](goldsrc_spectator_bars.md) — the spectator top and bottom bars.

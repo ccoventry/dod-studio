@@ -22,7 +22,7 @@ const PIPE_WAIT: Duration = Duration::from_secs(90);
 /// opens while the engine is still starting.
 const SETTLE: Duration = Duration::from_secs(5);
 /// After `viewdemo`, how long before the Highlights tab is opened. With
-/// `dodstudio_viewdemo_in_panel 1`, `viewdemo` opens the window on its
+/// `ds_viewdemo_in_panel 1`, `viewdemo` opens the window on its
 /// Playback tab a frame after the command runs, so a tab command sent in
 /// the same message loses to it.
 const TAB_AFTER: Duration = Duration::from_secs(3);

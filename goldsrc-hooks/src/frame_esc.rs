@@ -173,7 +173,7 @@ pub fn poll() {
     unsafe { crate::debug::report(&message) };
 }
 
-/// The `dodstudio_debug_status` line, or `None` when it isn't installed.
+/// The `ds_debug_status` line, or `None` when it isn't installed.
 pub fn status_line() -> Option<String> {
     INSTALLED.load(Ordering::Relaxed).then(|| {
         "window ESC fix: on (ESC sends Cancel only, as on the pre-Anniversary build)".to_string()

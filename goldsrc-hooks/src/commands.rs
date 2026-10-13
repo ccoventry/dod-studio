@@ -1,4 +1,4 @@
-//! The `dodstudio_*` console surface: its cvars and commands (`install`
+//! The `ds_*` console surface: its cvars and commands (`install`
 //! registers them all).
 //!
 //! ## Why cvars rather than commands
@@ -13,8 +13,8 @@
 //! variables existed.
 //!
 //! A cvar is a named box the *engine* owns. It shows up in the type-ahead with
-//! its value, answers `dodstudio_spec_match_pov` on its own, takes
-//! `+dodstudio_spec_match_pov 1` on the launch line, and can be set from any
+//! its value, answers `ds_spec_match_pov` on its own, takes
+//! `+ds_spec_match_pov 1` on the launch line, and can be set from any
 //! `.cfg` the user execs. `poll()` copies the values into the same atomics the
 //! rest of the crate already reads, once per frame, so nothing downstream
 //! changed.
@@ -40,7 +40,7 @@
 //!
 //! ## One switch for the spectator's first-person view
 //!
-//! `dodstudio_spec_match_pov` drives five modules at once: the viewmodel's
+//! `ds_spec_match_pov` drives five modules at once: the viewmodel's
 //! animations, the gunshots an HLTV demo lost, the spectator crosshair, the
 //! in-eye camera's height for a prone player, and the gun lowering off screen
 //! (`spectator_gun`). The first three used to
@@ -175,7 +175,7 @@ fn poll_flag(name: &str, cvar: &AtomicPtr<CvarSPartial>, flag: &AtomicBool) {
 
 /// Like `poll_flag`, but into the level `anim_fix` reads -- see
 /// `anim_fix::LEVEL`. Out-of-range values are clamped rather than refused, so
-/// `dodstudio_spec_match_pov 2` (which also asks `missing_shots` to log every
+/// `ds_spec_match_pov 2` (which also asks `missing_shots` to log every
 /// round) still means on here.
 fn poll_level(name: &str, cvar: &AtomicPtr<CvarSPartial>, level: &AtomicI32) {
     let ptr = cvar.load(Ordering::Relaxed);
@@ -393,7 +393,7 @@ fn poll_overviewmap() {
     }
 }
 
-/// `dodstudio_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
+/// `ds_hide_hudelement` keeps its own state -- a bitmask, not a cvar --
 /// so it cannot go through `poll_code_patch`. Everything else about it is the
 /// same: applied every frame, reported only when it writes, and complaining
 /// once rather than sixty times a second while `client.dll` is not loaded.
@@ -522,7 +522,7 @@ pub fn poll() {
     // Everything below has nothing to do with cvars and must run under both
     // paths -- it was silently skipped on the fallback path before #324.
     poll_hudelements();
-    // dodstudio_overviewmap keeps its own state -- held rects, not a cvar --
+    // ds_overviewmap keeps its own state -- held rects, not a cvar --
     // so it belongs here alongside hudelement rather than in the gated block
     // above.
     poll_overviewmap();
@@ -533,17 +533,17 @@ pub fn poll() {
     // callback slot), so its viewmodel-entity half reads apply()'s previous
     // frame's result, not this one's -- see spectator_target.rs's module doc.
     spectator_target::poll();
-    // Same reason, for whichever messages dodstudio_debug_msglog currently wants.
+    // Same reason, for whichever messages ds_debug_msglog currently wants.
     crate::msglog::poll();
     // Reads the map's own on-screen strings once per level while
-    // dodstudio_hide_map_text is on, and keeps its HudText handler prepended.
+    // ds_hide_map_text is on, and keeps its HudText handler prepended.
     crate::map_text::poll();
     // Keeps the TextMsg, ClanTimer and GameRules handlers prepended, and puts
     // the game's countdown and warm-up flag right when
-    // dodstudio_hide_clan_text changes.
+    // ds_hide_clan_text changes.
     crate::clan_text::poll();
-    // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
-    // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
+    // Follows ds_hd_enabled / ds_hd_style, then notes what each map
+    // uses for ds_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
     crate::lightmap_gamma::poll();
     crate::tempent_fix::poll();
@@ -621,10 +621,10 @@ fn log_level_changes() {
 /// Everything in one place, for debugging -- not the settings surface a
 /// player is expected to type. That is what `debug_` in the name signals:
 /// every value here is also visible piecemeal (a suppression cvar's own
-/// bare-name query, the console type-ahead, `dodstudio_deathmsg`'s own
+/// bare-name query, the console type-ahead, `ds_deathmsg`'s own
 /// status), but this is the one command that dumps all of it together, which
 /// is what a support question actually needs -- so it covers the *entire*
-/// `dodstudio_*` surface, not a subset.
+/// `ds_*` surface, not a subset.
 ///
 /// The suppression cvars and `log_weapon_model` are listed unconditionally,
 /// on or off, because there is no progress to gate them on -- they are just
@@ -792,7 +792,7 @@ fn status_text() -> String {
 unsafe extern "C" fn cmd_status() {
     // A console line's semicolon-joined commands all run together, in one
     // pass, before `poll` gets another turn as the per-frame prologue -- so
-    // `dodstudio_hide_scoreboard 1;dodstudio_debug_status` on one line would
+    // `ds_hide_scoreboard 1;ds_debug_status` on one line would
     // otherwise report the state from *before* that same line's own change.
     // `poll` is cheap and idempotent (it already runs every frame), so
     // forcing one here just makes this report always current.
@@ -873,7 +873,7 @@ fn handle_toggle(name: &str, flag: &AtomicBool, status: fn() -> String) {
     };
 }
 
-/// `dodstudio_spec_match_pov` as a plain command. With no cvar for `poll` to copy
+/// `ds_spec_match_pov` as a plain command. With no cvar for `poll` to copy
 /// from, the handler sets every part itself.
 unsafe extern "C" fn cmd_spec_match_pov() {
     handle_level(SPEC_MATCH_POV_NAME, &anim_fix::LEVEL, anim_fix::status);
@@ -1036,7 +1036,7 @@ unsafe extern "C" fn cmd_crosshair() {
     );
 }
 
-/// `dodstudio_hide_hudelement [<name> <0|1>]`.
+/// `ds_hide_hudelement [<name> <0|1>]`.
 ///
 /// A command rather than a cvar: it takes two arguments, which a cvar's single
 /// value cannot carry, and there is one per element -- a cvar for each would
@@ -1143,7 +1143,7 @@ unsafe extern "C" fn cmd_hudelement() {
     }
 }
 
-/// `dodstudio_clear_decals` -- takes no arguments and holds no state, so a
+/// `ds_clear_decals` -- takes no arguments and holds no state, so a
 /// command is the whole of what it needs to be.
 unsafe extern "C" fn cmd_clear_decals() {
     match decals::clear() {
@@ -1170,7 +1170,7 @@ unsafe extern "C" fn cmd_hand_signals() {
     });
 }
 
-/// `dodstudio_debug_log_texture_loads` -- verbose per-texture logging for the
+/// `ds_debug_log_texture_loads` -- verbose per-texture logging for the
 /// (opt-in, `GOLDSRC_HOOKS_TEXTURE_HIRES`-gated) world-texture swap: one line
 /// per world texture uploaded, saying whether it was replaced and why not. Registering the toggle unconditionally, whether or not
 /// the hook is actually installed this session, matches every other cvar
@@ -1184,7 +1184,7 @@ unsafe extern "C" fn cmd_texture_hires_log() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_folders` could not be a cvar.
+/// Only registered when `ds_demo_list_folders` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_folders() {
     handle_toggle(
         demo_list_folders::NAME,
@@ -1193,7 +1193,7 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
+/// Only registered when `ds_demo_list_hide_empty` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_hide_empty() {
     handle_toggle(
         demo_list_folders::HIDE_EMPTY.name,
@@ -1202,7 +1202,7 @@ unsafe extern "C" fn cmd_demo_list_hide_empty() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_count_subfolders` could not be
+/// Only registered when `ds_demo_list_count_subfolders` could not be
 /// a cvar.
 unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     handle_toggle(
@@ -1213,7 +1213,7 @@ unsafe extern "C" fn cmd_demo_list_count_subfolders() {
 }
 
 /// Only registered when the window-layout cvars could not be registered.
-/// Only registered when `dodstudio_viewdemo_in_panel` could not be a cvar.
+/// Only registered when `ds_viewdemo_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_viewdemo_in_panel() {
     handle_toggle(
         crate::studio_panel::VIEWDEMO_NAME,
@@ -1222,7 +1222,7 @@ unsafe extern "C" fn cmd_viewdemo_in_panel() {
     );
 }
 
-/// Only registered when `dodstudio_console_in_panel` could not be a cvar.
+/// Only registered when `ds_console_in_panel` could not be a cvar.
 unsafe extern "C" fn cmd_console_in_panel() {
     handle_toggle(
         crate::studio_panel::CONSOLE_NAME,
@@ -1247,7 +1247,7 @@ unsafe extern "C" fn cmd_remember_window_layout() {
     );
 }
 
-/// Only registered when `dodstudio_seek_skip_between` could not be a cvar.
+/// Only registered when `ds_seek_skip_between` could not be a cvar.
 unsafe extern "C" fn cmd_seek_skip_between() {
     handle_toggle(
         demo_seek::SKIP_BETWEEN_NAME,
@@ -1256,7 +1256,7 @@ unsafe extern "C" fn cmd_seek_skip_between() {
     );
 }
 
-/// `dodstudio_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
+/// `ds_overviewmap [full|mini <x> <y> <w> <h>] [default]`.
 ///
 /// A command rather than a cvar: four numbers and a name do not fit in one
 /// value, and two cvars per rectangle would be eight names in the type-ahead
@@ -1428,7 +1428,7 @@ pub fn install() {
         return;
     }
 
-    // `dodstudio_debug_status` is a command under either path: it takes no value, so
+    // `ds_debug_status` is a command under either path: it takes no value, so
     // there is nothing for a cvar to hold.
     add_command(STATUS_NAME, cmd_status);
 
@@ -1456,7 +1456,7 @@ pub fn install() {
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
 
-    // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
+    // Standalone, like `ds_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
     // setting's type-ahead -- a plain toggle stands in for it.
     match register(demo_seek::SKIP_BETWEEN_NAME, "0") {
@@ -1469,7 +1469,7 @@ pub fn install() {
     );
     add_command(crate::position::NAME, crate::position::command);
 
-    // Standalone, like `dodstudio_hd_enabled`: the hooks read it when the
+    // Standalone, like `ds_hd_enabled`: the hooks read it when the
     // Load Demo window asks for its list, so it needs no poll, and a failed
     // registration costs only this one setting's type-ahead -- a plain toggle
     // stands in for it.
@@ -1489,7 +1489,7 @@ pub fn install() {
         ),
     }
 
-    // Standalone, like `dodstudio_hd_enabled`: window_layout reads them where
+    // Standalone, like `ds_hd_enabled`: window_layout reads them where
     // it walks the windows, so they need no poll here, and a failed
     // registration costs only their type-ahead -- plain toggles stand in.
     match (
@@ -1695,7 +1695,7 @@ mod tests {
         ] {
             assert!(idle.contains(name), "{name} missing from:\n{idle}");
         }
-        assert!(idle.contains("dodstudio_deathmsg"), "{idle}");
+        assert!(idle.contains("ds_deathmsg"), "{idle}");
         for part in [
             "viewmodel animations:",
             "gunshot sounds:",
@@ -1727,11 +1727,11 @@ mod tests {
     }
 
     /// The console's type-ahead completes to the longest match, so a name
-    /// that starts with `dodstudio_spec_match_pov` would be offered in its
+    /// that starts with `ds_spec_match_pov` would be offered in its
     /// place. A fix that joins this switch must not bring a name like that.
     #[test]
     fn nothing_else_starts_with_the_spec_match_pov_name() {
-        assert_eq!(SPEC_MATCH_POV_NAME, "dodstudio_spec_match_pov");
+        assert_eq!(SPEC_MATCH_POV_NAME, "ds_spec_match_pov");
         for other in [
             HELD_MODELS_NAME,
             SPECTATOR_TARGET_LOG_NAME,
@@ -1812,13 +1812,13 @@ mod tests {
     }
 
     /// The names have to carry the sense, since the value alone cannot. A cvar
-    /// called after its subject (`dodstudio_scoreboard`) leaves the reader to
+    /// called after its subject (`ds_scoreboard`) leaves the reader to
     /// guess whether 1 means "scoreboard" or "suppress the scoreboard"; one
     /// called after the action does not.
     #[test]
     fn suppression_cvars_are_named_after_the_action() {
         for name in [SCOREBOARD_NAME, CROSSHAIR_NAME, VOICE_NAME] {
-            let verb = name.trim_start_matches("dodstudio_");
+            let verb = name.trim_start_matches(console_name!(""));
             assert!(
                 verb.starts_with("hide_") || verb.starts_with("mute_"),
                 "{name} is named after its subject, not the action it performs"

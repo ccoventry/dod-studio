@@ -29,5 +29,5 @@ export function steamIdForms(id) {
 /** The console line that hides every frag in the kill feed except this
  *  player's. The SteamID64 has no `:`, so it reaches the hook unsplit. */
 export function deathmsgShowOnlyLine(forms) {
-  return `dodstudio_deathmsg block !${forms.id64}`;
+  return `ds_deathmsg block !${forms.id64}`;
 }

@@ -1,8 +1,8 @@
-//! `dodstudio_stay_behind_while_capturing`: keeps a background capture in the background.
+//! `ds_stay_behind_while_capturing`: keeps a background capture in the background.
 //! With it on, HLAE no longer pulls the game window to the front when a
 //! recording starts, and a minimised game is put back behind the other
 //! windows instead, since a minimised game draws nothing (#434). Its own
-//! setting, apart from `dodstudio_run_in_background`'s speed, so a user can
+//! setting, apart from `ds_run_in_background`'s speed, so a user can
 //! watch a batch at full speed with the game in front.
 //!
 //! ## What HLAE does

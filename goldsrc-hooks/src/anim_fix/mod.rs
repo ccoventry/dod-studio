@@ -91,7 +91,7 @@ use trace::{
 
 use crate::engine::{self, ClEntityS, ModelSPartial};
 
-/// The animation part of `dodstudio_spec_match_pov`: 0 is off, 1 is on.
+/// The animation part of `ds_spec_match_pov`: 0 is off, 1 is on.
 ///
 /// This used to be a ladder of four ways to treat the hand after a grenade
 /// throw (leave it empty, draw at once, never throw, draw after a second),
@@ -104,7 +104,7 @@ pub static LEVEL: AtomicI32 = AtomicI32::new(0);
 pub const LEVEL_OFF: i32 = 0;
 pub const LEVEL_MAX: i32 = 1;
 
-/// What each value is, for `dodstudio_debug_status` and the startup line.
+/// What each value is, for `ds_debug_status` and the startup line.
 pub fn level_description(level: i32) -> &'static str {
     match level {
         LEVEL_OFF => "off",
@@ -1080,7 +1080,7 @@ pub(crate) mod tests {
         guard
     }
 
-    /// Every option in range needs its own description -- `dodstudio_debug_status`
+    /// Every option in range needs its own description -- `ds_debug_status`
     /// and the usage text are how a session tells them apart.
     #[test]
     fn every_option_is_described_distinctly() {

@@ -1,4 +1,4 @@
-//! `dodstudio_hud_map_team_marker`: in HLTV, mark the player being watched
+//! `ds_hud_map_team_marker`: in HLTV, mark the player being watched
 //! on the overview map with his team's camera icon, not `spec_camera.spr`.
 //!
 //! ## What the game does
@@ -129,7 +129,7 @@ pub fn poll() {
     }
 }
 
-/// One line for `dodstudio_debug_status`, once it has been on: the setting,
+/// One line for `ds_debug_status`, once it has been on: the setting,
 /// and the team the game is choosing the icon by right now.
 pub fn status_line() -> Option<String> {
     if !ON.load(Ordering::Relaxed) {

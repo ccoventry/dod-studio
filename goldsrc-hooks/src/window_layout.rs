@@ -2,9 +2,9 @@
 //! bar, the events list, the Load Demo window, Options and the rest
 //! (issue #408):
 //!
-//! - `dodstudio_resizable_windows 1`: every one of them can be resized by
+//! - `ds_resizable_windows 1`: every one of them can be resized by
 //!   its edges and corners, like the console.
-//! - `dodstudio_remember_window_layout 1`: each one comes back where it was
+//! - `ds_remember_window_layout 1`: each one comes back where it was
 //!   last left, at the size it was left, after the game restarts.
 //!
 //! ## Why neither is a `.res` setting

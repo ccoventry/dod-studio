@@ -222,8 +222,8 @@ mod tests {
             Some(&b"echo hello"[..])
         );
         assert_eq!(
-            console_command(b"engine  dodstudio_seek_by -10 "),
-            Some(&b"dodstudio_seek_by -10"[..])
+            console_command(b"engine  ds_seek_by -10 "),
+            Some(&b"ds_seek_by -10"[..])
         );
         assert_eq!(console_command(b"engine "), None);
         assert_eq!(console_command(b"engine"), None);

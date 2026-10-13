@@ -1,11 +1,11 @@
 //! The HD page's misses view (#372 part 3): the last miss list the game
 //! wrote to the hook log, read back and grouped by map.
 //!
-//! `dodstudio_debug_hd_misses`, typed in the game's console, prints every
+//! `ds_debug_hd_misses`, typed in the game's console, prints every
 //! texture that kept its original this session and why, map by map
 //! (`texture_hires.rs`'s `misses_report`). It also writes the same lines to
 //! the hook log, `<logs>\dodstudio_goldsrc_hooks_<date>.log`, under a
-//! `texture_hires: dodstudio_debug_hd_misses --` line and up to a blank line.
+//! `texture_hires: ds_debug_hd_misses --` line and up to a blank line.
 //! That block is what this module reads; the game keeps the list in memory
 //! only, so there is nothing to read until the command has been typed.
 
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 /// The console command whose output this reads.
-pub const MISSES_COMMAND: &str = "dodstudio_debug_hd_misses";
+pub const MISSES_COMMAND: &str = "ds_debug_hd_misses";
 
 /// The hook's log files: `dodstudio_goldsrc_hooks_YYYYMMDD.log`
 /// (`goldsrc-hooks/src/debug.rs`'s `LOG_FILE_PREFIX`).
@@ -281,17 +281,17 @@ mod tests {
 
     /// Two lists in one log, as the hook writes them: the second one wins.
     const LOG: &str = "\
-[17:24:31.261] [demo   548.425] [dodstudio_goldsrc_hooks] texture_hires: dodstudio_debug_hd_misses --
-dodstudio_debug_hd_misses: 1 miss(es) this session, 1 different texture(s) (style \"ultrasharp\"). A texture several maps use is listed under each of them.
+[17:24:31.261] [demo   548.425] [dodstudio_goldsrc_hooks] texture_hires: ds_debug_hd_misses --
+ds_debug_hd_misses: 1 miss(es) this session, 1 different texture(s) (style \"ultrasharp\"). A texture several maps use is listed under each of them.
 == dod_railroad2_test: 1 (1 on purpose, 0 shared with other maps) ==
 -- left alone on purpose (1):
   world  black  32x32, tool texture, never built
 
-[17:24:35.718] [demo   552.884] [dodstudio_goldsrc_hooks] commands: dodstudio_debug_status --
-dodstudio_hide_scoreboard = 0 -- the scoreboard behaves normally
+[17:24:35.718] [demo   552.884] [dodstudio_goldsrc_hooks] commands: ds_debug_status --
+ds_hide_scoreboard = 0 -- the scoreboard behaves normally
 
-[22:05:57.463] [demo   828.700] [dodstudio_goldsrc_hooks] texture_hires: dodstudio_debug_hd_misses --
-dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (style \"plain\"). A texture several maps use is listed under each of them.
+[22:05:57.463] [demo   828.700] [dodstudio_goldsrc_hooks] texture_hires: ds_debug_hd_misses --
+ds_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (style \"plain\"). A texture several maps use is listed under each of them.
 == dod_anzio: 3 (1 on purpose, 1 shared with other maps) ==
 -- HD file is for a different version of the texture (1):
   world  bido_wall1  128x128, built from other pixels (2 loads)
@@ -363,8 +363,8 @@ dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (styl
 
     #[test]
     fn a_list_with_nothing_missed_has_no_maps() {
-        let log = "[10:00:00.000] [dodstudio_goldsrc_hooks] texture_hires: dodstudio_debug_hd_misses --\n\
-                   dodstudio_debug_hd_misses: every HD-eligible texture loaded this session was replaced (style \"plain\")\n\n";
+        let log = "[10:00:00.000] [dodstudio_goldsrc_hooks] texture_hires: ds_debug_hd_misses --\n\
+                   ds_debug_hd_misses: every HD-eligible texture loaded this session was replaced (style \"plain\")\n\n";
         let report = parse_last(log).unwrap();
         assert!(report.maps.is_empty());
         assert!(report.summary.starts_with("every HD-eligible texture"));
@@ -404,7 +404,7 @@ dodstudio_debug_hd_misses: 5 miss(es) this session, 4 different texture(s) (styl
     fn the_format_matches_the_hook() {
         let hook = include_str!("../../../goldsrc-hooks/src/texture_hires.rs");
         assert!(hook.contains("console_name!(\"debug_hd_misses\")"));
-        assert_eq!(MISSES_COMMAND, "dodstudio_debug_hd_misses");
+        assert_eq!(MISSES_COMMAND, "ds_debug_hd_misses");
         assert!(hook.contains("\"texture_hires: {MISSES_NAME} --\\n{}\""));
         for (heading, _) in HEADINGS {
             assert!(hook.contains(&format!("=> \"{heading}\"")), "{heading}");

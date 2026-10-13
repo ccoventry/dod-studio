@@ -1,4 +1,4 @@
-//! `dodstudio_crosshair`: hide DoD's crosshair, and make it stay hidden.
+//! `ds_hide_crosshair`: hide DoD's crosshair, and make it stay hidden.
 //!
 //! ## Why the stock cvar is not enough
 //!
@@ -177,7 +177,7 @@ pub fn hidden() -> bool {
     HIDDEN_NOW.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     if !hidden() {
         return "the crosshair draws normally (the stock `crosshair` cvar cannot turn it off -- CHud::Redraw forces the value back every frame)".into();

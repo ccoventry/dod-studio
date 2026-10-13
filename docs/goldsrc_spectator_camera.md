@@ -1,7 +1,7 @@
 # The spectator camera under `spec_match_pov`: following one player, and the in-eye height
 
 Two fixes to where the camera sits while watching a player from an HLTV demo,
-both part of the `dodstudio_spec_match_pov` / `spec_lock` / `spec_target`
+both part of the `ds_spec_match_pov` / `spec_lock` / `spec_target`
 family in the hook DLL: which player the camera is on (#206, first section) and
 how high the in-eye camera is when that player goes prone (#329, second). They
 were `goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`.
@@ -14,8 +14,8 @@ Two settings in the hook DLL (`goldsrc-hooks/src/spectator_follow.rs`):
 
 | | |
 | --- | --- |
-| `dodstudio_spec_lock 1` | the camera stays on the player being watched when he dies, instead of moving to the next player four seconds later. A cvar, off by default. |
-| `dodstudio_spec_target <player>` | puts the camera on a player, by number. `dodstudio_deathmsg players` lists the numbers. With no number it says who the camera is on. A command. |
+| `ds_spec_lock 1` | the camera stays on the player being watched when he dies, instead of moving to the next player four seconds later. A cvar, off by default. |
+| `ds_spec_target <player>` | puts the camera on a player, by number. `ds_deathmsg players` lists the numbers. With no number it says who the camera is on. A command. |
 
 Both act on HLTV demo playback only. A first-person demo's view is the
 recording player's own.
@@ -43,7 +43,7 @@ after he dies it issues the keypress a viewer would:
 +0x2c7a6  call [pfnClientCmd]
 ```
 
-Seen live, with `dodstudio_debug_log_spectator_target 1`, on
+Seen live, with `ds_debug_log_spectator_target 1`, on
 `monday-wsod25_r07_m1_h1_hltv`:
 
 ```text
@@ -67,12 +67,12 @@ target (near the ground where he fell); it is his view again when he respawns,
 
 ### The target
 
-`dodstudio_spec_target <player>` writes `g_iUser2`. The in-eye camera, the
+`ds_spec_target <player>` writes `g_iUser2`. The in-eye camera, the
 viewmodel and the spectator panel read it every frame, and the view is on the
 new player on the next frame:
 
 ```text
-573.790  dodstudio_spec_target: the camera is on player 9
+573.790  ds_spec_target: the camera is on player 9
 573.796  g_iUser2 = 9
 573.803  anim_fix: now spectating idx 9 (was idx 2)
 ```
@@ -98,7 +98,7 @@ pre-Anniversary and 25th Anniversary builds, and both were tested.
 
 Watching a player in first person from an HLTV demo, the camera stays at
 crouch height when he goes prone. His own view drops to the ground.
-`dodstudio_spec_match_pov 1` makes the spectated view do the same. The code is
+`ds_spec_match_pov 1` makes the spectated view do the same. The code is
 `goldsrc-hooks/src/spectator_eye.rs`.
 
 ### Why the game gets it wrong
@@ -157,4 +157,4 @@ to frame only the float changes. The standing and dead branches are untouched.
 wall at about 9:15, recorded with the switch on and off, on both builds. On:
 the camera is at ground level and the wall fills the view. Off: the camera
 looks over the wall from crouch height.
-`dodstudio_debug_log_weapon_model 1` logs each change of stance it sees.
+`ds_debug_log_weapon_model 1` logs each change of stance it sees.

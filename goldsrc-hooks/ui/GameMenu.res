@@ -6,7 +6,7 @@
 	"1"
 	{
 		"label" "DoD Studio"
-		"command" "engine dodstudio_panel 1"
+		"command" "engine ds_panel 1"
 	}
 	"2"
 	{

@@ -132,7 +132,7 @@
 		"enabled"		"1"
 		"labelText"		"Yes"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review yes"
+		"Command"		"engine ds_review yes"
 		"helptext"		"Keep it: the row is marked Keep, with this kill range and note. Then the next highlight."
 	}
 	"NoButton"
@@ -147,7 +147,7 @@
 		"enabled"		"1"
 		"labelText"		"No"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review no"
+		"Command"		"engine ds_review no"
 		"helptext"		"Not this one. The note is still saved. Then the next highlight."
 	}
 	"ReplayButton"
@@ -162,7 +162,7 @@
 		"enabled"		"1"
 		"labelText"		"Replay"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review replay"
+		"Command"		"engine ds_review replay"
 		"helptext"		"Watch this highlight again."
 	}
 	"BackButton"
@@ -177,7 +177,7 @@
 		"enabled"		"1"
 		"labelText"		"Back"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review back"
+		"Command"		"engine ds_review back"
 		"helptext"		"The previous highlight, without answering this one."
 	}
 	"NextButton"
@@ -192,7 +192,7 @@
 		"enabled"		"1"
 		"labelText"		"Next"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review next"
+		"Command"		"engine ds_review next"
 		"helptext"		"The next highlight, without answering this one."
 	}
 	"StopButton"
@@ -207,7 +207,7 @@
 		"enabled"		"1"
 		"labelText"		"Stop"
 		"textAlignment"		"center"
-		"Command"		"engine dodstudio_review stop"
+		"Command"		"engine ds_review stop"
 		"helptext"		"End the review. Every answer so far is already in DoD Studio."
 	}
 	"ReviewHint"
@@ -220,7 +220,7 @@
 		"tall"		"24"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Keys: bind a key to dodstudio_review yes, no, replay or next in the console."
+		"labelText"		"Keys: bind a key to ds_review yes, no, replay or next in the console."
 		"textAlignment"		"west"
 		"helptext"		"Bind keys so the mouse isn't needed."
 	}

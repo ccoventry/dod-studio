@@ -1,7 +1,7 @@
 # The spectator bars: earlier R&D (superseded)
 
 > **Archived 2026-10. Superseded by `docs/goldsrc_spectator_bars.md`**, which
-> describes the shipped `dodstudio_hide_spectator_bars` (issue #328,
+> describes the shipped `ds_hide_spectator_bars` (issue #328,
 > 2026-09-30). Everything below is the research that led there. It
 > contains claims and offsets that were later corrected (e.g. `CDoDSpectatorGUI`
 > is at `DoDViewport+0x744`, not `+0x740`; `CBottomBar` at `CSpectatorGUI+0x118`,
@@ -225,7 +225,7 @@ bar-specific.
 
 ---
 
-## Attempted and parked: `dodstudio_hide_spectator_bars`
+## Attempted and parked: `ds_hide_spectator_bars`
 
 **Status (2026-09-21): parked.** Not wired into the crate (`goldsrc-hooks/src/spectator_bars.rs`
 exists on disk, but `lib.rs` doesn't declare it as a `mod`) after two live
@@ -295,7 +295,7 @@ never going to be a full fix anyway.
 That leaves one real open question, which a static scan can't answer for an
 indirect (virtual) call site: is `SetVisible` ever called on these two
 objects at all during ordinary play? `spectator_bars.rs` had the trampoline
-increment a hit counter, surfaced in `dodstudio_debug_status`, to settle it
+increment a hit counter, surfaced in `ds_debug_status`, to settle it
 empirically rather than by more guessing.
 
 **Second live test, same day: the hit count was 0.** `SetVisible` is
@@ -338,7 +338,7 @@ parent/sibling panel `BottomSpectator.res` doesn't even have a section for,
 drawn unconditionally by something else).
 
 **Narrower goal for next time, per a 2026-09-21 conversation with the
-user:** a `dodstudio_hide_spectator_bars` command was never the requirement
+user:** a `ds_hide_spectator_bars` command was never the requirement
 -- the user already has a working, no-code fix for the top bar
 (`Spectator.res`'s `visible`/`enabled` keys, edited by hand) and would be
 satisfied with the same thing working for the bottom bar, instead of a
@@ -381,7 +381,7 @@ linked into `client.dll`.
 
 Moved here verbatim from the "spectator bars" section of
 `docs/goldsrc_hud_suppression.md` when that doc was split (2026-10). It is the
-state before `dodstudio_hide_spectator_bars` shipped, by the route its last
+state before `ds_hide_spectator_bars` shipped, by the route its last
 paragraph guessed at, one level down: vgui2's own `IPanel::PaintTraverse`
 rather than the panel's vtable.
 

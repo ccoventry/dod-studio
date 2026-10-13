@@ -852,7 +852,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   const progressBar = document.querySelector('#capture-progress-bar');
 
   // No "keep the game focused" reminder: every batch turns on
-  // dodstudio_run_in_background, so a game behind other windows or minimised
+  // ds_run_in_background, so a game behind other windows or minimised
   // fast-forwards at full speed (#701, #722).
   const setBatchRunning = (running) => {
     if (progressContainer && running) progressContainer.style.display = 'block';

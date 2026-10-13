@@ -8,8 +8,8 @@ Written for the question behind #405: can the capture batch move from
 `playdemo` to `viewdemo`, so each clip is reached by a jump rather than a
 `host_framerate` fast-forward?
 
-> **Status 2026-10:** the jump is built as `dodstudio_seek_to` / `_by` /
-> `dodstudio_seek_skip_between` (`goldsrc-hooks/src/demo_seek.rs`), and #405
+> **Status 2026-10:** the jump is built as `ds_seek_to` / `_by` /
+> `ds_seek_skip_between` (`goldsrc-hooks/src/demo_seek.rs`), and #405
 > (batch under `viewdemo`) is still open. Long forward jumps drop joins and team
 > picks (#596); a fix that steps them 5 s per frame is the open PR #601, not yet
 > on `dev`.
@@ -93,7 +93,7 @@ patched demos with `+viewdemo`.
 
 `viewdemo` does not compute the view for an HLTV demo, so it does not get
 around DoD's client discarding `DRC_CMD_CHASE`/`DRC_CMD_INEYE` (#222), and it
-is no route to #206 (closed since: `dodstudio_spec_lock`, see
+is no route to #206 (closed since: `ds_spec_lock`, see
 `docs/goldsrc_spectator_camera.md`).
 
 - `Server::ParseHLTV` marks an HLTV demo (`HLTV_ACTIVE`), and an HLTV world's
@@ -160,9 +160,9 @@ The engine already has `dem_jump <seconds>` (relative, then pauses),
 `dem_start`, `dem_pause <0|1>`, `dem_speed <rate>` and `dem_save`, all from
 `DemoPlayer.dll`.
 
-`dodstudio_seek_to <seconds>` and `dodstudio_seek_by <seconds>`
+`ds_seek_to <seconds>` and `ds_seek_by <seconds>`
 (`goldsrc-hooks/src/demo_seek.rs`) jump without pausing and refuse while the
-demo is still loading. With `dodstudio_seek_skip_between 1` they also move the
+demo is still loading. With `ds_seek_skip_between 1` they also move the
 two "last sent" marks (`this+0x3c0`, `this+0x3d8`) to the landing frame, so
 the next frame runs that frame's commands and nothing before it. That suits a
 batch, whose skipped commands belong to other clips; it does not suit a POV
@@ -182,19 +182,19 @@ The player sends a jump's whole catch-up as **one** message, built in its
   overflow.`, and the player carries on from the landing frame alone.
 
 A 20-minute jump in an HLTV demo did exactly that on 2026-10-04
-(`dodstudio_seek_to: 90.10 -> 1335.30 s`, then the overflow line): a player
+(`ds_seek_to: 90.10 -> 1335.30 s`, then the overflow line): a player
 who joined 6:42 into the recording had no name in the kill feed and no team,
-the scoreboard counted 0 Allies and 0 Axis, and `dodstudio_spec_target` found
+the scoreboard counted 0 Allies and 0 Axis, and `ds_spec_target` found
 no such player. Players already on the server when the recording began were
 fine, since their info is in the signon data.
 
-So `dodstudio_seek_to`/`_by` take a forward jump of more than 5 seconds in
+So `ds_seek_to`/`_by` take a forward jump of more than 5 seconds in
 5-second steps, one per sent frame (each step waits for `m_LastFrameTime` to
 reach it). Measured with `analysis/examples/seek_burst.rs` on four HLTV
 demos: no 5-second window held more than 55 KB of network data, entities
 included, and the catch-up leaves entities out. Backward jumps replay nothing
 either way, so going back past a join or a team change still shows the later
-state. `dodstudio_seek_skip_between 1` jumps at once, as before.
+state. `ds_seek_skip_between 1` jumps at once, as before.
 
 ### The replayed console commands (#702)
 
@@ -218,5 +218,5 @@ Nothing found blocks it. Today's patched chain demos would run under
 hook holds the clip list and seeks through it by world time -- is the one that
 needs the skip: without it, a jump over earlier clips replays their
 `mirv_recordmovie_start`/`stop`. Still to measure live: one batch under
-`viewdemo`, and the load times above. (`dodstudio_seek_*` is in use; its
+`viewdemo`, and the load times above. (`ds_seek_*` is in use; its
 forward-jump problem is #596.)

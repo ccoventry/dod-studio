@@ -1,4 +1,4 @@
-//! The Review tab (#623): which highlight `dodstudio_review` is on, and the
+//! The Review tab (#623): which highlight `ds_review` is on, and the
 //! boxes its answer's kill range and note are read from.
 //!
 //! The labels follow [`crate::review::tab_view`] every frame the tab shows.

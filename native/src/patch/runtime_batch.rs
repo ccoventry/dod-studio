@@ -1,4 +1,4 @@
-//! A capture batch the hook DLL runs on the original demos (`dodstudio_batch`,
+//! A capture batch the hook DLL runs on the original demos (`ds_batch`,
 //! goldsrc-hooks `batch.rs`), instead of patched copies (issue #434, step 3).
 //!
 //! `build_batch_queue` still plans the batch: the blocks, their take folders,
@@ -43,7 +43,7 @@ pub const CLEAR_DECALS: &str = "dodstudio_clear_decals";
 pub const SETTLE_SECONDS: f64 = 30.0;
 
 /// The hook DLL's batch command.
-pub const BATCH_COMMAND: &str = "dodstudio_batch";
+pub const BATCH_COMMAND: &str = "ds_batch";
 
 /// One kill whose frame and `viewdemo` time are both known.
 #[derive(Debug, Clone, Copy)]
@@ -440,21 +440,18 @@ mod tests {
         assert_eq!(
             early_lines(true),
             [
-                "dodstudio_run_in_background 1",
-                "dodstudio_stay_behind_while_capturing 1",
-                "dodstudio_batch away"
+                "ds_run_in_background 1",
+                "ds_stay_behind_while_capturing 1",
+                "ds_batch away"
             ]
         );
         assert_eq!(
             early_lines(false),
-            [
-                "dodstudio_run_in_background 1",
-                "dodstudio_stay_behind_while_capturing 0"
-            ]
+            ["ds_run_in_background 1", "ds_stay_behind_while_capturing 0"]
         );
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),
-            ["dodstudio_batch start \"C:/x y/b.txt\""]
+            ["ds_batch start \"C:/x y/b.txt\""]
         );
     }
 }

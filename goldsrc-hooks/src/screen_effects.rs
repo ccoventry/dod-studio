@@ -1,4 +1,4 @@
-//! `dodstudio_hide_headshot_red_screen` and `dodstudio_hide_screen_shake`: keep two
+//! `ds_hide_headshot_red_screen` and `ds_hide_screen_shake`: keep two
 //! server effects out of a POV demo's picture (#606).
 //!
 //! ## What they are

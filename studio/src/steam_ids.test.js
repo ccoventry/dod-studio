@@ -31,6 +31,6 @@ describe('steamIdForms (#536)', () => {
 
   it('builds the show-only console line from the SteamID64', () => {
     expect(deathmsgShowOnlyLine(steamIdForms('76561197962734863')))
-      .toBe('dodstudio_deathmsg block !76561197962734863');
+      .toBe('ds_deathmsg block !76561197962734863');
   });
 });

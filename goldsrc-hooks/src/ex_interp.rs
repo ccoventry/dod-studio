@@ -1,4 +1,4 @@
-//! `dodstudio_ex_interp_max`: raise the engine's interpolation-window ceiling.
+//! `ds_ex_interp_max`: raise the engine's interpolation-window ceiling.
 //!
 //! ## `ex_interp` is engine-managed, which is the whole problem
 //!
@@ -262,7 +262,7 @@ pub fn active() -> i32 {
     ACTIVE_MS.load(Ordering::Relaxed)
 }
 
-/// One line for `dodstudio_status`.
+/// One line for `ds_debug_status`.
 pub fn status() -> String {
     let anniversary =
         SCANNED_BASE.load(Ordering::Relaxed) != 0 && BUILD.load(Ordering::Relaxed) == 1;

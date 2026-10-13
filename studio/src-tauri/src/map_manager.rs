@@ -244,6 +244,30 @@ pub struct NoopCommandRow {
     pub source: String,
 }
 
+/// A hook console name from before #555 (`dodstudio_*`), in a config or a
+/// command list (`cfg_scan::renamed_commands`, `CfgScan::renamed`). The game
+/// no longer knows it, so the line does nothing; never blocking, and the app
+/// never rewrites the config.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenamedCommandRow {
+    pub old: String,
+    pub new: String,
+    /// "Initial Commands", "Scheduled Commands", or "<file>, line <n>".
+    pub source: String,
+}
+
+fn renamed_rows(commands: &[String], source: &str) -> Vec<RenamedCommandRow> {
+    native::patch::cfg_scan::renamed_commands(commands)
+        .into_iter()
+        .map(|(old, new, _)| RenamedCommandRow {
+            old,
+            new,
+            source: source.to_string(),
+        })
+        .collect()
+}
+
 /// An Initial or Scheduled Command the engine's demo command filter drops
 /// (`cfg_scan::demo_filter_rule`, #679). Never blocking: the capture still
 /// works, the command just never runs.
@@ -330,6 +354,9 @@ pub struct CfgReport {
     /// warning this report carries: everything else degrades a capture,
     /// this one crashes the game.
     pub fatal_cvars: Vec<CfgFatalRow>,
+    /// Hook console names from before #555 in the configs, Initial Commands
+    /// or Scheduled Commands, with the name that replaced each.
+    pub renamed: Vec<RenamedCommandRow>,
     /// `dod/config.cfg` exists and is not read-only (#478). The engine
     /// rewrites that file from its current values whenever the game quits,
     /// so anything Initial or Scheduled Commands set ends up saved in it.
@@ -610,6 +637,19 @@ pub async fn scan_game_configs(
             })
             .collect();
 
+        // Configs first, as the engine runs them first.
+        let mut renamed: Vec<RenamedCommandRow> = scan
+            .renamed
+            .iter()
+            .map(|r| RenamedCommandRow {
+                old: r.old.clone(),
+                new: r.new.clone(),
+                source: format!("{}, line {}", r.file_name(), r.line),
+            })
+            .collect();
+        renamed.extend(renamed_rows(&init_commands, "Initial Commands"));
+        renamed.extend(renamed_rows(&command_texts, "Scheduled Commands"));
+
         CfgReport {
             unseen,
             conflicts,
@@ -625,6 +665,7 @@ pub async fn scan_game_configs(
             filtered_init,
             filtered_scheduled,
             fatal_cvars,
+            renamed,
             config_cfg_writable,
         }
     })

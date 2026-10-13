@@ -1,4 +1,4 @@
-//! The crosshair part of `dodstudio_spec_match_pov`: draw the spectator crosshair
+//! The crosshair part of `ds_spec_match_pov`: draw the spectator crosshair
 //! from the same sprite and the same tile the player's own `cl_xhair_style`
 //! picks. (It had a cvar of its own, `dodstudio_match_pov_crosshair`, until
 //! the three match-POV settings became one.)
@@ -86,7 +86,7 @@
 //! weapon-accuracy state the same way the animation fix re-derives body
 //! animation, and it is not known whether that state is replicated in a demo
 //! at all. Out of scope here: this leaves the stock spectator rect in place
-//! for style 0 and says so in `dodstudio_debug_status` rather than inventing a
+//! for style 0 and says so in `ds_debug_status` rather than inventing a
 //! tile. Filed as a follow-up.
 //!
 //! ## `cl_xhair_style < 0` draws the whole sheet
@@ -132,7 +132,7 @@
 //! and drew all sixteen tiles of `customXHair.spr` below and right of the
 //! screen centre.
 //!
-//! ## It loses to `dodstudio_hide_crosshair`
+//! ## It loses to `ds_hide_crosshair`
 //!
 //! That setting stubs `CHudDoDCrossHair::Draw`'s prologue, so neither branch
 //! runs and nothing is drawn. Hiding wins by construction, with no interlock
@@ -216,7 +216,7 @@ static SPAN_ADDRESS: AtomicUsize = AtomicUsize::new(0);
 static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 
 /// The style currently written into the code, or 0 for the stock rect. Read by
-/// [`status`] and by `dodstudio_debug_status`.
+/// [`status`] and by `ds_debug_status`.
 static ACTIVE_STYLE: AtomicI32 = AtomicI32::new(0);
 
 /// Why the player's own view would have no crosshair this frame, as
@@ -442,10 +442,10 @@ fn matching() -> bool {
     ACTIVE_STYLE.load(Ordering::Relaxed) != 0
 }
 
-/// One line for `dodstudio_debug_status`.
+/// One line for `ds_debug_status`.
 ///
 /// Reports what is patched into the code, which is not the same question as
-/// what is on screen: `dodstudio_hide_crosshair` stubs `Draw`'s prologue, so
+/// what is on screen: `ds_hide_crosshair` stubs `Draw`'s prologue, so
 /// none of this ever runs while it is on. Said here rather than left for the
 /// player to work out from two settings that otherwise look unrelated.
 pub fn status() -> String {
@@ -709,7 +709,7 @@ mod tests {
         ACTIVE_STYLE.store(saved, Ordering::Release);
     }
 
-    /// `dodstudio_hide_crosshair` stubs `Draw`'s prologue, so nothing this
+    /// `ds_hide_crosshair` stubs `Draw`'s prologue, so nothing this
     /// module patches ever runs while it is on. `status()` has to say so,
     /// rather than describe a tile that is not actually visible.
     #[test]

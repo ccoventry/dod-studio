@@ -1,16 +1,16 @@
-# The `dodstudio_*` console surface
+# The `ds_*` console surface
 
 One place to scan the whole `goldsrc-hooks` cvar/command surface without
 grepping `commands.rs`. Closes issue #313.
 
-Every name here shares the `dodstudio_` prefix ([`names.rs`](../goldsrc-hooks/src/names.rs)'s
-`console_name!` macro). `dodstudio_debug_status` reports the live value of
+Every name here shares the `ds_` prefix ([`names.rs`](../goldsrc-hooks/src/names.rs)'s
+`console_name!` macro). `ds_debug_status` reports the live value of
 everything below in one place (cvars unconditionally; the two fixes with
 preconditions only while enabled), and each item's own doc file has the full
 engine-level detail this table deliberately doesn't repeat.
 
 Diagnostics (status, logging, the HD miss list) all sit under
-`dodstudio_debug_`, so typing that prefix in the console lists every one of
+`ds_debug_`, so typing that prefix in the console lists every one of
 them; everything else is a setting you'd use for a capture. No name is the
 start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
@@ -31,39 +31,39 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 
 | cvar | default | what it does | doc |
 | --- | --- | --- | --- |
-| `dodstudio_spec_match_pov` | `0` (off) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` at launch | one switch for making a spectated first-person view look and sound like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the gunshots an HLTV demo has no fire event for (about 60% of rounds in some recordings), restored with their sound, muzzle flash, tracer and impact; and the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `dodstudio_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while he sprints, jumps, goes prone, crawls or climbs a ladder, as his own does (`goldsrc-hooks/src/spectator_gun.rs`). All five stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. `2` also logs every restored gunshot. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
-| `dodstudio_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
-| `dodstudio_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
-| `dodstudio_hide_scoreboard` | `0` | stops a POV demo's recorded TAB presses from putting the scoreboard over the shot | [`goldsrc_scoreboard.md`](goldsrc_scoreboard.md) |
-| `dodstudio_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
-| `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_crosshair.md`](goldsrc_crosshair.md) |
-| `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
-| `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
-| `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
-| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
-| `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording, and a minimised game is put back behind the other windows instead, since a minimised game draws nothing. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
-| `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
-| `dodstudio_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
-| `dodstudio_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (always amplitude 15 for 1 s; no WSOD25 map has an `env_shake`) (#606) | same |
-| `dodstudio_show_demo_scope` | `0` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever he zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307) | `goldsrc-hooks/src/demo_scope.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
-| `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
-| `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
-| `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
-| `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
-| `dodstudio_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
-| `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
-| `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
-| `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
-| `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
-| `dodstudio_debug_keep_detail_cache` | `0` | puts the engine's detail texture cache back, to compare. By default the hook bypasses that cache (#463, #703): `DT_SetRenderState` skips binding a detail texture it thinks is still bound, and nothing ever resets what it remembers, so a run of surfaces can draw with no detail, or another surface's, depending on where the camera stands. Seen on the 25th Anniversary build: the wall left of the double doors leaving harrington's Allied spawn | `goldsrc-hooks/src/detail_cache.rs` |
-| `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
-| `dodstudio_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders (and `../`) and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
-| `dodstudio_demo_list_hide_empty` | `1` | while folders are listed, a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
-| `dodstudio_demo_list_count_subfolders` | `1` | a folder row's demo count on the Demos tab includes its subfolders; `0` counts only the demos directly in it. Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
-| `dodstudio_viewdemo_in_panel` | `1` | `viewdemo` opens the DoD Studio window (`dodstudio_panel`) on its Playback tab, which takes the VCR bar's time slider and time label; the stock bar stays off screen while this is on, with the window open or closed (ESC → DoD Studio opens the window again); `0` brings the stock bar back | `goldsrc-hooks/src/studio_panel.rs`, #408 |
-| `dodstudio_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
-| `dodstudio_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
-| `dodstudio_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
+| `ds_spec_match_pov` | `0` (off) unless `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` at launch | one switch for making a spectated first-person view look and sound like the player's own recording. It turns on five things together: the first-person weapon's animations (firing, reloading, drawing, the bipod families, and grenades including primed ones); the gunshots an HLTV demo has no fire event for (about 60% of rounds in some recordings), restored with their sound, muzzle flash, tracer and impact; and the spectator crosshair drawn from `sprites/customXHair.spr` with the tile `cl_xhair_style` gives the POV view (needs `cl_xhair_style` 1 or higher, see issue #308; loses to `ds_hide_crosshair`), and hidden when the player's own would be while playing: sprinting, in the air after a jump, going prone or getting up, crawling, on a ladder, reloading, just after a weapon switch, cycling a bolt rifle, holding a knife, spade or sniper rifle, or a machine gun that is not deployed; the camera dropping to the ground when the player goes prone, where the game leaves it at crouch height; and the gun lowering off screen while he sprints, jumps, goes prone, crawls or climbs a ladder, as his own does (`goldsrc-hooks/src/spectator_gun.rs`). All five stand down while a POV demo plays, which is the recording they match (#613); live play and HLTV demos are unaffected. `2` also logs every restored gunshot. It replaces `dodstudio_hltv_show_viewmodel_animations`, `dodstudio_hltv_play_missing_gunshots` and `dodstudio_match_pov_crosshair`; `dodstudio_hltv_gunshots_fix` and `dodstudio_hltv_gunshot_attenuation` are gone, since making gunfire carry further than POV hears it is not matching POV | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md), [`goldsrc_hltv_missing_gunshots.md`](goldsrc_hltv_missing_gunshots.md), [`goldsrc_crosshair.md`](goldsrc_crosshair.md) §2, [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
+| `ds_debug_log_weapon_model` | `0` | logs the third-person weapon model the spectated player holds, each time it changes | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) |
+| `ds_debug_log_spectator_target` | `0` | logs who the spectator HUD thinks is being followed next to the entity the engine renders a viewmodel for, whenever either changes (issue #206) | `goldsrc-hooks/src/spectator_target.rs` |
+| `ds_hide_scoreboard` | `0` | stops a POV demo's recorded TAB presses from putting the scoreboard over the shot | [`goldsrc_scoreboard.md`](goldsrc_scoreboard.md) |
+| `ds_mute_voice_commands` | `0` | silences "fire in the hole!" and the rest, without touching the game's own `.wav` files; subtitles and speaker icons still show | [`goldsrc_hud_suppression.md`](goldsrc_hud_suppression.md) |
+| `ds_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_crosshair.md`](goldsrc_crosshair.md) |
+| `ds_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
+| `ds_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
+| `ds_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
+| `ds_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
+| `ds_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording, and a minimised game is put back behind the other windows instead, since a minimised game draws nothing. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
+| `ds_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
+| `ds_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
+| `ds_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (always amplitude 15 for 1 s; no WSOD25 map has an `env_shake`) (#606) | same |
+| `ds_show_demo_scope` | `0` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever he zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307) | `goldsrc-hooks/src/demo_scope.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
+| `ds_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
+| `ds_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
+| `ds_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
+| `ds_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
+| `ds_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models and sprites already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
+| `ds_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `ds_hd_enabled` | same |
+| `ds_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
+| `ds_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
+| `ds_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
+| `ds_debug_keep_detail_cache` | `0` | puts the engine's detail texture cache back, to compare. By default the hook bypasses that cache (#463, #703): `DT_SetRenderState` skips binding a detail texture it thinks is still bound, and nothing ever resets what it remembers, so a run of surfaces can draw with no detail, or another surface's, depending on where the camera stands. Seen on the 25th Anniversary build: the wall left of the double doors leaving harrington's Allied spawn | `goldsrc-hooks/src/detail_cache.rs` |
+| `ds_seek_skip_between` | `0` | `1` makes `ds_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
+| `ds_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders (and `../`) and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
+| `ds_demo_list_hide_empty` | `1` | while folders are listed, a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
+| `ds_demo_list_count_subfolders` | `1` | a folder row's demo count on the Demos tab includes its subfolders; `0` counts only the demos directly in it. Counted off the game thread, with a progress bar on the Demos tab; the hook log says how long each count took (`folder_counts:`) | same |
+| `ds_viewdemo_in_panel` | `1` | `viewdemo` opens the DoD Studio window (`ds_panel`) on its Playback tab, which takes the VCR bar's time slider and time label; the stock bar stays off screen while this is on, with the window open or closed (ESC → DoD Studio opens the window again); `0` brings the stock bar back | `goldsrc-hooks/src/studio_panel.rs`, #408 |
+| `ds_console_in_panel` | `1` | the console key (`toggleconsole`) opens the DoD Studio window on its Console tab, which holds the real console's history, input line and Submit button; the key again goes back to the game and leaves the window open for the next ESC | `goldsrc-hooks/src/studio_panel.rs`, #408 |
+| `ds_resizable_windows` | `0` | every GameUI window (VCR bar, events list, Load Demo, Options...) can be resized by its edges, like the console; its controls stretch as far as their `.res` `autoResize`/`pinCorner` allow. `0` puts back the ones it changed | `goldsrc-hooks/src/window_layout.rs`, #408 |
+| `ds_remember_window_layout` | `0` | each GameUI window comes back where it was left, and at its size when resizable, after the game restarts; kept in `%APPDATA%\dod-studio\goldsrc_hooks_windows.txt` | same |
 
 The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 `hw.dll` (#370).
@@ -73,10 +73,10 @@ The HD rows work the same on the pre-Anniversary and the 25th Anniversary
 Always a command rather than a cvar when it has subcommands or a variable
 argument count, which a cvar's single value can't hold.
 
-### `dodstudio_debug_status`
+### `ds_debug_status`
 
 No arguments. Always reports the four suppression cvars, the two
-`debug_log_*` cvars and `dodstudio_deathmsg`'s own status; the rest
+`debug_log_*` cvars and `ds_deathmsg`'s own status; the rest
 (including the animation fix and gunshots fix) are only included while
 enabled, since a flag being on says nothing about whether
 their preconditions are currently being met and they'd otherwise be noise
@@ -84,7 +84,7 @@ when off. Force-calls the per-frame `poll()` first, so chaining a cvar set
 and a status query on one `;`-joined console line reports the post-change
 state, not the state from before that line ran.
 
-### `dodstudio_deathmsg`
+### `ds_deathmsg`
 
 Raises DoD's hard-coded four-line cap on the kill feed, moves it, hides
 frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
@@ -93,15 +93,15 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 
 | subcommand | does |
 | --- | --- |
-| `dodstudio_deathmsg` | status + usage |
-| `dodstudio_deathmsg max <4..127>` | lines of kill feed shown at once (default 4) |
-| `dodstudio_deathmsg offset <-4096..4096>` | y the feed starts at (default 20); negative pulls it above the top of the screen |
-| `dodstudio_deathmsg offset default` | hand y back to the default layout: while spectating, just below the spectator bar (at the top while it's hidden, under the minimap while `_cl_minimap 2` shows it) |
-| `dodstudio_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
-| `dodstudio_deathmsg block !<id>...` | hide everything *except* these players |
-| `dodstudio_deathmsg block clear` | stop hiding anything |
-| `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
-| `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
+| `ds_deathmsg` | status + usage |
+| `ds_deathmsg max <4..127>` | lines of kill feed shown at once (default 4) |
+| `ds_deathmsg offset <-4096..4096>` | y the feed starts at (default 20); negative pulls it above the top of the screen |
+| `ds_deathmsg offset default` | hand y back to the default layout: while spectating, just below the spectator bar (at the top while it's hidden, under the minimap while `_cl_minimap 2` shows it) |
+| `ds_deathmsg block <id>...` | hide frags involving these players (replaces the set) |
+| `ds_deathmsg block !<id>...` | hide everything *except* these players |
+| `ds_deathmsg block clear` | stop hiding anything |
+| `ds_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
+| `ds_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
 
 A `block` id is any of:
 
@@ -112,24 +112,24 @@ A `block` id is any of:
   console splits it at each `:`, and the hook joins it back. It is matched
   against each player's userinfo `*sid` at every death notice, so one command
   works across a whole batch of demos and survives reconnects.
-  `dodstudio_deathmsg players` lists every player's slot and SteamID.
+  `ds_deathmsg players` lists every player's slot and SteamID.
 - **`self`**: the recording player in a POV demo. An HLTV demo has no
   recording player, so there `self` matches nobody, and the console says so
   once.
 
-Mix them freely. `dodstudio_deathmsg block !self !76561197975574370` shows
+Mix them freely. `ds_deathmsg block !self !76561197975574370` shows
 only your own frags in both kinds of demo: in a POV demo both entries point
 at you, and in an HLTV demo `self` drops out and the SteamID finds you.
 
-### `dodstudio_hide_hudelement`
+### `ds_hide_hudelement`
 
-`dodstudio_hide_hudelement <name> <0|1>` with no arguments lists the nine
+`ds_hide_hudelement <name> <0|1>` with no arguments lists the nine
 elements DoD draws that the stock `cl_hud_*` cvars don't already reach --
 chat, the kill feed, the status bar, the objective icons and the rest.
-`dodstudio_hide_hudelement all 0` puts everything back. See
+`ds_hide_hudelement all 0` puts everything back. See
 [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md).
 
-### `dodstudio_clear_decals`
+### `ds_clear_decals`
 
 No arguments. Empties the engine's 4096-slot decal pool on command,
 unlinking each decal from its surface first the way the engine's own remove
@@ -137,10 +137,10 @@ functions do. Nothing to do with `r_decals`. Works on the pre-Anniversary
 and the 25th Anniversary `hw.dll`.
 See [`goldsrc_decals.md`](goldsrc_decals.md).
 
-### `dodstudio_seek_to` / `dodstudio_seek_by`
+### `ds_seek_to` / `ds_seek_by`
 
-`dodstudio_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
-clock the editor's events list shows); `dodstudio_seek_by <seconds>` jumps
+`ds_seek_to <seconds>` jumps `viewdemo` playback to a world time (the
+clock the editor's events list shows); `ds_seek_by <seconds>` jumps
 from where playback is, back when negative. Neither pauses, and both refuse
 while the demo is still loading or under `playdemo`. Pre-Anniversary and 25th
 Anniversary `DemoPlayer.dll`.
@@ -152,21 +152,21 @@ replays (a POV demo's key presses) are dropped and the keys let go on landing,
 since the engine would run them one a frame long after it (#702). Anything
 after the time is
 a command to run once the jump has landed:
-`dodstudio_seek_to 1335.3 dodstudio_spec_target 13`. The in-game Highlights
+`ds_seek_to 1335.3 ds_spec_target 13`. The in-game Highlights
 tab's Go uses that. See [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md).
 
-### `dodstudio_reload_demo`
+### `ds_reload_demo`
 
 No arguments. Plays the last demo started with `playdemo` or `viewdemo`
 again, from the start, by running the same command with the same name. Says
 so when no demo has been played this session. See `src/demo_reload.rs`.
 
-### `dodstudio_schedule`
+### `ds_schedule`
 
 R&D for #434 (the hook runs a batch's commands instead of frames patched into
 the demo). `load "<file>"` reads a schedule: `dodstudio-schedule 1` on the
 first line, then `<seconds>`, a tab and a command per line, the seconds on the
-demo player's clock (the one `dodstudio_seek_to` takes). While a `viewdemo`
+demo player's clock (the one `ds_seek_to` takes). While a `viewdemo`
 demo plays, each command runs once through the engine's `pfnClientCmd`, on
 the first frame at or past its time; a seek back re-arms the commands after
 it, and a jump forward runs the ones it passed, late. The hook log has each
@@ -175,7 +175,7 @@ command's due time and how late it ran, and, while a schedule is loaded, every
 the schedule; bare says how far it got. Commands run this way skip the demo
 command filter (#679). Source: `goldsrc-hooks/src/schedule.rs`.
 
-### `dodstudio_batch`
+### `ds_batch`
 
 Studio's **Seek Between Clips** (#434): runs a capture batch on the original
 demos instead of patched copies. `start "<file>"` reads the batch file Studio
@@ -189,12 +189,12 @@ demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
 while a seek is on its way. A demo that doesn't load in three minutes, stops,
 or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
 `stop` ends the batch; bare says where it is. With
-`dodstudio_stay_behind_while_capturing` on when it starts, the game steps aside behind
+`ds_stay_behind_while_capturing` on when it starts, the game steps aside behind
 the other windows; `away` does that on its own, and Studio sends it the
 moment the game takes commands, before the batch starts, unless Keep the
-Game Behind Your Windows is off (then it sends `dodstudio_stay_behind_while_capturing 0`). Source: `goldsrc-hooks/src/batch.rs`.
+Game Behind Your Windows is off (then it sends `ds_stay_behind_while_capturing 0`). Source: `goldsrc-hooks/src/batch.rs`.
 
-### `dodstudio_review`
+### `ds_review`
 
 DoD Studio's **Review highlights** (#623): plays each queued highlight at
 normal speed, from 4 s before its first kill to 2 s after its last, pauses,
@@ -208,23 +208,23 @@ answer from the console, for key binds. Bare prints where the review is.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 
-### `dodstudio_overviewmap`
+### `ds_overviewmap`
 
-`dodstudio_overviewmap <full|mini> <x> <y> <w> <h>` places and sizes DoD's
+`ds_overviewmap <full|mini> <x> <y> <w> <h>` places and sizes DoD's
 overview map; `default` releases one back to the engine. With no arguments,
 lists both maps and what the engine currently has. See `src/overview_map.rs`'s
 module doc, including why it closes while a spectated player is scoped into a
 sniper (the engine's own FOV gate, not this command).
 
-### `dodstudio_spec_target`
+### `ds_spec_target`
 
-`dodstudio_spec_target <player>` puts the camera on a player while watching an
-HLTV demo. The number is the one `dodstudio_deathmsg players` lists (1-32).
+`ds_spec_target <player>` puts the camera on a player while watching an
+HLTV demo. The number is the one `ds_deathmsg players` lists (1-32).
 With no number it says who the camera is on. It refuses a number with no
 player, and a first-person demo. See
 [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md).
 
-### `dodstudio_debug_position`
+### `ds_debug_position`
 
 No arguments. Prints where the view is, as `spec_pos` does while the map has no
 overview (once it has one, `spec_pos` prints the overview camera instead): the
@@ -234,13 +234,13 @@ the origin standing, 18 crouched or prone); and the map. For checking an
 overview's reach in the game (#581). The line also goes to the hook log.
 `goldsrc-hooks/src/position.rs`.
 
-### `dodstudio_debug_msglog`
+### `ds_debug_msglog`
 
-`dodstudio_debug_msglog <name>... | all | clear` dumps chosen DoD user messages and
+`ds_debug_msglog <name>... | all | clear` dumps chosen DoD user messages and
 their payloads to the log file, forwarded to the game untouched. See
 `src/msglog.rs`'s module doc.
 
-### `dodstudio_objectives`
+### `ds_objectives`
 
 Places the territory-flag icon row and the objective timer beside it, which
 the game draws ~117px lower at 1080p while spectating than in a POV demo. See
@@ -248,35 +248,35 @@ the game draws ~117px lower at 1080p while spectating than in a POV demo. See
 
 | subcommand | does |
 | --- | --- |
-| `dodstudio_objectives offset <y>` | y the objective icons are drawn at |
-| `dodstudio_objectives xoffset <x>` | x the icon row starts at |
-| `dodstudio_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
-| `dodstudio_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
+| `ds_objectives offset <y>` | y the objective icons are drawn at |
+| `ds_objectives xoffset <x>` | x the icon row starts at |
+| `ds_objectives timer <y>` | y the objective timer is drawn at (no x -- the game hardcodes it) |
+| `ds_objectives <any> default` | hand that one back to the default layout: while spectating, just below the spectator bar, or at the top as in a POV demo while it's hidden |
 
-### `dodstudio_debug_hd_misses`
+### `ds_debug_hd_misses`
 
 Lists every texture that kept its original this session, map by map, grouped
 by why: the HD file is for a different version of the texture, there's no HD
 file (naming the file that would match), the file couldn't be used, or it
 was left alone on purpose (tool textures, blank sprites, per-player skins). A
-texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
-shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
+texture several maps use is listed under each. `ds_debug_hd_misses <map>`
+shows one map; `ds_debug_hd_misses clear` forgets the list.
 
-### `dodstudio_hide_asset`
+### `ds_hide_asset`
 
-`dodstudio_hide_asset` stops the game drawing an asset -- a sprite, model
+`ds_hide_asset` stops the game drawing an asset -- a sprite, model
 or brush entity, named by its file path -- here, specific world entities by exact model
 path: map sprites, props (`.mdl`), brush entities (`*12`). It keeps a list,
 shaped like HLAE's `mirv_matte_entities` but by model path rather than entity
 number (a path stays the same across demos):
 
-- `dodstudio_hide_asset list` (or no arguments): what is hidden.
-- `dodstudio_hide_asset add <model-path>...`: hide these too.
-- `dodstudio_hide_asset del <model-path>...`: stop hiding these.
-- `dodstudio_hide_asset clear`: stop hiding anything.
+- `ds_hide_asset list` (or no arguments): what is hidden.
+- `ds_hide_asset add <model-path>...`: hide these too.
+- `ds_hide_asset del <model-path>...`: stop hiding these.
+- `ds_hide_asset clear`: stop hiding anything.
 
 It is an allow-list, not a blanket toggle: `all` is refused. It was
-`dodstudio_hide_sprite`, then `dodstudio_hide_entity` (#333); neither was in
+`ds_hide_sprite`, then `ds_hide_entity` (#333); neither was in
 a release, and both names are gone. "Asset" because #614 extends it to the
 same paths drawn as temporary effects and particles.
 
@@ -288,12 +288,12 @@ trails, splashes, snow) where they are made. The status says where each path
 was seen: `seen as an entity`, `an effect` or `a particle`. DoD draws some sprite-looking things -- the crosshair, the
 capture-area icon -- as ordinary 2D HUD elements instead, which this command
 can never reach regardless of path spelling
-(`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
-status, bare or in `dodstudio_debug_status`, says whether each path has
+(`ds_hide_crosshair`/`ds_hide_hudelement` reach those). The
+status, bare or in `ds_debug_status`, says whether each path has
 matched anything this session, so a typo no longer fails silently. See
 `src/hide_asset.rs`'s module doc.
 
-### `dodstudio_panel`
+### `ds_panel`
 
 Opens DoD Studio's own window in the game, or closes it if it's open. It sits
 with GameUI's windows, so press ESC for the menu to see it. Real tabs, like the
@@ -311,7 +311,7 @@ filter by name or map (Search), map, HLTV or POV, and age in days.
 The Highlights tab lists every life with a kill in the demo playing
 (player, kills, weapons, time), narrowed by a Min kills box. A POV demo lists
 only the recording player's; an HLTV demo lists everyone's, with a Player box,
-and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
+and Go also puts the camera on that player (`ds_spec_target`). Go or a
 double-click jumps to 5 s before the first kill. It reads Studio's analyzer cache
 (`%APPDATA%\dod-studio\analyzer_cache`), so a demo Studio's Demo Analyzer or
 Master Queue already read shows at once; anything else is analysed in the
@@ -321,10 +321,10 @@ pre-Anniversary game has under 1 GB free) is refused with a note to open it in
 the Demo Analyzer instead. On the
 Settings tab, each check box named `cvar_<name>` is bound to that cvar: it
 shows the value and sets it when clicked (add more in build mode).
-`dodstudio_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
+`ds_panel [1|0|reset|<tab>]`: bare opens or closes it, `1` opens, `0`
 closes, `reset` writes the default layouts back and rebuilds the window, and a
-tab's name (`dodstudio_panel highlights`) opens it on that tab. With
-`dodstudio_viewdemo_in_panel 1`, a bare `viewdemo` opens the Playback tab.
+tab's name (`ds_panel highlights`) opens it on that tab. With
+`ds_viewdemo_in_panel 1`, a bare `viewdemo` opens the Playback tab.
 
 The hook also writes DoD Studio's main menu to `dod_addon\resource\GameMenu.res`
 (DoD Studio, Resume/Disconnect in a demo, Options, Quit), shown when the game
@@ -339,10 +339,88 @@ Save. A button's `Command` can be a VCR command (`play`, `pause`, `faster`,
 `slower`, `stepf`, `stepb`, `start`, `end`, `stop`, `load`, `events`, `save`)
 or `engine <console command>`. See `src/studio_panel.rs` (#408).
 
+## Renamed from `dodstudio_` (#555)
+
+Every name above used to start `dodstudio_`. The prefix is now `ds_`: shorter
+to type, and nothing in the engine, DoD's client or HLAE has a name starting
+with it. Only the prefix changed; the rest of each name is the same.
+
+- **The old names stop working.** The game has no aliases for them, so a
+  `dodstudio_` line typed in the console, or left in a config, does nothing.
+- **Studio's own saved lists move by themselves:** Initial Commands, Scheduled
+  Commands and every command profile are rewritten to the `ds_` names the
+  first time the new version loads its settings.
+- **The in-game window's saved settings move too** (`dodstudio_ui\settings.cfg`,
+  DoD Studio's own file): the hook reads a line with the old prefix as the new
+  name and writes the file back with the new names.
+- **Your own `.cfg` files are never changed.** The Commands tab's warnings list
+  every line in `config.cfg`, `userconfig.cfg`, `autoexec.cfg` and the configs
+  they `exec` (such as `movie.cfg`) that still uses an old name, with the name
+  that replaced it. Typing an old name in Initial or Scheduled Commands
+  suggests the new one.
+
+Folder and file names that start with `dodstudio_` (`dodstudio_hd`,
+`dodstudio_ui`, `dodstudio_helper.cfg`, `dodstudio_goldsrc_hooks.dll`, the hook
+log) did not change.
+
+| old name | new name |
+| --- | --- |
+| `dodstudio_allow_shaders` | `ds_allow_shaders` |
+| `dodstudio_batch` | `ds_batch` |
+| `dodstudio_clear_decals` | `ds_clear_decals` |
+| `dodstudio_console_in_panel` | `ds_console_in_panel` |
+| `dodstudio_deathmsg` | `ds_deathmsg` |
+| `dodstudio_debug_hd_misses` | `ds_debug_hd_misses` |
+| `dodstudio_debug_keep_detail_cache` | `ds_debug_keep_detail_cache` |
+| `dodstudio_debug_log_spectator_target` | `ds_debug_log_spectator_target` |
+| `dodstudio_debug_log_texture_loads` | `ds_debug_log_texture_loads` |
+| `dodstudio_debug_log_weapon_model` | `ds_debug_log_weapon_model` |
+| `dodstudio_debug_msglog` | `ds_debug_msglog` |
+| `dodstudio_debug_position` | `ds_debug_position` |
+| `dodstudio_debug_status` | `ds_debug_status` |
+| `dodstudio_demo_list_count_subfolders` | `ds_demo_list_count_subfolders` |
+| `dodstudio_demo_list_folders` | `ds_demo_list_folders` |
+| `dodstudio_demo_list_hide_empty` | `ds_demo_list_hide_empty` |
+| `dodstudio_ex_interp_max` | `ds_ex_interp_max` |
+| `dodstudio_hd_enabled` | `ds_hd_enabled` |
+| `dodstudio_hd_style` | `ds_hd_style` |
+| `dodstudio_hide_asset` | `ds_hide_asset` |
+| `dodstudio_hide_clan_text` | `ds_hide_clan_text` |
+| `dodstudio_hide_crosshair` | `ds_hide_crosshair` |
+| `dodstudio_hide_hand_signals` | `ds_hide_hand_signals` |
+| `dodstudio_hide_headshot_red_screen` | `ds_hide_headshot_red_screen` |
+| `dodstudio_hide_hltv_messages` | `ds_hide_hltv_messages` |
+| `dodstudio_hide_hudelement` | `ds_hide_hudelement` |
+| `dodstudio_hide_map_text` | `ds_hide_map_text` |
+| `dodstudio_hide_scoreboard` | `ds_hide_scoreboard` |
+| `dodstudio_hide_screen_shake` | `ds_hide_screen_shake` |
+| `dodstudio_hide_spectator_bars` | `ds_hide_spectator_bars` |
+| `dodstudio_hud_map_players` | `ds_hud_map_players` |
+| `dodstudio_hud_map_team_marker` | `ds_hud_map_team_marker` |
+| `dodstudio_mute_voice_commands` | `ds_mute_voice_commands` |
+| `dodstudio_objectives` | `ds_objectives` |
+| `dodstudio_overviewmap` | `ds_overviewmap` |
+| `dodstudio_panel` | `ds_panel` |
+| `dodstudio_reload_demo` | `ds_reload_demo` |
+| `dodstudio_remember_window_layout` | `ds_remember_window_layout` |
+| `dodstudio_resizable_windows` | `ds_resizable_windows` |
+| `dodstudio_review` | `ds_review` |
+| `dodstudio_run_in_background` | `ds_run_in_background` |
+| `dodstudio_schedule` | `ds_schedule` |
+| `dodstudio_seek_by` | `ds_seek_by` |
+| `dodstudio_seek_skip_between` | `ds_seek_skip_between` |
+| `dodstudio_seek_to` | `ds_seek_to` |
+| `dodstudio_show_demo_scope` | `ds_show_demo_scope` |
+| `dodstudio_spec_lock` | `ds_spec_lock` |
+| `dodstudio_spec_match_pov` | `ds_spec_match_pov` |
+| `dodstudio_spec_target` | `ds_spec_target` |
+| `dodstudio_stay_behind_while_capturing` | `ds_stay_behind_while_capturing` |
+| `dodstudio_viewdemo_in_panel` | `ds_viewdemo_in_panel` |
+
 ## Keeping this in sync
 
 Manual, like the rest of this crate's docs -- there is no generator from
-`commands.rs`. Each PR that adds or changes a `dodstudio_*` entry should
+`commands.rs`. Each PR that adds or changes a `ds_*` entry should
 update this file the same way it already updates `README.md`'s own
 control-surface list; the two lists should never drift apart. Issue #313
 left open whether this eventually becomes a generated table or a GitHub wiki
