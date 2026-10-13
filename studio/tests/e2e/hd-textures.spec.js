@@ -199,7 +199,7 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   await expect(page.locator('#hd-build-styles label', { hasText: 'x4plus' })).toContainText('(needs Download)');
   await expect(page.locator('#hd-build-styles input[value="plain"]')).toBeEnabled();
   // Every file type starts ticked.
-  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(5);
+  await expect(page.locator('#hd-build-types input:checked')).toHaveCount(6);
 
   await page.check('#hd-build-styles input[value="plain"]');
   await page.uncheck('#hd-build-types input[value="world"]');
@@ -207,7 +207,7 @@ test('build choices: AI styles wait for the upscaler, and the request carries wh
   const request = await page.evaluate(() => window.__mockInvocations.find((c) => c.cmd === 'hd_build')?.args);
   expect(request).toEqual({
     gamePath: 'C:/games/Half-Life/hl.exe',
-    request: { styles: ['plain'], types: ['sky', 'sprites', 'models', 'detail'], cap: 1024 },
+    request: { styles: ['plain'], types: ['sky', 'decals', 'sprites', 'models', 'detail'], cap: 1024 },
   });
 });
 
@@ -426,7 +426,7 @@ test('Build is off until at least one style and one kind of file are ticked', as
   await page.check('#hd-build-styles input[value="plain"]');
   await expect(page.locator('#hd-build-btn')).toBeEnabled();
 
-  for (const type of ['sky', 'sprites', 'models', 'detail', 'world']) {
+  for (const type of ['sky', 'decals', 'sprites', 'models', 'detail', 'world']) {
     await page.uncheck(`#hd-build-types input[value="${type}"]`);
   }
   await expect(page.locator('#hd-build-btn')).toBeDisabled();
