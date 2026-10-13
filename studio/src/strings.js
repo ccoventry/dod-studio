@@ -14,10 +14,15 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
-/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
-function cacheCounts(already, failed) {
+/**
+ * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
+ * (#569). `already` counts the upgraded ones too: they are in the cache by
+ * the time they are counted.
+ */
+function cacheCounts(already, failed, upgraded = 0) {
   const parts = [];
-  if (already) parts.push(`${already} already cached`);
+  if (upgraded) parts.push(`${upgraded} upgraded`);
+  if (already > upgraded) parts.push(`${already - upgraded} already cached`);
   if (failed) parts.push(`${failed} failed`);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
@@ -868,14 +873,18 @@ export const STRINGS = {
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',
-    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped, and ones an older version of DoD Studio cached are upgraded instead of analysed again where possible.',
     CACHE_NOTHING: 'No demos in this folder to cache.',
     CACHE_STOPPING: 'Stopping after the demos in progress…',
-    cacheProgress: ({ done, total, already, failed }) =>
-      `Caching ${done} / ${total}` + cacheCounts(already, failed),
-    cacheDone: ({ done, total, already, failed, cancelled }) =>
+    // A cache-format change leaves older analyses behind; they are upgraded
+    // first, which is fast, and only the rest are parsed.
+    cacheUpgrading: ({ upgrade: { done = 0, total = 0 } = {} }) =>
+      `Upgrading cached analyses: ${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`,
+    cacheProgress: ({ done, total, already, failed, upgrade }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed, upgrade?.upgraded),
+    cacheDone: ({ done, total, already, failed, cancelled, upgrade }) =>
       (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
-      cacheCounts(already, failed),
+      cacheCounts(already, failed, upgrade?.upgraded),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',

@@ -3,16 +3,54 @@
 //! instead of a full parse. Everything that reads a demo shares that cache:
 //! the Demo Analyzer, the Master Queue scan, and the in-game DoD Studio
 //! window's Highlights tab and Player filter.
+//!
+//! A run first upgrades the entries an older cache schema left for these
+//! demos (`analysis::cache::migrations`), milliseconds each, and parses only
+//! what is left: after a schema bump, most of a folder is cached again in
+//! seconds instead of a parse per demo.
 
-use analysis::cache::WorkPlan;
+use analysis::cache::{NotUpgraded, WorkPlan};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::time::Instant;
 
 /// Demos analysed at once. An analysis peaks at about 12 times the demo's
 /// size in memory, so a few big demos side by side already take gigabytes.
 pub const WORKERS: usize = 2;
+
+/// Older entries upgraded at once: a few MB each, and half the time is
+/// reading the file, so more than the parse workers.
+const UPGRADE_WORKERS: usize = 4;
+
+/// The least time between two progress reports while upgrading, which can
+/// finish hundreds of entries a second (CLAUDE.md's ~33 ms throttle).
+const UPGRADE_REPORT_MS: u32 = 33;
+
+/// The run's first step: upgrading the older cache entries of the demos the
+/// current cache doesn't have.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct UpgradeProgress {
+    /// The step is under way: the page says "Upgrading cached analyses".
+    pub running: bool,
+    /// Demos with an older entry to upgrade, and how many are done.
+    pub total: usize,
+    pub done: usize,
+    /// Of `done`, the ones upgraded and cached now.
+    pub upgraded: usize,
+    /// Of `done`, the ones that could not be upgraded and are parsed with
+    /// the rest, by reason.
+    pub needs_reparse: BTreeMap<String, usize>,
+}
+
+impl UpgradeProgress {
+    /// The upgrades that need a parse instead.
+    pub fn reparse_count(&self) -> usize {
+        self.needs_reparse.values().sum()
+    }
+}
 
 /// Where a run is, reported once the cache check is done, after every demo,
 /// and once more when the run ends.
@@ -38,22 +76,139 @@ pub struct CacheProgress {
     /// The run is over: every demo done, or stopped.
     pub finished: bool,
     pub cancelled: bool,
+    /// The upgrade step, done before any of the above counts move.
+    pub upgrade: UpgradeProgress,
 }
 
 /// Analyses every demo in `paths` into the analyzer cache, `WORKERS` at a
 /// time, calling `on_progress` after each and once more when the run ends.
-/// Stops taking new demos once `cancel` is set. The demos the cache has go
-/// first, then the parses largest first ([`WorkPlan`]), so the count jumps to
-/// "cached of total" at once instead of waiting behind an early parse.
+/// Stops taking new demos once `cancel` is set. First the older entries of
+/// demos the cache doesn't have are upgraded ([`upgrade_entries_with`]). Then
+/// the demos the cache has go first, then the parses largest first
+/// ([`WorkPlan`]), so the count jumps to "cached of total" at once instead of
+/// waiting behind an early parse.
 pub fn cache_demos(
     paths: Vec<PathBuf>,
     cancel: Arc<AtomicBool>,
     on_progress: impl Fn(&CacheProgress) + Send + Sync + 'static,
 ) -> CacheProgress {
-    let plan = WorkPlan::new(&crate::analyzer_cache_root(), &paths);
-    cache_demos_with(paths, plan, WORKERS, cancel, on_progress, |path| {
-        crate::run_analyzer_cached(path, |_, _| {}).map(|(_, _, cached)| cached)
-    })
+    let root = crate::analyzer_cache_root();
+    let total = paths.len();
+    let older: Vec<PathBuf> = paths
+        .iter()
+        .filter(|p| {
+            !analysis::cache::is_fresh(&root, p) && analysis::cache::has_older_entry(&root, p)
+        })
+        .cloned()
+        .collect();
+    let on_progress = Arc::new(on_progress);
+    let report = on_progress.clone();
+    let upgrade = upgrade_entries_with(
+        &older,
+        UPGRADE_WORKERS,
+        &cancel,
+        |upgrade| {
+            report(&CacheProgress {
+                total,
+                upgrade: upgrade.clone(),
+                ..CacheProgress::default()
+            })
+        },
+        |path| analysis::cache::upgrade(&root, path).map(|_| ()),
+    );
+    if upgrade.total > 0 {
+        let reasons: Vec<String> = upgrade
+            .needs_reparse
+            .iter()
+            .map(|(why, n)| format!("{n}: {why}"))
+            .collect();
+        crate::log_markdown(&format!(
+            "Cache demos: upgraded {} of {} older cache entries{}",
+            upgrade.upgraded,
+            upgrade.total,
+            if reasons.is_empty() {
+                String::new()
+            } else {
+                format!("; parsing the rest ({})", reasons.join(", "))
+            }
+        ));
+    }
+    let plan = WorkPlan::new(&root, &paths);
+    cache_demos_with(
+        paths,
+        plan,
+        WORKERS,
+        cancel,
+        upgrade,
+        move |progress| on_progress(progress),
+        |path| crate::run_analyzer_cached(path, |_, _| {}).map(|(_, _, cached)| cached),
+    )
+}
+
+/// Upgrades the older entry of each of `paths`, `workers` at a time, with
+/// `upgrade`; reports when it starts, at most every [`UPGRADE_REPORT_MS`]
+/// while it runs, and after the last one, all with `running` set. Stops
+/// taking new ones once `cancel` is set. Returns the totals, not running.
+fn upgrade_entries_with(
+    paths: &[PathBuf],
+    workers: usize,
+    cancel: &AtomicBool,
+    on_progress: impl Fn(&UpgradeProgress) + Sync,
+    upgrade: impl Fn(&PathBuf) -> Result<(), NotUpgraded> + Sync,
+) -> UpgradeProgress {
+    if paths.is_empty() {
+        return UpgradeProgress::default();
+    }
+    let progress = Mutex::new(UpgradeProgress {
+        running: true,
+        total: paths.len(),
+        ..UpgradeProgress::default()
+    });
+    on_progress(&progress.lock().unwrap_or_else(|e| e.into_inner()).clone());
+    let started = Instant::now();
+    // Milliseconds since `started` of the last report, shared by the workers.
+    let last_report = AtomicU32::new(0);
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|scope| {
+        for _ in 0..workers.clamp(1, paths.len()) {
+            scope.spawn(|| {
+                while !cancel.load(Ordering::Acquire) {
+                    let Some(path) = paths.get(next.fetch_add(1, Ordering::AcqRel)) else {
+                        break;
+                    };
+                    let result = upgrade(path);
+                    let snapshot = {
+                        let mut p = progress.lock().unwrap_or_else(|e| e.into_inner());
+                        p.done += 1;
+                        match result {
+                            Ok(()) => p.upgraded += 1,
+                            // Another writer saved a current entry first, or
+                            // the file changed since: the parse step sorts it
+                            // out.
+                            Err(NotUpgraded::NoOlderEntry) => {}
+                            Err(NotUpgraded::NeedsReparse(why)) => {
+                                *p.needs_reparse.entry(why.to_string()).or_default() += 1
+                            }
+                        }
+                        let now = started.elapsed().as_millis() as u32;
+                        let due = p.done == p.total
+                            || now.saturating_sub(last_report.load(Ordering::Relaxed))
+                                >= UPGRADE_REPORT_MS;
+                        if due {
+                            last_report.store(now, Ordering::Relaxed);
+                        }
+                        due.then(|| p.clone())
+                    };
+                    if let Some(snapshot) = snapshot {
+                        on_progress(&snapshot);
+                    }
+                }
+            });
+        }
+    });
+    let mut last = progress.into_inner().unwrap_or_else(|e| e.into_inner());
+    last.running = false;
+    last
 }
 
 /// [`cache_demos`] with the plan, the worker count and the analysis given:
@@ -64,6 +219,7 @@ fn cache_demos_with(
     plan: WorkPlan,
     workers: usize,
     cancel: Arc<AtomicBool>,
+    upgrade: UpgradeProgress,
     on_progress: impl Fn(&CacheProgress) + Send + Sync + 'static,
     analyse: impl Fn(&PathBuf) -> Result<bool, String> + Send + Sync + 'static,
 ) -> CacheProgress {
@@ -72,6 +228,7 @@ fn cache_demos_with(
         total,
         cached: plan.cached(),
         bytes_to_parse: plan.bytes_to_parse(),
+        upgrade,
         ..CacheProgress::default()
     }));
     // The cache check is done: the page leaves "Checking the analyzer
@@ -164,6 +321,7 @@ mod tests {
             uncached(7),
             WORKERS,
             Arc::new(AtomicBool::new(false)),
+            UpgradeProgress::default(),
             move |p| seen_by_progress.lock().unwrap().push(p.clone()),
             |path| match path.to_string_lossy().as_ref() {
                 "demo1.dem" | "demo4.dem" => Ok(true),
@@ -200,6 +358,7 @@ mod tests {
             plan,
             1,
             Arc::new(AtomicBool::new(false)),
+            UpgradeProgress::default(),
             move |p| reports_by_progress.lock().unwrap().push(p.clone()),
             move |path| {
                 called_by_analyse
@@ -236,6 +395,7 @@ mod tests {
             uncached(50),
             WORKERS,
             cancel,
+            UpgradeProgress::default(),
             |_| {},
             move |_| {
                 stop.store(true, Ordering::Release);
@@ -248,12 +408,92 @@ mod tests {
     }
 
     #[test]
+    fn upgrades_are_counted_by_outcome_and_reported_while_running() {
+        let reports = Mutex::new(Vec::new());
+        let paths = paths(6);
+        let result = upgrade_entries_with(
+            &paths,
+            UPGRADE_WORKERS,
+            &AtomicBool::new(false),
+            |p| reports.lock().unwrap().push(p.clone()),
+            |path| match path.to_string_lossy().as_ref() {
+                "demo1.dem" | "demo4.dem" => Err(NotUpgraded::NeedsReparse("left")),
+                "demo2.dem" => Err(NotUpgraded::NeedsReparse("bad")),
+                "demo3.dem" => Err(NotUpgraded::NoOlderEntry),
+                _ => Ok(()),
+            },
+        );
+        assert_eq!((result.total, result.done, result.upgraded), (6, 6, 2));
+        assert_eq!(
+            result.needs_reparse,
+            BTreeMap::from([("bad".to_string(), 1), ("left".to_string(), 2)])
+        );
+        assert_eq!(result.reparse_count(), 3);
+        assert!(!result.running);
+        let reports = reports.lock().unwrap();
+        // The start, then at least the last one; every one while running.
+        assert_eq!(reports[0].done, 0);
+        assert_eq!(reports.last().unwrap().done, 6);
+        assert!(reports.iter().all(|r| r.running && r.total == 6));
+    }
+
+    #[test]
+    fn no_older_entries_is_no_upgrade_step() {
+        let result = upgrade_entries_with(
+            &[],
+            UPGRADE_WORKERS,
+            &AtomicBool::new(false),
+            |_| panic!("nothing to report"),
+            |_| Ok(()),
+        );
+        assert_eq!(result, UpgradeProgress::default());
+    }
+
+    #[test]
+    fn a_stop_takes_no_new_upgrades() {
+        let cancel = AtomicBool::new(false);
+        let result = upgrade_entries_with(
+            &paths(50),
+            UPGRADE_WORKERS,
+            &cancel,
+            |_| {},
+            |_| {
+                cancel.store(true, Ordering::Release);
+                Ok(())
+            },
+        );
+        assert!(result.done <= UPGRADE_WORKERS, "{result:?}");
+    }
+
+    #[test]
+    fn the_upgrade_totals_ride_along_with_every_parse_report() {
+        let upgrade = UpgradeProgress {
+            total: 3,
+            done: 3,
+            upgraded: 2,
+            needs_reparse: BTreeMap::from([("left".to_string(), 1)]),
+            running: false,
+        };
+        let result = cache_demos_with(
+            paths(2),
+            uncached(2),
+            WORKERS,
+            Arc::new(AtomicBool::new(false)),
+            upgrade.clone(),
+            |_| {},
+            |_| Ok(false),
+        );
+        assert_eq!(result.upgrade, upgrade);
+    }
+
+    #[test]
     fn nothing_to_do_still_finishes() {
         let result = cache_demos_with(
             Vec::new(),
             uncached(0),
             WORKERS,
             Arc::new(AtomicBool::new(false)),
+            UpgradeProgress::default(),
             |_| {},
             |_| Ok(false),
         );
