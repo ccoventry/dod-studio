@@ -737,12 +737,21 @@
             </div>
             <div id="render-job-container"></div>
 
+            <!-- #70: the ticked rows are what the footer buttons act on. -->
+            <div id="render-selection-row" class="action-row" style="margin-top: 8px; align-items: center; gap: 6px; font-size: 0.9em;">
+              <button id="render-select-all-btn" data-str="RENDER.SELECT_ALL_BUTTON">Select all</button>
+              <button id="render-select-none-btn" data-str="RENDER.SELECT_NONE_BUTTON">Select none</button>
+              <button id="render-select-unrendered-btn" disabled data-str="RENDER.SELECT_UNRENDERED_BUTTON" data-str-title="RENDER.SELECT_UNRENDERED_TITLE" title="Tick only the takes with no finished render in their history.">Select unrendered</button>
+              <span id="render-selection-count" class="status-text" style="margin: 0 0 0 6px;">0 of 0 selected</span>
+            </div>
+
             <!-- Per-job render queue table — replaces the old single global
                  status line + progress bar with real per-clip rows. -->
             <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
+                    <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
                     <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
                     <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
                     <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
@@ -757,7 +766,7 @@
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="11" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -769,10 +778,14 @@
 
             <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
               <div class="action-buttons">
-                <button id="start-render-btn" class="primary-btn" data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
-                <button id="cancel-render-btn" disabled data-str="RENDER.CANCEL_ALL_BUTTON">Cancel All</button>
-                <button id="reset-all-render-btn" disabled data-str="RENDER.RESET_ALL_BUTTON">Reset All</button>
-                <button id="remove-all-render-btn" disabled data-str="RENDER.REMOVE_ALL_BUTTON">Remove All (Not Rendering)</button>
+                <!-- #70: each acts on the ticked rows; render_pane.js sets the
+                     label's count and the tooltip. -->
+                <button id="start-render-btn" class="primary-btn" disabled data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
+                <button id="cancel-render-btn" disabled>Cancel (0)</button>
+                <button id="retry-render-btn" disabled>Retry (0)</button>
+                <button id="remove-render-btn" disabled>Remove (0)</button>
+                <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+                <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
             </div>
