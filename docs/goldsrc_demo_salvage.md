@@ -41,6 +41,10 @@ Supporting probes: `salvage_probe`, `salvage_demo`, `bridge_ceiling` (swallowed-
 
 Results: all four damaged demos recovered and parsing (`m3_h2` 520,165 frames, 1 hole; `m1_h1` 525,086, 2 holes, 96.7% of the original bytes; `m1_h2` 701,898, 3 holes, 97.7%; `m3_h1-1` 524,407, 3 holes).
 
+## Checking a copy for lost frames (#41)
+
+A copy that silently lost frames (a bad thumb-drive transfer) still parses, because frames are length-prefixed with no checksum, and then crashes the engine. `hl-demo-auditor --integrity <demo-or-folder>...` catches it: it reports every packet-entity or client-data delta whose from-frame is not in the file, so the engine would decode it against stale ring state (`analysis::integrity::check_delta_continuity`; `native/examples/demo_integrity.rs` lists each one and can drop frames in memory to simulate a loss). It finds nothing on healthy demos and fires on a single dropped network frame; a demo that does not parse at all is reported as such. The recovered `_v10` builds above are flagged too, by client-data deltas only: the ramp's cloned `svc_clientdata` keeps one from-frame for its whole length. `m3_h2` played anyway, so a client-data-only hit on a salvaged build means stale client data, not necessarily a crash.
+
 ## What each live crash taught
 
 Every one of these passed every offline check that existed at the time. Each was found by playing the build in the engine.
