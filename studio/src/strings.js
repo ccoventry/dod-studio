@@ -1158,10 +1158,18 @@ export const STRINGS = {
   // ── Closing Studio while a capture batch runs (batch_close_prompt.js, #545) ──
   BATCH_CLOSE_MODAL: {
     TITLE: 'Capture batch running',
-    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own, but Studio won’t check the takes or mark them Captured, and the game stays open when the batch ends. To stop the batch instead, use Cancel Batch first.',
+    MESSAGE: 'A capture batch is still running. If you close DoD Studio, the game keeps capturing on its own. Studio checks the takes and marks them Captured the next time it opens. To stop the batch instead, use Cancel Batch first.',
     LOCAL_BUILD_NOTE: 'This is a local build started from npm run tauri dev: closing it closes the game too, and the batch stops where it is.',
     CLOSE_BUTTON: 'Close DoD Studio',
     KEEP_OPEN_BUTTON: 'Keep Studio open',
+  },
+
+  // ── A batch that ran while Studio was closed (batch_catch_up.js, #545) ──
+  BATCH_CATCH_UP: {
+    caughtUp: (captured, total, marked) => `A capture batch finished while DoD Studio was closed: ${captured} of ${total} clips are on disk.${marked > 0 ? ` ${marked} highlight(s) marked Captured.` : ''}`,
+    projectUpdated: (name) => `Marked them in the project ${name}.`,
+    projectNotUpdated: (name, err) => `Could not mark them in the project ${name}: ${err}`,
+    checkFailed: (err) => `Could not check the clips of a batch that ran while DoD Studio was closed: ${err}`,
   },
 
   // ── main.js: sessions, settings dialogs, scan status, Clear actions ─────

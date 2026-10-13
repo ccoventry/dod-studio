@@ -14,6 +14,7 @@ import { initRollFloors } from './roll_floors.js';
 import { renderDetailView, initDetailPane } from './detail_pane.js';
 import { initCaptureUI, getCommandsState, hydrateCommandsState, applyCommandsState, refreshLaunchGuard, refreshInitCommandWarnings, isCaptureRunning } from './capture_pane.js';
 import { confirmCloseDuringBatch } from './batch_close_prompt.js';
+import { createBatchCatchUp } from './batch_catch_up.js';
 import { initRenderUI, checkRenderRecoveryOnStartup, finishedRenderOutputs } from './render_pane.js';
 import { initFinishClips } from './finish_clips.js';
 import { initAuditorPane } from './auditor_pane.js';
@@ -106,6 +107,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     saveProjectSession,
     needsSavePrompt,
     requestUnsavedChangesConfirmation,
+    getSessionPath,
   } = createProjectSession({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
@@ -478,7 +480,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initCaptureUI(() => ({
     scanPaths,
     targetDrives,
-    currentScannedDemos
+    currentScannedDemos,
+    projectPath: getSessionPath(),
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
   initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
 
@@ -514,6 +517,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   });
 
   checkObsOrphanOnStartup();
+
+  // A batch that ran while Studio was closed (#545): mark its finished clips.
+  createBatchCatchUp({
+    getDemos: () => currentScannedDemos,
+    getTakeIndex: () => takeIndex,
+    getSessionPath,
+    onStatusChange: onHighlightStatusChange,
+  }).start();
 
   // Flush any not-yet-persisted settings edit before the window actually
   // closes. list_editor.js (Init/Custom Commands, numeric fields) only

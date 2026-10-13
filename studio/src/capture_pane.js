@@ -1330,6 +1330,10 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       hook_runs_batch: hookRunsBatchVal,
       keep_game_behind: keepGameBehindVal,
       streaks: selectedStreaks,
+      // Recorded in the batch's manifest, so a batch that outlives Studio can
+      // still be mapped back to these highlights when it reopens (#545).
+      streak_uids: selectedStreaks.map((streak, i) => streakUid(selectedDemoPaths[i], streak)),
+      project_path: state.projectPath || null,
       pre_roll_seconds: preRollVal,
       post_roll_seconds: postRollVal,
       capture_directories: outputDrivePool,
