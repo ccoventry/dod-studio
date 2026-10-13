@@ -12,6 +12,8 @@ name = "hl-demo-auditor"
 path = "src/main.rs"
 
 [dependencies]
+# The delta-continuity check behind `--integrity` (#41).
+analysis = { path = "../analysis" }
 clap = { workspace = true, features = ["derive"] }
 
 [lints]
