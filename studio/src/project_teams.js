@@ -167,3 +167,42 @@ export function teamsForHighlight(demo, streak, projectTeams) {
     opponent: teamName(projectTeams, sideTag(demo, enemy)),
   };
 }
+
+/** Two names in a fixed order whichever side each played: alphabetical,
+ *  a missing one last. */
+function fixedOrder(a, b) {
+  if (!a || !b) return a ? [a, b] : [b, a];
+  return a.localeCompare(b, undefined, { sensitivity: 'base' }) <= 0 ? [a, b] : [b, a];
+}
+
+/**
+ * The side-based team placeholders of a demo, for clip names and Rename
+ * Demos alike (#751): `allies` and `axis` by side, `team1` and `team2` the
+ * same two alphabetically, so both halves of a match agree. `null` for a
+ * side with no tag.
+ */
+export function sideTeams(demo, projectTeams) {
+  const allies = teamName(projectTeams, sideTag(demo, 'Allies'));
+  const axis = teamName(projectTeams, sideTag(demo, 'Axis'));
+  const [team1, team2] = fixedOrder(allies, axis);
+  return { allies, axis, team1, team2 };
+}
+
+/** `name` without the clan tag its side's players share (#445), and
+ *  without the punctuation that framed the tag: `dicE[: :]m00cat :D`
+ *  with tag `dicE` gives `m00cat :D`. The name as it is when there's no
+ *  tag, or nothing would be left. */
+export function nameWithoutTag(name, tag) {
+  if (!name || !tag) return name || null;
+  const lower = name.toLowerCase();
+  const t = tag.toLowerCase();
+  // Past any bracket or symbol the tag sits in: `[dicE] m00cat`.
+  const start = lower.match(/^[^\p{L}\p{N}]*/u)[0].length;
+  const end = lower.length - lower.match(/[^\p{L}\p{N}]*$/u)[0].length;
+  let rest;
+  if (lower.startsWith(t, start)) rest = name.slice(start + tag.length);
+  else if (lower.slice(0, end).endsWith(t)) rest = name.slice(0, end - tag.length);
+  else return name;
+  rest = rest.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+  return rest || name;
+}
