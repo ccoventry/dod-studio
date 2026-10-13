@@ -12,6 +12,8 @@ pub mod highlights;
 pub mod integrity;
 mod kill;
 mod localization;
+/// Which match and which half a demo records, from its contents (#685).
+mod match_group;
 mod mortality;
 mod objective;
 mod player;
@@ -54,6 +56,10 @@ pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
     clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
     localization::{get_active_language, set_active_language, translate_key},
+    match_group::{
+        Half, HalfCall, HalfReason, MatchGroup, MatchHalf, MatchTeam, Side, find_demo,
+        group_matches, half_of,
+    },
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
     player::{Connection, Player, PlayerGlobalId, SteamId},
