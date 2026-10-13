@@ -7,7 +7,7 @@ use crate::*;
 use dod::Class;
 use std::collections::HashMap;
 
-fn fixture() -> Vec<u8> {
+pub(crate) fn fixture() -> Vec<u8> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test-fixtures/ci_fixture.dem"
