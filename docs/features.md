@@ -388,7 +388,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 |---|---|
 | Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, HLTV text, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | Both builds | also the ESC fix that keeps GameUI windows open (#396) and the hull-trace guard (#393) |
-| PRE only | decal clear, HD textures, first-load lighting fix (#397) |
+| PRE only | decal clear, HD textures, first-load lighting fix (#397; the Anniversary engine rebuilds its lightmaps on a gamma change itself, so it has no first-load bug to fix, #370) |
 | Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
 

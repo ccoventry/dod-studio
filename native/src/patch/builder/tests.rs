@@ -810,6 +810,24 @@ fn an_agr_block_is_sized_as_an_agr_file_not_a_frame_sequence() {
 }
 
 #[test]
+fn keep_game_behind_sets_stay_behind_and_never_the_speed() {
+    let mut config = PatcherConfig::default();
+    let commands = final_init_commands(&config);
+    assert!(
+        commands.contains(&format!("{STAY_BEHIND} 1")),
+        "{commands:?}"
+    );
+    assert!(commands.contains(&format!("{RUN_IN_BACKGROUND} 1")));
+    config.keep_game_behind = false;
+    let commands = final_init_commands(&config);
+    assert!(
+        commands.contains(&format!("{STAY_BEHIND} 0")),
+        "{commands:?}"
+    );
+    assert!(commands.contains(&format!("{RUN_IN_BACKGROUND} 1")));
+}
+
+#[test]
 fn obs_mode_pins_fps_override_and_fps_max_to_obs_capture_fps() {
     let mut config = PatcherConfig::default();
     config.capture_mode = crate::patch::CaptureMode::Obs;

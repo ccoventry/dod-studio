@@ -683,11 +683,17 @@ pub fn spawn_capture_engine(
             // brightness and gamma (`game_handoff`). With the hook that demo
             // is dodstudio_chain_01 itself, without it the primer (#365). A
             // batch the hook runs starts the same way, with its batch file.
-            let start_behind = crate::patch::builder::START_BEHIND_ARG;
+            let with_start = |args: &str| {
+                if config.keep_game_behind {
+                    format!("{} {args}", crate::patch::builder::START_BEHIND_ARG)
+                } else {
+                    args.to_string()
+                }
+            };
             let (extra_args, early_lines, first_lines) = match runtime_batch.as_deref() {
                 Some(file) => (
-                    format!("{start_behind} +exec dodstudio_helper.cfg"),
-                    crate::patch::runtime_batch::early_lines(),
+                    with_start("+exec dodstudio_helper.cfg"),
+                    crate::patch::runtime_batch::early_lines(config.keep_game_behind),
                     crate::patch::runtime_batch::start_lines(file),
                 ),
                 None => {
@@ -695,7 +701,7 @@ pub fn spawn_capture_engine(
                         &first_demo_stem(&jobs).unwrap_or_default(),
                         config.goldsrc_hooks_dll().is_some(),
                     );
-                    (format!("{start_behind} {args}"), Vec::new(), lines)
+                    (with_start(&args), Vec::new(), lines)
                 }
             };
             let mut handoff = (!first_lines.is_empty()).then(|| {
@@ -714,7 +720,12 @@ pub fn spawn_capture_engine(
 
             // Held until the batch starts in the game (it has stepped aside by
             // then) or FOREGROUND_LOCK_MAX passes; dropped on every way out.
-            let mut foreground_lock = crate::sys::foreground_lock::ForegroundLock::take();
+            // Not taken when the user wants to watch the game.
+            let mut foreground_lock = if config.keep_game_behind {
+                crate::sys::foreground_lock::ForegroundLock::take()
+            } else {
+                crate::sys::foreground_lock::ForegroundLock::none()
+            };
             let foreground_locked_at = std::time::Instant::now();
             if foreground_lock.locked() {
                 log_markdown("[HLAE] The game can't take the foreground while it starts");

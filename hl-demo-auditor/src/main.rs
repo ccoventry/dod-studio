@@ -1,7 +1,7 @@
 //! Directory scanning and duplicate auditing tool for GoldSrc/Source/Source2 demo files.
 
 use clap::Parser;
-use hl_demo_auditor::{find_duplicates, scan_dir};
+use hl_demo_auditor::{collect_demos, find_duplicates, integrity_line, scan_dir};
 use std::fs;
 use std::path::PathBuf;
 
@@ -11,15 +11,24 @@ use std::path::PathBuf;
     about = "Audits folders for Half-Life engine family (.dem) files and reports duplicates."
 )]
 struct Args {
-    /// Folder paths to scan for .dem files
+    /// Instead of looking for duplicates, check that every delta in each demo
+    /// decodes against a frame the file has (#41): one line per demo, and a
+    /// non-zero exit if any is broken or cannot be read.
+    #[arg(long)]
+    integrity: bool,
+
+    /// Folders to scan for .dem files (with --integrity, demo files too)
     paths: Vec<PathBuf>,
 }
 
 fn main() {
     let args = Args::parse();
     if args.paths.is_empty() {
-        eprintln!("Usage: hl-demo-auditor <folder1> <folder2> ...");
+        eprintln!("Usage: hl-demo-auditor [--integrity] <folder-or-demo> ...");
         std::process::exit(1);
+    }
+    if args.integrity {
+        std::process::exit(run_integrity(&args.paths));
     }
 
     println!("Scanning directories...");
@@ -91,5 +100,32 @@ fn main() {
         eprintln!("Error writing duplicates report: {}", e);
     } else {
         println!("Detailed duplicate report written to: demo_deduplication_report.md");
+    }
+}
+
+/// `--integrity`: prints each demo's verdict as it is checked and returns the
+/// exit code, 1 if any demo is broken or unreadable.
+fn run_integrity(paths: &[PathBuf]) -> i32 {
+    let (demos, missing) = collect_demos(paths);
+    for path in &missing {
+        eprintln!("No such file or folder: {}", path.display());
+    }
+    let mut bad = 0;
+    for path in &demos {
+        let (ok, line) = integrity_line(path);
+        if !ok {
+            bad += 1;
+        }
+        println!("{line}");
+    }
+    println!(
+        "{} demos checked, {} OK, {bad} broken or unreadable",
+        demos.len(),
+        demos.len() - bad
+    );
+    if bad > 0 || !missing.is_empty() || demos.is_empty() {
+        1
+    } else {
+        0
     }
 }

@@ -72,6 +72,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
     const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked || false;
+    const keepGameBehind = document.querySelector('#config-keep-game-behind')?.checked ?? true;
 
     const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
     const renderCustomCodecArgs = document.querySelector('#render-custom-codec-input')?.value || '';
@@ -138,6 +139,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       command_profile_active: getActiveCommandProfile(),
       save_local_patched_copy: saveLocalPatchedCopy,
       hook_runs_batch: hookRunsBatch,
+      keep_game_behind: keepGameBehind,
       render_codec: renderCodec,
       render_custom_codec_args: renderCustomCodecArgs,
       render_fps: renderFps,
@@ -317,6 +319,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
   if (hookRunsBatchEl) hookRunsBatchEl.checked = !!settings.hook_runs_batch;
+  const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
+  if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {
     const inputEl = document.querySelector('#render-codec-select');
     if (inputEl) inputEl.value = settings.render_codec;
