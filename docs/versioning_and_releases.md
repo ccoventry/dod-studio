@@ -16,7 +16,7 @@ Four files carry a `version` field, but they don't all mean the same thing:
 | `studio/package.json` | Same — display/tooling only, stamped to match. |
 | Root `Cargo.toml` | The Cargo **workspace's** own version (currently `0.10.0`) — unrelated to the app's version above. This is the whole `dod-studio` workspace (native/analysis/dem-patch/etc.), not studio specifically. Don't confuse the two when checking "what version are we on."
 
-**Important:** the release workflows stamp `tauri.conf.json`/`package.json`/`Cargo.toml` with the computed release version *during the CI run only* — that stamp is **not committed back** to the repo. The checked-in versions in these files stay whatever they were (currently `0.1.0` everywhere) until someone deliberately bumps them as part of a release PR (see "Bumping minor/major" below). So `git grep version` in this repo will not tell you what's actually been released — check GitHub Releases instead.
+**Important:** the release workflows stamp `tauri.conf.json`/`package.json`/`Cargo.toml` with the computed release version *during the CI run only* — that stamp is **not committed back** to the repo. The checked-in versions in these files stay whatever they were (`Cargo.toml` is `0.2.0`, starting the 0.2 line; `tauri.conf.json`/`package.json` still say `0.1.0`, display-only) until someone deliberately bumps them as part of a release PR (see "Bumping minor/major" below). So `git grep version` in this repo will not tell you what's actually been released — check GitHub Releases instead.
 
 ## Stable channel — automatic
 
