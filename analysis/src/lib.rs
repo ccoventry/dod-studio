@@ -1365,6 +1365,11 @@ mod tests {
                     i,
                     j
                 );
+                assert_eq!(
+                    k_l.slot, k_r.slot,
+                    "Player {} kill_streak {} slot mismatched",
+                    i, j
+                );
             }
 
             // weapon_breakdown (HashMap == is order-independent)
