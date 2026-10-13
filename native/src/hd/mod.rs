@@ -20,6 +20,7 @@
 pub mod build;
 pub mod gl_max_size;
 pub mod map_list;
+pub mod map_textures;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
