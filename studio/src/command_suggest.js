@@ -21,7 +21,7 @@ export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mi
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
   'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
   'mirv_agr'];
-export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background'];
+export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background', 'dodstudio_stay_behind_while_capturing'];
 // Set by the fast-forward between clips and put back at every clip's pre-roll (#724):
 // honoured in Initial Commands, short-lived as a Scheduled Command.
 export const FAST_FORWARD_CVARS = ['fps_override', 'fps_max', 'gl_vsync'];

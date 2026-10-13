@@ -246,18 +246,26 @@ pub fn batch_file(
     Ok(out.join("\n"))
 }
 
-/// The console lines sent the moment the game takes commands: the background
-/// setting, then the game stepping out of the way (goldsrc-hooks
-/// `hlae_window.rs`). The batch's own init commands set the setting too, but
-/// only once the first demo has loaded, and an unfocused game loads a demo
-/// several times slower without it (85 s for a 21-minute HLTV demo,
-/// measured). Sent ahead of [`start_lines`]' settle, so the game holds the
-/// user's screen and mouse for as short a time as it can.
-pub fn early_lines() -> Vec<String> {
-    vec![
-        format!("{} 1", crate::patch::builder::RUN_IN_BACKGROUND),
-        format!("{BATCH_COMMAND} away"),
-    ]
+/// The console lines sent the moment the game takes commands: full speed in
+/// the background, the stay-behind setting, then the game stepping out of the
+/// way (goldsrc-hooks `hlae_window.rs`). The batch's own init commands set
+/// both settings too, but only once the first demo has loaded, and an
+/// unfocused game loads a demo several times slower without the first (85 s
+/// for a 21-minute HLTV demo, measured). Sent ahead of [`start_lines`]'
+/// settle, so the game holds the user's screen and mouse for as short a time
+/// as it can. With `keep_game_behind` off the game stays in front, and the
+/// setting goes to 0 in case a game left from an earlier batch (#666) still
+/// has it on.
+pub fn early_lines(keep_game_behind: bool) -> Vec<String> {
+    use crate::patch::builder::{RUN_IN_BACKGROUND, STAY_BEHIND};
+    let mut lines = vec![
+        format!("{RUN_IN_BACKGROUND} 1"),
+        format!("{STAY_BEHIND} {}", u8::from(keep_game_behind)),
+    ];
+    if keep_game_behind {
+        lines.push(format!("{BATCH_COMMAND} away"));
+    }
+    lines
 }
 
 /// The console line that starts `file`, once the game has settled.
@@ -432,8 +440,19 @@ mod tests {
     #[test]
     fn the_early_lines_step_aside_and_the_start_line_quotes_the_file() {
         assert_eq!(
-            early_lines(),
-            ["dodstudio_run_in_background 1", "dodstudio_batch away"]
+            early_lines(true),
+            [
+                "dodstudio_run_in_background 1",
+                "dodstudio_stay_behind_while_capturing 1",
+                "dodstudio_batch away"
+            ]
+        );
+        assert_eq!(
+            early_lines(false),
+            [
+                "dodstudio_run_in_background 1",
+                "dodstudio_stay_behind_while_capturing 0"
+            ]
         );
         assert_eq!(
             start_lines(Path::new("C:/x y/b.txt")),

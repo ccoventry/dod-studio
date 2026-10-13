@@ -204,6 +204,11 @@ jobs:
       - name: Python compiles
         run: python3 -m compileall -q goldsrc-hooks/tools
 
+      # The release-notes collector both release workflows run: a broken
+      # parser would only show up when a release is cut.
+      - name: Release notes collector tests
+        run: python3 -m unittest discover -s .github/scripts -p "test_*.py"
+
       - name: Web analyzer node tests
         run: node --test web-analyzer/tests/export.test.mjs
 

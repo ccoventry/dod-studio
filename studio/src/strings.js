@@ -266,15 +266,6 @@ export const STRINGS = {
     CAPTURE_MODE_OBS: 'OBS (real time)',
     CAPTURE_MODE_OBS_TITLE:
         'OBS records the game window while DoD Studio tells it when each clip starts and stops. HLAE records nothing. Output is a finished, playable file with audio already in it — but capture runs at real time, so frames drop if the machine cannot keep up, and high capture rates are not possible.',
-    // Shown beside the progress bar while a batch runs, not in the settings —
-    // there is nothing to configure and no mode it does not apply to. The
-    // throttle is the engine's: GoldSrc slows its frame loop when the window is
-    // not focused and `host_framerate` fast-forward stops with it, so the gaps
-    // between clips play out in real time. Nothing is lost and no HLAE flag
-    // defeats it — `engine_no_focus_sleep` is Source 2 only. See
-    // docs/goldsrc_dod_quirks.md.
-    FOCUS_REMINDER:
-        'Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses focus, and the batch takes far longer.',
     // ── OBS connection ──────────────────────────────────────────────────────
     OBS_SECTION_TITLE: 'OBS Connection',
     OBS_EXE_PATH_LABEL: 'OBS Path:',
@@ -392,6 +383,9 @@ export const STRINGS = {
     HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips (experimental)',
     HOOK_RUNS_BATCH_TITLE:
       'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. Needs the DoD Studio hook DLL and demos on the same drive as the game; a batch that cannot run this way is patched as before.',
+    KEEP_GAME_BEHIND_LABEL: 'Keep the Game Behind Your Windows While Capturing',
+    KEEP_GAME_BEHIND_TITLE:
+      'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
     PRE_ROLL_LABEL: 'Pre-roll (s):',
     PRE_ROLL_HINT: 'Time between fast-forward stopping and capture starting.',
     POST_ROLL_LABEL: 'Post-roll (s):',
