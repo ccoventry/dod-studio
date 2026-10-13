@@ -1038,6 +1038,7 @@ mod tests {
                 };
                 state.players[killer].kill_streaks.push(KillStreak {
                     kills: vec![(time, self.weapon.clone(), victim_id)],
+                    slot: None,
                 });
             }
             for &(secs, sender, text) in &self.chat {
