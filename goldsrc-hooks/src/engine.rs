@@ -660,14 +660,72 @@ pub fn engine_studio() -> Option<&'static EngineStudioApiPartial> {
 ///
 /// Normally driven by the real `HUD_Frame` trampoline. A ~60Hz timer thread
 /// is started as a safety net for the case where the `HUD_Frame` hook never
-/// lands (an engine build that resolves it by some path we don't intercept),
-/// and retires itself the moment a real frame callback arrives so the two
-/// never both drive it.
+/// lands (an engine build that resolves it by some path we don't intercept).
+/// It stands by while the hook is in the client's table, so the callbacks run
+/// on the engine thread only, and retires once a real frame arrives.
+///
+/// Standing by matters: the callbacks patch `client.dll` code, and two threads
+/// patching the same byte crash the game. On the first frame the settings.cfg
+/// cvars flip, the timer thread and `HUD_Frame` both saw it, and one thread's
+/// `VirtualProtect` restore landed between the other's unprotect and its
+/// write (`spectator_eye`, `spectator_follow`: an access violation writing
+/// `client.dll` code, about 1 launch in 10).
 static PER_FRAME_CALLBACK: std::sync::OnceLock<fn()> = std::sync::OnceLock::new();
 static TIMER_THREAD_STARTED: AtomicBool = AtomicBool::new(false);
 /// Set by the `HUD_Frame` trampoline the first time the engine actually
 /// renders a frame through us; retires the fallback timer thread.
 static HUD_FRAME_DRIVING: AtomicBool = AtomicBool::new(false);
+/// Held while the per-frame callbacks run, so the timer thread and
+/// `HUD_Frame` can never run them at the same time, even in the moment a late
+/// hook takes over. A try-lock: whoever finds it taken skips that frame
+/// instead of waiting, since this is the frame path.
+static PER_FRAME_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// A turn at running the per-frame callbacks; the flag clears when it drops.
+struct PerFrameTurn<'a>(&'a AtomicBool);
+
+impl<'a> PerFrameTurn<'a> {
+    fn try_take(flag: &'a AtomicBool) -> Option<Self> {
+        flag.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed)
+            .ok()
+            .map(|_| Self(flag))
+    }
+}
+
+impl Drop for PerFrameTurn<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+/// What the fallback timer thread does on one tick.
+#[derive(Debug, PartialEq, Eq)]
+enum TimerStep {
+    /// A real `HUD_Frame` has run: the hook drives from here on.
+    Retire,
+    /// The hook is in the client's table, so the engine will call it: leave
+    /// the callbacks to the engine thread.
+    StandBy,
+    /// No hook: this thread is the only thing driving the callbacks.
+    Drive,
+}
+
+fn timer_step(hud_frame_driving: bool, hud_frame_hooked: bool) -> TimerStep {
+    if hud_frame_driving {
+        TimerStep::Retire
+    } else if hud_frame_hooked {
+        TimerStep::StandBy
+    } else {
+        TimerStep::Drive
+    }
+}
+
+fn current_timer_step() -> TimerStep {
+    timer_step(
+        HUD_FRAME_DRIVING.load(Ordering::Acquire),
+        !REAL_HUD_FRAME.load(Ordering::Acquire).is_null(),
+    )
+}
 
 /// Runs immediately before the main per-frame callback.
 ///
@@ -717,15 +775,27 @@ fn run_per_frame_callback() {
 unsafe extern "system" fn per_frame_timer_thread(_lp_param: *mut c_void) -> u32 {
     loop {
         unsafe { Sleep(16) };
-        if HUD_FRAME_DRIVING.load(Ordering::Acquire) {
-            unsafe {
-                crate::debug::report(
-                    "per-frame: real HUD_Frame hook is driving, retiring the fallback timer thread",
-                )
-            };
-            return 0;
+        match current_timer_step() {
+            TimerStep::Retire => {
+                unsafe {
+                    crate::debug::report(
+                        "per-frame: real HUD_Frame hook is driving, retiring the fallback timer thread",
+                    )
+                };
+                return 0;
+            }
+            TimerStep::StandBy => {}
+            TimerStep::Drive => {
+                let Some(_turn) = PerFrameTurn::try_take(&PER_FRAME_RUNNING) else {
+                    continue;
+                };
+                // Asked again holding the turn: a hook that landed since the
+                // first look gets the frame instead.
+                if current_timer_step() == TimerStep::Drive {
+                    run_per_frame_callback();
+                }
+            }
         }
-        run_per_frame_callback();
     }
 }
 
@@ -928,7 +998,11 @@ unsafe extern "C" fn tramp_hud_frame(time: f64) {
     if !HUD_FRAME_DRIVING.swap(true, Ordering::AcqRel) {
         unsafe { crate::debug::report("HUD_Frame: first real per-frame callback received") };
     }
-    run_per_frame_callback();
+    // Taken only if the timer thread is mid-run, which can happen once, on the
+    // frame a late hook takes over; that frame's callbacks are skipped.
+    if let Some(_turn) = PerFrameTurn::try_take(&PER_FRAME_RUNNING) {
+        run_per_frame_callback();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1529,5 +1603,57 @@ pub fn install() {
                 "goldsrc-hooks: an IAT slot wasn't found -- sound/animation fixes are inactive this session.",
             )
         };
+    }
+}
+
+#[cfg(test)]
+mod per_frame_tests {
+    use super::*;
+
+    /// The timer thread drives only when there is no hook to do it, and gives
+    /// way for good once a real frame has run.
+    #[test]
+    fn the_timer_thread_drives_only_without_a_hook() {
+        assert_eq!(timer_step(false, false), TimerStep::Drive);
+        assert_eq!(timer_step(false, true), TimerStep::StandBy);
+        assert_eq!(timer_step(true, true), TimerStep::Retire);
+        assert_eq!(timer_step(true, false), TimerStep::Retire);
+    }
+
+    /// One turn at a time, and the turn comes back when it drops.
+    #[test]
+    fn a_per_frame_turn_excludes_a_second_runner() {
+        let flag = AtomicBool::new(false);
+        let first = PerFrameTurn::try_take(&flag);
+        assert!(first.is_some());
+        assert!(PerFrameTurn::try_take(&flag).is_none());
+        drop(first);
+        assert!(PerFrameTurn::try_take(&flag).is_some());
+    }
+
+    /// Two threads hammering the same turn never both hold it: the property
+    /// the first-frame crash broke.
+    #[test]
+    fn two_threads_never_hold_the_turn_together() {
+        use std::sync::atomic::AtomicU32;
+        static FLAG: AtomicBool = AtomicBool::new(false);
+        static INSIDE: AtomicU32 = AtomicU32::new(0);
+        static OVERLAPS: AtomicU32 = AtomicU32::new(0);
+        let runner = || {
+            for _ in 0..20_000 {
+                if let Some(_turn) = PerFrameTurn::try_take(&FLAG) {
+                    if INSIDE.fetch_add(1, Ordering::SeqCst) != 0 {
+                        OVERLAPS.fetch_add(1, Ordering::SeqCst);
+                    }
+                    std::hint::spin_loop();
+                    INSIDE.fetch_sub(1, Ordering::SeqCst);
+                }
+            }
+        };
+        let a = std::thread::spawn(runner);
+        let b = std::thread::spawn(runner);
+        a.join().unwrap();
+        b.join().unwrap();
+        assert_eq!(OVERLAPS.load(Ordering::SeqCst), 0);
     }
 }
