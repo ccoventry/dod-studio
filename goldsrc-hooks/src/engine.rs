@@ -657,6 +657,7 @@ pub fn engine_module_base() -> Option<usize> {
 /// version string (`VGUI_Surface026` from `hw.dll`, `VGUI_Panel007` from
 /// `vgui2.dll`), through the module's exported `CreateInterface`. `None`
 /// while the module isn't loaded or doesn't serve that name.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 pub fn create_interface(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Option<*mut c_void> {
     use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
     type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;

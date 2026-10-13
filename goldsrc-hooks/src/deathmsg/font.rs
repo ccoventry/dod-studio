@@ -59,6 +59,10 @@
 //! font manager knows an outline bit (0x200), and only the scheme loader of
 //! a later vgui2 does, so `outline` is accepted and said to do nothing.
 
+// The patching runs only in the 32-bit DLL; a host build (workspace clippy,
+// tests) keeps the tables and helpers for the unit tests alone.
+#![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
+
 use std::fmt;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicUsize, Ordering};
