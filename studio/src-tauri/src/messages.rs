@@ -273,6 +273,8 @@ pub const BATCH_ALREADY_QUEUED: &str =
     "A batch is already queued — start it or cancel it before scanning again.";
 pub const RENDER_BATCH_ALREADY_IN_PROGRESS: &str = "Render batch already in progress";
 pub const NOTHING_QUEUED_TO_RENDER: &str = "Nothing queued to render — scan for takes first.";
+pub const NO_TICKED_ROW_QUEUED: &str =
+    "None of the ticked rows is queued — tick a Queued row, or Retry a finished one first.";
 pub const SKIP_ONLY_FOR_OBS_TAKE: &str = "Skip (keep original) is only available for a captured OBS take (its own audio, not a HUD/alpha clip).";
 
 pub fn no_such_job(job_id: &str) -> String {
