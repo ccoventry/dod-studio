@@ -15,6 +15,10 @@ HUD
       Stop a POV demo's recorded TAB presses showing the scoreboard.
   dodstudio_hide_crosshair 0/1
       Hide the crosshair and keep it hidden.
+  dodstudio_hide_headshot_red_screen 0/1
+      POV demos: no red screen when the player is hit in the head.
+  dodstudio_hide_screen_shake 0/1
+      POV demos: no screen shake from grenades going off nearby.
   dodstudio_hide_hand_signals 0/1
       Replace players' hand-signal animations.
   dodstudio_mute_voice_commands 0/1
@@ -45,6 +49,8 @@ DEMO PLAYBACK
       Run at full speed while another window is in front, so a capture batch doesn't need the screen.
   dodstudio_pov_live_bob 0/1
       POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
+  dodstudio_stay_behind_while_capturing 0/1
+      Keep the game behind your other windows while it records, instead of coming to the front.
   dodstudio_seek_to <time>
       Jump viewdemo playback to a time, in seconds of the VCR bar's clock.
   dodstudio_seek_by <seconds>
