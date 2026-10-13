@@ -3,11 +3,17 @@
 pub mod cache;
 mod chat;
 mod clan_match;
+/// The clock offset between two recordings of one half (#708).
+mod clock_offset;
 pub mod entity_replay;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
+/// Whether every delta decodes against a frame the file has (#41).
+pub mod integrity;
 mod kill;
 mod localization;
+/// Which match and which half a demo records, from its contents (#685).
+mod match_group;
 mod mortality;
 mod objective;
 mod player;
@@ -48,7 +54,12 @@ pub use crate::localization::add_localization_search_path;
 pub use crate::weapon_names::{all_weapon_display_names, weapon_display_name};
 pub use crate::{
     chat::{ChatMessage, ChatType, translate_system_message},
+    clock_offset::{ClockOffset, MIN_PAIRS, is_same_half, kill_clock_offset},
     localization::{get_active_language, set_active_language, translate_key},
+    match_group::{
+        Half, HalfCall, HalfReason, MatchGroup, MatchHalf, MatchTeam, Side, find_demo,
+        group_matches, half_of,
+    },
     mortality::{Mortality, MortalityChange, MortalityState},
     objective::{
         AttemptOutcome, BREAK_WINDOW, CancelCause, CaptureAttempt, Flag, FlagCapture, Objectives,

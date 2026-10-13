@@ -474,6 +474,10 @@
                   <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
                 </div>
                 <div class="control-group">
+                  <input type="checkbox" id="config-keep-game-behind" checked />
+                  <label for="config-keep-game-behind" data-str="CAPTURE_CONFIG.KEEP_GAME_BEHIND_LABEL" data-str-title="CAPTURE_CONFIG.KEEP_GAME_BEHIND_TITLE">Keep the Game Behind Your Windows While Capturing</label>
+                </div>
+                <div class="control-group">
                   <input type="checkbox" id="config-save-local-patched" />
                   <label for="config-save-local-patched" data-str="CAPTURE_CONFIG.SAVE_LOCAL_PATCHED_LABEL">Save Local Patched Copy</label>
                 </div>
@@ -711,7 +715,7 @@
             </div>
 
             <!-- Start/Cancel Batch and everything read alongside them (status,
-                 progress, the focus reminder, the disk-space warning, the
+                 progress, the disk-space warning, the
                  Capture Output Free/Required figures) live in
                  #footer-capture-studio now, not here — batch control used to
                  only be reachable from this Configuration subtab, so starting
@@ -1515,15 +1519,6 @@
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
-          <!-- Shown only while a batch is running. Not a setting — there is
-               nothing here to configure, and no capture mode it does not
-               apply to. It is a reminder, and the moment it is worth reading
-               is the moment the user is about to go and do something else. -->
-          <p id="batch-focus-reminder" class="status-text" style="display: none;"
-             data-str="CAPTURE_CONFIG.FOCUS_REMINDER">
-            Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses
-            focus, and the batch takes far longer.
-          </p>
         </div>
         <!-- footer-row-grid-centered lives on this inner div, not
              #footer-render-studio itself — nav.js sets that element's
