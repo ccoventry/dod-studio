@@ -26,6 +26,11 @@ impl ForegroundLock {
         }
     }
 
+    /// A lock that holds nothing, for a game that may come to the front.
+    pub fn none() -> Self {
+        Self { locked: false }
+    }
+
     /// Whether the lock took.
     pub fn locked(&self) -> bool {
         self.locked

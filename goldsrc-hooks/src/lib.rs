@@ -53,6 +53,8 @@
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
+//! - `hlae_window`: `dodstudio_stay_behind_while_capturing`, the game window stays behind
+//!   the user's windows while a batch records.
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
