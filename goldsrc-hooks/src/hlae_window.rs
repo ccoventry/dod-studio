@@ -1,7 +1,9 @@
-//! Keeps a background capture in the background: with
-//! `dodstudio_run_in_background` on, HLAE no longer pulls the game window to
-//! the front when a recording starts, and a minimised game is put back behind
-//! the other windows instead, since a minimised game draws nothing (#434).
+//! `dodstudio_stay_behind_while_capturing`: keeps a background capture in the background.
+//! With it on, HLAE no longer pulls the game window to the front when a
+//! recording starts, and a minimised game is put back behind the other
+//! windows instead, since a minimised game draws nothing (#434). Its own
+//! setting, apart from `dodstudio_run_in_background`'s speed, so a user can
+//! watch a batch at full speed with the game in front.
 //!
 //! ## What HLAE does
 //!
@@ -43,7 +45,24 @@
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicUsize, Ordering};
+
+use crate::engine::CvarSPartial;
+use crate::names::console_name;
+
+pub const NAME: &str = console_name!("stay_behind_while_capturing");
+
+static CVAR: AtomicPtr<CvarSPartial> = AtomicPtr::new(std::ptr::null_mut());
+
+pub fn set_cvar(cvar: *mut CvarSPartial) {
+    CVAR.store(cvar, Ordering::Release);
+}
+
+/// Whether the setting is on now.
+pub fn wanted() -> bool {
+    let cvar = CVAR.load(Ordering::Acquire);
+    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
+}
 
 /// The start of HLAE's "make the window a popup" function. The exit function
 /// starts the same way but has `0F 84` for the second jump and `56 6A EC`
@@ -351,7 +370,7 @@ fn watch_start() {
     let mut seen = false;
     let mut last = cursor();
     let mut put_backs = 0;
-    while started.elapsed() < START_WATCH && !crate::run_in_background::wanted() {
+    while started.elapsed() < START_WATCH && !wanted() {
         std::thread::sleep(START_WATCH_EVERY);
         // The game's modules load as it starts: hook each as it appears.
         if !crate::behind_imports::all_installed() {
@@ -409,8 +428,9 @@ fn watch_start() {
     ));
 }
 
-/// Called every frame from `run_in_background::poll` with the setting.
-pub fn poll(on: bool) {
+/// Follows the setting. Called every frame from `commands::poll`.
+pub fn poll() {
+    let on = wanted();
     if on != SKIPPING.load(Ordering::Acquire) {
         set_skipping(on);
     }
