@@ -120,7 +120,9 @@ pub fn read_miptex(buf: &[u8], at: usize) -> Option<MipTex<'_>> {
     let pixels = (width as usize).checked_mul(height as usize)?;
     let data_at = at.checked_add(40)?;
     let indices = clip(buf, data_at, pixels);
-    let palette_at = data_at.checked_add((pixels >> 6).checked_mul(85)?)?.checked_add(2)?;
+    let palette_at = data_at
+        .checked_add((pixels >> 6).checked_mul(85)?)?
+        .checked_add(2)?;
     let palette = clip(buf, palette_at, 768);
     Some(MipTex {
         name,
@@ -267,6 +269,9 @@ pub struct MapKeys {
     /// Textures found in none of the map's wads: the build skips them, and
     /// the game shows them stock (or pink).
     pub missing: Vec<String>,
+    /// The wad file names the map's worldspawn lists, in its order: the
+    /// files the keys depend on besides the `.bsp`.
+    pub wads: Vec<String>,
 }
 
 /// The build's keys for a map, from its texture lump and the wads its
@@ -279,7 +284,10 @@ pub fn map_keys(
     wads: &[String],
     mut wad_texture: impl FnMut(&str, &str) -> Option<Vec<u8>>,
 ) -> MapKeys {
-    let mut out = MapKeys::default();
+    let mut out = MapKeys {
+        wads: wads.to_vec(),
+        ..MapKeys::default()
+    };
     for entry in texture_entries(textures_lump) {
         if let Some(tex) = entry.embedded {
             add_key(&mut out, &tex);
@@ -359,13 +367,12 @@ impl WadCache {
         Some((file, wad_entries(&dir, count)))
     }
 
-    fn directory(&mut self, wad: &str) -> &mut Option<(std::fs::File, HashMap<String, (usize, usize)>)> {
+    fn directory(
+        &mut self,
+        wad: &str,
+    ) -> &mut Option<(std::fs::File, HashMap<String, (usize, usize)>)> {
         if !self.wads.contains_key(wad) {
-            let found = WAD_DIRS
-                .iter()
-                .map(|dir| self.game.join(dir).join(wad))
-                .find(|p| p.is_file())
-                .and_then(|path| Self::open(&path));
+            let found = wad_path(&self.game, wad).and_then(|path| Self::open(&path));
             self.wads.insert(wad.to_string(), found);
         }
         self.wads.get_mut(wad).expect("inserted above")
@@ -382,6 +389,15 @@ impl WadCache {
     }
 }
 
+/// Where the wad file `wad` is, looking where the build looks
+/// ([`WAD_DIRS`]).
+pub fn wad_path(game: &Path, wad: &str) -> Option<PathBuf> {
+    WAD_DIRS
+        .iter()
+        .map(|dir| game.join(dir).join(wad))
+        .find(|p| p.is_file())
+}
+
 /// Where `map`'s `.bsp` is, looking where the build looks ([`MAP_DIRS`]).
 pub fn bsp_path(game: &Path, map: &str) -> Option<PathBuf> {
     MAP_DIRS
@@ -394,7 +410,8 @@ pub fn bsp_path(game: &Path, map: &str) -> Option<PathBuf> {
 /// lumps it needs, not the whole file: the maps' other lumps are most of
 /// their size.
 pub fn read_map_keys(bsp: &Path, wads: &mut WadCache) -> Result<MapKeys, String> {
-    let mut file = std::fs::File::open(bsp).map_err(|e| crate::messages::labeled(bsp.display(), e))?;
+    let mut file =
+        std::fs::File::open(bsp).map_err(|e| crate::messages::labeled(bsp.display(), e))?;
     let mut header = [0u8; HEADER_LEN];
     file.read_exact(&mut header)
         .map_err(|e| crate::messages::labeled(bsp.display(), e))?;
@@ -478,6 +495,25 @@ fn tga_stems(dir: &Path) -> HashSet<String> {
 /// The coverage of `maps` (names without `.bsp`, in `game`'s map folders)
 /// by every style under `hd_root\world`.
 pub fn world_coverage(game: &Path, hd_root: &Path, maps: &[String]) -> WorldCoverage {
+    world_coverage_with(
+        game,
+        hd_root,
+        maps,
+        &mut super::map_keys_cache::KeysCache::default(),
+        &mut |_, _| {},
+    )
+}
+
+/// [`world_coverage`], taking each map's keys from `cache` when its files
+/// are unchanged (a cold scan of every map takes seconds, a warm one
+/// milliseconds), and calling `progress(maps done, maps)` after each map.
+pub fn world_coverage_with(
+    game: &Path,
+    hd_root: &Path,
+    maps: &[String],
+    cache: &mut super::map_keys_cache::KeysCache,
+    progress: &mut dyn FnMut(usize, usize),
+) -> WorldCoverage {
     let started = std::time::Instant::now();
     let styles = style_stems(&hd_root.join("world"));
     let mut wads = WadCache::new(game);
@@ -485,9 +521,10 @@ pub fn world_coverage(game: &Path, hd_root: &Path, maps: &[String]) -> WorldCove
         styles: styles.keys().cloned().collect(),
         ..WorldCoverage::default()
     };
-    for map in maps {
+    for (done, map) in maps.iter().enumerate() {
+        progress(done, maps.len());
         let keys = match bsp_path(game, map) {
-            Some(path) => read_map_keys(&path, &mut wads),
+            Some(path) => cache.keys(game, &path, || read_map_keys(&path, &mut wads)),
             None => Err(format!("{map}.bsp: not found")),
         };
         let keys = match keys {
@@ -499,16 +536,17 @@ pub fn world_coverage(game: &Path, hd_root: &Path, maps: &[String]) -> WorldCove
         };
         out.maps.push(MapCoverage {
             map: map.clone(),
-            total: keys.keys.len(),
+            total: keys.len(),
             built: styles
                 .iter()
                 .map(|(style, stems)| {
-                    let built = keys.keys.iter().filter(|k| stems.contains(*k)).count();
+                    let built = keys.iter().filter(|k| stems.contains(*k)).count();
                     (style.clone(), built)
                 })
                 .collect(),
         });
     }
+    progress(maps.len(), maps.len());
     out.millis = started.elapsed().as_millis() as u64;
     out
 }
@@ -559,7 +597,10 @@ mod tests {
         file[..4].copy_from_slice(&30i32.to_le_bytes());
         let ents_at = HEADER_LEN;
         let tex_at = ents_at + entities.len();
-        for (index, (offset, length)) in [(0, (ents_at, entities.len())), (2, (tex_at, textures.len()))] {
+        for (index, (offset, length)) in [
+            (0, (ents_at, entities.len())),
+            (2, (tex_at, textures.len())),
+        ] {
             let at = 4 + index * 8;
             file[at..at + 4].copy_from_slice(&(offset as i32).to_le_bytes());
             file[at + 4..at + 8].copy_from_slice(&(length as i32).to_le_bytes());
@@ -616,10 +657,7 @@ mod tests {
         assert_eq!(hd_file_stem("Wall", b"", b""), "wall_811c9dc5");
         // Pinned from `python -I ref_keys.py` over these same bytes, so the
         // port can't drift from the scripts.
-        assert_eq!(
-            hd_file_stem("Wall", &px(1), &palette()),
-            "wall_b5d43885"
-        );
+        assert_eq!(hd_file_stem("Wall", &px(1), &palette()), "wall_b5d43885");
     }
 
     #[test]
@@ -672,7 +710,12 @@ mod tests {
         assert_eq!(keys.missing, ["nowhere"]);
         assert_eq!(
             asked,
-            ["dod_a.wad:floor", "dod_b.wad:floor", "dod_a.wad:nowhere", "dod_b.wad:nowhere"]
+            [
+                "dod_a.wad:floor",
+                "dod_b.wad:floor",
+                "dod_a.wad:nowhere",
+                "dod_b.wad:nowhere"
+            ]
         );
     }
 
@@ -744,7 +787,11 @@ mod tests {
         }
         std::fs::create_dir_all(root.join("world").join("remacri")).unwrap();
 
-        let maps = ["dod_test".to_string(), "dod_bad".to_string(), "dod_gone".to_string()];
+        let maps = [
+            "dod_test".to_string(),
+            "dod_bad".to_string(),
+            "dod_gone".to_string(),
+        ];
         let coverage = world_coverage(&dir, &root, &maps);
         assert_eq!(coverage.styles, ["plain", "remacri", "ultrasharp"]);
         assert_eq!(
@@ -778,7 +825,11 @@ mod tests {
                     r"C:\Program Files (x86)\Steam\steamapps\common\Half-Life - PRE-Anniversary for Movies",
                 )
             });
-        assert!(game.join("hl.exe").is_file(), "no install at {}", game.display());
+        assert!(
+            game.join("hl.exe").is_file(),
+            "no install at {}",
+            game.display()
+        );
         let root = game.join("dod_addon").join("dodstudio_hd");
         let maps: Vec<String> = ["dod_anzio", "dod_kalt", "dod_avalanche", "dod_chemille"]
             .iter()
@@ -794,15 +845,20 @@ mod tests {
         assert_eq!(coverage.maps[0].built["ultrasharpv2"], 124);
         assert_eq!(coverage.maps[1].built["ultrasharpv2"], 0);
 
-        // Every map in the install, timed: the page runs this on each refresh.
+        // Every map in the install, timed cold and from the cache: the page
+        // runs this on each refresh.
         let all = super::super::map_list::available_maps(&game.join("hl.exe"));
         let names: Vec<String> = all.into_iter().map(|m| m.name).collect();
-        let coverage = world_coverage(&game, &root, &names);
+        let mut cache = super::super::map_keys_cache::KeysCache::default();
+        let cold = world_coverage_with(&game, &root, &names, &mut cache, &mut |_, _| {});
+        let warm = world_coverage_with(&game, &root, &names, &mut cache, &mut |_, _| {});
+        assert_eq!(cold.maps, warm.maps);
         println!(
-            "{} maps in {} ms, {} unreadable",
-            coverage.maps.len(),
-            coverage.millis,
-            coverage.unreadable.len()
+            "{} maps in {} ms cold, {} ms from the cache, {} unreadable",
+            cold.maps.len(),
+            cold.millis,
+            warm.millis,
+            cold.unreadable.len()
         );
     }
 }

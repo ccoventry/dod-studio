@@ -19,6 +19,7 @@
 
 pub mod build;
 pub mod gl_max_size;
+pub mod map_keys_cache;
 pub mod map_list;
 pub mod map_textures;
 pub mod misses;
