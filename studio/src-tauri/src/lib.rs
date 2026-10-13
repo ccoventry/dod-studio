@@ -80,8 +80,12 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
-        settings.save()?;
+        let mut settings = settings;
         let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        // The frontend doesn't carry this field; the loaded value stands, or a
+        // migration would run again at every start.
+        settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
+        settings.save()?;
         *guard = settings;
         Ok(())
     }))

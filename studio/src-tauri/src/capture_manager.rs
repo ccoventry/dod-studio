@@ -176,7 +176,8 @@ pub struct CapturePayload {
     pub obs_password: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
-    #[serde(default)]
+    /// `PatcherConfig::hook_runs_batch`: on unless the payload says otherwise.
+    #[serde(default = "native::patch::types::default_hook_runs_batch")]
     pub hook_runs_batch: bool,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "crate::settings_manager::default_keep_game_behind")]
@@ -1063,9 +1064,12 @@ pub async fn start_capture_batch_impl(
         }
 
         // Kept for the hook-run route, which places each tick by the kills'
-        // demo-player times (#434).
+        // demo-player times (#434). A highlight from a project saved before
+        // those existed gets them from a fresh read of its demo first.
         let planned_streaks = if patcher_config.hook_runs_batch {
-            raw_streaks.clone()
+            let mut raw_streaks = raw_streaks.clone();
+            crate::hook_batch::refresh_viewdemo_times(&app_handle_clone, &mut raw_streaks);
+            raw_streaks
         } else {
             Vec::new()
         };
@@ -1135,10 +1139,10 @@ pub async fn start_capture_batch_impl(
         // ── Or hand the plan to the hook DLL instead of patching (#434) ─────────
         let runtime_batch = if patcher_config.hook_runs_batch {
             match crate::hook_batch::prepare(&patch_jobs, &planned_streaks, &patcher_config) {
-                Ok(file) => Some(file),
+                Ok(batch) => Some(batch),
                 Err(why) => {
                     log_markdown(&format!(
-                        "ℹ️ **Seek Between Clips is on, but this batch is patched as before** — {why}"
+                        "ℹ️ **This batch is patched instead of seeking between clips** — {why}"
                     ));
                     None
                 }
