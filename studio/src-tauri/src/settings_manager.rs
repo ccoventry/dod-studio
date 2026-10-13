@@ -157,6 +157,9 @@ pub struct AppSettings {
     /// `PatcherConfig::hook_runs_batch` (#434).
     #[serde(default)]
     pub hook_runs_batch: bool,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "default_keep_game_behind")]
+    pub keep_game_behind: bool,
     #[serde(default = "default_render_codec")]
     pub render_codec: String,
     /// Raw FFmpeg args, only meaningful when `render_codec == "custom"`.
@@ -324,6 +327,9 @@ fn default_demo_rename_hltv_template() -> String {
 fn default_auto_check_updates() -> bool {
     true
 }
+pub(crate) fn default_keep_game_behind() -> bool {
+    true
+}
 /// An OBS take already is a finished file with its audio in it, so the
 /// default finish is a plain copy (`RenderCodec::SourceCopy`).
 fn default_finish_codec_obs() -> String {
@@ -386,6 +392,7 @@ impl Default for AppSettings {
             command_profile_active: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
