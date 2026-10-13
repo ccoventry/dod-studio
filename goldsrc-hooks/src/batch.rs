@@ -506,7 +506,7 @@ fn start(path: &str) {
         plan.demos.len()
     ));
     // Running in the background: out of the user's way from the start.
-    if crate::run_in_background::wanted() {
+    if crate::hlae_window::wanted() {
         crate::hlae_window::step_aside();
     }
     let mut guard = lock();
@@ -550,10 +550,10 @@ pub unsafe extern "C" fn command() {
         // `start`, so the game leaves the user's screen and keyboard as
         // early as it can.
         Some("away") => {
-            if crate::run_in_background::wanted() {
+            if crate::hlae_window::wanted() {
                 crate::hlae_window::step_aside();
             } else {
-                say("away needs ds_run_in_background 1 first");
+                say(&format!("away needs {} 1 first", crate::hlae_window::NAME));
             }
         }
         Some("stop") => {

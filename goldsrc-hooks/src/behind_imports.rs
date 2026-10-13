@@ -94,9 +94,9 @@ fn report(line: &str) {
 }
 
 /// Whether the game is meant to be behind now: during the start-up watch, or
-/// with the setting on.
+/// with `ds_stay_behind_while_capturing` on.
 fn wanted() -> bool {
-    STARTING_BEHIND.load(Ordering::Acquire) || crate::run_in_background::wanted()
+    STARTING_BEHIND.load(Ordering::Acquire) || crate::hlae_window::wanted()
 }
 
 /// Whether one of the game's own windows (the game, its console) is in front.

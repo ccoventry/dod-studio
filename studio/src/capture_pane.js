@@ -850,14 +850,12 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   const statusEl = document.querySelector('#batch-status');
   const progressContainer = document.querySelector('#capture-progress-container');
   const progressBar = document.querySelector('#capture-progress-bar');
-  const focusReminder = document.querySelector('#batch-focus-reminder');
 
-  // Tied to the progress bar rather than tracked separately: the reminder is
-  // only true while a batch is actually running, and two flags for one state
-  // is how they come to disagree.
+  // No "keep the game focused" reminder: every batch turns on
+  // ds_run_in_background, so a game behind other windows or minimised
+  // fast-forwards at full speed (#701, #722).
   const setBatchRunning = (running) => {
     if (progressContainer && running) progressContainer.style.display = 'block';
-    if (focusReminder) focusReminder.style.display = running ? 'block' : 'none';
   };
 
   currentGetState = getState;
@@ -1278,6 +1276,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
     const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
     const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked || false;
+    const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
 
     const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;
     const autoClearPreviewsVal = document.querySelector("#config-auto-clear-previews")?.checked || false;
@@ -1329,6 +1328,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       obs_password: obsPasswordVal,
       save_local_patched_copy: saveLocalPatchedCopyVal,
       hook_runs_batch: hookRunsBatchVal,
+      keep_game_behind: keepGameBehindVal,
       streaks: selectedStreaks,
       pre_roll_seconds: preRollVal,
       post_roll_seconds: postRollVal,

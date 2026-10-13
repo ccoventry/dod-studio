@@ -53,6 +53,8 @@
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `ds_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
+//! - `hlae_window`: `ds_stay_behind_while_capturing`, the game window stays behind
+//!   the user's windows while a batch records.
 //! - `scoreboard`: the `ds_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -70,7 +72,8 @@
 //! - `lightmap_gamma`: the first demo of a session no longer renders with its
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
 //!   current cvars before a map's lightmaps are built. On by default;
-//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
+//!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
 //! - `particle_hide`: `ds_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
@@ -218,6 +221,7 @@ mod run_in_background;
 mod scan;
 mod schedule;
 mod scoreboard;
+mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;

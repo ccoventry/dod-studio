@@ -19,9 +19,11 @@ pub const PREFIX: &str = "ds_";
 pub const OLD_PREFIX: &str = "dodstudio_";
 
 /// Every name the hook registered when the prefix changed, without the prefix.
-/// Frozen, plus the three that shipped on `dev` with the old prefix while #555
+/// Frozen, plus the ones that shipped on `dev` with the old prefix while #555
 /// was open (`batch` #702, `debug_keep_detail_cache` #718, `show_demo_scope`
-/// #721); a name added since never had the old prefix. The rest of each name
+/// #721, `hide_headshot_red_screen` and `hide_screen_shake` #606,
+/// `stay_behind_while_capturing` #434); a name added since never had the old
+/// prefix. The rest of each name
 /// did not change, so the new name is [`PREFIX`] plus the same suffix.
 pub const RENAMED: &[&str] = &[
     "allow_shaders",
@@ -47,10 +49,12 @@ pub const RENAMED: &[&str] = &[
     "hide_clan_text",
     "hide_crosshair",
     "hide_hand_signals",
+    "hide_headshot_red_screen",
     "hide_hltv_messages",
     "hide_hudelement",
     "hide_map_text",
     "hide_scoreboard",
+    "hide_screen_shake",
     "hide_spectator_bars",
     "hud_map_players",
     "hud_map_team_marker",
@@ -71,6 +75,7 @@ pub const RENAMED: &[&str] = &[
     "spec_lock",
     "spec_match_pov",
     "spec_target",
+    "stay_behind_while_capturing",
     "viewdemo_in_panel",
 ];
 

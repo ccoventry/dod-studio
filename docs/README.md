@@ -17,6 +17,7 @@ Reference for people and coding agents working on DoD Studio. Work in progress l
 ## Demo analysis
 - [demo_analyzer_load_performance.md](demo_analyzer_load_performance.md) — making the Demo Analyzer open demos fast.
 - [demo_stats_feasibility.md](demo_stats_feasibility.md) — which league stats a demo can and cannot give (#192).
+- [match_and_half.md](match_and_half.md) — telling a demo's match and half from its contents, and the rules behind it (#685).
 - [goldsrc_demo_salvage.md](goldsrc_demo_salvage.md) — how a demo is put together, recovering damaged ones, and the engine's entity-packet flush rule (#15).
 
 ## The hook DLL (`goldsrc-hooks`)

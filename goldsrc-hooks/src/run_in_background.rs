@@ -21,8 +21,8 @@
 //! 0.05`) went from 11.7x real time to 2.2x (PRE) or 1.5x (25th Anniversary)
 //! as soon as another window took the foreground. Recording looked unaffected
 //! only because HLAE brings the game window to the front while it records;
-//! with this on, `hlae_window.rs` stops that, so the wait has to go for the
-//! recording too.
+//! `ds_stay_behind_while_capturing` (`hlae_window.rs`) stops that, so the wait has to
+//! go for the recording too.
 //!
 //! With the `jne` made a `jmp`, the wait never happens: the game runs as if
 //! it had the foreground. It also means a game left at its menu in the
@@ -137,12 +137,6 @@ fn describe(on: bool) -> String {
     }
 }
 
-/// Whether the setting is on now (it is applied on the next frame).
-pub fn wanted() -> bool {
-    let cvar = CVAR.load(Ordering::Acquire);
-    !cvar.is_null() && unsafe { (*cvar).value } != 0.0
-}
-
 /// Follows the cvar. Called every frame from `commands::poll`.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
@@ -150,7 +144,6 @@ pub fn poll() {
         return;
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
-    crate::hlae_window::poll(wanted);
     // Nothing to do until it's first turned on: the scan waits until then.
     if !wanted && !ON.load(Ordering::Acquire) && ADDRESS.load(Ordering::Acquire) == 0 {
         return;

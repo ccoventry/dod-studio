@@ -49,7 +49,7 @@ pub struct Streak {
     /// Details column (`CaptureStreak::update_visuals`).
     pub details: String,
     /// The player's number (entity index, what `ds_spec_target`
-    /// takes), when they were still in the game at the demo's end.
+    /// takes) when they scored these kills.
     pub player_number: Option<u8>,
 }
 
@@ -111,7 +111,7 @@ pub struct Found {
     pub recorder: Option<String>,
 }
 
-/// One player's kills, as [`select`] takes them.
+/// One player's kills from one slot, as [`select`] takes them.
 pub struct PlayerKills {
     pub name: String,
     pub number: Option<u8>,
@@ -147,41 +147,30 @@ pub fn select(players: Vec<PlayerKills>, hltv: bool) -> Found {
     }
 }
 
-/// Every listable streak in `analysis` ([`select`]).
+/// Every listable streak in `analysis` ([`select`]), as
+/// `analysis::highlights` defines them (#573): each with the slot its player
+/// held when the kills happened, so a player who left before the demo ended
+/// still has a number for Go to spectate (#706).
 pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
-    let hltv = analysis.demo_info.demo_type == "HLTV";
-    let recorder_slot = analysis.state.pov_player_index;
-    let players = analysis
-        .state
-        .players
+    let found = analysis::highlights::highlights(analysis);
+    let players = found
+        .all
         .iter()
-        .map(|player| {
-            let slot = match player.connection {
-                analysis::Connection::Connected { client_id } => Some(client_id),
-                _ => None,
-            };
-            PlayerKills {
-                name: player.name.clone(),
-                // The analysis counts slots from 0, entity numbers from 1.
-                number: slot.and_then(|s| s.checked_add(1)),
-                recorder: !hltv && slot.is_some() && slot == recorder_slot,
-                streaks: player
-                    .kill_streaks
+        .map(|highlight| PlayerKills {
+            name: highlight.player.clone(),
+            // The analysis counts slots from 0, entity numbers from 1.
+            number: highlight.slot.and_then(|s| s.checked_add(1)),
+            recorder: highlight.recorder,
+            streaks: vec![
+                highlight
+                    .kills
                     .iter()
-                    .map(|streak| {
-                        streak
-                            .kills
-                            .iter()
-                            .map(|(time, weapon, _)| {
-                                (time.viewdemo_offset.as_secs_f32(), weapon_name(weapon))
-                            })
-                            .collect()
-                    })
+                    .map(|kill| (kill.viewdemo_secs, weapon_name(&kill.weapon)))
                     .collect(),
-            }
+            ],
         })
         .collect();
-    select(players, hltv)
+    select(players, found.hltv)
 }
 
 /// Studio's English weapon names. `analysis::weapon_display_name` reads them
