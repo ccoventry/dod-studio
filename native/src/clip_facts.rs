@@ -28,9 +28,9 @@ pub fn faction_name(team: Option<&Team>, allies_are_british: bool) -> &'static s
     }
 }
 
-/// The facts for the streak `player_index` (a connected client slot, as
-/// `CaptureStreak.player_index` holds it) started at `first_kill_tick`, or
-/// `None` when no such streak is in the analysis.
+/// The facts for the streak `player_index` (the slot its kills were scored
+/// from, as `CaptureStreak.player_index` holds it) started at
+/// `first_kill_tick`, or `None` when no such streak is in the analysis.
 ///
 /// Sides are each player's team at the end of the demo, which is the side
 /// they played for a demo that is one half of a match.
@@ -41,13 +41,20 @@ pub fn streak_facts(
 ) -> Option<StreakFacts> {
     let british = analysis.state.allies_are_british;
     let players = &analysis.state.players;
-    let player = players.iter().find(|p| {
-        matches!(p.connection, Connection::Connected { client_id } if client_id as usize == player_index)
-    })?;
-    let streak = player.kill_streaks.iter().find(|s| {
-        s.kills
-            .first()
-            .is_some_and(|(time, _, _)| time.frame_index as i32 == first_kill_tick)
+    // The streak's own slot, as `analysis::highlights` reads it: a player
+    // who left before the demo ended holds none at its end (#573).
+    let (player, streak) = players.iter().find_map(|p| {
+        let end_slot = match p.connection {
+            Connection::Connected { client_id } => Some(client_id),
+            Connection::Disconnected => None,
+        };
+        let streak = p.kill_streaks.iter().find(|s| {
+            s.slot.or(end_slot).map(usize::from) == Some(player_index)
+                && s.kills
+                    .first()
+                    .is_some_and(|(time, _, _)| time.frame_index as i32 == first_kill_tick)
+        })?;
+        Some((p, streak))
     })?;
     let mut facts = StreakFacts {
         faction: faction_name(player.team.as_ref(), british).to_string(),

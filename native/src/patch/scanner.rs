@@ -141,6 +141,55 @@ fn leading_frame_times(
     Ok((frame_times, stopped || !truncated))
 }
 
+/// The Capture page's rows: one per highlight, as `analysis::highlights`
+/// defines them, each built on `demo` (the fields every row of the demo
+/// shares). Every player's (`all`): the frontend keeps the recording player's
+/// rows itself (`isVisibleStreak`), and saved projects index these rows in
+/// this order. The slot is the one the kills were scored from (#573), which
+/// capture spectates (#706), so a player who left before the demo ended keeps
+/// theirs; only a highlight whose slot is unknown is skipped, as capture
+/// needs one to anchor the patcher.
+fn capture_streaks(
+    highlights: &analysis::highlights::Highlights,
+    demo: &CaptureStreak,
+) -> Vec<CaptureStreak> {
+    let mut streaks = Vec::new();
+    for highlight in &highlights.all {
+        let Some(slot) = highlight.slot else {
+            continue;
+        };
+        let kills_raw: Vec<(i32, f32, String)> = highlight
+            .kills
+            .iter()
+            .map(|kill| {
+                (
+                    kill.frame_index as i32,
+                    kill.real_secs,
+                    analysis::weapon_display_name(&kill.weapon),
+                )
+            })
+            .collect();
+        let viewdemo_times: Vec<f32> = highlight.kills.iter().map(|k| k.viewdemo_secs).collect();
+
+        let end_index = kills_raw.len().saturating_sub(1);
+        let mut streak = CaptureStreak {
+            start_tick: kills_raw[0].0,
+            end_tick: kills_raw[end_index].0,
+            target_player: Some(highlight.player.clone()),
+            kill_count: kills_raw.len(),
+            player_index: slot as usize,
+            kills: kills_raw,
+            viewdemo_times,
+            start_index: 0,
+            end_index,
+            ..demo.clone()
+        };
+        streak.update_visuals();
+        streaks.push(streak);
+    }
+    streaks
+}
+
 pub fn scan_demo_for_highlights(
     path: &std::path::Path,
 ) -> Result<
@@ -223,59 +272,35 @@ pub fn scan_demo_for_highlights_with_analysis(
         tickrate = 100.0;
     }
 
-    let mut streaks: Vec<CaptureStreak> = Vec::new();
     let source_key = crate::utils::demo_hasher::key_text(
         crate::utils::demo_hasher::demo_key_of_head(&prefix, file_len as u64),
     );
 
-    // ── Per-player life-bounded streaks, as `analysis::highlights` defines them ──
-    // Every player's (`all`): the frontend keeps the recording player's rows
-    // itself (`isVisibleStreak`), and saved projects index these rows in this
-    // order. Skips players no longer in a connected slot: capture needs a slot
-    // to anchor the patcher.
     let highlights = analysis::highlights::highlights(&analysis);
-    for highlight in &highlights.all {
-        let Some(slot) = highlight.slot else {
-            continue;
-        };
-        let kills_raw: Vec<(i32, f32, String)> = highlight
-            .kills
-            .iter()
-            .map(|kill| {
-                (
-                    kill.frame_index as i32,
-                    kill.real_secs,
-                    analysis::weapon_display_name(&kill.weapon),
-                )
-            })
-            .collect();
-        let viewdemo_times: Vec<f32> = highlight.kills.iter().map(|k| k.viewdemo_secs).collect();
-
-        let end_index = kills_raw.len().saturating_sub(1);
-        let mut streak = CaptureStreak {
-            start_tick: kills_raw[0].0,
-            end_tick: kills_raw[end_index].0,
+    let streaks = capture_streaks(
+        &highlights,
+        &CaptureStreak {
+            start_tick: 0,
+            end_tick: 0,
             source_demo: path.to_string_lossy().to_string(),
-            target_player: Some(highlight.player.clone()),
-            kill_count: kills_raw.len(),
+            target_player: None,
+            kill_count: 0,
             timeline_string: String::new(),
             duration_string: String::new(),
-            player_index: slot as usize,
-            kills: kills_raw,
-            viewdemo_times,
+            player_index: 0,
+            kills: Vec::new(),
+            viewdemo_times: Vec::new(),
             start_index: 0,
-            end_index,
+            end_index: 0,
             total_demo_frames: final_demo_frames,
             demo_fps: tickrate,
             frame_times: frame_times_arc.clone(),
             status: HighlightStatus::None,
             match_start_tick: analysis.state.match_start_tick,
-            source_key: Some(source_key.clone()),
+            source_key: Some(source_key),
             spectated: highlights.hltv,
-        };
-        streak.update_visuals();
-        streaks.push(streak);
-    }
+        },
+    );
 
     // The player the Highlights table keeps (D18, `analysis::highlights::Rule`):
     // a POV demo's recorder. None lists everyone's -- an HLTV demo, whose
@@ -342,7 +367,7 @@ mod source_check_tests {
     use super::*;
     use crate::utils::demo_hasher::{demo_key_of_head, key_text};
 
-    fn streak_for(path: &std::path::Path, key: Option<String>) -> CaptureStreak {
+    pub(super) fn streak_for(path: &std::path::Path, key: Option<String>) -> CaptureStreak {
         CaptureStreak {
             start_tick: 0,
             end_tick: 0,
@@ -443,5 +468,151 @@ mod tests {
         assert!(is_hltv_head(&head));
         // What the old check looked for marks nothing on its own.
         assert!(!is_hltv_head(b"HLTV Proxy"));
+    }
+
+    /// An HLTV analysis with one player, `connection` at the demo's end, who
+    /// scored two kills from slot 3.
+    fn analysis_of_one_player(connection: serde_json::Value) -> analysis::Analysis {
+        let at = |secs: u64, frame: usize| {
+            serde_json::json!({
+                "real_offset": { "secs": secs, "nanos": 0 },
+                "viewdemo_offset": { "secs": secs, "nanos": 0 },
+                "frame_index": frame,
+            })
+        };
+        let mut json = serde_json::to_value(analysis::Analysis::default()).unwrap();
+        json["demo_info"]["demo_type"] = "HLTV".into();
+        json["state"]["players"] = serde_json::json!([{
+            "id": "STEAM_0:0:1",
+            "connection": connection,
+            "name": "leaver",
+            "team": "Axis",
+            "class": null,
+            "stats": [0, 2, 0],
+            "session_stats": [0, 2, 0],
+            "accumulated_stats": [0, 0, 0],
+            "needs_reconnect_sync": true,
+            "stats_seeded": true,
+            "has_pre_demo_activity": false,
+            "has_reconnected": false,
+            "kill_streaks": [
+                { "kills": [[at(10, 1000), "K98", "STEAM_0:0:2"], [at(12, 1200), "K98", "STEAM_0:0:3"]], "slot": 3 },
+                { "kills": [] },
+            ],
+            "weapon_breakdown": {},
+            "mortality": [],
+        }]);
+        serde_json::from_value(json).expect("the synthetic analysis deserialises")
+    }
+
+    fn rows(analysis: &analysis::Analysis) -> Vec<(Option<String>, usize, usize)> {
+        let highlights = analysis::highlights::highlights(analysis);
+        let demo = source_check_tests::streak_for(std::path::Path::new("x.dem"), None);
+        capture_streaks(&highlights, &demo)
+            .into_iter()
+            .map(|s| (s.target_player, s.player_index, s.kill_count))
+            .collect()
+    }
+
+    #[test]
+    fn a_player_who_left_keeps_the_slot_their_kills_came_from() {
+        let left = analysis_of_one_player("Disconnected".into());
+        assert_eq!(rows(&left), [(Some("leaver".to_string()), 3, 2)]);
+        // Still in the game, now in slot 8: the kills were still slot 3's.
+        let moved = analysis_of_one_player(serde_json::json!({ "Connected": { "client_id": 8 } }));
+        assert_eq!(rows(&moved), [(Some("leaver".to_string()), 3, 2)]);
+    }
+
+    /// Each DeathMsg in `bytes`: (its frame's time, the killer's slot).
+    fn death_msgs(bytes: &[u8]) -> Vec<(f32, u8)> {
+        use dem::types::{FrameData, MessageData, NetMessage};
+        let demo = dem::open_demo_from_bytes(bytes).expect("the demo parses");
+        let mut found = Vec::new();
+        for entry in &demo.directory.entries {
+            for frame in &entry.frames {
+                let FrameData::NetworkMessage(network) = &frame.frame_data else {
+                    continue;
+                };
+                let MessageData::Parsed(messages) = &network.1.messages else {
+                    continue;
+                };
+                for message in messages {
+                    if let NetMessage::UserMessage(user) = message
+                        && let Ok(dod::UserMessage::DeathMsg(death)) =
+                            dod::UserMessage::new(&user.name, &user.data)
+                        && let Some(slot) = death.killer_client_index.checked_sub(1)
+                    {
+                        found.push((frame.time, slot));
+                    }
+                }
+            }
+        }
+        found
+    }
+
+    /// An HLTV demo most of whose players left before it ended keeps every
+    /// player's highlights, each at the slot its kills came from. Run with
+    /// `DOD_HLTV_DISCONNECT_DEMO=<path> cargo test -p native --lib
+    /// players_who_left -- --ignored --nocapture`; without it, the KTP demo
+    /// it was found with is looked for in the Downloads folder.
+    #[test]
+    #[ignore]
+    fn the_highlights_of_players_who_left_are_kept() {
+        let path = std::env::var_os("DOD_HLTV_DISCONNECT_DEMO")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(std::env::var_os("USERPROFILE").unwrap_or_default())
+                    .join("Downloads")
+                    .join("ktp_1791749434-NY1_h2-2610111632-dod_thunder2.dem")
+            });
+        assert!(
+            path.is_file(),
+            "no demo at {}: set DOD_HLTV_DISCONNECT_DEMO",
+            path.display()
+        );
+        let ((_, streaks, ..), analysis) =
+            scan_demo_for_highlights_with_analysis(&path).expect("the scan succeeds");
+
+        let mut expected = 0;
+        let mut before = 0;
+        for player in &analysis.state.players {
+            let lives = player
+                .kill_streaks
+                .iter()
+                .filter(|s| !s.kills.is_empty())
+                .count();
+            expected += lives;
+            if matches!(player.connection, analysis::Connection::Connected { .. }) {
+                before += lives;
+            }
+            let listed = streaks
+                .iter()
+                .filter(|s| s.target_player.as_deref() == Some(player.name.as_str()))
+                .count();
+            println!(
+                "{:<24} {lives:>3} highlights, {listed:>3} listed",
+                player.name
+            );
+            assert_eq!(listed, lives, "{}", player.name);
+        }
+        println!(
+            "{} listed; {before} with the end-of-demo slot",
+            streaks.len()
+        );
+        assert_eq!(streaks.len(), expected);
+        assert!(expected > before, "every player was still in the game");
+
+        let deaths = death_msgs(&std::fs::read(&path).unwrap());
+        for streak in &streaks {
+            for (_, secs, weapon) in &streak.kills {
+                assert!(
+                    deaths.iter().any(|(t, slot)| (t - secs).abs() < 0.001
+                        && *slot as usize == streak.player_index),
+                    "{:?}'s {weapon} kill at {secs:.2} s: no DeathMsg from slot {}",
+                    streak.target_player,
+                    streak.player_index
+                );
+            }
+        }
     }
 }
