@@ -220,6 +220,7 @@ mod run_in_background;
 mod scan;
 mod schedule;
 mod scoreboard;
+mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
