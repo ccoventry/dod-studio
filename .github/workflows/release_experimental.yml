@@ -16,6 +16,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read # release_notes.py reads the merged PRs' bodies
 
 jobs:
   release:
@@ -25,6 +26,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: dev
+          fetch-depth: 0 # all tags and history: the release notes span the last stable tag..dev
 
       # The commit actually built. `github.sha` is the commit of the branch the
       # workflow was *started* from (often main), not dev's.
@@ -32,6 +34,30 @@ jobs:
         id: commit
         shell: bash
         run: echo "SHA=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # The release body: the `Release note:` lines of the PRs merged since
+      # the latest stable vX.Y.Z tag, grouped New / Fixed / Changed, then every
+      # PR title (.github/scripts/release_notes.py, docs/versioning_and_releases.md).
+      # From the latest stable tag, never experimental-latest or an older one,
+      # so the notes say what this build has that the stable channel lacks.
+      # `.github/release_notes/<version>.md`, when it exists, comes first.
+      # This early so a failure costs seconds, not a build.
+      - name: Collect release notes
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ github.event.inputs.version }}
+          SHA: ${{ steps.commit.outputs.SHA }}
+        run: |
+          python .github/scripts/release_notes.py --target "$SHA" --version "$RELEASE_VERSION" \
+            --header 'On-demand experimental build from `dev` — not for general use. Built from commit '"$SHA"'.' \
+            --output "$RUNNER_TEMP/release_notes.md"
+          {
+            echo "BODY<<RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
+            cat "$RUNNER_TEMP/release_notes.md"
+            echo "RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
@@ -130,9 +156,9 @@ jobs:
           projectPath: studio
           tagName: experimental-latest
           releaseName: "DoD Studio ${{ steps.version.outputs.EXPERIMENTAL_VERSION }} (experimental)"
-          releaseBody: "On-demand experimental build from `dev` — not for general use. Built from commit ${{ steps.commit.outputs.SHA }}."
-          # What changed, from the merged PRs' titles, grouped by .github/release.yml
-          # (#165). releaseBody is prepended to the generated notes.
-          generateReleaseNotes: true
+          # Starts with the "On-demand experimental build ..." line; built by
+          # the Collect release notes step, in place of GitHub's generated notes.
+          releaseBody: ${{ steps.notes.outputs.BODY }}
+          generateReleaseNotes: false
           releaseDraft: false
           prerelease: true

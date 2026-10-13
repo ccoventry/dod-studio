@@ -7,7 +7,7 @@ use crate::*;
 use dod::Class;
 use std::collections::HashMap;
 
-fn fixture() -> Vec<u8> {
+pub(crate) fn fixture() -> Vec<u8> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../test-fixtures/ci_fixture.dem"
@@ -15,7 +15,7 @@ fn fixture() -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"))
 }
 
-fn analysis() -> &'static Analysis {
+pub(crate) fn analysis() -> &'static Analysis {
     static ANALYSIS: std::sync::OnceLock<Analysis> = std::sync::OnceLock::new();
     ANALYSIS.get_or_init(|| Analysis::try_from_bytes(&fixture()).unwrap())
 }
