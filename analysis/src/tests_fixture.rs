@@ -156,6 +156,7 @@ fn cap_breaks() {
     assert!(state.players.iter().all(|p| p.cap_breaks == 0));
 }
 
+#[test]
 fn highlights_keep_their_kill_time_slots() {
     // Everyone is still in the game at this demo's end, so each highlight's
     // slot is also the one they end in, and none is dropped.
