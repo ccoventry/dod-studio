@@ -84,39 +84,41 @@ pub async fn demo_rename_list(
             .min(total.max(1));
         // Each demo's analysis is kept, trimmed, until every one is read:
         // its match and half are decided over the whole list (#685).
-        let mut facts: Vec<(usize, (DemoFacts, Option<analysis::Analysis>))> = std::thread::scope(|scope| {
-            let handles: Vec<_> = (0..workers)
-                .map(|_| {
-                    scope.spawn(|| {
-                        let mut mine = Vec::new();
-                        loop {
-                            if cancel.load(Ordering::Relaxed) {
-                                break;
+        let mut facts: Vec<(usize, (DemoFacts, Option<analysis::Analysis>))> =
+            std::thread::scope(|scope| {
+                let handles: Vec<_> = (0..workers)
+                    .map(|_| {
+                        scope.spawn(|| {
+                            let mut mine = Vec::new();
+                            loop {
+                                if cancel.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed))
+                                else {
+                                    break;
+                                };
+                                mine.push((i, demo_rename::facts_for_grouping(&demos[i])));
+                                if !fresh[i] {
+                                    parsed.fetch_add(1, Ordering::Relaxed);
+                                    bytes_parsed.fetch_add(sizes[i], Ordering::Relaxed);
+                                }
+                                let now_done = done.fetch_add(1, Ordering::Relaxed) + 1;
+                                // A parse takes about a second, so each one may
+                                // report; so does the last cached demo, which a
+                                // throttle could otherwise hold back until the
+                                // first parse ends.
+                                emit(now_done, !fresh[i] || now_done == cached);
                             }
-                            let Some(&i) = order.get(next.fetch_add(1, Ordering::Relaxed)) else {
-                                break;
-                            };
-                            mine.push((i, demo_rename::facts_for_grouping(&demos[i])));
-                            if !fresh[i] {
-                                parsed.fetch_add(1, Ordering::Relaxed);
-                                bytes_parsed.fetch_add(sizes[i], Ordering::Relaxed);
-                            }
-                            let now_done = done.fetch_add(1, Ordering::Relaxed) + 1;
-                            // A parse takes about a second, so each one may
-                            // report; so does the last cached demo, which a
-                            // throttle could otherwise hold back until the
-                            // first parse ends.
-                            emit(now_done, !fresh[i] || now_done == cached);
-                        }
-                        mine
+                            mine
+                        })
                     })
-                })
-                .collect();
-            handles
-                .into_iter()
-                .flat_map(|h| h.join().unwrap_or_default())
-                .collect()
-        });
+                    .collect();
+                handles
+                    .into_iter()
+                    .flat_map(|h| h.join().unwrap_or_default())
+                    .collect()
+            });
         emit(done.load(Ordering::Relaxed), true);
         facts.sort_by_key(|(i, _)| *i);
         let (mut facts, analyses): (Vec<DemoFacts>, Vec<Option<analysis::Analysis>>) =

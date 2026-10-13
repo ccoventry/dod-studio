@@ -436,6 +436,31 @@ mod tests {
     }
 
     #[test]
+    fn listed_demos_get_their_match_and_an_unread_one_gets_none() {
+        let fixture = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let (_, mut analysis) =
+            crate::run_analyzer_with_progress(&PathBuf::from(fixture), |_, _| {})
+                .expect("fixture parses");
+        let mut facts = vec![
+            facts_from(Path::new(fixture), &analysis),
+            DemoFacts {
+                path: "C:/demos/broken.dem".into(),
+                error: Some("no frames".into()),
+                ..DemoFacts::default()
+            },
+        ];
+        analysis::trim_for_grouping(&mut analysis);
+        apply_grouping(&mut facts, &[Some(analysis), None]);
+        assert_eq!(facts[0].match_number, Some(1));
+        // One bot game alone: nothing says which half.
+        assert_eq!(facts[0].half, None);
+        assert_eq!(facts[1].match_number, None);
+    }
+
+    #[test]
     fn the_recorder_is_the_player_in_the_pov_slot() {
         let players = [
             player(Some(1), "other", Some(Team::Axis)),

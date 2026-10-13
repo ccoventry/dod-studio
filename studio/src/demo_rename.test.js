@@ -137,6 +137,16 @@ describe('planRenames', () => {
     expect(rows[0].to).toBe('mix_unknown_anzio.dem');
   });
 
+  it('names the match and half the listing decided, and never guesses an unknown half (#685)', () => {
+    const rows = plan([
+      pov('a.dem', { match_number: 1, half: 1 }),
+      hltv('b.dem', { match_number: 1, half: 2 }),
+      pov('c.dem', { match_number: 2, half: null }),
+      pov('d.dem'),
+    ], { povTemplate: '{match|m}_{half|h}_{map}', hltvTemplate: '{match}_{half}_{map}' });
+    expect(rows.map((r) => r.to)).toEqual(['1_h1_anzio.dem', '1_h2_anzio.dem', '2_h_anzio.dem', 'm_h_anzio.dem']);
+  });
+
   it('makes every name plain: letters, digits, - and _ only', () => {
     const rows = plan([pov('a.dem', { name: 'Zoë [x] #1 :D' })], { povTemplate: '{name} {kills}k' });
     expect(rows[0].to).toBe('Zoe_x_1_D_31k.dem');

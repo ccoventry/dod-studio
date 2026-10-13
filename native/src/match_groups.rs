@@ -249,7 +249,10 @@ mod tests {
 
     #[test]
     fn the_fixture_alone_is_match_one_with_an_unknown_half() {
-        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../test-fixtures/ci_fixture.dem");
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
         let (_, analysis) = crate::run_analyzer_with_progress(&PathBuf::from(path), |_, _| {})
             .expect("fixture parses");
         let grouping = group_demos(&[(path.to_string(), &analysis, Some(1))]);

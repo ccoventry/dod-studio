@@ -8,6 +8,13 @@
 - `half_of(&Analysis) -> HalfCall` for a file on its own: fewer signals, so more often unknown.
 - `HalfCall { half: First | Second | Unknown, reason, detail }`. `reason` names the signal that decided; `detail` lists what every signal saw.
 - `find_demo(&groups, &id)` returns the match and half one demo went into.
+- `trim_for_grouping(&mut Analysis)` drops what the grouping never reads (health histories, weapon breakdowns, flags), so a folder's analyses can be held for one call.
+
+## Where Studio uses it
+
+- `native::match_groups` numbers the matches (1 is the match whose oldest file is oldest; undated last) and flattens the result per demo.
+- **Rename Demos:** `demo_rename_list` groups the listed folder, so `{match}` and `{half}` see every demo in it. `{half}` is `h1`, `h2`, or the `|fallback` (else `unknown`) — never a default first half.
+- **Master Demo Queue:** `queue_match_groups` runs after each scan and project load, from the analyzer cache. The answer stays on each demo for the clip name's `{match}` and `{half}` (`queue_match_groups.js`), not in the project file. Numbers stay put as the queue grows. "Group by match" shows the queue in match order under one header line per match, and reads any demo the cache lacks.
 
 ## Grouping rules
 
