@@ -72,7 +72,8 @@
 //! - `lightmap_gamma`: the first demo of a session no longer renders with its
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
 //!   current cvars before a map's lightmaps are built. On by default;
-//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
+//!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
 //! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
