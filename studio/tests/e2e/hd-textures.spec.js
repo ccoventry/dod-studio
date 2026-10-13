@@ -80,6 +80,10 @@ async function loadHarness(page, handlers) {
     window.__mockInvokeHandlers.hd_preview = () =>
       new Promise((resolve, reject) => { window.__finishPreview = { resolve, reject }; });
     if (h.mapSaveError) window.__mockInvokeHandlers.hd_save_map_list = () => Promise.reject(h.mapSaveError);
+    if (h.coverage) {
+      window.__mockInvokeHandlers.hd_world_coverage = () =>
+        new Promise((resolve, reject) => { window.__finishCoverage = { resolve, reject }; });
+    }
   }, handlers);
   await page.goto('/tests/e2e/hd-textures.html');
   await page.waitForFunction(() => window.__harnessReady === true);
@@ -895,4 +899,65 @@ test('map list: a map two patterns pick points at both; its own line plus a patt
   // Every map: no Add button, nothing to point at.
   await page.check('#hd-maps-every');
   await expect(page.locator('#hd-maps-add-btn')).toBeHidden();
+});
+
+/** native::hd::map_textures::WorldCoverage: ultrasharp built for every map,
+ *  remacri for anzio, part of railroad, and nothing else. */
+const WORLD_COVERAGE = {
+  styles: ['remacri', 'ultrasharp'],
+  maps: [
+    { map: 'dod_anzio', total: 12, built: { remacri: 12, ultrasharp: 12 } },
+    { map: 'dod_caen', total: 8, built: { remacri: 0, ultrasharp: 8 } },
+    { map: 'dod_railroad', total: 10, built: { remacri: 3, ultrasharp: 10 } },
+    { map: 'dod_railroad2_s9a', total: 9, built: { remacri: 0, ultrasharp: 9 } },
+  ],
+  unreadable: [],
+  millis: 5,
+};
+
+test('map coverage (#426): checks off the page thread, then says which maps a style covers and warns about the map list', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+
+  // While the scan runs: a checking line, and a bar once it reports.
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Checking which maps each style has map textures for…');
+  await expect(page.locator('#hd-refresh-btn')).toBeEnabled();
+  await page.evaluate(() => window.__mockEmit('hd_coverage_progress', { done: 2, total: 4 }));
+  await expect(page.locator('#hd-style-maps-summary')).toContainText('(2 of 4 maps)');
+  await expect(page.locator('#hd-style-maps-progress')).toBeVisible();
+  await expect(page.locator('#hd-style-maps-progress')).toHaveAttribute('max', '4');
+
+  await page.evaluate((c) => window.__finishCoverage.resolve(c), WORLD_COVERAGE);
+  await expect(page.locator('#hd-style-maps-progress')).toBeHidden();
+  await page.selectOption('#hd-style-select', 'ultrasharp');
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 4 maps.');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
+  await expect(page.locator('#hd-cfg-lines')).not.toContainText('//');
+
+  // The list picks railroad* and anzio: remacri has part of one, none of the other.
+  await page.selectOption('#hd-style-select', 'remacri');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri: every map texture for 1 map, some for 1 map and none for 2 maps.');
+  const warning = 'remacri is missing map textures for dod_railroad and 1 more map in your map list; those maps will show stock textures wherever it has none.';
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(warning);
+  await expect(page.locator('#hd-cfg-lines')).toContainText(`// ${warning}`);
+  await page.click('#hd-style-maps summary');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (2)dod_caen, dod_railroad2_s9a',
+  ]);
+
+  // Every map, as edited (not saved yet): the warning follows.
+  await page.check('#hd-maps-every');
+  await expect(page.locator('#hd-style-map-warning')).toHaveText(
+    'remacri is missing map textures for dod_caen and 2 more maps; those maps will show stock textures wherever it has none.');
+});
+
+test('map coverage (#426): a failed check says so and warns about nothing', async ({ page }) => {
+  await loadHarness(page, { status: { ...STATUS, map_list: MAP_LIST }, coverage: true });
+  await page.click('#hd-refresh-btn');
+  await page.evaluate(() => window.__finishCoverage.reject('disk gone'));
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('Could not check which maps are covered: disk gone');
+  await expect(page.locator('#hd-style-map-warning')).toBeHidden();
 });

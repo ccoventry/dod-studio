@@ -1013,6 +1013,17 @@ export async function hdSaveMapList(gamePath, text) {
     });
 }
 
+/** Which maps each style has map textures for (#426):
+ *  native::hd::map_textures::WorldCoverage. The HD page shows a failure in
+ *  its own coverage line, so there is no toast. */
+export async function hdWorldCoverage(gamePath) {
+  return invoke("hd_world_coverage", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_world_coverage):", err);
+      throw err;
+    });
+}
+
 /** Takes `name` out of the install's my_styles.txt. */
 export async function hdRemoveStyle(gamePath, name) {
   return invoke("hd_remove_style", { gamePath, name })

@@ -43,3 +43,53 @@ export function gapsSentence(style, gaps) {
     .map((g) => STRINGS.HD.someOf(g.files.toLocaleString(), g.most.toLocaleString(), name(g.asset_type)));
   return STRINGS.HD.styleGaps(style, none, some);
 }
+
+// Per map (#426): native::hd::map_textures::WorldCoverage, from the
+// hd_world_coverage command. `maps` is one entry per map with its texture
+// count and, per style, how many of those textures the style has built.
+
+/** How `style` stands on each map, as three lists: `full` (names), `part`
+ *  (`{ map, built, total }`) and `none` (names), in the report's map order.
+ *  A map with no textures to build is in none of them. */
+export function mapCoverage(coverage, style) {
+  const full = [];
+  const part = [];
+  const none = [];
+  for (const m of coverage?.maps || []) {
+    if (!m.total) continue;
+    const built = m.built?.[style] || 0;
+    if (built >= m.total) full.push(m.map);
+    else if (built > 0) part.push({ map: m.map, built, total: m.total });
+    else none.push(m.map);
+  }
+  return { full, part, none };
+}
+
+/** One sentence: how many maps `style` has every, some and none of the
+ *  textures for; '' when the report has no maps. */
+export function coverageSentence(style, groups) {
+  const total = groups.full.length + groups.part.length + groups.none.length;
+  if (!total) return '';
+  if (groups.full.length === total) return STRINGS.HD.coverageAll(style, total);
+  return STRINGS.HD.coverageCounts(style, groups.full.length, groups.part.length, groups.none.length);
+}
+
+/** The maps in `chosen` (the maps a build makes textures for: hd_maps.txt's
+ *  picks, or every map) that `style` has not fully built: `{ map, built,
+ *  total }`, in the report's map order. */
+export function uncoveredChosen(coverage, style, chosen) {
+  const wanted = new Set(chosen.map((name) => name.toLowerCase()));
+  return (coverage?.maps || [])
+    .filter((m) => m.total > 0 && wanted.has(m.map.toLowerCase()) && (m.built?.[style] || 0) < m.total)
+    .map((m) => ({ map: m.map, built: m.built?.[style] || 0, total: m.total }));
+}
+
+/** The warning beside the selected style, or '' when every chosen map is
+ *  covered. `listed` says the maps come from an hd_maps.txt in effect, not
+ *  from "every map". */
+export function mapListWarning(style, uncovered, listed) {
+  if (!uncovered.length) return '';
+  const kind = uncovered.every((m) => m.built === 0) ? 'none'
+    : uncovered.every((m) => m.built > 0) ? 'some' : 'missing';
+  return STRINGS.HD.mapListWarning(style, kind, uncovered[0].map, uncovered.length - 1, listed);
+}

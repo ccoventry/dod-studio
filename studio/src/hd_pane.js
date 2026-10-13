@@ -11,12 +11,14 @@ import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-dialog';
 import {
   hdStatus, hdSetupTools, hdBuild, hdCancel, hdSetPython, hdSetUpscaler, hdMisses, hdSaveStyle, hdRemoveStyle,
-  hdPreview, hdSaveMapList,
+  hdPreview, hdSaveMapList, hdWorldCoverage,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 import { elapsedWords } from './time_format.js';
-import { mostPerType, styleGaps, gapsSentence } from './hd_coverage.js';
+import {
+  mostPerType, styleGaps, gapsSentence, mapCoverage, coverageSentence, uncoveredChosen, mapListWarning,
+} from './hd_coverage.js';
 import { glMaxSizeLine } from './hd_gl_max_size.js';
 
 function formatSize(bytes) {
@@ -57,6 +59,11 @@ export function initHdPane() {
   const realesrganLine = document.querySelector('#hd-realesrgan-line');
   const footerSummary = document.querySelector('#footer-hd-summary');
   const styleCoverage = document.querySelector('#hd-style-coverage');
+  const styleMaps = document.querySelector('#hd-style-maps');
+  const styleMapsSummary = document.querySelector('#hd-style-maps-summary');
+  const styleMapsGroups = document.querySelector('#hd-style-maps-groups');
+  const styleMapWarning = document.querySelector('#hd-style-map-warning');
+  const styleMapsProgress = document.querySelector('#hd-style-maps-progress');
   const previewMap = document.querySelector('#hd-preview-map');
   const previewStyles = document.querySelector('#hd-preview-styles');
   const previewBtn = document.querySelector('#hd-preview-btn');
@@ -104,6 +111,12 @@ export function initHdPane() {
   let cvars = null;
   // The last status report, for the selected style's coverage (#426).
   let lastStatus = null;
+  // Which maps each style has map textures for (#426): a separate, slower
+  // report, fetched after each status refresh. `null` while it is on its way.
+  let worldCoverage = null;
+  let worldCoverageError = '';
+  let worldCoverageLoading = false;
+  let worldCoverageProgress = null; // { done, total } from hd_coverage_progress
   // A download or a build is running: the backend allows one at a time.
   let busy = false;
   // Whether the build can run at all: scripts shipped, and a Python found.
@@ -152,10 +165,14 @@ export function initHdPane() {
 
   function renderCfgLines() {
     if (!cvars || !cfgLines) return;
-    // #426: a partial style says so, here and in the lines copied to movie.cfg.
-    const gaps = gapsSentence(styleSelect.value, styleGaps(lastStatus, styleSelect.value));
-    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${styleSelect.value}\ngl_max_size ${cap()}`
-      + (gaps ? `\n${STRINGS.HD.cfgGapsComment(gaps)}` : '');
+    // #426: a partial style says so, here and in the lines copied to movie.cfg,
+    // and so does a map being built that the style has no textures for.
+    const style = styleSelect.value;
+    const gaps = gapsSentence(style, styleGaps(lastStatus, style));
+    const warning = renderStyleMaps(style);
+    cfgLines.textContent = `${cvars.enabled} 1\n${cvars.style} ${style}\ngl_max_size ${cap()}`
+      + (gaps ? `\n${STRINGS.HD.cfgGapsComment(gaps)}` : '')
+      + (warning ? `\n${STRINGS.HD.cfgGapsComment(warning)}` : '');
     if (styleCoverage) {
       styleCoverage.textContent = gaps;
       styleCoverage.hidden = !gaps;
@@ -167,6 +184,95 @@ export function initHdPane() {
       glMaxSize.textContent = gl?.text || '';
       glMaxSize.hidden = !gl;
       glMaxSize.classList.toggle('hd-gl-max-size-low', Boolean(gl?.low));
+    }
+  }
+
+  // #426: the selected style's maps, as one line that opens to the lists,
+  // and the warning about the maps being built that it hasn't covered.
+  // Returns the warning, for the cfg lines' comment.
+  function renderStyleMaps(style) {
+    if (!styleMaps) return '';
+    let summary = '';
+    let warning = '';
+    styleMapsGroups.replaceChildren();
+    if (worldCoverageLoading) {
+      summary = worldCoverageProgress
+        ? STRINGS.HD.coverageChecking(worldCoverageProgress.done, worldCoverageProgress.total)
+        : STRINGS.HD.COVERAGE_CHECKING;
+    } else if (worldCoverageError) {
+      summary = STRINGS.HD.coverageFailed(worldCoverageError);
+    } else if (worldCoverage) {
+      const groups = mapCoverage(worldCoverage, style);
+      summary = coverageSentence(style, groups);
+      if (worldCoverage.unreadable?.length) {
+        summary += ` ${STRINGS.HD.coverageUnreadable(worldCoverage.unreadable.length)}`;
+      }
+      const line = (heading, names) => {
+        if (!names.length) return;
+        const p = document.createElement('p');
+        p.className = 'hd-hint';
+        const head = document.createElement('strong');
+        head.textContent = heading;
+        p.append(head, document.createElement('br'), names.join(', '));
+        styleMapsGroups.appendChild(p);
+      };
+      line(STRINGS.HD.coverageGroupFull(groups.full.length), groups.full);
+      line(STRINGS.HD.coverageGroupPart(groups.part.length),
+        groups.part.map((m) => STRINGS.HD.coveragePartMap(m.map, m.built, m.total)));
+      line(STRINGS.HD.coverageGroupNone(groups.none.length), groups.none);
+      if (worldCoverage.unreadable?.length) {
+        line(STRINGS.HD.coverageUnreadable(worldCoverage.unreadable.length), worldCoverage.unreadable);
+      }
+      // A style with no map textures anywhere already says so in the line
+      // above; the warning is for one that has some maps but not these.
+      if (groups.full.length || groups.part.length) {
+        const listed = mapMode === 'some';
+        const chosen = listed ? [...pickedBy().keys()] : mapNames();
+        warning = mapListWarning(style, uncoveredChosen(worldCoverage, style, chosen), listed);
+      }
+    }
+    styleMapsSummary.textContent = summary;
+    styleMapsSummary.title = styleMapsGroups.childElementCount ? STRINGS.HD.COVERAGE_SHOW : '';
+    styleMaps.hidden = !summary;
+    if (styleMapsProgress) {
+      styleMapsProgress.hidden = !worldCoverageLoading || !worldCoverageProgress;
+      styleMapsProgress.max = worldCoverageProgress?.total || 1;
+      styleMapsProgress.value = worldCoverageProgress?.done || 0;
+    }
+    if (styleMapWarning) {
+      styleMapWarning.textContent = warning;
+      styleMapWarning.hidden = !warning;
+    }
+    return warning;
+  }
+
+  // The coverage scan reads every map (seconds the first time; the backend
+  // keeps what it read): it runs after each status refresh without holding
+  // the refresh up, one at a time, and a refresh during one runs it again
+  // when it ends so the report is never older than the page.
+  let coverageAgain = false;
+  async function loadCoverage() {
+    if (worldCoverageLoading) {
+      coverageAgain = true;
+      return;
+    }
+    worldCoverageLoading = true;
+    worldCoverageProgress = null;
+    renderCfgLines();
+    try {
+      worldCoverage = (await hdWorldCoverage(gamePath())) || null;
+      worldCoverageError = '';
+    } catch (err) {
+      worldCoverage = null;
+      worldCoverageError = String(err);
+    } finally {
+      worldCoverageLoading = false;
+      worldCoverageProgress = null;
+      renderCfgLines();
+    }
+    if (coverageAgain) {
+      coverageAgain = false;
+      loadCoverage();
     }
   }
 
@@ -392,6 +498,7 @@ export function initHdPane() {
     if (footerSummary) {
       footerSummary.textContent = STRINGS.HD.footerSummary(status.built_styles.join(', '), formatSize(total));
     }
+    loadCoverage();
   }
 
   // The style comparison: which maps and built styles to put in the sheet.
@@ -682,6 +789,8 @@ export function initHdPane() {
         mapMode = fresh.active ? 'some' : 'every';
       }
     }
+    // The warning beside the style follows the list as it is edited.
+    renderCfgLines();
     if (!mapsAvailable || !mapFile) return;
 
     mapsFile.textContent = mapFile.old_place
@@ -1021,6 +1130,12 @@ export function initHdPane() {
     const secs = Math.max(p.elapsed_secs, Math.floor((Date.now() - buildStartedAt) / 1000));
     buildProgress.textContent = STRINGS.HD.buildStep(p.step, p.steps, p.style, type, elapsedWords(secs));
   };
+
+  listen('hd_coverage_progress', (event) => {
+    if (!worldCoverageLoading) return;
+    worldCoverageProgress = event.payload;
+    renderStyleMaps(styleSelect.value);
+  }).catch((err) => console.error('hd_coverage_progress listener failed:', err));
 
   listen('hd_build_progress', (event) => {
     const p = event.payload;

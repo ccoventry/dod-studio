@@ -1605,6 +1605,35 @@ export const STRINGS = {
       return `${style} covers only part of the game: it has ${parts.join(', and ')}. Wherever it has none, the game shows the stock texture.`;
     },
     cfgGapsComment: (sentence) => `// ${sentence}`,
+    // #426: which maps a style has map textures for, and the warning when
+    // the maps being built include one it hasn't.
+    COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
+    coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
+    coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
+    coverageAll: (style, maps) => `${style} has every map texture for all ${maps} map${maps === 1 ? '' : 's'}.`,
+    coverageCounts: (style, full, part, none) => {
+      const maps = (n) => `${n} map${n === 1 ? '' : 's'}`;
+      const parts = [];
+      if (full) parts.push(`every map texture for ${maps(full)}`);
+      if (part) parts.push(`${parts.length ? 'some' : 'some of the map textures'} for ${maps(part)}`);
+      if (none) parts.push(`${parts.length ? 'none' : 'no map textures'} for ${maps(none)}`);
+      const last = parts.pop();
+      return `${style}: ${parts.length ? `${parts.join(', ')} and ${last}` : last}.`;
+    },
+    COVERAGE_SHOW: 'Click to see which maps',
+    coverageGroupFull: (n) => `Every map texture (${n})`,
+    coverageGroupPart: (n) => `Some of the map textures (${n})`,
+    coverageGroupNone: (n) => `No map textures (${n})`,
+    coveragePartMap: (map, built, total) => `${map} (${built} of ${total})`,
+    coverageUnreadable: (n) => `${n} map file${n === 1 ? '' : 's'} could not be read.`,
+    mapListWarning: (style, kind, first, more, listed) => {
+      const which = `${first}${more ? ` and ${more} more map${more === 1 ? '' : 's'}` : ''}${listed ? ' in your map list' : ''}`;
+      return {
+        none: `${style} has no map textures for ${which}; those maps will show stock textures.`,
+        some: `${style} has only some of the map textures for ${which}; those maps will show stock textures wherever it has none.`,
+        missing: `${style} is missing map textures for ${which}; those maps will show stock textures wherever it has none.`,
+      }[kind];
+    },
     // #680: the gl_max_size the selected install runs with (native::hd::gl_max_size).
     glMaxSizeSource: (source) => ({
       initial_commands: "Studio's Initial Commands",
