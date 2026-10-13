@@ -2338,6 +2338,7 @@ export const STRINGS = {
     FFMPEG_TITLE: 'FFmpeg (optional)',
     FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
     FFMPEG_CHECKING: 'Checking…',
+    FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
     FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',
     FFMPEG_NEEDS_HLAE: 'Set HLAE first (the step before this one); then this step can check for FFmpeg.',
 
@@ -2369,6 +2370,7 @@ export const STRINGS = {
     SKIP_SETUP_TITLE: 'Close this window. The Capture page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
     BACK: 'Back',
     NEXT: 'Next',
+    SKIP_STEP: 'Skip this step',
     FINISH: 'Finish',
     BROWSE: 'Browse',
     NOT_SET: 'Not set yet',

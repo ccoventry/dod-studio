@@ -16,7 +16,8 @@ import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
  *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
- *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers }),
+ *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
+ *   setupDismissed }),
  *   and currentCaptureMode().
  */
 export function createSettingsSync({ getState, currentCaptureMode }) {
@@ -150,7 +151,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_clips_after_batch: finishClipsAfterBatch,
       finish_codec_obs: finishCodecObs,
       finish_codec_video: finishCodecVideo,
-      finish_codec_frames: finishCodecFrames
+      finish_codec_frames: finishCodecFrames,
+      setup_dismissed: !!state.setupDismissed
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.

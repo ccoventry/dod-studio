@@ -228,6 +228,11 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
+    /// "Skip setup for now" in the Setup window (#599): it stops opening by
+    /// itself at launch. Finishing setup clears it, so a required path that
+    /// goes missing later opens the window again.
+    #[serde(default)]
+    pub setup_dismissed: bool,
 }
 
 fn default_resolution_width() -> i32 {
@@ -407,6 +412,7 @@ impl Default for AppSettings {
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
+            setup_dismissed: false,
         }
     }
 }

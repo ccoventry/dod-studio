@@ -3309,3 +3309,8 @@ button.setup-skip:hover:not(:disabled) {
 .setup-tick.todo { border: 1.5px solid #ffb74d; }
 .setup-tick.opt { border: 1.5px dashed var(--border-accent); }
 
+
+.setup-row-text {
+  cursor: pointer;
+  min-width: 0;
+}
