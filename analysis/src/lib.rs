@@ -8,6 +8,8 @@ mod clock_offset;
 pub mod entity_replay;
 /// What a highlight is, and whose, for every list of them (#573).
 pub mod highlights;
+/// Whether every delta decodes against a frame the file has (#41).
+pub mod integrity;
 mod kill;
 mod localization;
 /// Which match and which half a demo records, from its contents (#685).
@@ -1371,6 +1373,11 @@ mod tests {
                     "Player {} kill_streak {} mismatched",
                     i,
                     j
+                );
+                assert_eq!(
+                    k_l.slot, k_r.slot,
+                    "Player {} kill_streak {} slot mismatched",
+                    i, j
                 );
             }
 

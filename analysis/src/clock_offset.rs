@@ -236,6 +236,7 @@ mod tests {
             };
             state.players[killer].kill_streaks.push(KillStreak {
                 kills: vec![(game_time, weapon.clone(), victim_id)],
+                slot: None,
             });
         }
         Analysis {
