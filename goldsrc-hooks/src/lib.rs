@@ -120,6 +120,10 @@
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
 //!   turns it off.
+//! - `game_dir_check`: demos recorded in `dod` play in a copy of the game
+//!   folder (`-game dod_movies`), which the engine otherwise refuses with
+//!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
+//!   check, both builds; only when the game folder is not `dod`.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -193,6 +197,7 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod game_dir_check;
 mod game_folder;
 mod hand_signals;
 mod hide_asset;
@@ -436,6 +441,8 @@ fn install_fixes() {
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
     sprite_blend::install();
+    // Before the first demo's svc_serverinfo; does nothing in `dod`.
+    game_dir_check::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {
