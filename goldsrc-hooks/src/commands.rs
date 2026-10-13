@@ -1590,6 +1590,7 @@ pub fn install() {
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
         crate::pov_live_bob::set_cvar(bob);
+    }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
         register(crate::screen_effects::SHAKE_NAME, "0"),
