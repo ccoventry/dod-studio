@@ -74,8 +74,9 @@ pub(super) unsafe fn update(vgui: &Vgui) {
     }
 }
 
-/// The playing demo's playback length, read once per demo.
-fn length_of_current_demo() -> Option<f32> {
+/// The playing demo's playback length, read once per demo. The stock bar's
+/// progress (`demo_bar_progress`) reads the same one.
+pub(super) fn length_of_current_demo() -> Option<f32> {
     let name = crate::demo_reload::current_demo()?;
     let mut known = LENGTH.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((demo, length)) = known.as_ref()
