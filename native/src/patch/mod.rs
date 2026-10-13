@@ -152,6 +152,10 @@ pub mod runtime_batch;
 pub mod scanner;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sound_mute;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod source_copies;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod viewdemo_refresh;
 
 // ── Re-export wall ────────────────────────────────────────────────────────────
 // All items below were previously at the top level of patch.rs.
