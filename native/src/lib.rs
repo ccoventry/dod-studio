@@ -53,6 +53,11 @@ pub mod demo_rename;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
 
+/// The demo player bar's layout with the loading progress controls, written
+/// into `dod_addon` at every launch (#465).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod demo_bar_res;
+
 /// The HD texture files: what is built, and fetching the upscaler (#372).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod hd;
