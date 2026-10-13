@@ -31,7 +31,7 @@ They used to live in `native/src/bin/`; `native/Cargo.toml` sets
 | `demo_tickrate` | What frame rate was this demo actually recorded at? |
 | `test_builder` | Does `build_batch_queue` produce a sane plan for this input? |
 | `find_overlaps` | Which highlights are close enough to merge into one take? |
-| `demo_integrity` | Does every delta in this demo decode against a frame the file actually has? (#41) |
+| `demo_integrity` | Which deltas in this demo decode against a frame the file doesn't have, and what if frames A..B were lost? Lists what `hl-demo-auditor --integrity` counts (#41) |
 
 ### HLTV and the director channel
 

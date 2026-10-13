@@ -40,7 +40,8 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
-| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. It also stops HLAE bringing the game window to the front, topmost, for every recording (`hlae_window.rs`), and puts a minimised game back behind the other windows instead, since a minimised game draws nothing. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
+| `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
+| `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording, and a minimised game is put back behind the other windows instead, since a minimised game draws nothing. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
 | `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
 | `dodstudio_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
 | `dodstudio_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (always amplitude 15 for 1 s; no WSOD25 map has an `env_shake`) (#606) | same |
@@ -188,9 +189,10 @@ demo fast-forwarded the batch seeks (the stepped seek, #601). Nothing runs
 while a seek is on its way. A demo that doesn't load in three minutes, stops,
 or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
 `stop` ends the batch; bare says where it is. With
-`dodstudio_run_in_background` on when it starts, the game steps aside behind
+`dodstudio_stay_behind_while_capturing` on when it starts, the game steps aside behind
 the other windows; `away` does that on its own, and Studio sends it the
-moment the game takes commands, before the batch starts. Source: `goldsrc-hooks/src/batch.rs`.
+moment the game takes commands, before the batch starts, unless Keep the
+Game Behind Your Windows is off (then it sends `dodstudio_stay_behind_while_capturing 0`). Source: `goldsrc-hooks/src/batch.rs`.
 
 ### `dodstudio_review`
 
