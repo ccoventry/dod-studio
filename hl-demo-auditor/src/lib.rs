@@ -96,6 +96,41 @@ pub fn scan_dir(
     }
 }
 
+/// The demos named on a command line: each file as given, each folder walked
+/// with [`scan_dir`]. Sorted, so a run over the same folder prints in the same
+/// order. Paths that are neither come back in the second list.
+pub fn collect_demos(paths: &[PathBuf]) -> (Vec<PathBuf>, Vec<PathBuf>) {
+    let cancel = AtomicBool::new(false);
+    let mut demos = vec![];
+    let mut missing = vec![];
+    for path in paths {
+        if path.is_file() {
+            demos.push(path.clone());
+        } else if path.is_dir() {
+            scan_dir(path, &mut demos, &cancel, &None);
+        } else {
+            missing.push(path.clone());
+        }
+    }
+    demos.sort();
+    demos.dedup();
+    (demos, missing)
+}
+
+/// One demo's delta-continuity verdict (#41) as `--integrity` prints it:
+/// whether it is OK, and `<path>: <verdict>`. A file that cannot be read or
+/// parsed is not OK either.
+pub fn integrity_line(path: &Path) -> (bool, String) {
+    let (ok, verdict) = match fs::read(path) {
+        Ok(bytes) => match analysis::integrity::check_demo_bytes(&bytes) {
+            Ok(report) => (report.is_ok(), report.verdict()),
+            Err(e) => (false, e),
+        },
+        Err(e) => (false, format!("cannot read the file: {e}")),
+    };
+    (ok, format!("{}: {verdict}", path.display()))
+}
+
 /// Generates a `FileKey` for a file based on its size and an FNV-1a hash of its first 64KB.
 pub fn get_file_key(path: &Path) -> Result<FileKey, std::io::Error> {
     let metadata = fs::metadata(path)?;
@@ -221,6 +256,40 @@ mod tests {
     fn fnv_matches_the_reference_vectors() {
         assert_eq!(fnv1a_hash(b""), 0xcbf2_9ce4_8422_2325);
         assert_eq!(fnv1a_hash(b"a"), 0xaf63_dc4c_8601_ec8c);
+    }
+
+    fn fixture_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn the_ci_fixture_passes_the_integrity_check() {
+        let path = fixture_path();
+        let (ok, line) = integrity_line(&path);
+        assert!(ok, "{line}");
+        assert_eq!(line, format!("{}: OK", path.display()));
+    }
+
+    #[test]
+    fn an_unreadable_demo_fails_the_integrity_check_and_names_itself() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("no-such-demo.dem");
+        let (ok, line) = integrity_line(&path);
+        assert!(!ok);
+        assert!(
+            line.starts_with(&format!("{}: cannot read the file: ", path.display())),
+            "{line}"
+        );
+    }
+
+    #[test]
+    fn collect_demos_takes_files_and_folders_and_reports_the_rest() {
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../test-fixtures");
+        let nowhere = fixtures.join("no-such-folder");
+        let (demos, missing) = collect_demos(&[fixture_path(), fixtures, nowhere.clone()]);
+        // The fixture named directly and found in its folder is listed once.
+        assert_eq!(demos.len(), 1, "{demos:?}");
+        assert!(demos[0].ends_with("ci_fixture.dem"));
+        assert_eq!(missing, [nowhere]);
     }
 
     #[test]

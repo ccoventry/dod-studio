@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read # release_notes.py reads the merged PRs' bodies
 
 jobs:
   release:
@@ -53,6 +54,29 @@ jobs:
           LATEST_PATCH=$(git tag -l "v${MAJOR_MINOR}.*" | sed -E "s/^v${MAJOR_MINOR}\.//" | sort -n | tail -1)
           NEXT_PATCH=$(( ${LATEST_PATCH:--1} + 1 ))
           echo "RELEASE_VERSION=${MAJOR_MINOR}.${NEXT_PATCH}" >> "$GITHUB_OUTPUT"
+
+      # The release body: the `Release note:` lines of the PRs merged since
+      # the previous stable vX.Y.Z tag (the highest one below this version),
+      # grouped New / Fixed / Changed, then every PR title
+      # (.github/scripts/release_notes.py, docs/versioning_and_releases.md).
+      # `.github/release_notes/<version>.md`, when it exists, comes first.
+      # This early so a failure costs seconds, not a build.
+      - name: Collect release notes
+        id: notes
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ steps.version.outputs.RELEASE_VERSION }}
+        run: |
+          python .github/scripts/release_notes.py --target HEAD \
+            --version "$RELEASE_VERSION" --before "$RELEASE_VERSION" \
+            --header 'See assets below to download.' \
+            --output "$RUNNER_TEMP/release_notes.md"
+          {
+            echo "BODY<<RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
+            cat "$RUNNER_TEMP/release_notes.md"
+            echo "RELEASE_NOTES_EOF_${GITHUB_RUN_ID}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable branch
@@ -127,9 +151,9 @@ jobs:
           projectPath: studio
           tagName: v${{ steps.version.outputs.RELEASE_VERSION }}
           releaseName: "DoD Studio v${{ steps.version.outputs.RELEASE_VERSION }}"
-          releaseBody: "See assets below to download."
-          # What changed, from the merged PRs' titles, grouped by .github/release.yml
-          # (#165). releaseBody is prepended to the generated notes.
-          generateReleaseNotes: true
+          # Starts with "See assets below to download."; built by the Collect
+          # release notes step, in place of GitHub's generated notes.
+          releaseBody: ${{ steps.notes.outputs.BODY }}
+          generateReleaseNotes: false
           releaseDraft: false
           prerelease: false

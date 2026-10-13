@@ -592,6 +592,8 @@ pub fn poll() {
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
+    crate::screen_effects::poll();
+    crate::hlae_window::poll();
     crate::detail_cache::poll();
     crate::studio_panel::poll();
     crate::review::poll();
@@ -1625,6 +1627,15 @@ pub fn install() {
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
     }
+    if let (Some(flash), Some(shake)) = (
+        register(crate::screen_effects::FLASH_NAME, "0"),
+        register(crate::screen_effects::SHAKE_NAME, "0"),
+    ) {
+        crate::screen_effects::set_cvars(flash, shake);
+    }
+    if let Some(behind) = register(crate::hlae_window::NAME, "0") {
+        crate::hlae_window::set_cvar(behind);
+    }
     if let Some(keep) = register(crate::detail_cache::KEEP_NAME, "0") {
         crate::detail_cache::set_keep_cvar(keep);
     }
@@ -1787,6 +1798,9 @@ mod tests {
             crate::vgui_menus::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
+            crate::screen_effects::FLASH_NAME,
+            crate::screen_effects::SHAKE_NAME,
+            crate::hlae_window::NAME,
             crate::detail_cache::KEEP_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
