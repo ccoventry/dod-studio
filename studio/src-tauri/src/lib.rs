@@ -35,10 +35,11 @@ use capture_manager::{
     send_preview_to_running_game, start_steam, steam_state,
 };
 use render_manager::{
-    RenderManager, cancel_render_batch, cancel_render_job, check_render_autosave,
-    discard_render_autosave, get_export_pool_free_gb, get_render_required_estimate_gb,
-    queue_render_batch, recover_render_batch, remove_non_rendering_render_jobs, remove_render_job,
-    reset_all_render_jobs, reset_render_job, set_render_job_codec, start_queued_render,
+    RenderManager, cancel_render_batch, cancel_render_job, cancel_render_jobs,
+    check_render_autosave, clear_render_queue, discard_render_autosave, get_export_pool_free_gb,
+    get_render_required_estimate_gb, queue_render_batch, recover_render_batch,
+    remove_non_rendering_render_jobs, remove_render_job, remove_render_jobs, reset_all_render_jobs,
+    reset_render_job, reset_render_jobs, set_render_job_codec, start_queued_render,
 };
 use settings_manager::{AppSettings, SettingsManager};
 use std::sync::{
@@ -758,6 +759,10 @@ pub fn run() {
             reset_all_render_jobs,
             remove_render_job,
             remove_non_rendering_render_jobs,
+            cancel_render_jobs,
+            reset_render_jobs,
+            remove_render_jobs,
+            clear_render_queue,
             take_delete_manager::measure_take_folders,
             take_delete_manager::delete_take_folders,
             set_render_job_codec,
