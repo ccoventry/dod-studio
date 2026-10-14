@@ -208,6 +208,20 @@ pub fn find_demo<'g, I: PartialEq>(
     })
 }
 
+/// Drops what the grouping never reads, so a whole folder's analyses can
+/// wait in memory for one [`group_matches`] call: per-player health
+/// histories, weapon breakdowns and the flag history are the bulk of an
+/// analysis, and the grouping reads players, kills, chat, rounds and the
+/// clock. The rest of the analysis stays as it is.
+pub fn trim_for_grouping(analysis: &mut Analysis) {
+    let s = &mut analysis.state;
+    for p in &mut s.players {
+        p.mortality = Vec::new();
+        p.weapon_breakdown = HashMap::new();
+    }
+    s.objectives = Default::default();
+}
+
 /// What the grouping needs from one demo.
 struct Features<'a> {
     analysis: &'a Analysis,
@@ -1175,6 +1189,38 @@ mod tests {
         assert_eq!(g.teams[1].tag.as_deref(), Some("bravo"));
         assert_eq!(g.teams[0].players.len(), 6);
         assert!(g.teams[0].players.iter().all(|id| id.contains(":alpha")));
+    }
+
+    #[test]
+    fn trimmed_analyses_group_the_same() {
+        let first = Spec {
+            chat: said("gh"),
+            live: Some(60.0),
+            ..h1()
+        };
+        let second = Spec {
+            chat: said("gg"),
+            live: Some(60.0),
+            ..h2()
+        };
+        let specs = [
+            ("h2_pov", second.clone()),
+            ("h1_pov", first.clone()),
+            ("h2_hltv", hltv(second)),
+            ("h1_hltv", hltv(first)),
+        ];
+        let whole: Vec<Analysis> = specs.iter().map(|(_, s)| s.analysis()).collect();
+        let mut trimmed: Vec<Analysis> = specs.iter().map(|(_, s)| s.analysis()).collect();
+        trimmed.iter_mut().for_each(trim_for_grouping);
+        let input = |analyses: &[Analysis]| -> Vec<MatchGroup<&'static str>> {
+            let demos: Vec<(&'static str, &Analysis, Option<u64>)> = specs
+                .iter()
+                .zip(analyses)
+                .map(|((id, _), a)| (*id, a, None))
+                .collect();
+            group_matches(&demos)
+        };
+        assert_eq!(input(&whole), input(&trimmed));
     }
 
     #[test]

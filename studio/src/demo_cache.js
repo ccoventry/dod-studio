@@ -3,10 +3,12 @@
 // (`cache_demos`), so opening one later, the in-game Highlights tab and the
 // player filters are instant. Progress arrives as `demo_cache_progress`
 // events; while a run goes, the button is Stop. The demos already cached go
-// first, then the parses, with a time left from their pace (#687).
+// first, then the parses, with a time left from their pace (#687). Before
+// either, analyses an older cache format left are upgraded, a step of its own
+// with its own count.
 import { listen } from '@tauri-apps/api/event';
 import { cacheDemos, cancelDemoCache } from './ipc_bridge.js';
-import { parseClock, timeLeftText } from './scan_progress.js';
+import { cacheRunView, parseClock } from './scan_progress.js';
 import { STRINGS } from './strings.js';
 
 /**
@@ -15,6 +17,7 @@ import { STRINGS } from './strings.js';
 export function initDemoCache({ getDemoPaths }) {
   const button = document.querySelector('#analyzer-cache-all-btn');
   const status = document.querySelector('#analyzer-cache-status');
+  const bar = document.querySelector('#analyzer-cache-bar');
   if (!button || !status) return;
   let running = false;
   const parses = parseClock();
@@ -22,6 +25,18 @@ export function initDemoCache({ getDemoPaths }) {
   const setRunning = (on) => {
     running = on;
     button.textContent = on ? STRINGS.ANALYZER.CACHE_STOP_BUTTON : STRINGS.ANALYZER.CACHE_ALL_BUTTON;
+    if (bar) bar.hidden = !on;
+  };
+  // No value: a bar that moves without a count, while the backend checks
+  // which demos the cache has.
+  const showBar = (value, max) => {
+    if (!bar) return;
+    if (value === undefined) {
+      bar.removeAttribute('value');
+      return;
+    }
+    bar.max = max;
+    bar.value = value;
   };
 
   button.addEventListener('click', async () => {
@@ -36,6 +51,7 @@ export function initDemoCache({ getDemoPaths }) {
       return;
     }
     setRunning(true);
+    showBar();
     parses.reset();
     // Until the first event the backend is checking which demos the cache has.
     status.textContent = STRINGS.SCAN_PROGRESS.CHECKING_CACHE;
@@ -53,8 +69,9 @@ export function initDemoCache({ getDemoPaths }) {
       status.textContent = STRINGS.ANALYZER.cacheDone(payload);
     } else {
       setRunning(true);
-      status.textContent = STRINGS.ANALYZER.cacheProgress(payload)
-        + timeLeftText(payload, parses.elapsed(payload.done, payload.cached));
+      const view = cacheRunView(payload, parses);
+      status.textContent = view.text;
+      showBar(view.value, view.max);
     }
   });
 }
