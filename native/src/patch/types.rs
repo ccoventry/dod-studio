@@ -332,11 +332,10 @@ impl CaptureMode {
 
 /// Minimum gap between one take's stop and the next one's start, for OBS.
 ///
-/// `builder::MIN_TAKE_SEPARATION_SECONDS` is 1.0 s and was derived for HLAE as
-/// a deliberately conservative guess, because the demo side cannot observe how
-/// long HLAE needs to finalise a take. The OBS figure is not a guess: OBS took
-/// **~1.065 s** to finalise a file after `StopRecord` returned, measured
-/// repeatedly — so the existing guard is already too tight for this path.
+/// `builder::MIN_TAKE_SEPARATION_SECONDS` is HLAE's, 0.5 s from HLAE's
+/// measured ~0.28 s finalise (#9). OBS took **~1.065 s** to finalise a file
+/// after `StopRecord` returned, measured repeatedly, so HLAE's guard is far
+/// too tight for this path.
 ///
 /// 2.0 s rather than 1.1 s because the measurement is one machine writing one
 /// container, the cost of being wrong is a lost take, and the cost of being
@@ -660,11 +659,16 @@ impl PatcherConfig {
         // the observed behaviour: the flag parses, and the captured hudAlpha
         // bitmaps come out byte-for-byte identical to a run without it.
         //
-        // `-afxRenderMode` takes one of standard|fBO|memoryDC the same way.
-        // `-32bpp` because a framebuffer that is not 32-bit has no alpha bits
-        // to force in the first place. `-afxOptimizeCaptureVis` is left out:
-        // it is a visibility optimisation unrelated to alpha, and would be one
-        // more variable over the capture itself.
+        // `-afxForceAlpha8 1` is the only alpha flag sent. A bisect on the
+        // pre-Anniversary build removed one flag per separate-HUD capture
+        // (#69): without `-gl`, `-32bpp` or `-afxRenderMode standard` the
+        // `hudalpha`, `hudcolor` and `all` streams measured the same, with the
+        // same frame count and capture time, and only dropping
+        // `-afxForceAlpha8 1` flattened `hudalpha` to 255. The engine already
+        // runs OpenGL with a 32-bit framebuffer, and `standard` is HLAE's
+        // default render mode. `-afxOptimizeCaptureVis` is left out: it is a
+        // visibility optimisation unrelated to alpha, and would be one more
+        // variable over the capture itself.
         //
         // NOT gated on a "Separate HUD" setting. One used to exist and gated
         // this from inside `capture_engine`, which meant the two hand-driven
@@ -708,7 +712,7 @@ impl PatcherConfig {
         // unified in 02b43c1; an install with a custom
         // `dod/resource/DemoPlayerDialog.res` shows the row either way.
         let cmd_line_str = format!(
-            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -gl -32bpp -afxRenderMode standard -afxForceAlpha8 1 -condebug {}",
+            "-game {} -insecure -addons -demoedit -windowed -w {} -h {} -afxForceAlpha8 1 -condebug {}",
             game_folder, width, height, extra_engine_args
         );
 
@@ -941,14 +945,13 @@ mod launch_args_tests {
                 line.contains("-afxForceAlpha8 1"),
                 "alpha flag missing for extra={extra:?}: {line}"
             );
-            assert!(
-                line.contains("-32bpp"),
-                "missing -32bpp for extra={extra:?}: {line}"
-            );
-            assert!(
-                line.contains("-afxRenderMode standard"),
-                "missing render mode for extra={extra:?}: {line}"
-            );
+            // The flags #69's bisect showed change nothing stay off.
+            for unneeded in ["-gl", "-32bpp", "-afxRenderMode"] {
+                assert!(
+                    !line.split(' ').any(|token| token == unneeded),
+                    "{unneeded} is sent again for extra={extra:?}: {line}"
+                );
+            }
         }
     }
 

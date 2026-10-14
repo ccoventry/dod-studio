@@ -265,8 +265,8 @@ mod tests {
 
     #[test]
     fn a_launch_preview_command_line_gives_its_demo() {
-        let line = "hl.exe -game dod -insecure -demoedit -windowed -w 1280 -h 720 -gl -32bpp \
-                    -afxRenderMode standard -afxForceAlpha8 1 -condebug \
+        let line = "hl.exe -game dod -insecure -demoedit -windowed -w 1280 -h 720 \
+                    -afxForceAlpha8 1 -condebug \
                     +viewdemo k4_ktps9w1_gskill_allies_preview";
         assert_eq!(
             from_command_line(args(line)),
