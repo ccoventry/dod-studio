@@ -39,9 +39,11 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_crosshair` | `0` | hides the crosshair and keeps it hidden, which the stock `crosshair` cvar can't do because `CHud::Redraw` forces the value back every frame | [`goldsrc_crosshair.md`](goldsrc_crosshair.md) |
 | `dodstudio_hide_spectator_bars` | `0` | hides the spectator panel while spectating, in a demo or live: the two dark bands across the top and bottom of the screen, the score, timer and player name on them, and the menu row DUCK brings up. On screen, with no capture running | [`goldsrc_spectator_bars.md`](goldsrc_spectator_bars.md) |
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
+| `dodstudio_spec_deathcam` | `0` | HLTV demos: when the player being watched in first person dies, the view becomes the death cam his own recording shows, the camera 64 units behind his body pulling back and turning to the killer, with no gun, for 2.4 s; then it is the game's own view from his eyes again until he respawns. Without it the game rolls the dead player's eye view 80° and the dropped weapon fills the clip. A switch of its own, not part of `dodstudio_spec_match_pov`: a movie wants it, a shoutcast following the fight does not. Stands down in a POV demo (`goldsrc-hooks/src/spectator_deathcam.rs`) | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
+| `dodstudio_pov_live_bob` | `0` | a POV demo bobs the view and the gun by the `cl_bob` (and `cl_bobcycle`, `cl_bobup`) set now (#359). Without it a POV demo doesn't bob at all: the engine replaces the view `client.dll` works out live with the recorded one, which carries no bob (HLTV demos already follow the cvars). This adds the live bob and keeps the rest of the recorded view. The gun's bob tilt stays out, as in every POV demo | `goldsrc-hooks/src/pov_live_bob.rs` |
 | `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
-| `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording, and a minimised game is put back behind the other windows instead, since a minimised game draws nothing. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
+| `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording. A minimised game records black frames (its window owns no pixels), so while this is on a minimise parks the game off-screen instead: restored without being activated and moved left of the whole desktop, same size, taskbar button kept (#723). Activating it (its taskbar button, alt-tab) or turning this off moves it back where it was. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
 | `dodstudio_hud_map_team_marker` | `0` | HLTV: marks the player being watched on the overview map with his team's camera icon (`allies_camera.spr` / `axis_camera.spr` / `brit_camera.spr`) instead of `spec_camera.spr`. DoD Studio's bordered ones go in `dod_addon/sprites` | `goldsrc-hooks/src/overview_marker.rs` |
 | `dodstudio_hide_headshot_red_screen` | `0` | POV demos: drops the red screen flash (a server `ScreenFade` of (128,0,0) at alpha 200, flags 0) that comes with every hit on the player's head hitbox, fatal or not, grenades included (#606). The black fades (the clear at respawn, the end of the map) still play | `goldsrc-hooks/src/screen_effects.rs` |
 | `dodstudio_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (always amplitude 15 for 1 s; no WSOD25 map has an `env_shake`) (#606) | same |
@@ -56,6 +58,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
 | `dodstudio_debug_log_texture_loads` | `0` | logs every HD-eligible texture load: replaced (from which file) or why not | same |
 | `dodstudio_debug_keep_detail_cache` | `0` | puts the engine's detail texture cache back, to compare. By default the hook bypasses that cache (#463, #703): `DT_SetRenderState` skips binding a detail texture it thinks is still bound, and nothing ever resets what it remembers, so a run of surfaces can draw with no detail, or another surface's, depending on where the camera stands. Seen on the 25th Anniversary build: the wall left of the double doors leaving harrington's Allied spawn | `goldsrc-hooks/src/detail_cache.rs` |
+| `dodstudio_debug_cloak_instead` | `0` | with `dodstudio_run_in_background` on, a minimised game is DWM-cloaked in place (`DWMWA_CLOAK`, from inside the game's process) instead of parked off-screen, and uncloaked when activated, to compare the two (#723). The hook log says whether DWM accepted the cloak; when it refuses, the game is parked as usual | `goldsrc-hooks/src/hlae_window.rs` |
 | `dodstudio_seek_skip_between` | `0` | `1` makes `dodstudio_seek_to`/`_by` land without running the director events and console commands they jump over; `0` runs them, as the editor's Goto does | [`goldsrc_viewdemo.md`](goldsrc_viewdemo.md) |
 | `dodstudio_demo_list_folders` | `1` | the Load Demo window, and the DoD Studio window's Demos tab, also list folders (and `../`) and open them, so demos in subfolders or outside `dod/` can be picked; a row is the demo's path from `dod/` | `goldsrc-hooks/src/demo_list_folders.rs`, #408 |
 | `dodstudio_demo_list_hide_empty` | `1` | while folders are listed, a folder with no demo anywhere inside it (any depth) is left out | `goldsrc-hooks/src/demo_list_folders.rs` |
@@ -86,8 +89,9 @@ state, not the state from before that line ran.
 
 ### `dodstudio_deathmsg`
 
-Raises DoD's hard-coded four-line cap on the kill feed, moves it, hides
-frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
+Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
+one by hand, or changes the names' font. The font takes effect on the next
+frame (#562). HLAE's own `mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
 
@@ -102,6 +106,8 @@ frags, or injects one by hand. HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block clear` | stop hiding anything |
 | `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
+| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font, the icon stays as it is (#728); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
+| `dodstudio_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
 
 A `block` id is any of:
 
@@ -190,7 +196,8 @@ while a seek is on its way. A demo that doesn't load in three minutes, stops,
 or ends early is skipped with a `BATCH_PROBLEM` line on the events pipe.
 `stop` ends the batch; bare says where it is. With
 `dodstudio_stay_behind_while_capturing` on when it starts, the game steps aside behind
-the other windows; `away` does that on its own, and Studio sends it the
+the other windows (minimised if it had the foreground, which then parks it
+off-screen, #723); `away` does that on its own, and Studio sends it the
 moment the game takes commands, before the batch starts, unless Keep the
 Game Behind Your Windows is off (then it sends `dodstudio_stay_behind_while_capturing 0`). Source: `goldsrc-hooks/src/batch.rs`.
 
