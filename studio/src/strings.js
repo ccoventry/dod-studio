@@ -240,6 +240,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // Game Folder (#402): game_folder_ui.js.
+    GAME_FOLDER_LABEL: 'Game Folder:',
+    GAME_FOLDER_TIP:
+        "The folder beside hl.exe that DoD Studio starts with -game, and where it finds your configs, maps and demos. Almost always dod; pick another if you keep several versions of DoD side by side (dod_movies, dod_1_2, ...).",
+    GAME_FOLDER_EMPTY: 'Give the name of a folder beside hl.exe, such as dod.',
+    GAME_FOLDER_DOTS: 'Give just the name of a folder beside hl.exe, without "..".',
+    GAME_FOLDER_OPTION: "A folder name can't start with - or +: the game would read it as another launch option.",
+    gameFolderBadChar: (c) => (/\s/.test(c)
+      ? "A folder name can't contain spaces here: the game would split it on the launch line."
+      : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
+    gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
+    gameFolderMissing: (name) =>
+        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -1880,15 +1894,20 @@ export const STRINGS = {
      *  mismatch answer. */
     message({ running, wanted, differs }) {
       const install = differs.includes('install');
+      // The Game folder setting, `-game` (#402).
+      const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
       const size = (s) => `${s.width}×${s.height}`;
+      const folderName = (s) => `the "${s.game_folder}" game folder`;
       const now = [
         install && `from "${running.install}"`,
+        folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
       ].filter(Boolean).join(' ');
       const set = [
         install && `"${wanted.install}"`,
-        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+        folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
+        resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },

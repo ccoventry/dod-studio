@@ -615,7 +615,7 @@ def run(args):
     console = Tail(install / "qconsole.log")
     hooklog = Tail(hook_log_path())
     # The same line Studio builds (native::patch::types::build_hlae_process).
-    game_cmd = (f"-game dod -insecure -windowed -w {args.width} -h {args.height} -gl -32bpp "
+    game_cmd = (f"-game {args.game} -insecure -windowed -w {args.width} -h {args.height} -gl -32bpp "
                 "-afxRenderMode standard -afxForceAlpha8 1 -condebug"
                 + (" -addons" if args.addons else ""))
     probe_copy = None
@@ -623,10 +623,10 @@ def run(args):
         # `+playdemo` at launch, as a capture batch starts its primer: the demo
         # loads during engine start-up, not from the menu. The engine cuts its
         # command line at '-', so a copy with a safe name is played instead.
-        source = install / "dod" / f"{args.demo}.dem"
+        source = install / args.game / f"{args.demo}.dem"
         if not source.is_file():
             raise Refused(f"demo not found: {source}")
-        probe_copy = install / "dod" / "dodstudio_probe.dem"
+        probe_copy = install / args.game / "dodstudio_probe.dem"
         import shutil
         shutil.copyfile(source, probe_copy)
         game_cmd += f" +{args.play} dodstudio_probe"
@@ -878,6 +878,8 @@ def main():
     p.add_argument("--step", action="append", default=[])
     p.add_argument("--dll", help="hook DLL (default: Studio's setting, then the repo's release build)")
     p.add_argument("--hlae", help="HLAE.exe (default: Studio's setting)")
+    p.add_argument("--game", default="dod",
+                   help="the -game folder beside hl.exe (default dod; a copy such as dod_movies, #402)")
     p.add_argument("--addons", action="store_true",
                    help="add -addons, so dod_addon is read (as Studio does once #412 is merged)")
     p.add_argument("--width", type=int, default=1280)

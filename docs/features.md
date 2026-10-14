@@ -95,7 +95,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 | Tab | What is on it |
 |---|---|
-| **Paths** | Half-Life executable, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Each shows "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning, and the row reports whether this `hl.exe` gets 2 GB or 4 GB of memory. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
+| **Paths** | Half-Life executable, **Game Folder**, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Game Folder is the folder beside `hl.exe` that launches name with `-game` (`dod` unless changed, #402): a list of the folders there holding a `liblist.gam`, or a text box when none can be listed; a name with a path separator, `..` or a space is refused. It is for an install that keeps several DoD versions side by side (`dod_movies`, `dod_1_2`, ...); Studio reads configs, maps and demos and writes its helper files there, and the `_addon`/`_downloads` folders it uses are that folder's (`dod_movies_addon`). The path rows each show "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning, and the row reports whether this `hl.exe` gets 2 GB or 4 GB of memory. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
 | **Output Format** | Width and height (1280×720), Capture FPS (300), **Capture Mode** (Frame sequence, Video, OBS). Video mode adds a capture codec (Ut Video default, FFV1, x264 lossless, uncompressed). OBS mode adds host, port, password, OBS path, Launch OBS, **Test Connection**, and OBS Capture FPS (120). Test Connection is not read-only: it creates or repairs a `[DoD-Studio]` profile and scene in OBS and switches to them. |
 | **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked; its value is the `host_framerate` used for fast-forward. Every timing field can be 0. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
 | **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
@@ -191,10 +191,10 @@ Every launch (batch, preview, Launch Game) uses one command line:
       -hookDllPath <HLAE>\AfxHookGoldSrc.dll
       [-hookDllPath dodstudio_goldsrc_hooks.dll]
       -programPath <hl.exe>
-      -cmdLine "-game dod -insecure -addons -windowed -w W -h H -gl -32bpp
+      -cmdLine "-game <folder> -insecure -addons -windowed -w W -h H -gl -32bpp
                 -afxRenderMode standard -afxForceAlpha8 1 -condebug <extra>"
 
-A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-addons` (PR #412) is on every launch, right after `-game dod`; `-demoedit` (PR #401) is not on `dev` yet.
+A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`; `-demoedit` (PR #401) is not on `dev` yet.
 
 While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 

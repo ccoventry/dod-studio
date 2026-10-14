@@ -164,6 +164,15 @@ export async function diagnoseExecutablePaths(paths) {
     });
 }
 
+/** The folders beside `gamePath`'s hl.exe holding a liblist.gam (#402). */
+export async function listGameFolders(gamePath) {
+  return await invoke('list_game_folders', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {

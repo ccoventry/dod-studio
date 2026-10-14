@@ -12,6 +12,7 @@ import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -90,6 +91,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const settingsPayload = {
       hlae_path: hlaePath,
       hl_path: hlPath,
+      game_folder: getGameFolder(),
       ffmpeg_path: ffmpegPath,
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
@@ -185,6 +187,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     // Deferred: the init commands hydrate later in this same load, and the
     // warning is about how those two interact.
   }
+  // Always, so a file without one (written before #402) shows `dod`.
+  setGameFolder(settings.game_folder);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;
