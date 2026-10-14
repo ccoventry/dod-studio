@@ -655,7 +655,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair and the prone eye height, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -676,6 +676,9 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
+    }
+    if let Some(deathcam) = crate::spectator_deathcam::status_line() {
+        lines.push(deathcam);
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
@@ -1579,6 +1582,9 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
+        crate::spectator_deathcam::set_cvar(deathcam);
+    }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
         crate::overview_players::set_cvar(icons);
     }
@@ -1759,6 +1765,7 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::spectator_deathcam::NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
             crate::demo_scope::NAME,
