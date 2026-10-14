@@ -25,6 +25,21 @@ describe('buildTeamsList', () => {
     expect(rows[0].customName).toBe(false);
   });
 
+  it('counts how many demos each team played on each side', () => {
+    const demos = [
+      demo('a.dem', 'dicE', 'TEK'),
+      demo('b.dem', 'krod', 'dicE', 'British'),
+      demo('c.dem', 'dicE', null),
+    ];
+    const teams = emptyProjectTeams();
+    mergeTeam(teams, 'krod', 'TEK');
+    const { rows } = buildTeamsList(demos, teams);
+    expect(rows.map((r) => [r.tag, r.sides])).toEqual([
+      ['dicE', { Allied: 2, Axis: 1 }],
+      ['TEK', { Allied: 1, Axis: 1 }],
+    ]);
+  });
+
   it('counts demos scanned before teams were read, and old projects still load', () => {
     const old = { name: 'old.dem', path: 'C:\\demos\\old.dem', streaks: [] };
     expect(demoHasTeams(old)).toBe(false);

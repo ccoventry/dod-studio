@@ -103,9 +103,11 @@ pub fn select<'a>(text: &str, names: impl IntoIterator<Item = &'a str>) -> Vec<&
         .collect()
 }
 
-/// Every `.bsp` in `<game>\dod\maps`, sorted case-insensitively.
+/// Every `.bsp` in `<game>\<game folder>\maps` (`dod` by default, #402),
+/// sorted case-insensitively.
 pub fn available_maps(game_exe: &Path) -> Vec<MapFile> {
-    let Some(maps_dir) = game_exe.parent().map(|g| g.join("dod").join("maps")) else {
+    let Some(maps_dir) = crate::shared::paths::mod_dir_for_exe(game_exe).map(|g| g.join("maps"))
+    else {
         return Vec::new();
     };
     let Ok(entries) = std::fs::read_dir(maps_dir) else {

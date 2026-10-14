@@ -1,6 +1,7 @@
 //! Fixes the first demo of a session rendering with its lighting far too dark
 //! (issue #365, "The First-Load Black Map Bug" in `docs/goldsrc_dod_quirks.md`),
-//! which is why capture batches play a primer demo first.
+//! which is why a capture batch launched without this DLL plays a primer demo
+//! first; with it, a patched batch has no primer (#365).
 //!
 //! ## The bug
 //!
@@ -41,6 +42,23 @@
 //! `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
 //! `tools/verify_lightmap_gamma_offsets.py` checks every fact above against
 //! the binary.
+//!
+//! ## Why the 25th Anniversary build needs no port (#370)
+//!
+//! The Anniversary `hw.dll` (3,598,176 bytes) has the same setup -- `V_Init`
+//! (+0x231770) builds the table once with the constant 2.5, `V_CheckGamma`
+//! (+0x231470, and a copy inlined into the palette pass at +0x232360) runs
+//! from the screen update (+0x24d550) and compares the cvars with the values
+//! it saw last time -- but its flush is no longer empty: it is a `jmp` thunk
+//! (+0x245a70) to `GL_BuildLightmaps` itself (+0x246f80, the function the map
+//! load calls at +0x2465e7, with `R_BuildLightMap` at +0x247b50 reading
+//! `lightgammatable` +0xf6d560). So on that build a gamma change rebuilds
+//! every lightmap, and the first screen update puts the first map right
+//! before its first frame draws; the texture loader (+0x23c0d0) calls
+//! `V_CheckGamma` too, which covers `texgamma` as well. There is nothing to
+//! detour. `tools/verify_lightmap_gamma_offsets.py --anniversary` derives all
+//! of this from the binary and proves the signatures above match nothing in
+//! it.
 
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};

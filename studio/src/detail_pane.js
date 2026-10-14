@@ -37,11 +37,15 @@ let currentOnSelectionChange = null;
 // status, notes), never from a plain re-render, so loading a session or
 // switching the selected demo doesn't falsely flag unsaved changes.
 let currentOnDirty = null;
+// The project's Teams list (#445), for the automatic clip name's
+// {team_name} and {opponent}.
+let currentGetProjectTeams = () => null;
 
-export function initDetailPane(getAllDemos, onSelectionChange, onDirty) {
+export function initDetailPane(getAllDemos, onSelectionChange, onDirty, { getProjectTeams } = {}) {
   currentGetAllDemos = getAllDemos;
   currentOnSelectionChange = onSelectionChange || null;
   currentOnDirty = onDirty || null;
+  if (getProjectTeams) currentGetProjectTeams = getProjectTeams;
 }
 
 // ── Running Process Guard (Half-Life Preview Detector) ────────────────────────
@@ -648,7 +652,9 @@ export function renderDetailView(demo, selectedDemoIdx) {
     // #441: the automatic name shows greyed until a typed one replaces it.
     const clipNameInput = tr.querySelector('.streak-clip-name-input');
     clipNameInput.value = streak.clipName || '';
-    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate()).name;
+    clipNameInput.placeholder = automaticClipName(demo, streak, getClipNameTemplate(), {
+      projectTeams: currentGetProjectTeams(),
+    }).name;
     clipNameInput.addEventListener('input', (e) => {
       streak.clipName = e.target.value;
     });

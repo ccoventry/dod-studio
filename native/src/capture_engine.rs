@@ -11,6 +11,16 @@ pub struct CaptureJob {
     pub patched_demo_path: std::path::PathBuf,
 }
 
+/// The demo a patched batch starts on: its first job, which is the primer when
+/// `build_batch_queue` planned one and dodstudio_chain_01 when it didn't
+/// (`patch::builder::plays_primer`, #365). Read from the plan rather than
+/// decided again, so the start can't name a demo the batch never wrote. Named
+/// as the copy into `dod/` names the file.
+fn first_demo_stem(jobs: &[CaptureJob]) -> Option<String> {
+    let stem = jobs.first()?.patched_demo_path.file_stem()?;
+    Some(stem.to_string_lossy().replace('-', "_"))
+}
+
 #[derive(Clone, Debug)]
 pub enum EngineEvent {
     Starting(usize),
@@ -146,6 +156,9 @@ struct CaptureCleanupGuard {
     /// unwinds and no `Drop` runs. That gap, a hard kill and a power cut are
     /// all covered by `obs::recover` on the next start instead.
     obs: Option<std::sync::Arc<std::sync::Mutex<Option<crate::obs::ObsClient>>>>,
+    /// Copies of demos on another drive a hook-run batch plays from
+    /// (`patch::source_copies`), removed however the batch ends.
+    source_copies: Vec<PathBuf>,
     _wake_lock: Option<keepawake::KeepAwake>,
 }
 
@@ -185,6 +198,7 @@ impl CaptureCleanupGuard {
             auto_clear_previews,
             save_local_patched_copy,
             obs: None,
+            source_copies: Vec::new(),
             _wake_lock: keepawake::Builder::default()
                 .display(false)
                 .idle(true)
@@ -238,6 +252,8 @@ impl Drop for CaptureCleanupGuard {
                 self.save_local_patched_copy,
             );
         }
+        // Whatever the auto-clear settings say: these are never the user's.
+        crate::patch::source_copies::remove_all(self.source_copies.iter().map(PathBuf::as_path));
     }
 }
 
@@ -263,9 +279,9 @@ pub fn spawn_capture_engine(
     obs_take_folders: Vec<PathBuf>,
     // The hook's batch file (`patch::runtime_batch`), when this batch runs on
     // the original demos from the hook DLL instead of patched copies (#434).
-    // `jobs` is then empty: nothing is copied into `dod/`, the game starts on
+    // `jobs` is then empty: nothing is patched into `dod/`, the game starts on
     // no demo, and the file is handed to it once it takes commands.
-    runtime_batch: Option<PathBuf>,
+    runtime_batch: Option<crate::patch::runtime_batch::RuntimeBatch>,
 ) {
     std::thread::Builder::new()
         .name("capture_engine".into())
@@ -294,7 +310,7 @@ pub fn spawn_capture_engine(
                     return;
                 }
             };
-            let dod_dir = hl_exe_parent.join("dod");
+            let dod_dir = crate::shared::paths::mod_dir(hl_exe_parent);
 
 
 
@@ -313,6 +329,9 @@ pub fn spawn_capture_engine(
                 config.auto_clear_previews,
                 config.save_local_patched_copy,
             );
+            if let Some(batch) = &runtime_batch {
+                _cleanup_guard.source_copies = batch.source_copies.clone();
+            }
 
             let active_export_dir = config.primary_media_dir.clone().unwrap_or_else(|| {
                 let exe_path = std::env::current_exe().expect("Failed to resolve absolute exe path");
@@ -664,14 +683,16 @@ pub fn spawn_capture_engine(
             // only text folded into this string reaches `hl.exe`, via the
             // single `-cmdLine` value `build_hlae_process` composes below.
             //
-            // The HLAE alpha flags that used to be composed here now live in
-            // `build_hlae_process` itself, so every `-customLoader` launch this
-            // app makes carries them, not just a capture batch.
+            // HLAE's alpha flag (`-afxForceAlpha8 1`, the only one that matters,
+            // #69) lives in `build_hlae_process` itself, so every
+            // `-customLoader` launch this app makes carries it, not just a
+            // capture batch.
             //
             // The first demo starts over the hook's pipe once the game is up,
             // so its map loads after config.cfg/movie.cfg set the user's
-            // brightness and gamma (`game_handoff`). A batch the hook runs
-            // starts the same way, with its batch file instead of the primer.
+            // brightness and gamma (`game_handoff`). With the hook that demo
+            // is dodstudio_chain_01 itself, without it the primer (#365). A
+            // batch the hook runs starts the same way, with its batch file.
             let with_start = |args: &str| {
                 if config.keep_game_behind {
                     format!("{} {args}", crate::patch::builder::START_BEHIND_ARG)
@@ -679,15 +700,15 @@ pub fn spawn_capture_engine(
                     args.to_string()
                 }
             };
-            let (extra_args, early_lines, first_lines) = match runtime_batch.as_deref() {
-                Some(file) => (
+            let (extra_args, early_lines, first_lines) = match runtime_batch.as_ref() {
+                Some(batch) => (
                     with_start("+exec dodstudio_helper.cfg"),
                     crate::patch::runtime_batch::early_lines(config.keep_game_behind),
-                    crate::patch::runtime_batch::start_lines(file),
+                    crate::patch::runtime_batch::start_lines(&batch.file),
                 ),
                 None => {
                     let (args, lines) = crate::game_handoff::first_demo_start(
-                        crate::shared::paths::PRIMER_DEMO_STEM,
+                        &first_demo_stem(&jobs).unwrap_or_default(),
                         config.goldsrc_hooks_dll().is_some(),
                     );
                     (with_start(&args), Vec::new(), lines)
@@ -760,7 +781,7 @@ pub fn spawn_capture_engine(
             // `exit_trigger`) restarts the whole demo from the top as a side
             // effect — harmless in frame-sequence mode (which is already
             // mid-movie-recording throughout), but in OBS mode it replayed
-            // dodstudio_primer.dem *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
+            // the primer (when there is one) *and* dodstudio_chain_01.dem from tick 0, twice, adding ~50s to
             // a real batch before `exit_trigger` ever got written. The
             // BATCH_COMPLETE marker already exists and already fires
             // `ObsSession::on_marker`'s `end_block()` moments before this —
@@ -1320,5 +1341,52 @@ mod tests {
 
         assert!(dod.join("dodstudio_primer.dem").exists());
         assert!(dod.join("dodstudio_chain_01.dem").exists());
+    }
+
+    /// A hook-run batch's copies of demos from another drive go with the
+    /// guard, whatever the auto-clear settings say (#434).
+    #[test]
+    fn dropping_the_guard_removes_the_batchs_source_copies() {
+        let root = Scratch::new("cleanup_guard_copies");
+        let dod = root.join("dod");
+        std::fs::create_dir_all(&dod).unwrap();
+        let copy = dod.join("dodstudio_src_01_match.dem");
+        std::fs::write(&copy, b"x").unwrap();
+        std::fs::write(dod.join("match.dem"), b"x").unwrap();
+
+        {
+            let mut guard = CaptureCleanupGuard::new(
+                root.join("exit_trigger"),
+                root.join("session_junction"),
+                false,
+                false,
+                false,
+                false,
+            );
+            guard.source_copies = vec![copy.clone()];
+        }
+
+        assert!(!copy.exists());
+        assert!(dod.join("match.dem").exists());
+    }
+
+    /// The batch starts on whatever the plan put first: the primer without the
+    /// hook DLL, dodstudio_chain_01 with it (#365).
+    #[test]
+    fn the_batch_starts_on_its_first_planned_demo() {
+        let job = |name: &str| CaptureJob {
+            patched_demo_path: PathBuf::from("game").join("dod").join(name),
+        };
+        let with_primer = [job("dodstudio_primer.dem"), job("dodstudio_chain_01.dem")];
+        assert_eq!(
+            first_demo_stem(&with_primer).as_deref(),
+            Some("dodstudio_primer")
+        );
+        let without = [job("dodstudio_chain_01.dem"), job("dodstudio_chain_02.dem")];
+        assert_eq!(
+            first_demo_stem(&without).as_deref(),
+            Some("dodstudio_chain_01")
+        );
+        assert_eq!(first_demo_stem(&[]), None);
     }
 }

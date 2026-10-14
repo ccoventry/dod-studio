@@ -8,6 +8,7 @@
 // word after `|`: `{opponent:lower|mix}`.
 
 import { streakUid, resolveTake } from './take_index.js';
+import { teamsForHighlight } from './project_teams.js';
 import { STRINGS } from './strings.js';
 
 /** Keep in step with `default_clip_name_template` in settings_manager.rs. */
@@ -158,6 +159,10 @@ export function highlightRow(demo, streak) {
  * Every placeholder's value for one highlight, over its chosen Kill Range.
  * `null` means missing (only the team placeholders, or data a project saved
  * before #441 doesn't have until the demo is scanned again).
+ *
+ * The team placeholders come from the project's Teams list (#445):
+ * `context.projectTeams` resolves them per highlight, or `context.teams`
+ * gives them ready-made.
  */
 export function highlightValues(demo, streak, context = {}) {
   const kills = streak?.kills || [];
@@ -169,7 +174,8 @@ export function highlightValues(demo, streak, context = {}) {
   const seconds = streak?.viewdemo_times?.[start] ?? range[0]?.[1] ?? 0;
   const map = demo?.map_name ? demo.map_name.replace(/^dod_/i, '') : null;
   const row = context.row ?? highlightRow(demo, streak);
-  const teams = context.teams || {};
+  const teams = context.teams
+    || (context.projectTeams ? teamsForHighlight(demo, streak, context.projectTeams) : {});
   return {
     player: streak?.target_player || null,
     faction: streak?.faction || null,
@@ -260,11 +266,13 @@ export function clipNameFor(demo, streak, template, options = {}) {
 }
 
 /** The template's name for a highlight, ignoring any typed one. A template
- *  with errors gives the default template's name. */
-export function automaticClipName(demo, streak, template, { maxLength, teams } = {}) {
+ *  with errors gives the default template's name. `projectTeams` (or a
+ *  ready `teams`) fills `{team_name}` and `{opponent}`. */
+export function automaticClipName(demo, streak, template, { maxLength, teams, projectTeams } = {}) {
   const parsed = parseTemplate(template);
   const source = parsed.errors.length ? parseTemplate(DEFAULT_TEMPLATE) : parsed;
-  return { ...buildName(source, highlightValues(demo, streak, { teams }), { maxLength }), typed: false };
+  const values = highlightValues(demo, streak, { teams, projectTeams });
+  return { ...buildName(source, values, { maxLength }), typed: false };
 }
 
 /** Makes names unique (ignoring case) by adding `_2`, `_3`, ... to repeats. */
@@ -282,6 +290,7 @@ export function uniqueNames(names) {
  * Clip names for every recorded take the project knows (`take key -> name`),
  * for Render Studio's queue. A take that covers several highlights (an
  * overlap merge) is named after its first one. Names come out unique.
+ * `options` are `clipNameFor`'s (`maxLength`, `projectTeams`).
  */
 export function clipNamesForTakes(takeIndex, demos, template, options = {}) {
   const byUid = new Map();
