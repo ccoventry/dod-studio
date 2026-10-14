@@ -138,6 +138,7 @@ pub mod decal_probe;
 pub mod decal_strip;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
+pub mod game_dir;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
 pub mod launch_settings;

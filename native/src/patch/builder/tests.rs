@@ -259,17 +259,6 @@ fn without_the_hook_dll_the_primer_comes_first() {
 }
 
 #[test]
-fn fast_forward_uses_ff_speed_and_falls_back_when_it_is_not_positive() {
-    let mut config = PatcherConfig::default();
-    config.fast_forward_speed = 0.1;
-    assert_eq!(fast_forward_host_framerate(&config), 0.1);
-    for bad in [0.0, -1.0, f32::NAN] {
-        config.fast_forward_speed = bad;
-        assert_eq!(fast_forward_host_framerate(&config), 0.05, "{bad}");
-    }
-}
-
-#[test]
 fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
     let mut config = PatcherConfig::default();
     let game = std::env::temp_dir().join("dod_test_ff_speed_helper_cfg");
@@ -305,8 +294,79 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
     let cfg = std::fs::read_to_string(game.join("dod").join("dodstudio_helper.cfg"))
         .expect("helper cfg written");
     let _ = std::fs::remove_dir_all(&game);
+    // Uncapped and undrawn between clips (#724); the exact bodies are
+    // `speed.rs`'s own tests' business, this pins that the cfg carries them.
     assert!(
-        cfg.contains("alias sys_fast_forward \"host_framerate 0.1\""),
+        cfg.contains(
+            "alias sys_fast_forward \"host_framerate 0.1; fps_override 1; fps_max 1000; gl_vsync 0; r_norefresh 1\""
+        ),
+        "{cfg}"
+    );
+    assert!(
+        cfg.contains(
+            "alias sys_normal_speed \"sys_autodir; clear; r_norefresh 0; host_framerate 0; "
+        ),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn the_helper_cfgs_normal_speed_puts_back_the_configs_and_initial_commands_values() {
+    // The game's own config.cfg sets fps_max and gl_vsync (both archived, so
+    // every real one does); Initial Commands set fps_override on top. The
+    // pre-roll has to put exactly those back, not the engine defaults.
+    let mut config = mock_config_with_game_cfg("ff_restore", "fps_max \"250\"\ngl_vsync \"0\"\n");
+    config.init_commands = vec!["fps_override 1".to_string()];
+
+    build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let cfg = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .expect("helper cfg written");
+    assert!(
+        cfg.contains(
+            "alias sys_normal_speed \"sys_autodir; clear; r_norefresh 0; host_framerate 0; fps_override 1; fps_max 250; gl_vsync 0\""
+        ),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn in_obs_mode_normal_speed_puts_back_the_pinned_fps() {
+    // OBS mode pins fps_override/fps_max in the init commands
+    // (`final_init_commands`); the fast-forward lifts them and every clip has
+    // to get the pin back, or OBS records at whatever the fast-forward left.
+    let mut config = mock_config_with_game_cfg("ff_restore_obs", "fps_max \"250\"\n");
+    config.capture_mode = crate::patch::CaptureMode::Obs;
+    config.obs_capture_fps = 120;
+
+    build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let cfg = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .expect("helper cfg written");
+    assert!(
+        cfg.contains("; fps_override 1; fps_max 120; gl_vsync 1\""),
         "{cfg}"
     );
 }
