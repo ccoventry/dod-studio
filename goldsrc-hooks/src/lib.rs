@@ -53,6 +53,8 @@
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
 //!   another window has the foreground (capture without the screen).
+//! - `hlae_window`: `dodstudio_stay_behind_while_capturing`, the game window stays behind
+//!   the user's windows while a batch records.
 //! - `scoreboard`: the `dodstudio_hide_scoreboard` cvar -- stop a POV demo's
 //!   recorded TAB presses from putting the scoreboard over the shot, without
 //!   editing `ScoreBoard.res`. Full design write-up in
@@ -70,7 +72,8 @@
 //! - `lightmap_gamma`: the first demo of a session no longer renders with its
 //!   lighting far too dark (issue #365): the gamma tables are refreshed from the
 //!   current cvars before a map's lightmaps are built. On by default;
-//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off.
+//!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
+//!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
 //! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
@@ -117,6 +120,10 @@
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
 //!   turns it off.
+//! - `game_dir_check`: demos recorded in `dod` play in a copy of the game
+//!   folder (`-game dod_movies`), which the engine otherwise refuses with
+//!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
+//!   check, both builds; only when the game folder is not `dod`.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -190,6 +197,8 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod game_dir_check;
+mod game_folder;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;
@@ -212,12 +221,14 @@ mod patch;
 mod pe;
 mod pmove_guard;
 mod position;
+mod pov_live_bob;
 mod remote;
 mod review;
 mod run_in_background;
 mod scan;
 mod schedule;
 mod scoreboard;
+mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
@@ -431,6 +442,8 @@ fn install_fixes() {
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
     sprite_blend::install();
+    // Before the first demo's svc_serverinfo; does nothing in `dod`.
+    game_dir_check::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

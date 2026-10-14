@@ -178,6 +178,9 @@ pub struct CapturePayload {
     pub save_local_patched_copy: bool,
     #[serde(default)]
     pub hook_runs_batch: bool,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "crate::settings_manager::default_keep_game_behind")]
+    pub keep_game_behind: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
@@ -447,6 +450,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
     };
     cfg.save_local_patched_copy = payload.save_local_patched_copy;
     cfg.hook_runs_batch = payload.hook_runs_batch;
+    cfg.keep_game_behind = payload.keep_game_behind;
     cfg.auto_clear_logs = payload.auto_clear_logs;
     cfg.auto_clear_previews = payload.auto_clear_previews;
     cfg.auto_clear_temp_demos = payload.auto_clear_temp_demos;
@@ -2376,9 +2380,7 @@ fn resolve_preview_env(
         return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
     }
 
-    let dod_dir = hl_p
-        .parent()
-        .map(|p| p.join("dod"))
+    let dod_dir = native::shared::paths::mod_dir_for_exe(hl_p)
         .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string())?;
     std::fs::create_dir_all(&dod_dir).map_err(crate::messages::failed_to_create_dod_directory)?;
 
@@ -2985,27 +2987,26 @@ pub struct PreviewFileSummary {
     pub modified_unix_secs: f64,
 }
 
-/// Resolves the `dod` directory to sweep, accepting either an `hl.exe` path
-/// or the `dod` directory itself (mirrors `resolve_preview_env`'s
-/// hl.exe-relative resolution, but tolerates being pointed at the folder
-/// directly since the frontend may pass either).
+/// Resolves the game folder to sweep (`dod` unless the Game folder setting
+/// says otherwise, #402), accepting either an `hl.exe` path or that folder
+/// itself (mirrors `resolve_preview_env`'s hl.exe-relative resolution, but
+/// tolerates being pointed at the folder directly since the frontend may pass
+/// either).
 fn resolve_dod_dir_for_sweep(game_dir: &str) -> Result<PathBuf, String> {
     let p = Path::new(game_dir);
     if p.is_file() {
-        return p
-            .parent()
-            .map(|parent| parent.join("dod"))
+        return native::shared::paths::mod_dir_for_exe(p)
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string());
     }
     if p.is_dir() {
+        let game_folder = native::shared::paths::game_folder();
         let is_dod_dir = p
             .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase() == "dod")
-            .unwrap_or(false);
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(&game_folder));
         if is_dod_dir {
             return Ok(p.to_path_buf());
         }
-        return Ok(p.join("dod"));
+        return Ok(native::shared::paths::mod_dir(p));
     }
     Err(crate::messages::game_directory_not_found(game_dir))
 }
@@ -3503,6 +3504,7 @@ mod tests {
             obs_password: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            keep_game_behind: true,
             streaks: Vec::new(),
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,

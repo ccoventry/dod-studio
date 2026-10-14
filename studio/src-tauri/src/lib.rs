@@ -82,7 +82,12 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        // Refused before anything is written: a game folder that is a path
+        // would put the launch and every file Studio writes somewhere other
+        // than beside hl.exe (#402).
+        native::shared::paths::validate_game_folder(&settings.game_folder)?;
         settings.save()?;
+        settings_manager::apply_game_folder(&settings);
         let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
         *guard = settings;
         Ok(())
@@ -716,6 +721,7 @@ pub fn run() {
             validate_paths,
             check_hlae_ffmpeg,
             diagnose_executable_paths,
+            settings_manager::list_game_folders,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,

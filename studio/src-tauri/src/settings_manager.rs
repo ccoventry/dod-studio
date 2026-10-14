@@ -20,6 +20,12 @@ pub struct CommandProfile {
 pub struct AppSettings {
     pub hlae_path: String,
     pub hl_path: String,
+    /// The game folder beside `hl.exe`, the `<mod>` in `-game <mod>` (#402).
+    /// `dod` for a file written before it existed. Mirrored into
+    /// `native::shared::paths::set_game_folder` on load and on every save,
+    /// which is where every path and the launch line read it from.
+    #[serde(default = "default_game_folder")]
+    pub game_folder: String,
     pub ffmpeg_path: Option<String>,
     /// Override for `dodstudio_goldsrc_hooks.dll` (see `native::patch::PatcherConfig`'s
     /// field of the same name). Blank/absent means "use the bundled default
@@ -151,6 +157,9 @@ pub struct AppSettings {
     /// `PatcherConfig::hook_runs_batch` (#434).
     #[serde(default)]
     pub hook_runs_batch: bool,
+    /// `PatcherConfig::keep_game_behind`.
+    #[serde(default = "default_keep_game_behind")]
+    pub keep_game_behind: bool,
     #[serde(default = "default_render_codec")]
     pub render_codec: String,
     /// Raw FFmpeg args, only meaningful when `render_codec == "custom"`.
@@ -227,6 +236,9 @@ pub struct AppSettings {
     pub demo_rename_lowercase: bool,
 }
 
+fn default_game_folder() -> String {
+    native::shared::paths::DEFAULT_GAME_FOLDER.to_string()
+}
 fn default_resolution_width() -> i32 {
     1280
 }
@@ -315,6 +327,9 @@ fn default_demo_rename_hltv_template() -> String {
 fn default_auto_check_updates() -> bool {
     true
 }
+pub(crate) fn default_keep_game_behind() -> bool {
+    true
+}
 /// An OBS take already is a finished file with its audio in it, so the
 /// default finish is a plain copy (`RenderCodec::SourceCopy`).
 fn default_finish_codec_obs() -> String {
@@ -329,6 +344,7 @@ impl Default for AppSettings {
         Self {
             hlae_path: String::new(),
             hl_path: String::new(),
+            game_folder: default_game_folder(),
             ffmpeg_path: None,
             goldsrc_hooks_dll_path: None,
             pinned_folders: Vec::new(),
@@ -376,6 +392,7 @@ impl Default for AppSettings {
             command_profile_active: String::new(),
             save_local_patched_copy: false,
             hook_runs_batch: false,
+            keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
             render_fps: default_render_fps(),
@@ -442,10 +459,39 @@ pub struct SettingsManager {
 
 impl SettingsManager {
     pub fn new() -> Self {
+        let settings = AppSettings::load_or_default();
+        apply_game_folder(&settings);
         Self {
-            inner: Arc::new(Mutex::new(AppSettings::load_or_default())),
+            inner: Arc::new(Mutex::new(settings)),
         }
     }
+}
+
+/// Hands the Game folder setting to `native` (#402). A file someone edited
+/// by hand to an unusable name falls back to `dod` and says so, rather than
+/// launching the game at a folder Studio cannot name.
+pub fn apply_game_folder(settings: &AppSettings) {
+    if let Err(e) = native::shared::paths::set_game_folder(&settings.game_folder) {
+        native::log_markdown(&format!(
+            "⚠️ **Settings** — {e}. Using `{}` until it is changed in Configuration → Paths (#402).",
+            native::shared::paths::DEFAULT_GAME_FOLDER
+        ));
+        let _ = native::shared::paths::set_game_folder("");
+    }
+}
+
+/// The folders beside `hl.exe` that the Game folder setting can name: those
+/// holding a `liblist.gam` (#402). Empty when `game_path` has no folder or
+/// it can't be read.
+#[tauri::command]
+pub async fn list_game_folders(game_path: String) -> Result<Vec<String>, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        Ok(std::path::Path::new(&game_path)
+            .parent()
+            .map(native::shared::paths::list_game_folders)
+            .unwrap_or_default())
+    }))
+    .await
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
@@ -480,6 +526,8 @@ mod tests {
 
         assert_eq!(settings.hlae_path, "C:/hlae/hlae.exe");
         assert_eq!(settings.capture_fps, 300);
+        // Settings saved before #402 drive the `dod` folder, as they always did.
+        assert_eq!(settings.game_folder, "dod");
         // Settings saved before #440 do not start finishing clips on their own.
         assert!(!settings.finish_clips_after_batch);
         assert_eq!(settings.finish_codec_obs, "source_copy");

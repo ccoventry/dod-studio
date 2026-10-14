@@ -223,6 +223,13 @@
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
+              <!-- The <mod> of -game <mod> (#402): game_folder_ui.js lists the
+                   folders beside hl.exe, or disables the list when it can't. -->
+              <div class="input-row" data-str-title="CAPTURE_CONFIG.GAME_FOLDER_TIP" title="The folder beside hl.exe that DoD Studio starts with -game">
+                <label data-str="CAPTURE_CONFIG.GAME_FOLDER_LABEL">Game Folder:</label>
+                <select id="config-game-folder" style="flex: 1;"></select>
+              </div>
+              <div id="config-game-folder-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
                 <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />
@@ -474,6 +481,10 @@
                   <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
                 </div>
                 <div class="control-group">
+                  <input type="checkbox" id="config-keep-game-behind" checked />
+                  <label for="config-keep-game-behind" data-str="CAPTURE_CONFIG.KEEP_GAME_BEHIND_LABEL" data-str-title="CAPTURE_CONFIG.KEEP_GAME_BEHIND_TITLE">Keep the Game Behind Your Windows While Capturing</label>
+                </div>
+                <div class="control-group">
                   <input type="checkbox" id="config-save-local-patched" />
                   <label for="config-save-local-patched" data-str="CAPTURE_CONFIG.SAVE_LOCAL_PATCHED_LABEL">Save Local Patched Copy</label>
                 </div>
@@ -711,7 +722,7 @@
             </div>
 
             <!-- Start/Cancel Batch and everything read alongside them (status,
-                 progress, the focus reminder, the disk-space warning, the
+                 progress, the disk-space warning, the
                  Capture Output Free/Required figures) live in
                  #footer-capture-studio now, not here — batch control used to
                  only be reachable from this Configuration subtab, so starting
@@ -1532,15 +1543,6 @@
           <div id="capture-progress-container" class="progress-bar-container" style="display: none;">
             <div id="capture-progress-bar" class="progress-bar-fill"></div>
           </div>
-          <!-- Shown only while a batch is running. Not a setting — there is
-               nothing here to configure, and no capture mode it does not
-               apply to. It is a reminder, and the moment it is worth reading
-               is the moment the user is about to go and do something else. -->
-          <p id="batch-focus-reminder" class="status-text" style="display: none;"
-             data-str="CAPTURE_CONFIG.FOCUS_REMINDER">
-            Keep Day of Defeat focused — it stops fast-forwarding between clips when it loses
-            focus, and the batch takes far longer.
-          </p>
         </div>
         <!-- footer-row-grid-centered lives on this inner div, not
              #footer-render-studio itself — nav.js sets that element's

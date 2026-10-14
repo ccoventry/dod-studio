@@ -33,7 +33,7 @@ import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
-import { createTakeDelete, busyTakeFolders, progressLine } from './take_delete.js';
+import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
 import { themedConfirm } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
 
@@ -170,12 +170,15 @@ function actionsCellHtml(j, rowState = {}) {
     const useOutput = j.status === JOB_STATUS.FINISHED && j.output_path;
     html += `<button class="render-job-reveal-btn" data-job-id="${esc(j.id)}" title="${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_FOLDER_TITLE : STRINGS.RENDER.OPEN_TAKE_FOLDER_TITLE}">${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_BUTTON : STRINGS.RENDER.OPEN_TAKE_FOLDER_BUTTON}</button>`;
   }
-  // #644: off while the take (either half of a HUD pair) is queued or
-  // rendering, and while another delete runs; the backend refuses both too.
+  // #644: off while the take (either half of a HUD pair) is rendering, and
+  // while another delete runs; the backend refuses both too. The tooltip
+  // says which row is the busy one. A queued take stays deletable: the
+  // confirm says its render leaves the queue.
   if (j.take_folder) {
-    const title = rowState.deleting
-      ? STRINGS.RENDER.DELETE_TAKE_RUNNING_TITLE
-      : (rowState.takeBusy ? STRINGS.RENDER.DELETE_TAKE_BUSY_TITLE : STRINGS.RENDER.DELETE_TAKE_TITLE);
+    let title = STRINGS.RENDER.DELETE_TAKE_TITLE;
+    if (rowState.deleting) title = STRINGS.RENDER.DELETE_TAKE_RUNNING_TITLE;
+    else if (j.status === JOB_STATUS.RENDERING) title = STRINGS.RENDER.DELETE_TAKE_RENDERING_TITLE;
+    else if (rowState.takeBusy) title = STRINGS.RENDER.DELETE_TAKE_PAIR_RENDERING_TITLE;
     const disabled = rowState.deleting || rowState.takeBusy ? ' disabled' : '';
     html += `<button class="render-job-delete-take-btn" data-job-id="${esc(j.id)}" title="${title}"${disabled}>${STRINGS.RENDER.DELETE_TAKE_BUTTON}</button>`;
   }
@@ -418,7 +421,7 @@ function renderJobsTable() {
 
   const existingRows = new Map();
   tbody.querySelectorAll('tr[data-job-id]').forEach((tr) => existingRows.set(tr.dataset.jobId, tr));
-  const busyTakes = busyTakeFolders(jobs);
+  const busyTakes = renderingTakeFolders(jobs);
   const deleting = !!takeDelete?.isRunning();
 
   // Rows are patched in place and only moved when the chosen sort (#40)
@@ -640,6 +643,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     showProgress: showTakeDeleteProgress,
     onBusyChange: () => renderJobsTable(),
     listen,
+    getJobs: () => jobs,
   });
 
   // A take finishing renders — advances every highlight the take index says
