@@ -426,6 +426,22 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
   });
 
+  test('the finish toast counts only the rows this batch rendered', async ({ page }) => {
+    await gotoHarness(page);
+    const before = [
+      job({ id: '0', status: 'Finished', take_folder: 'C:\\a' }),
+      job({ id: '1', status: 'Cancelled', take_folder: 'C:\\b' }),
+      job({ id: '2', status: 'Queued', take_folder: 'C:\\c' }),
+    ];
+    await emitSnapshot(page, before);
+    await page.locator('#start-render-btn').click();
+    await emitSnapshot(page, [before[0], before[1], { ...before[2], status: 'Rendering' }]);
+    await emitSnapshot(page, [before[0], before[1], { ...before[2], status: 'Finished' }]);
+    await page.evaluate(() => window.__mockEmit('render_batch_finished', {}));
+    await expect(page.locator('#toast-container')).toContainText('Render batch completed successfully!');
+    await expect(page.locator('#toast-container')).not.toContainText('cancelled');
+  });
+
   test('a tick survives snapshots, and Start still counts every Queued row', async ({ page }) => {
     await gotoHarness(page);
     const rows = [job({ id: '0' }), job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000' })];

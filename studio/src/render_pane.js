@@ -45,6 +45,11 @@ let selection = null;
 // job was added/removed/changed status" (worth a refresh) apart from "only
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
+// The rows this batch rendered or tried to (#70): every row seen Rendering
+// or Queued while it runs. The finish toast counts only these, so a take
+// that scanned in as Finished, or was cancelled before Start, isn't
+// reported as rendered by this batch. Emptied when the batch finishes.
+const batchJobIds = new Set();
 // Delete Take (#644), set up by initRenderUI.
 let takeDelete = null;
 
@@ -701,6 +706,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // just repeatedly failed with "Render batch already in progress".
   listen('render_jobs_snapshot', (event) => {
     jobs = event.payload || [];
+    if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
+      for (const j of jobs) {
+        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
+      }
+    }
     renderJobsTable();
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
@@ -738,13 +748,15 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     // size reported the whole batch as cancelled — including the common case
     // of cancelling the takes you did not want and letting the rest run, where
     // it read as though nothing had rendered at all.
-    const finished = jobs.filter((j) => j.status === JOB_STATUS.FINISHED).length;
-    const failed = jobs.filter((j) => j.status === JOB_STATUS.ERROR).length;
-    const cancelled = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
+    const batch = jobs.filter((j) => batchJobIds.has(j.id));
+    batchJobIds.clear();
+    const finished = batch.filter((j) => j.status === JOB_STATUS.FINISHED).length;
+    const failed = batch.filter((j) => j.status === JOB_STATUS.ERROR).length;
+    const cancelled = batch.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
 
     // A batch the finish step (#440) queued has already said how it ended, in
     // its own words ("12 clips ready") — a second toast would repeat it.
-    if (jobs.length > 0 && !finishClipsOwnsJobs(jobs)) {
+    if (batch.length > 0 && !finishClipsOwnsJobs(jobs)) {
       // Severity follows what actually happened rather than what is present:
       // a deliberate partial cancel where the rest rendered is a success, not
       // an "info" event. Only a real failure is an error.
@@ -848,6 +860,8 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   if (startRenderBtn) {
     startRenderBtn.addEventListener('click', () => {
       if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
+      // A batch of Skip copies can end before any snapshot shows Rendering.
+      for (const j of jobs) if (j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
       startRenderBtn.disabled = true;
       if (cancelRenderBtn) cancelRenderBtn.disabled = false;
