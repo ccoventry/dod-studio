@@ -81,7 +81,7 @@ Buttons:
 
 If a game the hook DLL is in is already open, Launch Preview sends it `viewdemo <stem>_preview` over a local pipe (section 5.1) instead of relaunching. Otherwise, if `hl.exe` or HLAE is already running, a dialog offers Force Relaunch, Copy View Command, or Cancel. Before either, a game started with another install or resolution than Studio has now gets its own question, naming what differs: close it and start again, or Cancel to do nothing. Launch Game, Start Capture Batch and Review highlights ask the same (#666). The hook DLL's path isn't compared: HLAE passes it on its own command line and exits after injecting.
 
-A **capture summary** strip above Start Capture Batch says in one line how the batch is about to run (mode, codec, size and FPS, Scheduled Commands, decal flush, Destinations); each part links to its setting.
+A **capture summary** strip above Start Capture Batch says in one line how the batch is about to run (mode, codec, size and FPS, the command profile in use and whether it was edited since, Scheduled Commands, decal flush, what the finish step will save the clips as, Destinations); each part links to its setting.
 
 **Start Capture Batch** sits in the pinned footer. It is disabled while any of these is true: a banned or too-long command is present, no highlight is selected, no Destination is set, the hl.exe or HLAE path is not set, or the required disk space exceeds what is free. The footer shows free and required space and a progress bar. Before the game starts, the app checks that Steam is running and signed in, and offers to start it. If the game or HLAE shows an error box, the app reads it and says what it means. When the batch ends (or is cancelled), the app checks every planned take folder on disk, flips covered highlights to Captured, and writes `dodstudio_take.json` with the capture FPS into each take.
 
@@ -162,7 +162,7 @@ There is no fourth mode and no Separate HUD setting. The alpha launch flags are 
 
 ### 3.2 Planning
 
-For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 1.0 s for HLAE (a guess; issue #9) and 2.0 s for OBS (measured). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
+For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 0.5 s for HLAE and 2.0 s for OBS, both measured: HLAE takes about 0.28 s to finalise a take and loses frames from a restart sooner than that (#9). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
 
 Each block gets a disk estimate, and blocks are packed onto the Destinations with first-fit-decreasing. A drive must keep 15 GiB free.
 
@@ -191,10 +191,10 @@ Every launch (batch, preview, Launch Game) uses one command line:
       -hookDllPath <HLAE>\AfxHookGoldSrc.dll
       [-hookDllPath dodstudio_goldsrc_hooks.dll]
       -programPath <hl.exe>
-      -cmdLine "-game <folder> -insecure -addons -windowed -w W -h H -gl -32bpp
-                -afxRenderMode standard -afxForceAlpha8 1 -condebug <extra>"
+      -cmdLine "-game <folder> -insecure -addons -demoedit -windowed -w W -h H
+                -afxForceAlpha8 1 -condebug <extra>"
 
-A batch adds `+exec dodstudio_helper.cfg`. With the hook DLL, `playdemo dodstudio_chain_01` follows over its pipe once the game is up (5 s after the pipe answers); without it, `+playdemo dodstudio_primer` goes on the launch line (#365). The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`; `-demoedit` (PR #401) is not on `dev` yet.
+A batch adds `+exec dodstudio_helper.cfg`. With the hook DLL, `playdemo dodstudio_chain_01` follows over its pipe once the game is up (5 s after the pipe answers); without it, `+playdemo dodstudio_primer` goes on the launch line (#365). The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`, and so is `-demoedit` (PR #401). `-afxForceAlpha8 1` is the only HLAE alpha flag: a bisect showed `-gl`, `-32bpp` and `-afxRenderMode standard` change nothing in a separate-HUD capture (#69).
 
 While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 

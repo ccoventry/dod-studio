@@ -31,8 +31,8 @@ const RECORD_START_TIMEOUT: Duration = Duration::from_secs(15);
 /// How long to wait for the output file to be finalised after `StopRecord`.
 ///
 /// Measured at ~1.06 s consistently. Worth noting that number is longer than
-/// `MIN_TAKE_SEPARATION_SECONDS` (1.0 s), which is why that constant needs
-/// raising for this path — see `obs_take_separation_seconds`.
+/// HLAE's `MIN_TAKE_SEPARATION_SECONDS` (0.5 s), which is why this path has
+/// its own, `OBS_TAKE_SEPARATION_SECONDS`.
 const RECORD_STOP_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Socket read timeout. Nothing waits on a single read; the timeout only makes
@@ -961,8 +961,8 @@ mod tests {
         assert!(other.to_string().contains("4008"));
     }
 
-    /// OBS needs ~1.06s to finalise a file; the HLAE-derived merge guard is
-    /// 1.0s. If this ever drops back below that, takes start disappearing.
+    /// OBS needs ~1.06s to finalise a file; HLAE's merge guard is 0.5s. If
+    /// this ever drops below the OBS finalise time, takes start disappearing.
     #[test]
     fn obs_take_separation_clears_the_measured_finalise_time() {
         assert!(
