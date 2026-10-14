@@ -294,7 +294,7 @@ pub fn spawn_capture_engine(
                     return;
                 }
             };
-            let dod_dir = hl_exe_parent.join("dod");
+            let dod_dir = crate::shared::paths::mod_dir(hl_exe_parent);
 
 
 

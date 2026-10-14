@@ -18,16 +18,13 @@ use crate::patch::bsp_entities::MapEntity;
 const MAX_CHARS: usize = 60;
 /// How many non-empty lines at the top of a `.txt` are searched.
 const TOP_LINES: usize = 5;
-/// The mod folders a map's `.txt` can sit in, in the engine's search order.
-const MOD_DIRS: [&str; 3] = ["dod_addon", "dod", "dod_downloads"];
-
 /// The credit for `map` in `install`, or `None` when nothing names anyone.
 pub fn map_credit(install: &Path, map: &str, entities: &[MapEntity]) -> Option<String> {
-    MOD_DIRS
+    // The mod folders a map's `.txt` can sit in, in the engine's search order.
+    use crate::shared::paths::{addon_dir, downloads_dir, mod_dir};
+    [addon_dir(install), mod_dir(install), downloads_dir(install)]
         .iter()
-        .filter_map(|dir| {
-            std::fs::read(install.join(dir).join("maps").join(format!("{map}.txt"))).ok()
-        })
+        .filter_map(|dir| std::fs::read(dir.join("maps").join(format!("{map}.txt"))).ok())
         .find_map(|bytes| credit_from_text(&decode(&bytes)))
         .or_else(|| credit_from_entities(entities))
 }

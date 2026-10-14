@@ -47,6 +47,17 @@ describe('the running-game message (#666)', () => {
     expect(text).not.toContain('Anniversary');
   });
 
+  it('names the game folder when it differs (#402)', () => {
+    const folders = mismatch(['game_folder'], { game_folder: 'dod_movies' }, { game_folder: 'dod' });
+    expect(STRINGS.RUNNING_GAME.message(folders)).toContain(
+      'running with the "dod_movies" game folder; DoD Studio is set to the "dod" game folder.',
+    );
+    const all = mismatch(['install', 'game_folder', 'resolution'], { game_folder: 'dod_movies' }, { game_folder: 'dod' });
+    expect(STRINGS.RUNNING_GAME.message(all)).toContain(
+      'DoD Studio is set to "Half-Life - POST-Anniversary for Movies" with the "dod" game folder at 3440×1440.',
+    );
+  });
+
   it('lists both hl.exe paths only when the install differs', () => {
     expect(runningGameDetails(mismatch(['install']))).toEqual([
       { primary: STRINGS.RUNNING_GAME.RUNNING_EXE, secondary: PRE },
