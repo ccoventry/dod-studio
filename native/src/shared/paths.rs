@@ -196,7 +196,8 @@ pub fn preview_sidecar(demo: &Path) -> Option<PathBuf> {
 }
 
 /// Stem of the primer demo `build_batch_queue` writes into the game folder
-/// ([`mod_dir`]). The `dodstudio_` prefix matches every other file this app writes
+/// ([`mod_dir`]) when the batch launches without the hook DLL (#365). The
+/// cleanup still removes one left by such a batch. The `dodstudio_` prefix matches every other file this app writes
 /// there (`dodstudio_helper.cfg`, `dodstudio_capture_done.cfg`) and keeps the
 /// name out of the space a player's own demo could plausibly occupy (#197).
 pub const PRIMER_DEMO_STEM: &str = "dodstudio_primer";
