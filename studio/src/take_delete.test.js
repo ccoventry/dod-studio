@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
-  busyTakeFolders,
+  renderingTakeFolders,
+  queuedJobCount,
   uniqueTakeFolders,
   totalBytes,
   confirmContent,
@@ -15,15 +16,27 @@ const TAKE_A = 'D:/captures/session_1/chain_01_b0/take0000';
 const TAKE_B = 'D:/captures/session_1/chain_02_b0/take0000';
 
 describe('which takes are busy (#644)', () => {
-  it('a take with either half of a HUD pair queued or rendering is busy', () => {
-    const busy = busyTakeFolders([
+  it('a take with either half of a HUD pair rendering is busy; a queued one is not', () => {
+    const busy = renderingTakeFolders([
       { take_folder: TAKE_A, status: 'Finished' },
       { take_folder: TAKE_A, status: 'Rendering' },
       { take_folder: TAKE_B, status: 'Error' },
     ]);
     expect([...busy]).toEqual([TAKE_A]);
-    expect(busyTakeFolders([{ take_folder: TAKE_B, status: 'Queued' }]).has(TAKE_B)).toBe(true);
-    expect(busyTakeFolders(null).size).toBe(0);
+    expect(renderingTakeFolders([{ take_folder: TAKE_B, status: 'Queued' }]).has(TAKE_B)).toBe(false);
+    expect(renderingTakeFolders(null).size).toBe(0);
+  });
+
+  it('counts the queued renders a delete pulls from the queue', () => {
+    const jobs = [
+      { take_folder: TAKE_A, status: 'Queued' },
+      { take_folder: TAKE_A, status: 'Queued', stream: 'HUD ONLY' },
+      { take_folder: TAKE_B, status: 'Queued' },
+      { take_folder: TAKE_B, status: 'Finished' },
+    ];
+    expect(queuedJobCount(jobs, [TAKE_A])).toBe(2);
+    expect(queuedJobCount(jobs, [TAKE_A, TAKE_B])).toBe(3);
+    expect(queuedJobCount(null, [TAKE_A])).toBe(0);
   });
 
   it('two rows of one take are one take', () => {
@@ -51,6 +64,13 @@ describe('the confirm', () => {
     const c = confirmContent(sizes.slice(0, 1), fmt);
     expect(c.title).toBe('Delete Take');
     expect(c.message).toBe('Move this take (100 B) to the Recycle Bin?');
+    expect(c.footer).toBe('The space comes back when the Recycle Bin is emptied. The render history stays.');
+  });
+
+  it('says when queued renders leave the queue', () => {
+    expect(confirmContent(sizes.slice(0, 1), fmt, 1).footer)
+      .toBe('Its queued render is removed from the queue. The space comes back when the Recycle Bin is emptied. The render history stays.');
+    expect(confirmContent(sizes, fmt, 3).footer.startsWith('3 queued renders are removed from the queue. ')).toBe(true);
   });
 });
 
@@ -86,6 +106,7 @@ describe('the click flow', () => {
       formatSize: fmt,
       showProgress: (p) => calls.progress.push(p),
       onBusyChange: (b) => calls.busy.push(b),
+      getJobs: () => [{ take_folder: TAKE_A, status: 'Queued' }],
     };
     return { deps, calls, flow: createTakeDelete(deps) };
   }
@@ -95,6 +116,7 @@ describe('the click flow', () => {
     await flow.deleteTakes([TAKE_A, TAKE_A]);
     expect(deps.measure).toHaveBeenCalledWith([TAKE_A]);
     expect(deps.confirm).toHaveBeenCalledTimes(1);
+    expect(deps.confirm.mock.calls[0][1].footer.startsWith('Its queued render is removed from the queue. ')).toBe(true);
     expect(deps.remove).toHaveBeenCalledWith([TAKE_A]);
     expect(calls.toasts).toEqual([{ message: 'Take moved to the Recycle Bin (10 B).', level: 'success' }]);
     expect(calls.busy).toEqual([true, false]);

@@ -306,13 +306,6 @@ pub fn take_is_rendering(take_folder: &str) -> String {
     )
 }
 
-pub fn take_is_queued(take_folder: &str) -> String {
-    format!(
-        "{} is queued to render. Cancel or remove it first, then delete the take.",
-        take_folder
-    )
-}
-
 pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
 
 // ── audit_manager.rs ─────────────────────────────────────────────────────

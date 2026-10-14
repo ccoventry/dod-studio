@@ -308,8 +308,10 @@ impl RenderManager {
     }
 
     /// Takes these takes' rows out of the list before their folders go to the
-    /// Recycle Bin (#644), checking under the same lock that none is queued or
-    /// rendering, so a Reset can't start one in between.
+    /// Recycle Bin (#644), checking under the same lock that none is rendering,
+    /// so a Reset can't start one in between. A queued row goes with the rest:
+    /// the scheduler starts jobs under this lock too, so a job removed here
+    /// never starts, which is how Delete Take pulls a take from the queue.
     pub(crate) fn remove_take_rows(
         &self,
         app: &AppHandle,

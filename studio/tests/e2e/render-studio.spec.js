@@ -505,19 +505,39 @@ test.describe('issue #40 — sortable columns and the batch progress bar', () =>
 test.describe('issue #644 — Delete Take', () => {
   const TAKE = 'D:/captures/session_1/chain_01_b0/take0000';
 
-  test('is off while either half of the take is queued or rendering', async ({ page }) => {
+  test('is off while either half of the take is rendering, saying which; a queued take stays on', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [
       job({ id: '0', status: 'Finished', take_folder: TAKE }),
       job({ id: '1', status: 'Rendering', take_folder: TAKE, stream: 'HUD ONLY' }),
     ]);
-    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeDisabled();
+    const finishedBtn = page.locator('tr[data-job-id="0"] .render-job-delete-take-btn');
+    const pairBtn = page.locator('tr[data-job-id="1"] .render-job-delete-take-btn');
+    await expect(finishedBtn).toBeDisabled();
+    await expect(finishedBtn).toHaveAttribute('title', 'Another stream of this take is rendering. Cancel it first.');
+    await expect(pairBtn).toBeDisabled();
+    await expect(pairBtn).toHaveAttribute('title', 'This job is rendering. Cancel it first.');
 
     await emitSnapshot(page, [
       job({ id: '0', status: 'Finished', take_folder: TAKE }),
-      job({ id: '1', status: 'Finished', take_folder: TAKE, stream: 'HUD ONLY' }),
+      job({ id: '1', status: 'Queued', take_folder: TAKE, stream: 'HUD ONLY' }),
     ]);
-    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeEnabled();
+    await expect(finishedBtn).toBeEnabled();
+    await expect(pairBtn).toBeEnabled();
+  });
+
+  test('the confirm says a queued render leaves the queue', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 1024 }));
+    });
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued', take_folder: TAKE })]);
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    await expect(page.locator('#themed-confirm-footer')).toHaveText(
+      'Its queued render is removed from the queue. The space comes back when the Recycle Bin is emptied. The render history stays.',
+    );
+    await page.locator('#themed-confirm-cancel-btn').click();
   });
 
   test('confirms with the folder and its size, then sends the take once', async ({ page }) => {
