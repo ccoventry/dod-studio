@@ -615,12 +615,12 @@ def run(args):
     console = Tail(install / "qconsole.log")
     hooklog = Tail(hook_log_path())
     # The same line Studio builds (native::patch::types::build_hlae_process).
-    game_cmd = (f"-game {args.game} -insecure -windowed -w {args.width} -h {args.height} -gl -32bpp "
-                "-afxRenderMode standard -afxForceAlpha8 1 -condebug"
+    game_cmd = (f"-game {args.game} -insecure -windowed -w {args.width} -h {args.height} "
+                "-afxForceAlpha8 1 -condebug"
                 + (" -addons" if args.addons else ""))
     probe_copy = None
     if args.demo and args.at_launch:
-        # `+playdemo` at launch, as a capture batch starts its primer: the demo
+        # `+playdemo` at launch, as a batch without the hook DLL starts its primer: the demo
         # loads during engine start-up, not from the menu. The engine cuts its
         # command line at '-', so a copy with a safe name is played instead.
         source = install / args.game / f"{args.demo}.dem"

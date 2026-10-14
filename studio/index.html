@@ -120,6 +120,11 @@
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
+                <!-- #685: the queue in match order, a header line per match. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_MATCH_TITLE">
+                  <input type="checkbox" id="master-group-by-match-cb" />
+                  <span data-str="WORKSPACE.GROUP_BY_MATCH_LABEL">Group by match</span>
+                </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
@@ -477,8 +482,8 @@
                 </div>
                 <div class="control-group">
                   <!-- #434: the hook DLL runs the batch on the original demos. -->
-                  <input type="checkbox" id="config-hook-runs-batch" />
-                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
+                  <input type="checkbox" id="config-hook-runs-batch" checked />
+                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips</label>
                 </div>
                 <div class="control-group">
                   <input type="checkbox" id="config-keep-game-behind" checked />
@@ -666,7 +671,7 @@
                 <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
-              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-chips" class="placeholder-chips"></div>
               <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
               <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
               <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
@@ -748,12 +753,19 @@
             </div>
             <div id="render-job-container"></div>
 
+            <!-- #70: the ticked rows are what the footer buttons act on. -->
+            <div id="render-selection-row" class="action-row" style="margin-top: 8px; align-items: center; gap: 6px; font-size: 0.9em;">
+              <button id="render-select-unrendered-btn" disabled data-str="RENDER.SELECT_UNRENDERED_BUTTON" data-str-title="RENDER.SELECT_UNRENDERED_TITLE" title="Tick only the takes with no finished render in their history.">Select unrendered</button>
+              <span id="render-selection-count" class="status-text" style="margin: 0 0 0 6px;">0 of 0 selected</span>
+            </div>
+
             <!-- Per-job render queue table — replaces the old single global
                  status line + progress bar with real per-clip rows. -->
             <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
+                    <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
                     <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
                     <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
                     <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
@@ -768,7 +780,7 @@
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="11" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
             </div>
@@ -780,10 +792,14 @@
 
             <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
               <div class="action-buttons">
-                <button id="start-render-btn" class="primary-btn" data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
-                <button id="cancel-render-btn" disabled data-str="RENDER.CANCEL_ALL_BUTTON">Cancel All</button>
-                <button id="reset-all-render-btn" disabled data-str="RENDER.RESET_ALL_BUTTON">Reset All</button>
-                <button id="remove-all-render-btn" disabled data-str="RENDER.REMOVE_ALL_BUTTON">Remove All (Not Rendering)</button>
+                <!-- #70: each acts on the ticked rows; render_pane.js sets the
+                     label's count and the tooltip. -->
+                <button id="start-render-btn" class="primary-btn" disabled data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
+                <button id="cancel-render-btn" disabled>Cancel (0)</button>
+                <button id="retry-render-btn" disabled>Retry (0)</button>
+                <button id="remove-render-btn" disabled>Remove (0)</button>
+                <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+                <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
             </div>
@@ -893,7 +909,7 @@
                 <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
               </div>
               <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
-              <div id="rename-chips" class="rename-chips"></div>
+              <div id="rename-chips" class="placeholder-chips"></div>
               <label class="rename-lowercase-label" data-str-title="DEMO_RENAME.LOWERCASE_TITLE"><input type="checkbox" id="rename-lowercase" /> <span data-str="DEMO_RENAME.LOWERCASE_LABEL">Lowercase the whole name</span></label>
               <div class="row-inputs">
                 <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
@@ -1439,6 +1455,7 @@
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
                 <div class="analyzer-cache-controls">
                   <span id="analyzer-cache-status" class="status-text"></span>
+                  <progress id="analyzer-cache-bar" class="analyzer-cache-bar" max="1" value="0" hidden></progress>
                   <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
                 </div>
               </div>
@@ -1743,6 +1760,7 @@
               <tr>
                 <th data-str="TEAMS.HEADER_TAG">Tag</th>
                 <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th class="col-center" data-str="TEAMS.HEADER_SIDES">Played as</th>
                 <th data-str="TEAMS.HEADER_NAME">Name</th>
                 <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
               </tr>

@@ -434,10 +434,53 @@ export async function queueRenderBatch(payload) {
     });
 }
 
+/** Starts the staged batch. `jobIds` (#70) names the ticked rows: only the
+ *  Queued jobs among them render, the other Queued rows wait for a later
+ *  Start. `null` starts every Queued job. */
 export async function startQueuedRender() {
   return invoke("start_queued_render")
     .catch((err) => {
       console.error("IPC Execution Error (start_queued_render):", err);
+      throw err;
+    });
+}
+
+/** Cancels several rows at once (#70): Rendering ones stop, Queued ones
+ *  become Cancelled. */
+export async function cancelRenderJobs(jobIds) {
+  return invoke("cancel_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Requeues several Cancelled/Finished/Error rows at once (#70); resumes the
+ *  scheduler if nothing is Rendering, like a single Reset. */
+export async function resetRenderJobs(jobIds) {
+  return invoke("reset_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (reset_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Removes several rows at once (#70); a Rendering row stays. Resolves to
+ *  how many went. */
+export async function removeRenderJobs(jobIds) {
+  return invoke("remove_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (remove_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Clear Queue (#70): every row goes. With a batch running, its renders are
+ *  cancelled and the list empties once they have stopped. */
+export async function clearRenderQueue() {
+  return invoke("clear_render_queue")
+    .catch((err) => {
+      console.error("IPC Execution Error (clear_render_queue):", err);
       throw err;
     });
 }
@@ -665,6 +708,26 @@ export async function demoRenameUndoable() {
     .catch((err) => {
       console.error("IPC Execution Error (demo_rename_undoable):", err);
       return null;
+    });
+}
+
+/** Which match and half each queued demo is (#685). `parseMissing` reads
+ *  demos the analyzer cache doesn't have (about a second each); without it
+ *  they are left out of the answer. */
+export async function queueMatchGroups(paths, parseMissing = false) {
+  return invoke("queue_match_groups", { paths, parseMissing })
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups):", err);
+      showToast(STRINGS.IPC.matchGroupsFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function queueMatchGroupsCancel() {
+  return invoke("queue_match_groups_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups_cancel):", err);
+      throw err;
     });
 }
 

@@ -208,6 +208,12 @@ pub fn capturing_clip(clip: u32, total: u32) -> String {
     format!("Capturing clip {} of {}", clip, total)
 }
 
+/// The batch status line while a demo whose highlights have no demo-player
+/// times is read again before a Seek Between Clips batch (#434). 1-based.
+pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
+    format!("Reading {demo} again for its clip times ({index} of {total})")
+}
+
 pub fn game_directory_not_found(game_dir: &str) -> String {
     format!("Game directory not found: {}", game_dir)
 }
