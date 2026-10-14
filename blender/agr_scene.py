@@ -29,6 +29,8 @@ from mathutils import Vector
 
 _parser = argparse.ArgumentParser(prog="agr_scene.py")
 _parser.add_argument("--game", required=True, help="the Half-Life folder holding dod/")
+_parser.add_argument("--game-folder", default="dod",
+                     help="the mod folder under --game, the <mod> of -game <mod> (#402)")
 _parser.add_argument("--agr", required=True, help="the recorded .agr")
 _parser.add_argument("--assets", required=True, help="Crowbar's decompile folder (holds models/)")
 _parser.add_argument("--map", required=True, help="map name, e.g. dod_anzio")
@@ -43,6 +45,7 @@ _parser.add_argument("--log", default=None, help="also write the log here")
 ARGS = _parser.parse_args(sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else [])
 
 GAME    = ARGS.game
+MOD     = ARGS.game_folder
 AGR     = ARGS.agr
 ASSETS  = ARGS.assets
 OUT     = ARGS.out
@@ -133,8 +136,8 @@ def mdl_textures(path):
 def hd_root():
     # Picks like the hook and native::hd::hd_root (#415): dod_addon, or dod
     # while only an install built before #415 has it there.
-    addon = os.path.join(GAME, "dod_addon", "dodstudio_hd")
-    dod = os.path.join(GAME, "dod", "dodstudio_hd")
+    addon = os.path.join(GAME, MOD + "_addon", "dodstudio_hd")
+    dod = os.path.join(GAME, MOD, "dodstudio_hd")
     return dod if os.path.isdir(dod) and not os.path.isdir(addon) else addon
 
 def pick_style():
@@ -201,7 +204,7 @@ def agr_model_paths():
     return {os.path.basename(n).lower(): n for n in names}
 
 def find_mdl(rel):
-    for g in ("dod", "dod_downloads", "valve"):
+    for g in (MOD, MOD + "_downloads", "valve"):
         p = os.path.join(GAME, g, rel.replace("/", os.sep))
         if os.path.exists(p):
             return p
@@ -349,7 +352,7 @@ def texture_models():
 
 # ── 2. map import ────────────────────────────────────────────────────────────
 def bsp_path(m):
-    for g in ("dod", "dod_downloads"):
+    for g in (MOD, MOD + "_downloads"):
         p = os.path.join(GAME, g, "maps", m + ".bsp")
         if os.path.exists(p):
             return p
@@ -366,7 +369,7 @@ def import_bsp(m):
     p = bsp_path(m)
     if not p:
         # Fatal: a take rendered in empty space is not what anyone asked for.
-        raise SystemExit(f"map not found: {m}.bsp is in neither dod/maps nor dod_downloads/maps under {GAME}")
+        raise SystemExit(f"map not found: {m}.bsp is in neither {MOD}/maps nor {MOD}_downloads/maps under {GAME}")
     d = open(p, "rb").read()
     ver = struct.unpack_from("<i", d, 0)[0]
     lumps = [struct.unpack_from("<ii", d, 4 + 8 * i) for i in range(15)]
@@ -392,7 +395,7 @@ def import_bsp(m):
             textures.append(read_miptex(tl, off)); continue
         found = None
         for wname in wads:
-            for g in ("dod", "dod_downloads", "valve"):
+            for g in (MOD, MOD + "_downloads", "valve"):
                 wp = os.path.join(GAME, g, wname)
                 if os.path.exists(wp) and name.lower() in wad_lookup(wp):
                     o, disk = wad_lookup(wp)[name.lower()]
@@ -617,7 +620,7 @@ def sky_face_path(skyname, face):
         hp = os.path.join(hd_root(), "sky", STYLE, f"{skyname}{face}.tga")
         if os.path.exists(hp):
             return hp
-    for g in ("dod", "dod_downloads", "valve"):
+    for g in (MOD, MOD + "_downloads", "valve"):
         for ext in (".tga", ".bmp"):
             p = os.path.join(GAME, g, "gfx", "env", f"{skyname}{face}{ext}")
             if os.path.exists(p):
