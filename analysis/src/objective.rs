@@ -235,6 +235,60 @@ pub fn cancel_cause(
         })
 }
 
+/// The kills of `kills` (a finished analysis' `kill_positions`, in arrival
+/// order) that had arrived when a cancel at `at` was resolved: everything up
+/// to the end of the cancel's frame, as the cancel is resolved when the next
+/// frame starts. What `kill_positions` held at that moment, so
+/// [cancel_cause] gives the same answer on a cached analysis as it did live.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn kills_known_at<'a>(kills: &'a [KillPosition], at: &GameTime) -> &'a [KillPosition] {
+    &kills[..kills.partition_point(|k| k.time.frame_index <= at.frame_index)]
+}
+
+/// Every cancel's cause, and the totals `resolve_pending` adds up from them,
+/// worked out again from a finished analysis' attempts and kills.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default, PartialEq)]
+pub(crate) struct CancelTally {
+    /// Per attempt, in order: its `cancel_cause`.
+    pub causes: Vec<Option<CancelCause>>,
+    /// Breaks per breaker.
+    pub breaks: HashMap<PlayerGlobalId, u32>,
+    pub blocks_unattributed: u32,
+    pub attempts_abandoned: u32,
+}
+
+/// [CancelTally] for `attempts` and `kills`, through [cancel_cause] like the
+/// live analysis. The analyzer cache's v9 → v10 upgrade uses it on entries
+/// saved before causes were kept (#743). `Err` names what is missing: a
+/// cancelled attempt with no end time has no moment to look back from.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn recount_cancels(
+    attempts: &[CaptureAttempt],
+    kills: &[KillPosition],
+) -> Result<CancelTally, &'static str> {
+    let mut tally = CancelTally::default();
+    for attempt in attempts {
+        if attempt.outcome != AttemptOutcome::Cancelled {
+            tally.causes.push(None);
+            continue;
+        }
+        let Some(cancelled) = &attempt.ended else {
+            return Err("a cancelled capture attempt has no end time");
+        };
+        let cause = cancel_cause(attempt, cancelled, kills_known_at(kills, cancelled));
+        match &cause {
+            CancelCause::Break { breaker } => {
+                *tally.breaks.entry(breaker.clone()).or_default() += 1
+            }
+            CancelCause::Unattributed => tally.blocks_unattributed += 1,
+            CancelCause::Abandoned => tally.attempts_abandoned += 1,
+        }
+        tally.causes.push(Some(cause));
+    }
+    Ok(tally)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum AttemptOutcome {
     /// Still running when the demo ended.
@@ -954,6 +1008,47 @@ mod tests {
             .collect()
     }
 
+    /// What the analyzer cache's v9 → v10 upgrade works out from the finished
+    /// state (#743) is what the live analysis counted as it went.
+    fn assert_recount_matches_live(state: &AnalyzerState) {
+        let tally = recount_cancels(&state.objectives.attempts, &state.kill_positions).unwrap();
+        assert_eq!(tally.causes, causes(state));
+        for p in &state.players {
+            let recounted = tally.breaks.get(&p.id).copied().unwrap_or(0);
+            assert_eq!(recounted, p.cap_breaks, "{}", p.name);
+        }
+        assert_eq!(
+            tally.blocks_unattributed,
+            state.objectives.blocks_unattributed
+        );
+        assert_eq!(
+            tally.attempts_abandoned,
+            state.objectives.attempts_abandoned
+        );
+    }
+
+    #[test]
+    fn a_death_in_the_frame_after_the_cancel_does_not_count_even_at_the_same_clock() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        // Resolved as the next frame starts, before this death arrives in it;
+        // no SvcTime between them, so both read 15.0 s.
+        cancel(&mut state, 15.0);
+        kill(&mut state, Some("b1"), "a1");
+        next_frame(&mut state);
+        assert_eq!(causes(&state), [Some(CancelCause::Abandoned)]);
+        assert_recount_matches_live(&state);
+    }
+
+    #[test]
+    fn a_cancelled_attempt_without_an_end_time_cannot_be_recounted() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        cancel(&mut state, 15.0);
+        state.objectives.attempts[0].ended = None;
+        assert!(recount_cancels(&state.objectives.attempts, &state.kill_positions).is_err());
+    }
+
     #[test]
     fn a_capper_killed_by_a_defender_just_before_the_cancel_is_a_break_for_that_defender() {
         let mut state = two_teams();
@@ -972,6 +1067,7 @@ mod tests {
         assert_eq!(breaks(&state), [("a1", 0), ("a2", 0), ("a3", 0), ("b1", 1)]);
         assert_eq!(state.objectives.blocks_unattributed, 0);
         assert_eq!(state.objectives.attempts_abandoned, 0);
+        assert_recount_matches_live(&state);
     }
 
     #[test]
@@ -984,6 +1080,7 @@ mod tests {
         kill(&mut state, Some("b1"), "a1");
         next_frame(&mut state);
         assert_eq!(breaks(&state)[3], ("b1", 1));
+        assert_recount_matches_live(&state);
     }
 
     #[test]
@@ -996,6 +1093,7 @@ mod tests {
         kill(&mut state, Some("a2"), "a1");
         cancel(&mut state, 15.0);
         assert_eq!(breaks(&state)[3], ("b1", 1));
+        assert_recount_matches_live(&state);
     }
 
     #[test]
@@ -1023,6 +1121,7 @@ mod tests {
         assert_eq!(state.objectives.attempts_abandoned, 0);
         // Still blocks for the defending team.
         assert_eq!(state.objectives.blocked_attempts(&Team::Axis), 2);
+        assert_recount_matches_live(&state);
     }
 
     #[test]
@@ -1051,6 +1150,7 @@ mod tests {
         assert!(breaks(&state).iter().all(|(_, n)| *n == 0));
         assert_eq!(state.objectives.attempts_abandoned, 4);
         assert_eq!(state.objectives.blocks_unattributed, 0);
+        assert_recount_matches_live(&state);
 
         state.objectives.clear_match_totals();
         assert_eq!(state.objectives.attempts_abandoned, 0);
@@ -1074,6 +1174,7 @@ mod tests {
         assert!(breaks(&state).iter().all(|(_, n)| *n == 0));
         assert_eq!(state.objectives.blocks_unattributed, 0);
         assert_eq!(state.objectives.attempts_abandoned, 0);
+        assert_recount_matches_live(&state);
     }
 
     /// Cap breaks over a few real demos (`DOD_ANALYSIS_DEMOS`, a folder or one
