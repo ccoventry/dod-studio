@@ -4,23 +4,23 @@
 // can be tested on its own.
 //
 // Template syntax: literal text plus `{placeholder}`, `{placeholder:lower}`
-// or `{placeholder:upper}`. The two team placeholders also take a fallback
-// word after `|`: `{opponent:lower|mix}`.
+// or `{placeholder:upper}`. The placeholders that can be missing also take
+// a fallback word after `|`: `{opponent:lower|mix}`. Which placeholders
+// there are is placeholder_catalogue.js's, shared with Rename Demos (#751).
 
 import { streakUid, resolveTake } from './take_index.js';
+import {
+  placeholderNames, CLIP_ALIASES, MODIFIERS, WITH_FALLBACK,
+} from './placeholder_catalogue.js';
+import { nameWithoutTag, sideTag, sideTeams, teamsForHighlight } from './project_teams.js';
 import { STRINGS } from './strings.js';
 
+export { MODIFIERS, WITH_FALLBACK };
+
 /** Keep in step with `default_clip_name_template` in settings_manager.rs. */
-export const DEFAULT_TEMPLATE = '{map}_{player}_{kills}k_{weapons}_{time}';
+export const DEFAULT_TEMPLATE = '{map}_{name}_{kills}k_{weapons}_{time}';
 
-export const PLACEHOLDERS = [
-  'player', 'faction', 'enemy_faction', 'map', 'kills', 'weapons', 'first_weapon',
-  'victims', 'first_victim', 'row', 'time', 'demo', 'date', 'team_name', 'opponent',
-];
-export const MODIFIERS = ['lower', 'upper', 'first'];
-
-/** The only placeholders that can be missing, so the only ones with a fallback. */
-export const WITH_FALLBACK = new Set(['team_name', 'opponent']);
+export const PLACEHOLDERS = placeholderNames('clip');
 /** What tells two highlights apart. */
 const DISTINGUISHING = ['row', 'time', 'demo'];
 /** Cut first, in this order, when a name is too long for its path. */
@@ -44,9 +44,10 @@ const RENDER_SUFFIX_MARGIN = 20;
 const CLIP_RULES = {
   placeholders: PLACEHOLDERS,
   withFallback: WITH_FALLBACK,
+  aliases: CLIP_ALIASES,
   distinguishing: DISTINGUISHING,
   noDistinguishing: () => STRINGS.CLIP_NAME.NO_DISTINGUISHING,
-  fallbackNotAllowed: (raw) => STRINGS.CLIP_NAME.fallbackNotAllowed(raw),
+  fallbackNotAllowed: (raw) => STRINGS.PLACEHOLDERS.fallbackNotAllowed(raw),
 };
 
 /**
@@ -54,7 +55,7 @@ const CLIP_RULES = {
  * wrong with it. `errors` stop it being used; `warnings` don't.
  */
 export function parseTemplate(template, rules = CLIP_RULES) {
-  const { placeholders, withFallback, distinguishing } = rules;
+  const { placeholders, withFallback, distinguishing, aliases = {} } = rules;
   const text = String(template ?? '');
   const parts = [];
   const errors = [];
@@ -89,10 +90,12 @@ export function parseTemplate(template, rules = CLIP_RULES) {
     const [name, modifier] = spec.split(':', 2);
     // {MAP}, {Map} and {map} are the same placeholder: the case of a name
     // never changes the value's case (that's :lower / :upper). The fallback
-    // word keeps the case it was typed in.
+    // word keeps the case it was typed in. An old name reads as the one it
+    // stands for.
+    const typedName = name.trim().toLowerCase();
     const part = {
       raw,
-      name: name.trim().toLowerCase(),
+      name: aliases[typedName] ?? typedName,
       modifier: modifier?.trim().toLowerCase() || null,
       fallback: fallback ?? null,
     };
@@ -165,6 +168,10 @@ export function highlightRow(demo, streak) {
  * Every placeholder's value for one highlight, over its chosen Kill Range.
  * `null` means missing (only the team placeholders, or data a project saved
  * before #441 doesn't have until the demo is scanned again).
+ *
+ * The team placeholders come from the project's Teams list (#445):
+ * `context.projectTeams` resolves them per highlight, or `context.teams`
+ * gives them ready-made.
  */
 export function highlightValues(demo, streak, context = {}) {
   const kills = streak?.kills || [];
@@ -176,9 +183,12 @@ export function highlightValues(demo, streak, context = {}) {
   const seconds = streak?.viewdemo_times?.[start] ?? range[0]?.[1] ?? 0;
   const map = demo?.map_name ? demo.map_name.replace(/^dod_/i, '') : null;
   const row = context.row ?? highlightRow(demo, streak);
-  const teams = context.teams || {};
+  const teams = context.teams
+    || (context.projectTeams ? teamsForHighlight(demo, streak, context.projectTeams) : {});
+  const player = streak?.target_player || null;
   return {
-    player: streak?.target_player || null,
+    name: nameWithoutTag(player, sideTag(demo, streak?.faction)),
+    full_name: player,
     faction: streak?.faction || null,
     enemy_faction: mostCommon(victimSides),
     map,
@@ -193,7 +203,27 @@ export function highlightValues(demo, streak, context = {}) {
     date: localDate(demo?.modified_unix_secs),
     team_name: teams.team_name || null,
     opponent: teams.opponent || null,
+    ...sideTeams(demo, context.projectTeams),
+    demo_type: demoType(demo),
+    // The Master Queue's match grouping (#685, queue_match_groups.js) keeps
+    // these on the demo; `null` until it has run, or when nothing decided
+    // the half.
+    half: halfWord(demo?.match_info?.half),
+    match: demo?.match_info?.match ? String(demo.match_info.match) : null,
   };
+}
+
+/** `{demo_type}`: pov or hltv, or null for a demo from a project saved
+ *  before it was known. */
+function demoType(demo) {
+  if (demo?.is_pov === true) return 'pov';
+  if (demo?.is_pov === false) return 'hltv';
+  return null;
+}
+
+/** `{half}`'s word for a half number: h1, h2, or null when unknown. */
+export function halfWord(half) {
+  return half === 1 ? 'h1' : half === 2 ? 'h2' : null;
 }
 
 function applyModifier(value, modifier) {
@@ -267,11 +297,13 @@ export function clipNameFor(demo, streak, template, options = {}) {
 }
 
 /** The template's name for a highlight, ignoring any typed one. A template
- *  with errors gives the default template's name. */
-export function automaticClipName(demo, streak, template, { maxLength, teams } = {}) {
+ *  with errors gives the default template's name. `projectTeams` (or a
+ *  ready `teams`) fills `{team_name}` and `{opponent}`. */
+export function automaticClipName(demo, streak, template, { maxLength, teams, projectTeams } = {}) {
   const parsed = parseTemplate(template);
   const source = parsed.errors.length ? parseTemplate(DEFAULT_TEMPLATE) : parsed;
-  return { ...buildName(source, highlightValues(demo, streak, { teams }), { maxLength }), typed: false };
+  const values = highlightValues(demo, streak, { teams, projectTeams });
+  return { ...buildName(source, values, { maxLength }), typed: false };
 }
 
 /** Makes names unique (ignoring case) by adding `_2`, `_3`, ... to repeats. */
@@ -289,6 +321,7 @@ export function uniqueNames(names) {
  * Clip names for every recorded take the project knows (`take key -> name`),
  * for Render Studio's queue. A take that covers several highlights (an
  * overlap merge) is named after its first one. Names come out unique.
+ * `options` are `clipNameFor`'s (`maxLength`, `projectTeams`).
  */
 export function clipNamesForTakes(takeIndex, demos, template, options = {}) {
   const byUid = new Map();

@@ -7,6 +7,11 @@ reverse-engineering. For every `dodstudio_*` cvar/command in one scannable
 table, see [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
 instead of the list below.
 
+Folder names below (`dod`, `dod_addon`, `dod_downloads`) are the defaults.
+The DLL reads the game folder from the game's own `-game <folder>` (Studio's
+Game Folder setting, #402; `src/game_folder.rs`), so under `-game dod_movies`
+they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
+
 **Match POV** (`dodstudio_spec_match_pov 1`, off by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own
@@ -45,7 +50,10 @@ is the complete list):
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
-  players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
+  players (by slot, SteamID or `self`), injects one by hand, or draws the
+  names in a Windows font of your choice, live (`font "Verdana" 28 bold
+  shadow`: the names go through the engine's vgui2 surface with a font handle
+  the hook owns; `src/deathmsg/font.rs`, #562). HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen
@@ -85,6 +93,12 @@ is the complete list):
   overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
   replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
   Overviews page writes it. See `src/overview_hd.rs`.
+- **Death cam** (`dodstudio_spec_deathcam 1`): when the spectated player dies,
+  the camera pulls back from his body and turns to the killer for 2.4 s, as his
+  own recording shows, then returns to his eyes. DoD's own `V_GetDeathCam`,
+  which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
+  shoutcast does not, so it is not part of `spec_match_pov`. See
+  `docs/goldsrc_spectator_camera.md`.
 - **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
@@ -301,7 +315,8 @@ before launch; no file, no test -- no `hl.exe` is
 already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
-capture batch starts its primer, which matters for first-demo bugs (#546).
+capture batch without the hook DLL starts its primer, which matters for
+first-demo bugs (#546).
 
 ## Status
 

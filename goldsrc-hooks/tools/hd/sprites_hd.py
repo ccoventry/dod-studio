@@ -50,7 +50,7 @@ HUD = re.compile(r"^(320|640|1clip_|1hud_|1rockets|clip_|crosshair|customogxhair
 
 def hud_layout_names(game):
     names = set()
-    for g in ("dod", "valve"):
+    for g in (C.game_folder(), "valve"):
         for txt in glob.glob(os.path.join(game, g, "sprites", "*.txt")):
             for line in open(txt, encoding="latin1"):
                 cols = line.split()
@@ -71,7 +71,7 @@ def game_sprites(installs, with_hud=True):
     hud = set() if with_hud else hud_layout_names(installs[0])
     found = {}
     for hl in installs:
-        for g in ("dod", "valve"):
+        for g in (C.game_folder(), "valve"):
             root = os.path.join(hl, g, "sprites")
             for f in glob.glob(os.path.join(root, "**", "*.spr"), recursive=True):
                 rel = os.path.relpath(f, root).lower().replace("\\", "/")

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   suggestions, typedName, acceptSuggestion, tierNote, droppedFromDemo,
-  OWNED_BY_STUDIO, GAME_QUITS_OVER, SCHEDULED_BANNED, MID_DEMO_HAZARDS, NOOP_IN_INIT,
+  OWNED_BY_STUDIO, GAME_QUITS_OVER, SCHEDULED_BANNED, MID_DEMO_HAZARDS, NOOP_IN_INIT, FAST_FORWARD_CVARS,
   DEMO_FILTER_NAME_CONTAINS, DEMO_FILTER_NAME_STARTS_WITH, DEMO_FILTER_LINE_STARTS_WITH,
   DEMO_FILTER_LINE_CONTAINS, DEMO_FILTER_WORD_STARTS_WITH,
 } from './command_suggest.js';
@@ -46,6 +46,16 @@ describe('suggestions (#215)', () => {
     expect(tierNote('sensitivity', { scheduled: true })).toBeNull();
   });
 
+  it("knows the fast-forward's cvars (#724): r_norefresh refused, fps_max honoured in Initial, short-lived scheduled", () => {
+    expect(tierNote('r_norefresh', { scheduled: false }).level).toBe('refused');
+    for (const name of FAST_FORWARD_CVARS) {
+      expect(tierNote(name, { scheduled: false })).toBeNull();
+      const note = tierNote(name, { scheduled: true });
+      expect(note.level).toBe('warned');
+      expect(note.text).toContain('next clip');
+    }
+  });
+
   it("says when the game drops a name from a demo (#679), in either list", () => {
     for (const scheduled of [false, true]) {
       const note = tierNote('mirv_matte_setcolor', { scheduled });
@@ -83,7 +93,8 @@ describe('droppedFromDemo (#679)', () => {
   });
 
   it('never fires for a name another tier already covers', () => {
-    for (const name of [...OWNED_BY_STUDIO, ...GAME_QUITS_OVER, ...SCHEDULED_BANNED, ...MID_DEMO_HAZARDS, ...NOOP_IN_INIT]) {
+    for (const name of [...OWNED_BY_STUDIO, ...GAME_QUITS_OVER, ...SCHEDULED_BANNED, ...MID_DEMO_HAZARDS, ...NOOP_IN_INIT,
+      ...FAST_FORWARD_CVARS]) {
       expect(droppedFromDemo(name)).toBeNull();
     }
   });
@@ -120,6 +131,7 @@ describe('kept in step with the code', () => {
     expect([...DEMO_FILTER_LINE_CONTAINS].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_LINE_CONTAINS'));
     expect([...DEMO_FILTER_WORD_STARTS_WITH].sort()).toEqual(rustList(cfgScan, 'DEMO_FILTER_WORD_STARTS_WITH'));
     expect([...NOOP_IN_INIT].sort()).toEqual(rustList(cfgScan, 'NOOP_IN_INIT_COMMANDS'));
+    expect([...FAST_FORWARD_CVARS].sort()).toEqual(rustList(cfgScan, 'FAST_FORWARD_CVARS'));
   });
 
   it("has every console_name! in goldsrc-hooks (re-run goldsrc-hooks/tools/console_names.py when this fails)", () => {

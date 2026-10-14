@@ -149,6 +149,7 @@ pub fn run(
         .args(&args)
         .current_dir(scripts)
         .env("HD_GAME", game_dir)
+        .env("HD_GAME_FOLDER", crate::shared::paths::game_folder())
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

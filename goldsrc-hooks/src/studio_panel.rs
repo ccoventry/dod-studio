@@ -1123,7 +1123,12 @@ pub fn write_game_menu() {
     else {
         return;
     };
-    let path = dir.join("dod_addon").join("resource").join("GameMenu.res");
+    // `<game folder>_addon`, which `-addons` puts on the engine's search
+    // path for whatever `-game` names (#402).
+    let path = dir
+        .join(crate::game_folder::addon_name())
+        .join("resource")
+        .join("GameMenu.res");
     let existing = std::fs::read_to_string(&path).ok();
     let Some(verb) = game_menu_action(existing.as_deref()) else {
         if existing.is_some_and(|t| !t.contains(GAME_MENU_MARK)) {
@@ -1296,12 +1301,9 @@ fn tooltips(res: &str) -> Vec<(String, String)> {
 /// The engine loads the layouts through its own search paths, which only
 /// include `dod_addon` with `-addons`, ahead of `dod`.
 fn res_dir() -> std::path::PathBuf {
-    let game = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_default();
-    let addon = game.join("dod_addon");
-    let dod = game.join("dod");
+    let game = crate::game_folder::game_root();
+    let addon = game.join(crate::game_folder::addon_name());
+    let dod = game.join(crate::game_folder::name());
     let base = if ui_in_addon(
         crate::texture_hires::addons_on(),
         addon.join(RES_DIR).is_dir(),
@@ -1511,6 +1513,8 @@ mod hook {
     mod sort_arrows;
     /// The Highlights tab (#565).
     mod streaks_tab;
+    /// The hidden VCR bar's slider kept in step with playback (#663).
+    mod vcr_sync;
 
     /// Bumped each time the demo list is refilled and stamped, so what is
     /// worked out from its rows is worked out again.
@@ -2852,8 +2856,15 @@ mod hook {
                         // offset of its own (0, 0x20 on pre-Anniversary).
                         // Whenever the list is somewhere we didn't put it,
                         // that was the console: measure the offset then.
-                        let (sx, sy) = vgui.abs_pos(source);
-                        if lent.list_set != Some((px, py)) && (px, py) != want {
+                        // The window's place is its rect, not GetAbsPos: for
+                        // the hidden console that answers (0, 0), which put
+                        // the window off-screen on every other key and made
+                        // the list flicker between there and the input line.
+                        let (sx, sy, _, _) = vgui.rect(source);
+                        // A hidden list sits wherever it was left (0, 0 before
+                        // the first key); only a showing one was placed by
+                        // the console.
+                        if vgui.visible(vp) && lent.list_set != Some((px, py)) && (px, py) != want {
                             lent.list_offset = Some((px - sx - lx, py - sy - ly));
                         }
                         // Then move the (hidden) console window so its own
@@ -3370,6 +3381,7 @@ mod hook {
         let Ok(vgui) = Vgui::get() else { return };
         unsafe {
             console_to_tab(&vgui);
+            vcr_sync::update(&vgui);
             // After a viewdemo, open on Playback once the bar has appeared.
             if pending > 0 {
                 VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);

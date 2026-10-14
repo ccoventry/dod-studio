@@ -4,6 +4,7 @@ import {
   automaticClipName, uniqueNames, clipNamesForTakes, maxNameLength, timeWord, highlightRow,
 } from './clip_name.js';
 import { streakUid } from './take_index.js';
+import { emptyProjectTeams, renameTeam, mergeTeam } from './project_teams.js';
 
 function streak(overrides = {}) {
   return {
@@ -55,7 +56,7 @@ describe('parseTemplate', () => {
     expect(parseTemplate('{map_{row}').errors[0]).toContain('never closed');
     expect(parseTemplate('map}_{row}').errors[0]).toContain('no "{"');
     expect(parseTemplate('{map}?{row}').errors[0]).toContain("Windows doesn't allow");
-    expect(parseTemplate('{map|x}_{row}').errors[0]).toContain('only {team_name} and {opponent}');
+    expect(parseTemplate('{map|x}_{row}').errors[0]).toContain('only the name, faction, team, half and match placeholders');
     expect(parseTemplate('   ').errors[0]).toContain('empty');
   });
 
@@ -71,10 +72,19 @@ describe('highlightValues', () => {
     const s = streak({ start_index: 1, end_index: 2 });
     const v = highlightValues(demo([s]), s);
     expect(v).toMatchObject({
-      player: 'krod', faction: 'Allies', enemy_faction: 'Axis', map: 'anzio', kills: '2',
+      name: 'krod', full_name: 'krod', faction: 'Allies', enemy_faction: 'Axis', map: 'anzio', kills: '2',
       weapons: 'garand-mp40', first_weapon: 'garand', victims: 'bajko-dicE: Hub',
       first_victim: 'bajko', row: '01', time: '12m36s', demo: 'scrim-anzio_h1',
-      date: '2026-09-20', team_name: null, opponent: null,
+      date: '2026-09-20', team_name: null, opponent: null, allies: null, axis: null, demo_type: null,
+    });
+  });
+
+  it('gives {name} without the team tag, {full_name} as it is, and the side teams (#751)', () => {
+    const s = streak({ target_player: '[dicE] m00cat' });
+    const d = demo([s], { is_pov: false, teams: [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'gskiLL' }] });
+    expect(highlightValues(d, s)).toMatchObject({
+      name: 'm00cat', full_name: '[dicE] m00cat', allies: 'dicE', axis: 'gskiLL',
+      team1: 'dicE', team2: 'gskiLL', demo_type: 'hltv',
     });
   });
 
@@ -83,6 +93,17 @@ describe('highlightValues', () => {
     const second = streak({ start_tick: 5000 });
     const d = demo([streak(), other, second]);
     expect(highlightRow(d, second)).toBe(2);
+  });
+});
+
+describe('{player}, the old name (#751)', () => {
+  it('still parses and gives the name as it is, tag included, as {full_name} does', () => {
+    const s = streak({ target_player: 'dicE: m00cat' });
+    const d = demo([s], { teams: [{ side: 'Allies', tag: 'dicE' }] });
+    expect(parseTemplate('{player}_{row}').errors).toEqual([]);
+    expect(automaticClipName(d, s, '{player}_{row}').name).toBe(automaticClipName(d, s, '{full_name}_{row}').name);
+    expect(automaticClipName(d, s, '{map}_{player}_{kills}k_{weapons}_{time}').name).toBe('anzio_dicE_ m00cat_4k_garand-mp40_12m34s');
+    expect(automaticClipName(d, s, '{name}_{row}').name).toBe('m00cat_01');
   });
 });
 
@@ -97,7 +118,8 @@ describe('buildName', () => {
 
   it(':first keeps the first word, read before the value is cleaned', () => {
     const s = streak();
-    const v = { ...highlightValues(demo([s]), s), player: 'm00cat :D' };
+    const v = { ...highlightValues(demo([s]), s), name: 'm00cat :D', full_name: 'm00cat :D' };
+    expect(buildName(parseTemplate('{name:first}_{row}'), v).name).toBe('m00cat_01');
     expect(buildName(parseTemplate('{player:first}_{row}'), v).name).toBe('m00cat_01');
     // A one-word value is kept whole; a missing one still falls back.
     expect(buildName(parseTemplate('{map:first}_{team_name:first}_{row}'), v).name).toMatch(/^[a-z0-9]+_unknown_01$/);
@@ -139,6 +161,51 @@ describe('clipNameFor', () => {
     const s = streak({ faction: undefined, victims: undefined, victim_factions: undefined });
     const d = demo([s], { map_name: undefined, modified_unix_secs: undefined });
     expect(clipNameFor(d, s, '{map}_{faction}_{player}_{row}').name).toBe('unknown_unknown_krod_01');
+  });
+});
+
+describe('team placeholders through the Teams list (#445)', () => {
+  const TEMPLATE = '{player}_{team_name}_v_{opponent}_{map}';
+  const tagged = (s) => demo([s], { teams: [{ side: 'Allies', tag: 'KROD' }, { side: 'Axis', tag: 'dicE' }] });
+
+  it('uses a renamed tag, and a merged tag, as the team names', () => {
+    const teams = emptyProjectTeams();
+    renameTeam(teams, 'KROD', 'krod');
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_dicE_anzio');
+    mergeTeam(teams, 'dicE', 'DICE');
+    renameTeam(teams, 'DICE', 'dice');
+    expect(clipNameFor(tagged(s), s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_dice_anzio');
+  });
+
+  it('a tag with no name is used as it is', () => {
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE, { projectTeams: emptyProjectTeams() }).name)
+      .toBe('krod_KROD_v_dicE_anzio');
+  });
+
+  it('an untagged side gives unknown, or the word after |, never the faction', () => {
+    const s = streak();
+    const pug = demo([s], { teams: [{ side: 'Allies', tag: 'krod' }, { side: 'Axis', tag: null }] });
+    const teams = emptyProjectTeams();
+    expect(automaticClipName(pug, s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_unknown_anzio');
+    expect(automaticClipName(pug, s, '{player}_v_{opponent|mix}_{map}', { projectTeams: teams }).name)
+      .toBe('krod_v_mix_anzio');
+  });
+
+  it('without a Teams list the team placeholders stay unknown', () => {
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE).name).toBe('krod_unknown_v_unknown_anzio');
+  });
+
+  it('names for takes go through the Teams list too', () => {
+    const teams = emptyProjectTeams();
+    renameTeam(teams, 'dicE', 'dice');
+    const s = streak();
+    const d = tagged(s);
+    const takeIndex = { 'sess/dodstudio_chain_01_b0': [streakUid(d.path, s)] };
+    expect(clipNamesForTakes(takeIndex, [d], '{player}_v_{opponent}', { projectTeams: teams }))
+      .toEqual({ 'sess/dodstudio_chain_01_b0': 'krod_v_dice' });
   });
 });
 

@@ -43,6 +43,11 @@ pub struct Player {
     #[serde(default)]
     pub cap_credits: u32,
 
+    /// Enemy capture attempts this player stopped by killing a capper just
+    /// before the `CancelProg` (`objective.rs`, #192).
+    #[serde(default)]
+    pub cap_breaks: u32,
+
     /// Kills of a teammate, resolved against both teams at the moment of the
     /// kill.
     #[serde(default)]
@@ -88,6 +93,7 @@ impl Player {
             mortality: vec![],
             obj_points: 0,
             cap_credits: 0,
+            cap_breaks: 0,
             teamkills: 0,
             suicides: 0,
         }
@@ -167,6 +173,7 @@ impl Player {
             mortality: vec![],
             obj_points: 0,
             cap_credits: 0,
+            cap_breaks: 0,
             teamkills: 0,
             suicides: 0,
         }

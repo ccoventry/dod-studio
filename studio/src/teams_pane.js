@@ -78,7 +78,7 @@ function renderTeams() {
   if (rows.length === 0) {
     const tr = document.createElement('tr');
     const td = document.createElement('td');
-    td.colSpan = 4;
+    td.colSpan = 5;
     td.className = 'table-empty';
     td.textContent = STRINGS.TEAMS.EMPTY;
     tr.appendChild(td);
@@ -112,6 +112,10 @@ function renderTeams() {
     countCell.className = 'col-center teams-count';
     countCell.textContent = String(row.demoCount);
     countCell.title = row.demoNames.join('\n');
+
+    const sidesCell = document.createElement('td');
+    sidesCell.className = 'col-center teams-sides';
+    sidesCell.textContent = STRINGS.TEAMS.sides(row.sides.Allied, row.sides.Axis);
 
     const nameCell = document.createElement('td');
     const nameInput = document.createElement('input');
@@ -147,7 +151,7 @@ function renderTeams() {
     });
     sameCell.appendChild(same);
 
-    tr.append(tagCell, countCell, nameCell, sameCell);
+    tr.append(tagCell, countCell, sidesCell, nameCell, sameCell);
     tableBody.appendChild(tr);
   }
 }
