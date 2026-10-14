@@ -170,7 +170,7 @@ Each block gets a disk estimate, and blocks are packed onto the Destinations wit
 
 Nothing in your original demo changes. The app writes:
 
-- `dod/dodstudio_primer.dem`: a copy of the first demo that plays for 500 frames and then chains to the first real job. It exists because the first demo of a game session renders too dark (issue #365, still open; PR #397 fixes the cause on PRE).
+- `dod/dodstudio_primer.dem`, only when the batch launches without the hook DLL: a copy of the first demo that plays for 500 frames and then chains to the first real job. It exists because the first demo of a game session renders too dark. With the hook DLL there is no primer (#365): its `lightmap_gamma` fixes the lighting on PRE (#397; the 25th Anniversary build never had the bug), and the first demo is sent over its pipe after `config.cfg`/`movie.cfg` have run (#705).
 - `dod/dodstudio_chain_NN.dem`: one patched copy per demo and player. Each carries:
   - your Initial Commands plus the app's own (`mirv_movie_fps`, OBS frame pacing, and `r_decals` when the decal flush needs it and you did not set it);
   - per block: return to normal speed, sync audio, point `mirv_movie_filename` at the block's folder, start recording, stop recording, fast-forward again;
@@ -194,7 +194,7 @@ Every launch (batch, preview, Launch Game) uses one command line:
       -cmdLine "-game <folder> -insecure -addons -windowed -w W -h H -gl -32bpp
                 -afxRenderMode standard -afxForceAlpha8 1 -condebug <extra>"
 
-A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`; `-demoedit` (PR #401) is not on `dev` yet.
+A batch adds `+exec dodstudio_helper.cfg`. With the hook DLL, `playdemo dodstudio_chain_01` follows over its pipe once the game is up (5 s after the pipe answers); without it, `+playdemo dodstudio_primer` goes on the launch line (#365). The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`; `-demoedit` (PR #401) is not on `dev` yet.
 
 While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 
@@ -213,9 +213,9 @@ Every command must also fit a demo's 64-byte command field, which holds 63 chara
 
 | Tier | Commands | What happens |
 |---|---|---|
-| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
+| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_norefresh`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
 | Banned when scheduled | `r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename` | Fine in Initial Commands, refused in Scheduled |
-| Mid-demo hazards | the pipeline-owned commands, as a warning | Shadowed with a warning, not refused |
+| Mid-demo hazards | the pipeline-owned commands, as a warning; `fps_override`, `fps_max`, `gl_vsync` when scheduled (the fast-forward sets them and every clip's pre-roll puts the Initial Commands value back) | Shadowed with a warning, not refused |
 | No effect | `exec`, `quit` everywhere; `mirv_movie_filename` in Initial | Reported as doing nothing |
 | Fatal config values | `cl_lw` not 1; `r_drawentities` not 1 while `sv_cheats` is on | Reported from your game configs; DoD's client quits over these |
 
@@ -366,7 +366,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Project files | wherever you save them |
-| Patched demos, helper cfg | `<game>\dod\` (`dodstudio_primer.dem`, `dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`) |
+| Patched demos, helper cfg | `<game>\dod\` (`dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`, and `dodstudio_primer.dem` without the hook DLL) |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |

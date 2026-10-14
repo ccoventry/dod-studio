@@ -1,8 +1,9 @@
 // patch/builder/mod.rs
 // Batch job construction: `build_batch_queue` and the init commands it adds.
 // The helpers it uses live beside it — `timing` (tick walks, roll floors,
-// block merging), `alloc` (drive allocation), `workspace` (junctions and the
-// legacy channel-based worker spawner), `preview` (preview patches).
+// block merging), `speed` (the fast-forward and normal-speed aliases),
+// `alloc` (drive allocation), `workspace` (junctions and the legacy
+// channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
 use crate::patch::engine::StreamPatcher;
@@ -14,11 +15,13 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
 mod preview;
+mod speed;
 mod timing;
 mod workspace;
 
 use alloc::allocate_blocks_first_fit_decreasing;
 pub use preview::*;
+pub use speed::*;
 pub use timing::*;
 pub use workspace::*;
 
@@ -227,6 +230,22 @@ pub const STAY_BEHIND: &str = "dodstudio_stay_behind_while_capturing";
 /// two in step). The engine ignores a `-` argument it doesn't know.
 pub const START_BEHIND_ARG: &str = "-dodstudio_start_behind";
 
+/// Whether a patched batch plays the primer demo before its first chain job,
+/// given whether the launch injects the hook DLL (`config.goldsrc_hooks_dll()`,
+/// the test `build_hlae_process` makes).
+///
+/// The primer loads the first map once so the real first demo isn't dark, and
+/// plays [`crate::patch::PRIMER_DELAY_TICKS`] before `playdemo`. With the hook
+/// DLL neither is needed (#365): its `lightmap_gamma` fixes the first load's
+/// lighting (#397), the first demo goes over its pipe only after config.cfg
+/// and movie.cfg have run (#705), and `GameHandoff`'s settle wait covers the
+/// delay. Every chain job carries `init_commands` and `sys_autodir` itself
+/// ([`final_init_commands`]). Without the DLL nothing else covers the first
+/// two, so the primer stays.
+pub fn plays_primer(hook_dll: bool) -> bool {
+    !hook_dll
+}
+
 pub fn build_batch_queue(
     raw_streaks: Vec<CaptureStreak>,
     config: &PatcherConfig,
@@ -355,11 +374,14 @@ pub fn build_batch_queue(
 
     helper_cfg_content.push_str("# Global aliases\n");
     helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
-    helper_cfg_content
-        .push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
-    helper_cfg_content.push_str(&format!(
-        "alias sys_fast_forward \"host_framerate {}\"\n",
-        fast_forward_host_framerate(config)
+    // The fast-forward runs uncapped with nothing drawn, and the pre-roll
+    // puts back whatever the user's own commands and configs had (#724). An
+    // alias body is not a ConsoleCommand frame: the demo carries only the
+    // name, so the 64-byte frame limit does not apply to it.
+    helper_cfg_content.push_str(&speed_alias_lines(
+        config,
+        &final_init_commands(config),
+        Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
     ));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
@@ -440,9 +462,15 @@ pub fn build_batch_queue(
         ));
     }
 
-    // 1. Primer Job. Always first when there is any work, so a test asserting
-    // on this queue gets one job more than the streak groups it passed in.
     if total_jobs > 0 {
+        helper_cfg_content.push_str("# Demo specific next demos\n");
+    }
+
+    // 1. Primer Job, only when the launch has no hook DLL ([`plays_primer`],
+    // #365). It is then first, so a test asserting on this queue gets one job
+    // more than the streak groups it passed in; with the DLL the game starts
+    // on dodstudio_chain_01 directly.
+    if total_jobs > 0 && plays_primer(config.goldsrc_hooks_dll().is_some()) {
         let first_source = sorted_groups[0].0.0.to_string();
         let mut primer_init = config.init_commands.clone();
         primer_init.push("sys_autodir".to_string());
@@ -460,7 +488,6 @@ pub fn build_batch_queue(
         // Delay playdemo of the first chain to tick 500 (~5 seconds) to allow the engine to fully finish the
         // 2-second GoldSrc server handshake without buffer overflows before jumping to the first real chain.
         let mut primer_scheduled = Vec::new();
-        helper_cfg_content.push_str("# Demo specific next demos\n");
         let primer_next_alias = format!("{PRIMER_DEMO_STEM}_next");
         helper_cfg_content.push_str(&format!(
             "alias {primer_next_alias} \"playdemo {CHAIN_DEMO_PREFIX}01\"\n"
@@ -912,7 +939,8 @@ pub fn build_batch_queue(
                 ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
-                // Playback runs at `host_framerate 0.05` until the pre-roll
+                // Playback runs at `host_framerate 0.05`, uncapped and with
+                // nothing drawn (`r_norefresh 1`, #724), until the pre-roll
                 // drops it back to real time at `s_speed_tick`, and resumes
                 // fast-forwarding once the post-roll ends at `s_end`. A command
                 // landing outside that window still executes, but it executes
@@ -944,8 +972,8 @@ pub fn build_batch_queue(
                          usually fine — it simply takes effect early. It is worth checking only \
                          for commands that depend on playback running at real speed: anything \
                          touching sound, recording, or rendering, since the engine is at \
-                         `host_framerate {}` with its audio buffers unflushed. To have it run \
-                         at normal speed instead, {}.",
+                         `host_framerate {}`, drawing nothing, with its audio buffers unflushed. \
+                         To have it run at normal speed instead, {}.",
                         custom.command,
                         relation_str.to_lowercase(),
                         custom.offset,

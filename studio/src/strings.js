@@ -1316,9 +1316,9 @@ export const STRINGS = {
       'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
     tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
-    HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
+    HAZARD_TITLE: 'These Scheduled Commands fight a value DoD Studio sets itself:',
     HAZARD_ADVICE:
-      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
+      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting, so a scheduled one just fights it. fps_max, fps_override and gl_vsync are set by the fast-forward between clips and put back to your Initial Commands (or config) value at every clip's pre-roll, so a scheduled one lasts only until the next clip. Not dangerous, just short-lived — set them in Initial Commands instead.",
     hazardRow: (command) => `${command} — runs during playback`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
@@ -1890,6 +1890,7 @@ export const STRINGS = {
     droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    FAST_FORWARD_RESTORED: "Lasts until the next clip: the fast-forward between clips sets this, and every clip's pre-roll puts your Initial Commands value back.",
     describe: (source, kind, builds) => {
       const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
       const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';

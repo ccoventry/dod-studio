@@ -50,7 +50,10 @@ is the complete list):
 
 - **Death notices** (`dodstudio_deathmsg`): raises DoD's hard-coded four-line
   cap on the kill feed, moves it down the screen, hides frags involving chosen
-  players (by slot, SteamID or `self`), or injects one by hand. HLAE's `mirv_deathmsg` supports only
+  players (by slot, SteamID or `self`), injects one by hand, or draws the
+  names in a Windows font of your choice, live (`font "Verdana" 28 bold
+  shadow`: the names go through the engine's vgui2 surface with a font handle
+  the hook owns; `src/deathmsg/font.rs`, #562). HLAE's `mirv_deathmsg` supports only
   `cstrike` and `tfc`, so none of it works for DoD -- see
   `docs/goldsrc_death_notices.md`.
 - **Message log** (`dodstudio_debug_msglog <name>... | all | clear`): dumps chosen
@@ -306,7 +309,8 @@ before launch; no file, no test -- no `hl.exe` is
 already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
-capture batch starts its primer, which matters for first-demo bugs (#546).
+capture batch without the hook DLL starts its primer, which matters for
+first-demo bugs (#546).
 
 ## Status
 
