@@ -610,12 +610,10 @@ pub fn build_batch_queue(
             let next_start = first_kill_frame(&current);
 
             // Recordings overlap, or sit too close for a safe stop/start cycle.
-            // OBS needs longer between takes than HLAE does, and the number is
-            // measured rather than guessed: ~1.065s to finalise a file after
-            // `StopRecord` returned, against the 1.0s this guard promises. So
-            // the HLAE-derived constant is already too tight for that path by a
-            // small margin, and two highlights that merge today would otherwise
-            // ask OBS for a stop/start cycle it cannot service.
+            // OBS needs longer between takes than HLAE does: ~1.065s to
+            // finalise a file after `StopRecord` returned, against HLAE's
+            // ~0.28s (#9). So each mode brings its own separation, and the
+            // HLAE one would ask OBS for a stop/start cycle it cannot service.
             let min_separation_ticks = (take_separation_seconds(config) * demo_fps) as i32;
             if blocks_merge(
                 prev_stop,
