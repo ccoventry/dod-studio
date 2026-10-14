@@ -17,15 +17,32 @@
 //!   arrive in the same frame, which is how a flag's name gets learned.
 //! - **Capture attempts.** `StartProg` opens one on an area. A `CancelProg`
 //!   before the flag changes hands is a *block*, credited to the defending
-//!   team; the demo never says which player blocked it.
+//!   team.
+//! - **Cap breaks** (the league scoreboard's "breaks"): a block credited to
+//!   the defender who caused it. Neither `StartProg` nor `CancelProg` names a
+//!   player, so the break is found by timing, in [cancel_cause]: an
+//!   attacker who died within [BREAK_WINDOW] before the cancel was a capper,
+//!   and the defender who killed them broke the capture. A capper killed by a
+//!   teammate, the world or themselves leaves the block unattributed; a
+//!   cancel with no attacker death is the cappers walking off, abandoned.
 //!
 //! Messages are buffered per frame and resolved when the next frame starts,
 //! because a capture's messages arrive in one frame but not in a guaranteed
 //! order (in practice: `ObjScore`s, then `SetObj`, then `CapMsg`).
 
-use crate::{AnalyzerEvent, AnalyzerState, player::PlayerGlobalId, time::GameTime};
+use crate::{
+    AnalyzerEvent, AnalyzerState, player::PlayerGlobalId, position::KillPosition, time::GameTime,
+};
 use dod::{RoundState, Team, UserMessage};
 use std::collections::HashMap;
+use std::time::Duration;
+
+/// How long before a `CancelProg` an attacker's death still counts as the
+/// one that cancelled it (#192). The cancel does not come with the death but
+/// 0.5 to 1.1 s after it, on nearly every cancel `cap_break_probe` measured
+/// (2,558 cancels, 458 demos). Past 1.1 s, attacker deaths are no more common
+/// than at any other moment, so a wider window would only add coincidences.
+pub const BREAK_WINDOW: Duration = Duration::from_millis(1100);
 
 /// Everything the demo says about the map's flags.
 #[derive(Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -40,6 +57,16 @@ pub struct Objectives {
     /// Timed capture attempts (`StartProg`) since the match went live. Flags
     /// with no capture time are taken instantly and never appear here.
     pub attempts: Vec<CaptureAttempt>,
+
+    /// Cancelled attempts whose capper died just before the cancel, but not
+    /// at a defender's hand: blocks with no breaker (#192).
+    #[serde(default)]
+    pub blocks_unattributed: u32,
+
+    /// Cancelled attempts with no attacker death just before the cancel: the
+    /// cappers left the area alive, so nobody broke it (#192).
+    #[serde(default)]
+    pub attempts_abandoned: u32,
 
     /// Last `ObjScore` value per player, for turning values into increments.
     #[serde(skip)]
@@ -112,10 +139,10 @@ impl FlagCapture {
 
     /// A capture of a flag the other team held, as opposed to a neutral one.
     ///
-    /// This is the spec's "obvious" break rule, not necessarily what a
-    /// league's `cap_break` column means; [FlagCapture::owners_before] is kept
-    /// so a narrower rule can be computed instead.
-    pub fn is_break(&self) -> bool {
+    /// The stats spec first called this a "break". The league's breaks are
+    /// stopped captures instead ([Player::cap_breaks](crate::Player)), so this
+    /// is named for what it checks (#192).
+    pub fn taken_from_enemy(&self) -> bool {
         self.previous_owner
             .as_ref()
             .is_some_and(|owner| opposes(owner, &self.team))
@@ -132,6 +159,80 @@ pub struct CaptureAttempt {
     pub started: GameTime,
     pub ended: Option<GameTime>,
     pub outcome: AttemptOutcome,
+
+    /// For a cancelled attempt, what cancelled it as far as the demo shows
+    /// (#192). `None` for any other outcome.
+    #[serde(default)]
+    pub cancel_cause: Option<CancelCause>,
+}
+
+/// What cancelled a capture attempt, from the deaths just before the
+/// `CancelProg` (#192).
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CancelCause {
+    /// A defender killed one of the attacking team within [BREAK_WINDOW]
+    /// before the cancel: a cap break, credited to that defender.
+    Break { breaker: PlayerGlobalId },
+
+    /// An attacker died within the window, but not by a defender's hand:
+    /// killed by a teammate, the world or themselves, or by a player whose
+    /// team is unknown. A block with no breaker.
+    Unattributed,
+
+    /// No attacker died within the window: the cappers walked off the point.
+    /// A defender stepping onto the point would land here too; the demo has
+    /// no capture-area bounds to tell the two apart.
+    Abandoned,
+}
+
+/// Why `attempt`, cancelled at `cancelled`, was cancelled, from `kills` (in
+/// arrival order).
+///
+/// A death counts when its victim was on the attacking team, it came after
+/// the attempt started, and at most [BREAK_WINDOW] before the cancel. The
+/// victim is then taken to be a capper: the demo never names an attempt's
+/// cappers. An attacker dies somewhere within any given 1.1 s about one time
+/// in ten (`cap_break_probe`'s baseline), so roughly 5% of breaks credited
+/// this way are a death elsewhere that happened to land in the window. Of the
+/// deaths that count, the last one by a defender wins, as it is the one that
+/// left too few cappers; with none by a defender, the block is unattributed.
+///
+/// A defender standing on the point is not looked for: capture areas are
+/// brush triggers the server never sends, and `InitObj`'s flag origin is not
+/// a world position (the victims above died a median 7,148 units from it),
+/// so the demo cannot say who stood in an area.
+pub fn cancel_cause(
+    attempt: &CaptureAttempt,
+    cancelled: &GameTime,
+    kills: &[KillPosition],
+) -> CancelCause {
+    let earliest = cancelled
+        .viewdemo_offset
+        .saturating_sub(BREAK_WINDOW)
+        .max(attempt.started.viewdemo_offset);
+    let mut deaths = kills.iter().rev().filter(|k| {
+        k.victim_team
+            .as_ref()
+            .is_some_and(|team| same_side(team, &attempt.team))
+            && k.time.viewdemo_offset >= earliest
+            && k.time.viewdemo_offset <= cancelled.viewdemo_offset
+    });
+    let Some(latest) = deaths.next() else {
+        return CancelCause::Abandoned;
+    };
+    let by_defender = |k: &KillPosition| {
+        let defender = !k.teamkill
+            && k.killer_team
+                .as_ref()
+                .is_some_and(|team| opposes(team, &attempt.team));
+        defender.then(|| k.killer.clone()).flatten()
+    };
+    std::iter::once(latest)
+        .chain(deaths)
+        .find_map(by_defender)
+        .map_or(CancelCause::Unattributed, |breaker| CancelCause::Break {
+            breaker,
+        })
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -204,6 +305,8 @@ impl Objectives {
     pub(crate) fn clear_match_totals(&mut self) {
         self.captures.clear();
         self.attempts.clear();
+        self.blocks_unattributed = 0;
+        self.attempts_abandoned = 0;
     }
 
     pub(crate) fn convert_allies_to_british(&mut self) {
@@ -508,6 +611,7 @@ fn resolve_pending(state: &mut AnalyzerState) {
                     started: time.clone(),
                     ended: None,
                     outcome: AttemptOutcome::InProgress,
+                    cancel_cause: None,
                 });
             }
 
@@ -520,11 +624,26 @@ fn resolve_pending(state: &mut AnalyzerState) {
                             if a == area && same_side(t, team))
                     })
                 };
-                if let Some(attempt) = state.objectives.open_attempt_mut(*area)
-                    && !captured_later(&attempt.team)
-                {
-                    attempt.outcome = AttemptOutcome::Cancelled;
-                    attempt.ended = Some(time.clone());
+                let Some(attempt) = state.objectives.open_attempt_mut(*area) else {
+                    continue;
+                };
+                if captured_later(&attempt.team) {
+                    continue;
+                }
+                // Resolved at the start of the next frame, so a death in the
+                // cancel's own packet is already in `kill_positions`.
+                let cause = cancel_cause(attempt, &time, &state.kill_positions);
+                attempt.outcome = AttemptOutcome::Cancelled;
+                attempt.ended = Some(time.clone());
+                attempt.cancel_cause = Some(cause.clone());
+                match cause {
+                    CancelCause::Break { breaker } => {
+                        if let Some(player) = state.find_player_by_id_mut(&breaker) {
+                            player.cap_breaks += 1;
+                        }
+                    }
+                    CancelCause::Unattributed => state.objectives.blocks_unattributed += 1,
+                    CancelCause::Abandoned => state.objectives.attempts_abandoned += 1,
                 }
             }
 
@@ -641,7 +760,7 @@ mod tests {
         assert_eq!(capture.team, Team::Axis);
         // No InitObj and no earlier SetObj: who held it before is unknown.
         assert_eq!(capture.previous_owner, None);
-        assert!(!capture.is_break());
+        assert!(!capture.taken_from_enemy());
 
         assert_eq!(get(&state, "a1").cap_credits, 1);
         assert_eq!(get(&state, "a2").cap_credits, 1);
@@ -670,7 +789,7 @@ mod tests {
     }
 
     #[test]
-    fn taking_an_enemy_flag_is_a_break_and_the_learned_name_finds_its_area() {
+    fn taking_an_enemy_flag_is_taken_from_enemy_and_the_learned_name_finds_its_area() {
         let mut state = two_teams();
         send(&mut state, "SetObj", &[0, ALLIES, 0]);
         cap_msg(&mut state, 4, "Church", ALLIES);
@@ -685,8 +804,8 @@ mod tests {
         next_frame(&mut state);
 
         let captures = &state.objectives.captures;
-        assert!(!captures[0].is_break());
-        assert!(captures[1].is_break());
+        assert!(!captures[0].taken_from_enemy());
+        assert!(captures[1].taken_from_enemy());
         assert_eq!(captures[1].previous_owner, Some(Team::Allies));
         assert_eq!(captures[1].owners_before, vec![(0, Team::Allies)]);
         assert_eq!(captures[2].area_index, Some(0));
@@ -778,5 +897,244 @@ mod tests {
         assert_eq!(flag.origin, Some((6368, -1985)));
         assert_eq!(flag.owner, Team::Unassigned);
         assert_eq!(state.objectives.flag(0).unwrap().owner, Team::Allies);
+    }
+
+    /// Sets the demo clock, as an `SvcTime` would.
+    fn clock(state: &mut AnalyzerState, secs: f32) {
+        state.current_time.viewdemo_offset = Duration::from_secs_f32(secs);
+    }
+
+    /// A death as `use_position_updates` records it. A `killer` of `None` is
+    /// the world.
+    fn kill(state: &mut AnalyzerState, killer: Option<&str>, victim: &str) {
+        let victim = get(state, victim);
+        let killer = killer.map(|name| get(state, name));
+        let kill = KillPosition {
+            time: state.current_time.clone(),
+            weapon: dod::Weapon::K98,
+            killer: killer.map(|p| p.id.clone()),
+            victim: Some(victim.id.clone()),
+            killer_team: killer.and_then(|p| p.team.clone()),
+            victim_team: victim.team.clone(),
+            teamkill: killer.is_some_and(|p| p.team == victim.team),
+            killer_origin: None,
+            victim_origin: None,
+            distance: None,
+        };
+        state.kill_positions.push(kill);
+    }
+
+    /// Axis starts a timed capture of area 1 at `secs`.
+    fn axis_attempt(state: &mut AnalyzerState, secs: f32) {
+        clock(state, secs);
+        send(state, "StartProg", &[1, AXIS, 5, 0]);
+        next_frame(state);
+    }
+
+    fn cancel(state: &mut AnalyzerState, secs: f32) {
+        clock(state, secs);
+        send(state, "CancelProg", &[1, 0]);
+        next_frame(state);
+    }
+
+    fn causes(state: &AnalyzerState) -> Vec<Option<CancelCause>> {
+        state
+            .objectives
+            .attempts
+            .iter()
+            .map(|a| a.cancel_cause.clone())
+            .collect()
+    }
+
+    fn breaks(state: &AnalyzerState) -> Vec<(&str, u32)> {
+        state
+            .players
+            .iter()
+            .map(|p| (p.name.as_str(), p.cap_breaks))
+            .collect()
+    }
+
+    #[test]
+    fn a_capper_killed_by_a_defender_just_before_the_cancel_is_a_break_for_that_defender() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        // The cancel trails the death by 0.5 to 1.1 s on real demos.
+        clock(&mut state, 14.3);
+        kill(&mut state, Some("b1"), "a1");
+        cancel(&mut state, 15.0);
+
+        assert_eq!(
+            causes(&state),
+            [Some(CancelCause::Break {
+                breaker: id(&state, "b1")
+            })]
+        );
+        assert_eq!(breaks(&state), [("a1", 0), ("a2", 0), ("a3", 0), ("b1", 1)]);
+        assert_eq!(state.objectives.blocks_unattributed, 0);
+        assert_eq!(state.objectives.attempts_abandoned, 0);
+    }
+
+    #[test]
+    fn a_death_in_the_cancels_own_packet_counts() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        clock(&mut state, 15.0);
+        send(&mut state, "CancelProg", &[1, 0]);
+        // The DeathMsg after the CancelProg in the same packet.
+        kill(&mut state, Some("b1"), "a1");
+        next_frame(&mut state);
+        assert_eq!(breaks(&state)[3], ("b1", 1));
+    }
+
+    #[test]
+    fn a_defender_kill_wins_over_a_teamkill_in_the_same_window() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        clock(&mut state, 14.7);
+        kill(&mut state, Some("b1"), "a3");
+        clock(&mut state, 14.9);
+        kill(&mut state, Some("a2"), "a1");
+        cancel(&mut state, 15.0);
+        assert_eq!(breaks(&state)[3], ("b1", 1));
+    }
+
+    #[test]
+    fn a_capper_killed_by_a_teammate_or_the_world_leaves_the_block_unattributed() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        clock(&mut state, 14.9);
+        kill(&mut state, Some("a2"), "a1");
+        cancel(&mut state, 15.0);
+
+        axis_attempt(&mut state, 20.0);
+        clock(&mut state, 24.9);
+        kill(&mut state, None, "a3");
+        cancel(&mut state, 25.0);
+
+        assert_eq!(
+            causes(&state),
+            [
+                Some(CancelCause::Unattributed),
+                Some(CancelCause::Unattributed)
+            ]
+        );
+        assert!(breaks(&state).iter().all(|(_, n)| *n == 0));
+        assert_eq!(state.objectives.blocks_unattributed, 2);
+        assert_eq!(state.objectives.attempts_abandoned, 0);
+        // Still blocks for the defending team.
+        assert_eq!(state.objectives.blocked_attempts(&Team::Axis), 2);
+    }
+
+    #[test]
+    fn a_cancel_with_every_attacker_alive_is_abandoned() {
+        let mut state = two_teams();
+        // Nobody died.
+        axis_attempt(&mut state, 10.0);
+        cancel(&mut state, 15.0);
+        // An attacker died, but longer than BREAK_WINDOW before the cancel.
+        axis_attempt(&mut state, 20.0);
+        clock(&mut state, 23.5);
+        kill(&mut state, Some("b1"), "a1");
+        cancel(&mut state, 25.0);
+        // Only a defender died.
+        axis_attempt(&mut state, 30.0);
+        clock(&mut state, 34.9);
+        kill(&mut state, Some("a1"), "b1");
+        cancel(&mut state, 35.0);
+        // The attacker died before this attempt started.
+        clock(&mut state, 39.9);
+        kill(&mut state, Some("b1"), "a2");
+        axis_attempt(&mut state, 40.0);
+        cancel(&mut state, 40.2);
+
+        assert_eq!(causes(&state), vec![Some(CancelCause::Abandoned); 4]);
+        assert!(breaks(&state).iter().all(|(_, n)| *n == 0));
+        assert_eq!(state.objectives.attempts_abandoned, 4);
+        assert_eq!(state.objectives.blocks_unattributed, 0);
+
+        state.objectives.clear_match_totals();
+        assert_eq!(state.objectives.attempts_abandoned, 0);
+    }
+
+    #[test]
+    fn one_of_two_cappers_killed_is_no_cancel_and_no_break() {
+        let mut state = two_teams();
+        axis_attempt(&mut state, 10.0);
+        clock(&mut state, 12.0);
+        kill(&mut state, Some("b1"), "a1");
+        next_frame(&mut state);
+        // a2 stays on the point and the flag falls.
+        clock(&mut state, 15.0);
+        send(&mut state, "SetObj", &[1, AXIS, 0]);
+        cap_msg(&mut state, 2, "Grassy Knoll", AXIS);
+        next_frame(&mut state);
+
+        assert_eq!(outcomes(&state), [AttemptOutcome::Captured]);
+        assert_eq!(causes(&state), [None]);
+        assert!(breaks(&state).iter().all(|(_, n)| *n == 0));
+        assert_eq!(state.objectives.blocks_unattributed, 0);
+        assert_eq!(state.objectives.attempts_abandoned, 0);
+    }
+
+    /// Cap breaks over a few real demos (`DOD_ANALYSIS_DEMOS`, a folder or one
+    /// file, else six spread over the PRE install's `dod` folder), printed for
+    /// a person to read. Ignored because CI has no demos:
+    /// `cargo test -p analysis --release -- --ignored cap_breaks_on_real_demos --nocapture`.
+    #[test]
+    #[ignore]
+    fn cap_breaks_on_real_demos() {
+        let paths = crate::tests::comparison_demos();
+        assert!(
+            !paths.is_empty(),
+            "no demos found: set DOD_ANALYSIS_DEMOS to a folder or a .dem file"
+        );
+        let mut totals = [0u32; 4];
+        for path in &paths {
+            let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let analysis = crate::Analysis::try_from_bytes(&bytes)
+                .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let objectives = &analysis.state.objectives;
+            let cancelled: Vec<&CaptureAttempt> = objectives
+                .attempts
+                .iter()
+                .filter(|a| a.outcome == AttemptOutcome::Cancelled)
+                .collect();
+            let breaks = cancelled
+                .iter()
+                .filter(|a| matches!(a.cancel_cause, Some(CancelCause::Break { .. })))
+                .count() as u32;
+            let credited: u32 = analysis.state.players.iter().map(|p| p.cap_breaks).sum();
+            let file = path.display();
+            // Every cancel has exactly one cause, and every break a player.
+            assert!(cancelled.iter().all(|a| a.cancel_cause.is_some()), "{file}");
+            assert_eq!(
+                breaks + objectives.blocks_unattributed + objectives.attempts_abandoned,
+                cancelled.len() as u32,
+                "{file}"
+            );
+            assert_eq!(credited, breaks, "{file}");
+            println!(
+                "{file}: {} cancelled, {breaks} breaks, {} unattributed, {} abandoned",
+                cancelled.len(),
+                objectives.blocks_unattributed,
+                objectives.attempts_abandoned
+            );
+            for (total, n) in totals.iter_mut().zip([
+                cancelled.len() as u32,
+                breaks,
+                objectives.blocks_unattributed,
+                objectives.attempts_abandoned,
+            ]) {
+                *total += n;
+            }
+        }
+        println!(
+            "{} demos: {} cancelled, {} breaks, {} unattributed, {} abandoned",
+            paths.len(),
+            totals[0],
+            totals[1],
+            totals[2],
+            totals[3]
+        );
     }
 }
