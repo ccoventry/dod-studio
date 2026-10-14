@@ -43,6 +43,7 @@ import { numberField } from './number_field.js';
 import { initClipNameSettings, getClipNameTemplate, refreshClipNamePreview } from './clip_name_ui.js';
 import { clipNamesForTakes, maxNameLength } from './clip_name.js';
 import { initCommandProfiles, setCommandProfiles } from './command_profiles_ui.js';
+import { renderCaptureSummary } from './capture_summary_ui.js';
 import { initRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
@@ -145,7 +146,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTeamsPane({
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
-    onChange: markProjectDirty,
+    onChange: () => {
+      markProjectDirty();
+      // A renamed or merged team changes the clip names shown (#445).
+      // renderDetailView and refreshClipNamePreview are imported above;
+      // selectedDemoIdx is declared further down this scope.
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+      refreshClipNamePreview();
+    },
     // triggerAutoScan is declared further down (queue_scan.js).
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
@@ -491,7 +501,13 @@ window.addEventListener("DOMContentLoaded", async () => {
     targetDrives,
     currentScannedDemos
   }), persistAppSettings, onHighlightStatusChange, () => takeIndex, updateExportPoolIndicator, captureDemosReady);
-  initCommandProfiles({ getLists: getCommandsState, applyLists: applyCommandsState, onChange: persistAppSettings });
+  // Saving, renaming or deleting a profile changes its name in the capture
+  // summary strip without touching a field the strip listens to.
+  initCommandProfiles({
+    getLists: getCommandsState,
+    applyLists: applyCommandsState,
+    onChange: () => { persistAppSettings(); renderCaptureSummary(); },
+  });
 
   // Initialize Render Studio UI. First arg doubles as Render's scan-input
   // locations — see the driveOverridesEditor/targetDrives comment above.
@@ -503,6 +519,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
     onStatusChange: onHighlightStatusChange
   });
 
@@ -511,7 +528,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFinishClips({
     getExportDirs: () => renderExportDirs,
     getClipNames: (exportDirs) => clipNamesForTakes(
-      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+      takeIndex, currentScannedDemos, getClipNameTemplate(),
+      { maxLength: maxNameLength(exportDirs), projectTeams },
     ),
     onSettingsChange: persistAppSettings,
   });
@@ -655,6 +673,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       return streak ? { demo, streak } : null;
     },
     getExportDirList: () => renderExportDirs,
+    getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();
       if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
@@ -678,7 +697,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  });
+  }, { getProjectTeams: () => projectTeams });
 
   // Demo Analyzer's Explorer sidebar Pinned tier shares the same
   // pinned_folders/scanPaths state as Capture Studio (matches dev's real

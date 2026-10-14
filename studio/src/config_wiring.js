@@ -13,6 +13,7 @@ import { numberField } from './number_field.js';
 // The Steam-install check (#373) is shared with the Setup window (#599).
 import { isSteamPlayInstall } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
+import { createGameFolderUi } from './game_folder_ui.js';
 
 // ── Path Routing: does each configured path point at a real file? ────────────
 // These fields accepted anything. `validate_paths` only ran at capture launch,
@@ -314,6 +315,16 @@ export async function linkHlaeToFfmpeg() {
  * @param {object} app  persistAppSettings() from settings_sync.js
  */
 export function initConfigWiring({ persistAppSettings }) {
+  // Game Folder (#402): its list comes from the folder holding hl.exe, so it
+  // is re-read whenever that path changes.
+  const gameFolderUi = createGameFolderUi({
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    persist: persistAppSettings,
+  });
+  gameFolderUi.refresh();
+  document.querySelector('#hl-path-input')
+    ?.addEventListener('change', () => { gameFolderUi.refresh(); });
+
   const hlaeBrowseBtn = document.querySelector('#hlae-browse-btn');
   if (hlaeBrowseBtn) {
     hlaeBrowseBtn.addEventListener('click', async () => {
@@ -452,6 +463,7 @@ export function initConfigWiring({ persistAppSettings }) {
           if (inputEl) inputEl.value = path;
           await persistAppSettings();
           await refreshPathWarnings();
+          await gameFolderUi.refresh();
         }
       } catch (err) {
         console.error("Error selecting Half-Life executable:", err);

@@ -115,9 +115,10 @@ mod tests {
 
     #[test]
     fn with_the_hook_the_first_demo_waits_for_the_configs() {
-        let (args, lines) = first_demo_start("dodstudio_primer", true);
+        // With the hook a patched batch has no primer (#365).
+        let (args, lines) = first_demo_start("dodstudio_chain_01", true);
         assert_eq!(args, "+exec dodstudio_helper.cfg");
-        assert_eq!(lines, ["playdemo dodstudio_primer"]);
+        assert_eq!(lines, ["playdemo dodstudio_chain_01"]);
     }
 
     #[test]

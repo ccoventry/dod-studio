@@ -25,6 +25,7 @@ documented in its own `//!` header.
 | `userinfo_times` | When did a player's name first reach the recording, and when did it change? |
 | `seek_burst` | How much network data can a few seconds of a demo hold (the stepped seek's budget, #596)? |
 | `objective_probe` | What does the analyzer report for captures, cap credits and cap blocks? |
+| `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
@@ -112,6 +113,12 @@ that panics the parser cannot take down the run:
 | `grenade_pov_timeline_probe` | What a player's own recording shows around a grenade throw. |
 | `grenade_prime_probe` | Can a recording tell a primed grenade from a plain throw? |
 | `grenade_timing_probe` | When a thrower's body animation changes, relative to the throw. |
+
+### The analyzer cache
+
+| Probe | What it does |
+| --- | --- |
+| `cache_migrate_probe` | Dry-runs the cache upgrades on a real cache, read-only: how many entries upgrade, why the rest need a parse, and whether an upgraded entry matches a fresh analysis. |
 
 ### Crash hunting and live-test aids
 

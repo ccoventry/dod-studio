@@ -1,10 +1,11 @@
-# The spectator camera under `spec_match_pov`: following one player, and the in-eye height
+# The spectator camera under `spec_match_pov`: following one player, the in-eye height, and the death cam
 
-Two fixes to where the camera sits while watching a player from an HLTV demo,
-both part of the `dodstudio_spec_match_pov` / `spec_lock` / `spec_target`
-family in the hook DLL: which player the camera is on (#206, first section) and
-how high the in-eye camera is when that player goes prone (#329, second). They
-were `goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`.
+Three fixes to where the camera sits while watching a player from an HLTV
+demo, all part of the `dodstudio_spec_match_pov` / `spec_lock` / `spec_target`
+family in the hook DLL: which player the camera is on (#206, first section),
+how high the in-eye camera is when that player goes prone (#329, second), and
+what it shows when he dies (#709, third). The first two were
+`goldsrc_spectator_follow.md` and `goldsrc_spectator_eye_height.md`.
 
 ---
 
@@ -89,8 +90,9 @@ pre-Anniversary and 25th Anniversary builds, and both were tested.
 - Rewinding a demo to before a death, which was reported to move the camera
   as if the player were still dead. Not reproduced here; with the lock on the
   death switch cannot fire, which is the only unprompted writer found.
-- The view while the player is dead. It is whatever the game shows for a dead
-  target, which is not what his own recording would show.
+- The view while the player is dead is the game's own for a dead target
+  unless `dodstudio_spec_deathcam` is on, which gives it his recording's death
+  cam first (third section).
 
 ---
 
@@ -158,3 +160,95 @@ wall at about 9:15, recorded with the switch on and off, on both builds. On:
 the camera is at ground level and the wall fills the view. Off: the camera
 looks over the wall from crouch height.
 `dodstudio_debug_log_weapon_model 1` logs each change of stance it sees.
+
+---
+
+## The death cam when the watched player dies (#709)
+
+Watching a player in first person from an HLTV demo, the camera stays in his
+eyes when he dies: the game rolls it 80° and drops it 8 units, and the clip
+shows the ground and his dropped weapon. His own recording shows something
+else. `dodstudio_spec_deathcam 1` gives the spectated view the same, for 2.4 s.
+A switch of its own rather than part of `dodstudio_spec_match_pov`: a movie
+wants it, a shoutcast following the fight does not. The code
+is `goldsrc-hooks/src/spectator_deathcam.rs`.
+
+### What the player's own view does
+
+Measured from the recorded `ref_params` of two POV demos (`wsod25_grp2_h1_m00cat`,
+19 deaths; `wsod25_grp2_h1_element`, 28), by a script kept outside the repo:
+
+- A third-person camera, from the first dead frame: 64 units behind a point
+  17 above the body's origin, along its own view direction, pulling back to at
+  most 168 (shorter where a wall is close).
+- No roll, no gun (`viewmodel` 0 on every dead frame).
+- The angles turn smoothly from where he was looking toward the killer.
+- It lasts until the server respawns him or gives him an observer view of a
+  teammate: 2.43 s on every death in one demo, 1.81 s in the other.
+
+### Why the spectated view differs
+
+That camera is DoD's own `V_GetDeathCam` (`client+0x503d0`, the same in both
+builds):
+
+```text
+v_lastDistance += v_frametime * 96;  if (v_resetCamera) v_lastDistance = 64;
+v_lastDistance = min(v_lastDistance, 168);
+head = ent1->origin + (0, 0, 17)
+target angles = toward ent2, or straight down when ent2 is NULL
+V_SmoothInterpolateAngles(v_lastAngles, target, angles, 120);
+V_GetChaseOrigin(angles, head, v_lastDistance, origin);
+v_lastAngles = angles
+```
+
+`V_CalcRefdef` reaches it from `V_GetChasePos` only when the chase target is
+the local player, with `ent2` the entity `iuser3` names (the killer). A
+spectator's target is never the local player, and HLTV sends no `iuser1..3`
+for players, so the in-eye camera takes its own dead branch instead
+(`V_GetInEyePos`: `curstate.solid == 0`, roll 80, z -= 8).
+
+### What the fix does
+
+After the game's `V_CalcRefdef` each frame, while the camera is in a dead
+player's eyes (`solid` 0, or his body playing a `die_*`/`dead_*` sequence,
+since an HLTV demo can be late with `solid`):
+
+- On the first dead frame, `v_resetCamera` is set so the pull-back starts at
+  64, and `v_lastAngles` is put back to his last living view angles (the
+  frame's own `V_CalcNormalRefdef` has just stored the rolled dead-eye angles
+  there).
+- `V_GetDeathCam(body, killer, angles, origin)` is called once per frame time
+  (the picture-in-picture inset calls `V_CalcRefdef` twice a frame and reuses
+  the result), the view is overwritten with its answer, and `v_resetCamera`
+  cleared as `V_GetChasePos` does. The killer is the last `DeathMsg` naming
+  him as the victim; the world or himself means NULL, the game's look-down
+  case. `deathmsg`'s handler stays installed while the switch is on for that.
+- The viewmodel is moved 4096 units below the camera for the frame.
+- After 2.4 s (what the measured recordings held it for, see below; the
+  pull-back itself takes 1.1 s) nothing is touched until he respawns: the view is the
+  game's own for the dead player, from his eyes, as without the switch. With
+  `dodstudio_spec_lock 1` a long reinforcement wait is spent there, not
+  circling the body. A seek back across the death ends it too.
+- Once he is solid again nothing is touched: the game's in-eye view is his.
+
+No code is written. `V_GetDeathCam` is found by its first 30 bytes, and the
+two globals come from its own `mov eax, [v_resetCamera]` and the `push
+v_lastAngles` before its `V_SmoothInterpolateAngles` call, checked against the
+`mov [v_lastAngles], edx` that stores the result.
+`goldsrc-hooks/tools/verify_deathcam_offsets.py` checks all of it against a
+`client.dll`.
+
+### Known differences
+
+- The death cam lasts a fixed 2.4 s. In the recordings it is constant per
+  recording but not per server: 2.43 s on every death in
+  `wsod25_grp2_h1_m00cat` (16 of 19; the other three were instant respawns),
+  1.81 s in `wsod25_grp2_h1_element` (25 of 28), same half, same server. A
+  server rule then, not the client's 4 s spectator switch (which is
+  `CHudDoDCommon::Draw`'s, first section); why the two players differ is not
+  explained. After it the recording shows a respawn or an observer view of a
+  teammate; this one shows his dead eyes.
+- Switching the camera to a player who is already dead starts a death cam
+  from 64 behind his body.
+- POV-only effects are not reproduced: the red screen of a head hit (#606)
+  and the "killed by" centre text have no HLTV messages.
