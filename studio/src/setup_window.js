@@ -11,8 +11,10 @@ import {
   defaultDemoFolder,
   driveLabel,
   formatBytes,
+  EXE_NAMES,
   isSteamPlayInstall,
   setupChecklist,
+  wrongExeName,
 } from './setup_checklist.js';
 
 /**
@@ -65,21 +67,23 @@ export function createSetupWindow(deps) {
     return `<div class="setup-path-row">${shown}<button type="button" id="${buttonId}">${escapeHtml(buttonLabel)}</button></div>`;
   }
 
-  function exeStatus(path, state, foundText) {
+  function exeStatus(path, state, foundText, expected) {
     if (!path) return '';
     if (state === 'not_found') return status('bad', S.PATH_NOT_FOUND);
     if (state === 'not_a_file') return status('bad', S.PATH_IS_A_FOLDER);
+    const wrong = wrongExeName(path, expected);
+    if (wrong) return status('bad', S.wrongExe(wrong, expected));
     return status('ok', foundText);
   }
 
   function hlStep(snap) {
-    const build = snap.hlBuild ? `<span class="setup-chip ${snap.hlBuild === 'anniversary' ? 'ok' : 'info'}">${escapeHtml(S.HL_BUILD[snap.hlBuild])}</span>` : '';
+    const build = snap.hlBuild && !wrongExeName(snap.hlPath, EXE_NAMES.hl) ?`<span class="setup-chip ${snap.hlBuild === 'anniversary' ? 'ok' : 'info'}">${escapeHtml(S.HL_BUILD[snap.hlBuild])}</span>` : '';
     const playWarn = isSteamPlayInstall(snap.hlPath)
       ? `<div class="setup-note warn" id="setup-hl-play-warning">${escapeHtml(S.HL_PLAY_INSTALL)}</div>` : '';
     return `<p>${escapeHtml(S.HL_INTRO)}</p>
       <div class="setup-note info">${escapeHtml(S.HL_RECOMMEND)}</div>
       <div class="setup-field">
-        <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND)} ${build}</div>
+        <div class="setup-field-label">${escapeHtml(S.HL_FIELD)} ${exeStatus(snap.hlPath, snap.hlState, S.HL_FOUND, EXE_NAMES.hl)} ${build}</div>
         ${pathRow(snap.hlPath, 'setup-hl-browse', S.BROWSE)}
       </div>${playWarn}`;
   }
@@ -88,7 +92,7 @@ export function createSetupWindow(deps) {
     return `<p>${escapeHtml(S.HLAE_INTRO)}</p>
       <div class="setup-btn-row"><button type="button" id="setup-hlae-get">${escapeHtml(S.HLAE_GET)}</button></div>
       <div class="setup-field">
-        <div class="setup-field-label">${escapeHtml(S.HLAE_FIELD)} ${exeStatus(snap.hlaePath, snap.hlaeState, S.HLAE_FOUND)}</div>
+        <div class="setup-field-label">${escapeHtml(S.HLAE_FIELD)} ${exeStatus(snap.hlaePath, snap.hlaeState, S.HLAE_FOUND, EXE_NAMES.hlae)}</div>
         ${pathRow(snap.hlaePath, 'setup-hlae-browse', S.BROWSE)}
       </div>`;
   }

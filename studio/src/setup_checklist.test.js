@@ -8,6 +8,8 @@ import {
   defaultDemoFolder,
   engineBuild,
   isSteamPlayInstall,
+  wrongExeName,
+  EXE_NAMES,
   SETUP_STEPS,
 } from './setup_checklist.js';
 
@@ -60,6 +62,17 @@ describe('setup checklist (#599)', () => {
     const c = setupChecklist({ ...complete, hlState: 'not_found' });
     expect(c.steps.find((s) => s.key === 'hl').done).toBe(false);
     expect(c.nextIndex).toBe(0);
+  });
+
+  it('another program than hl.exe or HLAE.exe is not done (hlds.exe sits beside hl.exe)', () => {
+    const c = setupChecklist({ ...complete, hlPath: 'D:\\Games\\Half-Life - Movies\\hlds.exe' });
+    expect(c.steps.find((s) => s.key === 'hl').done).toBe(false);
+    const hlae = setupChecklist({ ...complete, hlaePath: 'C:\\Programs\\HLAE\\AfxHookGoldSrc.exe' });
+    expect(hlae.steps.find((s) => s.key === 'hlae').done).toBe(false);
+    expect(wrongExeName('D:/x/HL.EXE', EXE_NAMES.hl)).toBe('');
+    expect(wrongExeName('C:\\Programs\\HLAE\\hlae.exe', EXE_NAMES.hlae)).toBe('');
+    expect(wrongExeName('D:\\x\\hlds.exe', EXE_NAMES.hl)).toBe('hlds.exe');
+    expect(wrongExeName('', EXE_NAMES.hl)).toBe('');
   });
 
   it('a path not yet checked counts by its text alone', () => {

@@ -354,6 +354,7 @@ export const STRINGS = {
         "Capture to video is on, but HLAE has no FFmpeg — the capture would run and produce no video. Sort the HLAE FFmpeg row above first.",
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
+    wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
     // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
     HL_PATH_PLAY_INSTALL:
         "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
@@ -2457,5 +2458,6 @@ export const STRINGS = {
     NOT_SET: 'Not set yet',
     PATH_NOT_FOUND: "There's no file at this path.",
     PATH_IS_A_FOLDER: 'That is a folder, not the program itself.',
+    wrongExe: (found, expected) => `That is ${found}, not ${expected}. Pick ${expected}.`,
   },
 };

@@ -10,8 +10,9 @@ import { checkHlaeFfmpeg, linkHlaeFfmpeg, diagnoseExecutablePaths, launchObs } f
 import { refreshLaunchGuard, runObsConnectionTest } from './capture_pane.js';
 import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
-// The Steam-install check (#373) is shared with the Setup window (#599).
-import { isSteamPlayInstall } from './setup_checklist.js';
+// The Steam-install and program-name checks (#373) are shared with the
+// Setup window (#599).
+import { EXE_NAMES, isSteamPlayInstall, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
 import { createGameFolderUi } from './game_folder_ui.js';
 
@@ -50,10 +51,14 @@ export async function refreshPathWarnings() {
     return;
   }
 
+  const expectedExe = { 'hl-path-input': EXE_NAMES.hl, 'hlae-path-input': EXE_NAMES.hlae };
   rows.forEach((row, i) => {
     let message = "";
+    const expected = expectedExe[row.input.id];
+    const wrong = expected && wrongExeName(row.input.value, expected);
     if (states[i] === 'not_found') message = STRINGS.CAPTURE_CONFIG.PATH_NOT_FOUND;
     else if (states[i] === 'not_a_file') message = STRINGS.CAPTURE_CONFIG.PATH_IS_A_FOLDER;
+    else if (wrong) message = STRINGS.CAPTURE_CONFIG.wrongExe(wrong, expected);
     else if (row.input.id === 'hl-path-input' && isSteamPlayInstall(row.input.value)) {
       message = STRINGS.CAPTURE_CONFIG.HL_PATH_PLAY_INSTALL;
     }

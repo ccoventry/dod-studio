@@ -21,10 +21,22 @@ export function isSteamPlayInstall(hlPath) {
   return normalised.endsWith('/steamapps/common/half-life/hl.exe');
 }
 
+/** The program each path must name: any other .exe (hlds.exe sits beside
+ *  hl.exe in every install) passes the picker's filter but can't run. */
+export const EXE_NAMES = { hl: 'hl.exe', hlae: 'HLAE.exe' };
+
+/** The file name of `path` when it is not `expected` (case doesn't matter),
+ *  else ''. A blank path is not wrong, only unset. */
+export function wrongExeName(path, expected) {
+  const name = (path || '').trim().split(/[\\/]/).pop();
+  return name && name.toLowerCase() !== expected.toLowerCase() ? name : '';
+}
+
 /** A path state from diagnose_executable_paths counts as set only when it
- *  names a file. An unknown state (no check ran yet) trusts the text. */
-function pathIsSet(path, state) {
-  if (!(path || '').trim()) return false;
+ *  names a file, and the right one. An unknown state (no check ran yet)
+ *  trusts the text. */
+function pathIsSet(path, state, expected) {
+  if (!(path || '').trim() || wrongExeName(path, expected)) return false;
   return state == null || state === 'ok';
 }
 
@@ -54,8 +66,8 @@ function foldersAreSet(folders) {
  */
 export function setupChecklist(state = {}) {
   const done = {
-    hl: pathIsSet(state.hlPath, state.hlState),
-    hlae: pathIsSet(state.hlaePath, state.hlaeState),
+    hl: pathIsSet(state.hlPath, state.hlState, EXE_NAMES.hl),
+    hlae: pathIsSet(state.hlaePath, state.hlaeState, EXE_NAMES.hlae),
     ffmpeg: state.ffmpegUsable === true,
     captures: foldersAreSet(state.targetDrives),
     renders: foldersAreSet(state.renderExportDirs),
