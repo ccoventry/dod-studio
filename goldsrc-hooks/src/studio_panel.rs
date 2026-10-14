@@ -2852,8 +2852,15 @@ mod hook {
                         // offset of its own (0, 0x20 on pre-Anniversary).
                         // Whenever the list is somewhere we didn't put it,
                         // that was the console: measure the offset then.
-                        let (sx, sy) = vgui.abs_pos(source);
-                        if lent.list_set != Some((px, py)) && (px, py) != want {
+                        // The window's place is its rect, not GetAbsPos: for
+                        // the hidden console that answers (0, 0), which put
+                        // the window off-screen on every other key and made
+                        // the list flicker between there and the input line.
+                        let (sx, sy, _, _) = vgui.rect(source);
+                        // A hidden list sits wherever it was left (0, 0 before
+                        // the first key); only a showing one was placed by
+                        // the console.
+                        if vgui.visible(vp) && lent.list_set != Some((px, py)) && (px, py) != want {
                             lent.list_offset = Some((px - sx - lx, py - sy - ly));
                         }
                         // Then move the (hidden) console window so its own
