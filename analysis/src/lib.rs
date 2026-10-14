@@ -61,7 +61,10 @@ pub use crate::{
         group_matches, half_of, trim_for_grouping,
     },
     mortality::{Mortality, MortalityChange, MortalityState},
-    objective::{AttemptOutcome, CaptureAttempt, Flag, FlagCapture, Objectives},
+    objective::{
+        AttemptOutcome, BREAK_WINDOW, CancelCause, CaptureAttempt, Flag, FlagCapture, Objectives,
+        cancel_cause,
+    },
     player::{Connection, Player, PlayerGlobalId, SteamId},
     position::{KillPosition, PlayerPose},
     round::Round,
@@ -1148,7 +1151,7 @@ mod tests {
     /// Demos for [`test_optimized_vs_unoptimized`]: every `.dem` in
     /// `DOD_ANALYSIS_DEMOS` (a folder, or one file), else an even spread of up
     /// to six from the PRE install's `dod` folder. Empty when neither exists.
-    fn comparison_demos() -> Vec<std::path::PathBuf> {
+    pub(crate) fn comparison_demos() -> Vec<std::path::PathBuf> {
         let from_env = std::env::var_os("DOD_ANALYSIS_DEMOS").map(std::path::PathBuf::from);
         let source = from_env.clone().unwrap_or_else(|| {
             std::path::PathBuf::from(

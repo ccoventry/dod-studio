@@ -134,6 +134,29 @@ fn flag_captures() {
 }
 
 #[test]
+fn cap_breaks() {
+    // Two timed captures, both completed: nothing to break (#192). This pins
+    // that a recording with no cancel credits nobody and counts nothing.
+    let state = &analysis().state;
+    let outcomes: Vec<_> = state
+        .objectives
+        .attempts
+        .iter()
+        .map(|a| (a.outcome.clone(), a.cancel_cause.clone()))
+        .collect();
+    assert_eq!(
+        outcomes,
+        [
+            (AttemptOutcome::Captured, None),
+            (AttemptOutcome::Captured, None)
+        ]
+    );
+    assert_eq!(state.objectives.blocks_unattributed, 0);
+    assert_eq!(state.objectives.attempts_abandoned, 0);
+    assert!(state.players.iter().all(|p| p.cap_breaks == 0));
+}
+
+#[test]
 fn highlights_keep_their_kill_time_slots() {
     // Everyone is still in the game at this demo's end, so each highlight's
     // slot is also the one they end in, and none is dropped.

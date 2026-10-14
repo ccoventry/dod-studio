@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<!--
+  Harness for game_folder_ui.js (#402): Configuration > Paths' Game Folder
+  row. The backend's list_game_folders is window.__mockInvokeHandlers;
+  window.__persisted counts saves, window.__gameFolder() reads the setting.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>game_folder_ui.js test harness</title>
+</head>
+<body>
+  <input type="text" id="hl-path-input" value="C:/Games/Half-Life/hl.exe" />
+  <select id="config-game-folder"></select>
+  <div id="config-game-folder-warning" style="display: none;"></div>
+  <script type="module">
+    import { createGameFolderUi, getGameFolder, setGameFolder } from '/src/game_folder_ui.js';
+    window.__persisted = 0;
+    const ui = createGameFolderUi({
+      getHlPath: () => document.querySelector('#hl-path-input').value.trim(),
+      persist: () => { window.__persisted += 1; },
+    });
+    window.__gameFolder = () => getGameFolder();
+    window.__setGameFolder = (name) => setGameFolder(name);
+    window.__refresh = () => ui.refresh();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

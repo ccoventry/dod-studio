@@ -86,6 +86,7 @@ pub fn use_clan_match_detection_updates(
                 player.has_reconnected = false;
                 player.obj_points = 0;
                 player.cap_credits = 0;
+                player.cap_breaks = 0;
                 player.teamkills = 0;
                 player.suicides = 0;
 
