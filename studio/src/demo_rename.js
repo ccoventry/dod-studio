@@ -6,21 +6,23 @@
 //
 // The facts come from native::demo_rename::DemoFacts:
 // `{ path, file_name, map, modified_unix_secs, demo_type, name, kills,
-//    deaths, side, teams: [{ side, tag }], error }`.
+//    deaths, side, teams: [{ side, tag }], half, match_number, error }`.
 
-import { parseTemplate, buildName } from './clip_name.js';
-import { sideTag, teamName } from './project_teams.js';
+import { parseTemplate, buildName, halfWord } from './clip_name.js';
+import { nameWithoutTag, sideTag, sideTeams } from './project_teams.js';
+import { placeholderGroups, placeholderNames, WITH_FALLBACK } from './placeholder_catalogue.js';
 import { fromCacheText, timeLeftText } from './scan_progress.js';
 import { STRINGS } from './strings.js';
+
+export { nameWithoutTag, WITH_FALLBACK };
 
 /** Keep in step with the defaults in settings_manager.rs. */
 export const DEFAULT_POV_TEMPLATE = '{name}_{kills}k_v_{opponent}_{map}';
 export const DEFAULT_HLTV_TEMPLATE = '{allies}_v_{axis}_{map}_{date}';
 
-export const DEMO_PLACEHOLDERS = [
-  'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'map', 'date', 'demo_type',
-  'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2', 'demo',
-];
+/** The chip rows, from the catalogue the clip name shares (#751). */
+export const DEMO_PLACEHOLDER_GROUPS = placeholderGroups('demo');
+export const DEMO_PLACEHOLDERS = placeholderNames('demo');
 
 /** About the recording player, so only a POV demo has them: an HLTV
  *  template that uses one is refused, and its chips leave them out. */
@@ -28,33 +30,19 @@ export const POV_ONLY = new Set([
   'name', 'full_name', 'kills', 'deaths', 'faction', 'enemy_faction', 'team_name', 'opponent',
 ]);
 
-/** The chip rows, by what each placeholder holds: the recording player,
- *  the sides (Allies / Axis), the teams' names, and the demo itself. Every
- *  placeholder is in exactly one. */
-export const DEMO_PLACEHOLDER_GROUPS = [
-  { key: 'player', names: ['name', 'full_name', 'kills', 'deaths'] },
-  { key: 'sides', names: ['faction', 'enemy_faction'] },
-  { key: 'teams', names: ['team_name', 'opponent', 'allies', 'axis', 'team1', 'team2'] },
-  { key: 'demo', names: ['map', 'date', 'demo_type', 'demo'] },
-];
-
 /** The placeholders a demo type has, in chip order. */
 export function placeholdersFor(demoType) {
   return demoType === 'hltv' ? DEMO_PLACEHOLDERS.filter((p) => !POV_ONLY.has(p)) : DEMO_PLACEHOLDERS;
 }
 
-/** The ones a demo can be without, so the ones that take `|fallback`. */
-export const WITH_FALLBACK = new Set([
-  'name', 'full_name', 'faction', 'enemy_faction', 'team_name', 'opponent', 'allies', 'axis', 'team1', 'team2',
-]);
-
 const DEMO_RULES = {
   placeholders: DEMO_PLACEHOLDERS,
   withFallback: WITH_FALLBACK,
+  aliases: {},
   // Clashes get `_2`, `_3`, ... in the preview, where they can be seen.
   distinguishing: [],
   noDistinguishing: () => '',
-  fallbackNotAllowed: (raw) => STRINGS.DEMO_RENAME.fallbackNotAllowed(raw),
+  fallbackNotAllowed: (raw) => STRINGS.PLACEHOLDERS.fallbackNotAllowed(raw),
 };
 
 /** A template checked against the placeholders its demo type has. */
@@ -66,25 +54,6 @@ export function parseDemoTemplate(template, demoType = 'pov') {
     }
   }
   return parsed;
-}
-
-/** `name` without the clan tag its side's players share (#445), and
- *  without the punctuation that framed the tag: `dicE[: :]m00cat :D`
- *  with tag `dicE` gives `m00cat :D`. The name as it is when there's no
- *  tag, or nothing would be left. */
-export function nameWithoutTag(name, tag) {
-  if (!name || !tag) return name || null;
-  const lower = name.toLowerCase();
-  const t = tag.toLowerCase();
-  // Past any bracket or symbol the tag sits in: `[dicE] m00cat`.
-  const start = lower.match(/^[^\p{L}\p{N}]*/u)[0].length;
-  const end = lower.length - lower.match(/[^\p{L}\p{N}]*$/u)[0].length;
-  let rest;
-  if (lower.startsWith(t, start)) rest = name.slice(start + tag.length);
-  else if (lower.slice(0, end).endsWith(t)) rest = name.slice(0, end - tag.length);
-  else return name;
-  rest = rest.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
-  return rest || name;
 }
 
 /**
@@ -123,19 +92,10 @@ function localDate(unixSecs) {
 
 const isAxis = (side) => side === 'Axis';
 
-/** Two names in a fixed order whichever side each played: alphabetical,
- *  a missing one last. */
-function fixedOrder(a, b) {
-  if (!a || !b) return a ? [a, b] : [b, a];
-  return a.localeCompare(b, undefined, { sensitivity: 'base' }) <= 0 ? [a, b] : [b, a];
-}
-
 /** Every placeholder's value for one demo. `null` means missing. */
 export function demoValues(facts, projectTeams) {
-  const allies = teamName(projectTeams, sideTag(facts, 'Allies'));
-  const axis = teamName(projectTeams, sideTag(facts, 'Axis'));
+  const { allies, axis, team1, team2 } = sideTeams(facts, projectTeams);
   const known = facts?.side === 'Allies' || facts?.side === 'British' || isAxis(facts?.side);
-  const [team1, team2] = fixedOrder(allies, axis);
   const number = (n) => (n === null || n === undefined ? null : String(n));
   // The other side: Axis against Allies or British, whichever the demo has.
   const enemy = !known ? null
@@ -159,6 +119,10 @@ export function demoValues(facts, projectTeams) {
     team1,
     team2,
     demo: facts?.file_name ? facts.file_name.replace(/\.dem$/i, '') : null,
+    // Decided over every demo listed together (#685); null is "nothing
+    // said", never a guessed first half.
+    half: halfWord(facts?.half),
+    match: number(facts?.match_number),
   };
 }
 

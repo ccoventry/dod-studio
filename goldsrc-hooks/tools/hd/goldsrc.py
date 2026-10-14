@@ -40,8 +40,19 @@ def wad_lookup(path):
     return _wads[path]
 
 
+def _mod():
+    """The game folder (#402); imported late, so this module stays usable
+    without hdcommon's settings lookup on the path."""
+    try:
+        import hdcommon
+        return hdcommon.game_folder()
+    except ImportError:
+        return "dod"
+
+
 def bsp_path(game, m):
-    for g in ("dod", "dod_downloads"):
+    mod = _mod()
+    for g in (mod, mod + "_downloads"):
         p = os.path.join(game, g, "maps", m + ".bsp")
         if os.path.exists(p):
             return p
@@ -79,7 +90,7 @@ def map_textures(game, m, warn=print):
             continue
         found = False
         for w in wads:
-            p = next((os.path.join(game, g, w) for g in ("dod", "valve")
+            p = next((os.path.join(game, g, w) for g in (_mod(), "valve")
                       if os.path.exists(os.path.join(game, g, w))), None)
             if p and name.lower() in wad_lookup(p):
                 o, disk = wad_lookup(p)[name.lower()]

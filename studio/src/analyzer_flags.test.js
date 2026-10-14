@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { flagSummary, isBreak, flagLabel } from './analyzer_flags.js';
+import { flagSummary, takenFromEnemy, flagLabel } from './analyzer_flags.js';
 
 const t = (secs) => ({ viewdemo_offset: { secs, nanos: 0 }, real_offset: { secs, nanos: 0 }, frame_index: 1 });
 
@@ -8,8 +8,9 @@ const STATE = {
   players: [
     { id: '1', name: 'krod', team: 'Axis', cap_credits: 2, obj_points: 3 },
     { id: '2', name: 'milo', team: 'Axis', cap_credits: 1, obj_points: 1 },
-    { id: '3', name: 'dyelife', team: 'Allies', cap_credits: 1, obj_points: 1 },
+    { id: '3', name: 'dyelife', team: 'Allies', cap_credits: 1, cap_breaks: 2, obj_points: 1 },
     { id: '4', name: 'idle', team: 'Allies', cap_credits: 0, obj_points: 0 },
+    { id: '5', name: 'breaker', team: 'Allies', cap_credits: 0, cap_breaks: 1, obj_points: 0 },
   ],
   objectives: {
     flags: [
@@ -31,18 +32,18 @@ const STATE = {
 };
 
 describe('analyzer Flags tab (#192)', () => {
-  it('a break is a flag taken from the other side, never a neutral or unknown one', () => {
-    expect(isBreak({ team: 'Axis', previous_owner: 'Allies' })).toBe(true);
-    expect(isBreak({ team: 'British', previous_owner: 'Axis' })).toBe(true);
-    expect(isBreak({ team: 'Allies', previous_owner: 'Unassigned' })).toBe(false);
-    expect(isBreak({ team: 'Axis', previous_owner: null })).toBe(false);
-    expect(isBreak({ team: 'Allies', previous_owner: 'British' })).toBe(false);
+  it('a capture taken from the other side, never from a neutral or unknown owner', () => {
+    expect(takenFromEnemy({ team: 'Axis', previous_owner: 'Allies' })).toBe(true);
+    expect(takenFromEnemy({ team: 'British', previous_owner: 'Axis' })).toBe(true);
+    expect(takenFromEnemy({ team: 'Allies', previous_owner: 'Unassigned' })).toBe(false);
+    expect(takenFromEnemy({ team: 'Axis', previous_owner: null })).toBe(false);
+    expect(takenFromEnemy({ team: 'Allies', previous_owner: 'British' })).toBe(false);
   });
 
   it('counts each side: captures, breaks, blocks for the defenders, attempts', () => {
     const { teams } = flagSummary(STATE);
-    expect(teams.axis).toEqual({ captures: 2, breaks: 1, blocks: 0, attempts: 3 });
-    expect(teams.allied).toEqual({ captures: 1, breaks: 0, blocks: 2, attempts: 1 });
+    expect(teams.axis).toEqual({ captures: 2, fromEnemy: 1, blocks: 0, attempts: 3 });
+    expect(teams.allied).toEqual({ captures: 1, fromEnemy: 0, blocks: 2, attempts: 1 });
   });
 
   it('lists the flags, the captures with their cappers, and the cappers', () => {
@@ -51,11 +52,12 @@ describe('analyzer Flags tab (#192)', () => {
       { area: 0, name: 'Hill', owner: 'Axis', captures: 2, blocked: 0 },
       { area: 1, name: null, owner: 'Allies', captures: 0, blocked: 2 },
     ]);
-    expect(s.captures.map((c) => [c.flag, c.brk, c.cappers.join('+')])).toEqual([
+    expect(s.captures.map((c) => [c.flag, c.fromEnemy, c.cappers.join('+')])).toEqual([
       ['Hill', false, 'dyelife'], ['Hill', true, 'krod+milo'], ['Bridge', false, 'krod'],
     ]);
-    expect(s.players.map((p) => [p.name, p.caps, p.points])).toEqual([
-      ['krod', 2, 3], ['dyelife', 1, 1], ['milo', 1, 1],
+    // A player with only cap breaks (#192) is listed too.
+    expect(s.players.map((p) => [p.name, p.caps, p.breaks, p.points])).toEqual([
+      ['krod', 2, 0, 3], ['dyelife', 1, 2, 1], ['milo', 1, 0, 1], ['breaker', 0, 1, 0],
     ]);
   });
 
@@ -68,6 +70,6 @@ describe('analyzer Flags tab (#192)', () => {
   });
 
   it('copes with a demo that has no flag data', () => {
-    expect(flagSummary({})).toEqual({ teams: { allied: { captures: 0, breaks: 0, blocks: 0, attempts: 0 }, axis: { captures: 0, breaks: 0, blocks: 0, attempts: 0 } }, flags: [], captures: [], players: [] });
+    expect(flagSummary({})).toEqual({ teams: { allied: { captures: 0, fromEnemy: 0, blocks: 0, attempts: 0 }, axis: { captures: 0, fromEnemy: 0, blocks: 0, attempts: 0 } }, flags: [], captures: [], players: [] });
   });
 });

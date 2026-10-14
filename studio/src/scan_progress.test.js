@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fromCacheText, timeLeftText, parseClock } from './scan_progress.js';
+import { fromCacheText, timeLeftText, parseClock, cacheRunView } from './scan_progress.js';
 
 describe('fromCacheText', () => {
   it('names the cached demos only when there are some', () => {
@@ -48,5 +48,36 @@ describe('parseClock', () => {
     expect(clock.elapsed(0, 0)).toBe(0);
     now = 800;
     expect(clock.elapsed(1, 0)).toBe(800);
+  });
+});
+
+describe('cacheRunView', () => {
+  const upgrading = { done: 0, total: 1486, cached: 0, upgrade: { running: true, done: 812, total: 1486, upgraded: 800 } };
+
+  it('says it is upgrading, with the count and a bar of it', () => {
+    const clock = parseClock(() => 1000);
+    expect(cacheRunView(upgrading, clock)).toEqual({
+      text: 'Upgrading cached analyses: 812 of 1,486',
+      value: 812,
+      max: 1486,
+    });
+  });
+
+  it('does not start the parse clock while upgrading', () => {
+    let now = 0;
+    const clock = parseClock(() => now);
+    cacheRunView(upgrading, clock);
+    now = 5000;
+    // The first parse report: the clock starts here, not at the upgrade.
+    expect(clock.elapsed(0, 0)).toBe(0);
+  });
+
+  it('then counts the caching, the upgraded apart from the ones cached before', () => {
+    const view = cacheRunView({
+      done: 900, total: 1486, cached: 1300, already: 900, failed: 0,
+      upgrade: { running: false, done: 1486, total: 1486, upgraded: 800 },
+    }, parseClock(() => 0));
+    expect(view.text).toBe('Caching 900 / 1486 (800 upgraded, 100 already cached)');
+    expect([view.value, view.max]).toEqual([900, 1486]);
   });
 });

@@ -15,12 +15,16 @@ export const MAX_SUGGESTIONS = 12;
 // Copies of native::patch::cfg_scan's tiers (command_suggest.test.js checks
 // them against cfg_scan.rs). Banned for two reasons, so two lists.
 export const OWNED_BY_STUDIO = ['mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_ffmpeg', 'host_framerate',
-  'dodstudio_batch', 'dodstudio_schedule', 'dodstudio_spray'];
+  'r_norefresh', 'dodstudio_batch', 'dodstudio_schedule', 'dodstudio_spray'];
 export const GAME_QUITS_OVER = ['r_drawentities', 'cl_lw'];
 export const SCHEDULED_BANNED = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename', 'mirv_agr'];
 export const MID_DEMO_HAZARDS = ['r_decals', 'mirv_fov', 'gl_widescreenfov', 'mirv_movie_filename',
-  'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'mirv_agr'];
+  'mirv_recordmovie_start', 'mirv_recordmovie_stop', 'mirv_movie_fps', 'mirv_movie_ffmpeg', 'host_framerate', 'r_norefresh',
+  'mirv_agr'];
 export const NOOP_IN_INIT = ['mirv_movie_filename', 'dodstudio_run_in_background', 'dodstudio_stay_behind_while_capturing'];
+// Set by the fast-forward between clips and put back at every clip's pre-roll (#724):
+// honoured in Initial Commands, short-lived as a Scheduled Command.
+export const FAST_FORWARD_CVARS = ['fps_override', 'fps_max', 'gl_vsync'];
 // The game's filter for commands a demo carries (#679): cfg_scan's DEMO_FILTER_*.
 export const DEMO_FILTER_NAME_CONTAINS = ['bind', '_set', 'unbind', 'retry', 'quit', '_restart', 'motd_write',
   'motdfile', 'kill', 'exit', 'writecfg', 'cl_filterstuffcmd', 'unbindall'];
@@ -65,6 +69,7 @@ export function tierNote(name, { scheduled }) {
   const dropped = droppedFromDemo(name);
   if (dropped) return { level: 'noop', text: S.droppedFromDemo(dropped) };
   if (!scheduled && NOOP_IN_INIT.includes(name)) return { level: 'noop', text: S.NOOP_IN_INIT };
+  if (scheduled && FAST_FORWARD_CVARS.includes(name)) return { level: 'warned', text: S.FAST_FORWARD_RESTORED };
   if (MID_DEMO_HAZARDS.includes(name)) return { level: 'warned', text: S.HAS_A_SETTING };
   return null;
 }

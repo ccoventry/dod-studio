@@ -185,9 +185,7 @@ pub fn capture_fov_from_init(init_commands: &[String]) -> Option<f32> {
 
 /// The mod folder holding the game's configs, for a configured `hl.exe`.
 fn game_dir_for(config: &PatcherConfig) -> Option<std::path::PathBuf> {
-    let dir = std::path::Path::new(&config.game_path)
-        .parent()?
-        .join("dod");
+    let dir = crate::shared::paths::mod_dir_for_exe(std::path::Path::new(&config.game_path))?;
     dir.is_dir().then_some(dir)
 }
 

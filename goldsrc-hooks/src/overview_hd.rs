@@ -133,10 +133,14 @@ fn hd_file(image: &str) -> Option<PathBuf> {
     }
     let relative = format!("{stem}_hd.tga");
     let root = game_root();
-    [root.join("dod_addon"), root.join("dod")]
-        .into_iter()
-        .map(|f| f.join(&relative))
-        .find(|p| p.is_file())
+    // Named after `-game`'s folder (#402).
+    [
+        root.join(crate::game_folder::addon_name()),
+        root.join(crate::game_folder::name()),
+    ]
+    .into_iter()
+    .map(|f| f.join(&relative))
+    .find(|p| p.is_file())
 }
 
 /// The tile of `hd` for frame `index` of a `columns` x `rows` grid, with pure

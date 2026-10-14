@@ -66,8 +66,10 @@ export function teamName(projectTeams, tag) {
  * The Teams list: one row per team (a tag and whatever was merged into it),
  * most demos first. `unread` counts demos scanned before teams were read.
  *
- * Row: `{ tag, name, customName, demoCount, demoNames, merged }`, where
- * `name` is what the team goes by and `merged` the other tags folded in.
+ * Row: `{ tag, name, customName, demoCount, demoNames, sides, merged }`,
+ * where `name` is what the team goes by, `sides` how many of its demos it
+ * played on each side (`{ Allied, Axis }`) and `merged` the other tags
+ * folded in.
  */
 export function buildTeamsList(demos, projectTeams) {
   const rows = new Map();
@@ -77,13 +79,17 @@ export function buildTeamsList(demos, projectTeams) {
       unread += 1;
       continue;
     }
-    for (const { tag } of demo.teams) {
+    for (const { side, tag } of demo.teams) {
       if (!tag) continue;
       const root = rootTag(projectTeams, tag);
-      if (!rows.has(root)) rows.set(root, { tag: root, merged: new Set(), demos: new Set() });
+      if (!rows.has(root)) {
+        rows.set(root, { tag: root, merged: new Set(), demos: new Set(), sides: { Allied: 0, Axis: 0 } });
+      }
       const row = rows.get(root);
       if (tag !== root) row.merged.add(tag);
       row.demos.add(demo.name || demo.path);
+      const key = sideKey(side);
+      if (key) row.sides[key] += 1;
     }
   }
   const list = [...rows.values()].map((row) => ({
@@ -92,6 +98,7 @@ export function buildTeamsList(demos, projectTeams) {
     customName: !!projectTeams?.names?.[row.tag],
     demoCount: row.demos.size,
     demoNames: [...row.demos].sort(),
+    sides: row.sides,
     merged: [...row.merged].sort(),
   }));
   list.sort((a, b) => b.demoCount - a.demoCount || a.tag.localeCompare(b.tag));
@@ -166,4 +173,43 @@ export function teamsForHighlight(demo, streak, projectTeams) {
     team_name: teamName(projectTeams, sideTag(demo, own)),
     opponent: teamName(projectTeams, sideTag(demo, enemy)),
   };
+}
+
+/** Two names in a fixed order whichever side each played: alphabetical,
+ *  a missing one last. */
+function fixedOrder(a, b) {
+  if (!a || !b) return a ? [a, b] : [b, a];
+  return a.localeCompare(b, undefined, { sensitivity: 'base' }) <= 0 ? [a, b] : [b, a];
+}
+
+/**
+ * The side-based team placeholders of a demo, for clip names and Rename
+ * Demos alike (#751): `allies` and `axis` by side, `team1` and `team2` the
+ * same two alphabetically, so both halves of a match agree. `null` for a
+ * side with no tag.
+ */
+export function sideTeams(demo, projectTeams) {
+  const allies = teamName(projectTeams, sideTag(demo, 'Allies'));
+  const axis = teamName(projectTeams, sideTag(demo, 'Axis'));
+  const [team1, team2] = fixedOrder(allies, axis);
+  return { allies, axis, team1, team2 };
+}
+
+/** `name` without the clan tag its side's players share (#445), and
+ *  without the punctuation that framed the tag: `dicE[: :]m00cat :D`
+ *  with tag `dicE` gives `m00cat :D`. The name as it is when there's no
+ *  tag, or nothing would be left. */
+export function nameWithoutTag(name, tag) {
+  if (!name || !tag) return name || null;
+  const lower = name.toLowerCase();
+  const t = tag.toLowerCase();
+  // Past any bracket or symbol the tag sits in: `[dicE] m00cat`.
+  const start = lower.match(/^[^\p{L}\p{N}]*/u)[0].length;
+  const end = lower.length - lower.match(/[^\p{L}\p{N}]*$/u)[0].length;
+  let rest;
+  if (lower.startsWith(t, start)) rest = name.slice(start + tag.length);
+  else if (lower.slice(0, end).endsWith(t)) rest = name.slice(0, end - tag.length);
+  else return name;
+  rest = rest.replace(/^[^\p{L}\p{N}]+/u, '').replace(/[^\p{L}\p{N}]+$/u, '');
+  return rest || name;
 }
