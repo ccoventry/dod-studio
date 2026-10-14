@@ -174,16 +174,16 @@ test.describe('scan stages a batch, Start is a separate step', () => {
     await expect(page.locator('#scan-render-btn')).toBeDisabled();
   });
 
-  test('clicking Start Render Batch calls start_queued_render with the ticked Queued rows (#70)', async ({ page }) => {
+  test('clicking Start Render Batch calls start_queued_render for every Queued row, ticked or not (#70)', async ({ page }) => {
     await gotoHarness(page);
-    await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' }), job({ id: '1', status: 'Queued', take_folder: 'C:\\y' })]);
+    await page.locator('tr[data-job-id="1"] .render-job-select-cb').uncheck();
     await expect(page.locator('#start-render-btn')).toBeEnabled();
-    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (1)');
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
 
     await page.locator('#start-render-btn').click();
 
-    const calls = await invocationsFor(page, 'start_queued_render');
-    expect(calls).toEqual([{ jobIds: ['0'] }]);
+    expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(1);
   });
 
   test('once rendering starts, Scan and Start are both disabled again', async ({ page }) => {
@@ -387,17 +387,17 @@ test.describe('Remove row / Reset All / Remove All', () => {
 test.describe('issue #70 — ticked rows and Clear Queue', () => {
   const rendered = [{ started_unix_ms: 1700000000000, stream: 'all', codec: 'prores', custom_codec_args: '', fps: 300, outcome: 'finished', output_path: 'E:/out/a.mov', output_size_bytes: 1024, error: null, output_exists: true }];
 
-  test('a new take starts ticked, a rendered one unticked, and the count is exact', async ({ page }) => {
+  test('every row starts ticked and the count is exact', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [
       job({ id: '0' }),
-      job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
+      job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered, status: 'Finished' }),
       job({ id: '2', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000' }),
     ]);
     await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).toBeChecked();
-    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
     await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).toBeChecked();
-    await expect(page.locator('#render-selection-count')).toHaveText('2 of 3 selected');
+    await expect(page.locator('#render-selection-count')).toHaveText('3 of 3 selected');
     await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
   });
 
@@ -407,14 +407,15 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
       job({ id: '0' }),
       job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
     ]);
-    await page.locator('#render-select-all-cb').click();
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
     await expect(page.locator('#render-select-all-cb')).toBeChecked();
 
     await page.locator('#render-select-all-cb').click();
     await expect(page.locator('#render-selection-count')).toHaveText('0 of 2 selected');
-    await expect(page.locator('#start-render-btn')).toBeDisabled();
-    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (0)');
+    // Start ignores the ticks: both rows are still Queued.
+    await expect(page.locator('#start-render-btn')).toBeEnabled();
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
+    await expect(page.locator('#cancel-render-btn')).toBeDisabled();
 
     await page.locator('#render-select-unrendered-btn').click();
     await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).toBeChecked();
@@ -425,7 +426,7 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
   });
 
-  test('a tick survives snapshots, and Start sends only the ticked Queued rows', async ({ page }) => {
+  test('a tick survives snapshots, and Start still counts every Queued row', async ({ page }) => {
     await gotoHarness(page);
     const rows = [job({ id: '0' }), job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000' })];
     await emitSnapshot(page, rows);
@@ -433,10 +434,8 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await emitSnapshot(page, rows);
     await emitSnapshot(page, rows);
     await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).not.toBeChecked();
-    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (1)');
-
-    await page.locator('#start-render-btn').click();
-    expect(await invocationsFor(page, 'start_queued_render')).toEqual([{ jobIds: ['0'] }]);
+    await expect(page.locator('#render-selection-count')).toHaveText('1 of 2 selected');
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
   });
 
   test('Cancel sends the ticked rendering and queued rows', async ({ page }) => {

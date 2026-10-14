@@ -637,10 +637,11 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY: 'No render jobs queued. Scan a folder, then click Start Render Batch.',
     START_RENDER_BUTTON: 'Start Render Batch',
-    // #70: the footer buttons act on the ticked rows, and say on how many.
+    // #70: Start renders every queued row; the other footer buttons act on
+    // the ticked rows, and say on how many.
     startRenderBatch: (n) => `Start Render Batch (${n})`,
-    START_RENDER_TITLE: 'Render the ticked rows that are queued.',
-    START_RENDER_NONE_TITLE: 'Tick a queued row first.',
+    START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
+    START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
     cancelSelected: (n) => `Cancel (${n})`,
     CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
     retrySelected: (n) => `Retry (${n})`,
@@ -659,7 +660,7 @@ export const STRINGS = {
     SELECT_UNRENDERED_BUTTON: 'Select unrendered',
     SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
     SELECT_ALL_CB_TITLE: 'Tick or untick every row',
-    SELECT_ROW_TITLE: 'Tick this row for Start Render Batch and the other buttons below',
+    SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
     selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
     STATUS_WAITING: 'Status: Waiting...',
 

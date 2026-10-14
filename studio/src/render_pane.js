@@ -479,9 +479,11 @@ function syncSelectionControls() {
     btn.disabled = disabled;
   };
   const R = STRINGS.RENDER;
-  setButton('#start-render-btn', targets.start.length, R.startRenderBatch,
-    targets.start.length ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
-    targets.start.length === 0 || rendering > 0);
+  // Start renders every Queued row, ticked or not (#70).
+  const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+  setButton('#start-render-btn', queued, R.startRenderBatch,
+    queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
+    queued === 0 || rendering > 0);
   setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
   setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
   setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
@@ -727,7 +729,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   });
 
   listen('render_batch_finished', () => {
-    // A held row (ticked out of the batch) is still Queued, so Scan stays
+    // A row that was Retried during the batch is still Queued, so Scan stays
     // blocked and Start comes back for it; the buttons follow the ticks.
     if (scanRenderBtn) scanRenderBtn.disabled = jobs.some((j) => j.status === JOB_STATUS.QUEUED);
     syncSelectionControls();
@@ -845,13 +847,12 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // refusal the buttons are repainted from the rows as they are.
   if (startRenderBtn) {
     startRenderBtn.addEventListener('click', () => {
-      const ids = selection.targets().start;
-      if (!ids.length) return;
+      if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
       startRenderBtn.disabled = true;
       if (cancelRenderBtn) cancelRenderBtn.disabled = false;
 
-      startQueuedRender(ids)
+      startQueuedRender()
         .then(() => {
           showToast(STRINGS.RENDER.RENDER_BATCH_QUEUED, 'success');
         })

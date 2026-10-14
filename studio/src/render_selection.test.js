@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   selectionKey,
   wasRendered,
-  defaultTicked,
   bulkTargets,
   createRenderSelection,
 } from './render_selection.js';
@@ -21,15 +20,11 @@ function job(overrides = {}) {
 const finished = { outcome: 'finished', output_exists: true, output_size_bytes: 10 };
 const failed = { outcome: 'failed' };
 
-describe('default ticks (#70)', () => {
-  it('a new take starts ticked', () => {
-    expect(defaultTicked(job())).toBe(true);
-    expect(defaultTicked(job({ history: [failed] }))).toBe(true);
-  });
-
-  it('a take rendered before starts unticked', () => {
+describe('rendered before (#70)', () => {
+  it('a finished attempt in the history counts, a failed one does not', () => {
+    expect(wasRendered(job())).toBe(false);
+    expect(wasRendered(job({ history: [failed] }))).toBe(false);
     expect(wasRendered(job({ history: [failed, finished] }))).toBe(true);
-    expect(defaultTicked(job({ history: [finished] }))).toBe(false);
   });
 
   it('the key tells a new scan\'s job 0 from the old job 0', () => {
@@ -49,14 +44,14 @@ describe('createRenderSelection', () => {
     return { sel, setJobs: (next) => { jobs = next; return sel.sync(next); }, changes: () => changes };
   }
 
-  it('syncs defaults from history and counts exactly', () => {
+  it('every row starts ticked, and counts exactly', () => {
     const { sel } = setup([
       job({ id: '0' }),
       job({ id: '1', take_folder: 'D:/x/take0001', history: [finished] }),
       job({ id: '2', take_folder: 'D:/x/take0002' }),
     ]);
-    expect(sel.counts()).toEqual({ ticked: 2, total: 3 });
-    expect(sel.tickedJobs().map((j) => j.id)).toEqual(['0', '2']);
+    expect(sel.counts()).toEqual({ ticked: 3, total: 3 });
+    expect(sel.tickedJobs().map((j) => j.id)).toEqual(['0', '1', '2']);
   });
 
   it('keeps existing ticks when a snapshot adds rows, and forgets rows that left', () => {
@@ -87,10 +82,11 @@ describe('createRenderSelection', () => {
   it('select all, none and unrendered', () => {
     const rendered = job({ id: '1', take_folder: 'D:/x/take0001', history: [finished] });
     const { sel, changes } = setup([job({ id: '0' }), rendered]);
-    sel.selectAll();
     expect(sel.counts().ticked).toBe(2);
     sel.selectNone();
     expect(sel.counts().ticked).toBe(0);
+    sel.selectAll();
+    expect(sel.counts().ticked).toBe(2);
     sel.selectUnrendered();
     expect(sel.tickedJobs().map((j) => j.id)).toEqual(['0']);
     expect(changes()).toBe(3);
@@ -120,11 +116,6 @@ describe('bulkTargets', () => {
     job({ id: '4', status: 'Cancelled', take_folder: 'D:/x/take0002' }),
   ];
 
-  it('Start sends only the ticked Queued rows', () => {
-    expect(bulkTargets(all, all).start).toEqual(['0']);
-    expect(bulkTargets([all[2]], all).start).toEqual([]);
-  });
-
   it('cancel, retry and remove follow each row\'s status', () => {
     const t = bulkTargets(all, all);
     expect(t.cancel).toEqual(['0', '1']);
@@ -145,6 +136,6 @@ describe('bulkTargets', () => {
   });
 
   it('nothing ticked, nothing to do', () => {
-    expect(bulkTargets([], all)).toEqual({ start: [], cancel: [], retry: [], remove: [], deleteFolders: [] });
+    expect(bulkTargets([], all)).toEqual({ cancel: [], retry: [], remove: [], deleteFolders: [] });
   });
 });

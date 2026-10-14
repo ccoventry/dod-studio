@@ -437,8 +437,8 @@ export async function queueRenderBatch(payload) {
 /** Starts the staged batch. `jobIds` (#70) names the ticked rows: only the
  *  Queued jobs among them render, the other Queued rows wait for a later
  *  Start. `null` starts every Queued job. */
-export async function startQueuedRender(jobIds = null) {
-  return invoke("start_queued_render", { jobIds })
+export async function startQueuedRender() {
+  return invoke("start_queued_render")
     .catch((err) => {
       console.error("IPC Execution Error (start_queued_render):", err);
       throw err;

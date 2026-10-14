@@ -1,6 +1,8 @@
 // render_selection.js
 // Which Render tab rows are ticked (#70), and what each bulk button does with
-// them. The tick state lives here, keyed by the job rather than by its id:
+// them. Start Render Batch ignores the ticks: every Queued row renders, and a
+// row to leave out is cancelled or removed. The ticks scope Cancel, Retry,
+// Remove and Delete. The tick state lives here, keyed by the job rather than by its id:
 // a scan numbers its jobs from 0 again, so an id alone would hand a new
 // take the tick of whatever sat in that slot before. Pure apart from the
 // factory's own map, so it can be tested on its own.
@@ -20,11 +22,6 @@ export function wasRendered(job) {
   return (job.history || []).some((h) => h.outcome === 'finished');
 }
 
-/** How a row starts out: ticked unless its take was rendered before. */
-export function defaultTicked(job) {
-  return !wasRendered(job);
-}
-
 /**
  * The ids and take folders each bulk button acts on, from the ticked jobs
  * and the whole list (`busy` takes come from the whole list: a take with a
@@ -33,19 +30,17 @@ export function defaultTicked(job) {
  */
 export function bulkTargets(tickedJobs, allJobs) {
   const busy = renderingTakeFolders(allJobs);
-  const start = [];
   const cancel = [];
   const retry = [];
   const remove = [];
   const deleteFolders = new Set();
   for (const j of tickedJobs) {
-    if (j.status === JOB_STATUS.QUEUED) start.push(j.id);
     if (j.status === JOB_STATUS.QUEUED || j.status === JOB_STATUS.RENDERING) cancel.push(j.id);
     if (j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR) retry.push(j.id);
     if (j.status !== JOB_STATUS.RENDERING) remove.push(j.id);
     if (j.take_folder && !busy.has(j.take_folder)) deleteFolders.add(j.take_folder);
   }
-  return { start, cancel, retry, remove, deleteFolders: [...deleteFolders] };
+  return { cancel, retry, remove, deleteFolders: [...deleteFolders] };
 }
 
 /**
@@ -61,7 +56,7 @@ export function createRenderSelection({ getJobs, onChange } = {}) {
 
   /**
    * Brings the map in line with a snapshot: a row seen for the first time
-   * gets its default, a row already known keeps its tick (a scan that adds
+   * starts ticked, a row already known keeps its tick (a scan that adds
    * takes to an existing queue leaves the old rows as they were), and a row
    * that is gone is forgotten. Returns true when a tick changed.
    */
@@ -72,7 +67,7 @@ export function createRenderSelection({ getJobs, onChange } = {}) {
       const key = selectionKey(j);
       keep.add(key);
       if (!ticked.has(key)) {
-        ticked.set(key, defaultTicked(j));
+        ticked.set(key, true);
         changed = true;
       }
     }
