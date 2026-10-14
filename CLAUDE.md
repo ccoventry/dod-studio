@@ -93,6 +93,10 @@ Clippy is pinned the same way; your default toolchain misses lints CI catches:
 ### GitHub Issues & PRs
 - **Every PR targets `dev`** — always pass `gh pr create -B dev`. `main` is the default branch, so omitting `-B` opens the PR against `main`, which is how #325 skipped `dev`. The only PR into `main` is a `dev` → `main` release; the `Main only from dev` check refuses anything else. When syncing `main` back into `dev`, use a merge commit, never squash (#340 → #341).
 - **Every PR body starts with a `Release note:` line** (`.github/pull_request_template.md`): one plain-language line for players, not developers, optionally prefixed `New:`, `Fixed:` or `Changed:`; write `none` for internal work (CI, tests, refactors, docs). The release workflows build the release notes from these lines (`docs/versioning_and_releases.md`).
+- **Names** (subagents too; check before `gh pr create` / `gh issue create`):
+  - **Branch:** `<type>/<short-slug>-<issue>`, type one of `feat`, `fix`, `chore`, `docs`, `ci`, `test`, `rnd`. Example: `feat/render-multiselect-70`. Leave the number off only when there is no issue.
+  - **PR title:** one plain-language line saying what changes for someone using the app, not how the code changed, ending with the issue in brackets: `(#NN)` when it closes it, `(part of #NN)` when it doesn't, `(#703, #463)` for several. No `feat:` / `fix(scope):` prefixes. R&D PRs start with `R&D: `. Example: `Render tab: tick takes and render, retry or delete just those (#70)`.
+  - **Issue title:** the problem or the goal in plain words, no number. `[R&D]` in front for research whose outcome is a finding, `[Chore]` for internal work. The area goes in an `area:` label, not a `[Capture Studio]`-style prefix.
 - **After creating a PR**, check whether a GitHub issue already exists for the same work. If one does, link it to the PR via GraphQL, not just a `Closes #NN` line in the PR body — that text alone does not populate the issue's `closedByPullRequestsReferences`, so a "yes there's a PR" check on the issue can miss it:
       PR_ID=$(gh api repos/<owner>/<repo>/pulls/<pr-number> --jq .node_id)
       ISSUE_ID=$(gh api repos/<owner>/<repo>/issues/<issue-number> --jq .node_id)
@@ -131,7 +135,8 @@ Keep checks thorough and wall-clock short; the reasons live as comments in `ci.y
 - **`log::` macros go nowhere.** No logger backend is registered; only `log_markdown` (the activity log) is visible.
 - **Tests that need a real demo:** use `test-fixtures/ci_fixture.dem` (a real POV recording with bots, tracked; see its README) so CI runs them. For more or longer demos, take the path from an env var with the PRE install's `dod\` folder as the fallback (`DOD_ANALYSIS_DEMOS`, `DOD_ROUNDTRIP_DEMO`), never a file in `local/` (it gets cleaned, and #652's test silently lost its four demos that way); such a test is `#[ignore]`d and fails loudly when it finds no demo. Don't add more large demos to the tree without asking.
 - **Error text names what failed and prints paths with `.display()`,** not `{:?}`, which quotes them and doubles every backslash (#648).
-- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes. Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber.
+- **Analyzer cache schema:** bump `analysis::cache::SCHEMA_VERSION` when the cached format changes, and add a step to `analysis/src/cache/migrations.rs` when the new fields can be worked out from the old entry (else the bump re-parses every cached demo). Two open PRs that both bump it do not conflict in git, so whichever merges second must renumber, its migration step too.
+- **After resolving a merge conflict in Rust, check that every `fn` in a test module still has its `#[test]`:** keeping both sides of a block whose `#[test]` line was shared context leaves the second function without one, and the test silently stops running (#743).
 
 ---
 

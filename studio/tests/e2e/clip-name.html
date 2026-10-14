@@ -29,9 +29,14 @@
 
     window.__changes = 0;
     window.__exportDirs = ['D:\\Clips'];
+    // The Teams list (#445): the demo's tags, with dicE given a display name.
+    demo.teams = [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'KROD' }];
+    window.__projectTeams = { names: { dicE: 'dice' }, merged: {} };
+    window.__demo = demo;
     initClipNameSettings({
       getHighlight: () => ({ demo, streak }),
       getExportDirList: () => window.__exportDirs,
+      getProjectTeams: () => window.__projectTeams,
       onChange: () => { window.__changes += 1; },
     });
     window.__errors = () => clipNameTemplateErrors();

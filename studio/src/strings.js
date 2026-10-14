@@ -14,10 +14,15 @@
 // developer diagnostics are explicitly OUT OF SCOPE and are not represented
 // here — only text actually shown to the end user.
 
-/** "(3 already cached, 1 failed)", or nothing when both are 0 (#569). */
-function cacheCounts(already, failed) {
+/**
+ * "(2 upgraded, 3 already cached, 1 failed)", or nothing when all are 0
+ * (#569). `already` counts the upgraded ones too: they are in the cache by
+ * the time they are counted.
+ */
+function cacheCounts(already, failed, upgraded = 0) {
   const parts = [];
-  if (already) parts.push(`${already} already cached`);
+  if (upgraded) parts.push(`${upgraded} upgraded`);
+  if (already > upgraded) parts.push(`${already - upgraded} already cached`);
   if (failed) parts.push(`${failed} failed`);
   return parts.length ? ` (${parts.join(', ')})` : '';
 }
@@ -240,6 +245,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // Game Folder (#402): game_folder_ui.js.
+    GAME_FOLDER_LABEL: 'Game Folder:',
+    GAME_FOLDER_TIP:
+        "The folder beside hl.exe that DoD Studio starts with -game, and where it finds your configs, maps and demos. Almost always dod; pick another if you keep several versions of DoD side by side (dod_movies, dod_1_2, ...).",
+    GAME_FOLDER_EMPTY: 'Give the name of a folder beside hl.exe, such as dod.',
+    GAME_FOLDER_DOTS: 'Give just the name of a folder beside hl.exe, without "..".',
+    GAME_FOLDER_OPTION: "A folder name can't start with - or +: the game would read it as another launch option.",
+    gameFolderBadChar: (c) => (/\s/.test(c)
+      ? "A folder name can't contain spaces here: the game would split it on the launch line."
+      : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
+    gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
+    gameFolderMissing: (name) =>
+        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -623,9 +642,31 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY: 'No render jobs queued. Scan a folder, then click Start Render Batch.',
     START_RENDER_BUTTON: 'Start Render Batch',
-    CANCEL_ALL_BUTTON: 'Cancel All',
-    RESET_ALL_BUTTON: 'Reset All',
-    REMOVE_ALL_BUTTON: 'Remove All (Not Rendering)',
+    // #70: Start renders every queued row; the other footer buttons act on
+    // the ticked rows, and say on how many.
+    startRenderBatch: (n) => `Start Render Batch (${n})`,
+    START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
+    START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
+    cancelSelected: (n) => `Cancel (${n})`,
+    CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    retrySelected: (n) => `Retry (${n})`,
+    RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
+    removeSelected: (n) => `Remove (${n})`,
+    REMOVE_SELECTED_TITLE: 'Take the ticked rows off the list. A rendering row stays.',
+    deleteTakesSelected: (n) => `Delete Take folders (${n})`,
+    DELETE_TAKES_SELECTED_TITLE: "Move the ticked rows' take folders to the Recycle Bin. A take that is rendering stays; a queued one leaves the queue.",
+    CLEAR_QUEUE_BUTTON: 'Clear Queue',
+    CLEAR_QUEUE_TITLE: 'Empty the list. Anything rendering is cancelled first.',
+    CLEAR_QUEUE_CONFIRM_TITLE: 'Clear Queue',
+    clearQueueConfirmMessage: (rendering) => (rendering === 1
+      ? 'A take is rendering. Stop it and empty the list?'
+      : `${rendering} takes are rendering. Stop them and empty the list?`),
+    CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
+    SELECT_UNRENDERED_BUTTON: 'Select unrendered',
+    SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
+    SELECT_ALL_CB_TITLE: 'Tick or untick every row',
+    SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
+    selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
     STATUS_WAITING: 'Status: Waiting...',
 
     CANCEL_JOB_TITLE: 'Cancel this job',
@@ -640,6 +681,27 @@ export const STRINGS = {
     OPEN_TAKE_FOLDER_TITLE: 'Open the source take folder',
     OPEN_OUTPUT_BUTTON: '📁 Open Output',
     OPEN_TAKE_FOLDER_BUTTON: '📁 Open Take Folder',
+    // #644: Delete Take sends the take folder to the Recycle Bin.
+    DELETE_TAKE_BUTTON: 'Delete Take',
+    DELETE_TAKE_TITLE: "Move this take's folder to the Recycle Bin. Its render history stays.",
+    DELETE_TAKE_RENDERING_TITLE: 'This job is rendering. Cancel it first.',
+    DELETE_TAKE_PAIR_RENDERING_TITLE: 'Another stream of this take is rendering. Cancel it first.',
+    DELETE_TAKE_RUNNING_TITLE: 'A take is being deleted.',
+    deleteTakeConfirmTitle: (n) => (n === 1 ? 'Delete Take' : `Delete ${n} Takes`),
+    deleteTakeConfirmMessage: (n, size) => (n === 1
+      ? `Move this take (${size}) to the Recycle Bin?`
+      : `Move these ${n} takes (${size}) to the Recycle Bin?`),
+    DELETE_TAKE_CONFIRM_FOOTER: 'The space comes back when the Recycle Bin is emptied. The render history stays.',
+    deleteTakeQueuedNote: (n) => (n === 1
+      ? 'Its queued render is removed from the queue.'
+      : `${n} queued renders are removed from the queue.`),
+    DELETE_TAKE_CONFIRM_BUTTON: 'Move to Recycle Bin',
+    deleteTakeMeasuring: (done, total) => `Measuring takes: ${done} of ${total}`,
+    deleteTakeRecycling: (done, total) => `Moving to the Recycle Bin: ${done} of ${total}`,
+    takesDeleted: (n, size) => `${n === 1 ? 'Take' : `${n} takes`} moved to the Recycle Bin (${size}).`,
+    takesDeleteFailed: (deleted, failed, firstError) =>
+      `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
+    deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -837,6 +899,8 @@ export const STRINGS = {
     INTRO: "Tags found in players' names, one per side of each demo. Type the name you want a team to go by, or pick another tag it is the same team as.",
     HEADER_TAG: 'Tag',
     HEADER_DEMOS: 'Demos',
+    HEADER_SIDES: 'Played as',
+    sides: (allied, axis) => `${allied} Allied, ${axis} Axis`,
     HEADER_NAME: 'Name',
     HEADER_SAME_AS: 'Same team as',
     SAME_AS_NONE: '—',
@@ -862,14 +926,18 @@ export const STRINGS = {
     DEMOS_TITLE: 'Demos',
     CACHE_ALL_BUTTON: 'Cache all',
     CACHE_STOP_BUTTON: 'Stop',
-    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped.',
+    CACHE_ALL_TITLE: 'Analyse every demo in this folder now, in the background, so opening one later is instant. The game’s Highlights tab and the player filters use the same cache. Demos already cached are skipped, and ones an older version of DoD Studio cached are upgraded instead of analysed again where possible.',
     CACHE_NOTHING: 'No demos in this folder to cache.',
     CACHE_STOPPING: 'Stopping after the demos in progress…',
-    cacheProgress: ({ done, total, already, failed }) =>
-      `Caching ${done} / ${total}` + cacheCounts(already, failed),
-    cacheDone: ({ done, total, already, failed, cancelled }) =>
+    // A cache-format change leaves older analyses behind; they are upgraded
+    // first, which is fast, and only the rest are parsed.
+    cacheUpgrading: ({ upgrade: { done = 0, total = 0 } = {} }) =>
+      `Upgrading cached analyses: ${done.toLocaleString('en-US')} of ${total.toLocaleString('en-US')}`,
+    cacheProgress: ({ done, total, already, failed, upgrade }) =>
+      `Caching ${done} / ${total}` + cacheCounts(already, failed, upgrade?.upgraded),
+    cacheDone: ({ done, total, already, failed, cancelled, upgrade }) =>
       (cancelled ? `Stopped at ${done} / ${total}` : `Cached ${total} demo${total === 1 ? '' : 's'}`) +
-      cacheCounts(already, failed),
+      cacheCounts(already, failed, upgrade?.upgraded),
     SEARCH_NAME_MAP_PLACEHOLDER: 'Search name/map...',
     TYPE_ALL: 'All',
     TYPE_POV: 'POV',
@@ -1063,7 +1131,7 @@ export const STRINGS = {
     ROUNDS_TITLE: 'Rounds',
     // #192: the Flags tab.
     FLAGS_NONE: 'This demo has no flag messages: not a flag map, or recorded without them.',
-    flagsTeamBadge: (captures, breaks, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${breaks} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
+    flagsTeamBadge: (captures, fromEnemy, blocks, attempts) => `capture${captures === 1 ? '' : 's'} (${fromEnemy} from the other team) · ${blocks} block${blocks === 1 ? '' : 's'} · ${attempts} timed attempt${attempts === 1 ? '' : 's'}`,
     FLAGS_TITLE: 'Flags',
     flagArea: (area) => `Area ${area}`,
     COL_FLAG: 'Flag',
@@ -1074,12 +1142,14 @@ export const STRINGS = {
     CAPTURES_TITLE: 'Captures',
     COL_TEAM: 'Team',
     COL_CAPPERS: 'Cappers',
-    FLAGS_BREAK: 'from the other team',
+    FLAGS_FROM_ENEMY: 'from the other team',
     FLAGS_NO_CAPTURES: 'No flag was captured after the match went live.',
     CAPPERS_TITLE: 'Cappers',
     COL_PLAYER: 'Player',
     COL_CAP_CREDITS: 'Caps',
     COL_CAP_CREDITS_TITLE: 'Captures the player took part in: the one the game names, and everyone whose objective score rose in the same moment',
+    COL_CAP_BREAKS: 'Breaks',
+    COL_CAP_BREAKS_TITLE: 'Enemy captures the player stopped: a timed capture cancelled within 1.1 seconds of the player killing one of its cappers',
     COL_OBJ_POINTS: 'Objective points',
     COL_OBJ_POINTS_TITLE: "Every rise in the player's objective score since the match went live",
     COL_ROUND_NUM: '#',
@@ -1248,9 +1318,9 @@ export const STRINGS = {
       'Each command must be under 64 bytes — split it into shorter ones. Start Capture Batch stays disabled while any are present.',
     tooLongRow: (command, bytes) => `${command} — ${bytes} bytes`,
     bannedRowDetailed: (command, reason) => (reason ? `${command} — not allowed: ${reason}` : `${command} — not allowed`),
-    HAZARD_TITLE: 'These Scheduled Commands are redundant with a Configuration setting:',
+    HAZARD_TITLE: 'These Scheduled Commands fight a value DoD Studio sets itself:',
     HAZARD_ADVICE:
-      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting — a scheduled one here just fights the value the pipeline sets on its own. Not dangerous, just pointless.",
+      "mirv_movie_fps is already pinned every capture from Output Format's own Capture FPS setting, so a scheduled one just fights it. fps_max, fps_override and gl_vsync are set by the fast-forward between clips and put back to your Initial Commands (or config) value at every clip's pre-roll, so a scheduled one lasts only until the next clip. Not dangerous, just short-lived — set them in Initial Commands instead.",
     hazardRow: (command) => `${command} — runs during playback`,
     DECAL_DEFAULT_TITLE: 'No r_decals value is set anywhere:',
     DECAL_DEFAULT_ADVICE:
@@ -1526,10 +1596,15 @@ export const STRINGS = {
     modeObs: (fps) => `OBS @ ${fps} fps`,
     modeAgr: (fps) => `AGR for Blender @ ${fps} fps`,
     format: (w, h, fps) => `${w}×${h} @ ${fps} fps`,
+    commands: (name, edited) => `Commands: ${name}${edited ? ' (edited)' : ''}`,
+    COMMANDS_NONE: 'Commands: none',
     scheduled: (n) => (n === 0 ? 'No scheduled commands' : `${n} scheduled command${n === 1 ? '' : 's'}`),
     banned: (n) => `${n} banned command${n === 1 ? '' : 's'}`,
     DECALS_CLEARED: 'Decals cleared',
     DECALS_KEPT: 'Decals kept',
+    finish: (codec) => (codec ? `Finish: ${codec}` : 'Finish: on'),
+    FINISH_OFF: 'Finish: off',
+    FINISH_KEEP: 'Keep as captured',
     NO_DESTINATION: 'No destination folder',
     LINK_TITLE: 'Open this setting in Configuration',
   },
@@ -1851,6 +1926,7 @@ export const STRINGS = {
     droppedFromDemo: (pattern) => `Does nothing: the game drops any command from a demo with '${pattern}' in it.`,
     NOOP_IN_INIT: 'Does nothing here: DoD Studio sets it before anything reads it.',
     HAS_A_SETTING: 'DoD Studio has a setting for this; typing it here is flagged.',
+    FAST_FORWARD_RESTORED: "Lasts until the next clip: the fast-forward between clips sets this, and every clip's pre-roll puts your Initial Commands value back.",
     describe: (source, kind, builds) => {
       const what = source === 'hlae' ? 'HLAE' : source === 'dodstudio' ? 'DoD Studio' : kind === 'cvar' ? 'setting' : 'command';
       const where = builds === 'pre' ? ', pre-Anniversary only' : builds === 'post' ? ', 25th Anniversary only' : '';
@@ -1888,15 +1964,20 @@ export const STRINGS = {
      *  mismatch answer. */
     message({ running, wanted, differs }) {
       const install = differs.includes('install');
+      // The Game folder setting, `-game` (#402).
+      const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
       const size = (s) => `${s.width}×${s.height}`;
+      const folderName = (s) => `the "${s.game_folder}" game folder`;
       const now = [
         install && `from "${running.install}"`,
+        folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
       ].filter(Boolean).join(' ');
       const set = [
         install && `"${wanted.install}"`,
-        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+        folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
+        resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },
@@ -2217,8 +2298,8 @@ export const STRINGS = {
       map: 'The map, without dod_',
       date: "The demo file's date, YYYY-MM-DD",
       demo_type: 'pov or hltv',
-      team_name: "The recording player's team",
-      opponent: 'The other team',
+      team_name: "The recording player's team: its display name from the project's Teams list, or unknown when their side has no tag",
+      opponent: "The other team: its display name from the project's Teams list, or unknown when that side has no tag",
       allies: 'The team on the Allied side',
       axis: 'The team on the Axis side',
       team1: 'The two teams in alphabetical order, so both halves agree: the first',
@@ -2278,8 +2359,8 @@ export const STRINGS = {
       time: 'Time into the demo, like 12m34s',
       demo: 'The demo file name, without .dem',
       date: 'The demo file\'s date, YYYY-MM-DD',
-      team_name: 'Their team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
-      opponent: 'The other team\'s name (from the project\'s team list, not built yet: gives unknown or your word after |)',
+      team_name: "Their team's display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
+      opponent: "The first victim's team: its display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
       lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
       upper: 'Add after a placeholder name to upper-case it: {map:upper}',
       first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',

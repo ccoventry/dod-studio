@@ -11,6 +11,8 @@ import { STRINGS } from './strings.js';
 
 let getPreviewHighlight = () => null;
 let getExportDirs = () => [];
+// The project's Teams list (#445), for {team_name} and {opponent}.
+let getProjectTeams = () => null;
 
 function templateInput() {
   return document.querySelector('#config-clip-name-template');
@@ -106,7 +108,8 @@ export function refreshClipNamePreview() {
   showLines('#config-clip-name-errors', parsed.errors);
 
   const highlight = getPreviewHighlight();
-  const values = highlight ? highlightValues(highlight.demo, highlight.streak) : null;
+  const projectTeams = getProjectTeams();
+  const values = highlight ? highlightValues(highlight.demo, highlight.streak, { projectTeams }) : null;
   renderChips(values);
 
   const preview = document.querySelector('#config-clip-name-preview');
@@ -118,7 +121,7 @@ export function refreshClipNamePreview() {
   }
   const dirs = (getExportDirs() || []).filter(Boolean);
   const maxLength = maxNameLength(dirs);
-  const typed = clipNameFor(highlight.demo, highlight.streak, getClipNameTemplate(), { maxLength });
+  const typed = clipNameFor(highlight.demo, highlight.streak, getClipNameTemplate(), { maxLength, projectTeams });
   const built = typed.typed ? typed : buildName(parsed, values, { maxLength });
   const folder = String(dirs[0] || '').replace(/[\\/]+$/, '');
   const path = folder ? `${folder}\\${built.name}` : built.name;
@@ -140,12 +143,14 @@ export function refreshClipNamePreview() {
 
 /**
  * Wires the field. `getHighlight()` gives the highlight the preview uses
- * (`{ demo, streak }` or null); `onChange()` runs when the template settles
- * (blur, Enter, a chip, Default), to save it and refresh the names shown.
+ * (`{ demo, streak }` or null); `getProjectTeams()` the project's Teams
+ * list; `onChange()` runs when the template settles (blur, Enter, a chip,
+ * Default), to save it and refresh the names shown.
  */
-export function initClipNameSettings({ getHighlight, getExportDirList, onChange }) {
+export function initClipNameSettings({ getHighlight, getExportDirList, getProjectTeams: getTeams, onChange }) {
   if (getHighlight) getPreviewHighlight = getHighlight;
   if (getExportDirList) getExportDirs = getExportDirList;
+  if (getTeams) getProjectTeams = getTeams;
   const input = templateInput();
   if (!input) return;
   if (!input.value) input.value = DEFAULT_TEMPLATE;
