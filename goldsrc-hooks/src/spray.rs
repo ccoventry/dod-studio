@@ -60,9 +60,9 @@
 //! ## `dodstudio_spray <name>`
 //!
 //! Makes `<name>.png` the user's own spray: writes a `tempdecal.wad` the
-//! engine accepts (one `{LOGO` lump, each side the largest power of two up to
-//! 256, 8-bit, the palette quantised to 255 colours with entry 255 the
-//! transparent blue), keeps `tempdecal.wad.dodstudio-backup` of the file
+//! engine accepts (one `{LOGO` lump, sides in steps of 16 and the file at
+//! most 20480 bytes, which makes a square picture 112x112; 8-bit, the palette
+//! quantised to 255 colours with entry 255 the transparent blue), keeps `tempdecal.wad.dodstudio-backup` of the file
 //! that was there the first time, and writes the lump's key to the mapping,
 //! so the spray comes back in HD wherever it is seen. The engine reads
 //! `tempdecal.wad` when it connects, so the switch shows from the next
@@ -105,6 +105,14 @@ const TEMPDECAL: &str = "tempdecal.wad";
 const BACKUP: &str = "tempdecal.wad.dodstudio-backup";
 /// `Draw_ValidateCustomLogo`'s ceiling on each side.
 const MAX_LOGO_SIDE: u32 = 256;
+/// The file sizes the server takes a spray at: `COM_CreateCustomization`
+/// (pre-Anniversary `hw+0x2911f`) drops a decal resource under 1024 or over
+/// 20480 bytes, and the console says "Ignoring invalid custom decal". The
+/// player then sprays the default logo, and nobody else sees the custom one.
+const MIN_WAD_BYTES: usize = 0x400;
+const MAX_WAD_BYTES: usize = 0x5000;
+/// Spray sides are multiples of this, so all four mips halve exactly.
+const LOGO_STEP: u32 = 16;
 /// The transparent entry of a cut-out decal: pure blue at index 255 is what
 /// makes `Draw_MiptexTexture` upload it as `TEX_TYPE_ALPHA`.
 const CUTOUT_KEY: [u8; 3] = [0, 0, 255];
@@ -657,7 +665,11 @@ pub struct Logo {
 
 /// Median-cut quantisation of the opaque pixels to at most `n` colours.
 fn median_cut(colors: &HashMap<[u8; 3], u32>, n: usize) -> Vec<[u8; 3]> {
-    let mut boxes: Vec<Vec<([u8; 3], u32)>> = vec![colors.iter().map(|(c, k)| (*c, *k)).collect()];
+    // Sorted, so the same picture always gives the same palette and key: a
+    // HashMap's order changes every run, and ties in the splits with it.
+    let mut all: Vec<([u8; 3], u32)> = colors.iter().map(|(c, k)| (*c, *k)).collect();
+    all.sort_unstable();
+    let mut boxes = vec![all];
     if boxes[0].is_empty() {
         return Vec::new();
     }
@@ -802,34 +814,65 @@ fn mips(img: &Rgba, logo: &Logo) -> [Vec<u8>; 4] {
     })
 }
 
-/// The spray's size: the longer side the largest power of two at most
-/// `max_side` (itself at most 256), the other scaled with it and rounded down
-/// to a power of two (at least 8, so the fourth mip is still a pixel).
-/// Powers of two keep every mip exact.
-fn fit_logo(img: &Rgba, max_side: u32) -> Rgba {
-    let max_side = max_side.clamp(8, MAX_LOGO_SIDE);
-    let long = img.width.max(img.height);
-    let target = pot_floor(long, max_side);
-    let other = |side: u32| {
-        let scaled = (side as f64 * target as f64 / long as f64).round() as u32;
-        pot_floor(scaled.max(8), max_side)
-    };
-    if img.width >= img.height {
-        resample(img, target, other(img.height))
-    } else {
-        resample(img, other(img.width), target)
+/// The size of the WAD [`build_wad`] writes for a `w`x`h` spray: header,
+/// miptex header, four mips, palette count and palette, padded to 4, then
+/// the one directory entry.
+fn wad_bytes(w: u32, h: u32) -> usize {
+    let pix = (w * h) as usize;
+    let lump = 40 + pix + (pix >> 2) + (pix >> 4) + (pix >> 6) + 2 + 768;
+    (12 + lump).next_multiple_of(4) + 32
+}
+
+/// The spray's size: sides in steps of 16 (so every mip halves exactly; a
+/// `max_side` under 16 is the one exception), the aspect kept, never larger
+/// than the picture or `max_side`, and the biggest whose file still fits
+/// `max_bytes`. With [`MAX_WAD_BYTES`] a square picture comes out 112x112.
+fn logo_size(width: u32, height: u32, max_side: u32, max_bytes: usize) -> (u32, u32) {
+    let max_side = max_side.clamp(1, MAX_LOGO_SIDE);
+    let min_side = LOGO_STEP.min(max_side);
+    let long = width.max(height).max(1);
+    let short = width.min(height);
+    let mut target = (long / LOGO_STEP * LOGO_STEP).clamp(min_side, max_side);
+    loop {
+        let scaled = (short as f64 * target as f64 / long as f64 / LOGO_STEP as f64).round() as u32;
+        let other = (scaled * LOGO_STEP).clamp(min_side, target);
+        if wad_bytes(target, other) <= max_bytes || target <= LOGO_STEP {
+            return if width >= height {
+                (target, other)
+            } else {
+                (other, target)
+            };
+        }
+        target -= LOGO_STEP;
     }
 }
 
-/// A one-lump WAD3 of `img` as a `{LOGO` spray, and the lump's key. The
-/// image is first fitted by [`fit_logo`], up to the engine's 256.
-pub fn build_wad(img: &Rgba) -> Result<(Vec<u8>, Key), String> {
-    build_wad_sized(img, MAX_LOGO_SIDE)
+fn fit_logo(img: &Rgba, max_side: u32, max_bytes: usize) -> Rgba {
+    let (w, h) = logo_size(img.width, img.height, max_side, max_bytes);
+    resample(img, w, h)
 }
 
-/// [`build_wad`] with the longer side at most `max_side`.
+/// A one-lump WAD3 of `img` as a `{LOGO` spray, and the lump's key: the
+/// user's own `tempdecal.wad`, so fitted to the file size a server takes.
+pub fn build_wad(img: &Rgba) -> Result<(Vec<u8>, Key), String> {
+    let (wad, key) = build_wad_fitted(img, MAX_LOGO_SIDE, MAX_WAD_BYTES)?;
+    if !(MIN_WAD_BYTES..=MAX_WAD_BYTES).contains(&wad.len()) {
+        return Err(format!(
+            "it makes a {} byte file; the game takes {MIN_WAD_BYTES}..{MAX_WAD_BYTES}",
+            wad.len()
+        ));
+    }
+    Ok((wad, key))
+}
+
+/// [`build_wad`] with the longer side at most `max_side` and no file-size
+/// cap: for a spray the hook draws itself, which no server ever sees.
 pub fn build_wad_sized(img: &Rgba, max_side: u32) -> Result<(Vec<u8>, Key), String> {
-    let fitted = fit_logo(img, max_side);
+    build_wad_fitted(img, max_side, usize::MAX)
+}
+
+fn build_wad_fitted(img: &Rgba, max_side: u32, max_bytes: usize) -> Result<(Vec<u8>, Key), String> {
+    let fitted = fit_logo(img, max_side, max_bytes);
     let logo = quantise(&fitted);
     let (w, h) = (logo.width, logo.height);
     if !(1..=MAX_LOGO_SIDE).contains(&w) || !(1..=MAX_LOGO_SIDE).contains(&h) {
@@ -1351,25 +1394,41 @@ mod tests {
     }
 
     #[test]
-    fn the_wad_is_fitted_to_a_power_of_two_at_most_256() {
-        let big = Rgba {
-            width: 300,
-            height: 1000,
-            pixels: vec![255; 300 * 1000 * 4],
+    fn the_wad_fits_the_size_a_server_takes() {
+        let solid = |width: u32, height: u32| Rgba {
+            width,
+            height,
+            pixels: vec![255; (width * height * 4) as usize],
         };
-        let (wad, _) = build_wad(&big).unwrap();
+        // The team sprays' size: 112x112 is about 17.5 KB, 128x128 would be
+        // over the 20480 a server takes.
+        let (wad, _) = build_wad(&solid(3840, 3840)).unwrap();
         let (_, w, h) = wad_key(&wad).unwrap();
-        // The long side to 256; the short one scaled with it (77) and rounded
-        // down to a power of two.
-        assert_eq!((w, h), (64, 256));
-        let small = Rgba {
-            width: 50,
-            height: 40,
-            pixels: vec![255; 50 * 40 * 4],
-        };
-        let (wad, _) = build_wad(&small).unwrap();
+        assert_eq!((w, h), (112, 112));
+        assert_eq!(wad.len(), 17516);
+        assert!(wad_bytes(128, 128) > MAX_WAD_BYTES);
+        // Tall: the long side as far as the file allows, the short one
+        // scaled with it in steps of 16.
+        let (wad, _) = build_wad(&solid(300, 1000)).unwrap();
         let (_, w, h) = wad_key(&wad).unwrap();
-        assert_eq!((w, h), (32, 16));
+        assert_eq!((w, h), (64, 224));
+        assert!(wad.len() <= MAX_WAD_BYTES);
+        // Small pictures aren't scaled up past themselves.
+        let (wad, _) = build_wad(&solid(50, 40)).unwrap();
+        let (_, w, h) = wad_key(&wad).unwrap();
+        assert_eq!((w, h), (48, 32));
+        assert!(wad.len() >= MIN_WAD_BYTES);
+        let (wad, _) = build_wad(&solid(4, 4)).unwrap();
+        assert_eq!(wad_key(&wad).unwrap().1, 16);
+        // Every size it picks stays inside the server's range.
+        for (w, h) in [(1, 4000), (4000, 1), (256, 255), (17, 33), (1000, 999)] {
+            let (lw, lh) = logo_size(w, h, MAX_LOGO_SIDE, MAX_WAD_BYTES);
+            assert!(lw % 16 == 0 && lh % 16 == 0, "{w}x{h} -> {lw}x{lh}");
+            assert!(
+                (MIN_WAD_BYTES..=MAX_WAD_BYTES).contains(&wad_bytes(lw, lh)),
+                "{w}x{h}"
+            );
+        }
         assert_eq!(pot_floor(3840, 1024), 1024);
         assert_eq!(pot_floor(3840, 4096), 2048);
         assert_eq!(pot_floor(112, 256), 64);
@@ -1388,6 +1447,24 @@ mod tests {
         assert_eq!(&logo.palette[765..], &CUTOUT_KEY);
         let used: std::collections::HashSet<u8> = logo.indices.iter().copied().collect();
         assert!(used.len() <= 255 && used.len() > 100);
+    }
+
+    #[test]
+    fn the_same_picture_always_gives_the_same_key() {
+        // Each run of the command maps its key, so a key that changed from
+        // run to run left one stale mapping line per run.
+        let mut img = Rgba {
+            width: 64,
+            height: 64,
+            pixels: vec![0; 64 * 64 * 4],
+        };
+        for (i, px) in img.pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
+            *px = [(i * 7) as u8, (i * 13) as u8, (i * 29) as u8, 255];
+        }
+        let first = build_wad(&img).unwrap().1;
+        for _ in 0..5 {
+            assert_eq!(build_wad(&img).unwrap().1, first);
+        }
     }
 
     #[test]
