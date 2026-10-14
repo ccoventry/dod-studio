@@ -1513,6 +1513,8 @@ mod hook {
     mod sort_arrows;
     /// The Highlights tab (#565).
     mod streaks_tab;
+    /// The hidden VCR bar's slider kept in step with playback (#663).
+    mod vcr_sync;
 
     /// Bumped each time the demo list is refilled and stamped, so what is
     /// worked out from its rows is worked out again.
@@ -3372,6 +3374,7 @@ mod hook {
         let Ok(vgui) = Vgui::get() else { return };
         unsafe {
             console_to_tab(&vgui);
+            vcr_sync::update(&vgui);
             // After a viewdemo, open on Playback once the bar has appeared.
             if pending > 0 {
                 VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);

@@ -220,3 +220,15 @@ needs the skip: without it, a jump over earlier clips replays their
 `mirv_recordmovie_start`/`stop`. Still to measure live: one batch under
 `viewdemo`, and the load times above. (`dodstudio_seek_*` is in use; its
 forward-jump problem is #596.)
+
+### The first ESC after a second demo (#663)
+
+GameUI's VCR bar (`CDemoPlayerDialog`) treats "the slider's value differs
+from the one I set last" as the user dragging it, and seeks there and
+pauses. Its `OnThink` only runs while the bar shows, so after a second
+`viewdemo` the hidden bar still holds the first demo's slider state, and the
+first ESC sent playback to the new demo's first whole second, paused (PRE,
+traced: `SetWorldTime(726.00)`, `SetPaused(1)` from 1706 s). The hook keeps
+the hidden bar's slider range, value and last value in step with playback
+(`goldsrc-hooks/src/studio_panel/hook/vcr_sync.rs`), so that first think
+finds nothing changed.
