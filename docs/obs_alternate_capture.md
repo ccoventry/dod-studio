@@ -74,10 +74,10 @@ pre-roll budget is `AUDIO_RESYNC_SECONDS` = 2.0s, so this fits roughly thirty ti
 **Option A's timing holds, and Option B's only real advantage disappears** — it stays a contingency
 and should not ship as a second user-facing mode.
 
-**Stop to file finalised: ~1.065 s**, also measured twice. This is a problem worth naming:
-`MIN_TAKE_SEPARATION_SECONDS` is **1.0 s**, so OBS needs marginally *longer* to finalise a file than
-the pipeline currently guarantees between one take's stop and the next one's start. That constant
-was derived for HLAE and must be raised for this path.
+**Stop to file finalised: ~1.065 s**, also measured twice. HLAE's `MIN_TAKE_SEPARATION_SECONDS` is
+**0.5 s** (HLAE finalises a take in about 0.28 s, #9), so OBS needs about twice the gap the HLAE path
+guarantees between one take's stop and the next one's start. That is why the OBS path has its own,
+`OBS_TAKE_SEPARATION_SECONDS`.
 
 **The container was MP4**, not the MKV this document assumed OBS defaults to. Both need handling, or
 the setting needs pinning — see the open question on containers.
@@ -500,7 +500,8 @@ Two smaller ones found on the way:
   above has been tested against a real batch. Reproducing this one means a demo that fails to load
   with hl.exe still alive, plus a five-minute wait; it did arm correctly off a real run in the
   activity log, which is weaker evidence than the rest.
-- **Is `MIN_TAKE_SEPARATION_SECONDS` right?** The OBS path uses its own
-  `OBS_TAKE_SEPARATION_SECONDS` (> 1.065 s, tested in `native/src/obs/client.rs`); the HLAE-side constant's
-  calibration is [#9](https://github.com/ccoventry/dod-studio/issues/9).
+- **Is `OBS_TAKE_SEPARATION_SECONDS` right at sane settings?** It is 2.0 s (> 1.065 s, tested in
+  `native/src/obs/client.rs`); the HLAE-side `MIN_TAKE_SEPARATION_SECONDS` is measured at 0.5 s
+  ([#9](https://github.com/ccoventry/dod-studio/issues/9)), and the OBS re-test at a sustainable
+  frame rate is still open there.
 - **Measure wall-clock and disk against a real batch** (staging item 7). *(No issue.)*

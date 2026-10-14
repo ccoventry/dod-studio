@@ -149,6 +149,7 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
                 "suicides": player.suicides,
                 "obj_points": player.obj_points,
                 "cap_credits": player.cap_credits,
+                "cap_breaks": player.cap_breaks,
             })
         })
         .collect::<Vec<_>>();
@@ -164,7 +165,9 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
                 "team": team_name(&capture.team),
                 "cappers": capture.cappers().map(|id| id.to_string()).collect::<Vec<_>>(),
                 "previous_owner": capture.previous_owner.as_ref().map(team_name),
-                "break": capture.is_break(),
+                // Not a break: the league's breaks are stopped captures,
+                // `cap_breaks` above (#192).
+                "taken_from_enemy": capture.taken_from_enemy(),
             })
         })
         .collect::<Vec<_>>();
@@ -191,6 +194,9 @@ fn stats_json(file: &FileInfo, analysis: &Analysis) -> Value {
             "allies": state.objectives.blocked_attempts(&Team::Axis),
             "axis": state.objectives.blocked_attempts(&Team::Allies),
         },
+        // Blocks no player is credited with as a break (#192).
+        "blocks_unattributed": state.objectives.blocks_unattributed,
+        "attempts_abandoned": state.objectives.attempts_abandoned,
         "players": players,
         "captures": captures,
     })

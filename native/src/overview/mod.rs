@@ -50,8 +50,11 @@ pub fn scene_for_until(
 ) -> Result<scene::Scene, String> {
     let bsp = files::bsp_path(install, map);
     let level = level::Level::from_file(&bsp)?;
-    let strings =
-        scene::read_strings(&install.join("dod").join("resource").join("dod_english.txt"));
+    let strings = scene::read_strings(
+        &crate::shared::paths::mod_dir(install)
+            .join("resource")
+            .join("dod_english.txt"),
+    );
     let mut scene = scene::build_until(&level, &strings, progress)?;
     scene.checksum = crate::patch::bsp::map_checksum_of_file(&bsp).unwrap_or(0);
     scene.credit = credit::map_credit(install, map, &level.entities);

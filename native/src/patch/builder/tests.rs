@@ -70,7 +70,8 @@ fn test_build_batch_queue_merging() {
             status: Default::default(),
         },
         CaptureStreak {
-            start_tick: 1300,
+            // 0.4s after the first ends: inside the 0.5s take separation.
+            start_tick: 1240,
             end_tick: 1500,
             source_demo: "demo1.dem".to_string(),
             target_player: None,
@@ -138,7 +139,7 @@ fn test_build_batch_queue_merging() {
     );
     assert_eq!(job.streaks.len(), 2);
     assert_eq!(job.streaks[0].start_tick, 1000);
-    assert_eq!(job.streaks[0].end_tick, 1500); // Merged 1000-1200 and 1300-1500
+    assert_eq!(job.streaks[0].end_tick, 1500); // Merged 1000-1200 and 1240-1500
     assert_eq!(job.streaks[1].start_tick, 2000);
     assert_eq!(job.streaks[1].end_tick, 2200);
 
@@ -172,14 +173,90 @@ fn test_build_batch_queue_merging() {
 }
 
 #[test]
-fn fast_forward_uses_ff_speed_and_falls_back_when_it_is_not_positive() {
-    let mut config = PatcherConfig::default();
-    config.fast_forward_speed = 0.1;
-    assert_eq!(fast_forward_host_framerate(&config), 0.1);
-    for bad in [0.0, -1.0, f32::NAN] {
-        config.fast_forward_speed = bad;
-        assert_eq!(fast_forward_host_framerate(&config), 0.05, "{bad}");
+fn the_primer_is_played_only_without_the_hook_dll() {
+    assert!(plays_primer(false));
+    assert!(!plays_primer(true));
+}
+
+/// Two demos, one clip each, with `init_commands` set; `hook_dll` points the
+/// config at a stand-in DLL file, which is all `goldsrc_hooks_dll()` checks.
+fn primer_case(hook_dll: bool) -> (PatcherConfig, Vec<PatchJob>, String) {
+    let mut config = mock_config();
+    let root = config.primary_media_dir.clone().unwrap();
+    let dll = root.join("dodstudio_goldsrc_hooks.dll");
+    if hook_dll {
+        std::fs::write(&dll, b"x").unwrap();
+        config.goldsrc_hooks_dll_path = Some(dll.to_string_lossy().to_string());
     }
+    config.init_commands = vec!["brightness 2".to_string()];
+    let mut second_demo = streak_with_kills(1000, 1200, &[1000, 1200]);
+    second_demo.source_demo = "demo2.dem".to_string();
+    let raw_streaks = vec![streak_with_kills(1000, 1200, &[1000, 1200]), second_demo];
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let cfg = std::fs::read_to_string(root.join("dod").join("dodstudio_helper.cfg")).unwrap();
+    (config, jobs, cfg)
+}
+
+/// With the hook DLL the game starts on dodstudio_chain_01 directly (#365),
+/// which carries the init commands and `sys_autodir` the primer used to.
+#[test]
+fn with_the_hook_dll_the_batch_has_no_primer_and_chain_01_comes_first() {
+    let (config, jobs, cfg) = primer_case(true);
+    assert!(config.goldsrc_hooks_dll().is_some());
+    assert_eq!(jobs.len(), 2, "one job per demo, no primer");
+    assert!(jobs.iter().all(|j| !j.blocks.is_empty()));
+    assert!(
+        jobs[0].output_demo.ends_with("dodstudio_chain_01.dem"),
+        "{:?}",
+        jobs[0].output_demo
+    );
+    assert!(jobs[1].output_demo.ends_with("dodstudio_chain_02.dem"));
+    for wanted in ["brightness 2", "sys_autodir"] {
+        assert!(
+            jobs[0].init_commands.iter().any(|c| c == wanted),
+            "{wanted} missing from {:?}",
+            jobs[0].init_commands
+        );
+    }
+    assert!(
+        jobs[0]
+            .scheduled_commands
+            .iter()
+            .any(|(_, c)| c.contains("DEMO_START 1 2 1"))
+    );
+    assert!(!cfg.contains("primer"), "{cfg}");
+    assert!(
+        cfg.contains("alias dodstudio_chain_01_next \"playdemo dodstudio_chain_02\""),
+        "{cfg}"
+    );
+}
+
+/// Without the hook DLL the batch is as before: the primer first, chaining to
+/// dodstudio_chain_01 after `PRIMER_DELAY_TICKS`.
+#[test]
+fn without_the_hook_dll_the_primer_comes_first() {
+    let (config, jobs, cfg) = primer_case(false);
+    assert!(config.goldsrc_hooks_dll().is_none());
+    assert_eq!(jobs.len(), 3, "primer + one job per demo");
+    assert!(jobs[0].output_demo.ends_with("dodstudio_primer.dem"));
+    assert!(jobs[0].blocks.is_empty());
+    assert_eq!(
+        jobs[0].init_commands,
+        ["brightness 2".to_string(), "sys_autodir".to_string()]
+    );
+    assert_eq!(
+        jobs[0].scheduled_commands,
+        [(
+            crate::patch::PRIMER_DELAY_TICKS,
+            "dodstudio_primer_next".to_string()
+        )]
+    );
+    assert!(jobs[1].output_demo.ends_with("dodstudio_chain_01.dem"));
+    assert!(
+        cfg.contains("alias dodstudio_primer_next \"playdemo dodstudio_chain_01\""),
+        "{cfg}"
+    );
 }
 
 #[test]
@@ -218,8 +295,79 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
     let cfg = std::fs::read_to_string(game.join("dod").join("dodstudio_helper.cfg"))
         .expect("helper cfg written");
     let _ = std::fs::remove_dir_all(&game);
+    // Uncapped and undrawn between clips (#724); the exact bodies are
+    // `speed.rs`'s own tests' business, this pins that the cfg carries them.
     assert!(
-        cfg.contains("alias sys_fast_forward \"host_framerate 0.1\""),
+        cfg.contains(
+            "alias sys_fast_forward \"host_framerate 0.1; fps_override 1; fps_max 1000; gl_vsync 0; r_norefresh 1\""
+        ),
+        "{cfg}"
+    );
+    assert!(
+        cfg.contains(
+            "alias sys_normal_speed \"sys_autodir; clear; r_norefresh 0; host_framerate 0; "
+        ),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn the_helper_cfgs_normal_speed_puts_back_the_configs_and_initial_commands_values() {
+    // The game's own config.cfg sets fps_max and gl_vsync (both archived, so
+    // every real one does); Initial Commands set fps_override on top. The
+    // pre-roll has to put exactly those back, not the engine defaults.
+    let mut config = mock_config_with_game_cfg("ff_restore", "fps_max \"250\"\ngl_vsync \"0\"\n");
+    config.init_commands = vec!["fps_override 1".to_string()];
+
+    build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let cfg = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .expect("helper cfg written");
+    assert!(
+        cfg.contains(
+            "alias sys_normal_speed \"sys_autodir; clear; r_norefresh 0; host_framerate 0; fps_override 1; fps_max 250; gl_vsync 0\""
+        ),
+        "{cfg}"
+    );
+}
+
+#[test]
+fn in_obs_mode_normal_speed_puts_back_the_pinned_fps() {
+    // OBS mode pins fps_override/fps_max in the init commands
+    // (`final_init_commands`); the fast-forward lifts them and every clip has
+    // to get the pin back, or OBS records at whatever the fast-forward left.
+    let mut config = mock_config_with_game_cfg("ff_restore_obs", "fps_max \"250\"\n");
+    config.capture_mode = crate::patch::CaptureMode::Obs;
+    config.obs_capture_fps = 120;
+
+    build_batch_queue(
+        vec![streak_with_kills(1000, 1200, &[1000, 1200])],
+        &config,
+        &std::collections::HashMap::new(),
+    )
+    .unwrap();
+
+    let cfg = std::fs::read_to_string(
+        std::path::Path::new(&config.game_path)
+            .parent()
+            .unwrap()
+            .join("dod")
+            .join("dodstudio_helper.cfg"),
+    )
+    .expect("helper cfg written");
+    assert!(
+        cfg.contains("; fps_override 1; fps_max 120; gl_vsync 1\""),
         "{cfg}"
     );
 }
@@ -893,7 +1041,7 @@ fn test_merged_block_records_through_the_absorbed_highlights_last_kill() {
     let config = mock_config();
     let raw_streaks = vec![
         streak_with_kills(1000, 1200, &[1000, 1200]),
-        streak_with_kills(1300, 1500, &[1300, 1500]),
+        streak_with_kills(1240, 1500, &[1240, 1500]),
     ];
 
     let (jobs, _) =
@@ -1398,7 +1546,7 @@ fn test_anything_below_the_maximum_still_pins() {
 
 #[test]
 fn test_colliding_rolls_keep_separate_takes_without_fast_forwarding_between() {
-    // Recordings are 2s apart (200 ticks @ 100fps): clear of the 1s
+    // Recordings are 2s apart (200 ticks @ 100fps): clear of the 0.5s
     // separation guard so they stay two takes, but inside the 2.6s the
     // pre-roll and post-roll need, so the fast-forward round trip between
     // them can't fit and is dropped instead of collapsing the two
@@ -1453,13 +1601,13 @@ fn test_colliding_rolls_keep_separate_takes_without_fast_forwarding_between() {
 
 #[test]
 fn test_takes_too_close_together_are_merged_rather_than_restarted() {
-    // Only 0.5s (50 ticks @ 100fps) between one recording stopping and the
-    // next starting — under MIN_TAKE_SEPARATION_SECONDS, so they merge
-    // instead of risking a stop/start cycle that tight.
+    // Only 0.4s (40 ticks @ 100fps) between one recording stopping and the
+    // next starting — under MIN_TAKE_SEPARATION_SECONDS (0.5s), so they merge
+    // instead of a restart HLAE would start late, losing frames (#9).
     let config = mock_config();
     let raw_streaks = vec![
         streak_with_kills(1000, 1200, &[1000, 1200]),
-        streak_with_kills(1250, 1400, &[1250, 1400]),
+        streak_with_kills(1240, 1400, &[1240, 1400]),
     ];
 
     let (jobs, _) =
@@ -1470,6 +1618,27 @@ fn test_takes_too_close_together_are_merged_rather_than_restarted() {
     assert_eq!(job.blocks[0].source_streak_indices, vec![0, 1]);
     assert_eq!(ticks_for(job, "sys_record_start").len(), 1);
     assert_eq!(ticks_for(job, "sys_record_stop").len(), 1);
+}
+
+#[test]
+fn test_takes_just_past_the_separation_stay_separate() {
+    // 0.6s (60 ticks @ 100fps) between takes: past the 0.5s guard, so two
+    // takes. HLAE lost nothing restarting 0.5s after a stop (#9).
+    let config = mock_config();
+    let raw_streaks = vec![
+        streak_with_kills(1000, 1200, &[1000, 1200]),
+        streak_with_kills(1260, 1400, &[1260, 1400]),
+    ];
+
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = &jobs[1];
+
+    assert_eq!(job.streaks.len(), 2, "far enough apart for two takes");
+    assert_eq!(job.blocks[0].source_streak_indices, vec![0]);
+    assert_eq!(job.blocks[1].source_streak_indices, vec![1]);
+    assert_eq!(ticks_for(job, "sys_record_start").len(), 2);
+    assert_eq!(ticks_for(job, "sys_record_stop").len(), 2);
 }
 
 #[test]

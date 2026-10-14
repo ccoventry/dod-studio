@@ -224,6 +224,14 @@ pub fn is_renderable_take(take_folder: &Path) -> bool {
     false
 }
 
+/// Whether this exact folder is what the scan hands out as a clip's
+/// `take_folder`: it holds the streams itself, not through a nested `take*`.
+/// Delete Take (#644) asks this, so it can never act on a block or session
+/// folder that merely contains a take.
+pub fn is_take_folder(folder: &Path) -> bool {
+    take_shape_is_renderable(folder)
+}
+
 /// The two admissible shapes, checked against one specific folder.
 ///
 /// 1. **Audio beside a stream folder.** How HLAE writes a take, whether that

@@ -2376,9 +2376,7 @@ fn resolve_preview_env(
         return Err(crate::messages::HL_NOT_FOUND_AT_CONFIGURED_PATH.to_string());
     }
 
-    let dod_dir = hl_p
-        .parent()
-        .map(|p| p.join("dod"))
+    let dod_dir = native::shared::paths::mod_dir_for_exe(hl_p)
         .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string())?;
     std::fs::create_dir_all(&dod_dir).map_err(crate::messages::failed_to_create_dod_directory)?;
 
@@ -2484,11 +2482,29 @@ pub async fn launch_demo_preview(
             .and_then(|s| s.to_str())
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_PREVIEW_FILE_STEM.to_string())?;
 
-        let mut cmd = patcher_config.build_hlae_process(&format!("+viewdemo {}", preview_stem));
+        // With the hook DLL, the demo goes over its pipe once the game is up:
+        // on the launch line its map loads before config.cfg/movie.cfg set
+        // brightness and gamma, so the world is built darker than the models
+        // are lit (#662, the same as #705 for batches). Without the DLL there
+        // is no pipe, so the launch line keeps it.
+        let line = format!("viewdemo {preview_stem}");
+        let over_pipe = patcher_config.goldsrc_hooks_dll().is_some();
+        let before = running_game_pids();
+        let extra = if over_pipe {
+            String::new()
+        } else {
+            format!("+{line}")
+        };
+        let mut cmd = patcher_config.build_hlae_process(&extra);
         let launcher = cmd
             .spawn()
             .map_err(crate::messages::failed_to_launch_hlae_for_preview)?;
         watch_for_error_dialogs(app, launcher);
+        if over_pipe {
+            std::thread::spawn(move || {
+                crate::preview_in_place::send_when_ready(&before, &[line]);
+            });
+        }
 
         Ok(())
     }))
@@ -2985,27 +3001,26 @@ pub struct PreviewFileSummary {
     pub modified_unix_secs: f64,
 }
 
-/// Resolves the `dod` directory to sweep, accepting either an `hl.exe` path
-/// or the `dod` directory itself (mirrors `resolve_preview_env`'s
-/// hl.exe-relative resolution, but tolerates being pointed at the folder
-/// directly since the frontend may pass either).
+/// Resolves the game folder to sweep (`dod` unless the Game folder setting
+/// says otherwise, #402), accepting either an `hl.exe` path or that folder
+/// itself (mirrors `resolve_preview_env`'s hl.exe-relative resolution, but
+/// tolerates being pointed at the folder directly since the frontend may pass
+/// either).
 fn resolve_dod_dir_for_sweep(game_dir: &str) -> Result<PathBuf, String> {
     let p = Path::new(game_dir);
     if p.is_file() {
-        return p
-            .parent()
-            .map(|parent| parent.join("dod"))
+        return native::shared::paths::mod_dir_for_exe(p)
             .ok_or_else(|| crate::messages::COULD_NOT_RESOLVE_DOD_DIRECTORY.to_string());
     }
     if p.is_dir() {
+        let game_folder = native::shared::paths::game_folder();
         let is_dod_dir = p
             .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase() == "dod")
-            .unwrap_or(false);
+            .is_some_and(|n| n.to_string_lossy().eq_ignore_ascii_case(&game_folder));
         if is_dod_dir {
             return Ok(p.to_path_buf());
         }
-        return Ok(p.join("dod"));
+        return Ok(native::shared::paths::mod_dir(p));
     }
     Err(crate::messages::game_directory_not_found(game_dir))
 }

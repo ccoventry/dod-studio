@@ -83,7 +83,7 @@ Buttons:
 
 If a game the hook DLL is in is already open, Launch Preview sends it `viewdemo <stem>_preview` over a local pipe (section 5.1) instead of relaunching. Otherwise, if `hl.exe` or HLAE is already running, a dialog offers Force Relaunch, Copy View Command, or Cancel. Before either, a game started with another install or resolution than Studio has now gets its own question, naming what differs: close it and start again, or Cancel to do nothing. Launch Game, Start Capture Batch and Review highlights ask the same (#666). The hook DLL's path isn't compared: HLAE passes it on its own command line and exits after injecting.
 
-A **capture summary** strip above Start Capture Batch says in one line how the batch is about to run (mode, codec, size and FPS, Scheduled Commands, decal flush, Destinations); each part links to its setting.
+A **capture summary** strip above Start Capture Batch says in one line how the batch is about to run (mode, codec, size and FPS, the command profile in use and whether it was edited since, Scheduled Commands, decal flush, what the finish step will save the clips as, Destinations); each part links to its setting.
 
 **Start Capture Batch** sits in the pinned footer. It is disabled while any of these is true: a banned or too-long command is present, no highlight is selected, no Destination is set, the hl.exe or HLAE path is not set, or the required disk space exceeds what is free. The footer shows free and required space and a progress bar. Before the game starts, the app checks that Steam is running and signed in, and offers to start it. If the game or HLAE shows an error box, the app reads it and says what it means. When the batch ends (or is cancelled), the app checks every planned take folder on disk, flips covered highlights to Captured, and writes `dodstudio_take.json` with the capture FPS into each take.
 
@@ -97,7 +97,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 
 | Tab | What is on it |
 |---|---|
-| **Paths** | Half-Life executable, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Each shows "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning, and the row reports whether this `hl.exe` gets 2 GB or 4 GB of memory. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
+| **Paths** | Half-Life executable, **Game Folder**, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Game Folder is the folder beside `hl.exe` that launches name with `-game` (`dod` unless changed, #402): a list of the folders there holding a `liblist.gam`, or a text box when none can be listed; a name with a path separator, `..` or a space is refused. It is for an install that keeps several DoD versions side by side (`dod_movies`, `dod_1_2`, ...); Studio reads configs, maps and demos and writes its helper files there, and the `_addon`/`_downloads` folders it uses are that folder's (`dod_movies_addon`). The path rows each show "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning, and the row reports whether this `hl.exe` gets 2 GB or 4 GB of memory. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
 | **Output Format** | Width and height (1280×720), Capture FPS (300), **Capture Mode** (Frame sequence, Video, OBS). Video mode adds a capture codec (Ut Video default, FFV1, x264 lossless, uncompressed). OBS mode adds host, port, password, OBS path, Launch OBS, **Test Connection**, and OBS Capture FPS (120). Test Connection is not read-only: it creates or repairs a `[DoD-Studio]` profile and scene in OBS and switches to them. |
 | **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked; its value is the `host_framerate` used for fast-forward. Every timing field can be 0. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
 | **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
@@ -119,13 +119,13 @@ One folder picker, then a tab per tool:
 
 - **Explorer sidebar:** Pinned, Recent and Local quick links, a drive/folder tree, optional per-folder demo counts, a resizable width.
 - **Demos table:** the selected folder's demos (not recursive), filterable by text, type, map and date, sortable. The type column reads the demo's first 4 KB: an HLTV proxy's connect message ends "(HLTV)" (#566); only a file too short to say falls back to "hltv" in the name.
-- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Those go first, then the rest largest first, with a time left measured in bytes (#687). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs.
+- **Cache all:** analyses every demo of the folder into the analyzer cache in the background, two at a time, skipping the ones already there (#569). Those go first, then the rest largest first, with a time left measured in bytes (#687). Opening one afterwards takes ~15 ms, and the in-game Highlights tab and the player filters read the same cache. The button turns into Stop while it runs, with a bar of the count. After a cache-format change it first upgrades the analyses an older version cached ("Upgrading cached analyses: 812 of 1,486", milliseconds each) and parses only the ones it can't upgrade.
 - **A demo that recorded more than one map** (#217): the report covers only the first map, up to the next map change, as the game's `viewdemo` stops there too (cache 7; before, a first map with no gameplay was skipped). A notice above the tabs lists the maps (from the analysis's `signon_maps`) and offers **Split now**: the same split as the Demo Auditor's Split Maps, on this demo, keeping every map of a minute or more. The demos written appear next to the original, which is kept, and the first one opens.
 - **Report**, nine sub-tabs:
   - **Summary:** file, map, server, who recorded it, demo type, match type (public, clan pre-game, clan incomplete, clan full), durations.
   - **Scoreboard:** by team, with POV, reconnected and pre-existing-stats badges and a partial-recording warning.
   - **Player Details:** Steam links (SteamID64, classic and SteamID3, each copyable), score, kills, deaths, lifespans, weapon breakdown, kill streaks with weapon filters.
-  - **Team Details**, **Timeline** (team score chart), **Rounds**, **Flags** (per team: captures, how many were breaks, and the capture attempts it blocked; per flag: who holds it at the end and how often it changed hands; every capture with its cappers; each player's capture credits and objective points), **Chat Log** (with team, alive/dead and system-message filters).
+  - **Team Details**, **Timeline** (team score chart), **Rounds**, **Flags** (per team: captures, how many were taken from the other team, and the capture attempts it blocked; per flag: who holds it at the end and how often it changed hands; every capture with its cappers; each player's capture credits, cap breaks (enemy captures they stopped by killing a capper) and objective points), **Chat Log** (with team, alive/dead and system-message filters).
   - **Kill Map** (#448): every death placed on the map's overview picture (from the game's `dod\overviews` folder), with the players, weapon and distance on hover, and an engagement-distance table per weapon.
 
 There is no export from the page. The CLI can export Markdown or JSON (section 8).
@@ -164,7 +164,7 @@ There is no fourth mode and no Separate HUD setting. The alpha launch flags are 
 
 ### 3.2 Planning
 
-For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 1.0 s for HLAE (a guess; issue #9) and 2.0 s for OBS (measured). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
+For each demo and recording player, highlights are sorted and grouped into **blocks**. Two highlights share one recording when their windows overlap once the start lead, stop trail and a **take separation** are added. The separation is 0.5 s for HLAE and 2.0 s for OBS, both measured: HLAE takes about 0.28 s to finalise a take and loses frames from a restart sooner than that (#9). Highlights that do not share a recording but whose speed-change windows collide stay separate takes but skip the fast-forward between them.
 
 Each block gets a disk estimate, and blocks are packed onto the Destinations with first-fit-decreasing. A drive must keep 15 GiB free.
 
@@ -172,7 +172,7 @@ Each block gets a disk estimate, and blocks are packed onto the Destinations wit
 
 Nothing in your original demo changes. The app writes:
 
-- `dod/dodstudio_primer.dem`: a copy of the first demo that plays for 500 frames and then chains to the first real job. It exists because the first demo of a game session renders too dark (issue #365, still open; PR #397 fixes the cause on PRE).
+- `dod/dodstudio_primer.dem`, only when the batch launches without the hook DLL: a copy of the first demo that plays for 500 frames and then chains to the first real job. It exists because the first demo of a game session renders too dark. With the hook DLL there is no primer (#365): its `lightmap_gamma` fixes the lighting on PRE (#397; the 25th Anniversary build never had the bug), and the first demo is sent over its pipe after `config.cfg`/`movie.cfg` have run (#705).
 - `dod/dodstudio_chain_NN.dem`: one patched copy per demo and player. Each carries:
   - your Initial Commands plus the app's own (`mirv_movie_fps`, OBS frame pacing, and `r_decals` when the decal flush needs it and you did not set it);
   - per block: return to normal speed, sync audio, point `mirv_movie_filename` at the block's folder, start recording, stop recording, fast-forward again;
@@ -193,10 +193,10 @@ Every launch (batch, preview, Launch Game) uses one command line:
       -hookDllPath <HLAE>\AfxHookGoldSrc.dll
       [-hookDllPath dodstudio_goldsrc_hooks.dll]
       -programPath <hl.exe>
-      -cmdLine "-game dod -insecure -addons -windowed -w W -h H -gl -32bpp
-                -afxRenderMode standard -afxForceAlpha8 1 -condebug <extra>"
+      -cmdLine "-game <folder> -insecure -addons -demoedit -windowed -w W -h H
+                -afxForceAlpha8 1 -condebug <extra>"
 
-A batch adds `+exec dodstudio_helper.cfg +playdemo dodstudio_primer`. The hook DLL is added only if the file exists (section 5.1). `-addons` (PR #412) is on every launch, right after `-game dod`; `-demoedit` (PR #401) is not on `dev` yet.
+A batch adds `+exec dodstudio_helper.cfg`. With the hook DLL, `playdemo dodstudio_chain_01` follows over its pipe once the game is up (5 s after the pipe answers); without it, `+playdemo dodstudio_primer` goes on the launch line (#365). The hook DLL is added only if the file exists (section 5.1). `<folder>` is the **Game Folder** setting (Configuration → Paths), `dod` unless changed (#402). `-addons` (PR #412) is on every launch, right after `-game`, and so is `-demoedit` (PR #401). `-afxForceAlpha8 1` is the only HLAE alpha flag: a bisect showed `-gl`, `-32bpp` and `-afxRenderMode standard` change nothing in a separate-HUD capture (#69).
 
 While the game runs, the app reads its markers and turns them into status lines and notifications. They come from the game's events pipe (section 5.1) once it connects, and from `qconsole.log` until then, or throughout for a game without the hook DLL. The batch ends when:
 
@@ -215,9 +215,9 @@ Every command must also fit a demo's 64-byte command field, which holds 63 chara
 
 | Tier | Commands | What happens |
 |---|---|---|
-| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
+| Banned everywhere | `mirv_recordmovie_start`, `mirv_recordmovie_stop`, `mirv_movie_ffmpeg`, `host_framerate`, `r_norefresh`, `r_drawentities`, `cl_lw` | Refused; Start is disabled |
 | Banned when scheduled | `r_decals`, `mirv_fov`, `gl_widescreenfov`, `mirv_movie_filename` | Fine in Initial Commands, refused in Scheduled |
-| Mid-demo hazards | the pipeline-owned commands, as a warning | Shadowed with a warning, not refused |
+| Mid-demo hazards | the pipeline-owned commands, as a warning; `fps_override`, `fps_max`, `gl_vsync` when scheduled (the fast-forward sets them and every clip's pre-roll puts the Initial Commands value back) | Shadowed with a warning, not refused |
 | No effect | `exec`, `quit` everywhere; `mirv_movie_filename` in Initial | Reported as doing nothing |
 | Fatal config values | `cl_lw` not 1; `r_drawentities` not 1 while `sv_cheats` is on | Reported from your game configs; DoD's client quits over these |
 
@@ -242,11 +242,12 @@ Frame-sequence and video takes with HUD streams become two rows: the full pictur
 | Custom | your arguments, unvalidated | `.mkv` | PCM |
 | Skip (OBS takes only) | no FFmpeg; the file is copied | source | — |
 
-Each row shows its own codec and FPS snapshot, status, speed, progress and size, with Cancel, Reset, Remove, View Log and Open Folder actions. A header click sorts the table, and a whole-batch progress bar sits above it. The footer has Start Render Batch, Cancel All, Reset All and Remove All (Not Rendering). **Export Marker List…** (next to Scan for Takes) saves a CSV with one row per captured or rendered highlight: its demo, player, kills, place in the demo, take and label, for lining clips up in an editor.
+Each row shows its own codec and FPS snapshot, status, speed, progress and size, with Cancel, Reset, Remove, View Log, Open Folder and Delete Take actions. A header click sorts the table, and a whole-batch progress bar sits above it. A scan stages a take whose stream was rendered before (a finished render in its history, #438, with the file still there) as Finished rather than Queued, so Start Render Batch (N) renders every Queued row and nothing twice; Retry queues a finished one again, and Cancel or Remove keeps a row out. Every row has a tick box (#70), ticked to begin with; the header tick box or Select unrendered sets them together, and the ticks survive a re-scan that adds takes. The other footer buttons act on the ticked rows and say on how many: Cancel (N), Retry (N), Remove (N) and Delete Take folders (N), plus Clear Queue, which empties the whole list and asks first when anything is rendering. **Export Marker List…** (next to Scan for Takes) saves a CSV with one row per captured or rendered highlight: its demo, player, kills, place in the demo, take and label, for lining clips up in an editor.
 
 - **Scheduling:** up to the max-concurrent limit; each job reserves space on the first export drive with room, and the reservation learns each codec's real size per frame once there is a render to learn from.
 - **Crash recovery:** a lockfile (`.render_autosave.json`) is written at queue time and after each finished job. On the next start, a dialog offers to recover the batch. Recovered rows are stubs until rescanned. Per-job codec choices are lost on recovery until PR #395 lands.
 - **FFmpeg:** the override path, else `local/tools/ffmpeg.exe` beside the app, else `ffmpeg` on PATH.
+- **Delete Take (#644):** sends a take's folder to the Recycle Bin after a confirm naming the folder and its size, and takes its rows out of the list. It is off while the take (either half of a HUD pair) is rendering, with the tooltip saying which row is busy; deleting a queued take pulls its render from the queue, and the confirm says so. The backend only deletes a folder the scanner recognises as a take, inside a Destinations folder, and leaves `dodstudio_take.json` (the render history) in place. There is no automatic mode yet.
 - **Finishing clips after a batch (#440):** with **When a batch finishes** set to *Finish clips automatically* (off by default), a capture batch that completes queues and starts its own verified takes here, through the same Scan/Start path, and the Capture footer shows "Finishing clips: 3 of 12". OBS clips default to Skip (a copy); Video and Frame sequence clips default to the Codec above, and a frame sequence is encoded at the batch's own capture FPS. A cancelled batch is not finished, nothing is finished without an export drive, and a busy Render tab (running, or staged but not started) is waited for rather than replaced.
 
 ---
@@ -362,12 +363,12 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Settings | `%APPDATA%\dod-studio\settings.json`. The OBS password is stored in plain text. |
 | Activity log | `%APPDATA%\dod-studio\logs\activity_YYYYMMDD.md`, 30 days kept |
 | Hook DLL log | `%APPDATA%\dod-studio\logs\dodstudio_goldsrc_hooks_YYYYMMDD.log`, 30 days kept |
-| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v6\` (the number is the cache schema version; older version folders are deleted once a week old; entries within a version are never evicted) |
+| Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v6\` (the number is the cache schema version; an entry an older version left is upgraded into the current folder when it can be, `analysis::cache::migrations`; older version folders that can't be upgraded from are deleted once a week old; entries within a version are never evicted) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
 | Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Project files | wherever you save them |
-| Patched demos, helper cfg | `<game>\dod\` (`dodstudio_primer.dem`, `dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`) |
+| Patched demos, helper cfg | `<game>\dod\` (`dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`, and `dodstudio_primer.dem` without the hook DLL) |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |
@@ -390,7 +391,7 @@ In the DLL, each module finds its code by a byte pattern and refuses loudly if t
 |---|---|
 | Both builds | everything in `client.dll`: kill feed, crosshair, spectator crosshair, scoreboard, voice mute, HUD elements, hand signals, HLTV text, objectives, overview map, map sprites, message log, viewmodel animations, gunshots, temp-entity fix |
 | Both builds | also the ESC fix that keeps GameUI windows open (#396) and the hull-trace guard (#393) |
-| PRE only | decal clear, HD textures, first-load lighting fix (#397) |
+| PRE only | decal clear, HD textures, first-load lighting fix (#397; the Anniversary engine rebuilds its lightmaps on a gamma change itself, so it has no first-load bug to fix, #370) |
 | Anniversary only | world shaders (`dodstudio_allow_shaders`); the PRE engine has no shader path |
 | Unstated | `ex_interp` ceiling (would refuse loudly on a mismatch) |
 
