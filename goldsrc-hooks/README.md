@@ -7,6 +7,11 @@ reverse-engineering. For every `dodstudio_*` cvar/command in one scannable
 table, see [`docs/dodstudio_commands.md`](../docs/dodstudio_commands.md)
 instead of the list below.
 
+Folder names below (`dod`, `dod_addon`, `dod_downloads`) are the defaults.
+The DLL reads the game folder from the game's own `-game <folder>` (Studio's
+Game Folder setting, #402; `src/game_folder.rs`), so under `-game dod_movies`
+they are `dod_movies`, `dod_movies_addon` and `dod_movies_downloads`.
+
 **Match POV** (`dodstudio_spec_match_pov 1`, off by default;
 `GOLDSRC_HOOKS_SPEC_MATCH_POV=1` starts a session with it on): one switch for
 making a spectated first-person view look and sound like the player's own

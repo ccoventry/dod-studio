@@ -174,15 +174,16 @@ test.describe('scan stages a batch, Start is a separate step', () => {
     await expect(page.locator('#scan-render-btn')).toBeDisabled();
   });
 
-  test('clicking Start Render Batch calls start_queued_render with no payload of its own', async ({ page }) => {
+  test('clicking Start Render Batch calls start_queued_render for every Queued row, ticked or not (#70)', async ({ page }) => {
     await gotoHarness(page);
-    await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' }), job({ id: '1', status: 'Queued', take_folder: 'C:\\y' })]);
+    await page.locator('tr[data-job-id="1"] .render-job-select-cb').uncheck();
     await expect(page.locator('#start-render-btn')).toBeEnabled();
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
 
     await page.locator('#start-render-btn').click();
 
-    const calls = await invocationsFor(page, 'start_queued_render');
-    expect(calls).toEqual([undefined]);
+    expect(await invocationsFor(page, 'start_queued_render')).toHaveLength(1);
   });
 
   test('once rendering starts, Scan and Start are both disabled again', async ({ page }) => {
@@ -343,43 +344,170 @@ test.describe('Remove row / Reset All / Remove All', () => {
     expect(calls).toEqual([{ jobId: '0' }]);
   });
 
-  test('Reset All and Remove All start disabled, enable once an eligible row exists', async ({ page }) => {
+  test('Retry and Remove start disabled, enable once a ticked eligible row exists', async ({ page }) => {
     await gotoHarness(page);
-    await expect(page.locator('#reset-all-render-btn')).toBeDisabled();
-    await expect(page.locator('#remove-all-render-btn')).toBeDisabled();
+    await expect(page.locator('#retry-render-btn')).toBeDisabled();
+    await expect(page.locator('#remove-render-btn')).toBeDisabled();
 
     await emitSnapshot(page, [job({ id: '0', status: 'Queued' })]);
-    // Nothing resettable yet (Queued isn't Cancelled/Finished/Error) but it
-    // isn't Rendering either, so Remove All should already be live.
-    await expect(page.locator('#reset-all-render-btn')).toBeDisabled();
-    await expect(page.locator('#remove-all-render-btn')).toBeEnabled();
+    // Nothing to retry yet (Queued isn't Cancelled/Finished/Error) but it
+    // isn't Rendering either, so Remove should already be live.
+    await expect(page.locator('#retry-render-btn')).toBeDisabled();
+    await expect(page.locator('#remove-render-btn')).toBeEnabled();
 
     await emitSnapshot(page, [job({ id: '0', status: 'Cancelled' })]);
-    await expect(page.locator('#reset-all-render-btn')).toBeEnabled();
-    await expect(page.locator('#remove-all-render-btn')).toBeEnabled();
+    await expect(page.locator('#retry-render-btn')).toBeEnabled();
+    await expect(page.locator('#remove-render-btn')).toBeEnabled();
   });
 
-  test('Reset All and Remove All disable again once everything is Rendering', async ({ page }) => {
+  test('Retry and Remove disable again once everything is Rendering', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [job({ id: '0', status: 'Rendering' }), job({ id: '1', status: 'Rendering' })]);
-    await expect(page.locator('#reset-all-render-btn')).toBeDisabled();
-    await expect(page.locator('#remove-all-render-btn')).toBeDisabled();
+    await expect(page.locator('#retry-render-btn')).toBeDisabled();
+    await expect(page.locator('#remove-render-btn')).toBeDisabled();
   });
 
-  test('clicking Reset All calls reset_all_render_jobs with no payload', async ({ page }) => {
+  test('clicking Retry calls reset_render_jobs with the ticked ids', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [job({ id: '0', status: 'Error' })]);
-    await page.locator('#reset-all-render-btn').click();
-    const calls = await invocationsFor(page, 'reset_all_render_jobs');
-    expect(calls).toEqual([undefined]);
+    await page.locator('#retry-render-btn').click();
+    const calls = await invocationsFor(page, 'reset_render_jobs');
+    expect(calls).toEqual([{ jobIds: ['0'] }]);
   });
 
-  test('clicking Remove All calls remove_non_rendering_render_jobs with no payload', async ({ page }) => {
+  test('clicking Remove calls remove_render_jobs with the ticked ids', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [job({ id: '0', status: 'Finished' })]);
-    await page.locator('#remove-all-render-btn').click();
-    const calls = await invocationsFor(page, 'remove_non_rendering_render_jobs');
-    expect(calls).toEqual([undefined]);
+    await page.locator('#remove-render-btn').click();
+    const calls = await invocationsFor(page, 'remove_render_jobs');
+    expect(calls).toEqual([{ jobIds: ['0'] }]);
+  });
+});
+
+test.describe('issue #70 — ticked rows and Clear Queue', () => {
+  const rendered = [{ started_unix_ms: 1700000000000, stream: 'all', codec: 'prores', custom_codec_args: '', fps: 300, outcome: 'finished', output_path: 'E:/out/a.mov', output_size_bytes: 1024, error: null, output_exists: true }];
+
+  test('every row starts ticked and the count is exact', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0' }),
+      job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered, status: 'Finished' }),
+      job({ id: '2', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000' }),
+    ]);
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="2"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('#render-selection-count')).toHaveText('3 of 3 selected');
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
+  });
+
+  test('the header tick selects all or none, Select unrendered the new takes', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0' }),
+      job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
+    ]);
+    await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
+    await expect(page.locator('#render-select-all-cb')).toBeChecked();
+
+    await page.locator('#render-select-all-cb').click();
+    await expect(page.locator('#render-selection-count')).toHaveText('0 of 2 selected');
+    // Start ignores the ticks: both rows are still Queued.
+    await expect(page.locator('#start-render-btn')).toBeEnabled();
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
+    await expect(page.locator('#cancel-render-btn')).toBeDisabled();
+
+    await page.locator('#render-select-unrendered-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-select-cb')).toBeChecked();
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('#render-select-all-cb')).toHaveJSProperty('indeterminate', true);
+
+    await page.locator('#render-select-all-cb').click();
+    await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
+  });
+
+  test('the finish toast counts only the rows this batch rendered', async ({ page }) => {
+    await gotoHarness(page);
+    const before = [
+      job({ id: '0', status: 'Finished', take_folder: 'C:\\a' }),
+      job({ id: '1', status: 'Cancelled', take_folder: 'C:\\b' }),
+      job({ id: '2', status: 'Queued', take_folder: 'C:\\c' }),
+    ];
+    await emitSnapshot(page, before);
+    await page.locator('#start-render-btn').click();
+    await emitSnapshot(page, [before[0], before[1], { ...before[2], status: 'Rendering' }]);
+    await emitSnapshot(page, [before[0], before[1], { ...before[2], status: 'Finished' }]);
+    await page.evaluate(() => window.__mockEmit('render_batch_finished', {}));
+    await expect(page.locator('#toast-container')).toContainText('Render batch completed successfully!');
+    await expect(page.locator('#toast-container')).not.toContainText('cancelled');
+  });
+
+  test('a tick survives snapshots, and Start still counts every Queued row', async ({ page }) => {
+    await gotoHarness(page);
+    const rows = [job({ id: '0' }), job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000' })];
+    await emitSnapshot(page, rows);
+    await page.locator('tr[data-job-id="1"] .render-job-select-cb').uncheck();
+    await emitSnapshot(page, rows);
+    await emitSnapshot(page, rows);
+    await expect(page.locator('tr[data-job-id="1"] .render-job-select-cb')).not.toBeChecked();
+    await expect(page.locator('#render-selection-count')).toHaveText('1 of 2 selected');
+    await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
+  });
+
+  test('Cancel sends the ticked rendering and queued rows', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Rendering' }),
+      job({ id: '1', status: 'Queued', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000' }),
+      job({ id: '2', status: 'Finished', take_folder: 'C:\\captures\\demo1\\chain_03_b0\\take0000' }),
+    ]);
+    await expect(page.locator('#cancel-render-btn')).toHaveText('Cancel (2)');
+    await page.locator('#cancel-render-btn').click();
+    expect(await invocationsFor(page, 'cancel_render_jobs')).toEqual([{ jobIds: ['0', '1'] }]);
+  });
+
+  test('Delete Take folders lists each ticked take once and skips a busy one', async ({ page }) => {
+    const A = 'D:/captures/s1/chain_01_b0/take0000';
+    const B = 'D:/captures/s1/chain_02_b0/take0000';
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 1024 }));
+    });
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: A }),
+      job({ id: '1', status: 'Finished', take_folder: A, stream: 'HUD ONLY' }),
+      job({ id: '2', status: 'Rendering', take_folder: B }),
+    ]);
+    await expect(page.locator('#delete-takes-render-btn')).toHaveText('Delete Take folders (1)');
+    await page.locator('#delete-takes-render-btn').click();
+    await expect(page.locator('#themed-confirm-modal')).toBeVisible();
+    expect(await invocationsFor(page, 'measure_take_folders')).toEqual([{ takeFolders: [A] }]);
+    await page.locator('#themed-confirm-cancel-btn').click();
+  });
+
+  test('Clear Queue empties an idle list without asking', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(page.locator('#clear-render-queue-btn')).toBeDisabled();
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued' }), job({ id: '1', status: 'Finished' })]);
+    await page.locator('#clear-render-queue-btn').click();
+    await expect(page.locator('#themed-confirm-modal')).toBeHidden();
+    expect(await invocationsFor(page, 'clear_render_queue')).toEqual([undefined]);
+  });
+
+  test('Clear Queue asks first while a take renders, and Cancel keeps the list', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [job({ id: '0', status: 'Rendering' }), job({ id: '1', status: 'Queued' })]);
+    await page.locator('#clear-render-queue-btn').click();
+    const modal = page.locator('#themed-confirm-modal');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#themed-confirm-message')).toHaveText('A take is rendering. Stop it and empty the list?');
+    await page.locator('#themed-confirm-cancel-btn').click();
+    expect(await invocationsFor(page, 'clear_render_queue')).toEqual([]);
+
+    await page.locator('#clear-render-queue-btn').click();
+    await page.locator('#themed-confirm-ok-btn').click();
+    await expect.poll(() => invocationsFor(page, 'clear_render_queue')).toEqual([undefined]);
   });
 });
 
@@ -499,5 +627,88 @@ test.describe('issue #40 — sortable columns and the batch progress bar', () =>
     await emitSnapshot(page, [job({ id: '0', status: 'Finished', progress: 100 }), job({ id: '1', status: 'Rendering', progress: 50 })]);
     await expect(page.locator('#render-batch-progress')).toBeVisible();
     await expect(page.locator('#render-batch-progress-label')).toHaveText('Batch 75%');
+  });
+});
+
+test.describe('issue #644 — Delete Take', () => {
+  const TAKE = 'D:/captures/session_1/chain_01_b0/take0000';
+
+  test('is off while either half of the take is rendering, saying which; a queued take stays on', async ({ page }) => {
+    await gotoHarness(page);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Rendering', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+    const finishedBtn = page.locator('tr[data-job-id="0"] .render-job-delete-take-btn');
+    const pairBtn = page.locator('tr[data-job-id="1"] .render-job-delete-take-btn');
+    await expect(finishedBtn).toBeDisabled();
+    await expect(finishedBtn).toHaveAttribute('title', 'Another stream of this take is rendering. Cancel it first.');
+    await expect(pairBtn).toBeDisabled();
+    await expect(pairBtn).toHaveAttribute('title', 'This job is rendering. Cancel it first.');
+
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Queued', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+    await expect(finishedBtn).toBeEnabled();
+    await expect(pairBtn).toBeEnabled();
+  });
+
+  test('the confirm says a queued render leaves the queue', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 1024 }));
+    });
+    await emitSnapshot(page, [job({ id: '0', status: 'Queued', take_folder: TAKE })]);
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    await expect(page.locator('#themed-confirm-footer')).toHaveText(
+      'Its queued render is removed from the queue. The space comes back when the Recycle Bin is emptied. The render history stays.',
+    );
+    await page.locator('#themed-confirm-cancel-btn').click();
+  });
+
+  test('confirms with the folder and its size, then sends the take once', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate((take) => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'session_1/chain_01_b0', size_bytes: 3 * 1024 * 1024 * 1024 }));
+      window.__mockInvokeHandlers.delete_take_folders = ({ takeFolders }) => ({
+        deleted: takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 3 * 1024 * 1024 * 1024 })),
+        failed: [],
+      });
+      window.__take = take;
+    }, TAKE);
+    await emitSnapshot(page, [
+      job({ id: '0', status: 'Finished', take_folder: TAKE }),
+      job({ id: '1', status: 'Finished', take_folder: TAKE, stream: 'HUD ONLY' }),
+    ]);
+
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    const modal = page.locator('#themed-confirm-modal');
+    await expect(modal).toBeVisible();
+    await expect(page.locator('#themed-confirm-message')).toHaveText('Move this take (3.00 GB) to the Recycle Bin?');
+    await expect(modal).toContainText(TAKE);
+    // Every Delete Take is off while the dialog is open.
+    await expect(page.locator('tr[data-job-id="1"] .render-job-delete-take-btn')).toBeDisabled();
+
+    await page.locator('#themed-confirm-ok-btn').click();
+    await expect.poll(() => invocationsFor(page, 'delete_take_folders')).toEqual([{ takeFolders: [TAKE] }]);
+    expect(await invocationsFor(page, 'measure_take_folders')).toEqual([{ takeFolders: [TAKE] }]);
+    await expect(page.locator('#toast-container')).toContainText('Take moved to the Recycle Bin (3.00 GB).');
+    await expect(page.locator('#render-take-delete-progress')).toBeHidden();
+  });
+
+  test('cancelling the confirm deletes nothing', async ({ page }) => {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.measure_take_folders = ({ takeFolders }) =>
+        takeFolders.map((f) => ({ take_folder: f, take_key: 'k', size_bytes: 1024 }));
+    });
+    await emitSnapshot(page, [job({ id: '0', status: 'Cancelled', take_folder: TAKE })]);
+    await page.locator('tr[data-job-id="0"] .render-job-delete-take-btn').click();
+    await page.locator('#themed-confirm-cancel-btn').click();
+    await expect(page.locator('tr[data-job-id="0"] .render-job-delete-take-btn')).toBeEnabled();
+    expect(await invocationsFor(page, 'delete_take_folders')).toEqual([]);
   });
 });

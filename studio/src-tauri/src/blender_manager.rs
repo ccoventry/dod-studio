@@ -43,7 +43,8 @@ fn game_exe(game_path: &str) -> Result<PathBuf, String> {
 #[derive(Debug, Clone, Serialize)]
 pub struct BlenderPageStatus {
     pub blender: BlenderStatus,
-    /// Maps in the game's `dod\maps` and `dod_downloads\maps`.
+    /// Maps in the game folder's `maps` and its `_downloads` sibling's
+    /// (`dod\maps` and `dod_downloads\maps` by default, #402).
     pub maps: Vec<String>,
     /// HD styles built for models.
     pub styles: Vec<String>,
