@@ -132,12 +132,16 @@ describe('bulkTargets', () => {
     expect(t.remove).toEqual(['0', '2', '3', '4']);
   });
 
-  it('delete lists each ticked take once, skipping a take that is queued or rendering', () => {
+  it('delete lists each ticked take once, skipping a take that is rendering', () => {
     const t = bulkTargets(all, all);
     expect(t.deleteFolders).toEqual([TAKE_B, 'D:/x/take0002']);
-    // Only the Finished half of take A ticked: its HUD half is still
-    // rendering, so the take stays.
+    // Only the Finished half of take B and the Error half ticked: one take.
     expect(bulkTargets([all[2], all[3]], all).deleteFolders).toEqual([TAKE_B]);
+    // Take A's HUD half is still rendering, so ticking its Queued half
+    // deletes nothing; once that half is only Queued, the take goes.
+    expect(bulkTargets([all[0]], all).deleteFolders).toEqual([]);
+    const queuedPair = [all[0], { ...all[1], status: 'Queued' }];
+    expect(bulkTargets([all[0]], queuedPair).deleteFolders).toEqual([TAKE_A]);
   });
 
   it('nothing ticked, nothing to do', () => {

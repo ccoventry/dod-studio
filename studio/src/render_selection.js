@@ -6,7 +6,7 @@
 // factory's own map, so it can be tested on its own.
 
 import { JOB_STATUS } from './render_jobs.js';
-import { busyTakeFolders } from './take_delete.js';
+import { renderingTakeFolders } from './take_delete.js';
 
 /** The key a job's tick is kept under: stable across snapshots of one
  *  queue, different for the job a later scan puts at the same id. */
@@ -28,11 +28,11 @@ export function defaultTicked(job) {
 /**
  * The ids and take folders each bulk button acts on, from the ticked jobs
  * and the whole list (`busy` takes come from the whole list: a take with a
- * HUD pair is two rows, and either one being queued or rendering keeps the
- * take, like the per-row Delete Take).
+ * HUD pair is two rows, and either one rendering keeps the take, like the
+ * per-row Delete Take; a queued take goes, and its render leaves the queue).
  */
 export function bulkTargets(tickedJobs, allJobs) {
-  const busy = busyTakeFolders(allJobs);
+  const busy = renderingTakeFolders(allJobs);
   const start = [];
   const cancel = [];
   const retry = [];

@@ -648,7 +648,7 @@ export const STRINGS = {
     removeSelected: (n) => `Remove (${n})`,
     REMOVE_SELECTED_TITLE: 'Take the ticked rows off the list. A rendering row stays.',
     deleteTakesSelected: (n) => `Delete Take folders (${n})`,
-    DELETE_TAKES_SELECTED_TITLE: "Move the ticked rows' take folders to the Recycle Bin. A take that is queued or rendering stays.",
+    DELETE_TAKES_SELECTED_TITLE: "Move the ticked rows' take folders to the Recycle Bin. A take that is rendering stays; a queued one leaves the queue.",
     CLEAR_QUEUE_BUTTON: 'Clear Queue',
     CLEAR_QUEUE_TITLE: 'Empty the list. Anything rendering is cancelled first.',
     CLEAR_QUEUE_CONFIRM_TITLE: 'Clear Queue',
