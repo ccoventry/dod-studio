@@ -1,8 +1,9 @@
 // patch/builder/mod.rs
 // Batch job construction: `build_batch_queue` and the init commands it adds.
 // The helpers it uses live beside it — `timing` (tick walks, roll floors,
-// block merging), `alloc` (drive allocation), `workspace` (junctions and the
-// legacy channel-based worker spawner), `preview` (preview patches).
+// block merging), `speed` (the fast-forward and normal-speed aliases),
+// `alloc` (drive allocation), `workspace` (junctions and the legacy
+// channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
 use crate::patch::engine::StreamPatcher;
@@ -14,11 +15,13 @@ use std::sync::{Arc, atomic::AtomicBool};
 
 mod alloc;
 mod preview;
+mod speed;
 mod timing;
 mod workspace;
 
 use alloc::allocate_blocks_first_fit_decreasing;
 pub use preview::*;
+pub use speed::*;
 pub use timing::*;
 pub use workspace::*;
 
@@ -355,11 +358,14 @@ pub fn build_batch_queue(
 
     helper_cfg_content.push_str("# Global aliases\n");
     helper_cfg_content.push_str("alias sys_autodir \"spec_autodirector 1\"\n");
-    helper_cfg_content
-        .push_str("alias sys_normal_speed \"sys_autodir; clear; host_framerate 0\"\n");
-    helper_cfg_content.push_str(&format!(
-        "alias sys_fast_forward \"host_framerate {}\"\n",
-        fast_forward_host_framerate(config)
+    // The fast-forward runs uncapped with nothing drawn, and the pre-roll
+    // puts back whatever the user's own commands and configs had (#724). An
+    // alias body is not a ConsoleCommand frame: the demo carries only the
+    // name, so the 64-byte frame limit does not apply to it.
+    helper_cfg_content.push_str(&speed_alias_lines(
+        config,
+        &final_init_commands(config),
+        Some(&crate::patch::cfg_scan::scan_cached(&dod_dir)),
     ));
     helper_cfg_content.push_str("alias sys_sound \"stopsound\"\n");
     // In OBS mode HLAE records nothing: the recorder is an external process
@@ -912,7 +918,8 @@ pub fn build_batch_queue(
                 ) {
                     scheduled_commands.push((t, echo_cmd));
                 }
-                // Playback runs at `host_framerate 0.05` until the pre-roll
+                // Playback runs at `host_framerate 0.05`, uncapped and with
+                // nothing drawn (`r_norefresh 1`, #724), until the pre-roll
                 // drops it back to real time at `s_speed_tick`, and resumes
                 // fast-forwarding once the post-roll ends at `s_end`. A command
                 // landing outside that window still executes, but it executes
@@ -944,8 +951,8 @@ pub fn build_batch_queue(
                          usually fine — it simply takes effect early. It is worth checking only \
                          for commands that depend on playback running at real speed: anything \
                          touching sound, recording, or rendering, since the engine is at \
-                         `host_framerate {}` with its audio buffers unflushed. To have it run \
-                         at normal speed instead, {}.",
+                         `host_framerate {}`, drawing nothing, with its audio buffers unflushed. \
+                         To have it run at normal speed instead, {}.",
                         custom.command,
                         relation_str.to_lowercase(),
                         custom.offset,
