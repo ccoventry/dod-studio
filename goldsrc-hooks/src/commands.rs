@@ -582,6 +582,7 @@ pub fn poll() {
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
+    crate::pov_live_bob::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
@@ -738,6 +739,9 @@ fn status_text() -> String {
     }
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
+    }
+    if let Some(game_dir) = crate::game_dir_check::status_line() {
+        lines.push(game_dir);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
@@ -1590,6 +1594,9 @@ pub fn install() {
     if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
         crate::hlae_window::set_cloak_cvar(cloak);
     }
+    if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
+        crate::pov_live_bob::set_cvar(bob);
+    }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
         register(crate::screen_effects::SHAKE_NAME, "0"),
@@ -1757,6 +1764,7 @@ mod tests {
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
+            crate::pov_live_bob::NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,
