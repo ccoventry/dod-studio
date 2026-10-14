@@ -175,7 +175,11 @@ pub fn obs_orphan_recovery_failed(err: impl Display) -> String {
 }
 
 pub fn failed_to_create_dod_directory(err: impl Display) -> String {
-    format!("Failed to create dod directory: {}", err)
+    format!(
+        "Failed to create the game folder `{}` beside hl.exe: {}",
+        native::shared::paths::game_folder(),
+        err
+    )
 }
 
 pub fn failed_to_patch_preview_demo(source_demo: &str, err: impl Display) -> String {
@@ -218,7 +222,7 @@ pub fn game_directory_not_found(game_dir: &str) -> String {
 /// `resolve_dod_dir_for_sweep`) — both derive `dod_dir` from `hl.exe`'s
 /// parent and fail identically when that parent can't be resolved.
 pub const COULD_NOT_RESOLVE_DOD_DIRECTORY: &str =
-    "Could not resolve the 'dod' directory next to hl.exe";
+    "Could not resolve the game folder next to hl.exe";
 pub const FAILED_TO_BUILD_PREVIEW_PATCH_JOB: &str = "Failed to build the preview patch job";
 
 pub fn failed_to_send_to_running_game(e: impl std::fmt::Display) -> String {
@@ -296,6 +300,24 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_delete_manager.rs (#644) ───────────────────────────────────────
+
+pub fn take_not_listed(take_folder: &str) -> String {
+    format!(
+        "{} isn't in the Render tab's list, so it was not deleted",
+        take_folder
+    )
+}
+
+pub fn take_is_rendering(take_folder: &str) -> String {
+    format!(
+        "{} is rendering. Cancel it first, then delete the take.",
+        take_folder
+    )
+}
+
+pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 pub fn failed_to_delete_audit_file(path: &str, err: impl Display) -> String {
@@ -333,8 +355,9 @@ pub fn failed_to_open_folder(err: impl Display) -> String {
 
 pub fn no_map_folder_beside_exe(game_path: &str) -> String {
     format!(
-        "No map folder beside `{}` — maps are expected at `<hl.exe folder>/dod/maps`",
-        game_path
+        "No map folder beside `{}` — maps are expected at `<hl.exe folder>/{}/maps`",
+        game_path,
+        native::shared::paths::game_folder()
     )
 }
 
@@ -495,7 +518,7 @@ mod tests {
         );
         assert_eq!(
             failed_to_create_dod_directory("access denied"),
-            format!("Failed to create dod directory: {}", "access denied")
+            "Failed to create the game folder `dod` beside hl.exe: access denied"
         );
         assert_eq!(
             failed_to_patch_preview_demo("demo1.dem", "bad frame"),
@@ -526,7 +549,7 @@ mod tests {
         );
         assert_eq!(
             COULD_NOT_RESOLVE_DOD_DIRECTORY,
-            "Could not resolve the 'dod' directory next to hl.exe"
+            "Could not resolve the game folder next to hl.exe"
         );
         assert_eq!(
             FAILED_TO_BUILD_PREVIEW_PATCH_JOB,

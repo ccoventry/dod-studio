@@ -18,11 +18,9 @@ fn batch_file_path() -> PathBuf {
     native::shared::paths::get_appdata_dir().join("dodstudio_batch.txt")
 }
 
-/// The game's `dod` folder for `config`.
+/// The game folder for `config` (`dod`, or the Game Folder setting, #402).
 fn dod_dir(config: &PatcherConfig) -> Result<PathBuf, String> {
-    Path::new(&config.game_path)
-        .parent()
-        .map(|p| p.join("dod"))
+    native::shared::paths::mod_dir_for_exe(Path::new(&config.game_path))
         .ok_or_else(|| format!("{} has no folder", config.game_path))
 }
 

@@ -75,7 +75,7 @@ pub async fn hd_status(app: AppHandle, game_path: String) -> Result<HdStatus, St
         status.large_address_aware = native::sys::pe::is_large_address_aware(&exe).ok();
         // Read fresh, not scan_cached: the user may have just edited movie.cfg.
         if let Some(game) = exe.parent() {
-            let configs = native::patch::cfg_scan::scan(&game.join("dod"));
+            let configs = native::patch::cfg_scan::scan(&native::shared::paths::mod_dir(game));
             status.gl_max_size = Some(hd::gl_max_size::effective(&configs, &init_commands));
         }
         status
