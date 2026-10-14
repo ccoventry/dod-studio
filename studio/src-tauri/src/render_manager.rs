@@ -282,9 +282,8 @@ pub struct RenderManager {
     global_cancel: Arc<AtomicBool>,
     wake_lock: Arc<Mutex<Option<RenderWakeLock>>>,
     render_session: Arc<Mutex<Option<RenderSessionData>>>,
-    /// Persisted so Reset can resume the scheduler on the existing job list
-    /// without a fresh scan+payload (mirrors dev's `start_rendering()`
-    /// operating on `self.jobs` directly, independent of the scan step).
+    /// Persisted so Start can run the existing job list again (after a
+    /// Reset) without a fresh scan+payload.
     last_config: Arc<Mutex<Option<RenderConfig>>>,
     /// JIT export-drive reservation ledger — bytes each concurrently-running
     /// `run_render_job` has provisionally claimed per drive, so one job's
@@ -1141,46 +1140,24 @@ pub async fn remove_non_rendering_render_jobs(
     Ok(())
 }
 
-/// Resets a Finished/Error/Cancelled job back to Queued. If the batch has
-/// already fully drained (nothing else Rendering/Queued), immediately
-/// resumes the scheduler on the existing job list — a small UX improvement
-/// over dev, which required a separate "Start Render" click after Reset to
-/// notice the re-queued job at all.
+/// Resets a Finished/Error/Cancelled job back to Queued (#70): it joins a
+/// batch that is rendering, and otherwise waits for Start Render Batch like
+/// every other Queued row. Reset never starts rendering on its own; doing so
+/// started every other Queued row with it.
 ///
 /// Deliberately does not touch `codec`/`fps` — a reset job re-renders with
 /// exactly the settings it already carries (VirtualDub-style: each job owns
 /// its settings, the panel is only ever a template for *new* jobs), never
-/// whatever the panel currently shows. The `last_config` used below to
-/// resume the scheduler only supplies batch-wide infrastructure (ffmpeg
-/// path, export pool, concurrency) — never per-job creative settings.
-/// Shared tail of `reset_render_job`/`reset_all_render_jobs`: a reset job is
-/// worthless sitting at Queued forever, so bring the scheduler back if
-/// nothing is already driving it. If one is already running (mid-batch reset
-/// of one row while others are still Rendering), it will pick the newly
-/// Queued row(s) up on its own next tick — nothing more to do here.
-fn resume_scheduler_if_idle(app: AppHandle, state: &RenderManager, context: &str) {
-    if !state.is_rendering.swap(true, Ordering::SeqCst) {
-        let config = state.last_config.lock().unwrap().clone();
-        match config {
-            Some(config) => {
-                log_markdown(&format!("[render] {} resumed the scheduler", context));
-                state.global_cancel.store(false, Ordering::SeqCst);
-                if state.wake_lock.lock().unwrap().is_none() {
-                    *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
-                }
-                spawn_scheduler(app, state.handles(), config);
-            }
-            None => {
-                log_markdown(&format!(
-                    "[render] {} could not resume: no last_config to schedule against",
-                    context
-                ));
-                state.is_rendering.store(false, Ordering::SeqCst);
-            }
-        }
+/// whatever the panel currently shows.
+fn log_requeued(state: &RenderManager, context: &str) {
+    if state.is_rendering.load(Ordering::SeqCst) {
+        log_markdown(&format!(
+            "[render] {} queued; the running batch picks it up",
+            context
+        ));
     } else {
         log_markdown(&format!(
-            "[render] {} left as Queued — a scheduler is already running and will pick it up",
+            "[render] {} queued; waits for Start Render Batch",
             context
         ));
     }
@@ -1205,7 +1182,7 @@ pub async fn reset_render_job(
         job_id, previous_status
     ));
     emit_jobs_snapshot(&app, &state.jobs);
-    resume_scheduler_if_idle(app, &state, &format!("reset_render_job {}", job_id));
+    log_requeued(&state, &format!("reset_render_job {}", job_id));
     Ok(())
 }
 
@@ -1236,7 +1213,7 @@ pub async fn reset_all_render_jobs(
         reset_count
     ));
     emit_jobs_snapshot(&app, &state.jobs);
-    resume_scheduler_if_idle(app, &state, "reset_all_render_jobs");
+    log_requeued(&state, "reset_all_render_jobs");
     Ok(())
 }
 
@@ -1311,7 +1288,7 @@ pub async fn reset_render_jobs(
         job_ids.len()
     ));
     emit_jobs_snapshot(&app, &state.jobs);
-    resume_scheduler_if_idle(app, &state, "reset_render_jobs");
+    log_requeued(&state, "reset_render_jobs");
     Ok(())
 }
 

@@ -698,12 +698,9 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   });
 
   // Real-time per-job state, pushed by the backend scheduler. This is the
-  // single source of truth for whether a batch is actually running — driving
-  // Start/Cancel off it (rather than only off the Start button's own click
-  // handler and render_batch_finished) matters because reset_render_job can
-  // resume the scheduler on its own, bypassing both of those. Without this,
-  // Start Render Batch stayed clickable during a reset-triggered resume and
-  // just repeatedly failed with "Render batch already in progress".
+  // single source of truth for whether a batch is actually running — Start
+  // and Cancel follow it rather than only the Start click and
+  // render_batch_finished.
   listen('render_jobs_snapshot', (event) => {
     jobs = event.payload || [];
     if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
