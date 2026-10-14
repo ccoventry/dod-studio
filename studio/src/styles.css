@@ -460,6 +460,10 @@ body {
   gap: 8px;
 }
 
+.analyzer-cache-bar {
+  width: 120px;
+}
+
 .flex-between {
   display: flex;
   justify-content: space-between;
