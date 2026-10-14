@@ -115,3 +115,5 @@ DEBUG
       Log every HD texture load.
   dodstudio_debug_keep_detail_cache 0/1
       Leave the engine's detail texture cache alone (the bug that switches detail off by position), to compare.
+  dodstudio_debug_cloak_instead 0/1
+      While staying behind, a minimised game is cloaked in place instead of moved off-screen, to compare.
