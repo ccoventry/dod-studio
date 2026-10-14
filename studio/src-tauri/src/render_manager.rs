@@ -136,6 +136,29 @@ fn history_for(take_folder: &str) -> Vec<HistoryEntry> {
         .collect()
 }
 
+/// The newest finished render of this job's stream whose file is still
+/// there (#438): `(output_path, size)`. A scan stages such a job as Finished
+/// rather than Queued (#70), so Start Render Batch renders only what has no
+/// render yet; Retry queues it again.
+fn last_finished_output(history: &[HistoryEntry], stream: &str) -> Option<(String, Option<u64>)> {
+    history
+        .iter()
+        .rev()
+        .find(|h| {
+            h.attempt.stream == stream
+                && h.attempt.outcome == RenderOutcome::Finished
+                && h.output_exists
+        })
+        .map(|h| {
+            let size = h.attempt.output_size_bytes.or_else(|| {
+                std::fs::metadata(&h.attempt.output_path)
+                    .ok()
+                    .map(|m| m.len())
+            });
+            (h.attempt.output_path.clone(), size)
+        })
+}
+
 /// The first non-empty line of an FFmpeg error log, cut to a readable
 /// length, for a failed attempt's history line.
 fn first_error_line(log: &str) -> Option<String> {
@@ -259,9 +282,8 @@ pub struct RenderManager {
     global_cancel: Arc<AtomicBool>,
     wake_lock: Arc<Mutex<Option<RenderWakeLock>>>,
     render_session: Arc<Mutex<Option<RenderSessionData>>>,
-    /// Persisted so Reset can resume the scheduler on the existing job list
-    /// without a fresh scan+payload (mirrors dev's `start_rendering()`
-    /// operating on `self.jobs` directly, independent of the scan step).
+    /// Persisted so Start can run the existing job list again (after a
+    /// Reset) without a fresh scan+payload.
     last_config: Arc<Mutex<Option<RenderConfig>>>,
     /// JIT export-drive reservation ledger — bytes each concurrently-running
     /// `run_render_job` has provisionally claimed per drive, so one job's
@@ -270,6 +292,10 @@ pub struct RenderManager {
     /// (which several jobs starting in the same scheduler tick would all
     /// see as identical).
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    /// Clear Queue (#70) while a batch runs: the scheduler empties the list
+    /// once the cancelled renders have stopped, since a Rendering row can't
+    /// be removed under a live FFmpeg.
+    clear_on_finish: Arc<AtomicBool>,
 }
 
 struct SchedulerHandles {
@@ -279,6 +305,18 @@ struct SchedulerHandles {
     wake_lock: Arc<Mutex<Option<RenderWakeLock>>>,
     render_session: Arc<Mutex<Option<RenderSessionData>>>,
     export_reservations: Arc<Mutex<HashMap<PathBuf, u64>>>,
+    clear_on_finish: Arc<AtomicBool>,
+}
+
+/// Back to Queued with the run's leftovers cleared, keeping the job's own
+/// codec/fps (see `reset_render_job`).
+fn requeue(job: &mut RenderJobRuntime) {
+    job.status = "Queued".to_string();
+    job.progress = 0;
+    job.speed = String::new();
+    job.error_log = None;
+    job.output_size_bytes = None;
+    job.cancel_flag = Arc::new(AtomicBool::new(false));
 }
 
 impl RenderManager {
@@ -291,6 +329,7 @@ impl RenderManager {
             render_session: Arc::new(Mutex::new(None)),
             last_config: Arc::new(Mutex::new(None)),
             export_reservations: Arc::new(Mutex::new(HashMap::new())),
+            clear_on_finish: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -344,6 +383,7 @@ impl RenderManager {
             wake_lock: self.wake_lock.clone(),
             render_session: self.render_session.clone(),
             export_reservations: self.export_reservations.clone(),
+            clear_on_finish: self.clear_on_finish.clone(),
         }
     }
 }
@@ -363,7 +403,13 @@ fn write_autosave(
             .map(|j| AutosaveJob {
                 take_folder: j.clip.take_folder.clone(),
                 output_path: j.output_path.clone(),
-                status: AutosaveJobStatus::Pending,
+                // A take staged as Finished from its history (#70) comes
+                // back as Finished after a recovery too.
+                status: if j.status == "Finished" {
+                    AutosaveJobStatus::Completed
+                } else {
+                    AutosaveJobStatus::Pending
+                },
                 name: j.clip.base_name.clone(),
                 codec: Some(j.codec.to_str_id().to_string()),
                 custom_codec_args: Some(j.custom_codec_args.clone()),
@@ -718,6 +764,13 @@ fn spawn_scheduler(app: AppHandle, handles: SchedulerHandles, config: RenderConf
         let _ = std::fs::remove_file(autosave_path());
         *handles.render_session.lock().unwrap() = None;
 
+        // Clear Queue (#70) asked while this batch ran: every render has
+        // stopped by now, so the whole list can go.
+        if handles.clear_on_finish.swap(false, Ordering::SeqCst) {
+            handles.jobs.lock().unwrap().clear();
+            log_markdown("[render] clear_render_queue: list emptied once the batch stopped");
+        }
+
         emit_jobs_snapshot(&app, &handles.jobs);
         let _ = app.emit("render_batch_finished", serde_json::json!({}));
     });
@@ -832,22 +885,32 @@ pub async fn queue_render_batch(
             clip
         })
         .enumerate()
-        .map(|(i, clip)| (i, clip.take_folder.clone(), clip))
-        .map(|(i, clip_take_folder, clip)| RenderJobRuntime {
-            id: i.to_string(),
-            clip,
-            status: "Queued".to_string(),
-            speed: String::new(),
-            progress: 0,
-            error_log: None,
-            output_path: String::new(),
-            output_size_bytes: None,
-            cancel_flag: Arc::new(AtomicBool::new(false)),
-            codec: config.target_codec,
-            custom_codec_args: config.custom_codec_args.clone(),
-            fps: config.fps,
-            history: history_for(&clip_take_folder),
-            current_attempt: None,
+        .map(|(i, clip)| {
+            let history = history_for(&clip.take_folder);
+            // A stream rendered before, with the file still there, comes in
+            // as Finished (#70): Start renders what has no render yet, and
+            // Retry queues this one again.
+            let (status, progress, output_path, output_size_bytes) =
+                match last_finished_output(&history, &attempt_stream(&clip)) {
+                    Some((path, size)) => ("Finished", 100u32, path, size),
+                    None => ("Queued", 0u32, String::new(), None),
+                };
+            RenderJobRuntime {
+                id: i.to_string(),
+                clip,
+                status: status.to_string(),
+                speed: String::new(),
+                progress,
+                error_log: None,
+                output_path,
+                output_size_bytes,
+                cancel_flag: Arc::new(AtomicBool::new(false)),
+                codec: config.target_codec,
+                custom_codec_args: config.custom_codec_args.clone(),
+                fps: config.fps,
+                history,
+                current_attempt: None,
+            }
         })
         .collect();
 
@@ -865,6 +928,9 @@ pub async fn queue_render_batch(
 /// codec/fps snapshot (including any Skip toggle applied while it sat
 /// Queued), and batch-wide infrastructure (ffmpeg path, export pool,
 /// concurrency) came from `queue_render_batch`'s payload via `last_config`.
+///
+/// Every Queued row renders (#70): the tick boxes scope Cancel, Retry,
+/// Remove and Delete, not Start. A row to leave out is cancelled or removed.
 #[tauri::command]
 pub async fn start_queued_render(
     app: AppHandle,
@@ -875,18 +941,22 @@ pub async fn start_queued_render(
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
     let config = state.last_config.lock().unwrap().clone();
-    let has_queued = state
+    let starting = state
         .jobs
         .lock()
         .unwrap()
         .iter()
-        .any(|j| j.status == "Queued");
-    let Some(config) = config.filter(|_| has_queued) else {
+        .filter(|j| j.status == "Queued")
+        .count();
+    let Some(config) = config.filter(|_| starting > 0) else {
         state.is_rendering.store(false, Ordering::SeqCst);
         return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
     };
 
-    log_markdown("[render] start_queued_render: starting scheduler");
+    log_markdown(&format!(
+        "[render] start_queued_render: starting scheduler on {} job(s)",
+        starting
+    ));
     state.global_cancel.store(false, Ordering::SeqCst);
     *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
     spawn_scheduler(app, state.handles(), config);
@@ -1070,46 +1140,24 @@ pub async fn remove_non_rendering_render_jobs(
     Ok(())
 }
 
-/// Resets a Finished/Error/Cancelled job back to Queued. If the batch has
-/// already fully drained (nothing else Rendering/Queued), immediately
-/// resumes the scheduler on the existing job list — a small UX improvement
-/// over dev, which required a separate "Start Render" click after Reset to
-/// notice the re-queued job at all.
+/// Resets a Finished/Error/Cancelled job back to Queued (#70): it joins a
+/// batch that is rendering, and otherwise waits for Start Render Batch like
+/// every other Queued row. Reset never starts rendering on its own; doing so
+/// started every other Queued row with it.
 ///
 /// Deliberately does not touch `codec`/`fps` — a reset job re-renders with
 /// exactly the settings it already carries (VirtualDub-style: each job owns
 /// its settings, the panel is only ever a template for *new* jobs), never
-/// whatever the panel currently shows. The `last_config` used below to
-/// resume the scheduler only supplies batch-wide infrastructure (ffmpeg
-/// path, export pool, concurrency) — never per-job creative settings.
-/// Shared tail of `reset_render_job`/`reset_all_render_jobs`: a reset job is
-/// worthless sitting at Queued forever, so bring the scheduler back if
-/// nothing is already driving it. If one is already running (mid-batch reset
-/// of one row while others are still Rendering), it will pick the newly
-/// Queued row(s) up on its own next tick — nothing more to do here.
-fn resume_scheduler_if_idle(app: AppHandle, state: &RenderManager, context: &str) {
-    if !state.is_rendering.swap(true, Ordering::SeqCst) {
-        let config = state.last_config.lock().unwrap().clone();
-        match config {
-            Some(config) => {
-                log_markdown(&format!("[render] {} resumed the scheduler", context));
-                state.global_cancel.store(false, Ordering::SeqCst);
-                if state.wake_lock.lock().unwrap().is_none() {
-                    *state.wake_lock.lock().unwrap() = hold_render_wake_lock();
-                }
-                spawn_scheduler(app, state.handles(), config);
-            }
-            None => {
-                log_markdown(&format!(
-                    "[render] {} could not resume: no last_config to schedule against",
-                    context
-                ));
-                state.is_rendering.store(false, Ordering::SeqCst);
-            }
-        }
+/// whatever the panel currently shows.
+fn log_requeued(state: &RenderManager, context: &str) {
+    if state.is_rendering.load(Ordering::SeqCst) {
+        log_markdown(&format!(
+            "[render] {} queued; the running batch picks it up",
+            context
+        ));
     } else {
         log_markdown(&format!(
-            "[render] {} left as Queued — a scheduler is already running and will pick it up",
+            "[render] {} queued; waits for Start Render Batch",
             context
         ));
     }
@@ -1126,12 +1174,7 @@ pub async fn reset_render_job(
         let mut jobs = state.jobs.lock().unwrap();
         if let Some(job) = jobs.iter_mut().find(|j| j.id == job_id) {
             previous_status = Some(job.status.clone());
-            job.status = "Queued".to_string();
-            job.progress = 0;
-            job.speed = String::new();
-            job.error_log = None;
-            job.output_size_bytes = None;
-            job.cancel_flag = Arc::new(AtomicBool::new(false));
+            requeue(job);
         }
     }
     log_markdown(&format!(
@@ -1139,7 +1182,7 @@ pub async fn reset_render_job(
         job_id, previous_status
     ));
     emit_jobs_snapshot(&app, &state.jobs);
-    resume_scheduler_if_idle(app, &state, &format!("reset_render_job {}", job_id));
+    log_requeued(&state, &format!("reset_render_job {}", job_id));
     Ok(())
 }
 
@@ -1156,13 +1199,8 @@ pub async fn reset_all_render_jobs(
     {
         let mut jobs = state.jobs.lock().unwrap();
         for job in jobs.iter_mut() {
-            if job.status == "Cancelled" || job.status == "Finished" || job.status == "Error" {
-                job.status = "Queued".to_string();
-                job.progress = 0;
-                job.speed = String::new();
-                job.error_log = None;
-                job.output_size_bytes = None;
-                job.cancel_flag = Arc::new(AtomicBool::new(false));
+            if is_terminal(job) {
+                requeue(job);
                 reset_count += 1;
             }
         }
@@ -1175,7 +1213,138 @@ pub async fn reset_all_render_jobs(
         reset_count
     ));
     emit_jobs_snapshot(&app, &state.jobs);
-    resume_scheduler_if_idle(app, &state, "reset_all_render_jobs");
+    log_requeued(&state, "reset_all_render_jobs");
+    Ok(())
+}
+
+/// Cancelled, Finished or Error: a run that ended, which a reset can start
+/// over.
+fn is_terminal(job: &RenderJobRuntime) -> bool {
+    job.status == "Cancelled" || job.status == "Finished" || job.status == "Error"
+}
+
+// ── Bulk actions on the Render tab's ticked rows (#70) ───────────────────────
+
+/// `cancel_render_job` for several rows at once: a Rendering job stops, a
+/// Queued one becomes Cancelled. Ids that are neither are left alone.
+#[tauri::command]
+pub async fn cancel_render_jobs(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+    job_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut cancelled = 0usize;
+    let mut mutated = false;
+    {
+        let mut jobs = state.jobs.lock().unwrap();
+        for job in jobs.iter_mut().filter(|j| job_ids.contains(&j.id)) {
+            if job.status == "Rendering" || job.status == "Queued" {
+                job.cancel_flag.store(true, Ordering::Relaxed);
+                cancelled += 1;
+            }
+            if job.status == "Queued" {
+                job.status = "Cancelled".to_string();
+                mutated = true;
+            }
+        }
+    }
+    log_markdown(&format!(
+        "[render] cancel_render_jobs: {} of {} ticked job(s) cancelled",
+        cancelled,
+        job_ids.len()
+    ));
+    // A Queued job changed status outside the scheduler loop, which may not
+    // be running at all; the loop handles a Rendering one's own update.
+    if mutated {
+        emit_jobs_snapshot(&app, &state.jobs);
+    }
+    Ok(())
+}
+
+/// `reset_render_job` for several rows at once; only a Cancelled, Finished
+/// or Error job goes back to Queued.
+#[tauri::command]
+pub async fn reset_render_jobs(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+    job_ids: Vec<String>,
+) -> Result<(), String> {
+    let mut reset_count = 0usize;
+    {
+        let mut jobs = state.jobs.lock().unwrap();
+        for job in jobs.iter_mut().filter(|j| job_ids.contains(&j.id)) {
+            if is_terminal(job) {
+                requeue(job);
+                reset_count += 1;
+            }
+        }
+    }
+    if reset_count == 0 {
+        return Ok(());
+    }
+    log_markdown(&format!(
+        "[render] reset_render_jobs: {} of {} ticked job(s) -> Queued",
+        reset_count,
+        job_ids.len()
+    ));
+    emit_jobs_snapshot(&app, &state.jobs);
+    log_requeued(&state, "reset_render_jobs");
+    Ok(())
+}
+
+/// `remove_render_job` for several rows at once. A Rendering row stays, for
+/// the reason `remove_render_job` gives; the rest of the ids still go.
+#[tauri::command]
+pub async fn remove_render_jobs(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+    job_ids: Vec<String>,
+) -> Result<usize, String> {
+    let removed_count = {
+        let mut jobs = state.jobs.lock().unwrap();
+        let before = jobs.len();
+        jobs.retain(|j| j.status == "Rendering" || !job_ids.contains(&j.id));
+        before - jobs.len()
+    };
+    if removed_count == 0 {
+        return Ok(0);
+    }
+    log_markdown(&format!(
+        "[render] remove_render_jobs: {} of {} ticked job(s) removed",
+        removed_count,
+        job_ids.len()
+    ));
+    clear_batch_state_if_empty(&state);
+    emit_jobs_snapshot(&app, &state.jobs);
+    Ok(removed_count)
+}
+
+/// Clear Queue (#70): every row goes. With a batch running, the renders are
+/// cancelled first and the scheduler empties the list once they have
+/// stopped (`clear_on_finish`); the frontend confirms before asking for that.
+#[tauri::command]
+pub async fn clear_render_queue(
+    app: AppHandle,
+    state: tauri::State<'_, RenderManager>,
+) -> Result<(), String> {
+    if state.is_rendering.load(Ordering::SeqCst) {
+        log_markdown("[render] clear_render_queue: cancelling the running batch first");
+        state.clear_on_finish.store(true, Ordering::SeqCst);
+        state.global_cancel.store(true, Ordering::SeqCst);
+        return Ok(());
+    }
+    let count = {
+        let mut jobs = state.jobs.lock().unwrap();
+        let count = jobs.len();
+        jobs.clear();
+        count
+    };
+    log_markdown(&format!(
+        "[render] clear_render_queue: {} row(s) removed",
+        count
+    ));
+    clear_batch_state_if_empty(&state);
+    emit_jobs_snapshot(&app, &state.jobs);
     Ok(())
 }
 
@@ -1352,4 +1521,59 @@ pub fn recover_render_batch(
     let _ = std::fs::remove_file(autosave_path());
 
     Ok(views)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn attempt(stream: &str, outcome: RenderOutcome, path: &str) -> RenderAttempt {
+        RenderAttempt {
+            started_unix_ms: 1,
+            stream: stream.to_string(),
+            codec: "prores".to_string(),
+            custom_codec_args: String::new(),
+            fps: 300,
+            outcome,
+            output_path: path.to_string(),
+            output_size_bytes: Some(7),
+            error: None,
+        }
+    }
+
+    fn entry(stream: &str, outcome: RenderOutcome, path: &str, exists: bool) -> HistoryEntry {
+        HistoryEntry {
+            attempt: attempt(stream, outcome, path),
+            output_exists: exists,
+        }
+    }
+
+    #[test]
+    fn a_stream_rendered_before_is_staged_from_its_newest_surviving_output() {
+        let history = vec![
+            entry("all", RenderOutcome::Finished, "E:/out/old.mov", true),
+            entry("all", RenderOutcome::Failed, "", false),
+            entry("hud:hud", RenderOutcome::Finished, "E:/out/hud.mov", true),
+            entry("all", RenderOutcome::Finished, "E:/out/new.mov", true),
+        ];
+        assert_eq!(
+            last_finished_output(&history, "all"),
+            Some(("E:/out/new.mov".to_string(), Some(7)))
+        );
+        assert_eq!(
+            last_finished_output(&history, "hud:hud"),
+            Some(("E:/out/hud.mov".to_string(), Some(7)))
+        );
+        assert_eq!(last_finished_output(&history, "other"), None);
+    }
+
+    #[test]
+    fn a_deleted_or_failed_render_does_not_count() {
+        let history = vec![
+            entry("all", RenderOutcome::Finished, "E:/out/gone.mov", false),
+            entry("all", RenderOutcome::Cancelled, "", false),
+        ];
+        assert_eq!(last_finished_output(&history, "all"), None);
+        assert_eq!(last_finished_output(&[], "all"), None);
+    }
 }

@@ -20,12 +20,20 @@
 <body>
   <div id="render-status-row">
     <button id="scan-render-btn">Scan for Takes</button>
-    <button id="start-render-btn">Start Render Batch</button>
-    <button id="cancel-render-btn" disabled>Cancel All</button>
-    <button id="reset-all-render-btn" disabled>Reset All</button>
-    <button id="remove-all-render-btn" disabled>Remove All (Not Rendering)</button>
+    <button id="start-render-btn" disabled>Start Render Batch</button>
+    <button id="cancel-render-btn" disabled>Cancel (0)</button>
+    <button id="retry-render-btn" disabled>Retry (0)</button>
+    <button id="remove-render-btn" disabled>Remove (0)</button>
+    <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+    <button id="clear-render-queue-btn" disabled>Clear Queue</button>
     <p id="render-status">Status: Waiting...</p>
     <div id="render-job-container"></div>
+  </div>
+
+  <!-- #70: the selection's own controls, copied from index.html. -->
+  <div id="render-selection-row">
+    <button id="render-select-unrendered-btn" disabled>Select unrendered</button>
+    <span id="render-selection-count">0 of 0 selected</span>
   </div>
 
   <div id="render-settings-row">
@@ -48,12 +56,13 @@
   <table id="render-jobs-table">
     <thead>
       <tr>
+        <th><input type="checkbox" id="render-select-all-cb" disabled /></th>
         <th data-sort="name">Clip Name</th><th data-sort="stream">Stream</th><th data-sort="frames">Frames</th><th data-sort="date">Date</th>
         <th>Settings</th><th data-sort="status">Status</th><th>Speed</th><th>Progress</th><th data-sort="size">File Size</th><th>History</th><th>Actions</th>
       </tr>
     </thead>
     <tbody id="render-jobs-tbody">
-      <tr><td colspan="11" class="table-empty">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+      <tr><td colspan="12" class="table-empty">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
     </tbody>
   </table>
 
