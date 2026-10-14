@@ -930,14 +930,14 @@ test('map coverage (#426): checks off the page thread, then says which maps a st
   await page.evaluate((c) => window.__finishCoverage.resolve(c), WORLD_COVERAGE);
   await expect(page.locator('#hd-style-maps-progress')).toBeHidden();
   await page.selectOption('#hd-style-select', 'ultrasharp');
-  await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 4 maps.');
+  await expect(page.locator('#hd-style-maps-summary')).toHaveText('ultrasharp has every map texture for all 3 maps in your map list.');
   await expect(page.locator('#hd-style-map-warning')).toBeHidden();
   await expect(page.locator('#hd-cfg-lines')).not.toContainText('//');
 
   // The list picks railroad* and anzio: remacri has part of one, none of the other.
   await page.selectOption('#hd-style-select', 'remacri');
   await expect(page.locator('#hd-style-maps-summary'))
-    .toHaveText('remacri: every map texture for 1 map, some for 1 map and none for 2 maps.');
+    .toHaveText('remacri, in your map list: every map texture for 1 map, some for 1 map and none for 1 map.');
   const warning = 'remacri is missing map textures for dod_railroad and 1 more map in your map list; those maps will show stock textures wherever it has none.';
   await expect(page.locator('#hd-style-map-warning')).toHaveText(warning);
   await expect(page.locator('#hd-cfg-lines')).toContainText(`// ${warning}`);
@@ -945,8 +945,19 @@ test('map coverage (#426): checks off the page thread, then says which maps a st
   await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
     'Every map texture (1)dod_anzio',
     'Some of the map textures (1)dod_railroad (3 of 10)',
+    'No map textures (1)dod_railroad2_s9a',
+  ]);
+
+  // Show every map: the lists and the line cover the whole game folder.
+  await page.check('.hd-style-maps-every input');
+  await expect(page.locator('#hd-style-maps-summary'))
+    .toHaveText('remacri: every map texture for 1 map, some for 1 map and none for 2 maps.');
+  await expect(page.locator('#hd-style-maps-groups p')).toHaveText([
+    'Every map texture (1)dod_anzio',
+    'Some of the map textures (1)dod_railroad (3 of 10)',
     'No map textures (2)dod_caen, dod_railroad2_s9a',
   ]);
+  await page.uncheck('.hd-style-maps-every input');
 
   // Every map, as edited (not saved yet): the warning follows.
   await page.check('#hd-maps-every');
