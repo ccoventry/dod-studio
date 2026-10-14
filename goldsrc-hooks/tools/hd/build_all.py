@@ -84,7 +84,7 @@ def main():
 
     patterns = C.map_patterns()
     if patterns is not None and ({"world", "sky"} & set(args.types.split(","))):
-        names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+        names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, C.game_folder(), "maps", "*.bsp")))
         chosen, unused = C.select_maps(names, patterns)
         log(f"=== {C.map_list()}: map textures and skies for {len(chosen)} of {len(names)} map(s)"
             + (f"; matching nothing: {', '.join(unused)}" if unused else ""))
@@ -114,9 +114,9 @@ def main():
         if kind == "world":
             cmd = ["world_hd.py", out, "--all"]
         elif kind == "models":
-            cmd = ["models_hd.py", out, os.path.join(game, "dod", "models"),
+            cmd = ["models_hd.py", out, os.path.join(game, C.game_folder(), "models"),
                    os.path.join(C.HERE, "valve_models.txt")]
-            cmd += [os.path.join(a, "dod", "models") for a in args.also] + args.extra_models
+            cmd += [os.path.join(a, C.game_folder(), "models") for a in args.also] + args.extra_models
         elif kind == "sprites":
             cmd = ["sprites_hd.py", out]
         elif kind == "detail":

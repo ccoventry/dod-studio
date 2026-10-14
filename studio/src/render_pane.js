@@ -2,12 +2,13 @@ import { listen } from '@tauri-apps/api/event';
 import {
   queueRenderBatch,
   startQueuedRender,
-  cancelRenderBatch,
   cancelRenderJob,
   resetRenderJob,
-  resetAllRenderJobs,
   removeRenderJob,
-  removeNonRenderingRenderJobs,
+  cancelRenderJobs,
+  resetRenderJobs,
+  removeRenderJobs,
+  clearRenderQueue,
   setRenderJobCodec,
   getExportPoolFreeGb,
   getRenderRequiredEstimateGb,
@@ -16,6 +17,8 @@ import {
   recoverRenderBatch,
   revealInExplorer,
   writeTextFile,
+  measureTakeFolders,
+  deleteTakeFolders,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
@@ -30,13 +33,25 @@ import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
+import { themedConfirm } from './themed_confirm.js';
+import { createRenderSelection } from './render_selection.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
+// The ticked rows (#70), set up by initRenderUI.
+let selection = null;
 // id:status pairs from the last snapshot Export Pool Free/Required
 // (Estimated) were refreshed against — lets the snapshot listener tell "a
 // job was added/removed/changed status" (worth a refresh) apart from "only
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
+// The rows this batch rendered or tried to (#70): every row seen Rendering
+// or Queued while it runs. The finish toast counts only these, so a take
+// that scanned in as Finished, or was cancelled before Start, isn't
+// reported as rendered by this batch. Emptied when the batch finishes.
+const batchJobIds = new Set();
+// Delete Take (#644), set up by initRenderUI.
+let takeDelete = null;
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
@@ -139,7 +154,7 @@ function initSortableHeaders() {
  * The Actions cell's buttons, as HTML — kept separate from the row template
  * so it can be rebuilt on its own (see `updateJobRow`).
  */
-function actionsCellHtml(j) {
+function actionsCellHtml(j, rowState = {}) {
   let html = '';
   if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) {
     html += `<button class="render-job-cancel-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.CANCEL_JOB_TITLE}">✖</button>`;
@@ -160,6 +175,18 @@ function actionsCellHtml(j) {
     const useOutput = j.status === JOB_STATUS.FINISHED && j.output_path;
     html += `<button class="render-job-reveal-btn" data-job-id="${esc(j.id)}" title="${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_FOLDER_TITLE : STRINGS.RENDER.OPEN_TAKE_FOLDER_TITLE}">${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_BUTTON : STRINGS.RENDER.OPEN_TAKE_FOLDER_BUTTON}</button>`;
   }
+  // #644: off while the take (either half of a HUD pair) is rendering, and
+  // while another delete runs; the backend refuses both too. The tooltip
+  // says which row is the busy one. A queued take stays deletable: the
+  // confirm says its render leaves the queue.
+  if (j.take_folder) {
+    let title = STRINGS.RENDER.DELETE_TAKE_TITLE;
+    if (rowState.deleting) title = STRINGS.RENDER.DELETE_TAKE_RUNNING_TITLE;
+    else if (j.status === JOB_STATUS.RENDERING) title = STRINGS.RENDER.DELETE_TAKE_RENDERING_TITLE;
+    else if (rowState.takeBusy) title = STRINGS.RENDER.DELETE_TAKE_PAIR_RENDERING_TITLE;
+    const disabled = rowState.deleting || rowState.takeBusy ? ' disabled' : '';
+    html += `<button class="render-job-delete-take-btn" data-job-id="${esc(j.id)}" title="${title}"${disabled}>${STRINGS.RENDER.DELETE_TAKE_BUTTON}</button>`;
+  }
   return html;
 }
 
@@ -179,6 +206,12 @@ function wireActionsCell(cell) {
       if (!job) return;
       const target = (job.status === JOB_STATUS.FINISHED && job.output_path) ? job.output_path : job.take_folder;
       if (target) revealInExplorer(target).catch(() => {});
+    });
+  });
+  cell.querySelectorAll('.render-job-delete-take-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const job = jobs.find((j) => j.id === btn.dataset.jobId);
+      if (job?.take_folder) takeDelete?.deleteTakes([job.take_folder]);
     });
   });
   cell.querySelectorAll('.render-job-view-log-btn').forEach((btn) => {
@@ -241,10 +274,11 @@ function formatFileSize(bytes) {
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */
-function createJobRow(j) {
+function createJobRow(j, rowState) {
   const row = document.createElement('tr');
   row.dataset.jobId = j.id;
   row.innerHTML = `
+    <td class="rj-select col-center"><input type="checkbox" class="render-job-select-cb" title="${STRINGS.RENDER.SELECT_ROW_TITLE}" /></td>
     <td class="rj-name"></td>
     <td class="rj-stream"></td>
     <td class="rj-frames"></td>
@@ -256,7 +290,13 @@ function createJobRow(j) {
     <td class="rj-file-size"></td>
     <td class="rj-history"></td>
     <td class="rj-actions"></td>`;
-  updateJobRow(row, j);
+  // The tick is looked up by the job the row shows, not kept on the row:
+  // a sort moves rows and a snapshot patches them, and neither touches it.
+  row.querySelector('.render-job-select-cb').addEventListener('change', (e) => {
+    const job = jobs.find((x) => x.id === row.dataset.jobId);
+    if (job) selection?.setTicked(job, e.target.checked);
+  });
+  updateJobRow(row, j, rowState);
   return row;
 }
 
@@ -273,10 +313,12 @@ function createJobRow(j) {
  * other cell is plain text/style, which is safe to overwrite unconditionally
  * since it never had a click in flight to lose.
  */
-function updateJobRow(row, j) {
+function updateJobRow(row, j, rowState = {}) {
   // Snapshots arrive every scheduler tick while anything renders, and most
-  // rows (queued, finished) haven't changed; skip those outright.
-  const signature = JSON.stringify(j);
+  // rows (queued, finished) haven't changed; skip those outright. The row
+  // state rides along: a HUD pair's other half can change this row's Delete
+  // Take (#644) without this row changing.
+  const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
 
@@ -318,10 +360,10 @@ function updateJobRow(row, j) {
     row.dataset.historyKey = historyKey;
   }
 
-  const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}`;
+  const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}|${!!rowState.takeBusy}|${!!rowState.deleting}`;
   if (actionsKey !== row.dataset.actionsKey) {
     const cell = row.querySelector('.rj-actions');
-    cell.innerHTML = actionsCellHtml(j);
+    cell.innerHTML = actionsCellHtml(j, rowState);
     wireActionsCell(cell);
     row.dataset.actionsKey = actionsKey;
   }
@@ -365,11 +407,14 @@ function renderHistoryCell(row, history) {
 
 function renderJobsTable() {
   updateFooterQueueSummary();
+  // New rows get their default tick, known rows keep theirs (#70).
+  selection?.sync(jobs);
   const tbody = document.querySelector('#render-jobs-tbody');
   if (!tbody) return;
 
   if (jobs.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="11" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="12" class="table-empty">${STRINGS.RENDER.TABLE_EMPTY}</td></tr>`;
+    syncSelectionControls();
     return;
   }
 
@@ -381,25 +426,89 @@ function renderJobsTable() {
 
   const existingRows = new Map();
   tbody.querySelectorAll('tr[data-job-id]').forEach((tr) => existingRows.set(tr.dataset.jobId, tr));
+  const busyTakes = renderingTakeFolders(jobs);
+  const deleting = !!takeDelete?.isRunning();
 
   // Rows are patched in place and only moved when the chosen sort (#40)
   // puts them somewhere else — a move keeps the row's own nodes, buttons
   // included, so a click in flight still lands (#80). With no sort, job
   // order is stable once a batch starts, so nothing ever moves.
   sortJobs(jobs, jobSort).forEach((j, i) => {
+    const rowState = { takeBusy: busyTakes.has(j.take_folder), deleting };
     let row = existingRows.get(j.id);
     if (row) {
       existingRows.delete(j.id);
-      updateJobRow(row, j);
+      updateJobRow(row, j, rowState);
     } else {
-      row = createJobRow(j);
+      row = createJobRow(j, rowState);
     }
+    const cb = row.querySelector('.render-job-select-cb');
+    if (cb) cb.checked = !!selection?.isTicked(j);
     if (tbody.children[i] !== row) tbody.insertBefore(row, tbody.children[i] || null);
   });
   // Anything left in the map is a row for a job id no longer in the
   // snapshot — should not normally happen within a batch, but a leftover
   // stale row would be worse than the cost of checking.
   existingRows.forEach((row) => row.remove());
+  syncSelectionControls();
+}
+
+/**
+ * The selection's own controls (#70): the header tick, the count, and the
+ * footer buttons, which act on the ticked rows and say on how many. Start
+ * waits while anything renders (the scheduler is already running) and
+ * Delete Take folders while a delete runs, like the per-row button.
+ */
+function syncSelectionControls() {
+  if (!selection) return;
+  const { ticked, total } = selection.counts();
+  const targets = selection.targets();
+  const rendering = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
+
+  const allCb = document.querySelector('#render-select-all-cb');
+  if (allCb) {
+    allCb.checked = total > 0 && ticked === total;
+    allCb.indeterminate = ticked > 0 && ticked < total;
+    allCb.disabled = total === 0;
+  }
+  const countEl = document.querySelector('#render-selection-count');
+  if (countEl) countEl.textContent = STRINGS.RENDER.selectedCount(ticked, total);
+  const unrenderedBtn = document.querySelector('#render-select-unrendered-btn');
+  if (unrenderedBtn) unrenderedBtn.disabled = total === 0;
+
+  const setButton = (id, count, label, title, disabled = count === 0) => {
+    const btn = document.querySelector(id);
+    if (!btn) return;
+    btn.textContent = label(count);
+    btn.title = title;
+    btn.disabled = disabled;
+  };
+  const R = STRINGS.RENDER;
+  // Start renders every Queued row, ticked or not (#70).
+  const queued = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
+  setButton('#start-render-btn', queued, R.startRenderBatch,
+    queued ? R.START_RENDER_TITLE : R.START_RENDER_NONE_TITLE,
+    queued === 0 || rendering > 0);
+  setButton('#cancel-render-btn', targets.cancel.length, R.cancelSelected, R.CANCEL_SELECTED_TITLE);
+  setButton('#retry-render-btn', targets.retry.length, R.retrySelected, R.RETRY_SELECTED_TITLE);
+  setButton('#remove-render-btn', targets.remove.length, R.removeSelected, R.REMOVE_SELECTED_TITLE);
+  setButton('#delete-takes-render-btn', targets.deleteFolders.length, R.deleteTakesSelected,
+    R.DELETE_TAKES_SELECTED_TITLE, targets.deleteFolders.length === 0 || !!takeDelete?.isRunning());
+  const clearBtn = document.querySelector('#clear-render-queue-btn');
+  if (clearBtn) clearBtn.disabled = total === 0;
+}
+
+/** Delete Take's bar (#644): which step, and takes done of total. */
+function showTakeDeleteProgress(progress) {
+  const wrap = document.querySelector('#render-take-delete-progress');
+  if (!wrap) return;
+  wrap.style.display = progress ? 'flex' : 'none';
+  if (!progress) return;
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  const fill = wrap.querySelector('.progress-bar-fill');
+  if (fill) fill.style.width = `${pct}%`;
+  const label = wrap.querySelector('#render-take-delete-progress-label');
+  if (label) label.textContent = progressLine(progress.step, progress.done, progress.total);
 }
 
 function initErrorLogModal() {
@@ -509,9 +618,19 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const scanRenderBtn = document.querySelector('#scan-render-btn');
   const startRenderBtn = document.querySelector('#start-render-btn');
   const cancelRenderBtn = document.querySelector('#cancel-render-btn');
-  const resetAllRenderBtn = document.querySelector('#reset-all-render-btn');
-  const removeAllRenderBtn = document.querySelector('#remove-all-render-btn');
+  const retryRenderBtn = document.querySelector('#retry-render-btn');
+  const removeRenderBtn = document.querySelector('#remove-render-btn');
+  const deleteTakesRenderBtn = document.querySelector('#delete-takes-render-btn');
+  const clearQueueBtn = document.querySelector('#clear-render-queue-btn');
   const renderStatusEl = document.querySelector('#render-status');
+
+  // #70: a tick change repaints the rows' boxes and the buttons; the ticks
+  // themselves follow each snapshot in the listener below.
+  selection = createRenderSelection({ getJobs: () => jobs, onChange: () => renderJobsTable() });
+  document.querySelector('#render-select-all-cb')?.addEventListener('change', (e) => {
+    if (e.target.checked) selection.selectAll(); else selection.selectNone();
+  });
+  document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
@@ -521,6 +640,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
+  takeDelete = createTakeDelete({
+    measure: measureTakeFolders,
+    remove: deleteTakeFolders,
+    confirm: themedConfirm,
+    showToast,
+    formatSize: formatFileSize,
+    showProgress: showTakeDeleteProgress,
+    onBusyChange: () => renderJobsTable(),
+    listen,
+    getJobs: () => jobs,
+  });
 
   // A take finishing renders — advances every highlight the take index says
   // fed that take_key to Rendered. The take index is what makes this work
@@ -569,14 +699,16 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   });
 
   // Real-time per-job state, pushed by the backend scheduler. This is the
-  // single source of truth for whether a batch is actually running — driving
-  // Start/Cancel off it (rather than only off the Start button's own click
-  // handler and render_batch_finished) matters because reset_render_job can
-  // resume the scheduler on its own, bypassing both of those. Without this,
-  // Start Render Batch stayed clickable during a reset-triggered resume and
-  // just repeatedly failed with "Render batch already in progress".
+  // single source of truth for whether a batch is actually running — Start
+  // and Cancel follow it rather than only the Start click and
+  // render_batch_finished.
   listen('render_jobs_snapshot', (event) => {
     jobs = event.payload || [];
+    if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
+      for (const j of jobs) {
+        if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
+      }
+    }
     renderJobsTable();
     const queuedCount = jobs.filter((j) => j.status === JOB_STATUS.QUEUED).length;
     const renderingCount = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
@@ -586,19 +718,11 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         ? STRINGS.RENDER.renderingStatus(jobs.length - activeOrQueued, jobs.length)
         : (queuedCount > 0 ? STRINGS.RENDER.scanCompleteStatus(queuedCount) : STRINGS.RENDER.STATUS_WAITING);
     }
-    // Start only makes sense on a staged-but-not-started batch: something
-    // Queued, and nothing already Rendering. Scan is blocked for the same
-    // window so a re-scan can't clobber jobs the user may have already
-    // toggled Skip on — see queue_render_batch's own guard against this.
+    // Scan is blocked while anything is Queued or Rendering so a re-scan
+    // can't clobber jobs the user may have already toggled Skip on — see
+    // queue_render_batch's own guard against this. Start and the other
+    // footer buttons follow the ticked rows (renderJobsTable above).
     if (scanRenderBtn) scanRenderBtn.disabled = activeOrQueued > 0;
-    if (startRenderBtn) startRenderBtn.disabled = !(queuedCount > 0 && renderingCount === 0);
-    if (cancelRenderBtn) cancelRenderBtn.disabled = activeOrQueued === 0;
-    // Mirror each bulk button's per-row equivalent: Reset All wants at least
-    // one Cancelled/Finished/Error row, Remove All wants at least one row
-    // that isn't actively Rendering.
-    const resettableCount = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR).length;
-    if (resetAllRenderBtn) resetAllRenderBtn.disabled = resettableCount === 0;
-    if (removeAllRenderBtn) removeAllRenderBtn.disabled = jobs.length - renderingCount === 0;
 
     // Export Pool Free / Required (Estimated) only change when a job is
     // added, removed, or crosses a status boundary (started, finished,
@@ -613,24 +737,24 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   });
 
   listen('render_batch_finished', () => {
-    if (scanRenderBtn) scanRenderBtn.disabled = false;
-    if (startRenderBtn) startRenderBtn.disabled = true;
-    if (cancelRenderBtn) cancelRenderBtn.disabled = true;
-    const resettableCount = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED || j.status === JOB_STATUS.FINISHED || j.status === JOB_STATUS.ERROR).length;
-    if (resetAllRenderBtn) resetAllRenderBtn.disabled = resettableCount === 0;
-    if (removeAllRenderBtn) removeAllRenderBtn.disabled = jobs.length === 0;
+    // A row that was Retried during the batch is still Queued, so Scan stays
+    // blocked and Start comes back for it; the buttons follow the ticks.
+    if (scanRenderBtn) scanRenderBtn.disabled = jobs.some((j) => j.status === JOB_STATUS.QUEUED);
+    syncSelectionControls();
     // Counted, not `some()`. The old check asked "was anything cancelled?"
     // before "did anything finish?", so one cancelled job in a batch of any
     // size reported the whole batch as cancelled — including the common case
     // of cancelling the takes you did not want and letting the rest run, where
     // it read as though nothing had rendered at all.
-    const finished = jobs.filter((j) => j.status === JOB_STATUS.FINISHED).length;
-    const failed = jobs.filter((j) => j.status === JOB_STATUS.ERROR).length;
-    const cancelled = jobs.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
+    const batch = jobs.filter((j) => batchJobIds.has(j.id));
+    batchJobIds.clear();
+    const finished = batch.filter((j) => j.status === JOB_STATUS.FINISHED).length;
+    const failed = batch.filter((j) => j.status === JOB_STATUS.ERROR).length;
+    const cancelled = batch.filter((j) => j.status === JOB_STATUS.CANCELLED).length;
 
     // A batch the finish step (#440) queued has already said how it ended, in
     // its own words ("12 clips ready") — a second toast would repeat it.
-    if (jobs.length > 0 && !finishClipsOwnsJobs(jobs)) {
+    if (batch.length > 0 && !finishClipsOwnsJobs(jobs)) {
       // Severity follows what actually happened rather than what is present:
       // a deliberate partial cancel where the rest rendered is a success, not
       // an "info" event. Only a real failure is an error.
@@ -728,8 +852,14 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
     });
   }
 
+  // The footer buttons act on the ticked rows (#70). Each one is off until
+  // the next snapshot repaints it, so a double click can't send twice; on a
+  // refusal the buttons are repainted from the rows as they are.
   if (startRenderBtn) {
     startRenderBtn.addEventListener('click', () => {
+      if (!jobs.some((j) => j.status === JOB_STATUS.QUEUED)) return;
+      // A batch of Skip copies can end before any snapshot shows Rendering.
+      for (const j of jobs) if (j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
       showToast(STRINGS.RENDER.INITIALIZING_RENDER_BATCH, 'info');
       startRenderBtn.disabled = true;
       if (cancelRenderBtn) cancelRenderBtn.disabled = false;
@@ -740,39 +870,71 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         })
         .catch((err) => {
           showToast(STRINGS.RENDER.renderBatchError(err), 'error');
-          if (startRenderBtn) startRenderBtn.disabled = false;
-          if (cancelRenderBtn) cancelRenderBtn.disabled = true;
+          syncSelectionControls();
         });
     });
   }
 
   if (cancelRenderBtn) {
     cancelRenderBtn.addEventListener('click', () => {
+      const ids = selection.targets().cancel;
+      if (!ids.length) return;
       showToast(STRINGS.RENDER.CANCELLING_RENDER_BATCH, 'info');
       cancelRenderBtn.disabled = true;
-      cancelRenderBatch().catch((err) => {
-        console.error('IPC Execution Error (cancelRenderBatch):', err);
-        if (startRenderBtn) startRenderBtn.disabled = false;
+      cancelRenderJobs(ids).catch((err) => {
+        console.error('IPC Execution Error (cancelRenderJobs):', err);
+        syncSelectionControls();
       });
     });
   }
 
-  if (resetAllRenderBtn) {
-    resetAllRenderBtn.addEventListener('click', () => {
-      resetAllRenderBtn.disabled = true;
-      resetAllRenderJobs().catch((err) => {
-        console.error('IPC Execution Error (resetAllRenderJobs):', err);
-        resetAllRenderBtn.disabled = false;
+  if (retryRenderBtn) {
+    retryRenderBtn.addEventListener('click', () => {
+      const ids = selection.targets().retry;
+      if (!ids.length) return;
+      retryRenderBtn.disabled = true;
+      resetRenderJobs(ids).catch((err) => {
+        console.error('IPC Execution Error (resetRenderJobs):', err);
+        syncSelectionControls();
       });
     });
   }
 
-  if (removeAllRenderBtn) {
-    removeAllRenderBtn.addEventListener('click', () => {
-      removeAllRenderBtn.disabled = true;
-      removeNonRenderingRenderJobs().catch((err) => {
-        console.error('IPC Execution Error (removeNonRenderingRenderJobs):', err);
-        removeAllRenderBtn.disabled = false;
+  if (removeRenderBtn) {
+    removeRenderBtn.addEventListener('click', () => {
+      const ids = selection.targets().remove;
+      if (!ids.length) return;
+      removeRenderBtn.disabled = true;
+      removeRenderJobs(ids).catch((err) => {
+        console.error('IPC Execution Error (removeRenderJobs):', err);
+        syncSelectionControls();
+      });
+    });
+  }
+
+  if (deleteTakesRenderBtn) {
+    deleteTakesRenderBtn.addEventListener('click', () => {
+      const folders = selection.targets().deleteFolders;
+      if (folders.length) takeDelete?.deleteTakes(folders);
+    });
+  }
+
+  // Clear Queue: the whole list goes. With renders running, ask first; the
+  // backend stops them and empties the list once they have stopped.
+  if (clearQueueBtn) {
+    clearQueueBtn.addEventListener('click', async () => {
+      const rendering = jobs.filter((j) => j.status === JOB_STATUS.RENDERING).length;
+      if (rendering > 0) {
+        const ok = await themedConfirm(STRINGS.RENDER.clearQueueConfirmMessage(rendering), {
+          title: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_TITLE,
+          confirmLabel: STRINGS.RENDER.CLEAR_QUEUE_CONFIRM_BUTTON,
+        });
+        if (!ok) return;
+      }
+      clearQueueBtn.disabled = true;
+      clearRenderQueue().catch((err) => {
+        showToast(STRINGS.RENDER.renderBatchError(err), 'error');
+        syncSelectionControls();
       });
     });
   }
@@ -816,4 +978,5 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // takes over from here, refreshing on every add/remove/status change
   // instead of blindly polling.
   refreshExportPoolFree(getExportDirs);
+  syncSelectionControls();
 }

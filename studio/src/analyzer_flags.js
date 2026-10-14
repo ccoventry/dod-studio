@@ -1,10 +1,10 @@
 // analyzer_flags.js
 // The Demo Analyzer's Flags tab (#192): what the analysis already reads about
 // the flags (analysis::objective) shown for the first time. Per team:
-// captures, how many were breaks (a flag the other team held), and the
-// capture attempts it blocked; per flag: who holds it at the end and how
-// often it changed hands; every capture with its cappers; and each player's
-// capture credits and objective points.
+// captures, how many were taken from the other team, and the capture
+// attempts it blocked; per flag: who holds it at the end and how often it
+// changed hands; every capture with its cappers; and each player's capture
+// credits, cap breaks (enemy captures they stopped) and objective points.
 //
 // The summary is pure (flagSummary) so it can be tested on its own; the tab
 // takes analyzer_pane.js's own helpers rather than importing them.
@@ -27,8 +27,11 @@ export function flagLabel(name, map) {
   return words.split('_').filter(Boolean).map((w) => w[0] + w.slice(1).toLowerCase()).join(' ');
 }
 
-/** A capture of a flag the other side held (analysis's `is_break`). */
-export function isBreak(capture) {
+/**
+ * A capture of a flag the other side held (analysis's `taken_from_enemy`).
+ * Not a break: the league's breaks are stopped captures, `cap_breaks` (#192).
+ */
+export function takenFromEnemy(capture) {
   const from = side(capture.previous_owner);
   const to = side(capture.team);
   return Boolean(from && to && from !== to);
@@ -43,14 +46,14 @@ export function flagSummary(state, map = null) {
   const captures = objectives.captures || [];
   const attempts = objectives.attempts || [];
   const names = new Map((state?.players || []).map((p) => [p.id, p.name]));
-  const team = () => ({ captures: 0, breaks: 0, blocks: 0, attempts: 0 });
+  const team = () => ({ captures: 0, fromEnemy: 0, blocks: 0, attempts: 0 });
   const teams = { allied: team(), axis: team() };
 
   for (const c of captures) {
     const s = side(c.team);
     if (!s) continue;
     teams[s].captures += 1;
-    if (isBreak(c)) teams[s].breaks += 1;
+    if (takenFromEnemy(c)) teams[s].fromEnemy += 1;
   }
   for (const a of attempts) {
     const s = side(a.team);
@@ -81,14 +84,14 @@ export function flagSummary(state, map = null) {
     time: c.time,
     flag: flagLabel(c.flag_name, map),
     team: c.team,
-    brk: isBreak(c),
+    fromEnemy: takenFromEnemy(c),
     cappers: [c.capper, ...(c.co_cappers || [])].filter(Boolean).map((id) => names.get(id) || id),
   }));
 
   const players = (state?.players || [])
-    .filter((p) => (p.cap_credits || 0) > 0 || (p.obj_points || 0) > 0)
-    .map((p) => ({ name: p.name, team: p.team, caps: p.cap_credits || 0, points: p.obj_points || 0 }))
-    .sort((a, b) => b.caps - a.caps || b.points - a.points || a.name.localeCompare(b.name));
+    .filter((p) => (p.cap_credits || 0) > 0 || (p.cap_breaks || 0) > 0 || (p.obj_points || 0) > 0)
+    .map((p) => ({ name: p.name, team: p.team, caps: p.cap_credits || 0, breaks: p.cap_breaks || 0, points: p.obj_points || 0 }))
+    .sort((a, b) => b.caps - a.caps || b.breaks - a.breaks || b.points - a.points || a.name.localeCompare(b.name));
 
   return { teams, flags, captures: rows, players };
 }
@@ -113,7 +116,7 @@ export function renderFlagsTab(container, report, h) {
       <div class="analyzer-stat-card">
         <div class="stat-title">${dot(teamName)} ${h.esc(h.teamLabel(teamName, british))}</div>
         <div class="stat-value">${t.captures}</div>
-        <div class="stat-badge text-muted">${A.flagsTeamBadge(t.captures, t.breaks, t.blocks, t.attempts)}</div>
+        <div class="stat-badge text-muted">${A.flagsTeamBadge(t.captures, t.fromEnemy, t.blocks, t.attempts)}</div>
       </div>`;
   };
 
@@ -130,7 +133,7 @@ export function renderFlagsTab(container, report, h) {
       <td>${h.formatMMSS(h.durSecs(c.time.viewdemo_offset))}</td>
       <td>${h.esc(c.flag)}</td>
       <td>${dot(c.team)} ${h.esc(h.teamLabel(c.team, british))}</td>
-      <td>${c.brk ? A.FLAGS_BREAK : ''}</td>
+      <td>${c.fromEnemy ? A.FLAGS_FROM_ENEMY : ''}</td>
       <td>${h.esc(c.cappers.join(', ') || A.EMPTY_DASH)}</td>
     </tr>`).join('');
 
@@ -138,6 +141,7 @@ export function renderFlagsTab(container, report, h) {
     <tr>
       <td>${dot(p.team)} ${h.esc(p.name)}</td>
       <td style="text-align:right;">${p.caps}</td>
+      <td style="text-align:right;">${p.breaks}</td>
       <td style="text-align:right;">${p.points}</td>
     </tr>`).join('');
 
@@ -166,8 +170,8 @@ export function renderFlagsTab(container, report, h) {
         <h4 class="analyzer-section-title">${A.CAPPERS_TITLE}</h4>
         <div class="table-wrapper">
           <table class="analyzer-table">
-            <thead><tr><th>${A.COL_PLAYER}</th><th style="text-align:right;" title="${A.COL_CAP_CREDITS_TITLE}">${A.COL_CAP_CREDITS}</th><th style="text-align:right;" title="${A.COL_OBJ_POINTS_TITLE}">${A.COL_OBJ_POINTS}</th></tr></thead>
-            <tbody>${playerRows || `<tr><td colspan="3" class="table-empty">${A.FLAGS_NO_CAPTURES}</td></tr>`}</tbody>
+            <thead><tr><th>${A.COL_PLAYER}</th><th style="text-align:right;" title="${A.COL_CAP_CREDITS_TITLE}">${A.COL_CAP_CREDITS}</th><th style="text-align:right;" title="${A.COL_CAP_BREAKS_TITLE}">${A.COL_CAP_BREAKS}</th><th style="text-align:right;" title="${A.COL_OBJ_POINTS_TITLE}">${A.COL_OBJ_POINTS}</th></tr></thead>
+            <tbody>${playerRows || `<tr><td colspan="4" class="table-empty">${A.FLAGS_NO_CAPTURES}</td></tr>`}</tbody>
           </table>
         </div>
       </div>
