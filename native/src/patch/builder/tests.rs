@@ -173,6 +173,93 @@ fn test_build_batch_queue_merging() {
 }
 
 #[test]
+fn the_primer_is_played_only_without_the_hook_dll() {
+    assert!(plays_primer(false));
+    assert!(!plays_primer(true));
+}
+
+/// Two demos, one clip each, with `init_commands` set; `hook_dll` points the
+/// config at a stand-in DLL file, which is all `goldsrc_hooks_dll()` checks.
+fn primer_case(hook_dll: bool) -> (PatcherConfig, Vec<PatchJob>, String) {
+    let mut config = mock_config();
+    let root = config.primary_media_dir.clone().unwrap();
+    let dll = root.join("dodstudio_goldsrc_hooks.dll");
+    if hook_dll {
+        std::fs::write(&dll, b"x").unwrap();
+        config.goldsrc_hooks_dll_path = Some(dll.to_string_lossy().to_string());
+    }
+    config.init_commands = vec!["brightness 2".to_string()];
+    let mut second_demo = streak_with_kills(1000, 1200, &[1000, 1200]);
+    second_demo.source_demo = "demo2.dem".to_string();
+    let raw_streaks = vec![streak_with_kills(1000, 1200, &[1000, 1200]), second_demo];
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let cfg = std::fs::read_to_string(root.join("dod").join("dodstudio_helper.cfg")).unwrap();
+    (config, jobs, cfg)
+}
+
+/// With the hook DLL the game starts on dodstudio_chain_01 directly (#365),
+/// which carries the init commands and `sys_autodir` the primer used to.
+#[test]
+fn with_the_hook_dll_the_batch_has_no_primer_and_chain_01_comes_first() {
+    let (config, jobs, cfg) = primer_case(true);
+    assert!(config.goldsrc_hooks_dll().is_some());
+    assert_eq!(jobs.len(), 2, "one job per demo, no primer");
+    assert!(jobs.iter().all(|j| !j.blocks.is_empty()));
+    assert!(
+        jobs[0].output_demo.ends_with("dodstudio_chain_01.dem"),
+        "{:?}",
+        jobs[0].output_demo
+    );
+    assert!(jobs[1].output_demo.ends_with("dodstudio_chain_02.dem"));
+    for wanted in ["brightness 2", "sys_autodir"] {
+        assert!(
+            jobs[0].init_commands.iter().any(|c| c == wanted),
+            "{wanted} missing from {:?}",
+            jobs[0].init_commands
+        );
+    }
+    assert!(
+        jobs[0]
+            .scheduled_commands
+            .iter()
+            .any(|(_, c)| c.contains("DEMO_START 1 2 1"))
+    );
+    assert!(!cfg.contains("primer"), "{cfg}");
+    assert!(
+        cfg.contains("alias dodstudio_chain_01_next \"playdemo dodstudio_chain_02\""),
+        "{cfg}"
+    );
+}
+
+/// Without the hook DLL the batch is as before: the primer first, chaining to
+/// dodstudio_chain_01 after `PRIMER_DELAY_TICKS`.
+#[test]
+fn without_the_hook_dll_the_primer_comes_first() {
+    let (config, jobs, cfg) = primer_case(false);
+    assert!(config.goldsrc_hooks_dll().is_none());
+    assert_eq!(jobs.len(), 3, "primer + one job per demo");
+    assert!(jobs[0].output_demo.ends_with("dodstudio_primer.dem"));
+    assert!(jobs[0].blocks.is_empty());
+    assert_eq!(
+        jobs[0].init_commands,
+        ["brightness 2".to_string(), "sys_autodir".to_string()]
+    );
+    assert_eq!(
+        jobs[0].scheduled_commands,
+        [(
+            crate::patch::PRIMER_DELAY_TICKS,
+            "dodstudio_primer_next".to_string()
+        )]
+    );
+    assert!(jobs[1].output_demo.ends_with("dodstudio_chain_01.dem"));
+    assert!(
+        cfg.contains("alias dodstudio_primer_next \"playdemo dodstudio_chain_01\""),
+        "{cfg}"
+    );
+}
+
+#[test]
 fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
     let mut config = PatcherConfig::default();
     let game = std::env::temp_dir().join("dod_test_ff_speed_helper_cfg");

@@ -309,7 +309,8 @@ before launch; no file, no test -- no `hl.exe` is
 already running, and the install is one of the two movie installs. See the
 script's docstring for the steps and flags; `--check` runs only the refusal
 checks. `--at-launch` starts the demo from the launch command line, as a
-capture batch starts its primer, which matters for first-demo bugs (#546).
+capture batch without the hook DLL starts its primer, which matters for
+first-demo bugs (#546).
 
 ## Status
 

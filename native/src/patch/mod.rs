@@ -97,6 +97,8 @@ pub const EVENT_FRAME_SIZE: usize = 84;
 
 // Command Injection Logic
 pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
+/// How long the primer demo plays before `playdemo dodstudio_chain_01`. Only a
+/// batch launched without the hook DLL has a primer (#365).
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
 /// Upper bound on the size of a `NetworkMessage` frame the decal passes will
