@@ -53,6 +53,9 @@ pub mod demo_rename;
 /// `viewdemo` can play from it in place (#376).
 #[cfg(windows)]
 pub mod demo_links;
+/// Which match and half each demo of a list is (#685).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod match_groups;
 
 /// Launch Preview without patching (#434, step 2).
 #[cfg(not(target_arch = "wasm32"))]

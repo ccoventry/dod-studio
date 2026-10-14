@@ -13,6 +13,7 @@ mod hd_manager;
 mod hook_batch;
 mod manifest_file;
 mod map_manager;
+mod match_group_cmd;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
@@ -83,13 +84,17 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
         // would put the launch and every file Studio writes somewhere other
         // than beside hl.exe (#402).
         native::shared::paths::validate_game_folder(&settings.game_folder)?;
+        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        // The frontend doesn't carry this field; the loaded value stands, or a
+        // migration would run again at every start.
+        settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
-        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
         *guard = settings;
         Ok(())
     }))
@@ -694,6 +699,7 @@ pub fn run() {
         .manage(demo_split_manager::DemoSplitManager::default())
         .manage(combine_manager::CombineManager::default())
         .manage(demo_rename_manager::DemoRenameManager::default())
+        .manage(match_group_cmd::MatchGroupManager::default())
         .manage(hd_manager::HdManager::default())
         .manage(blender_manager::BlenderManager::default())
         .manage(updater_manager::UpdaterState::default())
@@ -803,6 +809,8 @@ pub fn run() {
             demo_rename_manager::demo_rename_apply,
             demo_rename_manager::demo_rename_undo,
             demo_rename_manager::demo_rename_undoable,
+            match_group_cmd::queue_match_groups,
+            match_group_cmd::queue_match_groups_cancel,
             reveal_in_explorer,
             dir_browser::browse_directory,
             dir_browser::default_browse_dir,
