@@ -319,7 +319,7 @@ fn default_update_channel() -> String {
 }
 /// Keep in step with `DEFAULT_TEMPLATE` in `studio/src/clip_name.js`.
 fn default_clip_name_template() -> String {
-    "{map}_{player}_{kills}k_{weapons}_{time}".to_string()
+    "{map}_{name}_{kills}k_{weapons}_{time}".to_string()
 }
 /// Keep in step with `DEFAULT_POV_TEMPLATE` in `studio/src/demo_rename.js`.
 fn default_demo_rename_pov_template() -> String {
