@@ -79,21 +79,24 @@ pub(super) const SOUND_FLUSH_LEAD_SECONDS: f32 = 1.0;
 /// next one's start. Two highlights closer than this are merged into a single
 /// take rather than risking a stop/start cycle that tight.
 ///
-/// This is a deliberately conservative guard, not a measured threshold — how
-/// long HLAE needs to finalise a take (flush the BMP sequence, write the WAV)
-/// before accepting a new one isn't something the demo side can observe. The
-/// failure it guards against is a take landing without its audio, which is
-/// exactly the "captured but not renderable" case take verification reports.
-/// Merging instead costs a second of connective footage inside one clip, which
-/// is a far cheaper outcome than a silent take.
-pub const MIN_TAKE_SEPARATION_SECONDS: f32 = 1.0;
+/// Measured on the pre-Anniversary build (#9): after `mirv_recordmovie_stop`
+/// on a 2 s 720p take, HLAE spends about 0.28 s of wall time finalising it
+/// (closing the frame files, writing the WAV) inside one engine frame, and
+/// since the engine is back on real time once recording stops, that frame
+/// moves the demo clock by the same amount. A next take asked for sooner
+/// starts late and loses the frames in between: 0.25 s lost 1 frame, 0.1 s
+/// lost 6, each with its audio cut short. From 0.5 s up nothing was lost.
+///
+/// 0.5 s rather than the ~0.3 s floor because finalising grows with the take
+/// (a longer `sound.wav`, more files to close) and with a slower disk, and the
+/// cost of being wrong is a short take, while the cost of merging is half a
+/// second of connective footage inside one clip.
+pub const MIN_TAKE_SEPARATION_SECONDS: f32 = 0.5;
 
 /// The separation this batch's capture mode actually needs.
 ///
-/// `MIN_TAKE_SEPARATION_SECONDS` above is HLAE's, and was a deliberately
-/// conservative guess because the demo side cannot observe how long HLAE takes
-/// to finalise a take. The OBS figure is not a guess — it is measured, and it
-/// is larger — so the mode has to choose.
+/// `MIN_TAKE_SEPARATION_SECONDS` above is HLAE's. The OBS figure is measured
+/// separately, and is larger, so the mode has to choose.
 ///
 /// Public so `find_overlaps` and the tests ask the same question the merge loop
 /// does, rather than re-deriving it and drifting.

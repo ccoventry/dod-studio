@@ -70,7 +70,8 @@ fn test_build_batch_queue_merging() {
             status: Default::default(),
         },
         CaptureStreak {
-            start_tick: 1300,
+            // 0.4s after the first ends: inside the 0.5s take separation.
+            start_tick: 1240,
             end_tick: 1500,
             source_demo: "demo1.dem".to_string(),
             target_player: None,
@@ -138,7 +139,7 @@ fn test_build_batch_queue_merging() {
     );
     assert_eq!(job.streaks.len(), 2);
     assert_eq!(job.streaks[0].start_tick, 1000);
-    assert_eq!(job.streaks[0].end_tick, 1500); // Merged 1000-1200 and 1300-1500
+    assert_eq!(job.streaks[0].end_tick, 1500); // Merged 1000-1200 and 1240-1500
     assert_eq!(job.streaks[1].start_tick, 2000);
     assert_eq!(job.streaks[1].end_tick, 2200);
 
@@ -1040,7 +1041,7 @@ fn test_merged_block_records_through_the_absorbed_highlights_last_kill() {
     let config = mock_config();
     let raw_streaks = vec![
         streak_with_kills(1000, 1200, &[1000, 1200]),
-        streak_with_kills(1300, 1500, &[1300, 1500]),
+        streak_with_kills(1240, 1500, &[1240, 1500]),
     ];
 
     let (jobs, _) =
@@ -1545,7 +1546,7 @@ fn test_anything_below_the_maximum_still_pins() {
 
 #[test]
 fn test_colliding_rolls_keep_separate_takes_without_fast_forwarding_between() {
-    // Recordings are 2s apart (200 ticks @ 100fps): clear of the 1s
+    // Recordings are 2s apart (200 ticks @ 100fps): clear of the 0.5s
     // separation guard so they stay two takes, but inside the 2.6s the
     // pre-roll and post-roll need, so the fast-forward round trip between
     // them can't fit and is dropped instead of collapsing the two
@@ -1600,13 +1601,13 @@ fn test_colliding_rolls_keep_separate_takes_without_fast_forwarding_between() {
 
 #[test]
 fn test_takes_too_close_together_are_merged_rather_than_restarted() {
-    // Only 0.5s (50 ticks @ 100fps) between one recording stopping and the
-    // next starting — under MIN_TAKE_SEPARATION_SECONDS, so they merge
-    // instead of risking a stop/start cycle that tight.
+    // Only 0.4s (40 ticks @ 100fps) between one recording stopping and the
+    // next starting — under MIN_TAKE_SEPARATION_SECONDS (0.5s), so they merge
+    // instead of a restart HLAE would start late, losing frames (#9).
     let config = mock_config();
     let raw_streaks = vec![
         streak_with_kills(1000, 1200, &[1000, 1200]),
-        streak_with_kills(1250, 1400, &[1250, 1400]),
+        streak_with_kills(1240, 1400, &[1240, 1400]),
     ];
 
     let (jobs, _) =
@@ -1617,6 +1618,27 @@ fn test_takes_too_close_together_are_merged_rather_than_restarted() {
     assert_eq!(job.blocks[0].source_streak_indices, vec![0, 1]);
     assert_eq!(ticks_for(job, "sys_record_start").len(), 1);
     assert_eq!(ticks_for(job, "sys_record_stop").len(), 1);
+}
+
+#[test]
+fn test_takes_just_past_the_separation_stay_separate() {
+    // 0.6s (60 ticks @ 100fps) between takes: past the 0.5s guard, so two
+    // takes. HLAE lost nothing restarting 0.5s after a stop (#9).
+    let config = mock_config();
+    let raw_streaks = vec![
+        streak_with_kills(1000, 1200, &[1000, 1200]),
+        streak_with_kills(1260, 1400, &[1260, 1400]),
+    ];
+
+    let (jobs, _) =
+        build_batch_queue(raw_streaks, &config, &std::collections::HashMap::new()).unwrap();
+    let job = &jobs[1];
+
+    assert_eq!(job.streaks.len(), 2, "far enough apart for two takes");
+    assert_eq!(job.blocks[0].source_streak_indices, vec![0]);
+    assert_eq!(job.blocks[1].source_streak_indices, vec![1]);
+    assert_eq!(ticks_for(job, "sys_record_start").len(), 2);
+    assert_eq!(ticks_for(job, "sys_record_stop").len(), 2);
 }
 
 #[test]

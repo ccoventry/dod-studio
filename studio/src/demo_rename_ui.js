@@ -5,7 +5,8 @@
 // native::demo_rename, which refuses anything but a plain rename in place.
 
 import { listen } from '@tauri-apps/api/event';
-import { MODIFIERS } from './clip_name.js';
+import { placeholderDescription } from './placeholder_catalogue.js';
+import { renderPlaceholderChips } from './placeholder_chips.js';
 import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, WITH_FALLBACK, placeholdersFor,
   parseDemoTemplate, demoValues, planRenames, renamePairs, listProgressView,
@@ -114,20 +115,15 @@ function chipType() {
   return chipTarget?.id === 'rename-hltv-template' ? 'hltv' : 'pov';
 }
 
-/** The | chip reads "|fallback" but inserts a bare |, for the word to follow. */
-function fallbackChip(button) {
-  button.textContent = '|fallback';
-  return button;
-}
-
 let chipsKey = null;
 function renderChips() {
   const box = $('#rename-chips');
   if (!box) return;
-  // Every placeholder, always in the same place, one row per group
-  // (DEMO_PLACEHOLDER_GROUPS) and a Format row for the modifiers; the ones
-  // the focused template's demo type doesn't have are greyed out and say
-  // why. Each shows its value for the first demo of that type.
+  // Every placeholder, always in the same place, one row per group of the
+  // catalogue the clip name shares (#751) and a Format row for the
+  // modifiers; the ones the focused template's demo type doesn't have are
+  // greyed out and say why. Each shows its value for the first demo of
+  // that type.
   const type = chipType();
   const first = facts.find((f) => !f.error && (f.demo_type === 'hltv' ? 'hltv' : 'pov') === type);
   const values = first ? demoValues(first, getProjectTeams()) : null;
@@ -135,39 +131,16 @@ function renderChips() {
   if (key === chipsKey && box.childElementCount) return;
   chipsKey = key;
   const D = STRINGS.DEMO_RENAME;
-  const chip = (text, title, usable = true) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'rename-chip';
-    b.textContent = text;
-    b.title = title;
-    b.disabled = !usable;
-    // Keeps the cursor in the field (see clip_name_ui.js).
-    b.addEventListener('mousedown', (e) => e.preventDefault());
-    b.addEventListener('click', () => insertAtCursor(text));
-    return b;
-  };
-  const usable = new Set(placeholdersFor(type));
-  const row = (key, chips) => {
-    const label = document.createElement('span');
-    label.className = 'rename-chip-group-label';
-    label.textContent = D.GROUPS[key];
-    const list = document.createElement('div');
-    list.className = 'rename-chip-group';
-    list.dataset.group = key;
-    list.append(...chips);
-    return [label, list];
-  };
-  box.replaceChildren(
-    ...DEMO_PLACEHOLDER_GROUPS.flatMap((g) => row(g.key, g.names.map((name) => (usable.has(name)
-      ? chip(`{${name}}`, D.chipTitle(D.DESCRIPTIONS[name], values?.[name])
-        + (WITH_FALLBACK.has(name) ? ` ${D.noValueNote(name)}` : ''))
-      : chip(`{${name}}`, D.povOnly(`{${name}}`), false))))),
-    ...row('format', [
-      ...MODIFIERS.map((m) => chip(`:${m}`, D.DESCRIPTIONS[m])),
-      fallbackChip(chip('|', D.fallbackTitle(DEMO_PLACEHOLDERS.filter((n) => WITH_FALLBACK.has(n)).map((n) => `{${n}}`).join(' ')))),
-    ]),
-  );
+  renderPlaceholderChips(box, {
+    groups: DEMO_PLACEHOLDER_GROUPS,
+    titleFor: (name) => D.chipTitle(placeholderDescription('demo', name), values?.[name])
+      + (WITH_FALLBACK.has(name) ? ` ${STRINGS.PLACEHOLDERS.noValueNote(name)}` : ''),
+    usable: new Set(placeholdersFor(type)),
+    unusableTitle: (name) => D.povOnly(`{${name}}`),
+    fallbackNames: DEMO_PLACEHOLDERS,
+    chipClass: 'rename-chip',
+    onInsert: insertAtCursor,
+  });
 }
 
 function statusNote(row) {

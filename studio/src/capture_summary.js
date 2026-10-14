@@ -12,7 +12,10 @@ import { STRINGS } from './strings.js';
  * Start Capture Batch disabled.
  *
  * `setup`: `{ mode, codecLabel, obsFps, agrFps, width, height, fps,
- * scheduledCount, bannedCount, decalFlush, destinations }`.
+ * commandProfile, scheduledCount, bannedCount, decalFlush, finish,
+ * destinations }`, where `commandProfile` is `{ name, edited }` (name empty
+ * when the lists are on no profile) and `finish` is `{ enabled, codecLabel }`
+ * for the "When a batch finishes" step.
  */
 export function summaryParts(setup) {
   const s = STRINGS.CAPTURE_SUMMARY;
@@ -33,6 +36,15 @@ export function summaryParts(setup) {
       field: '#config-res-width',
     });
   }
+  // The command profile the lists came from, and whether they were edited
+  // since (command_profiles.js's profileState decides both).
+  const profile = setup.commandProfile || {};
+  parts.push({
+    key: 'commands',
+    text: profile.name ? s.commands(profile.name, !!profile.edited) : s.COMMANDS_NONE,
+    tab: 'tab-custom-commands',
+    field: '#command-profile-select',
+  });
   if (setup.bannedCount > 0) {
     parts.push({
       key: 'banned',
@@ -54,6 +66,17 @@ export function summaryParts(setup) {
     tab: 'tab-pipeline',
     field: '#config-decal-flush',
   });
+  // What the finish step (#440) will save the batch's clips as. AGR captures
+  // nothing the finish step could render, so the part is left out there.
+  if (mode !== 'agr') {
+    const finish = setup.finish || {};
+    parts.push({
+      key: 'finish',
+      text: finish.enabled ? s.finish(finish.codecLabel || '') : s.FINISH_OFF,
+      tab: 'tab-render-output',
+      field: finish.enabled ? finishCodecField(mode) : '#config-finish-clips',
+    });
+  }
   if (!setup.destinations) {
     parts.push({
       key: 'destination',
@@ -64,4 +87,11 @@ export function summaryParts(setup) {
     });
   }
   return parts;
+}
+
+/** The finish codec select that applies to `mode` (finish_clips.js reads the same one). */
+function finishCodecField(mode) {
+  if (mode === 'obs') return '#config-finish-codec-obs';
+  if (mode === 'direct_to_video') return '#config-finish-codec-video';
+  return '#config-finish-codec-frames';
 }
