@@ -47,6 +47,8 @@ HUD
 DEMO PLAYBACK
   dodstudio_run_in_background 0/1
       Run at full speed while another window is in front, so a capture batch doesn't need the screen.
+  dodstudio_pov_live_bob 0/1
+      POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
   dodstudio_stay_behind_while_capturing 0/1
       Keep the game behind your other windows while it records, instead of coming to the front.
   dodstudio_seek_to <time>
