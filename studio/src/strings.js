@@ -240,6 +240,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // Game Folder (#402): game_folder_ui.js.
+    GAME_FOLDER_LABEL: 'Game Folder:',
+    GAME_FOLDER_TIP:
+        "The folder beside hl.exe that DoD Studio starts with -game, and where it finds your configs, maps and demos. Almost always dod; pick another if you keep several versions of DoD side by side (dod_movies, dod_1_2, ...).",
+    GAME_FOLDER_EMPTY: 'Give the name of a folder beside hl.exe, such as dod.',
+    GAME_FOLDER_DOTS: 'Give just the name of a folder beside hl.exe, without "..".',
+    GAME_FOLDER_OPTION: "A folder name can't start with - or +: the game would read it as another launch option.",
+    gameFolderBadChar: (c) => (/\s/.test(c)
+      ? "A folder name can't contain spaces here: the game would split it on the launch line."
+      : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
+    gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
+    gameFolderMissing: (name) =>
+        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -623,9 +637,31 @@ export const STRINGS = {
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY: 'No render jobs queued. Scan a folder, then click Start Render Batch.',
     START_RENDER_BUTTON: 'Start Render Batch',
-    CANCEL_ALL_BUTTON: 'Cancel All',
-    RESET_ALL_BUTTON: 'Reset All',
-    REMOVE_ALL_BUTTON: 'Remove All (Not Rendering)',
+    // #70: Start renders every queued row; the other footer buttons act on
+    // the ticked rows, and say on how many.
+    startRenderBatch: (n) => `Start Render Batch (${n})`,
+    START_RENDER_TITLE: 'Render every queued row. Cancel or remove a row to leave it out.',
+    START_RENDER_NONE_TITLE: 'Nothing is queued. Scan for takes, or Retry a finished row.',
+    cancelSelected: (n) => `Cancel (${n})`,
+    CANCEL_SELECTED_TITLE: 'Stop the ticked rows that are rendering or queued.',
+    retrySelected: (n) => `Retry (${n})`,
+    RETRY_SELECTED_TITLE: 'Queue the ticked rows that finished, failed or were cancelled again.',
+    removeSelected: (n) => `Remove (${n})`,
+    REMOVE_SELECTED_TITLE: 'Take the ticked rows off the list. A rendering row stays.',
+    deleteTakesSelected: (n) => `Delete Take folders (${n})`,
+    DELETE_TAKES_SELECTED_TITLE: "Move the ticked rows' take folders to the Recycle Bin. A take that is rendering stays; a queued one leaves the queue.",
+    CLEAR_QUEUE_BUTTON: 'Clear Queue',
+    CLEAR_QUEUE_TITLE: 'Empty the list. Anything rendering is cancelled first.',
+    CLEAR_QUEUE_CONFIRM_TITLE: 'Clear Queue',
+    clearQueueConfirmMessage: (rendering) => (rendering === 1
+      ? 'A take is rendering. Stop it and empty the list?'
+      : `${rendering} takes are rendering. Stop them and empty the list?`),
+    CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
+    SELECT_UNRENDERED_BUTTON: 'Select unrendered',
+    SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
+    SELECT_ALL_CB_TITLE: 'Tick or untick every row',
+    SELECT_ROW_TITLE: 'Tick this row for Cancel, Retry, Remove and Delete Take folders below',
+    selectedCount: (ticked, total) => `${ticked} of ${total} selected`,
     STATUS_WAITING: 'Status: Waiting...',
 
     CANCEL_JOB_TITLE: 'Cancel this job',
@@ -643,13 +679,17 @@ export const STRINGS = {
     // #644: Delete Take sends the take folder to the Recycle Bin.
     DELETE_TAKE_BUTTON: 'Delete Take',
     DELETE_TAKE_TITLE: "Move this take's folder to the Recycle Bin. Its render history stays.",
-    DELETE_TAKE_BUSY_TITLE: 'This take is queued or rendering. Cancel or remove it first.',
+    DELETE_TAKE_RENDERING_TITLE: 'This job is rendering. Cancel it first.',
+    DELETE_TAKE_PAIR_RENDERING_TITLE: 'Another stream of this take is rendering. Cancel it first.',
     DELETE_TAKE_RUNNING_TITLE: 'A take is being deleted.',
     deleteTakeConfirmTitle: (n) => (n === 1 ? 'Delete Take' : `Delete ${n} Takes`),
     deleteTakeConfirmMessage: (n, size) => (n === 1
       ? `Move this take (${size}) to the Recycle Bin?`
       : `Move these ${n} takes (${size}) to the Recycle Bin?`),
     DELETE_TAKE_CONFIRM_FOOTER: 'The space comes back when the Recycle Bin is emptied. The render history stays.',
+    deleteTakeQueuedNote: (n) => (n === 1
+      ? 'Its queued render is removed from the queue.'
+      : `${n} queued renders are removed from the queue.`),
     DELETE_TAKE_CONFIRM_BUTTON: 'Move to Recycle Bin',
     deleteTakeMeasuring: (done, total) => `Measuring takes: ${done} of ${total}`,
     deleteTakeRecycling: (done, total) => `Moving to the Recycle Bin: ${done} of ${total}`,
@@ -1919,15 +1959,20 @@ export const STRINGS = {
      *  mismatch answer. */
     message({ running, wanted, differs }) {
       const install = differs.includes('install');
+      // The Game folder setting, `-game` (#402).
+      const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
       const size = (s) => `${s.width}×${s.height}`;
+      const folderName = (s) => `the "${s.game_folder}" game folder`;
       const now = [
         install && `from "${running.install}"`,
+        folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
       ].filter(Boolean).join(' ');
       const set = [
         install && `"${wanted.install}"`,
-        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+        folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
+        resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },

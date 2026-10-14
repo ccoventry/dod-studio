@@ -5,7 +5,9 @@
 //! and measures, `delete_take_folders` checks again and moves. The safety check
 //! itself (a real take folder inside a Destinations folder) is
 //! `native::hlcr::take_delete`; this layer adds what only the Render tab knows,
-//! whether a take is queued or rendering.
+//! whether a take is rendering. A queued take may go: deleting it pulls its
+//! job from the queue (the confirm says so). Only a rendering one is refused,
+//! since FFmpeg holds its files open and the move would fail.
 
 use crate::render_manager::RenderManager;
 use crate::settings_manager::SettingsManager;
@@ -18,14 +20,12 @@ use tauri::{AppHandle, Emitter};
 
 /// Why a take can't be deleted right now, from the statuses of its jobs, or
 /// `None` when it can. A take with a HUD pair has two jobs, and either one
-/// being busy refuses it.
+/// rendering refuses it. Queued is fine: removing the rows pulls the job.
 pub(crate) fn refusal(take_folder: &str, statuses: &[&str]) -> Option<String> {
     if statuses.is_empty() {
         Some(crate::messages::take_not_listed(take_folder))
     } else if statuses.contains(&"Rendering") {
         Some(crate::messages::take_is_rendering(take_folder))
-    } else if statuses.contains(&"Queued") {
-        Some(crate::messages::take_is_queued(take_folder))
     } else {
         None
     }
@@ -227,20 +227,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_take_is_refused_while_either_of_its_jobs_is_busy() {
+    fn a_take_is_refused_while_either_of_its_jobs_is_rendering() {
         let take = "D:/captures/session/chain_01_b0/take0000";
         assert!(refusal(take, &["Finished"]).is_none());
         assert!(refusal(take, &["Error", "Cancelled"]).is_none());
+        // Deleting a queued take pulls its job from the queue instead.
+        assert!(refusal(take, &["Queued"]).is_none());
+        assert!(refusal(take, &["Finished", "Queued"]).is_none());
         // The HUD half still rendering refuses the whole take.
         assert!(
             refusal(take, &["Finished", "Rendering"])
                 .unwrap()
                 .contains("is rendering")
-        );
-        assert!(
-            refusal(take, &["Queued"])
-                .unwrap()
-                .contains("queued to render")
         );
     }
 

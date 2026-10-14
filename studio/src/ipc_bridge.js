@@ -164,6 +164,15 @@ export async function diagnoseExecutablePaths(paths) {
     });
 }
 
+/** The folders beside `gamePath`'s hl.exe holding a liblist.gam (#402). */
+export async function listGameFolders(gamePath) {
+  return await invoke('list_game_folders', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
@@ -425,10 +434,53 @@ export async function queueRenderBatch(payload) {
     });
 }
 
+/** Starts the staged batch. `jobIds` (#70) names the ticked rows: only the
+ *  Queued jobs among them render, the other Queued rows wait for a later
+ *  Start. `null` starts every Queued job. */
 export async function startQueuedRender() {
   return invoke("start_queued_render")
     .catch((err) => {
       console.error("IPC Execution Error (start_queued_render):", err);
+      throw err;
+    });
+}
+
+/** Cancels several rows at once (#70): Rendering ones stop, Queued ones
+ *  become Cancelled. */
+export async function cancelRenderJobs(jobIds) {
+  return invoke("cancel_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Requeues several Cancelled/Finished/Error rows at once (#70); resumes the
+ *  scheduler if nothing is Rendering, like a single Reset. */
+export async function resetRenderJobs(jobIds) {
+  return invoke("reset_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (reset_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Removes several rows at once (#70); a Rendering row stays. Resolves to
+ *  how many went. */
+export async function removeRenderJobs(jobIds) {
+  return invoke("remove_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (remove_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Clear Queue (#70): every row goes. With a batch running, its renders are
+ *  cancelled and the list empties once they have stopped. */
+export async function clearRenderQueue() {
+  return invoke("clear_render_queue")
+    .catch((err) => {
+      console.error("IPC Execution Error (clear_render_queue):", err);
       throw err;
     });
 }

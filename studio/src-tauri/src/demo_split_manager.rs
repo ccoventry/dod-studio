@@ -122,9 +122,10 @@ fn game_map_dirs(settings: &SettingsManager) -> Vec<PathBuf> {
     Path::new(&hl_path)
         .parent()
         .map(|game| {
-            ["dod", "dod_downloads", "dod_addon"]
+            use native::shared::paths::{addon_dir, downloads_dir, mod_dir};
+            [mod_dir(game), downloads_dir(game), addon_dir(game)]
                 .iter()
-                .map(|d| game.join(d).join("maps"))
+                .map(|d| d.join("maps"))
                 .collect()
         })
         .unwrap_or_default()
