@@ -90,6 +90,17 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
+    // #685: the queue grouped by match, with a header line per match.
+    GROUP_BY_MATCH_LABEL: 'Group by match',
+    GROUP_BY_MATCH_TITLE: 'Put the demos of one match together: the HLTV demo and every POV of each half, under a line naming the match. '
+      + 'Which match and half a demo is comes from what it recorded (the players, their sides, the kills and the chat), never from its file name. '
+      + 'The same numbers feed {match} and {half} in clip names.',
+    groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
+    matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
+    matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
+    matchHalfCount: (half, count) => `${half ? `h${half}` : 'half unknown'}: ${count} demo${count === 1 ? '' : 's'}`,
+    UNGROUPED_HEADER: 'Not in a match: these demos could not be read',
+    halfTooltip: (detail) => `What decided the half: ${detail}`,
     SEARCH_CLEAR_TITLE: 'Clear the search (Esc)',
     CLEAR_UNTRACKED_BUTTON: 'Clear Untracked',
     CLEAR_UNTRACKED_TITLE: 'Remove demos with no Pending/Captured/Rendered status, notes, or edited kill range. Tracked demos are kept. Only affects demos matching the current search.',
@@ -399,9 +410,9 @@ export const STRINGS = {
     DECAL_FLUSH_TITLE:
       'Clear bullet holes and blood off the walls between one clip and the next, so a later capture does not inherit the damage from an earlier one. Off captures the walls exactly as the engine leaves them. How many decals the engine keeps is a separate thing — set r_decals in Initial Commands.',
     SAVE_LOCAL_PATCHED_LABEL: 'Save Local Patched Copy',
-    HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips (experimental)',
+    HOOK_RUNS_BATCH_LABEL: 'Seek Between Clips',
     HOOK_RUNS_BATCH_TITLE:
-      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. Needs the DoD Studio hook DLL and demos on the same drive as the game; a batch that cannot run this way is patched as before.',
+      'Play the original demos and jump straight to each clip, instead of patching a copy of every demo and fast-forwarding through it. A demo on another drive than the game is copied into the game folder for the batch and removed afterwards. Needs the DoD Studio hook DLL; a batch that cannot run this way is patched as before. Turn off to patch every batch.',
     KEEP_GAME_BEHIND_LABEL: 'Keep the Game Behind Your Windows While Capturing',
     KEEP_GAME_BEHIND_TITLE:
       'The game captures behind your other windows and leaves your mouse alone. Off: the game comes to the front while it records each clip, so you can watch. Full speed either way. Only a capture batch does this: reviewing highlights and Launch Preview leave the window alone. Needs the DoD Studio hook DLL.',
@@ -2153,6 +2164,7 @@ export const STRINGS = {
     auditFailed: (err) => `Audit failed: ${err}`,
     combineFailed: (err) => `Combining the clips failed: ${err}`,
     demoRenameFailed: (err) => `Renaming demos failed: ${err}`,
+    matchGroupsFailed: (err) => `Grouping the demos by match failed: ${err}`,
     deletionFailed: (err) => `Deletion failed: ${err}`,
     cancelAuditError: (err) => `Cancel audit error: ${err}`,
     folderOpenFailed: (err) => `Could not open folder: ${err}`,
@@ -2287,47 +2299,60 @@ export const STRINGS = {
     renamedToast: (count) => `Renamed ${count} demo${count === 1 ? '' : 's'}.`,
     undoneToast: (count) => `Put back ${count} demo${count === 1 ? '' : 's'}.`,
     failedToast: (count, first) => `${count} couldn't be renamed. The first: ${first}`,
-    fallbackNotAllowed: (raw) => `${raw}: only the name, faction and team placeholders take a word after |.`,
     povOnly: (raw) => `${raw}: an HLTV demo has no recording player, so it only works in the POV template.`,
+    // Rename Demos' own meaning of a placeholder, where it isn't the one in
+    // PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
       name: "The recording player's name without their team's tag",
       full_name: "The recording player's name as it is, tag included",
-      kills: "The recording player's kills",
+      kills: "The recording player's kills in the whole demo (a clip name's {kills} is the highlight's kills instead)",
       deaths: "The recording player's deaths",
       faction: "The recording player's side: Allies, British or Axis",
       enemy_faction: 'The other side',
-      map: 'The map, without dod_',
-      date: "The demo file's date, YYYY-MM-DD",
-      demo_type: 'pov or hltv',
       team_name: "The recording player's team: its display name from the project's Teams list, or unknown when their side has no tag",
       opponent: "The other team: its display name from the project's Teams list, or unknown when that side has no tag",
-      allies: 'The team on the Allied side',
-      axis: 'The team on the Axis side',
-      team1: 'The two teams in alphabetical order, so both halves agree: the first',
-      team2: 'The second of the two teams in alphabetical order',
       demo: 'The current file name, without .dem',
-      lower: 'Add after a placeholder name to lower-case it: {map:lower}',
-      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
-      first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
+      half: 'Which half of its match the demo records, h1 or h2, told from the players\' sides and the chat across the demos listed together. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The match\'s number among the demos listed together, by date. Every demo of one match gets the same number: the HLTV demo and each POV of both halves',
     },
-    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the placeholder has no value, '
-      + `like the team names in a pug. {team_name|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. First demo: ${value}` : description),
-    noValueNote: (name) => `With no value (a pug has no team names) it gives unknown, or your word after |, as in {${name}|mix}.`,
-    // The chip rows, by what the placeholders hold.
+  },
+
+  // The name placeholders both templates share (#751): their chip rows, and
+  // what each means where the clip name and Rename Demos agree. Each
+  // template's own meanings are in CLIP_NAME.DESCRIPTIONS and
+  // DEMO_RENAME.DESCRIPTIONS.
+  PLACEHOLDERS: {
     GROUPS: {
       player: 'Player',
       sides: 'Sides',
       teams: 'Teams',
       demo: 'Demo',
+      highlight: 'Highlight',
       format: 'Format',
     },
+    DESCRIPTIONS: {
+      map: 'The map, without dod_',
+      date: "The demo file's date, YYYY-MM-DD",
+      demo_type: 'pov or hltv',
+      allies: 'The team on the Allied side',
+      axis: 'The team on the Axis side',
+      team1: 'The two teams in alphabetical order, so both halves agree: the first',
+      team2: 'The second of the two teams in alphabetical order',
+      lower: 'Add after a placeholder name to lower-case it: {map:lower}',
+      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
+      first: 'Add after a placeholder name to keep only its first word: {name:first} gives m00cat for "m00cat :D"',
+    },
+    fallbackNotAllowed: (raw) => `${raw}: only the name, faction, team, half and match placeholders take a word after |.`,
+    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the placeholder has no value, '
+      + `like the team names in a pug. {team_name|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
+    noValueNote: (name) => `With no value (a pug has no team names) it gives unknown, or your word after |, as in {${name}|mix}.`,
   },
 
   CLIP_NAME: {
     TEMPLATE_LABEL: 'Clip Name Template:',
     TEMPLATE_TITLE: 'How each highlight\'s automatic clip name is built. The finished file is named after it. A name typed on a Highlight Details row wins over this.',
-    INSERT_LABEL: 'Insert:',
     RESET_BUTTON: 'Default',
     RESET_TITLE: 'Go back to the default template.',
     MISSING_VALUE: 'unknown',
@@ -2335,8 +2360,7 @@ export const STRINGS = {
     unclosedBrace: (pos) => `The "{" at character ${pos} is never closed.`,
     EMPTY_PLACEHOLDER: '"{}" has no placeholder name in it.',
     unknownPlaceholder: (raw) => `${raw} isn't a placeholder. Pick one from the list below.`,
-    unknownModifier: (raw) => `${raw}: only :lower and :upper can follow a placeholder name.`,
-    fallbackNotAllowed: (raw) => `${raw}: only {team_name} and {opponent} take a word after |.`,
+    unknownModifier: (raw) => `${raw}: only :lower, :upper and :first can follow a placeholder name.`,
     invalidCharacters: (text) => `Windows doesn't allow \\ / : * ? " < > | in a file name: ${text}`,
     EMPTY_TEMPLATE: 'This template gives an empty name.',
     NO_DISTINGUISHING: 'No {row}, {time} or {demo}, so two highlights can get the same name. Their files still stay separate (a _2 is added), but the names won\'t say which is which.',
@@ -2346,12 +2370,14 @@ export const STRINGS = {
     TRIMMED: 'Shortened so the full path stays under the Windows limit (victims, demo and weapons are cut first).',
     PREVIEW_TYPED: 'The selected highlight has a typed name, which wins over the template:',
     PREVIEW_NONE: 'Select a demo with highlights to see a preview.',
+    // The clip name's own meaning of a placeholder, where it isn't the one
+    // in PLACEHOLDERS.DESCRIPTIONS.
     DESCRIPTIONS: {
-      player: 'The player whose highlight it is',
+      name: "The highlight player's name without their team's tag ({player} still works: the name as it is)",
+      full_name: "The highlight player's name as it is, tag included",
       faction: 'Their side: Allies, British, Axis',
       enemy_faction: 'The side of the players they killed',
-      map: 'The map, without dod_',
-      kills: 'Kills in the chosen Kill Range',
+      kills: "Kills in the chosen Kill Range (Rename Demos' {kills} is the player's kills in the whole demo instead)",
       weapons: 'Each weapon used, joined with -',
       first_weapon: 'The weapon of the first kill',
       victims: 'The players killed, joined with -',
@@ -2359,15 +2385,12 @@ export const STRINGS = {
       row: 'The highlight\'s row number',
       time: 'Time into the demo, like 12m34s',
       demo: 'The demo file name, without .dem',
-      date: 'The demo file\'s date, YYYY-MM-DD',
       team_name: "Their team's display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
       opponent: "The first victim's team: its display name from the project's Teams list; unknown (or your word after |) when the side has no tag",
-      lower: 'Add after a placeholder name to lower-case it: {faction:lower}',
-      upper: 'Add after a placeholder name to upper-case it: {map:upper}',
-      first: 'Add after a placeholder name to keep only its first word: {player:first} gives m00cat for "m00cat :D"',
+      half: 'Which half of its match the demo records, h1 or h2, as the Master Demo Queue\'s match grouping tells it from the demos\' contents. '
+        + 'When nothing says, it gives unknown or your word after |, never a guess',
+      match: 'The demo\'s match number in the Master Demo Queue\'s match grouping: every demo of one match shares it',
     },
-    fallbackTitle: (placeholders) => 'Click just after a placeholder, then this, then type a word: the word is used when the team has no name, '
-      + `like in a pug. {opponent|mix} gives mix there; without it you get unknown. Works on ${placeholders}.`,
     chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
   },

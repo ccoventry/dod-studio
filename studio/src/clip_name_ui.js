@@ -4,9 +4,11 @@
 // the selected highlight.
 
 import {
-  DEFAULT_TEMPLATE, PLACEHOLDERS, MODIFIERS, WITH_FALLBACK, NAME_WARN_LENGTH,
+  DEFAULT_TEMPLATE, PLACEHOLDERS, WITH_FALLBACK, NAME_WARN_LENGTH,
   parseTemplate, buildName, highlightValues, clipNameFor, maxNameLength,
 } from './clip_name.js';
+import { placeholderGroups, placeholderDescription } from './placeholder_catalogue.js';
+import { renderPlaceholderChips } from './placeholder_chips.js';
 import { STRINGS } from './strings.js';
 
 let getPreviewHighlight = () => null;
@@ -64,12 +66,6 @@ function insertAtCursor(text) {
 
 let chipsKey = null;
 
-/** The | chip reads "|fallback" but inserts a bare |, for the word to follow. */
-function fallbackChip(button) {
-  button.textContent = '|fallback';
-  return button;
-}
-
 function renderChips(values) {
   const box = document.querySelector('#config-clip-name-chips');
   if (!box) return;
@@ -77,28 +73,16 @@ function renderChips(values) {
   const key = JSON.stringify(values);
   if (key === chipsKey && box.childElementCount) return;
   chipsKey = key;
-  const label = document.createElement('span');
-  label.textContent = STRINGS.CLIP_NAME.INSERT_LABEL;
-  const chip = (text, title) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.className = 'clip-name-chip';
-    b.textContent = text;
-    b.title = title;
-    b.style.cssText = 'padding: 1px 6px; font-family: monospace; font-size: 1em;';
-    // Keeps focus (and the cursor) in the field: a blur would fire its
-    // change event and rebuild these chips under the click.
-    b.addEventListener('mousedown', (e) => e.preventDefault());
-    b.addEventListener('click', () => insertAtCursor(text));
-    return b;
-  };
-  box.replaceChildren(
-    label,
-    ...PLACEHOLDERS.map((name) => chip(`{${name}}`,
-      STRINGS.CLIP_NAME.chipTitle(STRINGS.CLIP_NAME.DESCRIPTIONS[name], values?.[name]))),
-    ...MODIFIERS.map((m) => chip(`:${m}`, STRINGS.CLIP_NAME.DESCRIPTIONS[m])),
-    fallbackChip(chip('|', STRINGS.CLIP_NAME.fallbackTitle(PLACEHOLDERS.filter((n) => WITH_FALLBACK.has(n)).map((n) => `{${n}}`).join(' ')))),
-  );
+  const C = STRINGS.CLIP_NAME;
+  // The same rows and chips as Rename Demos (#751), plus the Highlight row.
+  renderPlaceholderChips(box, {
+    groups: placeholderGroups('clip'),
+    titleFor: (name) => C.chipTitle(placeholderDescription('clip', name), values?.[name])
+      + (WITH_FALLBACK.has(name) ? ` ${STRINGS.PLACEHOLDERS.noValueNote(name)}` : ''),
+    fallbackNames: PLACEHOLDERS,
+    chipClass: 'clip-name-chip',
+    onInsert: insertAtCursor,
+  });
 }
 
 /** Re-checks the template and rebuilds the preview (the selection moved,
