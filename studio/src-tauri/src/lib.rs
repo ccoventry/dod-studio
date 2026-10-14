@@ -82,13 +82,17 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        let mut settings = settings;
         // Refused before anything is written: a game folder that is a path
         // would put the launch and every file Studio writes somewhere other
         // than beside hl.exe (#402).
         native::shared::paths::validate_game_folder(&settings.game_folder)?;
+        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
+        // The frontend doesn't carry this field; the loaded value stands, or a
+        // migration would run again at every start.
+        settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
-        let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
         *guard = settings;
         Ok(())
     }))

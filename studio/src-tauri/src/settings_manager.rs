@@ -154,9 +154,14 @@ pub struct AppSettings {
     pub command_profile_active: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
-    /// `PatcherConfig::hook_runs_batch` (#434).
-    #[serde(default)]
+    /// `PatcherConfig::hook_runs_batch` (#434): Seek Between Clips, the
+    /// default route. The setting stays as the switch back to patching.
+    #[serde(default = "native::patch::types::default_hook_runs_batch")]
     pub hook_runs_batch: bool,
+    /// Which one-time changes to saved values have run (`MIGRATIONS`), so a
+    /// new default can reach a settings file that saved the old one.
+    #[serde(default)]
+    pub settings_migrations: u32,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
@@ -391,7 +396,8 @@ impl Default for AppSettings {
             command_profiles: Vec::new(),
             command_profile_active: String::new(),
             save_local_patched_copy: false,
-            hook_runs_batch: false,
+            hook_runs_batch: native::patch::types::default_hook_runs_batch(),
+            settings_migrations: MIGRATIONS,
             keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
@@ -428,16 +434,33 @@ pub fn settings_path() -> PathBuf {
     native::shared::paths::get_appdata_dir().join("settings.json")
 }
 
+/// How many one-time changes to saved values exist; `migrate` runs the ones
+/// past a file's `settings_migrations`. The frontend saves settings without
+/// this field, so `save_settings` keeps the loaded value.
+pub const MIGRATIONS: u32 = 1;
+
 impl AppSettings {
     pub fn load_or_default() -> Self {
         let path = settings_path();
         if path.exists()
             && let Ok(content) = fs::read_to_string(&path)
-            && let Ok(settings) = serde_json::from_str::<AppSettings>(&content)
+            && let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content)
         {
+            settings.migrate();
             return settings;
         }
         Self::default()
+    }
+
+    /// Applies the one-time changes this file hasn't had.
+    pub fn migrate(&mut self) {
+        if self.settings_migrations < 1 {
+            // Seek Between Clips was off by default while experimental; a
+            // file saved then has the old default and gets the new one once
+            // (#434). Turning it off again after this sticks.
+            self.hook_runs_batch = true;
+        }
+        self.settings_migrations = MIGRATIONS;
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -538,6 +561,33 @@ mod tests {
             settings.scan_workers,
             crate::capture_manager::SCAN_CONCURRENCY as i32
         );
+    }
+
+    /// A file saved while Seek Between Clips was experimental (off by default)
+    /// gets the new default once; a later choice sticks (#434).
+    #[test]
+    fn seek_between_clips_turns_on_once_for_an_older_settings_file() {
+        let file = |extra: &str| -> AppSettings {
+            serde_json::from_str(&format!(
+                r#"{{"hlae_path": "C:/hlae/hlae.exe", "hl_path": "C:/dod/hl.exe", "ffmpeg_path": null,
+                    "pinned_folders": [], "language": "en", "capture_fps": 300,
+                    "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6{extra}}}"#
+            ))
+            .expect("a settings file")
+        };
+        let mut saved_off = file(r#", "hook_runs_batch": false"#);
+        saved_off.migrate();
+        assert!(saved_off.hook_runs_batch);
+        assert_eq!(saved_off.settings_migrations, MIGRATIONS);
+
+        let mut turned_off_again = file(r#", "hook_runs_batch": false, "settings_migrations": 1"#);
+        turned_off_again.migrate();
+        assert!(!turned_off_again.hook_runs_batch);
+
+        // A file from before the setting existed has the new default.
+        let mut older = file("");
+        older.migrate();
+        assert!(older.hook_runs_batch);
     }
 
     #[test]

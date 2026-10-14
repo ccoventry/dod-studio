@@ -1281,7 +1281,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsPortVal = parseInt(document.querySelector("#config-obs-port")?.value, 10) || 4455;
     const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
     const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
-    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked || false;
+    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked ?? true;
     const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
 
     const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;

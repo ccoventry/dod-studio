@@ -98,8 +98,8 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 | **Paths** | Half-Life executable, **Game Folder**, HLAE executable, FFmpeg override, GoldSrc Hooks DLL override. Game Folder is the folder beside `hl.exe` that launches name with `-game` (`dod` unless changed, #402): a list of the folders there holding a `liblist.gam`, or a text box when none can be listed; a name with a path separator, `..` or a space is refused. It is for an install that keeps several DoD versions side by side (`dod_movies`, `dod_1_2`, ...); Studio reads configs, maps and demos and writes its helper files there, and the `_addon`/`_downloads` folders it uses are that folder's (`dod_movies_addon`). The path rows each show "no file at this path" style warnings. `hl.exe` inside Steam's own `Half-Life` folder gets a VAC warning, and the row reports whether this `hl.exe` gets 2 GB or 4 GB of memory. An **HLAE FFmpeg** row reports whether HLAE can find an FFmpeg and offers **Point HLAE at FFmpeg**, which writes `<HLAE>\ffmpeg\ffmpeg.ini` (never over one it did not write, with a UAC retry). |
 | **Output Format** | Width and height (1280×720), Capture FPS (300), **Capture Mode** (Frame sequence, Video, OBS). Video mode adds a capture codec (Ut Video default, FFV1, x264 lossless, uncompressed). OBS mode adds host, port, password, OBS path, Launch OBS, **Test Connection**, and OBS Capture FPS (120). Test Connection is not read-only: it creates or repairs a `[DoD-Studio]` profile and scene in OBS and switches to them. |
 | **Timing** | Initial Delay (3.0 s), Pre-roll (2.0 s), Start Lead (0), Stop Trail (0), Post-roll (0.6 s). FF Speed (0.05) is shown but locked; its value is the `host_framerate` used for fast-forward. Every timing field can be 0. A banner warns when pre/post-roll is shorter than the batch needs; it never clamps. A live timeline table illustrates the result. |
-| **Pipeline** | Flush Decals Between Clips (on), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
-| **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Typing the start of a console name lists every name it could be, and says so when Studio refuses or overrides one. Warning banners explain what will not take effect, what is refused, and what your own game configs set (including a `config.cfg` that is not read-only). See 3.5 for the tiers. |
+| **Pipeline** | Flush Decals Between Clips (on), **Seek Between Clips** (on; off patches every batch, see 3.3), Save Local Patched Copy, Auto-clear Logs, Auto-clear Previews, Auto-clear Temp Demos, **Clear Previews...** (lists stale `_preview.dem` files the app made and deletes the ones you tick), and **Demo Scan Workers** (1–8, default 2, with a hint of about 1.2 GB per worker against this PC's RAM). |
+| **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Typing the start of a console name lists every name it could be, and says so when Studio refuses or overrides one. Warning banners explain what will not take effect, what is refused, and what your own game configs set (including a `config.cfg` that is not read-only). See 3.6 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
 | **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives, and **When a batch finishes** (see 4) with a finish codec per capture mode. |
 | **Notifications** | Six switches: patching started/finished, demo loading, fast-forward to clip, captures done, renders done, errors. |
@@ -166,7 +166,16 @@ For each demo and recording player, highlights are sorted and grouped into **blo
 
 Each block gets a disk estimate, and blocks are packed onto the Destinations with first-fit-decreasing. A drive must keep 15 GiB free.
 
-### 3.3 Patching
+### 3.3 Seek Between Clips, and patching
+
+By default (**Seek Between Clips**, on the Pipeline tab) the batch plays your original demos: the hook DLL loads each one with `viewdemo`, runs the batch's commands on the demo player's clock and seeks to each clip instead of fast-forwarding to it (`%APPDATA%\dod-studio\dodstudio_batch.txt` holds the plan; `dodstudio_batch` in `dodstudio_commands.md`). Nothing is patched. Two things happen first when they are needed, each with a status line and an activity-log line:
+
+- A highlight from a project saved before the demo player's clip times existed is read again from its demo (from the analyzer cache when it has it) to get them.
+- A demo on another drive than the game is copied as it is into `<game>\dod\` as `dodstudio_src_NN_<stem>.dem`, after a free-space check (the copies plus 1 GB), played from there and removed when the batch ends, is cancelled or fails. A demo on the game's drive is played where it is.
+
+A batch that cannot run this way (no hook DLL, or a demo whose kills still have no clip times) is patched as below, and the activity log says why. Turning the setting off patches every batch.
+
+### 3.4 Patching
 
 Nothing in your original demo changes. The app writes:
 
@@ -183,7 +192,7 @@ Injected commands are standalone `ConsoleCommand` frames, written after `DemoSta
 
 **Decal flush.** With Flush Decals on, a pre-pass rewrites a scratch copy of each demo so wall decals from outside the recorded windows are removed, and bursts of harmless decals clear the ring before each block. A failure here never fails the batch; the unmodified demo is used and the reason is logged.
 
-### 3.4 Launching and running
+### 3.5 Launching and running
 
 Every launch (batch, preview, Launch Game) uses one command line:
 
@@ -205,7 +214,7 @@ While the game runs, the app reads its markers and turns them into status lines 
 
 On failure or cancel the copied demos, junctions and scratch files are removed. Takes are never deleted.
 
-### 3.5 Command tiers
+### 3.6 Command tiers
 
 Commands you type into Initial or Scheduled Commands are checked twice: once for the warning banner, and again when the batch starts. The lists live in `native/src/patch/cfg_scan.rs`; read it rather than trusting this summary. `docs/command_tiers.md` explains each tier.
 
@@ -367,6 +376,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Project files | wherever you save them |
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`, and `dodstudio_primer.dem` without the hook DLL) |
+| Batch plan, copies of demos from another drive | `%APPDATA%\dod-studio\dodstudio_batch.txt`; `<game>\dod\dodstudio_src_NN_<stem>.dem` for the batch only |
 | Previews | `<game>\dod\<stem>_preview.dem` plus a hidden `.dodstudio_preview` marker |
 | Takes | `<Destination>\<session>\dodstudio_chain_NN_bK\take0000\...` |
 | HD files | `<game>\dod_addon\dodstudio_hd\` (or `<game>\dod\dodstudio_hd\` from before #415) |
