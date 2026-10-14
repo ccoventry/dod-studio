@@ -240,6 +240,20 @@ export const STRINGS = {
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
     HL_EXEC_LABEL: 'Half-Life Executable:',
     HL_EXEC_PLACEHOLDER: 'Path to hl.exe',
+    // Game Folder (#402): game_folder_ui.js.
+    GAME_FOLDER_LABEL: 'Game Folder:',
+    GAME_FOLDER_TIP:
+        "The folder beside hl.exe that DoD Studio starts with -game, and where it finds your configs, maps and demos. Almost always dod; pick another if you keep several versions of DoD side by side (dod_movies, dod_1_2, ...).",
+    GAME_FOLDER_EMPTY: 'Give the name of a folder beside hl.exe, such as dod.',
+    GAME_FOLDER_DOTS: 'Give just the name of a folder beside hl.exe, without "..".',
+    GAME_FOLDER_OPTION: "A folder name can't start with - or +: the game would read it as another launch option.",
+    gameFolderBadChar: (c) => (/\s/.test(c)
+      ? "A folder name can't contain spaces here: the game would split it on the launch line."
+      : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
+    gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
+    gameFolderMissing: (name) =>
+        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+    GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
     HLAE_FFMPEG_LABEL: 'HLAE FFmpeg:',
@@ -640,6 +654,27 @@ export const STRINGS = {
     OPEN_TAKE_FOLDER_TITLE: 'Open the source take folder',
     OPEN_OUTPUT_BUTTON: '📁 Open Output',
     OPEN_TAKE_FOLDER_BUTTON: '📁 Open Take Folder',
+    // #644: Delete Take sends the take folder to the Recycle Bin.
+    DELETE_TAKE_BUTTON: 'Delete Take',
+    DELETE_TAKE_TITLE: "Move this take's folder to the Recycle Bin. Its render history stays.",
+    DELETE_TAKE_RENDERING_TITLE: 'This job is rendering. Cancel it first.',
+    DELETE_TAKE_PAIR_RENDERING_TITLE: 'Another stream of this take is rendering. Cancel it first.',
+    DELETE_TAKE_RUNNING_TITLE: 'A take is being deleted.',
+    deleteTakeConfirmTitle: (n) => (n === 1 ? 'Delete Take' : `Delete ${n} Takes`),
+    deleteTakeConfirmMessage: (n, size) => (n === 1
+      ? `Move this take (${size}) to the Recycle Bin?`
+      : `Move these ${n} takes (${size}) to the Recycle Bin?`),
+    DELETE_TAKE_CONFIRM_FOOTER: 'The space comes back when the Recycle Bin is emptied. The render history stays.',
+    deleteTakeQueuedNote: (n) => (n === 1
+      ? 'Its queued render is removed from the queue.'
+      : `${n} queued renders are removed from the queue.`),
+    DELETE_TAKE_CONFIRM_BUTTON: 'Move to Recycle Bin',
+    deleteTakeMeasuring: (done, total) => `Measuring takes: ${done} of ${total}`,
+    deleteTakeRecycling: (done, total) => `Moving to the Recycle Bin: ${done} of ${total}`,
+    takesDeleted: (n, size) => `${n === 1 ? 'Take' : `${n} takes`} moved to the Recycle Bin (${size}).`,
+    takesDeleteFailed: (deleted, failed, firstError) =>
+      `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
+    deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',
@@ -1859,15 +1894,20 @@ export const STRINGS = {
      *  mismatch answer. */
     message({ running, wanted, differs }) {
       const install = differs.includes('install');
+      // The Game folder setting, `-game` (#402).
+      const folder = differs.includes('game_folder');
       const resolution = differs.includes('resolution');
       const size = (s) => `${s.width}×${s.height}`;
+      const folderName = (s) => `the "${s.game_folder}" game folder`;
       const now = [
         install && `from "${running.install}"`,
+        folder && `with ${folderName(running)}`,
         resolution && `at ${size(running)}`,
       ].filter(Boolean).join(' ');
       const set = [
         install && `"${wanted.install}"`,
-        resolution && (install ? `at ${size(wanted)}` : size(wanted)),
+        folder && (install ? `with ${folderName(wanted)}` : folderName(wanted)),
+        resolution && (install || folder ? `at ${size(wanted)}` : size(wanted)),
       ].filter(Boolean).join(' ');
       return `Day of Defeat is running ${now}; DoD Studio is set to ${set}. The game only takes these when it starts. Close it and start again?`;
     },

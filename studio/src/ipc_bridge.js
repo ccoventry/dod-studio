@@ -164,6 +164,15 @@ export async function diagnoseExecutablePaths(paths) {
     });
 }
 
+/** The folders beside `gamePath`'s hl.exe holding a liblist.gam (#402). */
+export async function listGameFolders(gamePath) {
+  return await invoke('list_game_folders', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
@@ -483,6 +492,27 @@ export async function removeNonRenderingRenderJobs() {
   return invoke("remove_non_rendering_render_jobs")
     .catch((err) => {
       console.error("IPC Execution Error (remove_non_rendering_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Delete Take (#644): checks each take folder and measures it for the
+ *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
+ *  with the reason when any take can't be deleted. */
+export async function measureTakeFolders(takeFolders) {
+  return invoke("measure_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (measure_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Delete Take (#644): sends the take folders to the Recycle Bin and takes
+ *  their rows out of the list. Resolves to `{ deleted, failed }`. */
+export async function deleteTakeFolders(takeFolders) {
+  return invoke("delete_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (delete_take_folders):", err);
       throw err;
     });
 }
