@@ -276,14 +276,6 @@ pub fn roll_floors(config: &PatcherConfig) -> RollFloors {
     }
 }
 
-/// The `host_framerate` fast-forward runs at: Configuration's FF Speed
-/// (`fast_forward_speed`), or the 0.05 default when that is not a positive
-/// number. `host_framerate 0` is real time, so 0 cannot mean "fast".
-pub(crate) fn fast_forward_host_framerate(config: &PatcherConfig) -> f32 {
-    let v = config.fast_forward_speed;
-    if v.is_finite() && v > 0.0 { v } else { 0.05 }
-}
-
 /// Whether a scheduled command lands while playback is still fast-forwarding.
 ///
 /// A block runs at `host_framerate 0.05` until the pre-roll drops it back to

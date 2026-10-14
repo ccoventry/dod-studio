@@ -88,12 +88,13 @@ pub fn parse_overview_txt(text: &str) -> OverviewPlacement {
     out
 }
 
-/// Where to look for `overviews/`: the game's own `dod` folder first, then the
+/// Where to look for `overviews/`: the game's own game folder (`dod` unless
+/// the Game folder setting says otherwise, #402) first, then the
 /// demo's folder and the two above it, for a demo kept inside a game folder
 /// the settings do not point at (the other install, say).
 pub fn overview_search_dirs(game_exe: Option<&Path>, demo_path: &Path) -> Vec<PathBuf> {
     let mut dirs = Vec::new();
-    if let Some(dod) = game_exe.and_then(Path::parent).map(|p| p.join("dod")) {
+    if let Some(dod) = game_exe.and_then(crate::shared::paths::mod_dir_for_exe) {
         dirs.push(dod);
     }
     for dir in demo_path.ancestors().skip(1).take(3) {

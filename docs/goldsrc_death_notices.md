@@ -545,3 +545,60 @@ patch state is reset too rather than inherited.
 The `[demo N]` column in the DLL's log is client time since process start, not
 demo playback position. It reads as though a demo is running when none is, which
 is exactly how the crash above was misdiagnosed once before being pinned down.
+
+## 6. The font (`font`, #562)
+
+`Draw` draws the names with the engine's console-string calls, all
+`call [gEngfuncs + slot*4]`:
+
+| RVA | call | slot |
+| --- | --- | --- |
+| `0x2b00d` | `pfnDrawConsoleStringLen(victim, &w, &h)` | 29 (`+0x74`) |
+| `0x2b04e` | `pfnDrawConsoleStringLen(killer, &w, &h)` | 29 |
+| `0x2b079` | `pfnDrawSetTextColor(KillerColor[0..3])`, if non-null | 28 (`+0x70`) |
+| `0x2b089` | `pfnDrawConsoleString(x, y, killer)` | 27 (`+0x6c`) |
+| `0x2b0de` | `SPR_Set(icon, 255, 255, 255)` | 4 |
+| `0x2b0f1` | `SPR_DrawHoles(0, x, y, &rect)` | 6 |
+| `0x2b125` | `pfnDrawSetTextColor(VictimColor[0..3])`, if non-null | 28 |
+| `0x2b135` | `pfnDrawConsoleString(x, y, victim)` | 27 |
+
+`x = ScreenWidth - len(victim) - icon width [- 5 - len(killer)]`, and the
+next line starts `rect.bottom - rect.top` (the icon's height) lower, at
+`0x2b13e..0x2b14e`, not a constant 20 as the SDK's `Draw` has.
+
+In `hw.dll` (both builds: `cl_enginefuncs` is at PRE `+0x136260`, POST
+`+0x319b08`), `pfnDrawConsoleString` draws through the engine's vgui2 surface
+-- `VGUI_Surface026`, class `BaseUISurface`, served by `hw.dll`'s own
+`CreateInterface`; there is no `vguimatsurface.dll` in GoldSrc -- with one
+font, `IScheme::GetFont("EngineFont", proportional)` of the default scheme
+(`dod/resource/TrackerScheme.res`), fetched once (PRE `+0x6a0f`, POST
+`+0x230d71`). It sets the font, position and colour, converts the string
+with `ILocalize::ConvertANSIToUnicode` (`MultiByteToWideChar(CP_UTF8)`),
+prints it, and then **resets the colour to `con_color`**. The width is the sum
+of `GetCharABCwide` over the characters, the height `GetFontTall`.
+
+`ISurface` slots (slot 0 is the destructor; MSVC lays adjacent overloads out
+in reverse order), checked by `ret` size on both builds in
+`tools/verify_killfeed_font_offsets.py`: 13 `DrawSetTextFont`, 15
+`DrawSetTextColor(r,g,b,a)`, 16 `DrawSetTextPos`, 18 `DrawPrintText`, 21
+`DrawFlushText`, 59 `CreateFont`, 60 `AddGlyphSetToFont`, 62 `GetFontTall`,
+65 `GetTextSize`.
+
+**A font cannot be changed in place.** `CFontManager::AddGlyphSetToFont` (PRE
+`+0xcfd70`, POST `+0x26cb10`) returns false for a handle that already has a
+glyph set, and the interface has no `DeleteFont`. So `font` creates a new
+handle each time and leaves the old one (one table entry; the Windows font
+behind it is cached by name, size and flags). The next frame draws with the
+new handle: live, no demo reload.
+
+The hook rewrites the six text calls to `call rel32; nop` (same six bytes)
+into `goldsrc-hooks/src/deathmsg/font.rs`, which forwards to the engine until
+a font is set, then draws and measures with its own handle and keeps each
+name's colour from the `pfnDrawSetTextColor` just before it (`con_color` when
+none was set, as the engine does). A 16-byte detour at the line step makes it
+`max(icon height, font height)`. The icon stays at its own size (#728).
+
+Flags: vgui2's scheme loader maps `dropshadow` to 0x80 when
+`ISurface::SupportsFeature(2)` is true, which it is on both builds (and the
+PRE `EngineFont`'s own shadow shows it renders). Neither font manager tests an
+outline bit (0x200), so `outline` is accepted and reported as not drawn.

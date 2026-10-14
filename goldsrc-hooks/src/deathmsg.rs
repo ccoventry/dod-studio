@@ -40,7 +40,7 @@
 //! `client.dll`'s own handler stays reachable by calling it directly. See
 //! [`crate::engine::HookUserMsgFn`].
 //!
-//! `max` and `offset` do need patching, and `max` needs the array **moved**:
+//! `max`, `offset` and `font` do need patching, and `max` needs the array **moved**:
 //! it is five slots and there is no slack after it — live data is referenced at
 //! array-end + 0. Every one of the 34 absolute references to it lives in
 //! `.text`, inside four functions, and nothing in `.data` or any vtable points
@@ -57,6 +57,8 @@
 //!
 //! Analysis subject: `dod/cl_dlls/client.dll`, 977,816 bytes, byte-identical
 //! across the stock, pre-Anniversary and post-Anniversary installs.
+//!
+//! `font` -- the names in a font of our own -- lives in [`font`] (#562).
 
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::Mutex;
@@ -67,6 +69,8 @@ use crate::detour;
 use crate::engine;
 use crate::names::console_name;
 use crate::scan;
+
+mod font;
 
 /// Every name this command answers to. `pfnAddCommand` takes a bare
 /// `void(*)(void)` and the handler reads its own arguments, so a name costs
@@ -1043,6 +1047,7 @@ pub fn poll() {
     if HOOK_WANTED.load(Ordering::Relaxed) || crate::spectator_deathcam::enabled() {
         install_hook();
     }
+    font::poll();
 }
 
 /// Field offsets inside a `DeathNoticeItem` that [`restamp_display_time`] needs.
@@ -1211,7 +1216,13 @@ fn usage() -> String {
          \x20 {COMMAND} block clear         stop hiding anything\n\
          \x20 {COMMAND} players            list each player's slot and SteamID, as block sees them\n\
          \x20 {COMMAND} fake <killer> <victim> <weapon>\n\
-         \x20                               weapon is a name (d_garand, garand) or 1..43\n"
+         \x20                               weapon is a name (d_garand, garand) or 1..43\n\
+         \x20 {COMMAND} font <face> <size> [bold] [shadow]\n\
+         \x20                               draw the names in that font (size {}..{} px), live;\n\
+         \x20                               e.g. font \"Verdana\" 28 bold shadow\n\
+         \x20 {COMMAND} font default       the game's own font again\n",
+        font::MIN_TALL,
+        font::MAX_TALL
     )
 }
 
@@ -1230,8 +1241,9 @@ pub(crate) fn status() -> String {
         Err(_) => "unknown".to_string(),
     };
     format!(
-        "{COMMAND}: max = {} line(s), offset = {offset}, blocking {block}\n",
+        "{COMMAND}: max = {} line(s), offset = {offset}, {}, blocking {block}\n",
         if max == 0 { STOCK_MAX } else { max },
+        font::describe(),
     )
 }
 
@@ -1330,6 +1342,19 @@ fn dispatch(argv: &[String]) -> String {
             status()
         }
         "players" => players(),
+        "font" => {
+            let rest = &argv[2..];
+            if rest.is_empty() {
+                return format!("{COMMAND}: {}\n{}", font::describe(), usage());
+            }
+            match font::parse_args(rest) {
+                Ok(spec) => match font::apply(spec) {
+                    Ok(reply) => format!("{COMMAND}: {reply}\n"),
+                    Err(why) => format!("{COMMAND} font: {why}\n"),
+                },
+                Err(why) => format!("{COMMAND} font: {why}\n"),
+            }
+        }
         "fake" => {
             let (Some(k), Some(v), Some(w)) = (argv.get(2), argv.get(3), argv.get(4)) else {
                 return format!(

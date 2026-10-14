@@ -111,6 +111,19 @@ pub struct DemoApiPartial {
 /// (`"r_decals"`, `"crosshair"`, `"developer"`, ...) and stores the result.
 pub type GetCvarPointerFn = unsafe extern "C" fn(name: *const c_char) -> *mut CvarSPartial;
 
+/// `gEngfuncs.pfnDrawConsoleString` (slot 27): draws `string` in the engine
+/// font (`EngineFont` of the default scheme) with its top-left at `(x, y)`,
+/// in the colour the last `pfnDrawSetTextColor` set, then puts the colour
+/// back to `con_color`. Returns `x` plus the text's width.
+pub type DrawConsoleStringFn = unsafe extern "C" fn(x: i32, y: i32, string: *const c_char) -> i32;
+/// `gEngfuncs.pfnDrawSetTextColor` (slot 28): the colour for the next
+/// `pfnDrawConsoleString`, each component 0.0..=1.0.
+pub type DrawSetTextColorFn = unsafe extern "C" fn(r: f32, g: f32, b: f32);
+/// `gEngfuncs.pfnDrawConsoleStringLen` (slot 29): the width and height
+/// `pfnDrawConsoleString` would give `string`.
+pub type DrawConsoleStringLenFn =
+    unsafe extern "C" fn(string: *const c_char, width: *mut i32, height: *mut i32);
+
 pub type WeaponAnimFn = unsafe extern "C" fn(sequence: i32, body: i32);
 /// A client event handler, `void (*)(struct event_args_s *args)`.
 pub type EventHandlerFn = unsafe extern "C" fn(args: *mut c_void);
@@ -554,7 +567,17 @@ pub struct ClEngineFuncsPartial {
     _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
     /// Slot 21. See [`GetPlayerInfoFn`].
     pub pfn_get_player_info: GetPlayerInfoFn,
-    _slots_before_console_print: [*mut c_void; 8], // pfnPlaySoundByName .. pfnDrawConsoleStringLen
+    _slots_before_draw_console_string: [*mut c_void; 5], // pfnPlaySoundByName .. pfnDrawCharacter
+    /// Slot 27. See [`DrawConsoleStringFn`]; the kill feed's names go through
+    /// it (`CHudDeathNotice::Draw`, `call [gEngfuncs+0x6c]` at
+    /// `client.dll+0x2b089` and `+0x2b135`) (#562).
+    pub pfn_draw_console_string: DrawConsoleStringFn,
+    /// Slot 28. See [`DrawSetTextColorFn`] (`call [gEngfuncs+0x70]` at
+    /// `+0x2b079` and `+0x2b125`).
+    pub pfn_draw_set_text_color: DrawSetTextColorFn,
+    /// Slot 29. See [`DrawConsoleStringLenFn`] (`call [gEngfuncs+0x74]` at
+    /// `+0x2b00d` and `+0x2b04e`).
+    pub pfn_draw_console_string_len: DrawConsoleStringLenFn,
     pub pfn_console_print: ConsolePrintFn,
     _slots_before_cmd_argc: [*mut c_void; 7], // pfnCenterPrint .. Cvar_SetValue
     pub cmd_argc: CmdArgcFn,
@@ -628,6 +651,25 @@ pub fn engine_module_base() -> Option<usize> {
     let name = c"hw.dll";
     let handle = unsafe { GetModuleHandleA(name.as_ptr() as *const u8) };
     (!handle.is_null()).then_some(handle as usize)
+}
+
+/// One of the engine's or vgui2's interface singletons, by module and
+/// version string (`VGUI_Surface026` from `hw.dll`, `VGUI_Panel007` from
+/// `vgui2.dll`), through the module's exported `CreateInterface`. `None`
+/// while the module isn't loaded or doesn't serve that name.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub fn create_interface(module: &std::ffi::CStr, name: &std::ffi::CStr) -> Option<*mut c_void> {
+    use windows_sys::Win32::System::LibraryLoader::GetProcAddress;
+    type CreateInterfaceFn = unsafe extern "C" fn(*const c_char, *mut i32) -> *mut c_void;
+    let handle = unsafe { GetModuleHandleA(module.as_ptr() as *const u8) };
+    if handle.is_null() {
+        return None;
+    }
+    let create = unsafe { GetProcAddress(handle, c"CreateInterface".as_ptr() as *const u8) }?;
+    // Safety: the interface factory's signature, the same on every Valve DLL.
+    let create: CreateInterfaceFn = unsafe { std::mem::transmute(create) };
+    let object = unsafe { create(name.as_ptr(), std::ptr::null_mut()) };
+    (!object.is_null()).then_some(object)
 }
 
 /// Returns the captured engine function table, once `client.dll` has loaded
@@ -1193,8 +1235,9 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 
 /// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
 /// replace the camera for a dead player (`spectator_deathcam`, before the
-/// position is recorded, so the recorded view is the drawn one) and adjust
-/// the viewmodel it just placed (`spectator_gun`).
+/// position is recorded, so the recorded view is the drawn one), adjust the
+/// viewmodel it just placed (`spectator_gun`) and keep its live bob for a POV
+/// demo (`pov_live_bob`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
@@ -1208,6 +1251,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
