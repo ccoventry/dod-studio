@@ -17,11 +17,12 @@ export const DEFAULT_TEMPLATE = '{map}_{player}_{kills}k_{weapons}_{time}';
 export const PLACEHOLDERS = [
   'player', 'faction', 'enemy_faction', 'map', 'kills', 'weapons', 'first_weapon',
   'victims', 'first_victim', 'row', 'time', 'demo', 'date', 'team_name', 'opponent',
+  'half', 'match',
 ];
 export const MODIFIERS = ['lower', 'upper', 'first'];
 
 /** The only placeholders that can be missing, so the only ones with a fallback. */
-export const WITH_FALLBACK = new Set(['team_name', 'opponent']);
+export const WITH_FALLBACK = new Set(['team_name', 'opponent', 'half', 'match']);
 /** What tells two highlights apart. */
 const DISTINGUISHING = ['row', 'time', 'demo'];
 /** Cut first, in this order, when a name is too long for its path. */
@@ -199,7 +200,17 @@ export function highlightValues(demo, streak, context = {}) {
     date: localDate(demo?.modified_unix_secs),
     team_name: teams.team_name || null,
     opponent: teams.opponent || null,
+    // The Master Queue's match grouping (#685, queue_match_groups.js) keeps
+    // these on the demo; `null` until it has run, or when nothing decided
+    // the half.
+    half: halfWord(demo?.match_info?.half),
+    match: demo?.match_info?.match ? String(demo.match_info.match) : null,
   };
+}
+
+/** `{half}`'s word for a half number: h1, h2, or null when unknown. */
+export function halfWord(half) {
+  return half === 1 ? 'h1' : half === 2 ? 'h2' : null;
 }
 
 function applyModifier(value, modifier) {

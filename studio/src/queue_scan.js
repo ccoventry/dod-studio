@@ -29,7 +29,9 @@ const scanParses = parseClock();
  *   selectDemoAndRenderDetail(demo, idx), updateDemoFooter(demos),
  *   markProjectDirty(), readScanWorkers(), offerIdenticalCopies(copies,
  *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
- *   list (pushed to in place), and persistAppSettings().
+ *   list (pushed to in place), persistAppSettings(), and regroupMatches()
+ *   from queue_match_groups.js, run after a scan so {match} and {half}
+ *   know the new demos (#685).
  */
 export function createQueueScan({
   getDemos,
@@ -41,6 +43,7 @@ export function createQueueScan({
   offerIdenticalCopies,
   getScanPaths,
   persistAppSettings,
+  regroupMatches = () => {},
 }) {
   // ── scan_progress event listener (registered once on load) ────────────────
   let unlistenScanProgress = null;
@@ -187,6 +190,9 @@ export function createQueueScan({
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
       refreshTeamsPane();
+      // Which match and half each demo is (#685), from the analyzer cache
+      // the scan just warmed. Not awaited: the queue is already usable.
+      if (newlyScanned.length > 0) regroupMatches();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
