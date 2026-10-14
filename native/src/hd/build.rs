@@ -257,6 +257,8 @@ pub fn run(
         .args(&request.styles)
         .current_dir(scripts)
         .env("HD_CAP", request.cap.to_string())
+        // `hdcommon.game_folder` (#402): the scripts build `<game>/<mod>` paths.
+        .env("HD_GAME_FOLDER", crate::shared::paths::game_folder())
         .env("REALESRGAN", setup::upscaler_exe(realesrgan))
         .env("PYTHONIOENCODING", "utf-8")
         .stdin(Stdio::null())

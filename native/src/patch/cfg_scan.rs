@@ -369,7 +369,10 @@ pub fn value_warnings(
 /// `host_framerate` is `sys_fast_forward`/`sys_normal_speed`'s own mechanism
 /// for the real-time run-up before recording (`docs/goldsrc_dod_quirks.md`'s
 /// audio-resync entry) — a scheduled one races that timing, not the record
-/// itself (recording pins its own timestep regardless).
+/// itself (recording pins its own timestep regardless). `r_norefresh` is the
+/// same pair's other switch (#724): the fast-forward draws nothing, and the
+/// pre-roll turns drawing back on; a scheduled `1` inside a clip records
+/// frames with no world in them.
 ///
 /// All of these share the same failure mode: the capture still completes and
 /// still looks plausible.
@@ -383,8 +386,17 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
     "mirv_movie_fps",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
     "mirv_agr",
 ];
+
+/// The cvars `sys_fast_forward` sets to run uncapped between clips and
+/// `sys_normal_speed` puts back at every pre-roll (#724; the values are
+/// `builder::speed`'s). Not a tier of their own: in Initial Commands they are
+/// honoured exactly — that value is what every clip gets back — and scheduled
+/// they are reported with `mid_demo_hazards`, because a scheduled one lasts
+/// only until the next clip's pre-roll restores the Initial value.
+pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"];
 
 /// Commands refused wherever a command can be typed (Initial Commands and
 /// Scheduled Commands alike), not merely shadowed or flagged as a mid-demo
@@ -394,7 +406,7 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   * **the pipeline owns it outright** — no dedicated setting exists, and no
 ///     scenario has been found where a user typing one is anything but a
 ///     misunderstanding (`mirv_recordmovie_start`/`_stop`, `mirv_movie_ffmpeg`,
-///     `host_framerate`);
+///     `host_framerate`, `r_norefresh`);
 ///   * **DoD's own client has no legitimate non-default value for it at
 ///     all** — `r_drawentities`, `cl_lw`.
 ///
@@ -419,6 +431,11 @@ pub const MID_DEMO_HAZARDS: &[&str] = &[
 ///   legitimate creative use (frame-by-frame stepping, per
 ///   `docs/goldsrc_dod_quirks.md`'s High-Precision Frame Pacing entry) and
 ///   rejected: "It's dangerous and nobody uses that."
+/// - `r_norefresh` — the same pair's drawing switch (#724): `sys_fast_forward`
+///   sets it so the fast-forward skips the 3D pass, `sys_normal_speed` clears
+///   it at every pre-roll. A user's `1` is either undone before any clip
+///   records (Initial Commands) or records clips with no world drawn
+///   (scheduled); there is no value of it a capture can want.
 /// - `r_drawentities` / `cl_lw` — DoD 1.3's `client.dll` runs a cvar-enforcement
 ///   check inside `CHud::Redraw`: if either is not `1`, it forces the correct
 ///   value back, prints an error, and calls `quit` — the process exits
@@ -441,6 +458,7 @@ pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_recordmovie_stop",
     "mirv_movie_ffmpeg",
     "host_framerate",
+    "r_norefresh",
     "dodstudio_batch",
     "dodstudio_schedule",
     "r_drawentities",
@@ -560,9 +578,13 @@ fn commands_matching(list: &[&str], commands: &[String]) -> Vec<(String, String)
         .collect()
 }
 
-/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback.
+/// Commands from `MID_DEMO_HAZARDS` that must not be run during playback, and
+/// the `FAST_FORWARD_CVARS` the next pre-roll would put back. Only meaningful
+/// against Scheduled Commands: the latter are honoured in Initial Commands.
 pub fn mid_demo_hazards(commands: &[String]) -> Vec<(String, String)> {
-    commands_matching(MID_DEMO_HAZARDS, commands)
+    let mut hits = commands_matching(MID_DEMO_HAZARDS, commands);
+    hits.extend(commands_matching(FAST_FORWARD_CVARS, commands));
+    hits
 }
 
 /// Commands from `BANNED_COMMANDS` present anywhere in `commands` — Initial
@@ -1525,6 +1547,7 @@ mod tests {
             "mirv_recordmovie_stop".to_string(),
             "mirv_movie_ffmpeg all enabled 1".to_string(),
             "host_framerate 0.05".to_string(),
+            "r_norefresh 1".to_string(),
             "r_drawentities 0".to_string(),
             "cl_lw 0".to_string(),
         ]);
@@ -1537,10 +1560,36 @@ mod tests {
                 "mirv_recordmovie_stop",
                 "mirv_movie_ffmpeg",
                 "host_framerate",
+                "r_norefresh",
                 "r_drawentities",
                 "cl_lw",
             ]
         );
+    }
+
+    #[test]
+    fn the_fast_forward_cvars_are_a_hazard_only_when_scheduled() {
+        // sys_fast_forward sets them between clips and sys_normal_speed puts
+        // the Initial Commands value back at every pre-roll (#724): typed in
+        // Initial Commands they are honoured, so no tier reports them there;
+        // scheduled, they last only until the next clip.
+        let commands: Vec<String> = ["fps_override 1", "FPS_MAX 300", "gl_vsync 0"]
+            .iter()
+            .map(|c| c.to_string())
+            .collect();
+        let hits = mid_demo_hazards(&commands);
+        let hazards: Vec<&str> = hits.iter().map(|(cvar, _)| cvar.as_str()).collect();
+        assert_eq!(hazards, FAST_FORWARD_CVARS);
+        assert!(banned_commands(&commands).is_empty());
+        assert!(scheduled_banned_commands(&commands).is_empty());
+        assert!(noop_commands_in_init(&commands).is_empty());
+    }
+
+    #[test]
+    fn r_norefresh_is_the_fast_forwards_and_refused_like_host_framerate() {
+        let commands = vec!["r_norefresh 1".to_string()];
+        assert_eq!(banned_commands(&commands).len(), 1);
+        assert_eq!(mid_demo_hazards(&commands).len(), 1);
     }
 
     #[test]
@@ -1868,6 +1917,7 @@ mod tests {
             .chain(SCHEDULED_BANNED_COMMANDS)
             .chain(MID_DEMO_HAZARDS)
             .chain(NOOP_IN_INIT_COMMANDS)
+            .chain(FAST_FORWARD_CVARS)
         {
             assert_eq!(demo_filter_rule(&format!("{name} 1")), None, "{name}");
         }
