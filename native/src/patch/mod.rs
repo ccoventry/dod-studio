@@ -97,6 +97,8 @@ pub const EVENT_FRAME_SIZE: usize = 84;
 
 // Command Injection Logic
 pub const MAX_ECHO_CHUNK_SIZE: usize = 55;
+/// How long the primer demo plays before `playdemo dodstudio_chain_01`. Only a
+/// batch launched without the hook DLL has a primer (#365).
 pub const PRIMER_DELAY_TICKS: i32 = 500;
 
 /// Upper bound on the size of a `NetworkMessage` frame the decal passes will
@@ -136,6 +138,7 @@ pub mod decal_probe;
 pub mod decal_strip;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod engine;
+pub mod game_dir;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod highlevel;
 pub mod launch_settings;
@@ -152,6 +155,10 @@ pub mod runtime_batch;
 pub mod scanner;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod sound_mute;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod source_copies;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod viewdemo_refresh;
 
 // ── Re-export wall ────────────────────────────────────────────────────────────
 // All items below were previously at the top level of patch.rs.

@@ -582,6 +582,7 @@ pub fn poll() {
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
+    crate::pov_live_bob::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
@@ -654,7 +655,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair and the prone eye height, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -675,6 +676,9 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
+    }
+    if let Some(deathcam) = crate::spectator_deathcam::status_line() {
+        lines.push(deathcam);
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
@@ -738,6 +742,9 @@ fn status_text() -> String {
     }
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
+    }
+    if let Some(game_dir) = crate::game_dir_check::status_line() {
+        lines.push(game_dir);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
@@ -1576,6 +1583,9 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
+        crate::spectator_deathcam::set_cvar(deathcam);
+    }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
         crate::overview_players::set_cvar(icons);
     }
@@ -1587,6 +1597,12 @@ pub fn install() {
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
+    }
+    if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
+        crate::hlae_window::set_cloak_cvar(cloak);
+    }
+    if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
+        crate::pov_live_bob::set_cvar(bob);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
@@ -1750,10 +1766,13 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::spectator_deathcam::NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
+            crate::hlae_window::CLOAK_NAME,
+            crate::pov_live_bob::NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,

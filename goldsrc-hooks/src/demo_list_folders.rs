@@ -145,7 +145,10 @@ pub fn status() -> String {
     if enabled() {
         "the Load Demo window lists and opens folders".to_string()
     } else {
-        "the Load Demo window lists only the demos in dod/".to_string()
+        format!(
+            "the Load Demo window lists only the demos in {}/",
+            crate::game_folder::name()
+        )
     }
 }
 
@@ -501,7 +504,10 @@ mod hook {
                 if let Ok(mut current) = super::CURRENT_FOLDER.lock() {
                     current.clone_from(&folder);
                 }
-                crate::debug::report(&format!("demo_list_folders: opened dod/{folder}"));
+                crate::debug::report(&format!(
+                    "demo_list_folders: opened {}/{folder}",
+                    crate::game_folder::name()
+                ));
                 let fill: FillFn = cast(FILL.load(Ordering::Relaxed));
                 fill(dialog);
                 return;

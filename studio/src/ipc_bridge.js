@@ -164,6 +164,15 @@ export async function diagnoseExecutablePaths(paths) {
     });
 }
 
+/** The folders beside `gamePath`'s hl.exe holding a liblist.gam (#402). */
+export async function listGameFolders(gamePath) {
+  return await invoke('list_game_folders', { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_game_folders):", err);
+      throw err;
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
@@ -425,10 +434,53 @@ export async function queueRenderBatch(payload) {
     });
 }
 
+/** Starts the staged batch. `jobIds` (#70) names the ticked rows: only the
+ *  Queued jobs among them render, the other Queued rows wait for a later
+ *  Start. `null` starts every Queued job. */
 export async function startQueuedRender() {
   return invoke("start_queued_render")
     .catch((err) => {
       console.error("IPC Execution Error (start_queued_render):", err);
+      throw err;
+    });
+}
+
+/** Cancels several rows at once (#70): Rendering ones stop, Queued ones
+ *  become Cancelled. */
+export async function cancelRenderJobs(jobIds) {
+  return invoke("cancel_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (cancel_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Requeues several Cancelled/Finished/Error rows at once (#70); resumes the
+ *  scheduler if nothing is Rendering, like a single Reset. */
+export async function resetRenderJobs(jobIds) {
+  return invoke("reset_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (reset_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Removes several rows at once (#70); a Rendering row stays. Resolves to
+ *  how many went. */
+export async function removeRenderJobs(jobIds) {
+  return invoke("remove_render_jobs", { jobIds })
+    .catch((err) => {
+      console.error("IPC Execution Error (remove_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Clear Queue (#70): every row goes. With a batch running, its renders are
+ *  cancelled and the list empties once they have stopped. */
+export async function clearRenderQueue() {
+  return invoke("clear_render_queue")
+    .catch((err) => {
+      console.error("IPC Execution Error (clear_render_queue):", err);
       throw err;
     });
 }
@@ -483,6 +535,27 @@ export async function removeNonRenderingRenderJobs() {
   return invoke("remove_non_rendering_render_jobs")
     .catch((err) => {
       console.error("IPC Execution Error (remove_non_rendering_render_jobs):", err);
+      throw err;
+    });
+}
+
+/** Delete Take (#644): checks each take folder and measures it for the
+ *  confirm. Resolves to `[{ take_folder, take_key, size_bytes }]`; rejects
+ *  with the reason when any take can't be deleted. */
+export async function measureTakeFolders(takeFolders) {
+  return invoke("measure_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (measure_take_folders):", err);
+      throw err;
+    });
+}
+
+/** Delete Take (#644): sends the take folders to the Recycle Bin and takes
+ *  their rows out of the list. Resolves to `{ deleted, failed }`. */
+export async function deleteTakeFolders(takeFolders) {
+  return invoke("delete_take_folders", { takeFolders })
+    .catch((err) => {
+      console.error("IPC Execution Error (delete_take_folders):", err);
       throw err;
     });
 }
@@ -635,6 +708,26 @@ export async function demoRenameUndoable() {
     .catch((err) => {
       console.error("IPC Execution Error (demo_rename_undoable):", err);
       return null;
+    });
+}
+
+/** Which match and half each queued demo is (#685). `parseMissing` reads
+ *  demos the analyzer cache doesn't have (about a second each); without it
+ *  they are left out of the answer. */
+export async function queueMatchGroups(paths, parseMissing = false) {
+  return invoke("queue_match_groups", { paths, parseMissing })
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups):", err);
+      showToast(STRINGS.IPC.matchGroupsFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function queueMatchGroupsCancel() {
+  return invoke("queue_match_groups_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups_cancel):", err);
+      throw err;
     });
 }
 

@@ -226,28 +226,28 @@ pub fn resolve(tools: &Path, scripts: Option<&Path>) -> BlenderStatus {
     }
 }
 
-/// Maps a `.agr` could have been recorded on: every `.bsp` in the game's
-/// `dod\maps` and `dod_downloads\maps`, by name, sorted.
+/// Maps a `.agr` could have been recorded on: every `.bsp` in the game
+/// folder's `maps` and its `_downloads` sibling's (`dod\maps` and
+/// `dod_downloads\maps` by default, #402), by name, sorted.
 pub fn maps(game_exe: &Path) -> Vec<String> {
     let Some(game_dir) = game_exe.parent() else {
         return Vec::new();
     };
-    let mut names: Vec<String> = ["dod", "dod_downloads"]
-        .iter()
-        .flat_map(|g| {
-            std::fs::read_dir(game_dir.join(g).join("maps"))
-                .into_iter()
-                .flatten()
-        })
-        .flatten()
-        .filter_map(|e| {
-            let path = e.path();
-            path.extension()
-                .is_some_and(|x| x.eq_ignore_ascii_case("bsp"))
-                .then(|| path.file_stem()?.to_str().map(str::to_string))
-                .flatten()
-        })
-        .collect();
+    let mut names: Vec<String> = [
+        crate::shared::paths::mod_dir(game_dir),
+        crate::shared::paths::downloads_dir(game_dir),
+    ]
+    .iter()
+    .flat_map(|g| std::fs::read_dir(g.join("maps")).into_iter().flatten())
+    .flatten()
+    .filter_map(|e| {
+        let path = e.path();
+        path.extension()
+            .is_some_and(|x| x.eq_ignore_ascii_case("bsp"))
+            .then(|| path.file_stem()?.to_str().map(str::to_string))
+            .flatten()
+    })
+    .collect();
     names.sort_unstable();
     names.dedup();
     names
@@ -448,6 +448,9 @@ pub fn arguments(
             push(&"--");
             push(&"--game");
             push(&game_exe.parent().unwrap_or(Path::new(".")));
+            // The script builds `<game>/<mod>/...` paths itself (#402).
+            push(&"--game-folder");
+            push(&crate::shared::paths::game_folder());
             push(&"--agr");
             push(&request.agr);
             push(&"--assets");
@@ -811,6 +814,7 @@ mod tests {
         let after = &a[dash + 1..];
         let value = |flag: &str| after[after.iter().position(|x| x == flag).unwrap() + 1].clone();
         assert_eq!(value("--game"), r"C:\Half-Life");
+        assert_eq!(value("--game-folder"), "dod");
         assert_eq!(value("--map"), "dod_anzio");
         assert_eq!(value("--engine"), "cycles");
         assert_eq!(value("--style"), "ultrasharp");
