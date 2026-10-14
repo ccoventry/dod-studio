@@ -2171,6 +2171,11 @@ tr.keyboard-selected {
   margin: 4px 0 4px 16px;
 }
 
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
 .hd-style-maps-progress {
   width: 100%;
 }

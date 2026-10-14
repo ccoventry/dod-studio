@@ -1685,17 +1685,18 @@ export const STRINGS = {
     COVERAGE_CHECKING: 'Checking which maps each style has map textures for…',
     coverageChecking: (done, total) => `Checking which maps each style has map textures for… (${done} of ${total} maps)`,
     coverageFailed: (err) => `Could not check which maps are covered: ${err}`,
-    coverageAll: (style, maps) => `${style} has every map texture for all ${maps} map${maps === 1 ? '' : 's'}.`,
-    coverageCounts: (style, full, part, none) => {
+    coverageAll: (style, maps, listed) => `${style} has every map texture for ${maps === 1 ? 'the 1 map' : `all ${maps} maps`}${listed ? ' in your map list' : ''}.`,
+    coverageCounts: (style, full, part, none, listed) => {
       const maps = (n) => `${n} map${n === 1 ? '' : 's'}`;
       const parts = [];
       if (full) parts.push(`every map texture for ${maps(full)}`);
       if (part) parts.push(`${parts.length ? 'some' : 'some of the map textures'} for ${maps(part)}`);
       if (none) parts.push(`${parts.length ? 'none' : 'no map textures'} for ${maps(none)}`);
       const last = parts.pop();
-      return `${style}: ${parts.length ? `${parts.join(', ')} and ${last}` : last}.`;
+      return `${style}${listed ? ', in your map list' : ''}: ${parts.length ? `${parts.join(', ')} and ${last}` : last}.`;
     },
     COVERAGE_SHOW: 'Click to see which maps',
+    COVERAGE_SHOW_EVERY_MAP: 'Show every map, not only the ones in your map list',
     coverageGroupFull: (n) => `Every map texture (${n})`,
     coverageGroupPart: (n) => `Some of the map textures (${n})`,
     coverageGroupNone: (n) => `No map textures (${n})`,

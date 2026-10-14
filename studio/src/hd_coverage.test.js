@@ -90,6 +90,15 @@ describe('hd_coverage per map (#426)', () => {
     expect(coverageSentence('x', mapCoverage(null, 'x'))).toBe('');
   });
 
+  it('sorts and counts only the map list\'s maps when given them', () => {
+    const groups = mapCoverage(COVERAGE, 'ultrasharpv2', ['dod_kalt', 'DOD_ANZIO', 'dod_nowhere']);
+    expect(groups).toEqual({ full: ['dod_anzio'], part: [], none: ['dod_Kalt'] });
+    expect(coverageSentence('ultrasharpv2', groups, true))
+      .toBe('ultrasharpv2, in your map list: every map texture for 1 map and none for 1 map.');
+    expect(coverageSentence('ultrasharp', mapCoverage(COVERAGE, 'ultrasharp', ['dod_kalt']), true))
+      .toBe('ultrasharp has every map texture for the 1 map in your map list.');
+  });
+
   it('warns about the chosen maps the style has not fully built', () => {
     // Names compare without case: the list is lowercased, the files are not.
     const chosen = ['dod_kalt', 'dod_avalanche', 'dod_anzio', 'dod_nowhere'];

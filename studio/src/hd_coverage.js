@@ -50,13 +50,16 @@ export function gapsSentence(style, gaps) {
 
 /** How `style` stands on each map, as three lists: `full` (names), `part`
  *  (`{ map, built, total }`) and `none` (names), in the report's map order.
- *  A map with no textures to build is in none of them. */
-export function mapCoverage(coverage, style) {
+ *  A map with no textures to build is in none of them. With `chosen`
+ *  (map names, any case), only those maps are sorted. */
+export function mapCoverage(coverage, style, chosen = null) {
   const full = [];
   const part = [];
   const none = [];
+  const wanted = chosen && new Set(chosen.map((name) => name.toLowerCase()));
   for (const m of coverage?.maps || []) {
     if (!m.total) continue;
+    if (wanted && !wanted.has(m.map.toLowerCase())) continue;
     const built = m.built?.[style] || 0;
     if (built >= m.total) full.push(m.map);
     else if (built > 0) part.push({ map: m.map, built, total: m.total });
@@ -66,12 +69,13 @@ export function mapCoverage(coverage, style) {
 }
 
 /** One sentence: how many maps `style` has every, some and none of the
- *  textures for; '' when the report has no maps. */
-export function coverageSentence(style, groups) {
+ *  textures for; '' when the report has no maps. `listed` says the groups
+ *  hold only the maps hd_maps.txt picks. */
+export function coverageSentence(style, groups, listed = false) {
   const total = groups.full.length + groups.part.length + groups.none.length;
   if (!total) return '';
-  if (groups.full.length === total) return STRINGS.HD.coverageAll(style, total);
-  return STRINGS.HD.coverageCounts(style, groups.full.length, groups.part.length, groups.none.length);
+  if (groups.full.length === total) return STRINGS.HD.coverageAll(style, total, listed);
+  return STRINGS.HD.coverageCounts(style, groups.full.length, groups.part.length, groups.none.length, listed);
 }
 
 /** The maps in `chosen` (the maps a build makes textures for: hd_maps.txt's

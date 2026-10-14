@@ -117,6 +117,7 @@ export function initHdPane() {
   let worldCoverageError = '';
   let worldCoverageLoading = false;
   let worldCoverageProgress = null; // { done, total } from hd_coverage_progress
+  let coverageEveryMap = false; // the lists show every map, not only the map list's
   // A download or a build is running: the backend allows one at a time.
   let busy = false;
   // Whether the build can run at all: scripts shipped, and a Python found.
@@ -202,8 +203,26 @@ export function initHdPane() {
     } else if (worldCoverageError) {
       summary = STRINGS.HD.coverageFailed(worldCoverageError);
     } else if (worldCoverage) {
-      const groups = mapCoverage(worldCoverage, style);
-      summary = coverageSentence(style, groups);
+      // With a map list in effect the lists show only its maps, unless the
+      // user asks for every map; an empty list shows every map.
+      const allGroups = mapCoverage(worldCoverage, style);
+      const picked = mapMode === 'some' ? [...pickedBy().keys()] : [];
+      const onlyPicked = picked.length > 0 && !coverageEveryMap;
+      const groups = onlyPicked ? mapCoverage(worldCoverage, style, picked) : allGroups;
+      summary = coverageSentence(style, groups, onlyPicked);
+      if (picked.length) {
+        const label = document.createElement('label');
+        label.className = 'hd-hint hd-style-maps-every';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = coverageEveryMap;
+        box.addEventListener('change', () => {
+          coverageEveryMap = box.checked;
+          renderCfgLines();
+        });
+        label.append(box, ` ${STRINGS.HD.COVERAGE_SHOW_EVERY_MAP}`);
+        styleMapsGroups.appendChild(label);
+      }
       if (worldCoverage.unreadable?.length) {
         summary += ` ${STRINGS.HD.coverageUnreadable(worldCoverage.unreadable.length)}`;
       }
@@ -225,9 +244,9 @@ export function initHdPane() {
       }
       // A style with no map textures anywhere already says so in the line
       // above; the warning is for one that has some maps but not these.
-      if (groups.full.length || groups.part.length) {
+      if (allGroups.full.length || allGroups.part.length) {
         const listed = mapMode === 'some';
-        const chosen = listed ? [...pickedBy().keys()] : mapNames();
+        const chosen = listed ? picked : mapNames();
         warning = mapListWarning(style, uncoveredChosen(worldCoverage, style, chosen), listed);
       }
     }
