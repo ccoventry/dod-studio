@@ -654,6 +654,27 @@ export const STRINGS = {
     OPEN_TAKE_FOLDER_TITLE: 'Open the source take folder',
     OPEN_OUTPUT_BUTTON: '📁 Open Output',
     OPEN_TAKE_FOLDER_BUTTON: '📁 Open Take Folder',
+    // #644: Delete Take sends the take folder to the Recycle Bin.
+    DELETE_TAKE_BUTTON: 'Delete Take',
+    DELETE_TAKE_TITLE: "Move this take's folder to the Recycle Bin. Its render history stays.",
+    DELETE_TAKE_RENDERING_TITLE: 'This job is rendering. Cancel it first.',
+    DELETE_TAKE_PAIR_RENDERING_TITLE: 'Another stream of this take is rendering. Cancel it first.',
+    DELETE_TAKE_RUNNING_TITLE: 'A take is being deleted.',
+    deleteTakeConfirmTitle: (n) => (n === 1 ? 'Delete Take' : `Delete ${n} Takes`),
+    deleteTakeConfirmMessage: (n, size) => (n === 1
+      ? `Move this take (${size}) to the Recycle Bin?`
+      : `Move these ${n} takes (${size}) to the Recycle Bin?`),
+    DELETE_TAKE_CONFIRM_FOOTER: 'The space comes back when the Recycle Bin is emptied. The render history stays.',
+    deleteTakeQueuedNote: (n) => (n === 1
+      ? 'Its queued render is removed from the queue.'
+      : `${n} queued renders are removed from the queue.`),
+    DELETE_TAKE_CONFIRM_BUTTON: 'Move to Recycle Bin',
+    deleteTakeMeasuring: (done, total) => `Measuring takes: ${done} of ${total}`,
+    deleteTakeRecycling: (done, total) => `Moving to the Recycle Bin: ${done} of ${total}`,
+    takesDeleted: (n, size) => `${n === 1 ? 'Take' : `${n} takes`} moved to the Recycle Bin (${size}).`,
+    takesDeleteFailed: (deleted, failed, firstError) =>
+      `${failed} take${failed === 1 ? '' : 's'} not deleted${deleted > 0 ? ` (${deleted} moved to the Recycle Bin)` : ''}: ${firstError}. Scan for Takes to list ${failed === 1 ? 'it' : 'them'} again.`,
+    deleteTakeRefused: (err) => `Couldn't delete the take: ${err}`,
     QUEUE_SUMMARY_DEFAULT: '0 queued · 0 rendering · 0 done',
     queueSummary: (queued, rendering, done) => `${queued} queued · ${rendering} rendering · ${done} done`,
     ERROR_LOG_TITLE_DEFAULT: 'FFmpeg Error Log',

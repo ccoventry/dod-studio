@@ -294,6 +294,24 @@ pub fn job_still_rendering(job_id: &str) -> String {
     format!("Job {} is still rendering — cancel it first", job_id)
 }
 
+// ── take_delete_manager.rs (#644) ───────────────────────────────────────
+
+pub fn take_not_listed(take_folder: &str) -> String {
+    format!(
+        "{} isn't in the Render tab's list, so it was not deleted",
+        take_folder
+    )
+}
+
+pub fn take_is_rendering(take_folder: &str) -> String {
+    format!(
+        "{} is rendering. Cancel it first, then delete the take.",
+        take_folder
+    )
+}
+
+pub const NO_TAKES_TO_DELETE: &str = "No takes were picked to delete.";
+
 // ── audit_manager.rs ─────────────────────────────────────────────────────
 
 pub fn failed_to_delete_audit_file(path: &str, err: impl Display) -> String {
