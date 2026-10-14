@@ -284,7 +284,7 @@ pub fn build_batch_queue(
 
     let game_path_buf = std::path::PathBuf::from(&config.game_path);
     let dod_dir = match game_path_buf.parent() {
-        Some(parent) => parent.join("dod"),
+        Some(parent) => crate::shared::paths::mod_dir(parent),
         None => {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::NotFound,

@@ -740,6 +740,9 @@ fn status_text() -> String {
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
     }
+    if let Some(game_dir) = crate::game_dir_check::status_line() {
+        lines.push(game_dir);
+    }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
     }
