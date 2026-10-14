@@ -623,8 +623,6 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   document.querySelector('#render-select-all-cb')?.addEventListener('change', (e) => {
     if (e.target.checked) selection.selectAll(); else selection.selectNone();
   });
-  document.querySelector('#render-select-all-btn')?.addEventListener('click', () => selection.selectAll());
-  document.querySelector('#render-select-none-btn')?.addEventListener('click', () => selection.selectNone());
   document.querySelector('#render-select-unrendered-btn')?.addEventListener('click', () => selection.selectUnrendered());
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;

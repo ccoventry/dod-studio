@@ -401,17 +401,17 @@ test.describe('issue #70 — ticked rows and Clear Queue', () => {
     await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (2)');
   });
 
-  test('Select all, none and unrendered, and the header tick', async ({ page }) => {
+  test('the header tick selects all or none, Select unrendered the new takes', async ({ page }) => {
     await gotoHarness(page);
     await emitSnapshot(page, [
       job({ id: '0' }),
       job({ id: '1', take_folder: 'C:\\captures\\demo1\\chain_02_b0\\take0000', history: rendered }),
     ]);
-    await page.locator('#render-select-all-btn').click();
+    await page.locator('#render-select-all-cb').click();
     await expect(page.locator('#render-selection-count')).toHaveText('2 of 2 selected');
     await expect(page.locator('#render-select-all-cb')).toBeChecked();
 
-    await page.locator('#render-select-none-btn').click();
+    await page.locator('#render-select-all-cb').click();
     await expect(page.locator('#render-selection-count')).toHaveText('0 of 2 selected');
     await expect(page.locator('#start-render-btn')).toBeDisabled();
     await expect(page.locator('#start-render-btn')).toHaveText('Start Render Batch (0)');

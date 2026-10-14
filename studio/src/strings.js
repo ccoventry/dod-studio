@@ -656,8 +656,6 @@ export const STRINGS = {
       ? 'A take is rendering. Stop it and empty the list?'
       : `${rendering} takes are rendering. Stop them and empty the list?`),
     CLEAR_QUEUE_CONFIRM_BUTTON: 'Stop and clear',
-    SELECT_ALL_BUTTON: 'Select all',
-    SELECT_NONE_BUTTON: 'Select none',
     SELECT_UNRENDERED_BUTTON: 'Select unrendered',
     SELECT_UNRENDERED_TITLE: 'Tick only the takes with no finished render in their history.',
     SELECT_ALL_CB_TITLE: 'Tick or untick every row',
