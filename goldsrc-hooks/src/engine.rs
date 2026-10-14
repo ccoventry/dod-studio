@@ -1234,7 +1234,8 @@ unsafe extern "C" fn tramp_get_studio_model_interface(
 }
 
 /// Runs `client.dll`'s own `V_CalcRefdef`, then lets the spectated view
-/// adjust the viewmodel it just placed (`spectator_gun`).
+/// adjust the viewmodel it just placed (`spectator_gun`) and keeps its live
+/// bob for a POV demo (`pov_live_bob`).
 unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
     let real = REAL_CALC_REFDEF.load(Ordering::Acquire);
     if real.is_null() {
@@ -1247,6 +1248,7 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
         crate::position::record(unsafe { &*pparams });
     }
     unsafe { crate::spectator_gun::after_calc_refdef(pparams) };
+    crate::pov_live_bob::after_calc_refdef(pparams);
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
