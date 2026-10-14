@@ -25,12 +25,14 @@
       kills: [[1000, 754.2, 'Garand'], [1400, 758, 'MP40']], viewdemo_times: [754.2, 758],
       start_index: 0, end_index: 1, faction: 'Axis', victims: ['a', 'b'], victim_factions: ['Allies', 'Allies'],
     };
-    const demo = { path: 'C:/d/x.dem', name: 'x.dem', map_name: 'dod_anzio', local_player_index: 3, streaks: [streak] };
+    const demo = {
+      path: 'C:/d/x.dem', name: 'x.dem', map_name: 'dod_anzio', local_player_index: 3, streaks: [streak], is_pov: true,
+      teams: [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'KROD' }],
+    };
 
     window.__changes = 0;
     window.__exportDirs = ['D:\\Clips'];
     // The Teams list (#445): the demo's tags, with dicE given a display name.
-    demo.teams = [{ side: 'Allies', tag: 'dicE' }, { side: 'Axis', tag: 'KROD' }];
     window.__projectTeams = { names: { dicE: 'dice' }, merged: {} };
     window.__demo = demo;
     initClipNameSettings({

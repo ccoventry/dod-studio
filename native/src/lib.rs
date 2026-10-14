@@ -49,6 +49,10 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
+/// Which match and half each demo of a list is (#685).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod match_groups;
+
 /// Launch Preview without patching (#434, step 2).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
