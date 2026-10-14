@@ -21,15 +21,26 @@
 //!   kill-feed lines, centre text, the clan-match countdown, dead bodies --
 //!   lands with a fresh client-clock timestamp and would still be on screen at
 //!   the clip. Fast-forward moves both clocks together, so those expire as
-//!   they would in a demo played straight through.
+//!   they would in a demo played straight through. It is the helper cfg's
+//!   `sys_fast_forward`, so it runs uncapped and undrawn here too
+//!   (`builder/speed.rs`, #724); the seek's own stepped frames still draw.
 //! - **`<demo>_next` becomes `next`.** The hook loads the next demo itself; the
 //!   alias (`playdemo` of the next patched copy) would not exist.
 //! - The 64-byte `build_safe_echos` splitting and the breadcrumbs stay out:
 //!   only the markers Studio reads go in.
 
-use std::path::Path;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 
 use crate::patch::types::{CaptureStreak, PatchJob};
+
+/// A batch the hook runs: its file, and the copies of demos on another
+/// drive it plays from (`patch::source_copies`), which go when it ends.
+#[derive(Debug, Clone, Default)]
+pub struct RuntimeBatch {
+    pub file: PathBuf,
+    pub source_copies: Vec<PathBuf>,
+}
 
 /// The hook's batch file header (goldsrc-hooks `batch::HEADER`).
 pub const HEADER: &str = "dodstudio-batch 1";
@@ -169,6 +180,19 @@ pub fn batch_file(
     streaks: &[CaptureStreak],
     clear_decals: bool,
 ) -> Result<String, String> {
+    batch_file_playing(jobs, streaks, clear_decals, &HashMap::new())
+}
+
+/// [`batch_file`], with a demo in `play_as` played from that path instead
+/// of its own: a demo on another drive than the game is copied into the
+/// game's folder for the batch (`patch::source_copies`). The highlights
+/// still belong to the original, so the clock is the original's.
+pub fn batch_file_playing(
+    jobs: &[PatchJob],
+    streaks: &[CaptureStreak],
+    clear_decals: bool,
+    play_as: &HashMap<String, PathBuf>,
+) -> Result<String, String> {
     let mut out = vec![HEADER.to_string()];
     let mut demos = 0;
     for job in jobs.iter().filter(|j| !j.blocks.is_empty()) {
@@ -178,7 +202,11 @@ pub fn batch_file(
             .output_demo
             .file_stem()
             .map(|s| format!("{}_next", s.to_string_lossy()));
-        out.push(format!("demo\t{}", clean(&job.source_demo)));
+        let plays = play_as
+            .get(&job.source_demo)
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_else(|| job.source_demo.clone());
+        out.push(format!("demo\t{}", clean(&plays)));
         for line in &job.init_commands {
             out.push(format!("init\t{}", clean(line)));
         }
@@ -391,6 +419,22 @@ mod tests {
         s.viewdemo_times.clear();
         let e = batch_file(&[job("a.dem", &[(1, "x")])], &[s], false).unwrap_err();
         assert!(e.contains("no demo-player times"), "{e}");
+    }
+
+    #[test]
+    fn a_copied_demo_is_played_from_its_copy_on_the_originals_clock() {
+        let streaks = [streak("D:/demos/a.dem", &[(3000, 330.0)], 100.0)];
+        let jobs = [job("D:/demos/a.dem", &[(2900, "sys_record_start")])];
+        let play_as = HashMap::from([(
+            "D:/demos/a.dem".to_string(),
+            PathBuf::from("C:/game/dod/dodstudio_src_01_a.dem"),
+        )]);
+        let text = batch_file_playing(&jobs, &streaks, false, &play_as).unwrap();
+        assert!(
+            text.contains("demo\tC:/game/dod/dodstudio_src_01_a.dem\n"),
+            "{text}"
+        );
+        assert!(text.contains("at\t329.000\tsys_record_start"), "{text}");
     }
 
     #[test]

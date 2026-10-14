@@ -1,6 +1,7 @@
 //! Fixes the first demo of a session rendering with its lighting far too dark
 //! (issue #365, "The First-Load Black Map Bug" in `docs/goldsrc_dod_quirks.md`),
-//! which is why capture batches play a primer demo first.
+//! which is why a capture batch launched without this DLL plays a primer demo
+//! first; with it, a patched batch has no primer (#365).
 //!
 //! ## The bug
 //!

@@ -114,6 +114,12 @@ that panics the parser cannot take down the run:
 | `grenade_prime_probe` | Can a recording tell a primed grenade from a plain throw? |
 | `grenade_timing_probe` | When a thrower's body animation changes, relative to the throw. |
 
+### The analyzer cache
+
+| Probe | What it does |
+| --- | --- |
+| `cache_migrate_probe` | Dry-runs the cache upgrades on a real cache, read-only: how many entries upgrade, why the rest need a parse, and whether an upgraded entry matches a fresh analysis. |
+
 ### Crash hunting and live-test aids
 
 | Probe | What it does |

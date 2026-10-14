@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<!--
+  Minimal harness for the Master Queue's Group by match (#685,
+  queue_match_groups.js with master_pane.js): the queue table, the checkbox
+  and the scan status line. See tests/e2e/README.md for the general shape.
+  The test sets the `queue_match_groups` mock before calling __regroup().
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>queue_match_groups.js test harness</title>
+</head>
+<body>
+  <input id="demo-search-input" />
+  <input type="checkbox" id="master-group-by-match-cb" />
+  <span id="scan-status">Status: Ready</span>
+  <table id="master-demo-table"><tbody id="master-demo-table-body"></tbody></table>
+
+  <script type="module">
+    import { initMasterPane, renderMasterList } from '/src/master_pane.js';
+    import { createQueueMatchGroups } from '/src/queue_match_groups.js';
+
+    const demos = ['h2_pov.dem', 'other.dem', 'h1_hltv.dem', 'h1_pov.dem'].map((name) => ({
+      name, path: `C:\\demos\\${name}`, streaks: [],
+    }));
+    initMasterPane();
+    const render = () => renderMasterList(demos, null, () => {});
+    const { regroup } = createQueueMatchGroups({ getDemos: () => demos, renderQueue: render });
+    render();
+    window.__demos = demos;
+    window.__regroup = (opts) => regroup(opts);
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
