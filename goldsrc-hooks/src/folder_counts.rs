@@ -276,7 +276,11 @@ pub fn count_later(listing: &str, folders: Vec<PathBuf>, up: Option<(PathBuf, Pa
             FINISHED.store(true, Ordering::Release);
             let line = format!(
                 "folder_counts: {} -- {} folder(s) counted in {} ms, off the game thread",
-                if listing.is_empty() { "dod/" } else { &listing },
+                if listing.is_empty() {
+                    format!("{}/", crate::game_folder::name())
+                } else {
+                    listing.clone()
+                },
                 todo.len(),
                 started.elapsed().as_millis()
             );
