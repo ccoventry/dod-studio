@@ -35,7 +35,7 @@ def main():
         sys.exit(__doc__)
     out_dir, maps = sys.argv[1], sys.argv[2:]
     game = C.game_root()
-    env_dirs = [os.path.join(game, "dod", "gfx", "env"), os.path.join(game, "valve", "gfx", "env")]
+    env_dirs = [os.path.join(game, C.game_folder(), "gfx", "env"), os.path.join(game, "valve", "gfx", "env")]
 
     def face_path(name):
         return next((p for p in (os.path.join(d, name) for d in env_dirs) if os.path.exists(p)), None)
@@ -45,7 +45,7 @@ def main():
         names = {skyname(game, m) for m in C.all_maps(game)}
     elif maps == ["--all"]:
         names = {f[:-6].lower() for f in os.listdir(env_dirs[0]) if f.lower().endswith(".tga")}
-        names |= {skyname(game, b[:-4]) for b in os.listdir(os.path.join(game, "dod", "maps"))
+        names |= {skyname(game, b[:-4]) for b in os.listdir(os.path.join(game, C.game_folder(), "maps"))
                   if b.lower().endswith(".bsp")}
     else:
         names = {skyname(game, m) for m in maps}

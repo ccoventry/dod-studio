@@ -16,6 +16,8 @@ import {
   recoverRenderBatch,
   revealInExplorer,
   writeTextFile,
+  measureTakeFolders,
+  deleteTakeFolders,
 } from './ipc_bridge.js';
 import { showToast } from './toast.js';
 import { streakUid, resolveTake, setVerifiedStatus } from './take_index.js';
@@ -30,6 +32,8 @@ import { notify } from './os_notifications.js';
 import { finishClipsOwnsJobs } from './finish_clips.js';
 import { escapeHtml as esc } from './html.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
+import { themedConfirm } from './themed_confirm.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // id:status pairs from the last snapshot Export Pool Free/Required
@@ -37,6 +41,8 @@ let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot
 // job was added/removed/changed status" (worth a refresh) apart from "only
 // progress% ticked" (not worth one), without a blind polling interval.
 let lastJobsFingerprint = null;
+// Delete Take (#644), set up by initRenderUI.
+let takeDelete = null;
 
 /** The batch panel's currently-selected codec, defaulting like the select's own first option. */
 function getSelectedCodec() {
@@ -139,7 +145,7 @@ function initSortableHeaders() {
  * The Actions cell's buttons, as HTML — kept separate from the row template
  * so it can be rebuilt on its own (see `updateJobRow`).
  */
-function actionsCellHtml(j) {
+function actionsCellHtml(j, rowState = {}) {
   let html = '';
   if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) {
     html += `<button class="render-job-cancel-btn" data-job-id="${esc(j.id)}" title="${STRINGS.RENDER.CANCEL_JOB_TITLE}">✖</button>`;
@@ -160,6 +166,18 @@ function actionsCellHtml(j) {
     const useOutput = j.status === JOB_STATUS.FINISHED && j.output_path;
     html += `<button class="render-job-reveal-btn" data-job-id="${esc(j.id)}" title="${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_FOLDER_TITLE : STRINGS.RENDER.OPEN_TAKE_FOLDER_TITLE}">${useOutput ? STRINGS.RENDER.OPEN_OUTPUT_BUTTON : STRINGS.RENDER.OPEN_TAKE_FOLDER_BUTTON}</button>`;
   }
+  // #644: off while the take (either half of a HUD pair) is rendering, and
+  // while another delete runs; the backend refuses both too. The tooltip
+  // says which row is the busy one. A queued take stays deletable: the
+  // confirm says its render leaves the queue.
+  if (j.take_folder) {
+    let title = STRINGS.RENDER.DELETE_TAKE_TITLE;
+    if (rowState.deleting) title = STRINGS.RENDER.DELETE_TAKE_RUNNING_TITLE;
+    else if (j.status === JOB_STATUS.RENDERING) title = STRINGS.RENDER.DELETE_TAKE_RENDERING_TITLE;
+    else if (rowState.takeBusy) title = STRINGS.RENDER.DELETE_TAKE_PAIR_RENDERING_TITLE;
+    const disabled = rowState.deleting || rowState.takeBusy ? ' disabled' : '';
+    html += `<button class="render-job-delete-take-btn" data-job-id="${esc(j.id)}" title="${title}"${disabled}>${STRINGS.RENDER.DELETE_TAKE_BUTTON}</button>`;
+  }
   return html;
 }
 
@@ -179,6 +197,12 @@ function wireActionsCell(cell) {
       if (!job) return;
       const target = (job.status === JOB_STATUS.FINISHED && job.output_path) ? job.output_path : job.take_folder;
       if (target) revealInExplorer(target).catch(() => {});
+    });
+  });
+  cell.querySelectorAll('.render-job-delete-take-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const job = jobs.find((j) => j.id === btn.dataset.jobId);
+      if (job?.take_folder) takeDelete?.deleteTakes([job.take_folder]);
     });
   });
   cell.querySelectorAll('.render-job-view-log-btn').forEach((btn) => {
@@ -241,7 +265,7 @@ function formatFileSize(bytes) {
 }
 
 /** Builds one job's `<tr>` fresh — only ever called once per job id. */
-function createJobRow(j) {
+function createJobRow(j, rowState) {
   const row = document.createElement('tr');
   row.dataset.jobId = j.id;
   row.innerHTML = `
@@ -256,7 +280,7 @@ function createJobRow(j) {
     <td class="rj-file-size"></td>
     <td class="rj-history"></td>
     <td class="rj-actions"></td>`;
-  updateJobRow(row, j);
+  updateJobRow(row, j, rowState);
   return row;
 }
 
@@ -273,10 +297,12 @@ function createJobRow(j) {
  * other cell is plain text/style, which is safe to overwrite unconditionally
  * since it never had a click in flight to lose.
  */
-function updateJobRow(row, j) {
+function updateJobRow(row, j, rowState = {}) {
   // Snapshots arrive every scheduler tick while anything renders, and most
-  // rows (queued, finished) haven't changed; skip those outright.
-  const signature = JSON.stringify(j);
+  // rows (queued, finished) haven't changed; skip those outright. The row
+  // state rides along: a HUD pair's other half can change this row's Delete
+  // Take (#644) without this row changing.
+  const signature = JSON.stringify([j, rowState]);
   if (row.dataset.signature === signature) return;
   row.dataset.signature = signature;
 
@@ -318,10 +344,10 @@ function updateJobRow(row, j) {
     row.dataset.historyKey = historyKey;
   }
 
-  const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}`;
+  const actionsKey = `${j.status}|${!!j.error_log}|${j.output_path}|${j.take_folder}|${!!rowState.takeBusy}|${!!rowState.deleting}`;
   if (actionsKey !== row.dataset.actionsKey) {
     const cell = row.querySelector('.rj-actions');
-    cell.innerHTML = actionsCellHtml(j);
+    cell.innerHTML = actionsCellHtml(j, rowState);
     wireActionsCell(cell);
     row.dataset.actionsKey = actionsKey;
   }
@@ -381,18 +407,21 @@ function renderJobsTable() {
 
   const existingRows = new Map();
   tbody.querySelectorAll('tr[data-job-id]').forEach((tr) => existingRows.set(tr.dataset.jobId, tr));
+  const busyTakes = renderingTakeFolders(jobs);
+  const deleting = !!takeDelete?.isRunning();
 
   // Rows are patched in place and only moved when the chosen sort (#40)
   // puts them somewhere else — a move keeps the row's own nodes, buttons
   // included, so a click in flight still lands (#80). With no sort, job
   // order is stable once a batch starts, so nothing ever moves.
   sortJobs(jobs, jobSort).forEach((j, i) => {
+    const rowState = { takeBusy: busyTakes.has(j.take_folder), deleting };
     let row = existingRows.get(j.id);
     if (row) {
       existingRows.delete(j.id);
-      updateJobRow(row, j);
+      updateJobRow(row, j, rowState);
     } else {
-      row = createJobRow(j);
+      row = createJobRow(j, rowState);
     }
     if (tbody.children[i] !== row) tbody.insertBefore(row, tbody.children[i] || null);
   });
@@ -400,6 +429,19 @@ function renderJobsTable() {
   // snapshot — should not normally happen within a batch, but a leftover
   // stale row would be worse than the cost of checking.
   existingRows.forEach((row) => row.remove());
+}
+
+/** Delete Take's bar (#644): which step, and takes done of total. */
+function showTakeDeleteProgress(progress) {
+  const wrap = document.querySelector('#render-take-delete-progress');
+  if (!wrap) return;
+  wrap.style.display = progress ? 'flex' : 'none';
+  if (!progress) return;
+  const pct = progress.total > 0 ? Math.round((progress.done / progress.total) * 100) : 0;
+  const fill = wrap.querySelector('.progress-bar-fill');
+  if (fill) fill.style.width = `${pct}%`;
+  const label = wrap.querySelector('#render-take-delete-progress-label');
+  if (label) label.textContent = progressLine(progress.step, progress.done, progress.total);
 }
 
 function initErrorLogModal() {
@@ -520,6 +562,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
 
   initErrorLogModal();
+  takeDelete = createTakeDelete({
+    measure: measureTakeFolders,
+    remove: deleteTakeFolders,
+    confirm: themedConfirm,
+    showToast,
+    formatSize: formatFileSize,
+    showProgress: showTakeDeleteProgress,
+    onBusyChange: () => renderJobsTable(),
+    listen,
+    getJobs: () => jobs,
+  });
 
   // A take finishing renders — advances every highlight the take index says
   // fed that take_key to Rendered. The take index is what makes this work

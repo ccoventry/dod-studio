@@ -19,6 +19,7 @@ mod preview_in_place;
 mod render_manager;
 mod review_manager;
 mod settings_manager;
+mod take_delete_manager;
 mod updater_manager;
 
 /// Helpers this crate's own tests share. See `Scratch` on why a temporary
@@ -80,7 +81,12 @@ async fn save_settings(
 ) -> Result<(), String> {
     let inner_arc = Arc::clone(&state.inner);
     messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        // Refused before anything is written: a game folder that is a path
+        // would put the launch and every file Studio writes somewhere other
+        // than beside hl.exe (#402).
+        native::shared::paths::validate_game_folder(&settings.game_folder)?;
         settings.save()?;
+        settings_manager::apply_game_folder(&settings);
         let mut guard = inner_arc.lock().unwrap_or_else(|p| p.into_inner());
         *guard = settings;
         Ok(())
@@ -714,6 +720,7 @@ pub fn run() {
             validate_paths,
             check_hlae_ffmpeg,
             diagnose_executable_paths,
+            settings_manager::list_game_folders,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,
@@ -751,6 +758,8 @@ pub fn run() {
             reset_all_render_jobs,
             remove_render_job,
             remove_non_rendering_render_jobs,
+            take_delete_manager::measure_take_folders,
+            take_delete_manager::delete_take_folders,
             set_render_job_codec,
             get_export_pool_free_gb,
             get_render_required_estimate_gb,
