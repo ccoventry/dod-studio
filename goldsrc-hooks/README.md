@@ -93,6 +93,12 @@ is the complete list):
   overview the game loads (in `dod_addon` with `-addons`, or `dod`), its tiles
   replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
   Overviews page writes it. See `src/overview_hd.rs`.
+- **Death cam** (`dodstudio_spec_deathcam 1`): when the spectated player dies,
+  the camera pulls back from his body and turns to the killer for 2.4 s, as his
+  own recording shows, then returns to his eyes. DoD's own `V_GetDeathCam`,
+  which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
+  shoutcast does not, so it is not part of `spec_match_pov`. See
+  `docs/goldsrc_spectator_camera.md`.
 - **Overview map icons** (`dodstudio_hud_map_players 0-4`): which players the
   overview map shows -- the game's own (the watched player's team), everyone,
   the other team, only the player being watched, or nobody. A detour on the
