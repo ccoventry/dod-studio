@@ -66,8 +66,10 @@ export function teamName(projectTeams, tag) {
  * The Teams list: one row per team (a tag and whatever was merged into it),
  * most demos first. `unread` counts demos scanned before teams were read.
  *
- * Row: `{ tag, name, customName, demoCount, demoNames, merged }`, where
- * `name` is what the team goes by and `merged` the other tags folded in.
+ * Row: `{ tag, name, customName, demoCount, demoNames, sides, merged }`,
+ * where `name` is what the team goes by, `sides` how many of its demos it
+ * played on each side (`{ Allied, Axis }`) and `merged` the other tags
+ * folded in.
  */
 export function buildTeamsList(demos, projectTeams) {
   const rows = new Map();
@@ -77,13 +79,17 @@ export function buildTeamsList(demos, projectTeams) {
       unread += 1;
       continue;
     }
-    for (const { tag } of demo.teams) {
+    for (const { side, tag } of demo.teams) {
       if (!tag) continue;
       const root = rootTag(projectTeams, tag);
-      if (!rows.has(root)) rows.set(root, { tag: root, merged: new Set(), demos: new Set() });
+      if (!rows.has(root)) {
+        rows.set(root, { tag: root, merged: new Set(), demos: new Set(), sides: { Allied: 0, Axis: 0 } });
+      }
       const row = rows.get(root);
       if (tag !== root) row.merged.add(tag);
       row.demos.add(demo.name || demo.path);
+      const key = sideKey(side);
+      if (key) row.sides[key] += 1;
     }
   }
   const list = [...rows.values()].map((row) => ({
@@ -92,6 +98,7 @@ export function buildTeamsList(demos, projectTeams) {
     customName: !!projectTeams?.names?.[row.tag],
     demoCount: row.demos.size,
     demoNames: [...row.demos].sort(),
+    sides: row.sides,
     merged: [...row.merged].sort(),
   }));
   list.sort((a, b) => b.demoCount - a.demoCount || a.tag.localeCompare(b.tag));

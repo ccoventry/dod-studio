@@ -4,6 +4,7 @@ import {
   automaticClipName, uniqueNames, clipNamesForTakes, maxNameLength, timeWord, highlightRow,
 } from './clip_name.js';
 import { streakUid } from './take_index.js';
+import { emptyProjectTeams, renameTeam, mergeTeam } from './project_teams.js';
 
 function streak(overrides = {}) {
   return {
@@ -160,6 +161,51 @@ describe('clipNameFor', () => {
     const s = streak({ faction: undefined, victims: undefined, victim_factions: undefined });
     const d = demo([s], { map_name: undefined, modified_unix_secs: undefined });
     expect(clipNameFor(d, s, '{map}_{faction}_{player}_{row}').name).toBe('unknown_unknown_krod_01');
+  });
+});
+
+describe('team placeholders through the Teams list (#445)', () => {
+  const TEMPLATE = '{player}_{team_name}_v_{opponent}_{map}';
+  const tagged = (s) => demo([s], { teams: [{ side: 'Allies', tag: 'KROD' }, { side: 'Axis', tag: 'dicE' }] });
+
+  it('uses a renamed tag, and a merged tag, as the team names', () => {
+    const teams = emptyProjectTeams();
+    renameTeam(teams, 'KROD', 'krod');
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_dicE_anzio');
+    mergeTeam(teams, 'dicE', 'DICE');
+    renameTeam(teams, 'DICE', 'dice');
+    expect(clipNameFor(tagged(s), s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_dice_anzio');
+  });
+
+  it('a tag with no name is used as it is', () => {
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE, { projectTeams: emptyProjectTeams() }).name)
+      .toBe('krod_KROD_v_dicE_anzio');
+  });
+
+  it('an untagged side gives unknown, or the word after |, never the faction', () => {
+    const s = streak();
+    const pug = demo([s], { teams: [{ side: 'Allies', tag: 'krod' }, { side: 'Axis', tag: null }] });
+    const teams = emptyProjectTeams();
+    expect(automaticClipName(pug, s, TEMPLATE, { projectTeams: teams }).name).toBe('krod_krod_v_unknown_anzio');
+    expect(automaticClipName(pug, s, '{player}_v_{opponent|mix}_{map}', { projectTeams: teams }).name)
+      .toBe('krod_v_mix_anzio');
+  });
+
+  it('without a Teams list the team placeholders stay unknown', () => {
+    const s = streak();
+    expect(automaticClipName(tagged(s), s, TEMPLATE).name).toBe('krod_unknown_v_unknown_anzio');
+  });
+
+  it('names for takes go through the Teams list too', () => {
+    const teams = emptyProjectTeams();
+    renameTeam(teams, 'dicE', 'dice');
+    const s = streak();
+    const d = tagged(s);
+    const takeIndex = { 'sess/dodstudio_chain_01_b0': [streakUid(d.path, s)] };
+    expect(clipNamesForTakes(takeIndex, [d], '{player}_v_{opponent}', { projectTeams: teams }))
+      .toEqual({ 'sess/dodstudio_chain_01_b0': 'krod_v_dice' });
   });
 });
 

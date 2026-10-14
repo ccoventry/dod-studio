@@ -128,7 +128,13 @@ pub fn enabled() -> bool {
 /// its recorder spends dead and watching someone in-eye: that is what they saw
 /// live, recorded. Live play and HLTV demos are unchanged.
 pub fn active() -> bool {
-    enabled() && !engine::engfuncs().is_some_and(playing_pov_demo)
+    enabled() && !pov_demo_playing()
+}
+
+/// Whether a POV demo is playing now (see [`active`]). Also what
+/// `spectator_deathcam` stands down for.
+pub fn pov_demo_playing() -> bool {
+    engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
 /// A demo is playing and the engine is not connected as a spectator.
