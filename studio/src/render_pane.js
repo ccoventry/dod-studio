@@ -634,6 +634,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
 
   const getTakeIndex = takeTracking?.getTakeIndex || null;
   const getAllDemos = takeTracking?.getAllDemos || null;
+  const getProjectTeams = takeTracking?.getProjectTeams || (() => null);
   document.querySelector('#export-marker-list-btn')
     ?.addEventListener('click', () => exportMarkerList(getTakeIndex, getAllDemos));
   const onTakeStatusChange = takeTracking?.onStatusChange || null;
@@ -807,7 +808,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
         getTakeIndex ? getTakeIndex() : null,
         getAllDemos ? getAllDemos() : [],
         getClipNameTemplate(),
-        { maxLength: maxNameLength(exportDirs) },
+        { maxLength: maxNameLength(exportDirs), projectTeams: getProjectTeams() },
       );
       // FFmpeg override is shared with the capture config panel.
       const ffmpegPathVal = document.querySelector('#ffmpeg-override-path-input')?.value?.trim() || null;

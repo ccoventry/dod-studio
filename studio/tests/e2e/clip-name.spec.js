@@ -49,6 +49,22 @@ test('a chip tooltip shows its value for the selected highlight', async ({ page 
     .toHaveAttribute('title', /Selected highlight: Allies/);
 });
 
+test('the team placeholders resolve through the Teams list (#445)', async ({ page }) => {
+  await loadHarness(page);
+  const input = page.locator('#config-clip-name-template');
+  const preview = page.locator('#config-clip-name-preview');
+  await input.fill('{player}_{team_name}_v_{opponent}_{map}');
+  await expect(preview).toContainText('Preview: krod_KROD_v_dice_anzio');
+  await expect(page.locator('.clip-name-chip', { hasText: '{opponent}' }))
+    .toHaveAttribute('title', /Selected highlight: dice/);
+  // An untagged side gives unknown, or the word after |, never the faction.
+  await page.evaluate(() => { window.__demo.teams[0].tag = null; });
+  await input.fill('{player}_v_{opponent}_{map}');
+  await expect(preview).toContainText('Preview: krod_v_unknown_anzio');
+  await input.fill('{player}_v_{opponent|mix}_{map}');
+  await expect(preview).toContainText('Preview: krod_v_mix_anzio');
+});
+
 test('Default puts the default template back and saves', async ({ page }) => {
   await loadHarness(page);
   await page.locator('#config-clip-name-template').fill('{row}');

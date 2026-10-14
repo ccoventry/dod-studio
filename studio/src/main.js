@@ -141,7 +141,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   initTeamsPane({
     getDemos: () => currentScannedDemos,
     getProjectTeams: () => projectTeams,
-    onChange: markProjectDirty,
+    onChange: () => {
+      markProjectDirty();
+      // A renamed or merged team changes the clip names shown (#445).
+      // renderDetailView and refreshClipNamePreview are imported above;
+      // selectedDemoIdx is declared further down this scope.
+      if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
+        renderDetailView(currentScannedDemos[selectedDemoIdx], selectedDemoIdx);
+      }
+      refreshClipNamePreview();
+    },
     // triggerAutoScan is declared further down (queue_scan.js).
     onReadMissing: (paths) => triggerAutoScan(paths),
   });
@@ -499,6 +508,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initRenderUI(() => targetDrives, () => renderExportDirs, persistAppSettings, {
     getTakeIndex: () => takeIndex,
     getAllDemos: () => currentScannedDemos,
+    getProjectTeams: () => projectTeams,
     onStatusChange: onHighlightStatusChange
   });
 
@@ -507,7 +517,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   initFinishClips({
     getExportDirs: () => renderExportDirs,
     getClipNames: (exportDirs) => clipNamesForTakes(
-      takeIndex, currentScannedDemos, getClipNameTemplate(), { maxLength: maxNameLength(exportDirs) },
+      takeIndex, currentScannedDemos, getClipNameTemplate(),
+      { maxLength: maxNameLength(exportDirs), projectTeams },
     ),
     onSettingsChange: persistAppSettings,
   });
@@ -651,6 +662,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       return streak ? { demo, streak } : null;
     },
     getExportDirList: () => renderExportDirs,
+    getProjectTeams: () => projectTeams,
     onChange: () => {
       persistAppSettings();
       if (selectedDemoIdx !== null && currentScannedDemos[selectedDemoIdx]) {
@@ -674,7 +686,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     // kill range, status, notes) — all of it is part of the `demos` written
     // by saveProjectSession(), so all of it marks the project dirty.
     markProjectDirty();
-  });
+  }, { getProjectTeams: () => projectTeams });
 
   // Demo Analyzer's Explorer sidebar Pinned tier shares the same
   // pinned_folders/scanPaths state as Capture Studio (matches dev's real
