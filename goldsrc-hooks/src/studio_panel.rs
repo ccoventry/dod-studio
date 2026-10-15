@@ -338,6 +338,9 @@ const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
 const KEY_PAD_ENTER: i32 = 0x33;
+/// `KEY_BACKSPACE`, two after `KEY_ENTER` in vgui2's key list (`KEY_SPACE`
+/// between); the Demos tab's Up, as in Explorer (#779).
+const KEY_BACKSPACE: i32 = 0x42;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
@@ -603,6 +606,13 @@ const PLAYER_CHOSEN: &str = "PlayerChosen";
 const PLAYER_MATCH: &str = "PlayerMatch";
 /// Any first: the usual case is one player under several names.
 const PLAYER_MATCHES: [&CStr; 2] = [c"Any", c"All"];
+/// The Demos tab's Go to dropdown (#779): its first row is this heading;
+/// picking any other row goes to that folder, and the heading shows again.
+const DEMO_PLACE: &str = "DemoPlace";
+const PLACE_HEADING: &CStr = c"Go to...";
+/// What a drive row (`D:/`) says in the Type column, where a folder row says
+/// Folder; it has no demo count.
+const DRIVE_TYPE: &CStr = c"Drive";
 /// `TextEntry::SetText(const char *)`: the Player box is emptied after a
 /// name is picked from its list.
 const TEXT_ENTRY_SLOT_SET_TEXT: usize = 134;
@@ -1188,6 +1198,10 @@ enum Action<'a> {
     ResetSettings,
     /// Forget the players picked on the Demos tab.
     ClearPlayers,
+    /// The Demos tab's Back, Forward and Up buttons (#779).
+    DemoBack,
+    DemoForward,
+    DemoUp,
     /// Anything else, for the class's own `OnCommand`.
     Own,
 }
@@ -1198,6 +1212,15 @@ fn action(command: &str) -> Action<'_> {
     }
     if command.eq_ignore_ascii_case("goto") {
         return Action::Goto;
+    }
+    if command.eq_ignore_ascii_case("demo_back") {
+        return Action::DemoBack;
+    }
+    if command.eq_ignore_ascii_case("demo_forward") {
+        return Action::DemoForward;
+    }
+    if command.eq_ignore_ascii_case("demo_up") {
+        return Action::DemoUp;
     }
     if command.eq_ignore_ascii_case("reset_settings") {
         return Action::ResetSettings;
@@ -1778,7 +1801,7 @@ mod hook {
         if name.ends_with('/') || name.is_empty() {
             return None;
         }
-        Some(dod_dir().join(name))
+        Some(crate::demo_list_folders::full_path(&dod_dir(), name))
     }
 
     /// The header facts of the demo a row names (a path from `dod/`).
@@ -1855,6 +1878,21 @@ mod hook {
                     let set_text: SetTextFn = slot(object, LABEL_SLOT_SET_TEXT);
                     set_text(object, demos_hint(folders & 1 == 1).as_ptr());
                 }
+            }
+            // The Go to dropdown: a pick goes to that place, and the list
+            // fills again, which puts the heading back (#779).
+            let picked = box_text(vgui, page, DEMO_PLACE);
+            if !picked.is_empty() && picked.as_bytes() != PLACE_HEADING.to_bytes() {
+                let folder = PLACES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .find(|p| p.label == picked)
+                    .map(|p| p.folder.clone());
+                if let Some(folder) = folder {
+                    crate::demo_list_folders::go_to(&folder);
+                }
+                refill_demo_list();
             }
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
@@ -2115,17 +2153,19 @@ mod hook {
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
-                        // then, and the tab lists again when it is done.
-                        let count = Some(dod_dir().join(name.trim().trim_matches('"'))).and_then(
-                            |folder| {
-                                crate::folder_counts::count(
-                                    &folder,
-                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
-                                )
-                            },
-                        );
-                        folder_count =
-                            Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                        // then, and the tab lists again when it is done. A
+                        // drive row (#779) is never counted: it says Drive.
+                        if crate::demo_list_folders::is_drive_root(&name) {
+                            set_string(row, DEMO_COLUMNS[1].0.as_ptr(), DRIVE_TYPE.as_ptr());
+                        } else {
+                            let folder = crate::demo_list_folders::full_path(&dod_dir(), &name);
+                            let count = crate::folder_counts::count(
+                                &folder,
+                                crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                            );
+                            folder_count =
+                                Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                        }
                     }
                     if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
@@ -2160,6 +2200,54 @@ mod hook {
         }
     }
 
+    /// What the Go to dropdown offered last, by label, for the pick (#779).
+    static PLACES: std::sync::Mutex<Vec<crate::demo_list_folders::Place>> =
+        std::sync::Mutex::new(Vec::new());
+
+    /// Fills the Demos tab's Go to dropdown: the heading, then every place
+    /// (#779). Again at each list fill, so a new drive or one of Studio's
+    /// folders shows up, and after a pick, which puts the heading back.
+    unsafe fn fill_place_box(vgui: &Vgui, base: usize, build: &Build) {
+        let demos_page =
+            unsafe { vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void) };
+        if demos_page == 0 {
+            return;
+        }
+        // Only a ComboBox (by its vftable) is filled, as the Type box is.
+        let found = unsafe {
+            vgui.child_named(demos_page, DEMO_PLACE)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null() && *(*o as *const usize) == base + build.combo_box_vftable)
+        };
+        let Some(o) = found else {
+            return;
+        };
+        let places = crate::demo_list_folders::places();
+        unsafe {
+            let clear: ActivateFn = slot(o, COMBO_SLOT_DELETE_ALL_ITEMS);
+            clear(o);
+            let add_item: ComboAddItemFn = slot(o, COMBO_SLOT_ADD_ITEM);
+            add_item(o, PLACE_HEADING.as_ptr(), std::ptr::null());
+            for place in &places {
+                if let Ok(label) = std::ffi::CString::new(place.label.clone()) {
+                    add_item(o, label.as_ptr(), std::ptr::null());
+                }
+            }
+            let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
+            activate_row(o, 0);
+        }
+        *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
+    }
+
+    /// Back, Forward or Up on the Demos tab: `step` moves the lists'
+    /// folder, and a move lists again.
+    unsafe fn navigate(step: fn() -> bool) -> Result<(), String> {
+        if step() {
+            unsafe { refill_demo_list() };
+        }
+        Ok(())
+    }
+
     /// Lists the demos again in our Load Demo window (new recordings, or a
     /// folder change), with the window's own fill.
     unsafe fn refill_demo_list() {
@@ -2171,6 +2259,9 @@ mod hook {
             unsafe {
                 let fill: ActivateFn = std::mem::transmute(base + build.file_dialog_fill);
                 fill(dialog);
+                if let Ok(vgui) = Vgui::get() {
+                    fill_place_box(&vgui, base, build);
+                }
             }
             // Every row shows again: filter afresh.
             *FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -2658,6 +2749,8 @@ mod hook {
                 let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
                 activate_row(o, 0);
             }
+            // The Go to dropdown: the heading, then the places (#779).
+            fill_place_box(&vgui, base, build);
 
             // Our own Load Demo window, never shown: the Demos tab borrows its
             // list and Load button. It fills its list as it is built.
@@ -3551,6 +3644,9 @@ mod hook {
                     .clear();
                 Ok(())
             }
+            Action::DemoBack => unsafe { navigate(crate::demo_list_folders::go_back) },
+            Action::DemoForward => unsafe { navigate(crate::demo_list_folders::go_forward) },
+            Action::DemoUp => unsafe { navigate(crate::demo_list_folders::go_up) },
             Action::ResetSettings => {
                 crate::commands::console_print(&format!("{NAME}: {}\n", reset_settings()));
                 Ok(())
@@ -3669,6 +3765,13 @@ mod hook {
             if let Err(why) = unsafe { goto_typed_time() } {
                 crate::commands::console_print(&format!("{NAME}: {why}\n"));
             }
+            return;
+        }
+        // Backspace on the Demos tab (outside its text boxes, which keep
+        // theirs) goes up a folder, as in Explorer.
+        let demos_page = PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void;
+        if this == demos_page && code == KEY_BACKSPACE {
+            let _ = unsafe { navigate(crate::demo_list_folders::go_up) };
             return;
         }
         let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
@@ -4396,6 +4499,9 @@ mod tests {
         );
         assert_eq!(action("Close"), Action::Own);
         assert_eq!(action("goto"), Action::Goto);
+        assert_eq!(action("demo_back"), Action::DemoBack);
+        assert_eq!(action("Demo_Forward"), Action::DemoForward);
+        assert_eq!(action("demo_up"), Action::DemoUp);
         assert_eq!(action("reset_settings"), Action::ResetSettings);
     }
 

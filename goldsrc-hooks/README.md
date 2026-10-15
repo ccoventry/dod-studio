@@ -178,7 +178,12 @@ is the complete list):
   demos sit directly in it. Only what is really under `dod/` is listed, not
   the other folders the game's file system merges in (`valve/`, the install
   folder's). On by default; a Settings-tab box turns it off. See
-  `src/demo_list_folders.rs`.
+  `src/demo_list_folders.rs`. Since #779 `dod/`'s list also has a row per
+  drive, a drive's folders are listed straight from the disk, and the Demos
+  tab has Back, Forward and Up (Backspace too) and a Go to dropdown: the
+  game folder, each drive, Studio's demo folders (from its settings.json)
+  and the folders visited lately; the folder shown is remembered between
+  sessions.
 - **Demos on another drive** (`dodstudio_demo_other_drives 1`): `viewdemo`
   and `playdemo` open a demo by its full path, `viewdemo "D:/folder/demo"`,
   which the game alone cannot (its file system only tries each search path

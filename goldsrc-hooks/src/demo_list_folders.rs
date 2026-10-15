@@ -35,6 +35,18 @@
 //! list looks stock. The hooks are in
 //! place either way and pass everything through while it is off.
 //!
+//! ## Drives, Back / Forward / Up, Go to (#779)
+//!
+//! `dod/`'s list starts with a row per drive (`D:/`), and a drive-rooted
+//! folder is listed straight from the disk (the game's file system only
+//! knows paths from `dod/`); its demo rows are full paths, quoted, which
+//! `viewdemo` takes with the hook DLL (`demo_other_drives`, #776). The
+//! folders visited are kept for the Demos tab's Back and Forward, the
+//! folder shown is remembered between sessions
+//! (`%APPDATA%\dod-studio\goldsrc_hooks_demos.txt`), and the tab's Go to
+//! dropdown offers the game folder, each drive, Studio's demo folders (read
+//! out of its settings.json) and the folders visited lately.
+//!
 //! ## Per build
 //!
 //! [`GAMEUI_BUILDS`] and [`FILESYSTEM_BUILDS`] name each DLL build by PE
@@ -46,6 +58,8 @@
 // them for the tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code))]
 
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
 
 use crate::engine::CvarSPartial;
@@ -132,12 +146,380 @@ pub fn count_subfolders_status() -> String {
     }
 }
 
-/// The folder the lists show, as a path from `dod/` (`""` for `dod/`).
-static CURRENT_FOLDER: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// The folder the lists show: a path from `dod/` (`""` for `dod/`), or a
+/// drive-rooted one (`D:/demos/`) for a folder on any drive (#779).
+static CURRENT_FOLDER: Mutex<String> = Mutex::new(String::new());
 
 /// The folder the Load Demo window and the Demos tab are in.
 pub fn current_folder() -> String {
     CURRENT_FOLDER.lock().map(|f| f.clone()).unwrap_or_default()
+}
+
+fn set_current(folder: &str) {
+    if let Ok(mut current) = CURRENT_FOLDER.lock() {
+        current.clear();
+        current.push_str(folder);
+    }
+}
+
+/// The folders visited, oldest first, and which one shows: the Demos tab's
+/// Back and Forward (#779).
+struct Nav {
+    visited: Vec<String>,
+    at: usize,
+}
+
+impl Nav {
+    const fn new() -> Self {
+        Self {
+            visited: Vec::new(),
+            at: 0,
+        }
+    }
+
+    fn current(&self) -> &str {
+        self.visited.get(self.at).map_or("", String::as_str)
+    }
+
+    /// Moves to `folder`, forgetting anything Forward of here. False when
+    /// already there.
+    fn go(&mut self, folder: &str) -> bool {
+        if !self.visited.is_empty() && self.current() == folder {
+            return false;
+        }
+        self.visited.truncate(self.at + 1);
+        self.visited.push(folder.to_string());
+        if self.visited.len() > NAV_KEPT {
+            self.visited.remove(0);
+        }
+        self.at = self.visited.len() - 1;
+        true
+    }
+
+    fn back(&mut self) -> bool {
+        if self.at == 0 {
+            return false;
+        }
+        self.at -= 1;
+        true
+    }
+
+    fn forward(&mut self) -> bool {
+        if self.at + 1 >= self.visited.len() {
+            return false;
+        }
+        self.at += 1;
+        true
+    }
+
+    /// The folders visited lately other than the current one, newest first,
+    /// each once.
+    fn recent(&self, most: usize) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for folder in self.visited.iter().rev() {
+            if folder != self.current() && !out.iter().any(|f| f.eq_ignore_ascii_case(folder)) {
+                out.push(folder.clone());
+                if out.len() == most {
+                    break;
+                }
+            }
+        }
+        out
+    }
+}
+
+/// How many visited folders Back can walk.
+const NAV_KEPT: usize = 50;
+/// How many lately visited folders the state file keeps, and the Go to list
+/// shows.
+const RECENT_KEPT: usize = 8;
+const RECENT_SHOWN: usize = 5;
+static NAV: Mutex<Nav> = Mutex::new(Nav::new());
+
+/// Shows `folder` (a listing path, see [`CURRENT_FOLDER`]): the next list
+/// fill reads it. Recorded for Back, and kept for the next session. False
+/// when the lists were there already.
+pub fn go_to(folder: &str) -> bool {
+    let moved = NAV.lock().map(|mut nav| nav.go(folder)).unwrap_or(false);
+    set_current(folder);
+    if moved {
+        remember();
+    }
+    moved
+}
+
+/// The Demos tab's Back: true when the folder changed.
+pub fn go_back() -> bool {
+    step(Nav::back)
+}
+
+/// The Demos tab's Forward: true when the folder changed.
+pub fn go_forward() -> bool {
+    step(Nav::forward)
+}
+
+fn step(walk: fn(&mut Nav) -> bool) -> bool {
+    let Ok(mut nav) = NAV.lock() else {
+        return false;
+    };
+    if !walk(&mut nav) {
+        return false;
+    }
+    let folder = nav.current().to_string();
+    drop(nav);
+    set_current(&folder);
+    remember();
+    true
+}
+
+/// The Demos tab's Up (and Backspace): the folder above, as the up row
+/// would open it. A drive's root goes back to `dod/`.
+pub fn go_up() -> bool {
+    let here = current_folder();
+    let up = resolve(&format!("{here}../"));
+    up != here && go_to(&up)
+}
+
+/// The folders visited lately, newest first, for the Go to list.
+pub fn recent_folders(most: usize) -> Vec<String> {
+    NAV.lock().map(|nav| nav.recent(most)).unwrap_or_default()
+}
+
+/// Where the folder shown and the ones visited lately are kept between
+/// sessions.
+fn state_path() -> Option<PathBuf> {
+    if cfg!(test) {
+        return None;
+    }
+    let appdata = std::env::var_os("APPDATA")?;
+    let dir = PathBuf::from(appdata).join("dod-studio");
+    std::fs::create_dir_all(&dir).ok()?;
+    Some(dir.join("goldsrc_hooks_demos.txt"))
+}
+
+/// The state file's text: the folder shown, then the ones visited lately.
+fn state_text(current: &str, recent: &[String]) -> String {
+    let mut out = format!("folder={current}\n");
+    for folder in recent {
+        out.push_str(&format!("recent={folder}\n"));
+    }
+    out
+}
+
+fn parse_state(text: &str) -> (String, Vec<String>) {
+    let mut current = String::new();
+    let mut recent = Vec::new();
+    for line in text.lines() {
+        if let Some(folder) = line.strip_prefix("folder=") {
+            current = folder.trim().to_string();
+        } else if let Some(folder) = line.strip_prefix("recent=")
+            && !folder.trim().is_empty()
+        {
+            recent.push(folder.trim().to_string());
+        }
+    }
+    (current, recent)
+}
+
+fn remember() {
+    let Some(path) = state_path() else {
+        return;
+    };
+    let recent = recent_folders(RECENT_KEPT);
+    let _ = std::fs::write(path, state_text(&current_folder(), &recent));
+}
+
+/// Puts the last session's folder back, when it still exists, with the
+/// folders visited then as Back history. Once, when the hooks install.
+fn restore(dod: &Path) {
+    let Some(text) = state_path().and_then(|path| std::fs::read_to_string(path).ok()) else {
+        return;
+    };
+    let (current, recent) = parse_state(&text);
+    if let Ok(mut nav) = NAV.lock() {
+        for folder in recent.iter().rev() {
+            if full_path(dod, folder).is_dir() {
+                nav.go(folder);
+            }
+        }
+    }
+    if full_path(dod, &current).is_dir() {
+        go_to(&current);
+    } else {
+        go_to("");
+    }
+}
+
+/// Whether a listing path is rooted at a drive (`D:/...`), rather than a
+/// path from `dod/`.
+pub fn is_drive_path(path: &str) -> bool {
+    let bytes = path.trim().trim_matches('"').as_bytes();
+    bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && matches!(bytes[2], b'/' | b'\\')
+}
+
+/// Whether a row is a drive's root (`D:/`), one of `dod/`'s drive rows.
+pub fn is_drive_root(row: &str) -> bool {
+    let name = row.trim().trim_matches('"');
+    is_drive_path(name) && name.len() == 3
+}
+
+/// The file or folder a row or listing path names on disk: a drive-rooted
+/// path as it is, a path from `dod/` under `dod`. Quotes around a row are
+/// dropped.
+pub fn full_path(dod: &Path, row: &str) -> PathBuf {
+    let name = row.trim().trim_matches('"');
+    if is_drive_path(name) {
+        PathBuf::from(name)
+    } else {
+        dod.join(name)
+    }
+}
+
+/// `D:/`, `E:/`...: a row per drive, after the up row, in `dod/`'s list.
+fn with_drives(mut rows: Vec<String>, drives: &[char]) -> Vec<String> {
+    let at = usize::from(!rows.is_empty());
+    for (i, drive) in drives.iter().enumerate() {
+        rows.insert(at + i, format!("{}:/", drive.to_ascii_uppercase()));
+    }
+    rows
+}
+
+/// One entry of the Demos tab's Go to list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Place {
+    pub label: String,
+    pub folder: String,
+}
+
+/// The Go to list: the game folder, each drive, Studio's demo folders, then
+/// the folders visited lately in here. Labels are unique, since a pick comes
+/// back as the row's text.
+pub fn build_places(
+    game: &str,
+    drives: &[char],
+    studio: &[String],
+    recent: &[String],
+) -> Vec<Place> {
+    let mut places = vec![Place {
+        label: format!("Game: {game}/"),
+        folder: String::new(),
+    }];
+    for drive in drives {
+        let folder = format!("{}:/", drive.to_ascii_uppercase());
+        places.push(Place {
+            label: format!("Drive: {folder}"),
+            folder,
+        });
+    }
+    for folder in studio {
+        push_place(&mut places, "Studio", folder);
+    }
+    for folder in recent {
+        push_place(&mut places, "Recent", folder);
+    }
+    places
+}
+
+fn push_place(places: &mut Vec<Place>, kind: &str, folder: &str) {
+    if places.iter().any(|p| p.folder.eq_ignore_ascii_case(folder)) {
+        return;
+    }
+    let base = format!("{kind}: {}", short_folder(folder));
+    let mut label = base.clone();
+    let mut n = 2;
+    while places.iter().any(|p| p.label == label) {
+        label = format!("{base} ({n})");
+        n += 1;
+    }
+    places.push(Place {
+        label,
+        folder: folder.to_string(),
+    });
+}
+
+/// The last two folders of a path, `.../Movies/dod/`, for a narrow list.
+fn short_folder(folder: &str) -> String {
+    let parts: Vec<&str> = folder.split('/').filter(|p| !p.is_empty()).collect();
+    match parts.len() {
+        0 => folder.to_string(),
+        1 => format!("{}/", parts[0]),
+        n => format!(".../{}/{}/", parts[n - 2], parts[n - 1]),
+    }
+}
+
+/// Studio's demo folders, from its settings file: the Capture page's demo
+/// folder list (`pinned_folders`, what its Add Folder button grows) and the
+/// folders it scanned lately (`demo_folder_history`), as listing paths,
+/// each once, those still on disk.
+pub fn studio_folders() -> Vec<String> {
+    let Some(appdata) = std::env::var_os("APPDATA") else {
+        return Vec::new();
+    };
+    let path = PathBuf::from(appdata)
+        .join("dod-studio")
+        .join("settings.json");
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    studio_folders_from(&text)
+        .into_iter()
+        .filter(|folder| Path::new(folder).is_dir())
+        .collect()
+}
+
+fn studio_folders_from(json: &str) -> Vec<String> {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for key in ["pinned_folders", "demo_folder_history"] {
+        let items = value
+            .get(key)
+            .and_then(|v| v.as_array())
+            .into_iter()
+            .flatten();
+        for folder in items.filter_map(|item| item.as_str()).map(listing_path) {
+            if is_drive_path(&folder) && !out.iter().any(|f| f.eq_ignore_ascii_case(&folder)) {
+                out.push(folder);
+            }
+        }
+    }
+    out
+}
+
+/// A Windows path as the lists spell a drive-rooted folder: forward
+/// slashes, ending in `/`.
+fn listing_path(path: &str) -> String {
+    let mut folder = path.trim().replace('\\', "/");
+    if !folder.is_empty() && !folder.ends_with('/') {
+        folder.push('/');
+    }
+    folder
+}
+
+/// The Go to list as it stands now.
+pub fn places() -> Vec<Place> {
+    build_places(
+        crate::game_folder::name(),
+        &drives(),
+        &studio_folders(),
+        &recent_folders(RECENT_SHOWN),
+    )
+}
+
+/// The drives a list can go to (fixed and removable), by letter.
+pub fn drives() -> Vec<char> {
+    #[cfg(target_arch = "x86")]
+    {
+        hook::drives()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        Vec::new()
+    }
 }
 
 /// For the fallback toggle command's bare-name query.
@@ -272,8 +654,9 @@ fn rows(
             out.push(format!("{folder}{name}/"));
         } else if name.to_ascii_lowercase().ends_with(".dem") {
             let path = format!("{folder}{name}");
-            // The demo bar runs `viewdemo <row>` unquoted.
-            demos.push(if path.contains(' ') {
+            // The demo bar runs `viewdemo <row>` unquoted, and the console
+            // splits an unquoted `D:/...` at the `:`.
+            demos.push(if path.contains(' ') || path.contains(':') {
                 format!("\"{path}\"")
             } else {
                 path
@@ -324,18 +707,57 @@ mod hook {
     static FIND_CLOSE: AtomicUsize = AtomicUsize::new(0);
     static DONE: AtomicBool = AtomicBool::new(false);
 
-    /// The current folder, and the listing being handed out.
+    /// The listing being handed out.
     struct Browser {
-        folder: String,
         rows: Vec<CString>,
         next: usize,
     }
 
     static BROWSER: Mutex<Browser> = Mutex::new(Browser {
-        folder: String::new(),
         rows: Vec::new(),
         next: 0,
     });
+
+    /// The drives a list can go to: fixed and removable ones, by letter.
+    pub(super) fn drives() -> Vec<char> {
+        use windows_sys::Win32::Storage::FileSystem::{GetDriveTypeA, GetLogicalDrives};
+        // `GetDriveType`'s answers (WinBase.h); windows-sys 0.59 has no
+        // names for them.
+        const DRIVE_REMOVABLE: u32 = 2;
+        const DRIVE_FIXED: u32 = 3;
+        let mask = unsafe { GetLogicalDrives() };
+        (0..26u32)
+            .filter(|i| mask & (1 << i) != 0)
+            .map(|i| (b'A' + i as u8) as char)
+            .filter(|letter| {
+                let root = [*letter as u8, b':', b'\\', 0];
+                let kind = unsafe { GetDriveTypeA(root.as_ptr()) };
+                kind == DRIVE_FIXED || kind == DRIVE_REMOVABLE
+            })
+            .collect()
+    }
+
+    /// `folder` (a drive-rooted path) read straight from the disk, without
+    /// hidden and system entries (`$Recycle.Bin` and the like at a root).
+    fn disk_entries(folder: &str) -> Vec<(String, bool)> {
+        use std::os::windows::fs::MetadataExt;
+        const HIDDEN_OR_SYSTEM: u32 = 0x2 | 0x4;
+        let Ok(dir) = std::fs::read_dir(folder) else {
+            return Vec::new();
+        };
+        dir.filter_map(Result::ok)
+            .filter_map(|entry| {
+                let meta = entry.metadata().ok()?;
+                if meta.file_attributes() & HIDDEN_OR_SYSTEM != 0 {
+                    return None;
+                }
+                Some((
+                    entry.file_name().to_string_lossy().into_owned(),
+                    meta.is_dir(),
+                ))
+            })
+            .collect()
+    }
 
     unsafe fn slot(object: *mut c_void, index: usize) -> usize {
         unsafe { *(*(object as *const *const usize)).add(index) }
@@ -355,8 +777,13 @@ mod hook {
         unsafe { crate::pe::image_identity(base as *mut u8) }
     }
 
-    /// Lists `folder` through the real file system, as rows.
-    unsafe fn list(fs: *mut c_void, folder: &str, path_id: *const c_char) -> Vec<CString> {
+    /// `folder` (a path from `dod/`) through the real file system, which
+    /// merges every search path.
+    unsafe fn fs_entries(
+        fs: *mut c_void,
+        folder: &str,
+        path_id: *const c_char,
+    ) -> Vec<(String, bool)> {
         let mut entries = Vec::new();
         let Ok(wildcard) = CString::new(format!("{folder}*")) else {
             return Vec::new();
@@ -375,6 +802,17 @@ mod hook {
             }
             find_close(fs, handle);
         }
+        entries
+    }
+
+    /// Lists `folder` as rows: through the real file system for a path from
+    /// `dod/`, straight from the disk for a drive-rooted one.
+    unsafe fn list(fs: *mut c_void, folder: &str, path_id: *const c_char) -> Vec<CString> {
+        let entries = if super::is_drive_path(folder) {
+            disk_entries(folder)
+        } else {
+            unsafe { fs_entries(fs, folder, path_id) }
+        };
         let dod = crate::texture_hires::game_dir();
         let hide_empty = super::HIDE_EMPTY.on();
         // No counting here, on the game thread: a folder known to be empty
@@ -382,7 +820,7 @@ mod hook {
         // (`folder_counts`), the Demos tab listing again when that is done.
         let to_count = std::cell::RefCell::new(Vec::new());
         let listed = rows(folder, entries, |path, is_dir| {
-            let full = dod.join(path);
+            let full = super::full_path(&dod, path);
             if !is_dir {
                 return full.is_file();
             }
@@ -392,14 +830,23 @@ mod hook {
             to_count.borrow_mut().push(full);
             true
         });
+        // Drive rows are not counted: a whole drive is too much to walk for
+        // a number in brackets.
+        let listed = if folder.is_empty() {
+            super::with_drives(listed, &drives())
+        } else {
+            listed
+        };
         // The up row's count too: this folder's total from its parts, plus
-        // the rest of the parent, so nothing is counted twice.
-        let here = dod.join(folder);
-        crate::folder_counts::count_later(
-            folder,
-            to_count.into_inner(),
-            Some((here.join(".."), here)),
-        );
+        // the rest of the parent, so nothing is counted twice. A drive
+        // root's up row goes back to `dod/`.
+        let here = super::full_path(&dod, folder);
+        let up = if super::is_drive_root(folder) {
+            (dod.clone(), here)
+        } else {
+            (here.join(".."), here)
+        };
+        crate::folder_counts::count_later(folder, to_count.into_inner(), Some(up));
         listed
             .into_iter()
             .filter_map(|row| CString::new(row).ok())
@@ -417,7 +864,7 @@ mod hook {
                 let Ok(mut browser) = BROWSER.lock() else {
                     return std::ptr::null();
                 };
-                let folder = browser.folder.clone();
+                let folder = super::current_folder();
                 browser.rows = list(fs, &folder, path_id);
                 browser.next = 1;
                 *handle = OWN_HANDLE;
@@ -498,16 +945,13 @@ mod hook {
                 && row.ends_with('/')
             {
                 let folder = resolve(&row);
-                if let Ok(mut browser) = BROWSER.lock() {
-                    browser.folder.clone_from(&folder);
-                }
-                if let Ok(mut current) = super::CURRENT_FOLDER.lock() {
-                    current.clone_from(&folder);
-                }
-                crate::debug::report(&format!(
-                    "demo_list_folders: opened {}/{folder}",
-                    crate::game_folder::name()
-                ));
+                super::go_to(&folder);
+                let opened = if super::is_drive_path(&folder) {
+                    folder.clone()
+                } else {
+                    format!("{}/{folder}", crate::game_folder::name())
+                };
+                crate::debug::report(&format!("demo_list_folders: opened {opened}"));
                 let fill: FillFn = cast(FILL.load(Ordering::Relaxed));
                 fill(dialog);
                 return;
@@ -593,9 +1037,12 @@ mod hook {
         };
         DONE.store(true, Ordering::Relaxed);
         let message = match install(gameui, filesystem) {
-            Ok(build) => format!(
-                "demo_list_folders: installed ({build}); {NAME} 1 lists folders in the Load Demo window (#408)"
-            ),
+            Ok(build) => {
+                super::restore(&crate::texture_hires::game_dir());
+                format!(
+                    "demo_list_folders: installed ({build}); {NAME} 1 lists folders in the Load Demo window (#408)"
+                )
+            }
             Err(why) => format!("demo_list_folders: not installed -- {why}"),
         };
         unsafe { crate::debug::report(&message) };
@@ -612,6 +1059,119 @@ pub fn poll() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_drive_rooted_listing_path_is_told_from_one_under_dod() {
+        assert!(is_drive_path("D:/"));
+        assert!(is_drive_path("d:\\demos\\"));
+        assert!(is_drive_path("\"C:/Program Files (x86)/x/\""));
+        assert!(!is_drive_path(""));
+        assert!(!is_drive_path("demos/"));
+        assert!(!is_drive_path("../"));
+        assert!(!is_drive_path("D:"));
+        assert!(is_drive_root("D:/"));
+        assert!(is_drive_root("\"d:/\""));
+        assert!(!is_drive_root("D:/demos/"));
+        let dod = Path::new("C:/games/dod");
+        assert_eq!(full_path(dod, "demos/x.dem"), dod.join("demos/x.dem"));
+        assert_eq!(
+            full_path(dod, "\"temp demos/x.dem\""),
+            dod.join("temp demos/x.dem")
+        );
+        assert_eq!(full_path(dod, "D:/x/y.dem"), PathBuf::from("D:/x/y.dem"));
+        assert_eq!(full_path(dod, ""), dod);
+    }
+
+    #[test]
+    fn drive_paths_resolve_and_climb_back_to_dod() {
+        assert_eq!(resolve("D:/"), "D:/");
+        assert_eq!(resolve("D:/a/b/../"), "D:/a/");
+        assert_eq!(resolve("D:/../"), "");
+    }
+
+    #[test]
+    fn drive_rows_follow_the_up_row_and_drive_demos_are_quoted() {
+        let listed = with_drives(vec!["../".to_string(), "demos/".to_string()], &['c', 'D']);
+        assert_eq!(listed, vec!["../", "C:/", "D:/", "demos/"]);
+        assert_eq!(with_drives(Vec::new(), &['D']), vec!["D:/"]);
+        let entries = [("x.dem".to_string(), false), ("sub".to_string(), true)];
+        assert_eq!(
+            rows("D:/demos/", entries, |_, _| true),
+            vec!["D:/demos/../", "D:/demos/sub/", "\"D:/demos/x.dem\""]
+        );
+    }
+
+    #[test]
+    fn back_and_forward_walk_the_folders_visited() {
+        let mut nav = Nav::new();
+        assert!(nav.go(""));
+        assert!(!nav.go(""), "the same folder again is not a step");
+        assert!(nav.go("demos/"));
+        assert!(nav.go("D:/"));
+        assert!(nav.back());
+        assert_eq!(nav.current(), "demos/");
+        assert!(nav.back());
+        assert_eq!(nav.current(), "");
+        assert!(!nav.back());
+        assert!(nav.forward());
+        assert_eq!(nav.current(), "demos/");
+        // A new folder from here forgets what was Forward.
+        assert!(nav.go("E:/"));
+        assert!(!nav.forward());
+        assert_eq!(nav.recent(5), vec!["demos/", ""]);
+        assert_eq!(nav.recent(1), vec!["demos/"]);
+    }
+
+    #[test]
+    fn the_state_file_round_trips() {
+        let text = state_text("D:/demos/", &["".to_string(), "temp demos/".to_string()]);
+        assert_eq!(text, "folder=D:/demos/\nrecent=\nrecent=temp demos/\n");
+        assert_eq!(
+            parse_state(&text),
+            ("D:/demos/".to_string(), vec!["temp demos/".to_string()])
+        );
+        assert_eq!(parse_state(""), (String::new(), Vec::new()));
+    }
+
+    #[test]
+    fn the_go_to_list_names_each_place_once() {
+        let studio = [
+            "C:/Games/Half-Life/dod/".to_string(),
+            "D:/demos/".to_string(),
+        ];
+        let recent = ["D:/demos/".to_string(), "temp demos/".to_string()];
+        let places = build_places("dod", &['C', 'D'], &studio, &recent);
+        let labels: Vec<&str> = places.iter().map(|p| p.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            vec![
+                "Game: dod/",
+                "Drive: C:/",
+                "Drive: D:/",
+                "Studio: .../Half-Life/dod/",
+                "Studio: .../D:/demos/",
+                "Recent: temp demos/",
+            ]
+        );
+        assert_eq!(places[3].folder, "C:/Games/Half-Life/dod/");
+        // Two different folders with the same last two names stay apart.
+        let twins = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
+        let places = build_places("dod", &[], &twins, &[]);
+        assert_eq!(places[1].label, "Studio: .../x/dod/");
+        assert_eq!(places[2].label, "Studio: .../x/dod/ (2)");
+    }
+
+    #[test]
+    fn studios_folders_come_out_of_its_settings_file() {
+        let json = r#"{"pinned_folders": ["C:\\Games\\Half-Life\\dod", "D:\\demos\\"],
+            "demo_folder_history": ["D:\\demos", "\\\\server\\share", "C:\\x"], "other": 1}"#;
+        assert_eq!(
+            studio_folders_from(json),
+            vec!["C:/Games/Half-Life/dod/", "D:/demos/", "C:/x/"]
+        );
+        assert!(studio_folders_from("not json").is_empty());
+        assert!(studio_folders_from("{}").is_empty());
+    }
 
     #[test]
     fn folders_resolve_to_clean_paths_from_dod() {
