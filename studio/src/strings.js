@@ -1888,6 +1888,25 @@ export const STRINGS = {
     START_ANYWAY: 'Start anyway',
   },
 
+  // ── demo_links.js: demo folders linked into the game folder (#376) ─────
+  DEMO_LINKS: {
+    TITLE: 'Demo folders the game can play',
+    HINT: 'The game plays demos on its own drive through a relative path (../), but cannot reach another drive. Link a demo folder from another drive and the game plays its demos where they are, with nothing copied.',
+    LINK_BUTTON: '+ Link Folder to Game',
+    LINK_BUTTON_TITLE: 'Make a demo folder on any drive playable in the game, without copying it',
+    LINKING: 'Linking…',
+    PICK_TITLE: 'Choose a demo folder to link into the game',
+    NEED_GAME: 'Set the Half-Life executable in Configuration → Paths first: the link goes into that game folder.',
+    EMPTY: 'No folders linked yet.',
+    REMOVE: 'Remove',
+    removeTitle: (target) => `Remove this link. ${target} and its demos stay where they are.`,
+    pointsTo: (target) => `→ ${target}`,
+    consoleLine: (prefix) => `In the game's console: viewdemo "${prefix}<demo name>"`,
+    linked: (name) => `Linked as ${name}. In the game's console: viewdemo "demos/${name}/<demo name>"`,
+    removed: (name) => `Removed the link ${name}. The folder and its demos are untouched.`,
+    listFailed: (reason) => `Could not read the linked folders: ${reason}`,
+  },
+
   // ── packet_entity_limit.js: demos the engine can't play (#207) ─────────
   ENTITY_LIMIT: {
     BADGE: "won't play",

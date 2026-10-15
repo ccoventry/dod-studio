@@ -1056,6 +1056,44 @@ button.primary-btn:hover:not(:disabled) {
   gap: 8px;
 }
 
+/* Demo folders linked into the game folder (demo_links.js, #376) */
+.demo-links {
+  margin-top: 6px;
+  font-size: 12px;
+}
+.demo-links summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+.demo-links-hint {
+  color: var(--text-muted);
+  margin: 4px 0 6px;
+}
+.demo-links-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+}
+.demo-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0;
+  border-top: 1px solid var(--border-color);
+}
+.demo-link-info {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.demo-link-target,
+.demo-link-empty {
+  color: var(--text-muted);
+}
+.demo-link-console {
+  user-select: text;
+}
+
 /* Small inline scan/audit-in-progress indicator */
 .spinner {
   display: inline-block;

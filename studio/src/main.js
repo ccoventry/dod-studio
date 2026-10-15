@@ -54,6 +54,7 @@ import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
@@ -661,6 +662,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
+  initDemoLinks(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
   // capture_pane.js owns the Scheduled Command list, so the floor check reads
   // it from there rather than keeping a second copy.
   initRollFloors(() => getCommandsState().custom_commands);
