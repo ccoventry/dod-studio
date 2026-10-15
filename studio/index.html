@@ -980,6 +980,14 @@
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
                 <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
+                <!-- #426: which maps the selected style has map textures for, and the
+                     warning when the maps being built include one it hasn't. -->
+                <details id="hd-style-maps" class="hd-style-maps" hidden>
+                  <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
+                  <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
+                </details>
+                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
               </div>
