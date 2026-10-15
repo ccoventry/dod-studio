@@ -179,6 +179,14 @@ is the complete list):
   the other folders the game's file system merges in (`valve/`, the install
   folder's). On by default; a Settings-tab box turns it off. See
   `src/demo_list_folders.rs`.
+- **Demos on another drive** (`dodstudio_demo_other_drives 1`): `viewdemo`
+  and `playdemo` open a demo by its full path, `viewdemo "D:/folder/demo"`,
+  which the game alone cannot (its file system only tries each search path
+  plus the name, and the Anniversary build asserts on the `:`). A swap of
+  the file system's `Open` slot: the drive's root becomes a search path the
+  first time it is named, under the hook's own path ID, and the rest of the
+  path is opened under it. On by default. See `src/demo_other_drives.rs`
+  and `docs/goldsrc_viewdemo.md` (#776).
 - **Window layout** (`dodstudio_resizable_windows 1`,
   `dodstudio_remember_window_layout 1`): every GameUI window can be resized
   like the console, and each comes back where it was left after a restart
