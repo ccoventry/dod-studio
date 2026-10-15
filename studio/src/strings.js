@@ -2437,6 +2437,8 @@ export const STRINGS = {
     NO_FOLDERS_YET: 'No folder yet.',
     freeOn: (free, drive) => (drive ? `${free} free on ${drive}` : `${free} free`),
     NO_SPACE_FOUND: 'Drive not found',
+    sameDrive: (path, drive, first) =>
+      `${path} is on ${drive}, like ${first} above it. Both share ${drive}'s free space, so this folder adds no room. Pick a folder on another drive, or remove it.`,
 
     // Step 6: demos.
     DEMOS_TITLE: 'Add your demos',

@@ -139,6 +139,24 @@ export function defaultDemoFolder(hlPath) {
   return `${p.slice(0, cut)}${sep}dod`;
 }
 
+/** Folders after the first on a drive, each with the earlier folder on that
+ *  drive: `[{ path, drive, first }]`. Folders on one drive share its free
+ *  space, so the later one adds no room (Render still scans capture folders
+ *  for takes, so it's a warning, not a refusal). */
+export function sameDriveFolders(paths) {
+  const firstOn = new Map();
+  const repeats = [];
+  for (const raw of paths || []) {
+    const path = (raw || '').trim();
+    const drive = driveLabel(path);
+    if (!drive) continue;
+    const key = drive.toLowerCase();
+    if (firstOn.has(key)) repeats.push({ path, drive, first: firstOn.get(key) });
+    else firstOn.set(key, path);
+  }
+  return repeats;
+}
+
 /** The engine build behind a packet-entity limit (packet_entity_limit.js):
  *  1024 is the 25th Anniversary build, 256 the one before it. */
 export function engineBuild(limit) {

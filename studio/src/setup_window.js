@@ -13,6 +13,7 @@ import {
   formatBytes,
   EXE_NAMES,
   isSteamPlayInstall,
+  sameDriveFolders,
   setupChecklist,
   wrongExeName,
 } from './setup_checklist.js';
@@ -124,8 +125,11 @@ export function createSetupWindow(deps) {
     }).join('') || `<div class="setup-path-row"><span class="setup-path empty">${escapeHtml(S.NO_FOLDERS_YET)}</span></div>`;
     const intro = kind === 'captures' ? S.CAPTURES_INTRO : S.RENDERS_INTRO;
     const field = kind === 'captures' ? S.CAPTURES_FIELD : S.RENDERS_FIELD;
+    const sameDrive = sameDriveFolders(list.map((f) => f.path))
+      .map((r) => `<div class="setup-note warn setup-same-drive">${escapeHtml(S.sameDrive(r.path, r.drive, r.first))}</div>`)
+      .join('');
     return `<p>${escapeHtml(intro)}</p>
-      <div class="setup-field"><div class="setup-field-label">${escapeHtml(field)}</div>${rows}</div>
+      <div class="setup-field"><div class="setup-field-label">${escapeHtml(field)}</div>${rows}</div>${sameDrive}
       <div class="setup-btn-row"><button type="button" id="setup-folder-add">${escapeHtml(list.length ? S.ADD_ANOTHER_DRIVE : S.ADD_FOLDER)}</button></div>`;
   }
 

@@ -50,7 +50,7 @@ import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
-import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
+import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { createSetup } from './setup_wiring.js';
@@ -202,7 +202,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.RENDER.EXPORT_DIR_ROW_PLACEHOLDER }],
     unique: true,
     browse: pickRenderExportDir,
-    onChange: () => { persistAppSettings(); setup?.refresh(); },
+    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); },
   });
 
   // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
@@ -272,6 +272,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (Array.isArray(settings.render_export_dirs) && settings.render_export_dirs.length > 0) {
         renderExportDirs = [...settings.render_export_dirs];
         renderExportDirsEditor.render();
+        refreshSameDriveWarning(renderExportDirs, 'clips');
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
       setCommandProfiles(settings.command_profiles, settings.command_profile_active);
@@ -381,6 +382,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function updateExportPoolIndicator() {
     const indicator = document.querySelector('#export-pool-free-indicator');
+    refreshSameDriveWarning(targetDrives);
     if (!indicator) return;
     if (targetDrives.length === 0) {
       indicator.textContent = STRINGS.MAIN.EXPORT_POOL_FREE_DEFAULT;

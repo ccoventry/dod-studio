@@ -12,7 +12,7 @@ import { showToast } from './toast.js';
 import { numberField } from './number_field.js';
 // The Steam-install and program-name checks (#373) are shared with the
 // Setup window (#599).
-import { EXE_NAMES, isSteamPlayInstall, wrongExeName } from './setup_checklist.js';
+import { EXE_NAMES, isSteamPlayInstall, sameDriveFolders, wrongExeName } from './setup_checklist.js';
 import { STRINGS } from './strings.js';
 import { createGameFolderUi } from './game_folder_ui.js';
 
@@ -28,6 +28,18 @@ const PATH_FIELDS = [
   ['#ffmpeg-override-path-input', '#ffmpeg-path-warning'],
   ['#goldsrc-hooks-dll-path-input', '#goldsrc-hooks-path-warning'],
 ];
+
+/** Under the capture and clip folder lists: a folder on the same drive as
+ *  one above it adds no room (the Setup window says the same). `kind` is
+ *  'captures' or 'clips'. */
+export function refreshSameDriveWarning(paths, kind = 'captures') {
+  const box = document.querySelector(kind === 'clips' ? '#render-export-dir-same-warning' : '#target-drive-same-warning');
+  if (!box) return;
+  const lines = sameDriveFolders(paths).map((r) => STRINGS.SETUP.sameDrive(r.path, r.drive, r.first));
+  box.textContent = lines.join('\n');
+  box.style.whiteSpace = 'pre-line';
+  box.style.display = lines.length ? '' : 'none';
+}
 
 export async function refreshPathWarnings() {
   const rows = PATH_FIELDS

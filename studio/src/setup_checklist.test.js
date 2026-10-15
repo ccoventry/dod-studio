@@ -10,6 +10,7 @@ import {
   isSteamPlayInstall,
   wrongExeName,
   EXE_NAMES,
+  sameDriveFolders,
   SETUP_STEPS,
 } from './setup_checklist.js';
 
@@ -73,6 +74,17 @@ describe('setup checklist (#599)', () => {
     expect(wrongExeName('C:\\Programs\\HLAE\\hlae.exe', EXE_NAMES.hlae)).toBe('');
     expect(wrongExeName('D:\\x\\hlds.exe', EXE_NAMES.hl)).toBe('hlds.exe');
     expect(wrongExeName('', EXE_NAMES.hl)).toBe('');
+  });
+
+  it('names each capture folder after the first on its drive', () => {
+    expect(sameDriveFolders([
+      'C:\\DICEWSOD25\\02_HLAE_Raw', 'D:\\DICEWSOD25\\02_HLAE_Raw', 'c:\\Programs\\HLAE', '', 'C:\\x',
+    ])).toEqual([
+      { path: 'c:\\Programs\\HLAE', drive: 'C:', first: 'C:\\DICEWSOD25\\02_HLAE_Raw' },
+      { path: 'C:\\x', drive: 'C:', first: 'C:\\DICEWSOD25\\02_HLAE_Raw' },
+    ]);
+    expect(sameDriveFolders(['C:\\a', 'D:\\b'])).toEqual([]);
+    expect(sameDriveFolders(null)).toEqual([]);
   });
 
   it('a path not yet checked counts by its text alone', () => {
