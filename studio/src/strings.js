@@ -1890,7 +1890,7 @@ export const STRINGS = {
   // ── demo_links.js: demo folders linked into the game folder (#376) ─────
   DEMO_LINKS: {
     TITLE: 'Demo folders the game can play',
-    HINT: 'The game only plays demos inside its own folder. Link a demo folder from any drive and the game plays its demos where they are, with nothing copied.',
+    HINT: 'The game plays demos on its own drive through a relative path (../), but cannot reach another drive. Link a demo folder from another drive and the game plays its demos where they are, with nothing copied.',
     LINK_BUTTON: '+ Link Folder to Game',
     LINK_BUTTON_TITLE: 'Make a demo folder on any drive playable in the game, without copying it',
     LINKING: 'Linking…',
