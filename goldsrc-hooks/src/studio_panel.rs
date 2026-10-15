@@ -753,6 +753,9 @@ fn display_name(path: &str, count: Option<&str>) -> String {
 /// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
 /// parent itself included, where the path under it would be empty.
 fn folder_line(dod: &std::path::Path, folder: &str) -> String {
+    if crate::demo_list_folders::is_studio_place(folder) {
+        return "Currently in Studio's analysed demos (the analyzer cache)".to_string();
+    }
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
         .parent()

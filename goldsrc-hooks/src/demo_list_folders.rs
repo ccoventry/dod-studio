@@ -44,8 +44,10 @@
 //! folders visited are kept for the Demos tab's Back and Forward, the
 //! folder shown is remembered between sessions
 //! (`%APPDATA%\dod-studio\goldsrc_hooks_demos.txt`), and the tab's Go to
-//! dropdown offers the game folder, each drive, Studio's demo folders (read
-//! out of its settings.json) and the folders visited lately.
+//! dropdown offers the game folder, Studio's analysed demos (every demo in
+//! its analyzer cache as one list, the `studio:/` place), each drive,
+//! Studio's demo folders (read out of its settings.json) and the folders
+//! visited lately.
 //!
 //! ## Per build
 //!
@@ -343,7 +345,7 @@ fn restore(dod: &Path) {
             }
         }
     }
-    if full_path(dod, &current).is_dir() {
+    if is_studio_place(&current) || full_path(dod, &current).is_dir() {
         go_to(&current);
     } else {
         go_to("");
@@ -364,6 +366,36 @@ pub fn is_drive_path(path: &str) -> bool {
 pub fn is_drive_root(row: &str) -> bool {
     let name = row.trim().trim_matches('"');
     is_drive_path(name) && name.len() == 3
+}
+
+/// The listing path of Studio's analysed demos: every demo in Studio's
+/// analyzer cache as one list, wherever each is on disk (#779). Not a
+/// folder, so it is listed by [`studio_rows`]; its up row goes to `dod/`
+/// (`resolve` drops the one part).
+pub const STUDIO_PLACE: &str = "studio:/";
+
+pub fn is_studio_place(folder: &str) -> bool {
+    folder.trim().trim_matches('"') == STUDIO_PLACE
+}
+
+/// Studio's analysed demos as rows: the up row, then each demo that is
+/// still on disk, as a quoted full path the way the drive listings spell
+/// theirs, sorted by name.
+pub fn studio_rows(
+    paths: impl IntoIterator<Item = String>,
+    on_disk: impl Fn(&str) -> bool,
+) -> Vec<String> {
+    let mut demos: Vec<String> = paths
+        .into_iter()
+        .map(|path| path.trim().replace('\\', "/"))
+        .filter(|path| is_drive_path(path) && on_disk(path))
+        .map(|path| format!("\"{path}\""))
+        .collect();
+    demos.sort_by_key(|row| row.to_ascii_lowercase());
+    demos.dedup();
+    let mut out = vec![format!("{STUDIO_PLACE}../")];
+    out.extend(demos);
+    out
 }
 
 /// The file or folder a row or listing path names on disk: a drive-rooted
@@ -403,10 +435,16 @@ pub fn build_places(
     studio: &[String],
     recent: &[String],
 ) -> Vec<Place> {
-    let mut places = vec![Place {
-        label: format!("Game: {game}/"),
-        folder: String::new(),
-    }];
+    let mut places = vec![
+        Place {
+            label: format!("Game: {game}/"),
+            folder: String::new(),
+        },
+        Place {
+            label: "Studio's analysed demos".to_string(),
+            folder: STUDIO_PLACE.to_string(),
+        },
+    ];
     for drive in drives {
         let folder = format!("{}:/", drive.to_ascii_uppercase());
         places.push(Place {
@@ -808,12 +846,29 @@ mod hook {
     /// Lists `folder` as rows: through the real file system for a path from
     /// `dod/`, straight from the disk for a drive-rooted one.
     unsafe fn list(fs: *mut c_void, folder: &str, path_id: *const c_char) -> Vec<CString> {
+        let dod = crate::texture_hires::game_dir();
+        if super::is_studio_place(folder) {
+            // Studio's analysed demos: the analyzer cache's entries, those
+            // still on disk. The up row counts `dod/`, where it goes.
+            let paths = crate::streaks::cache_root()
+                .map(|root| analysis::cache::cached_demo_paths(&root))
+                .unwrap_or_default();
+            let listed = super::studio_rows(paths, |path| std::path::Path::new(path).is_file());
+            crate::folder_counts::count_later(
+                folder,
+                Vec::new(),
+                Some((dod.clone(), dod.join(super::STUDIO_PLACE))),
+            );
+            return listed
+                .into_iter()
+                .filter_map(|row| CString::new(row).ok())
+                .collect();
+        }
         let entries = if super::is_drive_path(folder) {
             disk_entries(folder)
         } else {
             unsafe { fs_entries(fs, folder, path_id) }
         };
-        let dod = crate::texture_hires::game_dir();
         let hide_empty = super::HIDE_EMPTY.on();
         // No counting here, on the game thread: a folder known to be empty
         // is left out, and the rest are counted in the background
@@ -1090,6 +1145,26 @@ mod tests {
     }
 
     #[test]
+    fn studios_analysed_demos_are_one_list_whose_up_row_goes_to_dod() {
+        assert!(is_studio_place("studio:/"));
+        assert!(is_studio_place("\"studio:/\""));
+        assert!(!is_studio_place("studio:/../"));
+        assert!(!is_drive_path(STUDIO_PLACE));
+        assert_eq!(resolve("studio:/../"), "");
+        let paths = [
+            "D:\\demos\\b.dem".to_string(),
+            "D:/demos/A.dem".to_string(),
+            "D:/gone/x.dem".to_string(),
+            "D:/demos/A.dem".to_string(),
+            "relative/x.dem".to_string(),
+        ];
+        assert_eq!(
+            studio_rows(paths, |path| !path.contains("gone")),
+            vec!["studio:/../", "\"D:/demos/A.dem\"", "\"D:/demos/b.dem\""]
+        );
+    }
+
+    #[test]
     fn drive_rows_follow_the_up_row_and_drive_demos_are_quoted() {
         let listed = with_drives(vec!["../".to_string(), "demos/".to_string()], &['c', 'D']);
         assert_eq!(listed, vec!["../", "C:/", "D:/", "demos/"]);
@@ -1146,6 +1221,7 @@ mod tests {
             labels,
             vec![
                 "Game: dod/",
+                "Studio's analysed demos",
                 "Drive: C:/",
                 "Drive: D:/",
                 "Studio: .../Half-Life/dod/",
@@ -1153,12 +1229,13 @@ mod tests {
                 "Recent: temp demos/",
             ]
         );
-        assert_eq!(places[3].folder, "C:/Games/Half-Life/dod/");
+        assert_eq!(places[1].folder, STUDIO_PLACE);
+        assert_eq!(places[4].folder, "C:/Games/Half-Life/dod/");
         // Two different folders with the same last two names stay apart.
         let twins = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
         let places = build_places("dod", &[], &twins, &[]);
-        assert_eq!(places[1].label, "Studio: .../x/dod/");
-        assert_eq!(places[2].label, "Studio: .../x/dod/ (2)");
+        assert_eq!(places[2].label, "Studio: .../x/dod/");
+        assert_eq!(places[3].label, "Studio: .../x/dod/ (2)");
     }
 
     #[test]
