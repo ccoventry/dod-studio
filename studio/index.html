@@ -121,6 +121,11 @@
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
+                <!-- #685: the queue in match order, a header line per match. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_MATCH_TITLE">
+                  <input type="checkbox" id="master-group-by-match-cb" />
+                  <span data-str="WORKSPACE.GROUP_BY_MATCH_LABEL">Group by match</span>
+                </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
@@ -481,8 +486,8 @@
                 </div>
                 <div class="control-group">
                   <!-- #434: the hook DLL runs the batch on the original demos. -->
-                  <input type="checkbox" id="config-hook-runs-batch" />
-                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
+                  <input type="checkbox" id="config-hook-runs-batch" checked />
+                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips</label>
                 </div>
                 <div class="control-group">
                   <input type="checkbox" id="config-keep-game-behind" checked />
@@ -672,7 +677,7 @@
                 <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
-              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-chips" class="placeholder-chips"></div>
               <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
               <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
               <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
@@ -910,7 +915,7 @@
                 <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
               </div>
               <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
-              <div id="rename-chips" class="rename-chips"></div>
+              <div id="rename-chips" class="placeholder-chips"></div>
               <label class="rename-lowercase-label" data-str-title="DEMO_RENAME.LOWERCASE_TITLE"><input type="checkbox" id="rename-lowercase" /> <span data-str="DEMO_RENAME.LOWERCASE_LABEL">Lowercase the whole name</span></label>
               <div class="row-inputs">
                 <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
@@ -981,6 +986,14 @@
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
                 <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
+                <!-- #426: which maps the selected style has map textures for, and the
+                     warning when the maps being built include one it hasn't. -->
+                <details id="hd-style-maps" class="hd-style-maps" hidden>
+                  <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
+                  <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
+                </details>
+                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
               </div>

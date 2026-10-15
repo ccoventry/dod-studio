@@ -450,9 +450,11 @@ pub struct PatcherConfig {
     pub movie_config: String,
     pub save_local_patched_copy: bool,
     /// Run the batch from the hook DLL on the original demos, seeking between
-    /// clips, instead of patching a copy of each demo (#434). Falls back to
-    /// patching when the batch can't run that way (`patch::runtime_batch`).
-    #[serde(default)]
+    /// clips, instead of patching a copy of each demo (#434): the default
+    /// route. Falls back to patching when the batch can't run that way
+    /// (`patch::runtime_batch`); the patch route itself is kept until real
+    /// batches have vetted this one.
+    #[serde(default = "default_hook_runs_batch")]
     pub hook_runs_batch: bool,
     /// The hook DLL's `dodstudio_stay_behind_while_capturing` for the batch: the game stays
     /// behind the user's windows. Off, it comes to the front while it records,
@@ -504,6 +506,10 @@ fn default_decal_flush() -> bool {
 }
 
 fn default_keep_game_behind() -> bool {
+    true
+}
+
+pub fn default_hook_runs_batch() -> bool {
     true
 }
 
@@ -788,7 +794,7 @@ impl Default for PatcherConfig {
             primary_media_dir: None,
             movie_config: String::new(),
             save_local_patched_copy: false,
-            hook_runs_batch: false,
+            hook_runs_batch: default_hook_runs_batch(),
             keep_game_behind: default_keep_game_behind(),
             session_id: String::new(),
             hlae_path: String::new(),

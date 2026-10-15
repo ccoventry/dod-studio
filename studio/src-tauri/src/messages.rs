@@ -130,6 +130,7 @@ pub fn blender_not_blender(path: &str) -> String {
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
 pub const HD_ALREADY_RUNNING: &str =
     "A download or build is already running. Wait for it, or Cancel it.";
+pub const HD_COVERAGE_RUNNING: &str = "Studio is already checking which maps each style covers.";
 pub const HD_NO_SCRIPTS: &str =
     "This copy of DoD Studio has no HD build scripts (goldsrc-hooks/tools/hd).";
 pub const HD_NO_PYTHON: &str =
@@ -206,6 +207,12 @@ pub fn failed_to_launch_obs(err: impl Display) -> String {
 /// clip (#76). 1-based.
 pub fn capturing_clip(clip: u32, total: u32) -> String {
     format!("Capturing clip {} of {}", clip, total)
+}
+
+/// The batch status line while a demo whose highlights have no demo-player
+/// times is read again before a Seek Between Clips batch (#434). 1-based.
+pub fn reading_demo_again(demo: &str, index: u32, total: u32) -> String {
+    format!("Reading {demo} again for its clip times ({index} of {total})")
 }
 
 pub fn game_directory_not_found(game_dir: &str) -> String {

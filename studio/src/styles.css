@@ -2163,6 +2163,23 @@ tr.keyboard-selected {
   color: #ffb74d;
 }
 
+.hd-style-maps summary {
+  cursor: pointer;
+}
+
+.hd-style-maps-groups p {
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-progress {
+  width: 100%;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
@@ -2935,8 +2952,9 @@ input[type="checkbox"].hd-box-pattern {
   color: #ef5350;
 }
 
-/* One row per placeholder group: its label, then its chips (#469). */
-.rename-chips {
+/* One row per placeholder group: its label, then its chips (#469), under
+   both name templates (#751, placeholder_chips.js). */
+.placeholder-chips {
   display: grid;
   grid-template-columns: max-content 1fr;
   gap: 4px 10px;
@@ -2945,28 +2963,39 @@ input[type="checkbox"].hd-box-pattern {
   font-size: 0.85em;
 }
 
-.rename-chip-group-label {
+.placeholder-chip-group-label {
   color: var(--text-muted);
   font-size: 0.95em;
   text-align: right;
 }
 
-.rename-chip-group {
+.placeholder-chip-group {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
 }
 
-.rename-chip {
+.placeholder-chip {
   padding: 1px 6px;
   font-family: monospace;
   font-size: 1em;
 }
 
 /* A placeholder the focused template's demo type doesn't have. */
-.rename-chip:disabled {
+.placeholder-chip:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* The Master Queue grouped by match (#685): one header line per match. */
+#master-demo-table .queue-match-header td {
+  padding: 6px 8px 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(255, 255, 255, 0.03);
+  cursor: default;
 }
 
 /* The list: the shared .analyzer-table look, with fixed columns so the two
