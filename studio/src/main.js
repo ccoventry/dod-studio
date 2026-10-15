@@ -31,7 +31,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, recordingPlayerStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -352,11 +352,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   function updateDemoFooter(demos) {
     const footerEl = document.querySelector('#demo-list-footer');
     if (footerEl) {
-      // Same recording-player filter the Highlights column uses (M2) — this
-      // used to sum every player's streaks in the demo, not just the
-      // recording player's, and could read in the hundreds where the
-      // visible Highlights column summed to a fraction of that.
-      const totalHighlights = (demos || []).reduce((sum, d) => sum + recordingPlayerStreaks(d).length, 0);
+      // The same highlights the Highlights column counts (M2).
+      const totalHighlights = (demos || []).reduce((sum, d) => sum + listedStreaks(d).length, 0);
       footerEl.textContent = STRINGS.WORKSPACE.demoListFooter((demos || []).length, totalHighlights);
     }
     // Clear Untracked/Clear All only make sense with something in the
@@ -684,7 +681,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClipNameSettings({
     getHighlight: () => {
       const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
-      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const own = demo ? listedStreaks(demo) : [];
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
     },

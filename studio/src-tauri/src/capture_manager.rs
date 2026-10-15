@@ -312,6 +312,13 @@ pub struct SerializedStreak {
     /// existed: such a demo is scanned again (queue_scan.js).
     #[serde(default)]
     pub spectated: bool,
+    /// `CaptureStreak::steam_id`.
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// `CaptureStreak::recorded_this_demo`. Absent from projects saved
+    /// before #573, which the frontend tells by it (queue_filters.js).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_this_demo: Option<bool>,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -337,6 +344,8 @@ impl From<SerializedStreak> for CaptureStreak {
             status: native::patch::types::HighlightStatus::Pending,
             source_key: s.source_key,
             spectated: s.spectated,
+            steam_id: s.steam_id,
+            recorded_this_demo: s.recorded_this_demo.unwrap_or(false),
         }
     }
 }
@@ -1673,6 +1682,8 @@ impl From<CaptureStreak> for SerializedStreak {
             victim_factions: Vec::new(),
             source_key: c.source_key,
             spectated: c.spectated,
+            steam_id: c.steam_id,
+            recorded_this_demo: Some(c.recorded_this_demo),
         }
     }
 }
