@@ -183,7 +183,9 @@ is the complete list):
   tab has Back, Forward and Up (Backspace too) and a Go to dropdown: the
   game folder, each drive, Studio's demo folders (from its settings.json)
   and the folders visited lately; the folder shown is remembered between
-  sessions.
+  sessions. Each row has an icon (up, folder, drive, POV or HLTV demo) in a
+  first image column, drawn from pictures in the DLL through the list's own
+  image list; see `src/studio_panel/hook/list_icons.rs`.
 - **Demos on another drive** (`dodstudio_demo_other_drives 1`): `viewdemo`
   and `playdemo` open a demo by its full path, `viewdemo "D:/folder/demo"`,
   which the game alone cannot (its file system only tries each search path

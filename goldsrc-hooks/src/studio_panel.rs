@@ -716,18 +716,15 @@ struct DemoFilters {
 /// POV or HLTV.
 const FOLDER_TYPE: &CStr = c"Folder";
 
-/// The marks in front of a Demos tab row's name. The font has none of them:
-/// the game draws them from a fallback font but spaces them by its own font's
-/// narrower width, so each is followed by enough spaces to clear it
-/// (measured on PRE, 2026-10-05; one more each after the 25th Anniversary
-/// build drew them almost touching the name, 2026-10-06). The folder mark is a square: the 25th
-/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
-/// it draws these shapes and arrows. Not the rectangle (U+25AC): in Tahoma,
-/// the list's font, that is a 20x4 bar that reads as a dash, where the square
-/// is a solid block about 11x9.
-const FOLDER_MARK: &str = "\u{25A0}   ";
-const DEMO_MARK: &str = "\u{25B6}   ";
-const UP_MARK: &str = "\u{2191}   ";
+/// What goes in front of a Demos tab row's name, and only sorts it: the list
+/// sorts the name column by its text, so a leading space puts the up row,
+/// the folders and the drives before the demos, and the up row's `..`
+/// before any folder's name. The pictures are in the icon column
+/// (`list_icons`, #779); before it, these were an arrow, a square and a
+/// triangle drawn from a fallback font.
+const FOLDER_MARK: &str = " ";
+const DEMO_MARK: &str = "";
+const UP_MARK: &str = " ";
 
 /// What the Demos tab's Demo File column shows for a row's `path` from
 /// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
@@ -1526,6 +1523,8 @@ mod hook {
 
     /// The Demos tab's counting bar (#409).
     mod folder_progress;
+    /// The icons in the Demos tab's list (#779).
+    mod list_icons;
     /// The Playback tab's loading progress (#465).
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
@@ -1591,6 +1590,7 @@ mod hook {
     type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
     type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
+    type SetIntFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, i32);
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
@@ -1717,12 +1717,10 @@ mod hook {
                 // A folder: #409's handler opens it, reading the path from
                 // the column the tab gave a display name.
                 Some(_) => unsafe { restore_selected_path(this) },
-                None => {
-                    crate::commands::console_print(&format!(
-                        "{NAME}: pick a demo in the list first\n"
-                    ));
-                    return;
-                }
+                // Nothing picked: Enter anywhere on the tab lands here too
+                // (the window's default button), so no console line (#777);
+                // the hint under the list already says what to do.
+                None => return,
             }
         }
         let original = DEMO_LIST_ON_COMMAND.load(Ordering::Acquire);
@@ -2037,10 +2035,22 @@ mod hook {
             // position, so columns change only while the list is empty (the
             // window filled it as it was built); `refill_demo_list` refills it.
             delete_all(list);
+            // The icon column first (#779): an image column, fixed width,
+            // drawn from our own image list; a row picks its icon with the
+            // `int` under the column's key.
+            add(
+                list,
+                0,
+                list_icons::ICON_KEY.as_ptr(),
+                c"".as_ptr(),
+                list_icons::ICON_COLUMN_WIDE,
+                list_icons::COLUMN_FIXEDSIZE | list_icons::COLUMN_IMAGE,
+            );
+            list_icons::install(vgui.surface, list);
             for (index, (key, heading, width)) in DEMO_COLUMNS.iter().enumerate() {
                 add(
                     list,
-                    index as i32 + 1,
+                    index as i32 + 2,
                     key.as_ptr(),
                     heading.as_ptr(),
                     *width,
@@ -2051,7 +2061,8 @@ mod hook {
                 let (x, y, _, tall) = vgui.rect(heading);
                 vgui.place(heading, (x, y, NAME_COLUMN_WIDE, tall));
             }
-            for index in 0..=DEMO_COLUMNS.len() as i32 {
+            // Every column but the icons' sorts by a click on its heading.
+            for index in 1..=DEMO_COLUMNS.len() as i32 + 1 {
                 sortable(list, index, 1);
             }
         }
@@ -2150,6 +2161,20 @@ mod hook {
                     // the Map column to maps.
                     let name = path.clone();
                     let mut folder_count = None;
+                    // The icon column (#779): the row's int picks the image.
+                    let is_up = name
+                        .trim()
+                        .trim_matches('"')
+                        .strip_suffix('/')
+                        .is_some_and(|folder| folder.rsplit('/').next() == Some(".."));
+                    let icon = list_icons::icon_for(
+                        is_folder_row(&name),
+                        is_up,
+                        crate::demo_list_folders::is_drive_root(&name),
+                        info_for(&path).map(|info| info.hltv),
+                    );
+                    let set_int: SetIntFn = slot(row, list_icons::KEYVALUES_SLOT_SET_INT);
+                    set_int(row, list_icons::ICON_KEY.as_ptr(), icon as i32);
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
@@ -3740,6 +3765,11 @@ mod hook {
             let typed = CStr::from_bytes_until_nul(&buf)
                 .map(|c| c.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            // Enter anywhere on the tab lands here (#777): an empty box is
+            // not a mistake to report, just nothing to do.
+            if typed.trim().is_empty() {
+                return Ok(());
+            }
             let seconds = parse_time(&typed)?;
             let line = std::ffi::CString::new(format!(
                 "{} {seconds:.2}\n",
