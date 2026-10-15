@@ -62,7 +62,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicBool, AtomicPtr, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
 
 use crate::engine::CvarSPartial;
 use crate::names::console_name;
@@ -238,6 +238,30 @@ const RECENT_KEPT: usize = 8;
 const RECENT_SHOWN: usize = 5;
 static NAV: Mutex<Nav> = Mutex::new(Nav::new());
 
+/// The Demos tab's own Load Demo window (`studio_panel`'s hidden one): its
+/// list has Back, Forward and Up, so no up row. The game's Load Demo window
+/// keeps the up row, its only way up. `FILLING_TAB` is set around each fill
+/// of the tab's window, so the listing knows whose it is.
+static TAB_DIALOG: AtomicUsize = AtomicUsize::new(0);
+static FILLING_TAB: AtomicBool = AtomicBool::new(false);
+
+/// Called by `studio_panel` with its hidden Load Demo window.
+pub fn set_tab_dialog(dialog: usize) {
+    TAB_DIALOG.store(dialog, Ordering::Release);
+}
+
+/// Runs `fill`, a fill of the Demos tab's list, which gets no up row.
+pub fn tab_fill<R>(fill: impl FnOnce() -> R) -> R {
+    FILLING_TAB.store(true, Ordering::Release);
+    let out = fill();
+    FILLING_TAB.store(false, Ordering::Release);
+    out
+}
+
+fn up_row_wanted() -> bool {
+    !FILLING_TAB.load(Ordering::Acquire)
+}
+
 /// Shows `folder` (a listing path, see [`CURRENT_FOLDER`]): the next list
 /// fill reads it. Recorded for Back, and kept for the next session. False
 /// when the lists were there already.
@@ -378,12 +402,13 @@ pub fn is_studio_place(folder: &str) -> bool {
     folder.trim().trim_matches('"') == STUDIO_PLACE
 }
 
-/// Studio's analysed demos as rows: the up row, then each demo that is
-/// still on disk, as a quoted full path the way the drive listings spell
-/// theirs, sorted by name.
+/// Studio's analysed demos as rows: the up row when `up_row`, then each
+/// demo that is still on disk, as a quoted full path the way the drive
+/// listings spell theirs, sorted by name.
 pub fn studio_rows(
     paths: impl IntoIterator<Item = String>,
     on_disk: impl Fn(&str) -> bool,
+    up_row: bool,
 ) -> Vec<String> {
     let mut demos: Vec<String> = paths
         .into_iter()
@@ -393,7 +418,11 @@ pub fn studio_rows(
         .collect();
     demos.sort_by_key(|row| row.to_ascii_lowercase());
     demos.dedup();
-    let mut out = vec![format!("{STUDIO_PLACE}../")];
+    let mut out = if up_row {
+        vec![format!("{STUDIO_PLACE}../")]
+    } else {
+        Vec::new()
+    };
     out.extend(demos);
     out
 }
@@ -410,9 +439,10 @@ pub fn full_path(dod: &Path, row: &str) -> PathBuf {
     }
 }
 
-/// `D:/`, `E:/`...: a row per drive, after the up row, in `dod/`'s list.
-fn with_drives(mut rows: Vec<String>, drives: &[char]) -> Vec<String> {
-    let at = usize::from(!rows.is_empty());
+/// `D:/`, `E:/`...: a row per drive in `dod/`'s list, first, or after the
+/// up row when the list has one (`after_up`).
+fn with_drives(mut rows: Vec<String>, drives: &[char], after_up: bool) -> Vec<String> {
+    let at = usize::from(after_up && !rows.is_empty());
     for (i, drive) in drives.iter().enumerate() {
         rows.insert(at + i, format!("{}:/", drive.to_ascii_uppercase()));
     }
@@ -678,8 +708,14 @@ fn rows(
     folder: &str,
     entries: impl IntoIterator<Item = (String, bool)>,
     on_disk: impl Fn(&str, bool) -> bool,
+    up_row: bool,
 ) -> Vec<String> {
-    let mut out = vec![format!("{folder}../")];
+    // The up row only where there is no Up button: the game's own window.
+    let mut out = if up_row {
+        vec![format!("{folder}../")]
+    } else {
+        Vec::new()
+    };
     let mut demos = Vec::new();
     for (name, is_dir) in entries {
         // `.` and `..` are this folder and the one above (the `../` row
@@ -845,19 +881,26 @@ mod hook {
 
     /// Lists `folder` as rows: through the real file system for a path from
     /// `dod/`, straight from the disk for a drive-rooted one.
-    unsafe fn list(fs: *mut c_void, folder: &str, path_id: *const c_char) -> Vec<CString> {
+    unsafe fn list(
+        fs: *mut c_void,
+        folder: &str,
+        path_id: *const c_char,
+        up_row: bool,
+    ) -> Vec<CString> {
         let dod = crate::texture_hires::game_dir();
         if super::is_studio_place(folder) {
             // Studio's analysed demos: the analyzer cache's entries, those
-            // still on disk. The up row counts `dod/`, where it goes.
+            // still on disk. The up row, where there is one, counts `dod/`,
+            // where it goes.
             let paths = crate::streaks::cache_root()
                 .map(|root| analysis::cache::cached_demo_paths(&root))
                 .unwrap_or_default();
-            let listed = super::studio_rows(paths, |path| std::path::Path::new(path).is_file());
+            let listed =
+                super::studio_rows(paths, |path| std::path::Path::new(path).is_file(), up_row);
             crate::folder_counts::count_later(
                 folder,
                 Vec::new(),
-                Some((dod.clone(), dod.join(super::STUDIO_PLACE))),
+                up_row.then(|| (dod.clone(), dod.join(super::STUDIO_PLACE))),
             );
             return listed
                 .into_iter()
@@ -874,34 +917,41 @@ mod hook {
         // is left out, and the rest are counted in the background
         // (`folder_counts`), the Demos tab listing again when that is done.
         let to_count = std::cell::RefCell::new(Vec::new());
-        let listed = rows(folder, entries, |path, is_dir| {
-            let full = super::full_path(&dod, path);
-            if !is_dir {
-                return full.is_file();
-            }
-            if !full.is_dir() || (hide_empty && crate::folder_counts::known_empty(&full)) {
-                return false;
-            }
-            to_count.borrow_mut().push(full);
-            true
-        });
+        let listed = rows(
+            folder,
+            entries,
+            |path, is_dir| {
+                let full = super::full_path(&dod, path);
+                if !is_dir {
+                    return full.is_file();
+                }
+                if !full.is_dir() || (hide_empty && crate::folder_counts::known_empty(&full)) {
+                    return false;
+                }
+                to_count.borrow_mut().push(full);
+                true
+            },
+            up_row,
+        );
         // Drive rows are not counted: a whole drive is too much to walk for
         // a number in brackets.
         let listed = if folder.is_empty() {
-            super::with_drives(listed, &drives())
+            super::with_drives(listed, &drives(), up_row)
         } else {
             listed
         };
-        // The up row's count too: this folder's total from its parts, plus
-        // the rest of the parent, so nothing is counted twice. A drive
-        // root's up row goes back to `dod/`.
+        // The up row's count too, where there is one: this folder's total
+        // from its parts, plus the rest of the parent, so nothing is counted
+        // twice. A drive root's up row goes back to `dod/`.
         let here = super::full_path(&dod, folder);
-        let up = if super::is_drive_root(folder) {
-            (dod.clone(), here)
+        let up = if !up_row {
+            None
+        } else if super::is_drive_root(folder) {
+            Some((dod.clone(), here))
         } else {
-            (here.join(".."), here)
+            Some((here.join(".."), here))
         };
-        crate::folder_counts::count_later(folder, to_count.into_inner(), Some(up));
+        crate::folder_counts::count_later(folder, to_count.into_inner(), up);
         listed
             .into_iter()
             .filter_map(|row| CString::new(row).ok())
@@ -920,7 +970,7 @@ mod hook {
                     return std::ptr::null();
                 };
                 let folder = super::current_folder();
-                browser.rows = list(fs, &folder, path_id);
+                browser.rows = list(fs, &folder, path_id, super::up_row_wanted());
                 browser.next = 1;
                 *handle = OWN_HANDLE;
                 return browser
@@ -1008,7 +1058,11 @@ mod hook {
                 };
                 crate::debug::report(&format!("demo_list_folders: opened {opened}"));
                 let fill: FillFn = cast(FILL.load(Ordering::Relaxed));
-                fill(dialog);
+                if dialog as usize == super::TAB_DIALOG.load(Ordering::Acquire) {
+                    super::tab_fill(|| fill(dialog));
+                } else {
+                    fill(dialog);
+                }
                 return;
             }
             let original: OnCommandFn = cast(ON_COMMAND.load(Ordering::Relaxed));
@@ -1159,20 +1213,41 @@ mod tests {
             "relative/x.dem".to_string(),
         ];
         assert_eq!(
-            studio_rows(paths, |path| !path.contains("gone")),
+            studio_rows(paths.clone(), |path| !path.contains("gone"), true),
             vec!["studio:/../", "\"D:/demos/A.dem\"", "\"D:/demos/b.dem\""]
+        );
+        assert_eq!(
+            studio_rows(paths, |_| true, false),
+            vec![
+                "\"D:/demos/A.dem\"",
+                "\"D:/demos/b.dem\"",
+                "\"D:/gone/x.dem\""
+            ]
         );
     }
 
     #[test]
     fn drive_rows_follow_the_up_row_and_drive_demos_are_quoted() {
-        let listed = with_drives(vec!["../".to_string(), "demos/".to_string()], &['c', 'D']);
+        let listed = with_drives(
+            vec!["../".to_string(), "demos/".to_string()],
+            &['c', 'D'],
+            true,
+        );
         assert_eq!(listed, vec!["../", "C:/", "D:/", "demos/"]);
-        assert_eq!(with_drives(Vec::new(), &['D']), vec!["D:/"]);
+        assert_eq!(with_drives(Vec::new(), &['D'], true), vec!["D:/"]);
+        // The Demos tab's list has no up row: the drives come first.
+        assert_eq!(
+            with_drives(vec!["demos/".to_string()], &['D'], false),
+            vec!["D:/", "demos/"]
+        );
         let entries = [("x.dem".to_string(), false), ("sub".to_string(), true)];
         assert_eq!(
-            rows("D:/demos/", entries, |_, _| true),
+            rows("D:/demos/", entries.clone(), |_, _| true, true),
             vec!["D:/demos/../", "D:/demos/sub/", "\"D:/demos/x.dem\""]
+        );
+        assert_eq!(
+            rows("D:/demos/", entries, |_, _| true, false),
+            vec!["D:/demos/sub/", "\"D:/demos/x.dem\""]
         );
     }
 
@@ -1274,7 +1349,7 @@ mod tests {
             ("my clip.dem".to_string(), false),
         ];
         assert_eq!(
-            rows("test/", entries, |_, _| true),
+            rows("test/", entries, |_, _| true, true),
             vec![
                 "test/../",
                 "test/temp demos/",
@@ -1293,7 +1368,10 @@ mod tests {
             ("A.dem".to_string(), false),
             ("sub".to_string(), true),
         ];
-        assert_eq!(rows("", entries, |_, _| true), vec!["../", "sub/", "a.dem"]);
+        assert_eq!(
+            rows("", entries, |_, _| true, true),
+            vec!["../", "sub/", "a.dem"]
+        );
     }
 
     #[test]
@@ -1307,7 +1385,7 @@ mod tests {
         ];
         let on_disk = |path: &str, _: bool| matches!(path, "temp demos" | "mine.dem");
         assert_eq!(
-            rows("", entries, on_disk),
+            rows("", entries, on_disk, true),
             vec!["../", "temp demos/", "mine.dem"]
         );
     }
@@ -1320,10 +1398,15 @@ mod tests {
             ("sub".to_string(), true),
         ];
         let asked = std::cell::RefCell::new(Vec::new());
-        let listed = rows("test/", entries, |path, _| {
-            asked.borrow_mut().push(path.to_string());
-            true
-        });
+        let listed = rows(
+            "test/",
+            entries,
+            |path, _| {
+                asked.borrow_mut().push(path.to_string());
+                true
+            },
+            true,
+        );
         assert_eq!(listed, vec!["test/../", "test/sub/"]);
         assert_eq!(
             *asked.borrow(),

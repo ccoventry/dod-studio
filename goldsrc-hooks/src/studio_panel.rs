@@ -2286,7 +2286,7 @@ mod hook {
         if let Ok((base, build)) = gameui() {
             unsafe {
                 let fill: ActivateFn = std::mem::transmute(base + build.file_dialog_fill);
-                fill(dialog);
+                crate::demo_list_folders::tab_fill(|| fill(dialog));
                 if let Ok(vgui) = Vgui::get() {
                     fill_place_box(&vgui, base, build);
                 }
@@ -2784,7 +2784,11 @@ mod hook {
             // list and Load button. It fills its list as it is built.
             let dialog = allocate(base, build, build.frame_size + 4)?;
             let dialog_ctor: SheetCtor = std::mem::transmute(base + build.file_dialog_ctor);
-            dialog_ctor(dialog, frame, c"DodStudioDemoList".as_ptr());
+            // Its list has Back, Forward and Up, so no up row (#779).
+            crate::demo_list_folders::set_tab_dialog(dialog as usize);
+            crate::demo_list_folders::tab_fill(|| {
+                dialog_ctor(dialog, frame, c"DodStudioDemoList".as_ptr())
+            });
             vgui.set_visible(vpanel_of(dialog), false);
             DEMO_LIST_ON_COMMAND.store(
                 own_on_command(dialog, demo_list_on_command as *const () as usize),
