@@ -365,9 +365,10 @@ export const STRINGS = {
         "Capture to video is on, but HLAE has no FFmpeg — the capture would run and produce no video. Sort the HLAE FFmpeg row above first.",
     PATH_NOT_FOUND: "There's no file at this path — check it for a typo.",
     PATH_IS_A_FOLDER: "That's a folder, not the program itself. Pick the .exe inside it.",
+    wrongExe: (found, expected) => `That's ${found}, not ${expected}: DoD Studio can't start the game with it. Pick ${expected}.`,
     // #373. Shown under Half-Life Executable only; see isSteamPlayInstall.
     HL_PATH_PLAY_INSTALL:
-        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended: it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
+        "This is Steam's own Half-Life folder. That works. A separate copy of Half-Life for movies is recommended (made from the 25th Anniversary build): it keeps your movie configs, models and sounds out of the game you play online. Either way, don't join a game server from a game DoD Studio started.",
     HLAE_FFMPEG_BUNDLED: (path) => `Installed in HLAE's own folder (${path}).`,
     HLAE_FFMPEG_LINKED: (target) => `Pointed at ${target}.`,
     // Both halves of the pipeline encoding with the same FFmpeg build was the
@@ -2412,5 +2413,125 @@ export const STRINGS = {
     },
     chipTitle: (description, value) => (value ? `${description}. Selected highlight: ${value}` : description),
     renderTemplateInvalid: (reason) => `Nothing was queued: the clip name template has a problem. ${reason} Fix it in Configuration > Render Output.`,
+  },
+
+  // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  SETUP: {
+    MENU_ITEM: 'Setup…',
+    MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',
+    TITLE: 'Setup',
+    // The card's heading and its "3 of 6" chip.
+    CARD_TITLE: 'Finish setting up',
+    cardProgress: (done, total) => `${done} of ${total}`,
+    cardTitleAttr: (requiredDone, requiredTotal) =>
+      `${requiredDone} of ${requiredTotal} required items set. Start Capture Batch needs all of them.`,
+    OPEN_SETUP: 'Open Setup',
+    // One row per step: the name, then what to do about it.
+    STEP_NAMES: {
+      hl: 'Half-Life movie copy',
+      hlae: 'HLAE',
+      ffmpeg: 'FFmpeg',
+      captures: 'Where captures go',
+      renders: 'Where finished clips go',
+      demos: 'Your demos',
+    },
+    // Short labels for the window's progress strip.
+    STEP_TABS: {
+      hl: 'Half-Life',
+      hlae: 'HLAE',
+      ffmpeg: 'FFmpeg',
+      captures: 'Captures',
+      renders: 'Clips',
+      demos: 'Demos',
+    },
+    REQUIRED: 'Required',
+    OPTIONAL: 'Optional',
+    CARD_TODO: {
+      hl: 'Pick the hl.exe of a separate copy of Half-Life used only for movies.',
+      hlae: 'Pick HLAE.exe. HLAE records the game.',
+      ffmpeg: 'Optional. Needed for Video capture mode, Render and Finish clips.',
+      captures: 'Required. Pick a folder on a drive with room.',
+      renders: 'Optional. Needed for Render and Finish clips.',
+      demos: 'Add a folder of .dem files to scan.',
+    },
+    CARD_FIX: {
+      hl: 'Browse',
+      hlae: 'Browse',
+      ffmpeg: 'Check',
+      captures: 'Choose folder',
+      renders: 'Choose folder',
+      demos: 'Add folder',
+    },
+    CARD_CHANGE: 'Change',
+    CARD_ROW_TITLE: 'Opens Setup on this step',
+    FFMPEG_FOUND: 'HLAE can find FFmpeg.',
+    foldersSummary: (count) => (count === 1 ? '1 folder' : `${count} folders`),
+    demosSummary: (count) => (count === 1 ? '1 demo in the queue' : `${count} demos in the queue`),
+
+    // Step 1: Half-Life.
+    HL_TITLE: 'Set up a movie copy of Half-Life',
+    HL_INTRO: 'DoD Studio loads HLAE and its own add-on into the game. Do that in a separate copy of Half-Life used only for movies, never the one you play online with. To make one, copy your Half-Life folder somewhere else and pick the hl.exe inside the copy here.',
+    HL_RECOMMEND: 'Make the copy from the 25th Anniversary build. DoD Studio fixes the problems that build brought in (ESC closing the demo bar, textures glitching as you walk past them), and it is the build DoD Studio is developed on.',
+    HL_FIELD: 'Movie copy: hl.exe',
+    HL_FOUND: 'Found hl.exe.',
+    HL_BUILD: {
+      anniversary: '25th Anniversary build',
+      pre_anniversary: 'pre-Anniversary build',
+    },
+    HL_PLAY_INSTALL: "This is Steam's own Half-Life, the one you play online with. Pick your movie copy instead: copy the Half-Life folder to a new folder and pick its hl.exe here.",
+
+    // Step 2: HLAE.
+    HLAE_TITLE: 'Point DoD Studio at HLAE',
+    HLAE_INTRO: "HLAE (Half-Life Advanced Effects) records the game. Download it from its project page if you don't have it yet, unzip it anywhere, and pick HLAE.exe here.",
+    HLAE_FIELD: 'HLAE.exe',
+    HLAE_FOUND: 'Found HLAE.',
+    HLAE_GET: 'Get HLAE (advancedfx.org)',
+    HLAE_URL: 'https://www.advancedfx.org/download/',
+
+    // Step 3: FFmpeg.
+    FFMPEG_TITLE: 'FFmpeg (optional)',
+    FFMPEG_INTRO: 'Needed for Video capture mode, Render and Finish clips. Frame-sequence capture works without it. HLAE looks for FFmpeg in its own folder; the button below points it at the one DoD Studio uses.',
+    FFMPEG_CHECKING: 'Checking…',
+    FFMPEG_MISSING: "HLAE can't find FFmpeg yet.",
+    FFMPEG_LINK_NOTE: 'Windows may ask for permission if HLAE is in a protected folder.',
+    FFMPEG_NEEDS_HLAE: 'Set HLAE first (the step before this one); then this step can check for FFmpeg.',
+
+    // Steps 4 and 5: folders.
+    CAPTURES_TITLE: 'Choose where captures go',
+    CAPTURES_INTRO: 'Captures are large: a frame sequence runs to many gigabytes a minute. Add folders on as many drives as you like; DoD Studio fills them in order and checks the space before every batch.',
+    CAPTURES_FIELD: 'Capture folders (required)',
+    RENDERS_TITLE: 'Choose where finished clips go',
+    RENDERS_INTRO: 'Render and Finish clips write finished videos here. Optional: a batch captures without it. Several folders work the same way as for captures.',
+    RENDERS_FIELD: 'Clip folders (optional)',
+    ADD_FOLDER: 'Add a folder',
+    ADD_ANOTHER_DRIVE: 'Add another drive',
+    REMOVE: 'Remove',
+    NO_FOLDERS_YET: 'No folder yet.',
+    freeOn: (free, drive) => (drive ? `${free} free on ${drive}` : `${free} free`),
+    NO_SPACE_FOUND: 'Drive not found',
+    sameDrive: (path, drive, first) =>
+      `${path} is on ${drive}, like ${first} above it. Both share ${drive}'s free space, so this folder adds no room. Pick a folder on another drive, or remove it.`,
+
+    // Step 6: demos.
+    DEMOS_TITLE: 'Add your demos',
+    DEMOS_INTRO: "DoD Studio scans a folder of .dem files for highlights. Your movie copy's dod folder is a good start; you can add more folders later from the Capture page.",
+    DEMOS_FIELD: 'Demo folder',
+    DEMOS_NONE: 'No folder picked yet.',
+    DEMOS_FINISH_NOTE: 'Finish scans this folder and opens the Capture page with your demos listed.',
+    DEMOS_SCANNING: 'Scanning…',
+    USE_SUGGESTED: 'Use this folder',
+
+    // Footer.
+    SKIP_SETUP: 'Skip setup for now',
+    SKIP_SETUP_TITLE: 'Close this window. The Capture page keeps a checklist until the required items are set, and Help > Setup… opens this again.',
+    BACK: 'Back',
+    NEXT: 'Next',
+    SKIP_STEP: 'Skip this step',
+    FINISH: 'Finish',
+    BROWSE: 'Browse',
+    NOT_SET: 'Not set yet',
+    PATH_NOT_FOUND: "There's no file at this path.",
+    PATH_IS_A_FOLDER: 'That is a folder, not the program itself.',
+    wrongExe: (found, expected) => `That is ${found}, not ${expected}. Pick ${expected}.`,
   },
 };

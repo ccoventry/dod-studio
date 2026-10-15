@@ -239,6 +239,11 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
+    /// "Skip setup for now" in the Setup window (#599): it stops opening by
+    /// itself at launch. Finishing setup clears it, so a required path that
+    /// goes missing later opens the window again.
+    #[serde(default)]
+    pub setup_dismissed: bool,
 }
 
 fn default_game_folder() -> String {
@@ -423,6 +428,7 @@ impl Default for AppSettings {
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
+            setup_dismissed: false,
         }
     }
 }
@@ -561,6 +567,19 @@ mod tests {
             settings.scan_workers,
             crate::capture_manager::SCAN_CONCURRENCY as i32
         );
+        // Settings saved before #599 still open Setup when a path is missing.
+        assert!(!settings.setup_dismissed);
+    }
+
+    #[test]
+    fn test_setup_dismissed_roundtrip() {
+        let original = AppSettings {
+            setup_dismissed: true,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert!(restored.setup_dismissed);
     }
 
     /// A file saved while Seek Between Clips was experimental (off by default)
