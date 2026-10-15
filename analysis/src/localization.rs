@@ -195,11 +195,30 @@ fn scan_dir_recursive(
     filter_lang: &str,
     amxx_code: &str,
 ) {
+    scan_dir_to_depth(dir, map, filter_lang, amxx_code, 0);
+}
+
+/// Folder levels read below the localizations folder.
+#[cfg(not(target_arch = "wasm32"))]
+const SCAN_MAX_DEPTH: usize = 16;
+
+/// `file_type` never follows a junction, so a link is never entered; with
+/// the depth cap, no folder layout can make this loop (#376).
+#[cfg(not(target_arch = "wasm32"))]
+fn scan_dir_to_depth(
+    dir: &std::path::Path,
+    map: &mut HashMap<String, String>,
+    filter_lang: &str,
+    amxx_code: &str,
+    depth: usize,
+) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for entry in entries.filter_map(Result::ok) {
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir_recursive(&path, map, filter_lang, amxx_code);
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < SCAN_MAX_DEPTH {
+                    scan_dir_to_depth(&path, map, filter_lang, amxx_code, depth + 1);
+                }
             } else if path.is_file() && path.extension().map(|s| s == "txt").unwrap_or(false) {
                 let name = path
                     .file_name()
