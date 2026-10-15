@@ -2201,6 +2201,23 @@ tr.keyboard-selected {
   color: #ffb74d;
 }
 
+.hd-style-maps summary {
+  cursor: pointer;
+}
+
+.hd-style-maps-groups p {
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-every {
+  display: block;
+  margin: 4px 0 4px 16px;
+}
+
+.hd-style-maps-progress {
+  width: 100%;
+}
+
 #hd-status-table th {
   color: #aaaaaa;
   font-weight: 600;
