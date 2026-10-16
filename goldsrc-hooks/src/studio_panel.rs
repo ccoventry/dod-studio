@@ -1780,9 +1780,9 @@ mod hook {
     /// What the search box held when the list was last filtered, and
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
-    /// The filters as typed when the list was last scrolled to the top: a
-    /// new search starts at the top, a background refilter (rosters, a
-    /// refill) leaves the scroll alone.
+    /// The folder and the filters as typed when the list was last scrolled
+    /// to the top: a new folder or search starts at the top, a background
+    /// refilter (rosters, a recount) leaves the scroll alone.
     static SCROLLED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
     /// [`folder_settings`] as the Demos tab's list was last filled with them.
@@ -2034,9 +2034,12 @@ mod hook {
                 }
                 id = next(list, id);
             }
-            // A new search starts at the top, and puts the scroll bar back in
-            // the range that hiding rows shrank.
-            let typed = format!("{filters:?} {player:?} {all} {recorded}");
+            // A new folder or search starts at the top, and puts the scroll
+            // bar back in the range that a shorter list shrank.
+            let typed = format!(
+                "{:?} {filters:?} {player:?} {all} {recorded}",
+                crate::demo_list_folders::current_folder()
+            );
             let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             if *scrolled != typed {
                 let wheel: ListIntVoidFn = slot(list, LIST_SLOT_ON_MOUSE_WHEELED);
