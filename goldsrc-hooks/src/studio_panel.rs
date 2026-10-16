@@ -1504,6 +1504,8 @@ mod hook {
 
     use super::*;
 
+    /// The stock VCR bar's loading progress (#465).
+    mod demo_bar_progress;
     /// The Demos tab's counting bar (#409).
     mod folder_progress;
     /// The Playback tab's loading progress (#465).
@@ -3377,6 +3379,8 @@ mod hook {
 
     pub(super) fn poll() {
         hook_taskbar();
+        // The stock bar's progress needs no window of ours.
+        demo_bar_progress::update();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0

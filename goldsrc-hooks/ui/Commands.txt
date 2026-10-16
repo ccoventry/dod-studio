@@ -77,6 +77,8 @@ DOD STUDIO WINDOW
       Open (1) or close (0) this window; bare toggles it; reset restores the default layouts; a tab's name (highlights) opens that tab.
   dodstudio_viewdemo_in_panel 0/1
       viewdemo opens this window on Playback instead of the VCR bar.
+  dodstudio_show_load_progress 0/1
+      The VCR bar shows how far a loading demo has got, where the time goes.
   dodstudio_console_in_panel 0/1
       The console key opens this window on the Console tab.
   dodstudio_resizable_windows 0/1

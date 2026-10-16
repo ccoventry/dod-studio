@@ -631,6 +631,12 @@ impl PatcherConfig {
             goldsrc_hooks_dll,
         } = self.launch_settings();
 
+        // The demo bar's layout with the loading progress controls goes into
+        // `dod_addon` here, rather than in any one caller, so every way the
+        // app starts the game (a batch, Launch Preview, Launch Game) ships it,
+        // and from the user's own `dod\resource` layout as it is now (#465).
+        crate::demo_bar_res::prepare(&hl_exe);
+
         let hook_dll_str = dll_path.to_string_lossy().replace("/", "\\\\");
 
         // `-hookDllPath` is repeatable on HLAE's `-customLoader` command line

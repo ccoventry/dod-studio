@@ -81,7 +81,7 @@ pub struct Setting {
 }
 
 impl Setting {
-    const fn new(name: &'static str, on: bool) -> Self {
+    pub(crate) const fn new(name: &'static str, on: bool) -> Self {
         Self {
             name,
             fallback: AtomicBool::new(on),

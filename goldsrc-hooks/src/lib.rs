@@ -190,6 +190,7 @@ mod crosshair;
 mod deathmsg;
 mod debug;
 mod decals;
+mod demo_bar_progress;
 mod demo_file;
 mod demo_list_folders;
 mod demo_other_drives;
