@@ -50,8 +50,8 @@
 //!   the decal is sized from `texture_t`, not the GL texture.
 //! - `dodstudio_sprays.txt`, the mapping the hook reads (`//` comments):
 //!   `<key>\t<png>` replaces every spray whose content hashes to `<key>`;
-//!   `player\t<SteamID or name>\t<png>` is for the HLTV route (below).
-//!   PNG names are relative to `logos\`.
+//!   `player\t<SteamID or name>\t<png or custom.hpk MD5>` is for the HLTV
+//!   route (below). PNG names are relative to `logos\`.
 //!
 //! A spray with no line is listed by `dodstudio_debug_hd_misses` as
 //! `decal spray <key>`, which is how a key is found from a demo. A missing
@@ -75,13 +75,15 @@
 //! ## HLTV demos
 //!
 //! An HLTV demo carries every `TE_PLAYERDECAL` with decal index 0 (the
-//! bullet hole) and no `svc_customization`, so `CL_ParseTEnt` finds no
-//! `customdata` for the slot and shoots the wad decal. Painting the mapped
-//! PNG there needs a detour at that test (pre-Anniversary `hw+0x24624`,
-//! 25th Anniversary `hw+0x1ae89e`) that hands `R_CustomDecalShoot` a
-//! `texture_t` of ours; that is not built yet. What is built is the mapping
-//! line and the slot-to-player lookup behind it: `dodstudio_spray players`
-//! lists every slot with its name, SteamID and the PNG it would get.
+//! bullet hole) and no `svc_customization` (#368), so `CL_ParseTEnt` finds no
+//! `customdata` for the slot and shoots the wad decal. A `player` line names
+//! the spray to draw instead, by SteamID or name: a PNG here, or the
+//! `custom.hpk` entry with that resource MD5 (the player's real spray, which
+//! the cache already holds). `spray_hltv.rs` builds a texture from it and
+//! sends the decal down the engine's own custom-spray path; the texture's
+//! upload comes back through this module as a spray, so a PNG line or a
+//! `<key>` line gives it in HD. `dodstudio_spray players` lists every slot
+//! with its name, SteamID and the spray it gets.
 
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -328,8 +330,12 @@ pub fn looks_like_custom_name(identifier: &str) -> bool {
 }
 
 /// Whether the `GLT_DECAL` upload in progress is a player's spray rather
-/// than a `decals.wad` decal.
+/// than a `decals.wad` decal. An HLTV spray `spray_hltv` builds is one too,
+/// though the engine's flag is clear then.
 pub fn is_custom_upload(identifier: &str) -> bool {
+    if crate::spray_hltv::building() {
+        return true;
+    }
     match custom_build_flag() {
         // Safety: a dword in hw.dll's data, found as described above.
         Some(flag) => (unsafe { (flag as *const u32).read_volatile() }) != 0,
@@ -348,12 +354,30 @@ pub enum PlayerId {
     Name(String),
 }
 
+/// What a `player` line gives that player (#428): a PNG in `logos\`, or the
+/// `custom.hpk` entry whose resource MD5 (the whole-WAD hash demos and the
+/// cache name a spray by, #368) is this.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum PlayerSource {
+    Png(String),
+    Hpk(Key),
+}
+
+impl std::fmt::Display for PlayerSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            PlayerSource::Png(png) => f.write_str(png),
+            PlayerSource::Hpk(md5) => write!(f, "custom.hpk {}", hex(md5)),
+        }
+    }
+}
+
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Mapping {
     /// Content key -> PNG name.
     pub by_key: HashMap<Key, String>,
     /// `player` lines, in file order; the first match wins.
-    pub players: Vec<(PlayerId, String)>,
+    pub players: Vec<(PlayerId, PlayerSource)>,
     /// Lines that weren't a comment, blank, or one of the two shapes.
     pub bad: Vec<(usize, String)>,
 }
@@ -422,12 +446,17 @@ pub fn parse_mapping(text: &str) -> Mapping {
         let bad = |map: &mut Mapping| map.bad.push((i + 1, raw.to_string()));
         if line.to_ascii_lowercase().starts_with("player") {
             let f = fields(line, 3);
-            match (f.get(1), f.get(2).and_then(|p| clean_png_name(p))) {
-                (Some(id), Some(png)) if f.len() == 3 => {
+            let source = f.get(2).and_then(|s| {
+                parse_key(s)
+                    .map(PlayerSource::Hpk)
+                    .or_else(|| clean_png_name(s).map(PlayerSource::Png))
+            });
+            match (f.get(1), source) {
+                (Some(id), Some(source)) if f.len() == 3 => {
                     let id = parse_steam_id(id)
                         .map(PlayerId::SteamId)
                         .unwrap_or_else(|| PlayerId::Name(id.to_string()));
-                    map.players.push((id, png));
+                    map.players.push((id, source));
                 }
                 _ => bad(&mut map),
             }
@@ -464,16 +493,23 @@ pub fn load_mapping() -> Mapping {
     }
 }
 
-/// The PNG mapped to `key`, as a path, or `None`.
+/// The PNG mapped to `key`, as a path, or `None`. A line in the file wins;
+/// then the PNG a `player` line's HLTV spray was built from
+/// (`spray_hltv.rs`), whose key exists only in memory.
 pub fn png_for_key(key: &Key) -> Option<PathBuf> {
     load_mapping()
         .by_key
         .get(key)
         .map(|png| logos_dir().join(png))
+        .or_else(|| crate::spray_hltv::png_for_built_key(key))
 }
 
 /// Which `player` line a slot's name and SteamID match, if any.
-pub fn png_for_player<'a>(mapping: &'a Mapping, name: &str, steam_id: u64) -> Option<&'a str> {
+pub fn source_for_player<'a>(
+    mapping: &'a Mapping,
+    name: &str,
+    steam_id: u64,
+) -> Option<&'a PlayerSource> {
     mapping
         .players
         .iter()
@@ -481,7 +517,7 @@ pub fn png_for_player<'a>(mapping: &'a Mapping, name: &str, steam_id: u64) -> Op
             PlayerId::SteamId(s) => steam_id != 0 && *s == steam_id,
             PlayerId::Name(n) => n.eq_ignore_ascii_case(name),
         })
-        .map(|(_, png)| png.as_str())
+        .map(|(_, source)| source)
 }
 
 // ── PNG in, fitted RGBA out ─────────────────────────────────────────────────
@@ -787,18 +823,20 @@ fn wad_bytes(w: u32, h: u32) -> usize {
     (12 + lump).next_multiple_of(4) + 32
 }
 
-/// The spray's size: sides in steps of 16 (so every mip halves exactly),
-/// the aspect kept, never larger than the picture, and the biggest that
-/// still fits [`MAX_WAD_BYTES`]. A square picture comes out 112x112.
-fn logo_size(width: u32, height: u32) -> (u32, u32) {
+/// The spray's size: sides in steps of 16 (so every mip halves exactly; a
+/// `max_side` under 16 is the one exception), the aspect kept, never larger
+/// than the picture or `max_side`, and the biggest whose file still fits
+/// `max_bytes`. With [`MAX_WAD_BYTES`] a square picture comes out 112x112.
+fn logo_size(width: u32, height: u32, max_side: u32, max_bytes: usize) -> (u32, u32) {
+    let max_side = max_side.clamp(1, MAX_LOGO_SIDE);
+    let min_side = LOGO_STEP.min(max_side);
     let long = width.max(height).max(1);
     let short = width.min(height);
-    let step_floor = |side: u32| (side / LOGO_STEP * LOGO_STEP).clamp(LOGO_STEP, MAX_LOGO_SIDE);
-    let mut target = step_floor(long);
+    let mut target = (long / LOGO_STEP * LOGO_STEP).clamp(min_side, max_side);
     loop {
         let scaled = (short as f64 * target as f64 / long as f64 / LOGO_STEP as f64).round() as u32;
-        let other = (scaled * LOGO_STEP).clamp(LOGO_STEP, target);
-        if wad_bytes(target, other) <= MAX_WAD_BYTES || target == LOGO_STEP {
+        let other = (scaled * LOGO_STEP).clamp(min_side, target);
+        if wad_bytes(target, other) <= max_bytes || target <= LOGO_STEP {
             return if width >= height {
                 (target, other)
             } else {
@@ -809,15 +847,32 @@ fn logo_size(width: u32, height: u32) -> (u32, u32) {
     }
 }
 
-fn fit_logo(img: &Rgba) -> Rgba {
-    let (w, h) = logo_size(img.width, img.height);
+fn fit_logo(img: &Rgba, max_side: u32, max_bytes: usize) -> Rgba {
+    let (w, h) = logo_size(img.width, img.height, max_side, max_bytes);
     resample(img, w, h)
 }
 
-/// A one-lump WAD3 of `img` as a `{LOGO` spray, and the lump's key. The
-/// image is first fitted by [`fit_logo`].
+/// A one-lump WAD3 of `img` as a `{LOGO` spray, and the lump's key: the
+/// user's own `tempdecal.wad`, so fitted to the file size a server takes.
 pub fn build_wad(img: &Rgba) -> Result<(Vec<u8>, Key), String> {
-    let fitted = fit_logo(img);
+    let (wad, key) = build_wad_fitted(img, MAX_LOGO_SIDE, MAX_WAD_BYTES)?;
+    if !(MIN_WAD_BYTES..=MAX_WAD_BYTES).contains(&wad.len()) {
+        return Err(format!(
+            "it makes a {} byte file; the game takes {MIN_WAD_BYTES}..{MAX_WAD_BYTES}",
+            wad.len()
+        ));
+    }
+    Ok((wad, key))
+}
+
+/// [`build_wad`] with the longer side at most `max_side` and no file-size
+/// cap: for a spray the hook draws itself, which no server ever sees.
+pub fn build_wad_sized(img: &Rgba, max_side: u32) -> Result<(Vec<u8>, Key), String> {
+    build_wad_fitted(img, max_side, usize::MAX)
+}
+
+fn build_wad_fitted(img: &Rgba, max_side: u32, max_bytes: usize) -> Result<(Vec<u8>, Key), String> {
+    let fitted = fit_logo(img, max_side, max_bytes);
     let logo = quantise(&fitted);
     let (w, h) = (logo.width, logo.height);
     if !(1..=MAX_LOGO_SIDE).contains(&w) || !(1..=MAX_LOGO_SIDE).contains(&h) {
@@ -861,45 +916,65 @@ pub fn build_wad(img: &Rgba) -> Result<(Vec<u8>, Key), String> {
     wad.push(0); // compression
     wad.extend_from_slice(&[0, 0]); // pad
     wad.extend_from_slice(&name);
-    if !(MIN_WAD_BYTES..=MAX_WAD_BYTES).contains(&wad.len()) {
-        return Err(format!(
-            "{w}x{h} makes a {} byte file; the game takes {MIN_WAD_BYTES}..{MAX_WAD_BYTES}",
-            wad.len()
-        ));
-    }
     Ok((wad, key))
 }
 
-/// A one-lump spray WAD read back: the key, width and height of its lump,
-/// checked the way `Draw_ValidateCustomLogo` and the container check do.
-pub fn wad_key(wad: &[u8]) -> Result<(Key, u32, u32), String> {
-    let u32_at = |at: usize| -> Result<u32, String> {
-        wad.get(at..at + 4)
-            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            .ok_or_else(|| "truncated".to_string())
-    };
+fn u32_in(bytes: &[u8], at: usize) -> Result<u32, String> {
+    bytes
+        .get(at..at.checked_add(4).ok_or("truncated")?)
+        .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+        .ok_or_else(|| "truncated".to_string())
+}
+
+/// The one lump of a spray WAD, checked the way the engine's container check
+/// (`hw+0x2f490` pre-Anniversary) does: `WAD3`, exactly one lump, the
+/// directory last, the lump inside the file.
+pub fn wad_lump(wad: &[u8]) -> Result<&[u8], String> {
     if wad.get(..4) != Some(b"WAD3") {
         return Err("not a WAD3 file".into());
     }
-    let (count, dir_at) = (u32_at(4)?, u32_at(8)? as usize);
+    let (count, dir_at) = (u32_in(wad, 4)?, u32_in(wad, 8)? as usize);
     if count != 1 {
         return Err(format!("{count} lumps; a spray has exactly one"));
     }
-    if dir_at + 32 != wad.len() {
+    if dir_at.checked_add(32) != Some(wad.len()) {
         return Err("the directory isn't at the end of the file".into());
     }
-    let (at, size) = (u32_at(dir_at)? as usize, u32_at(dir_at + 8)? as usize);
-    if at < 12 || at + size > dir_at {
+    let (at, size) = (
+        u32_in(wad, dir_at)? as usize,
+        u32_in(wad, dir_at + 8)? as usize,
+    );
+    if at < 12 || at.saturating_add(size) > dir_at {
         return Err("the lump runs outside the file".into());
     }
-    let lump = &wad[at..at + size];
-    let (w, h) = (u32_at(at + 16)?, u32_at(at + 20)?);
+    Ok(&wad[at..at + size])
+}
+
+/// A spray lump's key, width and height, checked the way
+/// `Draw_ValidateCustomLogo` does: each side 1..256, the four mips one after
+/// another from where the header says, at most 256 colours, and the palette
+/// inside the lump.
+pub fn lump_key(lump: &[u8]) -> Result<(Key, u32, u32), String> {
+    let (w, h) = (u32_in(lump, 16)?, u32_in(lump, 20)?);
     if !(1..=MAX_LOGO_SIDE).contains(&w) || !(1..=MAX_LOGO_SIDE).contains(&h) {
         return Err(format!("{w}x{h} is outside 1..{MAX_LOGO_SIDE}"));
     }
-    let mip0 = u32_at(at + 24)? as usize;
     let pix = (w * h) as usize;
-    let pal_count_at = mip0 + pix + (pix >> 2) + (pix >> 4) + (pix >> 6);
+    let sizes = [pix, pix >> 2, pix >> 4, pix >> 6];
+    let mut offsets = [0usize; 4];
+    for (i, offset) in offsets.iter_mut().enumerate() {
+        *offset = u32_in(lump, 24 + 4 * i)? as usize;
+    }
+    // Bounded first, so the sums below can't wrap in a 32-bit build.
+    if offsets[0] < 40 || offsets[0] > lump.len() {
+        return Err(format!("mip 0 at {}, outside the lump", offsets[0]));
+    }
+    for i in 0..3 {
+        if offsets[i + 1] != offsets[i] + sizes[i] {
+            return Err(format!("mip {} isn't right after mip {i}", i + 1));
+        }
+    }
+    let pal_count_at = offsets[3] + sizes[3];
     let count = lump
         .get(pal_count_at..pal_count_at + 2)
         .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
@@ -910,11 +985,51 @@ pub fn wad_key(wad: &[u8]) -> Result<(Key, u32, u32), String> {
         n if n > 256 => return Err(format!("{n} palette entries")),
         n => n,
     };
-    let indices = lump.get(mip0..mip0 + pix).ok_or("truncated mip 0")?;
+    let indices = lump
+        .get(offsets[0]..offsets[0] + pix)
+        .ok_or("truncated mip 0")?;
     let palette = lump
         .get(pal_count_at + 2..pal_count_at + 2 + 3 * count)
         .ok_or("truncated palette")?;
     Ok((spray_key(w, h, indices, palette), w, h))
+}
+
+/// A one-lump spray WAD read back: the key, width and height of its lump.
+pub fn wad_key(wad: &[u8]) -> Result<(Key, u32, u32), String> {
+    lump_key(wad_lump(wad)?)
+}
+
+/// The spray WAD `custom.hpk` holds under the resource MD5 `md5` (#368):
+/// `HPAK`, a version, the directory's offset; the directory is a count, then
+/// 144-byte entries (`resource_t`, its MD5 at +77, then the data's offset
+/// and length). The entry's bytes must hash to its MD5, the check the
+/// engine makes before it trusts a cached customization.
+pub fn hpk_find<'a>(hpk: &'a [u8], md5_wanted: &Key) -> Result<&'a [u8], String> {
+    const ENTRY: usize = 144;
+    if hpk.get(..4) != Some(b"HPAK") {
+        return Err("not an HPAK file".into());
+    }
+    let dir_at = u32_in(hpk, 8)? as usize;
+    let count = u32_in(hpk, dir_at)? as usize;
+    if count > (hpk.len() - dir_at.min(hpk.len())) / ENTRY {
+        return Err(format!("{count} entries don't fit the file"));
+    }
+    for i in 0..count {
+        let at = dir_at + 4 + ENTRY * i;
+        let entry = hpk.get(at..at + ENTRY).ok_or("truncated directory")?;
+        if &entry[77..93] != md5_wanted {
+            continue;
+        }
+        let (offset, length) = (u32_in(entry, 136)? as usize, u32_in(entry, 140)? as usize);
+        let wad = hpk
+            .get(offset..offset.saturating_add(length))
+            .ok_or("the entry runs past the file")?;
+        if &md5(&[wad]) != md5_wanted {
+            return Err("the entry's bytes don't hash to its MD5".into());
+        }
+        return Ok(wad);
+    }
+    Err("no entry with that MD5".into())
 }
 
 // ── The command ─────────────────────────────────────────────────────────────
@@ -941,7 +1056,7 @@ fn usage() -> String {
         "{NAME}: list the PNGs in dod\\{LOGOS}\\ and say which is your spray\n\
          {NAME} <name>: make dod\\{LOGOS}\\<name>.png your spray (writes dod\\{TEMPDECAL}, the game's spray file; \
          shows from the next connect) and map it for HD playback\n\
-         {NAME} players: each slot in the demo and the PNG a player line in {MAPPING_FILE} gives it\n"
+         {NAME} players: each slot in the demo and the spray a player line in {MAPPING_FILE} gives it\n"
     )
 }
 
@@ -1048,7 +1163,8 @@ fn write_mapping_line(key: &Key, png: &str) -> Result<(), String> {
             "// DoD Studio spray mapping (#428). One spray a line: the key, a tab, a PNG in this\n\
              // folder. The key is the MD5 {NAME} prints (width, height, mip 0, palette count and\n\
              // palette of the spray as the game loads it). player, a tab, a SteamID or name, a tab,\n\
-             // a PNG is a line for HLTV demos. Written by {NAME} <name>; edit freely.\n"
+             // a PNG or the custom.hpk MD5 of his spray is a line for HLTV demos. Written by\n\
+             // {NAME} <name>; edit freely.\n"
         ));
     } else {
         let hexed = hex(key);
@@ -1137,18 +1253,19 @@ fn players() -> String {
         } else {
             steam_id.to_string()
         };
-        let png = png_for_player(&mapping, &name, steam_id)
-            .map_or("no player line".to_string(), |p| format!("-> {p}"));
-        out.push_str(&format!("  {slot:>2}  {name}  {id}  {png}\n"));
+        let source = source_for_player(&mapping, &name, steam_id)
+            .map_or("no player line".to_string(), |s| {
+                format!("-> {s} ({})", crate::spray_hltv::source_state(s))
+            });
+        out.push_str(&format!("  {slot:>2}  {name}  {id}  {source}\n"));
     }
     if !any {
         out.push_str("  nobody: no demo or game loaded\n");
     }
-    if hltv {
-        out.push_str(
-            "  (an HLTV demo draws the bullet hole for every spray; painting the mapped PNG there is not built yet, see the module doc)\n",
-        );
-    }
+    out.push_str(&format!(
+        "  a demo with no image for a player's spray (every HLTV demo) draws his line's spray instead of the bullet hole: {}\n",
+        crate::spray_hltv::status()
+    ));
     out
 }
 
@@ -1305,7 +1422,7 @@ mod tests {
         assert_eq!(wad_key(&wad).unwrap().1, 16);
         // Every size it picks stays inside the server's range.
         for (w, h) in [(1, 4000), (4000, 1), (256, 255), (17, 33), (1000, 999)] {
-            let (lw, lh) = logo_size(w, h);
+            let (lw, lh) = logo_size(w, h, MAX_LOGO_SIDE, MAX_WAD_BYTES);
             assert!(lw % 16 == 0 && lh % 16 == 0, "{w}x{h} -> {lw}x{lh}");
             assert!(
                 (MIN_WAD_BYTES..=MAX_WAD_BYTES).contains(&wad_bytes(lw, lh)),
@@ -1372,7 +1489,9 @@ mod tests {
                     player\tSome Name\tname.png\n\
                     player 76561197972310283 plain.png\n\
                     not a line\n\
-                    8e506e748e506e748e506e748e506e74\t../escape.png\n";
+                    8e506e748e506e748e506e748e506e74\t../escape.png\n\
+                    player\twarchyld\tFFE83715FFE83715FFE83715FFE83715\n\
+                    player\tx\tnot-a-png-or-md5\n";
         let m = parse_mapping(text);
         assert_eq!(m.by_key.len(), 2);
         assert_eq!(
@@ -1383,21 +1502,101 @@ mod tests {
             m.by_key[&parse_key("ffe83715ffe83715ffe83715ffe83715").unwrap()],
             "two words.png"
         );
-        assert_eq!(m.players.len(), 4);
+        assert_eq!(m.players.len(), 5);
         assert_eq!(m.players[0].0, PlayerId::SteamId(76561197972576011));
         assert_eq!(m.players[1].0, PlayerId::SteamId(76561197972576011));
         assert_eq!(m.players[2].0, PlayerId::Name("Some Name".into()));
         assert_eq!(m.players[3].0, PlayerId::SteamId(76561197972310283));
+        assert_eq!(m.players[4].0, PlayerId::Name("warchyld".into()));
+        assert_eq!(
+            m.players[4].1,
+            PlayerSource::Hpk(parse_key("ffe83715ffe83715ffe83715ffe83715").unwrap())
+        );
         assert_eq!(
             m.bad.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
-            vec![8, 9]
+            vec![8, 9, 11]
         );
-        assert_eq!(png_for_player(&m, "some name", 0), Some("name.png"));
+        let png = |s: &str| PlayerSource::Png(s.to_string());
         assert_eq!(
-            png_for_player(&m, "x", 76561197972576011),
-            Some("chris_teamwork.png")
+            source_for_player(&m, "some name", 0),
+            Some(&png("name.png"))
         );
-        assert_eq!(png_for_player(&m, "x", 1), None);
+        assert_eq!(
+            source_for_player(&m, "x", 76561197972576011),
+            Some(&png("chris_teamwork.png"))
+        );
+        assert_eq!(source_for_player(&m, "x", 1), None);
+        assert_eq!(
+            m.players[4].1.to_string(),
+            "custom.hpk ffe83715ffe83715ffe83715ffe83715"
+        );
+    }
+
+    /// An HPAK the way `custom.hpk` lays one out, holding `wads`.
+    fn hpak(wads: &[&[u8]]) -> Vec<u8> {
+        let mut out = b"HPAK".to_vec();
+        out.extend_from_slice(&1u32.to_le_bytes());
+        out.extend_from_slice(&0u32.to_le_bytes()); // directory, patched below
+        let mut at = Vec::new();
+        for wad in wads {
+            at.push(out.len());
+            out.extend_from_slice(wad);
+        }
+        let dir_at = out.len() as u32;
+        out[8..12].copy_from_slice(&dir_at.to_le_bytes());
+        out.extend_from_slice(&(wads.len() as u32).to_le_bytes());
+        for (wad, offset) in wads.iter().zip(at) {
+            let mut entry = [0u8; 144];
+            entry[..13].copy_from_slice(b"tempdecal.wad");
+            entry[77..93].copy_from_slice(&md5(&[wad]));
+            entry[136..140].copy_from_slice(&(offset as u32).to_le_bytes());
+            entry[140..144].copy_from_slice(&(wad.len() as u32).to_le_bytes());
+            out.extend_from_slice(&entry);
+        }
+        out
+    }
+
+    #[test]
+    fn hpk_find_returns_the_wad_with_that_md5_and_checks_it() {
+        let (a, _) = build_wad(&sample()).unwrap();
+        let (b, key_b) = build_wad_sized(&sample(), 8).unwrap();
+        let file = hpak(&[&a, &b]);
+        assert_eq!(hpk_find(&file, &md5(&[&b])).unwrap(), &b[..]);
+        assert_eq!(
+            wad_key(hpk_find(&file, &md5(&[&b])).unwrap()).unwrap().0,
+            key_b
+        );
+        assert!(hpk_find(&file, &[7; 16]).is_err());
+        // A corrupted entry is refused, not drawn.
+        let mut bad = file.clone();
+        bad[12 + 50] ^= 0xff;
+        assert!(hpk_find(&bad, &md5(&[&a])).is_err());
+        // A count that can't fit, and garbage, are errors rather than panics.
+        let mut huge = file.clone();
+        let dir_at = u32::from_le_bytes(huge[8..12].try_into().unwrap()) as usize;
+        huge[dir_at..dir_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
+        assert!(hpk_find(&huge, &md5(&[&a])).is_err());
+        assert!(hpk_find(b"HPAK\x01\0\0\0\xff\xff\xff\xff", &[0; 16]).is_err());
+        assert!(hpk_find(b"nope", &[0; 16]).is_err());
+    }
+
+    #[test]
+    fn lump_key_refuses_what_validate_custom_logo_refuses() {
+        let (wad, key) = build_wad_sized(&sample(), 16).unwrap();
+        let lump = wad_lump(&wad).unwrap().to_vec();
+        assert_eq!(lump_key(&lump).unwrap(), (key, 16, 16));
+        // Mip 1 not right after mip 0.
+        let mut gap = lump.clone();
+        gap[28] += 1;
+        assert!(lump_key(&gap).is_err());
+        // A side over 256.
+        let mut wide = lump.clone();
+        wide[16..20].copy_from_slice(&512u32.to_le_bytes());
+        assert!(lump_key(&wide).is_err());
+        // Cut short anywhere: an error, never a panic.
+        for len in 0..lump.len() {
+            assert!(lump_key(&lump[..len]).is_err(), "{len}");
+        }
     }
 
     #[test]

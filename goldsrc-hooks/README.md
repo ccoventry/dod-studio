@@ -347,7 +347,11 @@ upload is keyed by its content and replaced from the PNG
 `dod\logos\dodstudio_sprays.txt` maps it to, and `dodstudio_spray <name>`
 makes a `logos\<name>.png` the user's own spray by writing the game's
 `tempdecal.wad` (with a backup) and mapping it. `tools/spray_key.py` prints
-the keys of spray WADs and `custom.hpk` entries.
+the keys of spray WADs and `custom.hpk` entries. `src/spray_hltv.rs` makes a
+demo with no customization for a player (every HLTV demo, #368) draw the
+spray his `player` line names -- his `custom.hpk` entry by MD5, or a PNG --
+instead of the bullet hole, through the engine's own custom-spray path, on
+both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`).
 
 ### Always-on crash guards
 

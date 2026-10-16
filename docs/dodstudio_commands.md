@@ -292,12 +292,36 @@ and of every entry in `custom.hpk`.
 | --- | --- |
 | `dodstudio_spray` | lists the PNGs in `logos\`, which sprays each is mapped to, and which one is your spray |
 | `dodstudio_spray <name>` | makes `logos\<name>.png` your spray: writes `dod\tempdecal.wad` (the game's spray file -- the one file in the game's folder the hook writes, because that is what the command is for; sides in steps of 16 and the file at most 20480 bytes, the most a server takes, so a square picture is 112x112; 8-bit, 255 colours, transparent where the PNG is), keeps `tempdecal.wad.dodstudio-backup` of the original the first time, and adds the lump's key to the mapping. The engine reads the file when it connects, so it shows from the next connect; a demo already playing draws the sprays it recorded |
-| `dodstudio_spray players` | each slot in the demo with its name, SteamID and the PNG a `player` line gives it: `player`, a tab, a SteamID (`76561197972576011`, `STEAM_0:1:...` or `[U:1:...]`) or a name, a tab, the PNG. For HLTV demos, which carry every spray as decal index 0 (the bullet hole) and no customization; painting the PNG there is not built yet, see `src/spray.rs` |
+| `dodstudio_spray players` | each slot in the demo with its name, SteamID, the spray its `player` line gives it and whether that spray is read yet, then whether the HLTV detours are on |
+
+**HLTV demos** (#368) carry every spray as decal index 0 (the bullet hole)
+and no customization, and most POV demos lack it for players who joined
+before the recording started. A `player` line names the spray to draw for a
+player in such a demo instead: `player`, a tab, a SteamID
+(`76561197972576011`, `STEAM_0:1:...` or `[U:1:...]`) or a name, a tab, then
+either
+
+- the **`custom.hpk` MD5** of his spray (the resource MD5 the #368 scan
+  lists per player, and the fourth column of `tools/spray_key.py` run on
+  `dod\custom.hpk`): his real spray as the game cached it, at its real
+  size, checked as the engine checks a cached customization. A `<key>` line
+  for its key gives it in HD; or
+- a **PNG** in `logos\`: a spray 128 a side (the drawn size) built from it,
+  with the PNG itself as its HD version.
+
+The hook draws it through the engine's own custom-spray path, so it sits on
+the wall like a real spray. It installs once the file has a `player` line
+(the file is checked once a second; edits apply from the next spray), acts
+only in demo playback, and leaves a player whose demo carries his
+customization to the engine. The log says
+`spray: HLTV TE_PLAYERDECAL for <player> (slot <n>) -> <source>` for each
+spray drawn.
 
 `cl_logofile` and the game's `.cfg` files are left alone. Refused in a
 capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a
 batch draws recorded sprays and would only change the file on disk.
-Source: `goldsrc-hooks/src/spray.rs`.
+Source: `goldsrc-hooks/src/spray.rs`, `goldsrc-hooks/src/spray_hltv.rs`
+(offsets checked by `goldsrc-hooks/tools/verify_hltv_spray_offsets.py`).
 
 ### `dodstudio_hide_asset`
 
