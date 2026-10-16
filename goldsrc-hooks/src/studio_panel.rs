@@ -877,12 +877,23 @@ fn demos_hint(folders: bool) -> &'static CStr {
     }
 }
 
+/// The name a row shows: its last part, without quotes or the folder's
+/// `/`. A row is a path (`temp demos/x.dem`, `"D:/demos/x.dem"`), and the
+/// search matches only what the list shows, so the folders above it (the
+/// one the list is in) don't match every row.
+fn row_name(row: &str) -> &str {
+    let path = row.trim().trim_matches('"');
+    let path = path.strip_suffix('/').unwrap_or(path);
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 /// Whether a row passes every filter. `info` is `None` for a row whose
 /// header couldn't be read (or a folder): only the search applies to it.
 fn passes(row: &str, info: Option<&DemoInfo>, f: &DemoFilters, now: u64) -> bool {
+    let name = row_name(row);
     let haystack = match info {
-        Some(i) => format!("{row} {}", i.map),
-        None => row.to_string(),
+        Some(i) => format!("{name} {}", i.map),
+        None => name.to_string(),
     };
     if !matches_filter(&haystack, &f.search) {
         return false;
@@ -4571,6 +4582,26 @@ mod tests {
         };
         let now = 1_000_000 + 3 * 86_400;
         assert!(passes("x.dem", Some(&anzio), &all, now));
+        // The search matches the name shown, not the folders above it.
+        let typed = |search: &str| DemoFilters {
+            search: search.to_string(),
+            ..all.clone()
+        };
+        assert!(!passes(
+            "\"H:/Programs/Clips/\"",
+            None,
+            &typed("h:/programs"),
+            now
+        ));
+        assert!(passes("\"H:/Programs/Clips/\"", None, &typed("clip"), now));
+        assert!(!passes(
+            "temp demos/x.dem",
+            Some(&anzio),
+            &typed("temp"),
+            now
+        ));
+        assert_eq!(row_name("\"D:/demos/x.dem\""), "x.dem");
+        assert_eq!(row_name("temp demos/"), "temp demos");
         // The search also sees the map.
         assert!(passes(
             "x.dem",
