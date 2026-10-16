@@ -1473,6 +1473,7 @@ pub fn install() {
     add_command(crate::review::NAME, crate::review::command);
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
+    add_command(crate::spray::NAME, crate::spray::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one

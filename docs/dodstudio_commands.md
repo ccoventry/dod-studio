@@ -16,7 +16,7 @@ start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
 **Scope:** the surface actually on `dev` today: twenty-four cvars and
-fourteen commands. Entries still in open PRs are not listed -- update this file as
+fifteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -52,7 +52,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
-| `dodstudio_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, decals, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
+| `dodstudio_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, decals, detail textures and skies from `dodstudio_hd`, and player sprays from PNGs in `logos` (`dodstudio_spray`). A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
 | `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
@@ -269,6 +269,35 @@ file (naming the file that would match), the file couldn't be used, or it
 was left alone on purpose (tool textures, blank sprites, per-player skins). A
 texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
 shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
+
+### `dodstudio_spray`
+
+Player sprays in HD, and switching your own (#428). The HD sources are PNGs
+in the game's own `dod\logos\` folder (any size, RGBA), and a mapping file
+beside them, `dod\logos\dodstudio_sprays.txt`, says which PNG replaces which
+spray: one line per spray, the spray's key, a tab, the PNG's name (`//`
+starts a comment). While `dodstudio_hd_enabled` is on, every spray the game
+loads whose key has a line is uploaded from that PNG instead -- at the
+largest power of two `gl_max_size` allows per side, alpha kept -- and drawn
+at the spray's own size, since the engine sizes a decal from its texture
+record, not the GL texture. The key is a content hash (MD5 of the spray's
+width, height, mip-0 pixels, palette count and palette as the game loads
+them), so it follows the player through every demo and never depends on
+which slot he had; a spray with no line shows up in
+`dodstudio_debug_hd_misses` as `decal spray <key>`, which is how a key is
+found, and `goldsrc-hooks/tools/spray_key.py` prints the keys of spray WADs
+and of every entry in `custom.hpk`.
+
+| subcommand | does |
+| --- | --- |
+| `dodstudio_spray` | lists the PNGs in `logos\`, which sprays each is mapped to, and which one is your spray |
+| `dodstudio_spray <name>` | makes `logos\<name>.png` your spray: writes `dod\tempdecal.wad` (the game's spray file -- the one file in the game's folder the hook writes, because that is what the command is for; sides in steps of 16 and the file at most 20480 bytes, the most a server takes, so a square picture is 112x112; 8-bit, 255 colours, transparent where the PNG is), keeps `tempdecal.wad.dodstudio-backup` of the original the first time, and adds the lump's key to the mapping. The engine reads the file when it connects, so it shows from the next connect; a demo already playing draws the sprays it recorded |
+| `dodstudio_spray players` | each slot in the demo with its name, SteamID and the PNG a `player` line gives it: `player`, a tab, a SteamID (`76561197972576011`, `STEAM_0:1:...` or `[U:1:...]`) or a name, a tab, the PNG. For HLTV demos, which carry every spray as decal index 0 (the bullet hole) and no customization; painting the PNG there is not built yet, see `src/spray.rs` |
+
+`cl_logofile` and the game's `.cfg` files are left alone. Refused in a
+capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a
+batch draws recorded sprays and would only change the file on disk.
+Source: `goldsrc-hooks/src/spray.rs`.
 
 ### `dodstudio_hide_asset`
 
