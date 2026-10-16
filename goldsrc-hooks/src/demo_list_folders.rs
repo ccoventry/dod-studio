@@ -301,20 +301,30 @@ fn step(walk: fn(&mut Nav) -> bool) -> bool {
     true
 }
 
-/// The Demos tab's Up (and Backspace): the folder above. A drive's root is
-/// as high as Up goes; Go to reaches the game folder and the other drives.
-/// (The game's own Load Demo window keeps its up row, which goes from a
-/// drive's root to `dod/`, where its drive rows are.)
+/// The Demos tab's Up (and Backspace): the folder above. Above a drive's
+/// root is This PC, every drive in one list, as in Explorer, and that is as
+/// high as Up goes. (The game's own Load Demo window keeps its up row,
+/// which goes from a drive's root to `dod/`, where its drive rows are.)
 pub fn go_up() -> bool {
     let here = current_folder();
     let up = up_from(&here);
     up != here && go_to(&up)
 }
 
-/// The folder Up opens from `here`: `here` itself at a drive's root.
+/// Whether Up has somewhere to go: the tab greys it out on This PC.
+pub fn can_go_up() -> bool {
+    let here = current_folder();
+    up_from(&here) != here
+}
+
+/// The folder Up opens from `here`: This PC from a drive's root, and
+/// `here` itself on This PC.
 fn up_from(here: &str) -> String {
-    if is_drive_root(here) {
+    if is_drives_place(here) {
         return here.to_string();
+    }
+    if is_drive_root(here) {
+        return DRIVES_PLACE.to_string();
     }
     resolve(&format!("{here}../"))
 }
@@ -325,7 +335,7 @@ fn up_from(here: &str) -> String {
 /// the line above the list read `.../../../`. As a drive path, Up stops
 /// there as at any drive's root. `None` for any other folder.
 fn drive_root_of(dod: &Path, folder: &str) -> Option<String> {
-    if folder.is_empty() || is_drive_path(folder) || is_studio_place(folder) {
+    if folder.is_empty() || is_drive_path(folder) || is_place(folder) {
         return None;
     }
     let full = crate::folder_counts::normalize(&full_path(dod, folder));
@@ -404,7 +414,7 @@ fn restore(dod: &Path) {
             }
         }
     }
-    if is_studio_place(&current) || full_path(dod, &current).is_dir() {
+    if is_place(&current) || full_path(dod, &current).is_dir() {
         go_to(&current);
     } else {
         go_to("");
@@ -435,6 +445,26 @@ pub const STUDIO_PLACE: &str = "studio:/";
 
 pub fn is_studio_place(folder: &str) -> bool {
     folder.trim().trim_matches('"') == STUDIO_PLACE
+}
+
+/// The listing path of This PC: every drive as one list, what Up opens
+/// from a drive's root. Its up row, in the game's own Load Demo window,
+/// goes to `dod/` (`resolve` drops the one part).
+pub const DRIVES_PLACE: &str = "drives:/";
+
+pub fn is_drives_place(folder: &str) -> bool {
+    folder.trim().trim_matches('"') == DRIVES_PLACE
+}
+
+/// Studio's analysed demos or This PC: listed by the hook, not a folder.
+pub fn is_place(folder: &str) -> bool {
+    is_studio_place(folder) || is_drives_place(folder)
+}
+
+/// This PC as rows: the up row when `up_row`, then a row per drive.
+pub fn drives_rows(drives: &[char], up_row: bool) -> Vec<String> {
+    let up = up_row.then(|| format!("{DRIVES_PLACE}../"));
+    with_drives(up.into_iter().collect(), drives, up_row)
 }
 
 /// Studio's analysed demos as rows: the up row when `up_row`, then each
@@ -510,6 +540,10 @@ pub fn build_places(
         Place {
             label: "Studio's analysed demos".to_string(),
             folder: STUDIO_PLACE.to_string(),
+        },
+        Place {
+            label: "This PC (every drive)".to_string(),
+            folder: DRIVES_PLACE.to_string(),
         },
     ];
     for drive in drives {
@@ -959,6 +993,19 @@ mod hook {
                 .filter_map(|row| CString::new(row).ok())
                 .collect();
         }
+        if super::is_drives_place(folder) {
+            // This PC: a row per drive, not counted (a whole drive is too
+            // much to walk); the up row counts `dod/`, where it goes.
+            crate::folder_counts::count_later(
+                folder,
+                Vec::new(),
+                up_row.then(|| (dod.clone(), dod.join(super::DRIVES_PLACE))),
+            );
+            return super::drives_rows(&drives(), up_row)
+                .into_iter()
+                .filter_map(|row| CString::new(row).ok())
+                .collect();
+        }
         let entries = if super::is_drive_path(folder) {
             disk_entries(folder)
         } else {
@@ -1325,6 +1372,19 @@ mod tests {
     }
 
     #[test]
+    fn this_pc_lists_every_drive() {
+        assert_eq!(drives_rows(&['C', 'd'], false), vec!["C:/", "D:/"]);
+        assert_eq!(
+            drives_rows(&['C'], true),
+            vec!["drives:/../".to_string(), "C:/".to_string()]
+        );
+        // Its up row goes to dod/.
+        assert_eq!(resolve("drives:/../"), "");
+        assert!(is_place(DRIVES_PLACE) && is_place(STUDIO_PLACE));
+        assert!(!is_drive_path(DRIVES_PLACE) && !is_place("D:/"));
+    }
+
+    #[test]
     fn climbing_to_a_drive_root_lands_on_the_drive() {
         let dod = Path::new("C:/Steam/common/HL/dod");
         assert_eq!(drive_root_of(dod, "../../../../"), Some("C:/".to_string()));
@@ -1338,8 +1398,10 @@ mod tests {
         assert_eq!(drive_root_of(dod, ""), None);
         assert_eq!(drive_root_of(dod, "D:/"), None);
         assert_eq!(drive_root_of(dod, STUDIO_PLACE), None);
-        // Up stops at a drive's root; below it, it goes one folder up.
-        assert_eq!(up_from("C:/"), "C:/");
+        assert_eq!(drive_root_of(dod, DRIVES_PLACE), None);
+        // Up from a drive's root is This PC, and stops there.
+        assert_eq!(up_from("C:/"), DRIVES_PLACE);
+        assert_eq!(up_from(DRIVES_PLACE), DRIVES_PLACE);
         assert_eq!(up_from("D:/demos/"), "D:/");
         assert_eq!(up_from("temp demos/"), "");
         assert_eq!(up_from(STUDIO_PLACE), "");
@@ -1377,6 +1439,7 @@ mod tests {
             vec![
                 "Game: dod/",
                 "Studio's analysed demos",
+                "This PC (every drive)",
                 "Drive: C:/",
                 "Drive: D:/",
                 "Studio: .../Half-Life/dod/",
@@ -1388,12 +1451,13 @@ mod tests {
             ]
         );
         assert_eq!(places[1].folder, STUDIO_PLACE);
-        assert_eq!(places[4].folder, "C:/Games/Half-Life/dod/");
+        assert_eq!(places[2].folder, DRIVES_PLACE);
+        assert_eq!(places[5].folder, "C:/Games/Half-Life/dod/");
         // Two different folders with the same last two names stay apart.
         let twins = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
         let places = build_places(dod, "dod", &[], &twins, &[]);
-        assert_eq!(places[2].label, "Studio: .../x/dod/");
-        assert_eq!(places[3].label, "Studio: .../x/dod/ (2)");
+        assert_eq!(places[3].label, "Studio: .../x/dod/");
+        assert_eq!(places[4].label, "Studio: .../x/dod/ (2)");
     }
 
     #[test]

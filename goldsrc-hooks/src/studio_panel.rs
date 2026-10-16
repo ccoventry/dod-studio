@@ -630,6 +630,11 @@ const COMBO_SLOT_DELETE_ALL_ITEMS: usize = 203;
 /// it to its own width each time the list opens, which cuts the Go to
 /// list's folder names short, so the tab widens it again while it is open.
 const MENU_SLOT_SET_FIXED_WIDTH: usize = 166;
+/// `Panel::SetEnabled(bool)`, what a `.res` file's `enabled` key calls: the
+/// Demos tab's Up is greyed out where it has nowhere to go.
+const PANEL_SLOT_SET_ENABLED: usize = 47;
+/// The Demos tab's Up button (`ui/Demos.res`).
+const DEMO_UP: &str = "DemoUp";
 /// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
 /// or closes it if open.
 const BUTTON_CLICKED: &CStr = c"ButtonClicked";
@@ -760,6 +765,9 @@ fn display_name(path: &str, count: Option<&str>) -> String {
 fn folder_line(dod: &std::path::Path, folder: &str, max: usize) -> String {
     if crate::demo_list_folders::is_studio_place(folder) {
         return "Currently in Studio's analysed demos".to_string();
+    }
+    if crate::demo_list_folders::is_drives_place(folder) {
+        return "Currently in This PC (every drive)".to_string();
     }
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
@@ -1922,6 +1930,7 @@ mod hook {
                 refill_demo_list();
             }
             widen_place_menu(vgui, page);
+            show_up_enabled(vgui, page, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -2292,6 +2301,30 @@ mod hook {
             activate_row(o, 0);
         }
         *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
+    }
+
+    /// Up as it was last set, `2` for not yet: set again only on a change or
+    /// a new page.
+    static UP_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+
+    /// Greys out the Demos tab's Up where it has nowhere to go (This PC).
+    unsafe fn show_up_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+        let want = u8::from(crate::demo_list_folders::can_go_up());
+        if !new_page && UP_ENABLED.load(Ordering::Acquire) == want {
+            return;
+        }
+        unsafe {
+            let Some(vp) = vgui.child_named(page, DEMO_UP) else {
+                return;
+            };
+            let button = vgui.object(vp);
+            if button.is_null() {
+                return;
+            }
+            let set_enabled: ListIntVoidFn = slot(button, PANEL_SLOT_SET_ENABLED);
+            set_enabled(button, i32::from(want));
+        }
+        UP_ENABLED.store(want, Ordering::Release);
     }
 
     /// Widens the Go to list, while it is open, to fit its longest label

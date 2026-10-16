@@ -381,6 +381,19 @@ def verify(game, src):
     check(b"ButtonClicked" in pushed,
           f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
 
+    # The Demos tab's Up is greyed out through Panel's SetEnabled(bool): the
+    # slot ApplySettings calls with the `enabled` key's GetInt.
+    enabled_slot = vwl.rust_usize(src, "PANEL_SLOT_SET_ENABLED")
+    enabled_at = ui.img.find(b"\0enabled\0") + 1
+    enabled_push = b"\x68" + struct.pack("<I", ui.base + enabled_at)
+    sites = [m.start() for m in re.finditer(re.escape(enabled_push), ui.img)]
+    want_call = f"+ {enabled_slot * 4:#x}]"
+    calls_enabled = any(
+        any(x.startswith("call dword ptr [e") and x.endswith(want_call)
+            for x in [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[at:at + 0x30], ui.base + at)][:9])
+        for at in sites)
+    check(calls_enabled, f"Panel slot {enabled_slot} is SetEnabled(bool), called with the `enabled` setting")
+
     # The Go to dropdown is widened through the menu's SetFixedWidth(int):
     # it stores its argument and invalidates the layout (Panel slot 58,
     # +0xe8), the slot the box itself calls with its own width when the
