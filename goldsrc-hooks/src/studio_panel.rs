@@ -751,10 +751,11 @@ fn display_name(path: &str, count: Option<&str>) -> String {
 /// The Demos tab's line above the list, naming the folder the list is in: as
 /// a path under the install folder's parent (`Half-Life - PRE-Anniversary for
 /// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
-/// parent itself included, where the path under it would be empty.
-fn folder_line(dod: &std::path::Path, folder: &str) -> String {
+/// parent itself included, where the path under it would be empty. A long
+/// path keeps its end, to fit `max` characters.
+fn folder_line(dod: &std::path::Path, folder: &str, max: usize) -> String {
     if crate::demo_list_folders::is_studio_place(folder) {
-        return "Currently in Studio's analysed demos (the analyzer cache)".to_string();
+        return "Currently in Studio's analysed demos".to_string();
     }
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
@@ -767,17 +768,21 @@ fn folder_line(dod: &std::path::Path, folder: &str) -> String {
     if !shown.is_empty() && !shown.ends_with('/') {
         shown.push('/');
     }
-    format!("Currently in {}", keep_the_end(&shown, FOLDER_LINE_CHARS))
+    format!("Currently in {}", keep_the_end(&shown, max))
 }
 
 /// The Demos tab's line above the list (`ui/Demos.res`).
 const FOLDER_LINE: &str = "FolderPath";
 
-/// How much of a folder path the line above the list shows. A label clips on
-/// the right at its width, which would cut off the folder's own name; a long
-/// path loses folders from the left instead. (The label's own limit is about
-/// 1,023 characters, so nothing overflows either way.)
-const FOLDER_LINE_CHARS: usize = 90;
+/// How much of a folder path fits the line above the list, `wide` pixels
+/// wide. A label clips on the right at its width, which would cut off the
+/// folder's own name; a long path loses folders from the left instead. Six
+/// pixels a character, about the tab font's average, less "Currently in ".
+fn folder_line_chars(wide: i32) -> usize {
+    (usize::try_from(wide / 6).unwrap_or(0))
+        .saturating_sub(13)
+        .max(20)
+}
 
 /// `path` (folders, each ending in `/`) cut to at most about `max` characters
 /// by dropping whole folders from the left behind `.../`. The last folder is
@@ -1853,13 +1858,19 @@ mod hook {
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
             // The line above the list says which folder the list is in, and
             // is empty while folders are off.
-            let line_text = match folders & 1 {
-                1 => folder_line(&dod_dir(), &crate::demo_list_folders::current_folder()),
+            // The line stretches with the tab, so how much path fits does too.
+            let line = vgui.child_named(page, FOLDER_LINE);
+            let line_text = match (folders & 1, line) {
+                (1, Some(line)) => folder_line(
+                    &dod_dir(),
+                    &crate::demo_list_folders::current_folder(),
+                    folder_line_chars(vgui.rect(line).2),
+                ),
                 _ => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
             if *headed != (page as usize, line_text.clone()) {
-                if let Some(line) = vgui.child_named(page, FOLDER_LINE)
+                if let Some(line) = line
                     && let Ok(text) = std::ffi::CString::new(line_text.clone())
                 {
                     let object = vgui.object(line);
@@ -4338,20 +4349,40 @@ mod tests {
     #[test]
     fn the_line_above_the_list_names_the_folder() {
         let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
-        assert_eq!(folder_line(dod, ""), "Currently in Half-Life - PRE/dod/");
         assert_eq!(
-            folder_line(dod, "temp demos/"),
+            folder_line(dod, "", 90),
+            "Currently in Half-Life - PRE/dod/"
+        );
+        assert_eq!(
+            folder_line(dod, "temp demos/", 90),
             "Currently in Half-Life - PRE/dod/temp demos/"
         );
-        assert_eq!(folder_line(dod, "../"), "Currently in Half-Life - PRE/");
+        assert_eq!(folder_line(dod, "../", 90), "Currently in Half-Life - PRE/");
         // The installs' own folder: nothing under it to show, so in full.
-        assert_eq!(folder_line(dod, "../../"), "Currently in C:/Steam/common/");
         assert_eq!(
-            folder_line(dod, "temp demos/../"),
+            folder_line(dod, "../../", 90),
+            "Currently in C:/Steam/common/"
+        );
+        assert_eq!(
+            folder_line(dod, "temp demos/../", 90),
             "Currently in Half-Life - PRE/dod/"
         );
         // Above the installs: the whole path.
-        assert_eq!(folder_line(dod, "../../../"), "Currently in C:/Steam/");
+        assert_eq!(folder_line(dod, "../../../", 90), "Currently in C:/Steam/");
+        // A narrow line keeps the folder's own name.
+        assert_eq!(
+            folder_line(dod, "temp demos/", 20),
+            "Currently in .../dod/temp demos/"
+        );
+    }
+
+    #[test]
+    fn the_line_fits_its_width() {
+        // The drawn 276 px line: the cache place's line fits whole.
+        let chars = folder_line_chars(276);
+        assert!("Studio's analysed demos".len() <= chars, "{chars}");
+        assert!(folder_line_chars(800) > chars);
+        assert_eq!(folder_line_chars(0), 20);
     }
 
     #[test]

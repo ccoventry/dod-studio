@@ -458,8 +458,10 @@ pub struct Place {
 
 /// The Go to list: the game folder, each drive, Studio's demo folders, then
 /// the folders visited lately in here. Labels are unique, since a pick comes
-/// back as the row's text.
+/// back as the row's text. Folders are listing paths from `dod`; labels name
+/// them as they are on disk, so `../../` reads as the folder it is.
 pub fn build_places(
+    dod: &Path,
     game: &str,
     drives: &[char],
     studio: &[String],
@@ -483,19 +485,31 @@ pub fn build_places(
         });
     }
     for folder in studio {
-        push_place(&mut places, "Studio", folder);
+        push_place(&mut places, dod, "Studio", folder);
     }
     for folder in recent {
-        push_place(&mut places, "Recent", folder);
+        push_place(&mut places, dod, "Recent", folder);
     }
     places
 }
 
-fn push_place(places: &mut Vec<Place>, kind: &str, folder: &str) {
-    if places.iter().any(|p| p.folder.eq_ignore_ascii_case(folder)) {
+/// `folder` (a listing path from `dod`) as a drive-rooted path with forward
+/// slashes, ending in `/`: `../../` from `C:/Steam/common/HL/dod` is
+/// `C:/Steam/common/`.
+fn on_disk_folder(dod: &Path, folder: &str) -> String {
+    let full = crate::folder_counts::normalize(&full_path(dod, folder));
+    listing_path(&full.to_string_lossy())
+}
+
+fn push_place(places: &mut Vec<Place>, dod: &Path, kind: &str, folder: &str) {
+    let here = on_disk_folder(dod, folder);
+    if places
+        .iter()
+        .any(|p| on_disk_folder(dod, &p.folder).eq_ignore_ascii_case(&here))
+    {
         return;
     }
-    let base = format!("{kind}: {}", short_folder(folder));
+    let base = format!("{kind}: {}", short_folder(&here));
     let mut label = base.clone();
     let mut n = 2;
     while places.iter().any(|p| p.label == label) {
@@ -508,12 +522,14 @@ fn push_place(places: &mut Vec<Place>, kind: &str, folder: &str) {
     });
 }
 
-/// The last two folders of a path, `.../Movies/dod/`, for a narrow list.
+/// The last two folders of a path, `.../Movies/dod/`, for a narrow list; a
+/// path of two folders or fewer (`D:/demos/`) in full.
 fn short_folder(folder: &str) -> String {
     let parts: Vec<&str> = folder.split('/').filter(|p| !p.is_empty()).collect();
     match parts.len() {
         0 => folder.to_string(),
         1 => format!("{}/", parts[0]),
+        2 => format!("{}/{}/", parts[0], parts[1]),
         n => format!(".../{}/{}/", parts[n - 2], parts[n - 1]),
     }
 }
@@ -571,6 +587,7 @@ fn listing_path(path: &str) -> String {
 /// The Go to list as it stands now.
 pub fn places() -> Vec<Place> {
     build_places(
+        &crate::texture_hires::game_dir(),
         crate::game_folder::name(),
         &drives(),
         &studio_folders(),
@@ -1289,8 +1306,15 @@ mod tests {
             "C:/Games/Half-Life/dod/".to_string(),
             "D:/demos/".to_string(),
         ];
-        let recent = ["D:/demos/".to_string(), "temp demos/".to_string()];
-        let places = build_places("dod", &['C', 'D'], &studio, &recent);
+        let recent = [
+            "D:/demos/".to_string(),
+            "temp demos/".to_string(),
+            "../../".to_string(),
+            "../".to_string(),
+            "../../Half-Life/dod/".to_string(),
+        ];
+        let dod = Path::new("C:/Steam/common/HL/dod");
+        let places = build_places(dod, "dod", &['C', 'D'], &studio, &recent);
         let labels: Vec<&str> = places.iter().map(|p| p.label.as_str()).collect();
         assert_eq!(
             labels,
@@ -1300,15 +1324,18 @@ mod tests {
                 "Drive: C:/",
                 "Drive: D:/",
                 "Studio: .../Half-Life/dod/",
-                "Studio: .../D:/demos/",
-                "Recent: temp demos/",
+                "Studio: D:/demos/",
+                "Recent: .../dod/temp demos/",
+                "Recent: .../Steam/common/",
+                "Recent: .../common/HL/",
+                "Recent: .../Half-Life/dod/",
             ]
         );
         assert_eq!(places[1].folder, STUDIO_PLACE);
         assert_eq!(places[4].folder, "C:/Games/Half-Life/dod/");
         // Two different folders with the same last two names stay apart.
         let twins = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
-        let places = build_places("dod", &[], &twins, &[]);
+        let places = build_places(dod, "dod", &[], &twins, &[]);
         assert_eq!(places[2].label, "Studio: .../x/dod/");
         assert_eq!(places[3].label, "Studio: .../x/dod/ (2)");
     }

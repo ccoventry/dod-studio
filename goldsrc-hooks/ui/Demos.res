@@ -253,7 +253,7 @@
 		"fieldName"		"DemoPlace"
 		"xpos"		"96"
 		"ypos"		"84"
-		"wide"		"190"
+		"wide"		"150"
 		"tall"		"20"
 		"visible"		"1"
 		"enabled"		"1"
@@ -264,15 +264,15 @@
 	{
 		"ControlName"		"Label"
 		"fieldName"		"FolderPath"
-		"xpos"		"292"
+		"xpos"		"252"
 		"ypos"		"86"
-		"wide"		"236"
+		"wide"		"276"
 		"tall"		"18"
 		"visible"		"1"
 		"enabled"		"1"
 		"labelText"		""
 		"textAlignment"		"west"
-		"helptext"		"The folder the list shows. Open a folder, its up row, or a drive row to move; Back, Forward and Up walk the way you came."
+		"helptext"		"The folder the list shows. Open a folder or a drive row to move; Back, Forward and Up walk the way you came."
 	}
 	"DemoListSlot"
 	{
