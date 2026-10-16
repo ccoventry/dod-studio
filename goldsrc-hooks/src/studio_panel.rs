@@ -628,10 +628,11 @@ const COMBO_SLOT_DELETE_ALL_ITEMS: usize = 203;
 /// list's folder names short, so the tab widens it again while it is open.
 const MENU_SLOT_SET_FIXED_WIDTH: usize = 166;
 /// `Panel::SetEnabled(bool)`, what a `.res` file's `enabled` key calls: the
-/// Demos tab's Up is greyed out where it has nowhere to go.
+/// Demos tab's Back, Forward and Up are greyed out where they have nowhere
+/// to go.
 const PANEL_SLOT_SET_ENABLED: usize = 47;
-/// The Demos tab's Up button (`ui/Demos.res`).
-const DEMO_UP: &str = "DemoUp";
+/// The Demos tab's Back, Forward and Up buttons (`ui/Demos.res`).
+const DEMO_NAV_BUTTONS: [&str; 3] = ["DemoBack", "DemoForward", "DemoUp"];
 /// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
 /// or closes it if open.
 const BUTTON_CLICKED: &CStr = c"ButtonClicked";
@@ -1927,7 +1928,7 @@ mod hook {
                 refill_demo_list();
             }
             widen_place_menu(vgui, page);
-            show_up_enabled(vgui, page, new_page);
+            show_nav_enabled(vgui, page, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -2300,28 +2301,37 @@ mod hook {
         *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
     }
 
-    /// Up as it was last set, `2` for not yet: set again only on a change or
-    /// a new page.
-    static UP_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(2);
+    /// Back, Forward and Up as last set, a bit each in that order; `0xff`
+    /// for not yet. Set again only on a change or a new page.
+    static NAV_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0xff);
 
-    /// Greys out the Demos tab's Up where it has nowhere to go (This PC).
-    unsafe fn show_up_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
-        let want = u8::from(crate::demo_list_folders::can_go_up());
-        if !new_page && UP_ENABLED.load(Ordering::Acquire) == want {
+    /// Greys out the Demos tab's Back, Forward and Up where each has nowhere
+    /// to go: Back at the oldest folder remembered, Forward at the newest, Up
+    /// on This PC.
+    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+        use crate::demo_list_folders::{can_go_back, can_go_forward, can_go_up};
+        let can = [can_go_back(), can_go_forward(), can_go_up()];
+        let want = can
+            .iter()
+            .enumerate()
+            .fold(0u8, |bits, (i, &on)| bits | (u8::from(on) << i));
+        if !new_page && NAV_ENABLED.load(Ordering::Acquire) == want {
             return;
         }
-        unsafe {
-            let Some(vp) = vgui.child_named(page, DEMO_UP) else {
-                return;
-            };
-            let button = vgui.object(vp);
-            if button.is_null() {
-                return;
+        for (name, on) in DEMO_NAV_BUTTONS.iter().zip(can) {
+            unsafe {
+                let Some(vp) = vgui.child_named(page, name) else {
+                    continue;
+                };
+                let button = vgui.object(vp);
+                if button.is_null() {
+                    continue;
+                }
+                let set_enabled: ListIntVoidFn = slot(button, PANEL_SLOT_SET_ENABLED);
+                set_enabled(button, i32::from(on));
             }
-            let set_enabled: ListIntVoidFn = slot(button, PANEL_SLOT_SET_ENABLED);
-            set_enabled(button, i32::from(want));
         }
-        UP_ENABLED.store(want, Ordering::Release);
+        NAV_ENABLED.store(want, Ordering::Release);
     }
 
     /// Widens the Go to list, while it is open, to fit its longest label

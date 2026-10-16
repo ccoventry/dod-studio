@@ -207,11 +207,19 @@ impl Nav {
     }
 
     fn forward(&mut self) -> bool {
-        if self.at + 1 >= self.visited.len() {
+        if !self.can_go_forward() {
             return false;
         }
         self.at += 1;
         true
+    }
+
+    fn can_go_back(&self) -> bool {
+        self.at > 0
+    }
+
+    fn can_go_forward(&self) -> bool {
+        self.at + 1 < self.visited.len()
     }
 
     /// The folders visited lately other than the current one, newest first,
@@ -309,6 +317,16 @@ pub fn go_up() -> bool {
     let here = current_folder();
     let up = up_from(&here);
     up != here && go_to(&up)
+}
+
+/// Whether Back and Forward have somewhere to go: the tab greys each out
+/// where it has not.
+pub fn can_go_back() -> bool {
+    NAV.lock().is_ok_and(|nav| nav.can_go_back())
+}
+
+pub fn can_go_forward() -> bool {
+    NAV.lock().is_ok_and(|nav| nav.can_go_forward())
 }
 
 /// Whether Up has somewhere to go: the tab greys it out on This PC.
@@ -1356,8 +1374,11 @@ mod tests {
         assert!(nav.go(""));
         assert!(!nav.go(""), "the same folder again is not a step");
         assert!(nav.go("demos/"));
+        assert!(!nav.can_go_forward());
         assert!(nav.go("D:/"));
+        assert!(nav.can_go_back());
         assert!(nav.back());
+        assert!(nav.can_go_forward());
         assert_eq!(nav.current(), "demos/");
         assert!(nav.back());
         assert_eq!(nav.current(), "");
