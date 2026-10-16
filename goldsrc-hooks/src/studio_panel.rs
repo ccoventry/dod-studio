@@ -551,6 +551,13 @@ const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
 /// where it was, so a list scrolled down showed nothing until the next
 /// scroll; a big wheel up after each new filter puts it back at the top.
 const LIST_SLOT_ON_MOUSE_WHEELED: usize = 99;
+/// `Panel::InvalidateLayout(bool layoutNow, bool reloadScheme)`, what
+/// `Menu::SetFixedWidth` calls (`verify_studio_panel.py`). The list is laid
+/// out now, before the wheel above, so its scroll bar has the new folder's
+/// range: against the old one (a folder that fitted, whose range ends below
+/// zero) the clamp left the bar above its top, drawn short until the next
+/// scroll.
+const PANEL_SLOT_INVALIDATE_LAYOUT: usize = 58;
 /// `AddColumnHeader(int index, const char *name, const char *text, int width,
 /// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
 /// and Date columns are built with.
@@ -1634,6 +1641,7 @@ mod hook {
     type AddColumnFn =
         unsafe extern "thiscall" fn(*mut c_void, i32, *const c_char, *const c_char, i32, i32);
     type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
+    type ListIntIntFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32);
     type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
     type SetIntFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, i32);
@@ -2042,6 +2050,8 @@ mod hook {
             );
             let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             if *scrolled != typed {
+                let lay_out: ListIntIntFn = slot(list, PANEL_SLOT_INVALIDATE_LAYOUT);
+                lay_out(list, 1, 0);
                 let wheel: ListIntVoidFn = slot(list, LIST_SLOT_ON_MOUSE_WHEELED);
                 wheel(list, 100_000);
                 *scrolled = typed;

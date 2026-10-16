@@ -412,9 +412,10 @@ def verify(game, src):
     fixed_fn = ui.u32(menu_vt + 4 * fixed_slot) - ui.base if menu_vt else 0
     fixed = ui.body(fixed_fn, 0x30)
     stores = any(re.fullmatch(r"mov dword ptr \[ecx \+ 0x[0-9a-f]+\], eax", x) for x in fixed)
-    lays_out = any(re.fullmatch(r"call dword ptr \[e[a-d]x \+ 0xe8\]", x) for x in fixed)
+    layout_slot = vwl.rust_usize(src, "PANEL_SLOT_INVALIDATE_LAYOUT")
+    lays_out = any(re.fullmatch(rf"call dword ptr \[e[a-d]x \+ {layout_slot * 4:#x}\]", x) for x in fixed)
     check(stores and lays_out and ui.last_ret(fixed_fn) == "ret 4",
-          f"Menu slot {fixed_slot} is SetFixedWidth(int): stores it and invalidates the layout: {fixed[:6]}")
+          f"Menu slot {fixed_slot} is SetFixedWidth(int): stores it and invalidates the layout (Panel slot {layout_slot}): {fixed[:6]}")
 
     # 21: the Highlights tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
