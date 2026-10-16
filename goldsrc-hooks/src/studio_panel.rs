@@ -3638,8 +3638,28 @@ mod hook {
         }
     }
 
+    /// The game's own Load Demo window, just filled: its rows get short
+    /// names (`demo_list_folders::name_stock_rows`). Not ours, nor the
+    /// Highlights tab's hidden one.
+    fn name_stock_demo_rows() {
+        if !crate::demo_list_folders::stock_naming_pending() {
+            return;
+        }
+        let Ok(vgui) = Vgui::get() else { return };
+        let mut named = false;
+        unsafe {
+            for (vp, name) in vgui.gameui_popups() {
+                if name != DEMO_LIST && name != STREAK_LIST {
+                    named |= crate::demo_list_folders::name_stock_rows(vgui.object(vp));
+                }
+            }
+        }
+        crate::demo_list_folders::stock_naming_frame(named);
+    }
+
     pub(super) fn poll() {
         hook_taskbar();
+        name_stock_demo_rows();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0

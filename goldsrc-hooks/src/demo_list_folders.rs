@@ -778,6 +778,26 @@ const LIST_SLOT_GET_ITEM: usize = 153;
 const KEYVALUES_SLOT_GET_STRING: usize = 12;
 /// The key each row's name is stored under.
 const ROW_KEY: &std::ffi::CStr = c"demoname";
+/// Where a row's path is kept once its name column shows a short name
+/// (`studio_panel`'s key for the Demos tab, the same for the game's window).
+const PATH_KEY: &std::ffi::CStr = c"dodstudio_path";
+/// `KeyValues::SetString(const char *key, const char *value)`.
+const KEYVALUES_SLOT_SET_STRING: usize = 17;
+/// `ListPanel::FirstItem()`, `NextItem(int)`, `ApplyItemChanges(int)`.
+const LIST_SLOT_FIRST_ITEM: usize = 167;
+const LIST_SLOT_NEXT_ITEM: usize = 168;
+const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
+
+/// The short name the game's own Load Demo window shows for a row: the
+/// last part of its path (`Philly LAN/`, `../`, `D:/`, `x.dem`), not the
+/// whole path, which for a folder on another drive reads like a Go to entry.
+pub fn short_row_name(row: &str) -> String {
+    let path = row.trim().trim_matches('"');
+    match path.strip_suffix('/') {
+        Some(folder) => format!("{}/", folder.rsplit('/').next().unwrap_or(folder)),
+        None => path.rsplit('/').next().unwrap_or(path).to_string(),
+    }
+}
 /// `IFileSystem` (`VFileSystem009`) slots.
 const FS_SLOT_FIND_FIRST: usize = 27;
 const FS_SLOT_FIND_NEXT: usize = 28;
@@ -857,7 +877,7 @@ fn rows(
 mod hook {
     use std::ffi::{CStr, CString, c_char, c_void};
     use std::sync::Mutex;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
     use windows_sys::Win32::System::LibraryLoader::{GetModuleHandleA, GetProcAddress};
 
@@ -880,6 +900,7 @@ mod hook {
     type PtrFn = unsafe extern "thiscall" fn(*mut c_void, i32) -> *mut c_void;
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
+    type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
 
     static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static FILL: AtomicUsize = AtomicUsize::new(0);
@@ -1132,11 +1153,121 @@ mod hook {
                 browser.rows.clear();
                 browser.next = 0;
             }
+            // A fill of the game's own window: its rows get short names on
+            // the next frames (`name_stock_rows`). The tab names its own.
+            if super::up_row_wanted() {
+                STOCK_NAMING_FRAMES.store(STOCK_NAMING_BUDGET, Ordering::Release);
+            }
             return;
         }
         unsafe {
             let original: FindCloseFn = cast(FIND_CLOSE.load(Ordering::Relaxed));
             original(fs, handle)
+        }
+    }
+
+    /// Frames left to look for the game's own window after a fill of it,
+    /// to give its rows short names: the constructor fills the list before
+    /// the window is a popup anyone can find.
+    static STOCK_NAMING_FRAMES: AtomicU32 = AtomicU32::new(0);
+    const STOCK_NAMING_BUDGET: u32 = 120;
+    /// `GameUI.dll` + `CDemoPlayerFileDialog`'s vftable: the game's own
+    /// window has exactly this one (the Demos tab's has its own copy).
+    static STOCK_VFTABLE: AtomicUsize = AtomicUsize::new(0);
+
+    pub(super) fn stock_naming_pending() -> bool {
+        STOCK_NAMING_FRAMES.load(Ordering::Acquire) > 0
+    }
+
+    pub(super) fn stock_naming_frame(named: bool) {
+        let left = STOCK_NAMING_FRAMES.load(Ordering::Acquire);
+        let next = if named { 0 } else { left.saturating_sub(1) };
+        STOCK_NAMING_FRAMES.store(next, Ordering::Release);
+    }
+
+    /// Gives the rows of `dialog`, when it is the game's own Load Demo
+    /// window, their short names ([`short_row_name`]); each row's path moves
+    /// to [`PATH_KEY`], and `load` puts it back first. True when `dialog` was
+    /// that window with its rows in.
+    pub(super) unsafe fn name_stock_rows(dialog: *mut c_void) -> bool {
+        unsafe {
+            let vftable = STOCK_VFTABLE.load(Ordering::Acquire);
+            if dialog.is_null() || vftable == 0 || *(dialog as *const usize) != vftable {
+                return false;
+            }
+            let list = *((dialog as *const u8).add(LIST_FIELD.load(Ordering::Relaxed))
+                as *const *mut c_void);
+            if list.is_null() {
+                return false;
+            }
+            let first: unsafe extern "thiscall" fn(*mut c_void) -> i32 =
+                cast(slot(list, LIST_SLOT_FIRST_ITEM));
+            let next: IntFn = cast(slot(list, LIST_SLOT_NEXT_ITEM));
+            let is_valid: IntFn = cast(slot(list, LIST_SLOT_IS_VALID_ITEM_ID));
+            let get_item: PtrFn = cast(slot(list, LIST_SLOT_GET_ITEM));
+            let apply: unsafe extern "thiscall" fn(*mut c_void, i32) =
+                cast(slot(list, LIST_SLOT_APPLY_ITEM_CHANGES));
+            let mut id = first(list);
+            let mut rows = 0;
+            while is_valid(list, id) & 0xff != 0 && rows < 100_000 {
+                rows += 1;
+                let row = get_item(list, id);
+                if !row.is_null() {
+                    let get_string: GetStringFn = cast(slot(row, KEYVALUES_SLOT_GET_STRING));
+                    let set_string: SetStringFn = cast(slot(row, KEYVALUES_SLOT_SET_STRING));
+                    let read = |key: &CStr| {
+                        let raw = get_string(row, key.as_ptr(), c"".as_ptr());
+                        if raw.is_null() {
+                            String::new()
+                        } else {
+                            CStr::from_ptr(raw).to_string_lossy().into_owned()
+                        }
+                    };
+                    if read(PATH_KEY).is_empty() {
+                        let path = read(ROW_KEY);
+                        if let (Ok(c_path), Ok(c_name)) = (
+                            CString::new(path.clone()),
+                            CString::new(short_row_name(&path)),
+                        ) {
+                            set_string(row, PATH_KEY.as_ptr(), c_path.as_ptr());
+                            set_string(row, ROW_KEY.as_ptr(), c_name.as_ptr());
+                            apply(list, id);
+                        }
+                    }
+                }
+                id = next(list, id);
+            }
+            rows > 0
+        }
+    }
+
+    /// Puts the selected row's path back under [`ROW_KEY`] where a short
+    /// name took its place, so `load` (ours, then the window's own) reads
+    /// the path.
+    unsafe fn restore_selected_path(dialog: *mut c_void) {
+        unsafe {
+            let list = *((dialog as *const u8).add(LIST_FIELD.load(Ordering::Relaxed))
+                as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let get_selected: IntFn = cast(slot(list, LIST_SLOT_GET_SELECTED_ITEM));
+            let is_valid: IntFn = cast(slot(list, LIST_SLOT_IS_VALID_ITEM_ID));
+            let get_item: PtrFn = cast(slot(list, LIST_SLOT_GET_ITEM));
+            let id = get_selected(list, 0);
+            if is_valid(list, id) & 0xff == 0 {
+                return;
+            }
+            let row = get_item(list, id);
+            if row.is_null() {
+                return;
+            }
+            let get_string: GetStringFn = cast(slot(row, KEYVALUES_SLOT_GET_STRING));
+            let set_string: SetStringFn = cast(slot(row, KEYVALUES_SLOT_SET_STRING));
+            let path = get_string(row, PATH_KEY.as_ptr(), c"".as_ptr());
+            if !path.is_null() && *path != 0 {
+                set_string(row, ROW_KEY.as_ptr(), path);
+            }
         }
     }
 
@@ -1167,6 +1298,9 @@ mod hook {
 
     unsafe extern "thiscall" fn on_command(dialog: *mut c_void, command: *const c_char) {
         unsafe {
+            if !command.is_null() && CStr::from_ptr(command).to_bytes() == b"load" {
+                restore_selected_path(dialog);
+            }
             if enabled()
                 && !command.is_null()
                 && CStr::from_ptr(command).to_bytes() == b"load"
@@ -1255,6 +1389,7 @@ mod hook {
                 on_command as OnCommandFn as usize,
                 &ON_COMMAND,
             )?;
+            STOCK_VFTABLE.store(gameui + ui.file_dialog_vftable, Ordering::Release);
         }
         Ok(format!("{} GameUI, {} file system", ui.name, fs_build.name))
     }
@@ -1279,6 +1414,45 @@ mod hook {
             Err(why) => format!("demo_list_folders: not installed -- {why}"),
         };
         unsafe { crate::debug::report(&message) };
+    }
+}
+
+/// Whether the game's own Load Demo window was just filled, so its rows
+/// want short names; `studio_panel` looks for it among GameUI's windows.
+pub fn stock_naming_pending() -> bool {
+    #[cfg(target_arch = "x86")]
+    {
+        hook::stock_naming_pending()
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        false
+    }
+}
+
+/// One frame of looking for the game's own window: `named` when it was
+/// found with its rows named, which ends the search.
+pub fn stock_naming_frame(named: bool) {
+    #[cfg(target_arch = "x86")]
+    hook::stock_naming_frame(named);
+    #[cfg(not(target_arch = "x86"))]
+    let _ = named;
+}
+
+/// Short names for the rows of `dialog`, when it is the game's own Load
+/// Demo window. True when it was, with its rows in.
+///
+/// # Safety
+/// `dialog` is a live GameUI panel object (or null).
+pub unsafe fn name_stock_rows(dialog: *mut std::ffi::c_void) -> bool {
+    #[cfg(target_arch = "x86")]
+    {
+        unsafe { hook::name_stock_rows(dialog) }
+    }
+    #[cfg(not(target_arch = "x86"))]
+    {
+        let _ = dialog;
+        false
     }
 }
 
@@ -1397,6 +1571,18 @@ mod tests {
         assert!(!nav.forward());
         assert_eq!(nav.recent(5), vec!["demos/", ""]);
         assert_eq!(nav.recent(1), vec!["demos/"]);
+    }
+
+    #[test]
+    fn the_game_window_shows_short_names() {
+        assert_eq!(short_row_name("H:/DoD Demos/Philly LAN/"), "Philly LAN/");
+        assert_eq!(short_row_name("H:/DoD Demos/../"), "../");
+        assert_eq!(short_row_name("D:/"), "D:/");
+        assert_eq!(short_row_name("../"), "../");
+        assert_eq!(short_row_name("temp demos/"), "temp demos/");
+        assert_eq!(short_row_name("temp demos/x.dem"), "x.dem");
+        assert_eq!(short_row_name("\"H:/DoD Demos/a b.dem\""), "a b.dem");
+        assert_eq!(short_row_name("x.dem"), "x.dem");
     }
 
     #[test]
