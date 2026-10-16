@@ -133,6 +133,29 @@ pub static HIDE_EMPTY: Setting = Setting::new(console_name!("demo_list_hide_empt
 pub static COUNT_SUBFOLDERS: Setting =
     Setting::new(console_name!("demo_list_count_subfolders"), true);
 
+/// `dodstudio_demo_list_hide_counts 1`: folder rows on the Demos tab show no
+/// "(N demos)" (#787). Off by default.
+pub static HIDE_COUNTS: Setting = Setting::new(console_name!("demo_list_hide_counts"), false);
+
+/// Whether folders are counted in the background: only while something
+/// shows a count or needs one. With the counts hidden, hiding empty folders
+/// is the one thing left that does.
+pub fn counting_wanted(hide_counts: bool, hide_empty: bool) -> bool {
+    !hide_counts || hide_empty
+}
+
+fn counting_wanted_now() -> bool {
+    counting_wanted(HIDE_COUNTS.on(), HIDE_EMPTY.on())
+}
+
+pub fn hide_counts_status() -> String {
+    if HIDE_COUNTS.on() {
+        "folder rows on the Demos tab show no demo count".to_string()
+    } else {
+        "folder rows on the Demos tab end in their demo count".to_string()
+    }
+}
+
 /// For the fallback toggle commands' bare-name query.
 pub fn hide_empty_status() -> String {
     if HIDE_EMPTY.on() {
@@ -1010,6 +1033,18 @@ mod hook {
         entries
     }
 
+    /// [`crate::folder_counts::count_later`], unless nothing would use the
+    /// counts ([`counting_wanted`], #787).
+    fn count_later(
+        listing: &str,
+        folders: Vec<std::path::PathBuf>,
+        up: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    ) {
+        if super::counting_wanted_now() {
+            crate::folder_counts::count_later(listing, folders, up);
+        }
+    }
+
     /// Lists `folder` as rows: through the real file system for a path from
     /// `dod/`, straight from the disk for a drive-rooted one.
     unsafe fn list(
@@ -1028,7 +1063,7 @@ mod hook {
                 .unwrap_or_default();
             let listed =
                 super::studio_rows(paths, |path| std::path::Path::new(path).is_file(), up_row);
-            crate::folder_counts::count_later(
+            count_later(
                 folder,
                 Vec::new(),
                 up_row.then(|| (dod.clone(), dod.join(super::STUDIO_PLACE))),
@@ -1041,7 +1076,7 @@ mod hook {
         if super::is_drives_place(folder) {
             // This PC: a row per drive, not counted (a whole drive is too
             // much to walk); the up row counts `dod/`, where it goes.
-            crate::folder_counts::count_later(
+            count_later(
                 folder,
                 Vec::new(),
                 up_row.then(|| (dod.clone(), dod.join(super::DRIVES_PLACE))),
@@ -1096,7 +1131,7 @@ mod hook {
         } else {
             Some((here.join(".."), here))
         };
-        crate::folder_counts::count_later(folder, to_count.into_inner(), up);
+        count_later(folder, to_count.into_inner(), up);
         listed
             .into_iter()
             .filter_map(|row| CString::new(row).ok())
@@ -1466,6 +1501,15 @@ pub fn poll() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hidden_counts_stop_the_counting_unless_empty_folders_are_hidden() {
+        assert!(counting_wanted(false, false));
+        assert!(counting_wanted(false, true));
+        assert!(counting_wanted(true, true));
+        assert!(!counting_wanted(true, false));
+        assert!(!HIDE_COUNTS.on(), "counts show by default");
+    }
 
     #[test]
     fn a_drive_rooted_listing_path_is_told_from_one_under_dod() {

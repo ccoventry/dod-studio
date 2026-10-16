@@ -856,17 +856,26 @@ fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
     }
 }
 
-/// The three folder settings as one value, so a change to any lists again.
+/// What a folder row shows in brackets: its count, "counting..." until that
+/// is in, or nothing while `dodstudio_demo_list_hide_counts` is on (#787).
+fn shown_count(hidden: bool, count: Option<crate::folder_counts::FolderCount>) -> Option<String> {
+    (!hidden).then(|| count.map_or_else(|| COUNTING.to_string(), demo_count_text))
+}
+
+/// The four folder settings as one value, so a change to any lists again.
 fn folder_settings() -> u8 {
     use crate::demo_list_folders as f;
-    f::enabled() as u8 | (f::HIDE_EMPTY.on() as u8) << 1 | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+    f::enabled() as u8
+        | (f::HIDE_EMPTY.on() as u8) << 1
+        | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+        | (f::HIDE_COUNTS.on() as u8) << 3
 }
 
 /// A Settings-tab box that only applies while folders are listed, and so
 /// only shows then.
 fn shown_with_folders(cvar: &str) -> bool {
     use crate::demo_list_folders as f;
-    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name
+    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name || cvar == f::HIDE_COUNTS.name
 }
 
 /// [`folder_settings`] before anything was seen: the tab has only just
@@ -2270,7 +2279,7 @@ mod hook {
                                 crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
                             );
                             folder_count =
-                                Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                                shown_count(crate::demo_list_folders::HIDE_COUNTS.on(), count);
                         }
                     }
                     if let Some(info) = info_for(&path) {
@@ -4600,9 +4609,27 @@ mod tests {
     }
 
     #[test]
+    fn hidden_counts_leave_a_folder_row_its_name_alone() {
+        use crate::folder_counts::FolderCount;
+        let counted = Some(FolderCount {
+            demos: 73,
+            complete: true,
+        });
+        assert_eq!(shown_count(false, counted).as_deref(), Some("73 demos"));
+        assert_eq!(shown_count(false, None).as_deref(), Some(COUNTING));
+        assert_eq!(shown_count(true, counted), None);
+        assert_eq!(shown_count(true, None), None);
+        assert_eq!(
+            display_name("temp demos/", shown_count(true, counted).as_deref()),
+            format!("{FOLDER_MARK}temp demos/")
+        );
+    }
+
+    #[test]
     fn the_folder_sub_options_show_only_with_folders() {
         assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
         assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
+        assert!(shown_with_folders("dodstudio_demo_list_hide_counts"));
         assert!(!shown_with_folders("dodstudio_demo_list_folders"));
         assert!(!shown_with_folders("hud_draw"));
     }
