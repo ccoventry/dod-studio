@@ -49,6 +49,14 @@ pub mod demo_split;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod demo_rename;
 
+/// Linking a demo folder on another drive into the game folder, so
+/// `viewdemo` can play from it in place (#376).
+#[cfg(windows)]
+pub mod demo_links;
+/// Which match and half each demo of a list is (#685).
+#[cfg(not(target_arch = "wasm32"))]
+pub mod match_groups;
+
 /// Launch Preview without patching (#434, step 2).
 #[cfg(not(target_arch = "wasm32"))]
 pub mod preview_in_place;
@@ -164,10 +172,17 @@ where
 /// (359 MB of it on one machine, 2026-09). The week spares an older build
 /// still in use beside this one (an installed release next to a dev build),
 /// whose cache would otherwise be deleted under it every run. Leaves anything
-/// that isn't a `v<N>` folder alone. Best-effort.
+/// that isn't a `v<N>` folder alone, and a folder whose entries can still be
+/// upgraded to the current schema (`analysis::cache::migrations`): its
+/// demos would need a full parse again without it. Best-effort.
 #[cfg(not(target_arch = "wasm32"))]
 fn sweep_stale_analyzer_caches(cache_root: &std::path::Path, current: u32) -> usize {
-    sweep_stale_analyzer_caches_older_than(cache_root, current, STALE_CACHE_AGE)
+    sweep_stale_analyzer_caches_older_than(
+        cache_root,
+        current,
+        STALE_CACHE_AGE,
+        analysis::cache::migrations::upgrades_from,
+    )
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -178,6 +193,7 @@ fn sweep_stale_analyzer_caches_older_than(
     cache_root: &std::path::Path,
     current: u32,
     min_age: std::time::Duration,
+    upgradable: impl Fn(u32) -> bool,
 ) -> usize {
     let Ok(entries) = fs::read_dir(cache_root) else {
         return 0;
@@ -199,6 +215,7 @@ fn sweep_stale_analyzer_caches_older_than(
             .and_then(|t| t.elapsed().ok())
             .is_some_and(|age| age >= min_age);
         if version < current
+            && !upgradable(version)
             && idle_long_enough
             && entry.file_type().is_ok_and(|t| t.is_dir())
             && fs::remove_dir_all(entry.path()).is_ok()
@@ -511,12 +528,12 @@ mod analyzer_cache_tests {
     use crate::test_support::Scratch;
 
     /// Old schema folders idle for the grace period go; the current one, a
-    /// newer one, a recently used one, and anything that isn't a `v<N>`
-    /// folder stay.
+    /// newer one, a recently used one, one that can be upgraded, and anything
+    /// that isn't a `v<N>` folder stay.
     #[test]
     fn stale_cache_versions_are_swept() {
         let root = Scratch::new("analyzer_cache_sweep");
-        for dir in ["v1", "v2", "v3", "v4", "other"] {
+        for dir in ["v0", "v1", "v2", "v3", "v4", "other"] {
             fs::create_dir_all(root.join(dir)).unwrap();
             fs::write(root.join(dir).join("x.json"), b"{}").unwrap();
         }
@@ -526,8 +543,11 @@ mod analyzer_cache_tests {
         assert_eq!(sweep_stale_analyzer_caches(&root, 3), 0);
         assert!(root.join("v1").is_dir());
 
-        let swept = sweep_stale_analyzer_caches_older_than(&root, 3, std::time::Duration::ZERO);
+        let swept =
+            sweep_stale_analyzer_caches_older_than(&root, 3, std::time::Duration::ZERO, |v| v == 0);
         assert_eq!(swept, 2);
+        // Its entries upgrade to the current schema instead of a parse.
+        assert!(root.join("v0").is_dir());
         assert!(!root.join("v1").exists());
         assert!(!root.join("v2").exists());
         assert!(root.join("v3").join("x.json").is_file());

@@ -111,86 +111,40 @@ pub struct Found {
     pub recorder: Option<String>,
 }
 
-/// One player's kills from one slot, as [`select`] takes them.
-pub struct PlayerKills {
-    pub name: String,
-    pub number: Option<u8>,
-    pub recorder: bool,
-    /// Each streak's kills: (bar time, weapon).
-    pub streaks: Vec<Vec<(f32, String)>>,
-}
-
-/// The streaks to list, earliest first: in a POV demo only the recording
-/// player's (the only ones its footage follows), in an HLTV demo
-/// everyone's. A POV demo whose recorder can't be told lists everyone's.
-pub fn select(players: Vec<PlayerKills>, hltv: bool) -> Found {
-    let recorder = (!hltv)
-        .then(|| players.iter().find(|p| p.recorder).map(|p| p.name.clone()))
-        .flatten();
-    let mut streaks: Vec<Streak> = players
-        .iter()
-        .filter(|p| recorder.is_none() || p.recorder)
-        .flat_map(|p| {
-            p.streaks.iter().filter_map(|kills| {
-                Streak::new(&p.name, kills).map(|s| Streak {
-                    player_number: p.number,
-                    ..s
+/// The streaks to list, earliest first: the highlights
+/// `analysis::highlights` keeps (#573, D18: a POV demo's recorder's, an HLTV
+/// demo's everyone's), the same ones the Capture page lists. Each carries the
+/// number its player had when the kills happened, so a player who left
+/// before the demo ended still has one for Go to spectate (#706). Weapon
+/// names are `analysis`' own, the Capture page's: built-in English when the
+/// game's folder has no `localizations`.
+pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
+    let found = analysis::highlights::highlights(analysis);
+    let mut streaks: Vec<Streak> = found
+        .shown()
+        .filter_map(|highlight| {
+            let kills: Vec<(f32, String)> = highlight
+                .kills
+                .iter()
+                .map(|kill| {
+                    (
+                        kill.viewdemo_secs,
+                        analysis::weapon_display_name(&kill.weapon),
+                    )
                 })
+                .collect();
+            Streak::new(&highlight.player, &kills).map(|s| Streak {
+                player_number: highlight.number(),
+                ..s
             })
         })
         .collect();
     streaks.sort_by(|a, b| a.first_kill.total_cmp(&b.first_kill));
     Found {
         streaks,
-        hltv,
-        recorder,
+        hltv: found.hltv,
+        recorder: found.recorder,
     }
-}
-
-/// Every listable streak in `analysis` ([`select`]), as
-/// `analysis::highlights` defines them (#573): each with the slot its player
-/// held when the kills happened, so a player who left before the demo ended
-/// still has a number for Go to spectate (#706).
-pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
-    let found = analysis::highlights::highlights(analysis);
-    let players = found
-        .all
-        .iter()
-        .map(|highlight| PlayerKills {
-            name: highlight.player.clone(),
-            // The analysis counts slots from 0, entity numbers from 1.
-            number: highlight.slot.and_then(|s| s.checked_add(1)),
-            recorder: highlight.recorder,
-            streaks: vec![
-                highlight
-                    .kills
-                    .iter()
-                    .map(|kill| (kill.viewdemo_secs, weapon_name(&kill.weapon)))
-                    .collect(),
-            ],
-        })
-        .collect();
-    select(players, found.hltv)
-}
-
-/// Studio's English weapon names. `analysis::weapon_display_name` reads them
-/// from a `localizations` folder it looks for beside the running program,
-/// which in the game is `hl.exe`'s: there is none there.
-const WEAPON_NAMES: &str = include_str!("../../localizations/dod_studio_english.txt");
-
-/// A weapon's name as Studio shows it (`"weapon.<name>"` keys are the
-/// weapon's own name in lower case), or that name itself.
-fn weapon_name(weapon: &analysis::Weapon) -> String {
-    let own = format!("{weapon:?}");
-    let key = format!("\"weapon.{}\"", own.to_ascii_lowercase());
-    WEAPON_NAMES
-        .lines()
-        .find_map(|line| {
-            let rest = line.trim().strip_prefix(&key)?;
-            Some(rest.trim().trim_matches('"').to_string())
-        })
-        .filter(|name| !name.is_empty())
-        .unwrap_or(own)
 }
 
 /// A span of time as `m:ss`, rounded to the second, as the Capture page
@@ -552,59 +506,35 @@ mod tests {
         list.iter().map(|(t, w)| (*t, w.to_string())).collect()
     }
 
-    fn player(name: &str, number: u8, recorder: bool, first: f32) -> PlayerKills {
-        PlayerKills {
-            name: name.to_string(),
-            number: Some(number),
-            recorder,
-            streaks: vec![kills(&[(first, "K98"), (first + 2.0, "K98")])],
-        }
-    }
-
+    /// Whose highlights are listed is `analysis::highlights`' rule, tested
+    /// there; here, that the tab lists exactly those, earliest first, with
+    /// each player's number and Studio's weapon names.
     #[test]
-    fn a_pov_demo_lists_only_the_recorders_streaks() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 10.0),
-                player("brain", 5, true, 20.0),
-            ],
-            false,
+    fn the_tab_lists_the_highlights_analysis_keeps() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
         );
-        assert_eq!(found.recorder.as_deref(), Some("brain"));
-        assert_eq!(found.streaks.len(), 1);
-        assert_eq!(found.streaks[0].player, "brain");
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let analysis = analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = analysis::highlights::highlights(&analysis);
+        let found = streaks_of(&analysis);
+
         assert!(!found.hltv);
-    }
-
-    #[test]
-    fn an_hltv_demo_lists_everyone_with_their_numbers() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 30.0),
-                player("brain", 5, false, 20.0),
-            ],
-            true,
+        assert_eq!(found.recorder, highlights.recorder);
+        assert!(!found.streaks.is_empty());
+        assert_eq!(found.streaks.len(), highlights.shown().count());
+        for streak in &found.streaks {
+            assert_eq!(Some(&streak.player), found.recorder.as_ref());
+            assert!(streak.player_number.is_some());
+            assert!(!streak.weapons.is_empty());
+        }
+        assert!(
+            found
+                .streaks
+                .windows(2)
+                .all(|w| w[0].first_kill <= w[1].first_kill)
         );
-        assert!(found.hltv && found.recorder.is_none());
-        let names: Vec<_> = found
-            .streaks
-            .iter()
-            .map(|s| (s.player.as_str(), s.player_number))
-            .collect();
-        assert_eq!(names, [("brain", Some(5)), ("milo", Some(3))]);
-    }
-
-    #[test]
-    fn a_pov_demo_without_a_known_recorder_lists_everyone() {
-        let found = select(
-            vec![
-                player("milo", 3, false, 10.0),
-                player("brain", 5, false, 20.0),
-            ],
-            false,
-        );
-        assert_eq!(found.streaks.len(), 2);
-        assert!(found.recorder.is_none());
     }
 
     #[test]
@@ -649,9 +579,15 @@ mod tests {
 
     #[test]
     fn weapons_have_studios_names() {
-        assert_eq!(weapon_name(&analysis::Weapon::StickGrenade), "Stick");
-        assert_eq!(weapon_name(&analysis::Weapon::Mp40), "MP40");
-        assert_eq!(weapon_name(&analysis::Weapon::K98), "K98");
+        assert_eq!(
+            analysis::weapon_display_name(&analysis::Weapon::StickGrenade),
+            "Stick"
+        );
+        assert_eq!(
+            analysis::weapon_display_name(&analysis::Weapon::Mp40),
+            "MP40"
+        );
+        assert_eq!(analysis::weapon_display_name(&analysis::Weapon::K98), "K98");
     }
 
     #[test]

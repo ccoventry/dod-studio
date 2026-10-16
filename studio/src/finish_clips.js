@@ -246,6 +246,22 @@ let getExportDirsFn = null;
 let getClipNamesFn = null;
 let captureRunning = false;
 
+/**
+ * What the finish step will do for a batch captured in `mode`, for the
+ * capture summary strip (#443): `{ enabled, codecLabel }`, with the label
+ * being the codec's name as its own select shows it, resolved through the
+ * Render tab's Codec when the setting says to use that.
+ */
+export function finishSummary(mode) {
+  const settings = readSettings();
+  if (!settings.enabled) return { enabled: false, codecLabel: '' };
+  const { codec } = finishCodecFor(mode, settings.codecs);
+  if (codec === 'source_copy') return { enabled: true, codecLabel: STRINGS.CAPTURE_SUMMARY.FINISH_KEEP };
+  const option = document.querySelector(`#render-codec-select option[value="${codec}"]`)
+    || document.querySelector(`#config-finish-codec-${mode === 'obs' ? 'obs' : mode === 'direct_to_video' ? 'video' : 'frames'} option[value="${codec}"]`);
+  return { enabled: true, codecLabel: option?.textContent?.trim() || codec };
+}
+
 /** Reads the finish settings and the Render tab's shared ones from the page. */
 function readSettings() {
   const value = (sel, fallback) => document.querySelector(sel)?.value || fallback;

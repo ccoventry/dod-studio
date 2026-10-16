@@ -164,31 +164,48 @@ def _steam_libraries():
     return list(seen.values())
 
 
-def _studio_game():
-    """The folder of the hl.exe DoD Studio launches, from its settings."""
+def _studio_settings():
+    """DoD Studio's settings.json, or {} when there is none."""
     try:
         import json
         cfg = os.path.join(os.environ.get("APPDATA", ""), "dod-studio", "settings.json")
-        hl = json.load(open(cfg, encoding="utf-8")).get("hl_path")
-        game = os.path.dirname(hl) if hl else None
-        return game if game and os.path.isdir(os.path.join(game, "dod")) else None
-    except (OSError, ValueError, AttributeError):
-        return None
+        settings = json.load(open(cfg, encoding="utf-8"))
+        return settings if isinstance(settings, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def game_folder():
+    """The mod folder, the <mod> of -game <mod> (#402): HD_GAME_FOLDER (DoD
+    Studio sets it on every build), else Studio's Game folder setting, else
+    dod. Only a plain folder name counts."""
+    name = os.environ.get("HD_GAME_FOLDER") or _studio_settings().get("game_folder") or "dod"
+    name = str(name).strip()
+    bad = not name or ".." in name or any(c in name for c in '/:*?"<>|' + chr(92)) or name[0] in "-+"
+    return "dod" if bad else name
+
+
+def _studio_game():
+    """The folder of the hl.exe DoD Studio launches, from its settings."""
+    hl = _studio_settings().get("hl_path")
+    game = os.path.dirname(hl) if isinstance(hl, str) and hl else None
+    return game if game and os.path.isdir(os.path.join(game, game_folder())) else None
 
 
 def game_root():
-    """The Half-Life folder holding dod/."""
+    """The Half-Life folder holding the game folder (dod/ by default)."""
+    mod = game_folder()
     env = os.environ.get("HD_GAME")
     if env:
-        if not os.path.isdir(os.path.join(env, "dod")):
-            sys.exit(f"HD_GAME={env!r} has no dod folder; point it at the Half-Life folder that does")
+        if not os.path.isdir(os.path.join(env, mod)):
+            sys.exit(f"HD_GAME={env!r} has no {mod} folder; point it at the Half-Life folder that does")
         return env
     studio = _studio_game()
     if studio:
         return studio
     found = sorted({os.path.normcase(os.path.dirname(d)): os.path.dirname(d)
                     for lib in _steam_libraries()
-                    for d in glob.glob(os.path.join(lib, "steamapps", "common", "*", "dod"))}.values())
+                    for d in glob.glob(os.path.join(lib, "steamapps", "common", "*", mod))}.values())
     if len(found) == 1:
         return found[0]
     listing = "\n  ".join(found) or "(none found)"
@@ -252,13 +269,14 @@ def select_maps(names, patterns):
 
 
 def all_maps(game):
-    """Every map in dod/maps, as hd_maps.txt narrows it (all of them without
-    the file). Patterns that match no map are reported, since a typo there
-    would otherwise quietly build nothing."""
-    names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, "dod", "maps", "*.bsp")))
+    """Every map in dod/maps (the game folder's), as hd_maps.txt narrows it
+    (all of them without the file). Patterns that match no map are reported,
+    since a typo there would otherwise quietly build nothing."""
+    mod = game_folder()
+    names = sorted(os.path.basename(f)[:-4] for f in glob.glob(os.path.join(game, mod, "maps", "*.bsp")))
     chosen, unused = select_maps(names, map_patterns())
     for p in unused:
-        print(f"  {MAP_LIST}: {p!r} matches no map in dod/maps", flush=True)
+        print(f"  {MAP_LIST}: {p!r} matches no map in {mod}/maps", flush=True)
     return chosen
 
 
@@ -285,14 +303,14 @@ def clear_partial(out_dir):
 
 
 def dod_dir():
-    return os.path.join(game_root(), "dod")
+    return os.path.join(game_root(), game_folder())
 
 
 def hd_dir():
     """Where texture_hires looks (#415): dod_addon/dodstudio_hd, or
     dod/dodstudio_hd while that one exists and the dod_addon one doesn't (an
     install built before #415). native::hd::hd_root picks the same way."""
-    addon = os.path.join(game_root(), "dod_addon", "dodstudio_hd")
+    addon = os.path.join(game_root(), game_folder() + "_addon", "dodstudio_hd")
     old = os.path.join(dod_dir(), "dodstudio_hd")
     if os.path.isdir(old) and not os.path.isdir(addon):
         return old

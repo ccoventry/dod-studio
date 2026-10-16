@@ -338,6 +338,9 @@ const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
 const KEY_PAD_ENTER: i32 = 0x33;
+/// vgui2's `KEY_UP` and `KEY_DOWN`: the console's history keys.
+const KEY_UP: i32 = 88;
+const KEY_DOWN: i32 = 90;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
@@ -1123,7 +1126,12 @@ pub fn write_game_menu() {
     else {
         return;
     };
-    let path = dir.join("dod_addon").join("resource").join("GameMenu.res");
+    // `<game folder>_addon`, which `-addons` puts on the engine's search
+    // path for whatever `-game` names (#402).
+    let path = dir
+        .join(crate::game_folder::addon_name())
+        .join("resource")
+        .join("GameMenu.res");
     let existing = std::fs::read_to_string(&path).ok();
     let Some(verb) = game_menu_action(existing.as_deref()) else {
         if existing.is_some_and(|t| !t.contains(GAME_MENU_MARK)) {
@@ -1296,12 +1304,9 @@ fn tooltips(res: &str) -> Vec<(String, String)> {
 /// The engine loads the layouts through its own search paths, which only
 /// include `dod_addon` with `-addons`, ahead of `dod`.
 fn res_dir() -> std::path::PathBuf {
-    let game = std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(std::path::Path::to_path_buf))
-        .unwrap_or_default();
-    let addon = game.join("dod_addon");
-    let dod = game.join("dod");
+    let game = crate::game_folder::game_root();
+    let addon = game.join(crate::game_folder::addon_name());
+    let dod = game.join(crate::game_folder::name());
     let base = if ui_in_addon(
         crate::texture_hires::addons_on(),
         addon.join(RES_DIR).is_dir(),
@@ -1513,6 +1518,8 @@ mod hook {
     mod sort_arrows;
     /// The Highlights tab (#565).
     mod streaks_tab;
+    /// The hidden VCR bar's slider kept in step with playback (#663).
+    mod vcr_sync;
 
     /// Bumped each time the demo list is refilled and stamped, so what is
     /// worked out from its rows is worked out again.
@@ -1590,6 +1597,9 @@ mod hook {
     static PAGE_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY: AtomicUsize = AtomicUsize::new(0);
     static PAGE_ON_KEY_PRESSED: AtomicUsize = AtomicUsize::new(0);
+    /// Frames left to put the focus back on the Console tab's input line
+    /// after Up or Down (#786).
+    static CONSOLE_REFOCUS: AtomicUsize = AtomicUsize::new(0);
     static DEMO_LIST_ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
     /// Our own Load Demo window, or 0.
     static DEMO_DIALOG: AtomicUsize = AtomicUsize::new(0);
@@ -2854,8 +2864,15 @@ mod hook {
                         // offset of its own (0, 0x20 on pre-Anniversary).
                         // Whenever the list is somewhere we didn't put it,
                         // that was the console: measure the offset then.
-                        let (sx, sy) = vgui.abs_pos(source);
-                        if lent.list_set != Some((px, py)) && (px, py) != want {
+                        // The window's place is its rect, not GetAbsPos: for
+                        // the hidden console that answers (0, 0), which put
+                        // the window off-screen on every other key and made
+                        // the list flicker between there and the input line.
+                        let (sx, sy, _, _) = vgui.rect(source);
+                        // A hidden list sits wherever it was left (0, 0 before
+                        // the first key); only a showing one was placed by
+                        // the console.
+                        if vgui.visible(vp) && lent.list_set != Some((px, py)) && (px, py) != want {
                             lent.list_offset = Some((px - sx - lx, py - sy - ly));
                         }
                         // Then move the (hidden) console window so its own
@@ -3374,6 +3391,8 @@ mod hook {
         let Ok(vgui) = Vgui::get() else { return };
         unsafe {
             console_to_tab(&vgui);
+            refocus_console_entry(&vgui);
+            vcr_sync::update(&vgui);
             // After a viewdemo, open on Playback once the bar has appeared.
             if pending > 0 {
                 VIEWDEMO_PENDING.store(pending - 1, Ordering::Relaxed);
@@ -3591,6 +3610,26 @@ mod hook {
         unsafe { handle(this, raw, &PAGE_ON_COMMAND) }
     }
 
+    /// After Up or Down on the Console tab, puts the focus back on the
+    /// borrowed input line for a few frames. The console dialog's history
+    /// step moves the focus a frame later, to our tab button and then the
+    /// window (its input line's usual parent is the dialog, not our page), so
+    /// the next key went nowhere: one Up, then nothing (#786).
+    unsafe fn refocus_console_entry(vgui: &Vgui) {
+        let left = CONSOLE_REFOCUS.load(Ordering::Acquire);
+        if left == 0 {
+            return;
+        }
+        CONSOLE_REFOCUS.store(left - 1, Ordering::Release);
+        unsafe {
+            let page = vpanel_of(PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void);
+            if let Some(entry) = vgui.child_named(page, CONSOLE_ENTRY) {
+                let focus: SetParentFn = slot(vgui.panel, IPANEL_REQUEST_FOCUS);
+                focus(vgui.panel, entry, 0);
+            }
+        }
+    }
+
     /// Each page's `OnKeyCodePressed`. On the Console tab, a key the borrowed
     /// input line passes up (Tab, the arrows) goes to the console dialog, its
     /// usual parent, which does the type-ahead and the command history.
@@ -3607,6 +3646,9 @@ mod hook {
                 if let Some(object) = object {
                     let pressed: KeyFn = slot(object, PANEL_SLOT_ON_KEY_CODE_PRESSED);
                     pressed(object, code);
+                    if code == KEY_UP || code == KEY_DOWN {
+                        CONSOLE_REFOCUS.store(3, Ordering::Release);
+                    }
                     return;
                 }
             }

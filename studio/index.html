@@ -43,6 +43,7 @@
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
+                <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
               </div>
             </div>
@@ -97,6 +98,13 @@
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
                 <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
               </div>
+              <!-- demo_links.js (#376) -->
+              <details id="demo-links-section" class="demo-links">
+                <summary data-str="DEMO_LINKS.TITLE">Demo folders the game can play</summary>
+                <p class="demo-links-hint" data-str="DEMO_LINKS.HINT">The game only plays demos inside its own folder. Link a demo folder from any drive and the game plays its demos where they are, with nothing copied.</p>
+                <button id="link-folder-btn" data-str="DEMO_LINKS.LINK_BUTTON" data-str-title="DEMO_LINKS.LINK_BUTTON_TITLE">+ Link Folder to Game</button>
+                <ul id="demo-links-list" class="demo-links-list"></ul>
+              </details>
             </div>
           </div>
 
@@ -120,6 +128,11 @@
                   <input type="checkbox" id="master-owner-only-cb" />
                   <span data-str="WORKSPACE.OWNER_ONLY_LABEL">POV only</span>
                 </label>
+                <!-- #685: the queue in match order, a header line per match. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="WORKSPACE.GROUP_BY_MATCH_TITLE">
+                  <input type="checkbox" id="master-group-by-match-cb" />
+                  <span data-str="WORKSPACE.GROUP_BY_MATCH_LABEL">Group by match</span>
+                </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
@@ -141,6 +154,9 @@
                  that is missing or is a different build than it was recorded
                  on. Stays hidden when the library is complete. -->
             <div id="map-warning-banner" hidden></div>
+            <!-- Setup checklist (#599), setup_card.js: shown while something
+                 Start needs is missing; it stands in for the empty queue. -->
+            <div id="setup-card" class="setup-card" hidden></div>
             <div class="table-wrapper">
               <table id="master-demo-table">
                 <thead>
@@ -223,6 +239,13 @@
                 <button id="hl-browse-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="hl-path-warning" class="path-warning" style="display: none;"></div>
+              <!-- The <mod> of -game <mod> (#402): game_folder_ui.js lists the
+                   folders beside hl.exe, or disables the list when it can't. -->
+              <div class="input-row" data-str-title="CAPTURE_CONFIG.GAME_FOLDER_TIP" title="The folder beside hl.exe that DoD Studio starts with -game">
+                <label data-str="CAPTURE_CONFIG.GAME_FOLDER_LABEL">Game Folder:</label>
+                <select id="config-game-folder" style="flex: 1;"></select>
+              </div>
+              <div id="config-game-folder-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row">
                 <label data-str="CAPTURE_CONFIG.HLAE_EXEC_LABEL">HLAE Executable:</label>
                 <input type="text" id="hlae-path-input" data-str-placeholder="CAPTURE_CONFIG.HLAE_EXEC_PLACEHOLDER" placeholder="Path to hlae.exe" style="flex: 1;" />
@@ -470,8 +493,8 @@
                 </div>
                 <div class="control-group">
                   <!-- #434: the hook DLL runs the batch on the original demos. -->
-                  <input type="checkbox" id="config-hook-runs-batch" />
-                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips (experimental)</label>
+                  <input type="checkbox" id="config-hook-runs-batch" checked />
+                  <label for="config-hook-runs-batch" data-str="CAPTURE_CONFIG.HOOK_RUNS_BATCH_LABEL" data-str-title="CAPTURE_CONFIG.HOOK_RUNS_BATCH_TITLE">Seek Between Clips</label>
                 </div>
                 <div class="control-group">
                   <input type="checkbox" id="config-keep-game-behind" checked />
@@ -548,6 +571,7 @@
                 <button id="browse-drive-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="target-drive-list" class="list-editor-list"></div>
+              <div id="target-drive-same-warning" class="path-warning" style="display: none;"></div>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
@@ -600,6 +624,7 @@
                 <button id="browse-render-export-btn" data-str="RENDER.BROWSE_DRIVE_BUTTON">Browse Drive</button>
               </div>
               <div id="render-export-dir-list" class="list-editor-list"></div>
+              <div id="render-export-dir-same-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 4px; align-items: center;">
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
@@ -659,7 +684,7 @@
                 <input type="text" id="config-clip-name-template" spellcheck="false" autocomplete="off" style="flex: 1; font-family: monospace;" />
                 <button id="config-clip-name-reset" data-str="CLIP_NAME.RESET_BUTTON" data-str-title="CLIP_NAME.RESET_TITLE">Default</button>
               </div>
-              <div id="config-clip-name-chips" style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 4px; font-size: 0.85em;"></div>
+              <div id="config-clip-name-chips" class="placeholder-chips"></div>
               <div id="config-clip-name-errors" class="path-warning" style="display: none; margin-top: 4px; color: #ef5350;"></div>
               <div id="config-clip-name-warnings" class="path-warning" style="display: none; margin-top: 4px;"></div>
               <div id="config-clip-name-preview" style="margin-top: 4px; font-size: 0.85em; opacity: 0.9; word-break: break-all;"></div>
@@ -741,12 +766,19 @@
             </div>
             <div id="render-job-container"></div>
 
+            <!-- #70: the ticked rows are what the footer buttons act on. -->
+            <div id="render-selection-row" class="action-row" style="margin-top: 8px; align-items: center; gap: 6px; font-size: 0.9em;">
+              <button id="render-select-unrendered-btn" disabled data-str="RENDER.SELECT_UNRENDERED_BUTTON" data-str-title="RENDER.SELECT_UNRENDERED_TITLE" title="Tick only the takes with no finished render in their history.">Select unrendered</button>
+              <span id="render-selection-count" class="status-text" style="margin: 0 0 0 6px;">0 of 0 selected</span>
+            </div>
+
             <!-- Per-job render queue table — replaces the old single global
                  status line + progress bar with real per-clip rows. -->
             <div class="table-wrapper" style="margin-top: 8px; max-height: 280px;">
               <table class="analyzer-table" id="render-jobs-table">
                 <thead>
                   <tr>
+                    <th class="col-center"><input type="checkbox" id="render-select-all-cb" disabled data-str-title="RENDER.SELECT_ALL_CB_TITLE" title="Tick or untick every row" /></th>
                     <th data-sort="name" data-str="RENDER.TABLE_HEADER_CLIP_NAME">Clip Name</th>
                     <th data-sort="stream" data-str="RENDER.TABLE_HEADER_STREAM">Stream</th>
                     <th data-sort="frames" data-str="RENDER.TABLE_HEADER_FRAMES">Frames</th>
@@ -761,17 +793,26 @@
                   </tr>
                 </thead>
                 <tbody id="render-jobs-tbody">
-                  <tr><td colspan="11" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
+                  <tr><td colspan="12" class="table-empty" data-str="RENDER.TABLE_EMPTY">No render jobs queued. Scan a folder, then click Start Render Batch.</td></tr>
                 </tbody>
               </table>
+            </div>
+            <!-- #644: Delete Take's steps, measuring then moving to the Recycle Bin. -->
+            <div id="render-take-delete-progress" style="display: none; align-items: center; gap: 6px; margin-top: 6px;">
+              <div class="progress-bar-container" style="margin-top: 0; width: 140px;"><div class="progress-bar-fill" style="width: 0%;"></div></div>
+              <span id="render-take-delete-progress-label"></span>
             </div>
 
             <div class="action-footer flex-between" style="margin-top: 12px; border-top: 1px solid #383838; padding-top: 10px;">
               <div class="action-buttons">
-                <button id="start-render-btn" class="primary-btn" data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
-                <button id="cancel-render-btn" disabled data-str="RENDER.CANCEL_ALL_BUTTON">Cancel All</button>
-                <button id="reset-all-render-btn" disabled data-str="RENDER.RESET_ALL_BUTTON">Reset All</button>
-                <button id="remove-all-render-btn" disabled data-str="RENDER.REMOVE_ALL_BUTTON">Remove All (Not Rendering)</button>
+                <!-- #70: each acts on the ticked rows; render_pane.js sets the
+                     label's count and the tooltip. -->
+                <button id="start-render-btn" class="primary-btn" disabled data-str="RENDER.START_RENDER_BUTTON">Start Render Batch</button>
+                <button id="cancel-render-btn" disabled>Cancel (0)</button>
+                <button id="retry-render-btn" disabled>Retry (0)</button>
+                <button id="remove-render-btn" disabled>Remove (0)</button>
+                <button id="delete-takes-render-btn" disabled>Delete Take folders (0)</button>
+                <button id="clear-render-queue-btn" disabled data-str="RENDER.CLEAR_QUEUE_BUTTON" data-str-title="RENDER.CLEAR_QUEUE_TITLE" title="Empty the list. Anything rendering is cancelled first.">Clear Queue</button>
               </div>
               <p id="render-status" class="status-text" data-str="RENDER.STATUS_WAITING">Status: Waiting...</p>
             </div>
@@ -881,7 +922,7 @@
                 <button id="rename-hltv-reset" data-str="DEMO_RENAME.RESET_BUTTON" data-str-title="DEMO_RENAME.RESET_TITLE">Default</button>
               </div>
               <div id="rename-hltv-errors" class="path-warning rename-errors" style="display: none;"></div>
-              <div id="rename-chips" class="rename-chips"></div>
+              <div id="rename-chips" class="placeholder-chips"></div>
               <label class="rename-lowercase-label" data-str-title="DEMO_RENAME.LOWERCASE_TITLE"><input type="checkbox" id="rename-lowercase" /> <span data-str="DEMO_RENAME.LOWERCASE_LABEL">Lowercase the whole name</span></label>
               <div class="row-inputs">
                 <button id="rename-list-btn" data-str="DEMO_RENAME.LIST_BUTTON" data-str-title="DEMO_RENAME.LIST_TITLE">List Demos</button>
@@ -952,6 +993,14 @@
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
                 <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
+                <!-- #426: which maps the selected style has map textures for, and the
+                     warning when the maps being built include one it hasn't. -->
+                <details id="hd-style-maps" class="hd-style-maps" hidden>
+                  <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
+                  <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
+                </details>
+                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
               </div>
@@ -1427,6 +1476,7 @@
                 <h3 data-str="ANALYZER.DEMOS_TITLE">Demos</h3>
                 <div class="analyzer-cache-controls">
                   <span id="analyzer-cache-status" class="status-text"></span>
+                  <progress id="analyzer-cache-bar" class="analyzer-cache-bar" max="1" value="0" hidden></progress>
                   <button id="analyzer-cache-all-btn" data-str="ANALYZER.CACHE_ALL_BUTTON" data-str-title="ANALYZER.CACHE_ALL_TITLE" title="Analyse every demo in this folder now">Cache all</button>
                 </div>
               </div>
@@ -1731,6 +1781,7 @@
               <tr>
                 <th data-str="TEAMS.HEADER_TAG">Tag</th>
                 <th class="col-center" data-str="TEAMS.HEADER_DEMOS">Demos</th>
+                <th class="col-center" data-str="TEAMS.HEADER_SIDES">Played as</th>
                 <th data-str="TEAMS.HEADER_NAME">Name</th>
                 <th data-str="TEAMS.HEADER_SAME_AS">Same team as</th>
               </tr>
@@ -1804,6 +1855,25 @@
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup window (#599), setup_window.js: opens by itself on a first
+         launch or when a required path is missing, and from Help > Setup….
+         The step's content is drawn by the module; only the frame is here. -->
+    <div id="setup-modal" class="modal" style="display: none;">
+      <div class="modal-content setup-modal-content" role="dialog" aria-labelledby="setup-step-title">
+        <div class="setup-header">
+          <ol id="setup-steps" class="setup-steps"></ol>
+          <h2 id="setup-step-title"></h2>
+        </div>
+        <div id="setup-step-content" class="setup-content"></div>
+        <div class="setup-footer">
+          <button id="setup-skip-btn" class="setup-skip" data-str="SETUP.SKIP_SETUP" data-str-title="SETUP.SKIP_SETUP_TITLE">Skip setup for now</button>
+          <span class="setup-footer-spacer"></span>
+          <button id="setup-back-btn" data-str="SETUP.BACK">Back</button>
+          <button id="setup-next-btn" class="primary-btn" data-str="SETUP.NEXT">Next</button>
         </div>
       </div>
     </div>
