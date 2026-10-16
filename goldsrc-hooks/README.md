@@ -178,8 +178,9 @@ is the complete list):
   demos sit directly in it. Only what is really under `dod/` is listed, not
   the other folders the game's file system merges in (`valve/`, the install
   folder's). On by default; a Settings-tab box turns it off. See
-  `src/demo_list_folders.rs`. Since #779 `dod/`'s list also has a row per
-  drive, a drive's folders are listed straight from the disk, and the Demos
+  `src/demo_list_folders.rs`. Since #779 `dod/`'s list in the game's Load
+  Demo window also has a row per drive, a drive's folders are listed
+  straight from the disk, and the Demos
   tab has Back, Forward and Up (above a drive is This PC,
   every drive as one list, where Up greys out) and a Go to dropdown: the
   game folder, Studio's analysed demos (every demo in its analyzer cache as

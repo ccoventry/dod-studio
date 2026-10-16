@@ -37,7 +37,9 @@
 //!
 //! ## Drives, Back / Forward / Up, Go to (#779)
 //!
-//! `dod/`'s list starts with a row per drive (`D:/`), and a drive-rooted
+//! In the game's Load Demo window `dod/`'s list starts with a row per drive
+//! (`D:/`); the Demos tab reaches drives through This PC and Go to instead,
+//! so its `dod/` lists only what is there. A drive-rooted
 //! folder is listed straight from the disk (the game's file system only
 //! knows paths from `dod/`); its demo rows are full paths, quoted, which
 //! `viewdemo` takes with the hook DLL (`demo_other_drives`, #776). The
@@ -1051,8 +1053,9 @@ mod hook {
             up_row,
         );
         // Drive rows are not counted: a whole drive is too much to walk for
-        // a number in brackets.
-        let listed = if folder.is_empty() {
+        // a number in brackets. Only the game's Load Demo window (the one
+        // with an up row) gets them; the Demos tab has This PC and Go to.
+        let listed = if folder.is_empty() && up_row {
             super::with_drives(listed, &drives(), up_row)
         } else {
             listed
