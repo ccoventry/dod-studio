@@ -245,7 +245,7 @@
 		"labelText"		"Up"
 		"textAlignment"		"center"
 		"command"		"demo_up"
-		"helptext"		"Up: the folder above (Backspace does the same). Above a drive is This PC, every drive in one list."
+		"helptext"		"Up: the folder above. Above a drive is This PC, every drive in one list."
 	}
 	"DemoPlace"
 	{

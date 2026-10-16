@@ -301,7 +301,7 @@ fn step(walk: fn(&mut Nav) -> bool) -> bool {
     true
 }
 
-/// The Demos tab's Up (and Backspace): the folder above. Above a drive's
+/// The Demos tab's Up: the folder above. Above a drive's
 /// root is This PC, every drive in one list, as in Explorer, and that is as
 /// high as Up goes. (The game's own Load Demo window keeps its up row,
 /// which goes from a drive's root to `dod/`, where its drive rows are.)

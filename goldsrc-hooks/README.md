@@ -180,7 +180,7 @@ is the complete list):
   folder's). On by default; a Settings-tab box turns it off. See
   `src/demo_list_folders.rs`. Since #779 `dod/`'s list also has a row per
   drive, a drive's folders are listed straight from the disk, and the Demos
-  tab has Back, Forward and Up (Backspace too; above a drive is This PC,
+  tab has Back, Forward and Up (above a drive is This PC,
   every drive as one list, where Up greys out) and a Go to dropdown: the
   game folder, Studio's analysed demos (every demo in its analyzer cache as
   one list, with the tab's filters on it), This PC, each drive, Studio's demo folders

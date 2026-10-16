@@ -338,9 +338,6 @@ const PANEL_SLOT_ON_KEY_CODE_PRESSED: usize = 101;
 /// second to the first, `cmp 0x33` / `mov 0x40`).
 const KEY_ENTER: i32 = 0x40;
 const KEY_PAD_ENTER: i32 = 0x33;
-/// `KEY_BACKSPACE`, two after `KEY_ENTER` in vgui2's key list (`KEY_SPACE`
-/// between); the Demos tab's Up, as in Explorer (#779).
-const KEY_BACKSPACE: i32 = 0x42;
 /// `Frame::Activate()`: what GameUI calls on a dialog it has just built
 /// (`jmp [vftable+0x280]`, both builds).
 const FRAME_SLOT_ACTIVATE: usize = 160;
@@ -3895,13 +3892,6 @@ mod hook {
             if let Err(why) = unsafe { goto_typed_time() } {
                 crate::commands::console_print(&format!("{NAME}: {why}\n"));
             }
-            return;
-        }
-        // Backspace on the Demos tab (outside its text boxes, which keep
-        // theirs) goes up a folder, as in Explorer.
-        let demos_page = PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void;
-        if this == demos_page && code == KEY_BACKSPACE {
-            let _ = unsafe { navigate(crate::demo_list_folders::go_up) };
             return;
         }
         let console_page = PAGE_OBJECTS[CONSOLE_PAGE].load(Ordering::Acquire) as *mut c_void;
