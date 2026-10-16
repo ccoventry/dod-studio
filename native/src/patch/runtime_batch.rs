@@ -328,6 +328,8 @@ mod tests {
             match_start_tick: None,
             source_key: None,
             spectated: false,
+            steam_id: None,
+            recorded_this_demo: false,
         }
     }
 

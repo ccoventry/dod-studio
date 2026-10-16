@@ -19,7 +19,9 @@
 
 pub mod build;
 pub mod gl_max_size;
+pub mod map_keys_cache;
 pub mod map_list;
+pub mod map_textures;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
@@ -259,7 +261,9 @@ fn count_files(dir: &Path) -> (u64, u64, Option<PathBuf>) {
     let mut files = 0;
     let mut bytes = 0;
     let mut biggest: Option<(u64, PathBuf)> = None;
+    // walkdir does not follow links by default; the depth cap is #376's.
     for e in walkdir::WalkDir::new(dir)
+        .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())

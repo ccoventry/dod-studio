@@ -44,6 +44,30 @@ pub struct Highlight {
     pub kills: Vec<HighlightKill>,
 }
 
+impl Highlight {
+    /// The player's number when they scored these kills: their entity
+    /// index, what `dodstudio_spec_target` takes and what the in-game
+    /// Highlights tab shows. The analysis counts slots from 0, the game
+    /// numbers players from 1.
+    pub fn number(&self) -> Option<u8> {
+        self.slot.and_then(|slot| slot.checked_add(1))
+    }
+
+    /// The player's SteamID64, when the demo carries one.
+    pub fn steam_id(&self) -> Option<String> {
+        crate::player::steam_id_of(&self.player_id)
+    }
+
+    /// The first kill's time on the `viewdemo` bar: what a list sorted by
+    /// time orders on.
+    pub fn first_kill_secs(&self) -> f32 {
+        self.kills
+            .iter()
+            .map(|k| k.viewdemo_secs)
+            .fold(f32::INFINITY, f32::min)
+    }
+}
+
 /// Whose highlights a list shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
@@ -57,8 +81,8 @@ pub enum Rule {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Highlights {
     /// Every player's: players in the analysis' order, each one's highlights
-    /// in the order they happened (the Capture page's row order, which saved
-    /// projects index into).
+    /// in the order they happened. [`Highlights::shown`] keeps this order:
+    /// the Capture page's row order, which saved projects index into.
     pub all: Vec<Highlight>,
     pub hltv: bool,
     /// A POV demo's recording player.
@@ -185,6 +209,24 @@ mod tests {
         assert_eq!(shown, ["brain"]);
         list.rule = Rule::Everyone;
         assert_eq!(list.shown().count(), 2);
+    }
+
+    #[test]
+    fn a_highlight_knows_its_players_number_steam_id_and_first_kill() {
+        let mut h = highlight("brain", true, 9.0);
+        assert_eq!(h.number(), Some(2));
+        assert_eq!(h.steam_id(), None);
+        h.player_id = "76561197961831029".to_string();
+        assert_eq!(h.steam_id().as_deref(), Some("76561197961831029"));
+        h.slot = None;
+        assert_eq!(h.number(), None);
+        h.kills.push(HighlightKill {
+            frame_index: 2,
+            real_secs: 4.0,
+            viewdemo_secs: 4.0,
+            weapon: Weapon::K98,
+        });
+        assert_eq!(h.first_kill_secs(), 4.0);
     }
 
     /// One DeathMsg (1-based client indices) through the analyzers that

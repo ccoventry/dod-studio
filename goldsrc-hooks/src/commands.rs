@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
-    hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
-    spectator_eye, spectator_target, texture_hires, voice, window_layout,
+    anim_fix, crosshair, decals, demo_list_folders, demo_other_drives, demo_seek, ex_interp,
+    fire_sounds, hand_signals, hudelement, missing_shots, overview_map, scoreboard,
+    spectator_crosshair, spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -551,6 +551,8 @@ pub fn poll() {
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();
+    // Installs once FileSystem_Stdio.dll is found, then costs one atomic load.
+    demo_other_drives::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
@@ -1206,6 +1208,15 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
+/// Only registered when `dodstudio_demo_other_drives` could not be a cvar.
+unsafe extern "C" fn cmd_demo_other_drives() {
+    handle_toggle(
+        demo_other_drives::NAME,
+        &demo_other_drives::ENABLED,
+        demo_other_drives::status,
+    );
+}
+
 /// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_hide_empty() {
     handle_toggle(
@@ -1490,6 +1501,11 @@ pub fn install() {
     match register(demo_list_folders::NAME, "1") {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
+    }
+    // Read by the file system's Open hook on a `D:/...` name (#776).
+    match register(demo_other_drives::NAME, "1") {
+        Some(cvar) => demo_other_drives::set_cvar(cvar),
+        None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
     }
     match register(demo_list_folders::HIDE_EMPTY.name, "1") {
         Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),

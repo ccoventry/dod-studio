@@ -1,0 +1,71 @@
+<!doctype html>
+<!--
+  Minimal harness for setup_card.js and setup_window.js (#599) — see
+  tests/e2e/README.md for the general shape. A fake snapshot stands in for
+  setup_wiring.js; every action is recorded on window.__calls.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>setup window test harness</title>
+</head>
+<body>
+  <div id="setup-card" hidden></div>
+
+  <div id="setup-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+      <ol id="setup-steps"></ol>
+      <h2 id="setup-step-title"></h2>
+      <div id="setup-step-content"></div>
+      <button id="setup-skip-btn">Skip setup for now</button>
+      <button id="setup-back-btn">Back</button>
+      <button id="setup-next-btn">Next</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { renderSetupCard } from '/src/setup_card.js';
+    import { createSetupWindow } from '/src/setup_window.js';
+    import { setupChecklist } from '/src/setup_checklist.js';
+
+    window.__calls = [];
+    const record = (name) => (...args) => { window.__calls.push([name, ...args]); return null; };
+    window.__snapshot = {
+      hlPath: 'C:\\Steam\\steamapps\\common\\Half-Life\\hl.exe',
+      hlState: 'ok',
+      hlBuild: 'anniversary',
+      hlaePath: '',
+      ffmpegUsable: null,
+      targetDrives: [{ path: 'D:\\Captures', freeBytes: 412 * 1024 ** 3 }],
+      renderExportDirs: [],
+      demoCount: 0,
+      pinnedFolders: [],
+    };
+
+    const win = createSetupWindow({
+      getSnapshot: () => window.__snapshot,
+      pickHl: record('pickHl'),
+      pickHlae: record('pickHlae'),
+      linkFfmpeg: record('linkFfmpeg'),
+      openHlaePage: record('openHlaePage'),
+      addFolder: record('addFolder'),
+      removeFolder: record('removeFolder'),
+      pickDemoFolder: async () => 'E:\\Demos',
+      onSkip: record('onSkip'),
+      onFinish: record('onFinish'),
+    });
+
+    window.__draw = () => {
+      const checklist = setupChecklist(window.__snapshot);
+      renderSetupCard(document.querySelector('#setup-card'), { checklist, snapshot: window.__snapshot }, {
+        fix: record('fix'),
+        open: (key) => { window.__calls.push(['open', key]); win.open(key); },
+      });
+      win.render();
+    };
+    window.__win = win;
+    window.__draw();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>
