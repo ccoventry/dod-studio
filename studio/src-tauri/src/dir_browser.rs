@@ -120,8 +120,19 @@ fn native_roots() -> Vec<DirEntryLite> {
 
 /// Lists the immediate subfolders and `.dem` files of `path`. `path: None`
 /// returns the drive roots (Windows) or `/` (elsewhere) as the top of the tree.
+///
+/// Runs on a blocking thread: on a cloud drive each subfolder's demo count
+/// can be a network round trip, and on the main thread that froze the whole
+/// window for ~30 s (#789).
 #[tauri::command]
-pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
+pub async fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
+    crate::messages::flatten_spawn_blocking(tokio::task::spawn_blocking(move || {
+        list_directory(path)
+    }))
+    .await
+}
+
+fn list_directory(path: Option<String>) -> Result<DirListing, String> {
     let Some(path) = path else {
         return Ok(DirListing {
             path: None,
@@ -192,7 +203,7 @@ pub fn browse_directory(path: Option<String>) -> Result<DirListing, String> {
 
 /// A sensible starting folder for the picker — the user's Documents
 /// directory, falling back to their home directory.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn default_browse_dir() -> Option<String> {
     dirs::document_dir()
         .or_else(dirs::home_dir)
@@ -235,9 +246,14 @@ mod tests {
 /// Non-recursive `.dem` count for a single folder — used by the Explorer
 /// sidebar's Quick Links rows (Pinned/Recent/Local), which don't otherwise
 /// need a full directory listing.
+///
+/// On a blocking thread for the same reason as `browse_directory` (#789).
 #[tauri::command]
-pub fn count_demo_files_in_folder(path: String) -> usize {
-    count_demo_files(&PathBuf::from(path))
+pub async fn count_demo_files_in_folder(path: String) -> Result<usize, String> {
+    crate::messages::spawn_blocking_result(tokio::task::spawn_blocking(move || {
+        count_demo_files(&PathBuf::from(path))
+    }))
+    .await
 }
 
 fn is_drive_root(path: &Path) -> bool {

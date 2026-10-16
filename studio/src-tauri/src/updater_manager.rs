@@ -144,7 +144,7 @@ pub fn is_debug_build() -> bool {
 /// this PC that's the repo; for a CI-built installer it's a CI runner path
 /// that doesn't exist on the user's machine, so this returns `None` and the
 /// title is unchanged. Plain file reads, no `git` process.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn local_git_branch() -> Option<String> {
     git_branch_from(std::path::Path::new(env!("CARGO_MANIFEST_DIR")))
 }
