@@ -791,10 +791,12 @@ const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
 /// The short name the game's own Load Demo window shows for a row: the
 /// last part of its path (`Philly LAN/`, `../`, `D:/`, `x.dem`), not the
 /// whole path, which for a folder on another drive reads like a Go to entry.
+/// A folder's name starts with a space, as on the Demos tab, so the list's
+/// sort puts `../`, the drives and the folders before the demos (#790).
 pub fn short_row_name(row: &str) -> String {
     let path = row.trim().trim_matches('"');
     match path.strip_suffix('/') {
-        Some(folder) => format!("{}/", folder.rsplit('/').next().unwrap_or(folder)),
+        Some(folder) => format!(" {}/", folder.rsplit('/').next().unwrap_or(folder)),
         None => path.rsplit('/').next().unwrap_or(path).to_string(),
     }
 }
@@ -1575,11 +1577,11 @@ mod tests {
 
     #[test]
     fn the_game_window_shows_short_names() {
-        assert_eq!(short_row_name("H:/DoD Demos/Philly LAN/"), "Philly LAN/");
-        assert_eq!(short_row_name("H:/DoD Demos/../"), "../");
-        assert_eq!(short_row_name("D:/"), "D:/");
-        assert_eq!(short_row_name("../"), "../");
-        assert_eq!(short_row_name("temp demos/"), "temp demos/");
+        assert_eq!(short_row_name("H:/DoD Demos/Philly LAN/"), " Philly LAN/");
+        assert_eq!(short_row_name("H:/DoD Demos/../"), " ../");
+        assert_eq!(short_row_name("D:/"), " D:/");
+        assert_eq!(short_row_name("../"), " ../");
+        assert_eq!(short_row_name("temp demos/"), " temp demos/");
         assert_eq!(short_row_name("temp demos/x.dem"), "x.dem");
         assert_eq!(short_row_name("\"H:/DoD Demos/a b.dem\""), "a b.dem");
         assert_eq!(short_row_name("x.dem"), "x.dem");
