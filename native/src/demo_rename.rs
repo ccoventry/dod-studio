@@ -196,18 +196,7 @@ fn modified_unix_secs(path: &Path) -> Option<u64> {
 
 /// Every `.dem` under `folder`, subfolders too, sorted by path.
 pub fn demos_in(folder: &Path) -> Vec<PathBuf> {
-    let mut demos: Vec<PathBuf> = walkdir::WalkDir::new(folder)
-        .into_iter()
-        .flatten()
-        .filter(|e| e.file_type().is_file())
-        .map(walkdir::DirEntry::into_path)
-        .filter(|p| {
-            p.extension()
-                .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
-        })
-        .collect();
-    demos.sort();
-    demos
+    crate::sys::folder_walk::Walker::new().demos(folder)
 }
 
 /// One rename: full paths.

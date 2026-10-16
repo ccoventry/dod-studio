@@ -93,6 +93,9 @@
 //! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `demo_other_drives`: the `dodstudio_demo_other_drives` cvar -- `viewdemo`
+//!   and `playdemo` open a demo on another drive by its full path, through a
+//!   swap of the file system's `Open` slot (issue #776).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
@@ -189,6 +192,7 @@ mod debug;
 mod decals;
 mod demo_file;
 mod demo_list_folders;
+mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
