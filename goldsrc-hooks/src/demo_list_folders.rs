@@ -301,19 +301,29 @@ fn step(walk: fn(&mut Nav) -> bool) -> bool {
     true
 }
 
-/// The Demos tab's Up (and Backspace): the folder above, as the up row
-/// would open it. A drive's root goes back to `dod/`.
+/// The Demos tab's Up (and Backspace): the folder above. A drive's root is
+/// as high as Up goes; Go to reaches the game folder and the other drives.
+/// (The game's own Load Demo window keeps its up row, which goes from a
+/// drive's root to `dod/`, where its drive rows are.)
 pub fn go_up() -> bool {
     let here = current_folder();
-    let up = resolve(&format!("{here}../"));
+    let up = up_from(&here);
     up != here && go_to(&up)
+}
+
+/// The folder Up opens from `here`: `here` itself at a drive's root.
+fn up_from(here: &str) -> String {
+    if is_drive_root(here) {
+        return here.to_string();
+    }
+    resolve(&format!("{here}../"))
 }
 
 /// `folder`, a path from `dod`, as its drive (`C:/`) when it climbs to the
 /// drive's root or past it. Windows lists `C:/../` as `C:/`, so without this
 /// Up and the up row at the root only grew the path by `../` each time, and
-/// the line above the list read `.../../../`. As a drive path, Up goes back
-/// to `dod/` as from any drive row. `None` for any other folder.
+/// the line above the list read `.../../../`. As a drive path, Up stops
+/// there as at any drive's root. `None` for any other folder.
 fn drive_root_of(dod: &Path, folder: &str) -> Option<String> {
     if folder.is_empty() || is_drive_path(folder) || is_studio_place(folder) {
         return None;
@@ -1328,8 +1338,11 @@ mod tests {
         assert_eq!(drive_root_of(dod, ""), None);
         assert_eq!(drive_root_of(dod, "D:/"), None);
         assert_eq!(drive_root_of(dod, STUDIO_PLACE), None);
-        // Up from the drive goes back to dod/, as from a drive row.
-        assert_eq!(resolve("C:/../"), "");
+        // Up stops at a drive's root; below it, it goes one folder up.
+        assert_eq!(up_from("C:/"), "C:/");
+        assert_eq!(up_from("D:/demos/"), "D:/");
+        assert_eq!(up_from("temp demos/"), "");
+        assert_eq!(up_from(STUDIO_PLACE), "");
     }
 
     #[test]

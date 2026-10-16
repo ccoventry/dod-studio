@@ -245,7 +245,7 @@
 		"labelText"		"Up"
 		"textAlignment"		"center"
 		"command"		"demo_up"
-		"helptext"		"Up: the folder above (Backspace does the same). A drive's root goes back to the game folder."
+		"helptext"		"Up: the folder above (Backspace does the same), as far as the drive's root. Go to reaches the game folder and the other drives."
 	}
 	"DemoPlace"
 	{
