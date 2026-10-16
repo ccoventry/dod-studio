@@ -6,6 +6,7 @@ mod capture_manager;
 mod combine_manager;
 mod crash_maps_manager;
 mod demo_cache_cmd;
+mod demo_links_manager;
 mod demo_rename_manager;
 mod demo_split_manager;
 mod dir_browser;
@@ -278,11 +279,30 @@ fn cancel_scan(scan_state: tauri::State<'_, ScanManager>) -> Result<(), String> 
     Ok(())
 }
 
+/// The drive (`c:`) or share (`\\server\share`) a path is on, lowercased;
+/// `None` for a path with no prefix.
+fn volume_key(path: &std::path::Path) -> Option<String> {
+    match path.components().next()? {
+        std::path::Component::Prefix(prefix) => {
+            Some(prefix.as_os_str().to_string_lossy().to_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// Free space across the capture folders, each drive counted once: two
+/// folders on one drive share its space.
 #[tauri::command]
 fn calculate_export_pool_space(paths: Vec<String>) -> Result<u64, String> {
     let mut total: u64 = 0;
+    let mut seen = std::collections::HashSet::new();
     for path_str in paths {
         let p = std::path::PathBuf::from(path_str);
+        if let Some(key) = volume_key(&p)
+            && !seen.insert(key)
+        {
+            continue;
+        }
         let space = native::sys::disk::get_available_bytes(&p);
         if space != u64::MAX {
             total += space;
@@ -798,6 +818,9 @@ pub fn run() {
             cancel_audit,
             crash_maps_manager::crash_map_warnings,
             crash_maps_manager::forget_crash_map,
+            demo_links_manager::list_demo_links,
+            demo_links_manager::add_demo_link,
+            demo_links_manager::remove_demo_link,
             packet_limit_manager::engine_packet_entity_limit,
             combine_manager::combine_plan,
             combine_manager::combine_clips,
@@ -838,6 +861,7 @@ pub fn run() {
             hd_manager::hd_save_style,
             hd_manager::hd_remove_style,
             hd_manager::hd_save_map_list,
+            hd_manager::hd_world_coverage,
             hd_manager::hd_preview,
             blender_manager::blender_status,
             blender_manager::blender_set_exe,
@@ -851,4 +875,28 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod pool_space_tests {
+    use super::volume_key;
+    use std::path::Path;
+
+    #[cfg(windows)]
+    #[test]
+    fn folders_on_one_drive_share_a_key() {
+        assert_eq!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"c:\Programs\HLAE"))
+        );
+        assert_ne!(
+            volume_key(Path::new(r"C:\captures")),
+            volume_key(Path::new(r"D:\captures"))
+        );
+        assert_eq!(
+            volume_key(Path::new(r"\\nas\movies\a")),
+            volume_key(Path::new(r"\\NAS\Movies\b"))
+        );
+        assert_eq!(volume_key(Path::new("relative")), None);
+    }
 }

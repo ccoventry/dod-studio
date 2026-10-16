@@ -32,7 +32,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, recordingPlayerStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -52,9 +52,11 @@ import { createQueueScan } from './queue_scan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
-import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring } from './config_wiring.js';
+import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
 import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
+import { initDemoLinks } from './demo_links.js';
+import { createSetup } from './setup_wiring.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -91,6 +93,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   let targetDrives = [];
   let renderExportDirs = []; // JIT multi-drive export pool for Render Studio
   let currentScannedDemos = [];
+  // The Setup window and the Capture page's checklist (#599): setup_wiring.js,
+  // created once everything it reads is wired, near the end of startup.
+  let setup = null;
+  let savedSetupDismissed = false;
   let selectedDemoIdx = null;
   // take_key -> uid[]. Recorded by capture_pane.js when a batch verifies a
   // block on disk; resolved by render_pane.js when that take finishes
@@ -193,6 +199,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       updateExportPoolIndicator();
       persistAppSettings();
       refreshLaunchGuard({ targetDrives, currentScannedDemos });
+      setup?.refresh();
     },
   });
 
@@ -202,7 +209,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     fields: [{ key: 'value', type: 'text', primitive: true, placeholder: STRINGS.RENDER.EXPORT_DIR_ROW_PLACEHOLDER }],
     unique: true,
     browse: pickRenderExportDir,
-    onChange: () => persistAppSettings(),
+    onChange: () => { persistAppSettings(); setup?.refresh(); refreshSameDriveWarning(renderExportDirs, 'clips'); },
   });
 
   // Demo scan workers (#246): 1..8, default 2 (SCAN_CONCURRENCY). Each one
@@ -236,6 +243,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       targetDrives,
       renderExportDirs,
       scanWorkers: readScanWorkers(),
+      // Read from the file until setup_wiring.js exists, so a save made
+      // earlier in startup keeps it.
+      setupDismissed: setup ? setup.isDismissed() : savedSetupDismissed,
     }),
     currentCaptureMode,
   });
@@ -257,6 +267,7 @@ window.addEventListener("DOMContentLoaded", async () => {
         demoFolderHistory = [...settings.demo_folder_history];
       }
       scanFoldersForDemos = !!settings.scan_folders_for_demos;
+      savedSetupDismissed = !!settings.setup_dismissed;
       if (settings.analyzer_explorer_width) {
         analyzerExplorerWidth = settings.analyzer_explorer_width;
       }
@@ -268,6 +279,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       if (Array.isArray(settings.render_export_dirs) && settings.render_export_dirs.length > 0) {
         renderExportDirs = [...settings.render_export_dirs];
         renderExportDirsEditor.render();
+        refreshSameDriveWarning(renderExportDirs, 'clips');
       }
       hydrateCommandsState(settings.init_commands, settings.custom_commands);
       setCommandProfiles(settings.command_profiles, settings.command_profile_active);
@@ -342,11 +354,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   function updateDemoFooter(demos) {
     const footerEl = document.querySelector('#demo-list-footer');
     if (footerEl) {
-      // Same recording-player filter the Highlights column uses (M2) — this
-      // used to sum every player's streaks in the demo, not just the
-      // recording player's, and could read in the hundreds where the
-      // visible Highlights column summed to a fraction of that.
-      const totalHighlights = (demos || []).reduce((sum, d) => sum + recordingPlayerStreaks(d).length, 0);
+      // The same highlights the Highlights column counts (M2).
+      const totalHighlights = (demos || []).reduce((sum, d) => sum + listedStreaks(d).length, 0);
       footerEl.textContent = STRINGS.WORKSPACE.demoListFooter((demos || []).length, totalHighlights);
     }
     // Clear Untracked/Clear All only make sense with something in the
@@ -357,6 +366,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (clearUntrackedBtnEl) clearUntrackedBtnEl.disabled = isEmpty;
     const clearAllBtnEl = document.querySelector('#clear-all-btn');
     if (clearAllBtnEl) clearAllBtnEl.disabled = isEmpty;
+    setup?.refresh();
   }
 
   // Which match and half each queued demo is, and Group by match (#685):
@@ -369,7 +379,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
   // queue_scan.js. Declared before anything can start a scan; the earlier
   // callers above reach triggerAutoScan through closures.
-  const { triggerAutoScan } = createQueueScan({
+  const { triggerAutoScan, addDemoFolder } = createQueueScan({
     getDemos: () => currentScannedDemos,
     setSelectedDemoIdx: (idx) => { selectedDemoIdx = idx; },
     selectDemoAndRenderDetail: (demo, idx) => selectDemoAndRenderDetail(demo, idx),
@@ -384,6 +394,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   async function updateExportPoolIndicator() {
     const indicator = document.querySelector('#export-pool-free-indicator');
+    refreshSameDriveWarning(targetDrives);
     if (!indicator) return;
     if (targetDrives.length === 0) {
       indicator.textContent = STRINGS.MAIN.EXPORT_POOL_FREE_DEFAULT;
@@ -659,6 +670,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   // Read at click time, not captured: the hl.exe path can be set after a scan
   // has already run and left the banner up.
   initMapWarnings(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
+  initDemoLinks(() => document.querySelector('#hl-path-input')?.value?.trim() || '');
   // capture_pane.js owns the Scheduled Command list, so the floor check reads
   // it from there rather than keeping a second copy.
   initRollFloors(() => getCommandsState().custom_commands);
@@ -680,7 +692,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   initClipNameSettings({
     getHighlight: () => {
       const demo = selectedDemoIdx !== null ? currentScannedDemos[selectedDemoIdx] : null;
-      const own = demo ? recordingPlayerStreaks(demo) : [];
+      const own = demo ? listedStreaks(demo) : [];
       const streak = own.find((s) => s.selected) || own[0];
       return streak ? { demo, streak } : null;
     },
@@ -762,6 +774,19 @@ window.addEventListener("DOMContentLoaded", async () => {
     getAnalyzerExplorerWidth: () => analyzerExplorerWidth,
     setAnalyzerExplorerWidth,
   });
+
+  setup = createSetup({
+    getDemos: () => currentScannedDemos,
+    getScanPaths: () => scanPaths,
+    getTargetDrives: () => targetDrives,
+    getRenderExportDirs: () => renderExportDirs,
+    captureFolders: { add: (p) => driveOverridesEditor.addItem(p), remove: (p) => driveOverridesEditor.removeItem(p) },
+    renderFolders: { add: (p) => renderExportDirsEditor.addItem(p), remove: (p) => renderExportDirsEditor.removeItem(p) },
+    addDemoFolder: (folder) => addDemoFolder(folder),
+    persistAppSettings: () => persistAppSettings(),
+    dismissed: savedSetupDismissed,
+  });
+  setup.start();
 
   // Context-Aware Shortcut Dispatcher
   window.addEventListener('keydown', (e) => {

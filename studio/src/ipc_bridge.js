@@ -741,6 +741,35 @@ export async function crashMapWarnings(demoPaths) {
     });
 }
 
+/** The demo folders linked into the game folder of `hlExe` (#376). Throws
+ *  the reason when it cannot read them; demo_links.js shows it. */
+export async function listDemoLinks(hlExe) {
+  return invoke("list_demo_links", { hlExe })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_demo_links):", err);
+      throw err;
+    });
+}
+
+/** Links `folder` into the game folder of `hlExe` (#376). Throws why it was
+ *  refused; demo_links.js shows it. */
+export async function addDemoLink(hlExe, folder) {
+  return invoke("add_demo_link", { hlExe, folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (add_demo_link):", err);
+      throw err;
+    });
+}
+
+/** Removes the link `name` only; the folder it points at stays (#376). */
+export async function removeDemoLink(hlExe, name) {
+  return invoke("remove_demo_link", { hlExe, name })
+    .catch((err) => {
+      console.error("IPC Execution Error (remove_demo_link):", err);
+      throw err;
+    });
+}
+
 /** The engine's MAX_PACKET_ENTITIES beside hl.exe (#207), or null. Never
  *  toasts: the warning it feeds simply assumes the pre-Anniversary 256. */
 export async function enginePacketEntityLimit(gamePath) {
@@ -1121,6 +1150,17 @@ export async function hdSaveMapList(gamePath, text) {
     .catch((err) => {
       console.error("IPC Execution Error (hd_save_map_list):", err);
       showToast(STRINGS.IPC.hdMapListFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Which maps each style has map textures for (#426):
+ *  native::hd::map_textures::WorldCoverage. The HD page shows a failure in
+ *  its own coverage line, so there is no toast. */
+export async function hdWorldCoverage(gamePath) {
+  return invoke("hd_world_coverage", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_world_coverage):", err);
       throw err;
     });
 }

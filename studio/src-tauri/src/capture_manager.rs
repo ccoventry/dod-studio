@@ -64,6 +64,7 @@ use native::patch::{
     CaptureBlock, CaptureStreak, CommandRelation, CustomCommand, PatchJob, PatcherConfig,
     StreamPatcher, build_batch_queue, build_preview_patch_jobs,
 };
+use native::sys::folder_walk::{Kind, Step, Walker};
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -318,6 +319,13 @@ pub struct SerializedStreak {
     /// existed: such a demo is scanned again (queue_scan.js).
     #[serde(default)]
     pub spectated: bool,
+    /// `CaptureStreak::steam_id`.
+    #[serde(default)]
+    pub steam_id: Option<String>,
+    /// `CaptureStreak::recorded_this_demo`. Absent from projects saved
+    /// before #573, which the frontend tells by it (queue_filters.js).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recorded_this_demo: Option<bool>,
 }
 
 impl From<SerializedStreak> for CaptureStreak {
@@ -343,6 +351,8 @@ impl From<SerializedStreak> for CaptureStreak {
             status: native::patch::types::HighlightStatus::Pending,
             source_key: s.source_key,
             spectated: s.spectated,
+            steam_id: s.steam_id,
+            recorded_this_demo: s.recorded_this_demo.unwrap_or(false),
         }
     }
 }
@@ -767,16 +777,10 @@ pub struct VerifiedBlock {
 
 /// Everything under `path`, in bytes. 0 for a folder that isn't there.
 fn folder_bytes(path: &Path) -> u64 {
-    let Ok(entries) = std::fs::read_dir(path) else {
-        return 0;
-    };
-    entries
-        .flatten()
-        .map(|e| match e.file_type() {
-            Ok(t) if t.is_dir() => folder_bytes(&e.path()),
-            Ok(_) => e.metadata().map(|m| m.len()).unwrap_or(0),
-            Err(_) => 0,
-        })
+    native::sys::folder_walk::Walker::new()
+        .files(path)
+        .iter()
+        .map(|file| std::fs::metadata(file).map(|m| m.len()).unwrap_or(0))
         .sum()
 }
 
@@ -1720,6 +1724,8 @@ impl From<CaptureStreak> for SerializedStreak {
             victim_factions: Vec::new(),
             source_key: c.source_key,
             spectated: c.spectated,
+            steam_id: c.steam_id,
+            recorded_this_demo: Some(c.recorded_this_demo),
         }
     }
 }
@@ -1838,49 +1844,50 @@ fn locate_missing_demos_within(
         return missing;
     }
 
+    // A search folder listed twice, or inside another, is read once.
     let mut visited = std::collections::HashSet::new();
-    let mut entries = 0usize;
-    let mut queue: std::collections::VecDeque<(PathBuf, usize)> =
-        search_dirs.iter().map(|d| (d.clone(), 0)).collect();
-    while let Some((dir, depth)) = queue.pop_front() {
-        if !visited.insert(same_path_key(&dir.to_string_lossy())) {
-            continue;
-        }
-        let Ok(read) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in read.flatten() {
-            entries += 1;
-            if entries > max_entries {
-                return missing;
-            }
-            let path = entry.path();
-            let Ok(meta) = entry.metadata() else { continue };
-            if meta.is_dir() {
-                if depth < LOCATE_MAX_DEPTH {
-                    queue.push_back((path, depth + 1));
+    let roots: Vec<&PathBuf> = search_dirs
+        .iter()
+        .filter(|d| visited.insert(same_path_key(&d.to_string_lossy())))
+        .collect();
+    Walker::new()
+        .breadth_first()
+        // Folders LOCATE_MAX_DEPTH below a search folder are still read.
+        .max_depth(LOCATE_MAX_DEPTH + 1)
+        .max_entries(max_entries)
+        .walk_roots(&roots, &mut |found| {
+            match found.kind {
+                Kind::Dir => {
+                    return visited
+                        .insert(same_path_key(&found.path.to_string_lossy()))
+                        .into();
                 }
-                continue;
+                Kind::Link => return Step::Skip,
+                Kind::File => {}
             }
-            let is_dem = path
-                .extension()
-                .is_some_and(|e| e.eq_ignore_ascii_case("dem"));
-            if !is_dem || !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
-                continue;
+            if !found.is_demo() {
+                return Step::Enter;
             }
-            let Some(key) = demo_file_key(&path) else {
-                continue;
+            let Ok(meta) = std::fs::metadata(&found.path) else {
+                return Step::Enter;
+            };
+            if !wanted.iter().any(|(_, _, size)| *size == meta.len()) {
+                return Step::Enter;
+            }
+            let Some(key) = demo_file_key(&found.path) else {
+                return Step::Enter;
             };
             for (i, wanted_key, _) in &wanted {
                 if missing[*i].candidate.is_none() && key == *wanted_key {
-                    missing[*i].candidate = Some(path.to_string_lossy().to_string());
+                    missing[*i].candidate = Some(found.path.to_string_lossy().to_string());
                 }
             }
             if missing.iter().all(|m| m.candidate.is_some()) {
-                return missing;
+                Step::Stop
+            } else {
+                Step::Enter
             }
-        }
-    }
+        });
     missing
 }
 
@@ -2087,27 +2094,27 @@ pub async fn scan_directory_impl(
             }
         }
 
-        while let Some(dir) = dir_stack.pop() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_dir() {
-                        dir_stack.push(path);
-                    } else if path.is_file()
-                        && path.extension().map(|ext| ext == "dem").unwrap_or(false)
-                    {
-                        let insert_idx = list
-                            .binary_search_by(|p: &PathBuf| {
-                                p.file_name()
-                                    .unwrap_or_default()
-                                    .cmp(path.file_name().unwrap_or_default())
-                            })
-                            .unwrap_or_else(|pos| pos);
-                        list.insert(insert_idx, path);
-                    }
-                }
+        // A picked folder is read through even when it is a link; links
+        // inside it are not, so a junction back up the tree cannot loop.
+        Walker::new().walk_roots(&dir_stack, &mut |found| {
+            if found.kind == Kind::File
+                && found
+                    .path
+                    .extension()
+                    .map(|ext| ext == "dem")
+                    .unwrap_or(false)
+            {
+                let insert_idx = list
+                    .binary_search_by(|p: &PathBuf| {
+                        p.file_name()
+                            .unwrap_or_default()
+                            .cmp(found.path.file_name().unwrap_or_default())
+                    })
+                    .unwrap_or_else(|pos| pos);
+                list.insert(insert_idx, found.path.clone());
             }
-        }
+            Step::Enter
+        });
 
         // Demos already in the queue and unchanged on disk are not parsed
         // again: re-adding a folder to pick up one new demo used to re-parse
@@ -2982,7 +2989,7 @@ fn is_obs_process_running() -> bool {
 }
 
 /// True if any `hl.exe` or `hlae.exe` process is currently running.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_engine_processes() -> bool {
     native::sys::process::is_running(ENGINE_PROCESS_NAMES)
 }
@@ -3006,7 +3013,7 @@ pub async fn steam_state() -> Result<String, String> {
 /// Steam joined any job object DoD Studio runs in -- `cargo run`, under
 /// `npm run tauri dev`, puts it in one that kills every process inside when
 /// cargo exits -- so closing or rebuilding Studio closed Steam too.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn start_steam() -> Result<(), String> {
     let exe = native::sys::steam::steam_exe().ok_or(crate::messages::STEAM_NOT_FOUND)?;
     // The registry spells it `c:/program files (x86)/steam/steam.exe`, and
@@ -3020,7 +3027,7 @@ pub fn start_steam() -> Result<(), String> {
 }
 
 /// Aggressively terminates every running `hl.exe`/`hlae.exe` instance.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn kill_engine_processes() -> Result<(), String> {
     let sys = native::sys::process::snapshot();
     for process in sys.processes().values() {

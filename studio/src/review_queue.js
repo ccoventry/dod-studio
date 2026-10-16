@@ -11,7 +11,7 @@
 //    only time demos don't want rows ticked). Skip always unticks.
 // Status is left alone: it records what the pipeline did, not the user's call.
 
-import { recordingPlayerStreaks } from './queue_filters.js';
+import { listedStreaks } from './queue_filters.js';
 import { streakUid, setCuration, CURATION } from './take_index.js';
 
 /** The game speaks yes/no; the row keeps Keep/Skip. */
@@ -29,7 +29,7 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1) {
   let skipped = 0;
   for (const demo of demos || []) {
     if (!checked.has(demo.path)) continue;
-    const streaks = recordingPlayerStreaks(demo)
+    const streaks = listedStreaks(demo)
       .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills);
     const rows = [];
     for (const streak of streaks) {

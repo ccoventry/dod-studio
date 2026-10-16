@@ -14,6 +14,7 @@ import { streakUid, pruneTakeIndex } from './take_index.js';
 import { emptyProjectTeams, normalizeProjectTeams } from './project_teams.js';
 import { refreshTeamsPane } from './teams_pane.js';
 import { projectFolders } from './project_paths.js';
+import { dropOtherPlayersSavedStreaks } from './queue_filters.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
 
@@ -217,6 +218,9 @@ export function createProjectSession({
             // sessions saved before the fix, instead of replaying whatever
             // text got baked in at save time.
             data.demos.forEach(demo => (demo.streaks || []).forEach(updateStreakVisuals));
+            // A project saved before #573 holds other players' highlights
+            // the table never showed; a new scan lists the recorder's alone.
+            data.demos.forEach(dropOtherPlayersSavedStreaks);
             loadDemos(data.demos);
             showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
             await checkMissingDemos(selected, data.scanPaths || []);

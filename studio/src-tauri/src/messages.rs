@@ -130,6 +130,7 @@ pub fn blender_not_blender(path: &str) -> String {
 pub const HD_NEEDS_GAME_PATH: &str = "Set the Half-Life Executable in Configuration → Paths first: the HD files live in its dod folder.";
 pub const HD_ALREADY_RUNNING: &str =
     "A download or build is already running. Wait for it, or Cancel it.";
+pub const HD_COVERAGE_RUNNING: &str = "Studio is already checking which maps each style covers.";
 pub const HD_NO_SCRIPTS: &str =
     "This copy of DoD Studio has no HD build scripts (goldsrc-hooks/tools/hd).";
 pub const HD_NO_PYTHON: &str =
