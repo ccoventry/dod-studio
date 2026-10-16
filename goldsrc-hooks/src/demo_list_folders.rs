@@ -810,6 +810,13 @@ const KEYVALUES_SLOT_SET_STRING: usize = 17;
 const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
+/// `Panel::InvalidateLayout(bool layoutNow, bool reloadScheme)` and
+/// `ListPanel::OnMouseWheeled(int delta)`, as `studio_panel` uses them on the
+/// Demos tab: a refill leaves the scroll bar's value where it was, so a list
+/// scrolled down far in a long folder showed nothing in a shorter one. Laid
+/// out first, the bar has the new folder's range before the wheel clamps it.
+const PANEL_SLOT_INVALIDATE_LAYOUT: usize = 58;
+const LIST_SLOT_ON_MOUSE_WHEELED: usize = 99;
 
 /// The short name the game's own Load Demo window shows for a row: the
 /// last part of its path (`Philly LAN/`, `../`, `D:/`, `x.dem`), not the
@@ -1271,6 +1278,16 @@ mod hook {
                     }
                 }
                 id = next(list, id);
+            }
+            if rows > 0 {
+                // Each fill is a folder opened (or the window opened): start
+                // it at the top, as the Demos tab does.
+                let lay_out: unsafe extern "thiscall" fn(*mut c_void, i32, i32) =
+                    cast(slot(list, PANEL_SLOT_INVALIDATE_LAYOUT));
+                lay_out(list, 1, 0);
+                let wheel: unsafe extern "thiscall" fn(*mut c_void, i32) =
+                    cast(slot(list, LIST_SLOT_ON_MOUSE_WHEELED));
+                wheel(list, 100_000);
             }
             rows > 0
         }
