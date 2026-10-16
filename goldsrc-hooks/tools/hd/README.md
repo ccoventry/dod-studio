@@ -1,6 +1,6 @@
 # HD asset build scripts
 
-These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, world sprites, decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
+These scripts make the upscaled files that `goldsrc-hooks`' HD texture hook (`src/texture_hires.rs`) swaps in while the game loads: map textures, model skins, sprites (world sprites and, since #728, the HUD's own: kill-feed and weapon icons, crosshairs, scopes, hint icons, HLTV icons), decals (bullet holes, blood, scorch marks, map logos), detail textures and skyboxes. Nothing in the game's own files is changed. Everything goes into one folder, `<game>\dod_addon\dodstudio_hd\`, which you can delete to go back to stock. An install built before #415 has it in `<game>\dod\dodstudio_hd\` instead, and keeps using that one until `dod_addon` has its own: to move it, move the whole `dodstudio_hd` folder from `dod` into `dod_addon` (make `dod_addon` if it isn't there).
 
 The hook turns itself on when it finds a `dodstudio_hd` folder; `dodstudio_hd_enabled 0` in the game console (or `movie.cfg`) turns it off.
 
@@ -186,7 +186,7 @@ Every script upscales 250 files at a time and writes each batch before starting 
 
 - **Map textures:** `<name>_<hash>.tga`
 - **Model skins:** `<skin name>_<hash>.tga`
-- **Sprites:** `<sprite>_<frame>_<hash>.tga`
+- **Sprites:** `<sprite>_<frame>_<hash>.tga`, HUD atlases included (`weapons1_0_<hash>.tga`, `hud_icons_0_<hash>.tga`); the game draws a HUD sprite at the size `hud.txt` says whatever the file's size, so the file just needs the same layout at a multiple of the original
 - **Decals:** `<name>_<hash>.tga`, where the name's first character is the one the game uses, not the wad's: `{` for a cut-out decal (its palette ends in pure blue), `}` for every other (`}scorch1`, `{shot5`)
 - **Detail textures and skies:** the same names as in `gfx\detail` and `gfx\env`
 
@@ -246,7 +246,7 @@ Lists saved in this folder by an older version still work while the install has 
 | `build_all.py` | runs everything below, for each style |
 | `world_hd.py` | map textures (embedded in the BSP or from its wads) |
 | `models_hd.py` | model skins |
-| `sprites_hd.py` | world sprite frames (HUD sprites are never replaced, so they're skipped) |
+| `sprites_hd.py` | sprite frames, world and HUD (`--no-hud` leaves the HUD atlases out) |
 | `decals_hd.py` | decals from `decals.wad` (players' sprays can't be built: they arrive with the demo) |
 | `detail_hd.py` | detail textures |
 | `sky_hd.py` | skybox faces |
