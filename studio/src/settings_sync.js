@@ -12,11 +12,13 @@ import { numberField } from './number_field.js';
 import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
+import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
  *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
- *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers }),
+ *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
+ *   setupDismissed }),
  *   and currentCaptureMode().
  */
 export function createSettingsSync({ getState, currentCaptureMode }) {
@@ -71,7 +73,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
-    const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked || false;
+    const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
     const keepGameBehind = document.querySelector('#config-keep-game-behind')?.checked ?? true;
 
     const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
@@ -90,6 +92,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const settingsPayload = {
       hlae_path: hlaePath,
       hl_path: hlPath,
+      game_folder: getGameFolder(),
       ffmpeg_path: ffmpegPath,
       goldsrc_hooks_dll_path: goldsrcHooksDllPath,
       pinned_folders: state.scanPaths,
@@ -150,7 +153,8 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_clips_after_batch: finishClipsAfterBatch,
       finish_codec_obs: finishCodecObs,
       finish_codec_video: finishCodecVideo,
-      finish_codec_frames: finishCodecFrames
+      finish_codec_frames: finishCodecFrames,
+      setup_dismissed: !!state.setupDismissed
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -185,6 +189,8 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
     // Deferred: the init commands hydrate later in this same load, and the
     // warning is about how those two interact.
   }
+  // Always, so a file without one (written before #402) shows `dod`.
+  setGameFolder(settings.game_folder);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;
@@ -318,7 +324,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
-  if (hookRunsBatchEl) hookRunsBatchEl.checked = !!settings.hook_runs_batch;
+  if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {

@@ -28,6 +28,12 @@
 //!     are drawn by different code paths and do not otherwise share a look.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
+//!   - `spectator_gun`: the gun drops off the bottom of the screen when the
+//!     player's own would (sprint, jump, prone, ladder).
+//! - `spectator_deathcam`: `dodstudio_spec_deathcam`, the game's own death cam
+//!   when the watched player dies, as his recording shows it, instead of the
+//!   rolled view from his dead eyes. Its own switch: a movie wants it, a
+//!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
 //! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
@@ -90,6 +96,9 @@
 //! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `demo_other_drives`: the `dodstudio_demo_other_drives` cvar -- `viewdemo`
+//!   and `playdemo` open a demo on another drive by its full path, through a
+//!   swap of the file system's `Open` slot (issue #776).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
@@ -123,6 +132,10 @@
 //!   longer darkens sprites until the game restarts (issue #467). Two bytes in
 //!   `GL_Upload32`, both builds. On by default; `GOLDSRC_HOOKS_SPRITEBLEND_FIX=0`
 //!   turns it off.
+//! - `game_dir_check`: demos recorded in `dod` play in a copy of the game
+//!   folder (`-game dod_movies`), which the engine otherwise refuses with
+//!   "Server is running game dod" (#402). One byte in `CL_ParseServerInfo`'s
+//!   check, both builds; only when the game folder is not `dod`.
 //! - `remote`: DoD Studio can send console commands to the running game over
 //!   a local named pipe, `\\.\pipe\dodstudio-hl-<pid>` (issue #413) -- e.g.
 //!   Launch Preview while the game is open. `GOLDSRC_HOOKS_REMOTE=0` turns it
@@ -198,6 +211,7 @@ mod debug;
 mod decals;
 mod demo_file;
 mod demo_list_folders;
+mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
@@ -213,6 +227,8 @@ mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
 mod frame_esc;
+mod game_dir_check;
+mod game_folder;
 mod hand_signals;
 mod hide_asset;
 mod hlae_window;
@@ -237,6 +253,7 @@ mod patch;
 mod pe;
 mod pmove_guard;
 mod position;
+mod pov_live_bob;
 mod remote;
 mod review;
 mod run_in_background;
@@ -248,6 +265,7 @@ mod server_hud_text;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
+mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;
@@ -460,6 +478,8 @@ fn install_fixes() {
     pmove_guard::install();
     // Before any map loads, so before the first HUD sprite is uploaded.
     sprite_blend::install();
+    // Before the first demo's svc_serverinfo; does nothing in `dod`.
+    game_dir_check::install();
 
     if TEXTURE_HIRES_ENABLED.load(Ordering::Relaxed) {
         match texture_hires::install() {

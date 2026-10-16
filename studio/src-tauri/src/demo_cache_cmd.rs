@@ -1,6 +1,7 @@
 //! The Demo Analyzer's **Cache all** button (#569): analyses every demo of
 //! the current folder into the analyzer cache in the background
-//! (`native::demo_cache`), reporting a `demo_cache_progress` event per demo.
+//! (`native::demo_cache`), reporting a `demo_cache_progress` event per demo,
+//! after the throttled ones of its first step, upgrading older cache entries.
 //! One run at a time; **Stop** sets the run's cancel flag.
 
 use std::path::PathBuf;
@@ -25,11 +26,15 @@ pub fn cache_demos(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), Stri
     std::thread::spawn(move || {
         native::demo_cache::cache_demos(paths, cancel, move |progress| {
             if progress.finished {
+                // `already` counts the upgraded demos too: cached by the time
+                // the parse step reaches them.
+                let upgraded = progress.upgrade.upgraded;
                 native::log_markdown(&format!(
-                    "Cache demos: {} of {} done ({} already cached, {} failed){}",
+                    "Cache demos: {} of {} done ({} upgraded, {} already cached, {} failed){}",
                     progress.done,
                     progress.total,
-                    progress.already,
+                    upgraded,
+                    progress.already.saturating_sub(upgraded),
                     progress.failed,
                     if progress.cancelled { ", stopped" } else { "" }
                 ));

@@ -284,7 +284,9 @@ fn load(level: &str) {
     let game_dir = crate::texture_hires::game_dir();
     let candidates = [
         game_dir.join(level),
-        game_dir.with_file_name("dod_downloads").join(level),
+        game_dir
+            .with_file_name(crate::game_folder::downloads_name())
+            .join(level),
     ];
     let map = short_name(level).to_ascii_lowercase();
     let lump = candidates.iter().find_map(|p| read_entity_lump(p).ok());

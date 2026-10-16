@@ -242,6 +242,12 @@ impl StreamPatcher {
                 .unwrap(),
         );
 
+        // The copy says it was recorded in the running game folder, in the
+        // header here and in each svc_serverinfo below, or a copy of DoD
+        // refuses to play it (#402; see game_dir.rs).
+        let game_folder = crate::shared::paths::game_folder();
+        let network_protocol = crate::patch::game_dir::header_network_protocol(&header);
+        crate::patch::game_dir::set_header_game_dir(&mut header, &game_folder);
         writer.write_all(&header)?;
 
         let mut bytes_injected: i32 = 0;
@@ -510,6 +516,19 @@ impl StreamPatcher {
                     let mut net_buf = vec![0u8; msg_len];
                     read_exact(&mut reader, &mut net_buf, "NetworkMessage Body")?;
 
+                    if let Some(renamed) = network_protocol.and_then(|p| {
+                        crate::patch::game_dir::rewrite_server_info_game_dir(
+                            &net_buf,
+                            p,
+                            &game_folder,
+                        )
+                    }) {
+                        let delta = renamed.len() as i32 - net_buf.len() as i32;
+                        update_injection(pos, delta, 0);
+                        bytes_injected += delta;
+                        net_buf = renamed;
+                    }
+
                     let final_len_buf = (net_buf.len() as u32).to_le_bytes();
                     writer.write_all(&final_len_buf)?;
                     writer.write_all(&net_buf)?;
@@ -691,6 +710,8 @@ mod tests {
                 match_start_tick: None,
                 source_key: None,
                 spectated: false,
+                steam_id: None,
+                recorded_this_demo: false,
                 status: Default::default(),
             }],
             target_player: None,
@@ -806,6 +827,8 @@ mod tests {
                 match_start_tick: None,
                 source_key: None,
                 spectated: false,
+                steam_id: None,
+                recorded_this_demo: false,
                 status: Default::default(),
             }],
             target_player: None,

@@ -65,9 +65,9 @@ use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU32, Ordering};
 use crate::engine::{self, CvarSPartial};
 use crate::names::console_name;
 use crate::{
-    anim_fix, crosshair, decals, demo_list_folders, demo_seek, ex_interp, fire_sounds,
-    hand_signals, hudelement, missing_shots, overview_map, scoreboard, spectator_crosshair,
-    spectator_eye, spectator_target, texture_hires, voice, window_layout,
+    anim_fix, crosshair, decals, demo_list_folders, demo_other_drives, demo_seek, ex_interp,
+    fire_sounds, hand_signals, hudelement, missing_shots, overview_map, scoreboard,
+    spectator_crosshair, spectator_eye, spectator_target, texture_hires, voice, window_layout,
 };
 
 /// Viewmodel animations, lost gunshots and the spectator crosshair together.
@@ -560,6 +560,8 @@ pub fn poll() {
     // Installs once GameUI.dll and FileSystem_Stdio.dll are found, then costs
     // one atomic load.
     demo_list_folders::poll();
+    // Installs once FileSystem_Stdio.dll is found, then costs one atomic load.
+    demo_other_drives::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
     crate::frame_esc::poll();
     // Installs once GameUI.dll is found, then costs one atomic load.
@@ -592,6 +594,7 @@ pub fn poll() {
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
+    crate::pov_live_bob::poll();
     crate::screen_effects::poll();
     crate::hlae_window::poll();
     crate::detail_cache::poll();
@@ -664,7 +667,7 @@ fn status_text() -> String {
             crosshair::status()
         ),
         format!(
-            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair and the prone eye height, as the player's own recording has them",
+            "{SPEC_MATCH_POV_NAME} = {} -- viewmodel animations, lost gunshots, the spectator crosshair, the prone eye height and the gun lowering, as the player's own recording has them",
             bit(anim_fix::enabled())
         ),
         format!(
@@ -685,6 +688,9 @@ fn status_text() -> String {
         ));
         lines.push(format!("spectator eye height: {}", spectator_eye::status()));
         lines.push(format!("spectator gun: {}", crate::spectator_gun::status()));
+    }
+    if let Some(deathcam) = crate::spectator_deathcam::status_line() {
+        lines.push(deathcam);
     }
     lines.push(crate::deathmsg::status().trim_end().to_string());
     // Always shown (#430): the one fact that decides how big HD textures can
@@ -748,6 +754,9 @@ fn status_text() -> String {
     }
     if let Some(sprites) = crate::sprite_blend::status_line() {
         lines.push(sprites);
+    }
+    if let Some(game_dir) = crate::game_dir_check::status_line() {
+        lines.push(game_dir);
     }
     if overview_map::any_held() {
         lines.push(format!("overview map: {}", overview_map::status()));
@@ -1218,6 +1227,15 @@ unsafe extern "C" fn cmd_demo_list_folders() {
     );
 }
 
+/// Only registered when `dodstudio_demo_other_drives` could not be a cvar.
+unsafe extern "C" fn cmd_demo_other_drives() {
+    handle_toggle(
+        demo_other_drives::NAME,
+        &demo_other_drives::ENABLED,
+        demo_other_drives::status,
+    );
+}
+
 /// Only registered when `dodstudio_demo_list_hide_empty` could not be a cvar.
 unsafe extern "C" fn cmd_demo_list_hide_empty() {
     handle_toggle(
@@ -1502,6 +1520,11 @@ pub fn install() {
         Some(cvar) => demo_list_folders::set_cvar(cvar),
         None => add_command(demo_list_folders::NAME, cmd_demo_list_folders),
     }
+    // Read by the file system's Open hook on a `D:/...` name (#776).
+    match register(demo_other_drives::NAME, "1") {
+        Some(cvar) => demo_other_drives::set_cvar(cvar),
+        None => add_command(demo_other_drives::NAME, cmd_demo_other_drives),
+    }
     match register(demo_list_folders::HIDE_EMPTY.name, "1") {
         Some(cvar) => demo_list_folders::HIDE_EMPTY.set_cvar(cvar),
         None => add_command(demo_list_folders::HIDE_EMPTY.name, cmd_demo_list_hide_empty),
@@ -1612,6 +1635,9 @@ pub fn install() {
     if let Some(lock) = register(crate::spectator_follow::LOCK_NAME, "0") {
         crate::spectator_follow::set_cvar(lock);
     }
+    if let Some(deathcam) = register(crate::spectator_deathcam::NAME, "0") {
+        crate::spectator_deathcam::set_cvar(deathcam);
+    }
     if let Some(icons) = register(crate::overview_players::NAME, "0") {
         crate::overview_players::set_cvar(icons);
     }
@@ -1626,6 +1652,12 @@ pub fn install() {
     }
     if let Some(background) = register(crate::run_in_background::NAME, "0") {
         crate::run_in_background::set_cvar(background);
+    }
+    if let Some(cloak) = register(crate::hlae_window::CLOAK_NAME, "0") {
+        crate::hlae_window::set_cloak_cvar(cloak);
+    }
+    if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
+        crate::pov_live_bob::set_cvar(bob);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),
@@ -1789,6 +1821,7 @@ mod tests {
             crate::world_shaders::NAME,
             crate::spectator_follow::LOCK_NAME,
             crate::spectator_follow::TARGET_NAME,
+            crate::spectator_deathcam::NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
             crate::overview_speaker::NAME,
@@ -1798,6 +1831,8 @@ mod tests {
             crate::vgui_menus::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
+            crate::hlae_window::CLOAK_NAME,
+            crate::pov_live_bob::NAME,
             crate::screen_effects::FLASH_NAME,
             crate::screen_effects::SHAKE_NAME,
             crate::hlae_window::NAME,

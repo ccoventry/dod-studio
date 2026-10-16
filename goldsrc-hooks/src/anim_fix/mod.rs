@@ -70,6 +70,7 @@ mod classify;
 mod crosshair_rule;
 mod grenade;
 mod sequences;
+mod sprint_turn;
 mod trace;
 
 use std::sync::atomic::{AtomicI32, AtomicPtr, AtomicU64, Ordering};
@@ -128,7 +129,13 @@ pub fn enabled() -> bool {
 /// its recorder spends dead and watching someone in-eye: that is what they saw
 /// live, recorded. Live play and HLTV demos are unchanged.
 pub fn active() -> bool {
-    enabled() && !engine::engfuncs().is_some_and(playing_pov_demo)
+    enabled() && !pov_demo_playing()
+}
+
+/// Whether a POV demo is playing now (see [`active`]). Also what
+/// `spectator_deathcam` stands down for.
+pub fn pov_demo_playing() -> bool {
+    engine::engfuncs().is_some_and(playing_pov_demo)
 }
 
 /// A demo is playing and the engine is not connected as a spectator.
@@ -846,6 +853,11 @@ pub fn apply() {
         body_label.as_deref().unwrap_or(""),
         gait_label.as_deref().unwrap_or(""),
     ));
+    sprint_turn::note_snapshot(
+        f64::from(spectated.curstate.msg_time),
+        spectated.curstate.origin.x,
+        spectated.curstate.origin.y,
+    );
     let pov_view = crosshair_rule::View {
         body: body_label.as_deref().unwrap_or(""),
         gait: gait_label.as_deref().unwrap_or(""),

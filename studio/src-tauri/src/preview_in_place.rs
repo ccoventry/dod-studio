@@ -97,8 +97,9 @@ pub fn send_to_running(pids: &[u32], arg: &str) -> Result<Option<String>, String
 }
 
 /// Waits for the game launched after `before` was listed to open its pipe,
-/// then sends it `lines`. Returns the game's pid once they were sent.
-fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
+/// then sends it `lines`. Returns the game's pid once they were sent. Also
+/// used by the patched Launch Preview (#662).
+pub(crate) fn send_when_ready(before: &[u32], lines: &[String]) -> Option<u32> {
     let started = Instant::now();
     while started.elapsed() < PIPE_WAIT {
         std::thread::sleep(Duration::from_millis(500));

@@ -1173,7 +1173,7 @@ fn map_file_uses(map: &str) -> Vec<String> {
     let dir = game_dir();
     let bsp = [
         dir.join("maps").join(format!("{map}.bsp")),
-        dir.with_file_name("dod_downloads")
+        dir.with_file_name(crate::game_folder::downloads_name())
             .join("maps")
             .join(format!("{map}.bsp")),
     ]
@@ -1446,12 +1446,9 @@ static DETAIL_INDEX: Cached<HashMap<String, String>> = Cached::new();
 /// Detail textures loaded from [`DETAIL_DIR`] this session.
 static DETAIL_REDIRECTED: AtomicU32 = AtomicU32::new(0);
 
+/// `<hl.exe folder>\<game folder>`: `dod`, or what `-game` names (#402).
 pub(crate) fn game_dir() -> PathBuf {
-    std::env::current_exe()
-        .ok()
-        .and_then(|exe| exe.parent().map(Path::to_path_buf))
-        .unwrap_or_default()
-        .join("dod")
+    crate::game_folder::mod_dir()
 }
 
 /// Which mod folder holds `dodstudio_hd` (#415).
@@ -1481,7 +1478,7 @@ pub(crate) fn hd_home(in_addon: bool, in_dod: bool) -> HdHome {
 /// `dod_addon` on them, ahead of `dod`.
 pub(crate) fn hd_base() -> PathBuf {
     let dod = game_dir();
-    let addon = dod.with_file_name("dod_addon");
+    let addon = dod.with_file_name(crate::game_folder::addon_name());
     match hd_home(
         addon.join("dodstudio_hd").is_dir(),
         dod.join("dodstudio_hd").is_dir(),
@@ -1498,7 +1495,7 @@ pub(crate) fn addons_on() -> bool {
 }
 
 fn build_detail_index() -> HashMap<String, String> {
-    if hd_base().ends_with("dod_addon") && !addons_on() {
+    if hd_base().ends_with(crate::game_folder::addon_name()) && !addons_on() {
         unsafe {
             crate::debug::report(
                 "texture_hires: the HD files are in dod_addon but the game has no -addons, so the engine won't find the HD detail textures (DoD Studio's launches pass it)",
@@ -1516,7 +1513,10 @@ fn build_sky_index() -> HashMap<String, String> {
 /// winning), keyed by its lowercased path relative to that folder, mapped to
 /// its path relative to [`hd_base`] (and so to the engine's search paths).
 fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
-    fn walk(dir: &Path, rel: &str, out: &mut std::collections::HashSet<String>) {
+    // `file_type` never follows a junction, so a link is indexed as a name
+    // and never entered; the depth cap bounds the rest (#376).
+    const MAX_DEPTH: usize = 16;
+    fn walk(dir: &Path, rel: &str, depth: usize, out: &mut std::collections::HashSet<String>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
@@ -1524,7 +1524,9 @@ fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             let rel = format!("{rel}{name}");
             if entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                walk(&entry.path(), &format!("{rel}/"), out);
+                if depth < MAX_DEPTH {
+                    walk(&entry.path(), &format!("{rel}/"), depth + 1, out);
+                }
             } else {
                 out.insert(rel);
             }
@@ -1533,7 +1535,7 @@ fn build_folder_index(type_dir: &str, what: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     for sub in style_dirs(type_dir) {
         let mut found = std::collections::HashSet::new();
-        walk(&hd_base().join(&sub), "", &mut found);
+        walk(&hd_base().join(&sub), "", 0, &mut found);
         unsafe {
             crate::debug::report(&format!(
                 "texture_hires: indexed {} {what} in {sub}",
@@ -1761,12 +1763,17 @@ fn detail_fits(file: &Path, max_bytes: usize) -> bool {
 }
 
 /// Whether `rel` (`gfx/detail/x.tga`) exists where the engine looks for it:
-/// `dod`, `dod_downloads`, then `valve`.
+/// `dod`, `dod_downloads`, then `valve` (the first two named after `-game`,
+/// #402).
 fn in_game_dirs(rel: &str) -> bool {
     let dod = game_dir();
-    ["dod", "dod_downloads", "valve"]
-        .iter()
-        .any(|g| dod.with_file_name(g).join(rel).is_file())
+    [
+        crate::game_folder::name().to_string(),
+        crate::game_folder::downloads_name(),
+        "valve".to_string(),
+    ]
+    .iter()
+    .any(|g| dod.with_file_name(g).join(rel).is_file())
 }
 
 /// Called by the detail-path stub with the detail loader's path buffer, just
