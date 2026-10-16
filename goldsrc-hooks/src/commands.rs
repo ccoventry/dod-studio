@@ -547,6 +547,10 @@ pub fn poll() {
     crate::center_text::poll();
     // dodstudio_hide_spectator_text: two code patches, byte-checked each frame.
     crate::spectator_text::poll();
+    // dodstudio_hide_server_hud_text: one hw.dll call, byte-checked each frame.
+    crate::server_hud_text::poll();
+    // dodstudio_hide_menus: VGUIMenu and MOTD hooks, re-prepended each frame.
+    crate::vgui_menus::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -801,6 +805,12 @@ fn status_text() -> String {
     }
     if let Some(spectator_text) = crate::spectator_text::status_line() {
         lines.push(spectator_text);
+    }
+    if let Some(server_hud_text) = crate::server_hud_text::status_line() {
+        lines.push(server_hud_text);
+    }
+    if let Some(menus) = crate::vgui_menus::status_line() {
+        lines.push(menus);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1607,6 +1617,12 @@ pub fn install() {
     if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
         crate::spectator_text::set_cvar(spectator_text);
     }
+    if let Some(server_hud_text) = register(crate::server_hud_text::NAME, "0") {
+        crate::server_hud_text::set_cvar(server_hud_text);
+    }
+    if let Some(menus) = register(crate::vgui_menus::NAME, "0") {
+        crate::vgui_menus::set_cvar(menus);
+    }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
@@ -1811,6 +1827,8 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
+            crate::vgui_menus::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
@@ -1833,6 +1851,8 @@ mod tests {
             crate::overview_speaker::NAME,
             crate::center_text::NAME,
             crate::spectator_text::NAME,
+            crate::server_hud_text::NAME,
+            crate::vgui_menus::NAME,
         ];
         let mut all: Vec<String> = Vec::new();
         for entry in std::fs::read_dir("src")

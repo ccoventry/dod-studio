@@ -34,7 +34,11 @@ HUD
   dodstudio_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
   dodstudio_hide_center_text 0/1
-      Hide the text the server prints in the middle of the screen (plugin countdowns and notices).
+      Hide the text the server prints in the middle of the screen (plugin countdowns and notices), the engine's own centre print too.
+  dodstudio_hide_server_hud_text 0/1
+      Hide server plugins' coloured HUD messages (match status, ready lists, banners); the map's own text stays.
+  dodstudio_hide_menus 0/1
+      Keep the team menu, class menus and MOTD window a POV demo replays off the screen (demos only).
   dodstudio_hide_asset list|add|del|clear <model>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg

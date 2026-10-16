@@ -442,6 +442,30 @@ There is also a per-opcode counter array at `0x2d09de0`, incremented as
 `inc [opcode*4 + 0x2d09de0]` for every message parsed — a ready-made histogram
 of what a session actually received.
 
+### Centre print and HUD messages (#677)
+
+Two text paths the engine owns, both read for `goldsrc-hooks` and checked on
+both builds by `tools/verify_engine_text_offsets.py`:
+
+- **`svc_centerprint`** (`hw+0x1dc80`; 25th Anniversary `+0x1a9cc0`) is
+  `call MSG_ReadString; push eax; call SCR_CenterPrint; pop ecx; ret`.
+  `SCR_CenterPrint` (`+0x4ba90` / `+0x24cde0`) copies 1023 bytes into the
+  centre string; `svc_finale`, `svc_cutscene` and the client's
+  `pfnCenterPrint` wrapper (`+0xb0e0`) are its other callers.
+  `engine_center_print.rs` turns only the handler's call into `nop`s.
+- **`TE_TEXTMESSAGE`**, inside `CL_ParseTEnt`, fills one of four
+  `client_textmessage_t`s named `__NETMESSAGE__1..4` (text at `+0x28`) and
+  calls `CL_HudMessage` (`+0x19ab0` / `+0x1a30a0`), which dispatches
+  `"HudText"` **by name** (`+0x1a7c0` / `+0x1a9260`). Unlike the by-number
+  dispatcher every server message uses, the by-name one calls every record
+  with that name, so a `pfnHookUserMsg` hook cannot drop these:
+  `client.dll`'s own record runs after it. `server_hud_text.rs` points the
+  `CL_HudMessage` call (`+0x23da4` / `+0x1b0a0d`) at a filter instead.
+- The user-message list itself is freed only where the engine unloads
+  `client.dll` (`+0xbda0`: `HUD_Shutdown`, then `FreeLibrary`), and
+  `svc_newusermsg` (`+0x1a550`) numbers every record with a message's name, so
+  a hook added once `HUD_Init` has run keeps working across connects.
+
 ### The self-naming heuristic was too narrow
 
 The first pass matched `Name:` as a *prefix*. The function #273 said was not

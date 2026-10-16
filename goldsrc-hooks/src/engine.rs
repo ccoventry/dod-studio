@@ -154,6 +154,14 @@ pub type AddCommandFn = unsafe extern "C" fn(cmd_name: *const c_char, function: 
 /// hook wins, and `client.dll`'s own handler is still reachable by calling it
 /// directly. Verified in `hw.dll` at 0x1d1a830 (hook) and 0x1d1a660
 /// (dispatch), pre-Anniversary. See `deathmsg.rs`.
+///
+/// The engine's *by-name* dispatcher (`hw.dll+0x1a7c0` pre-Anniversary,
+/// `+0x1a9260` 25th Anniversary) is different: it calls **every** record
+/// whose name matches, newest first, and never stops early. Only messages the
+/// engine makes up itself go that way -- the `HudText` that `TE_TEXTMESSAGE`
+/// turns into (`CL_HudMessage`) is the one that matters -- so a hook cannot
+/// drop those: `client.dll`'s own record runs after it anyway (#677,
+/// `server_hud_text.rs`).
 /// `gEngfuncs.GetLocalPlayer` (slot 51). Returns the local player's
 /// `cl_entity_t`. Confirmed by the call site at `client.dll+0x20520`, a
 /// three-instruction thunk that calls this slot and immediately
@@ -166,6 +174,40 @@ pub type GetLocalPlayerFn = unsafe extern "C" fn() -> *mut c_void;
 /// `client.dll+0xb4ae`, which passes `(slot, &g_PlayerInfoList[slot])` with a
 /// 0x20-byte stride -- the `hud_player_info_t` that carries `m_nSteamID`.
 pub type GetPlayerInfoFn = unsafe extern "C" fn(slot: i32, info: *mut HudPlayerInfo);
+
+/// `gEngfuncs.pfnTextMessageGet` (slot 25): the `client_textmessage_t` for a
+/// `titles.txt` name, or for one of the engine's own `__NETMESSAGE__1..4`
+/// that a `TE_TEXTMESSAGE` fills in. Confirmed by DoD's own five calls through
+/// `gEngfuncs+0x64` (`CHudMessage` at `client.dll+0x25386`, `+0x25437`,
+/// `+0x254f8`, `CHudTextMessage` at `+0x4c10f`, `+0x4c1cb`): one string
+/// argument, popped by the caller, and the result's `+0x28` read as the text.
+pub type TextMessageGetFn = unsafe extern "C" fn(name: *const c_char) -> *const ClientTextMessage;
+
+/// `client_textmessage_t` (`common/cl_entity.h`'s neighbour `cdll_int.h`).
+/// Only `p_message` is read. Its offset is what `client.dll` reads after
+/// `pfnTextMessageGet` (`mov eax, [eax+0x28]`, `+0x4c11c`) and what the
+/// engine's `TE_TEXTMESSAGE` handler writes the text pointer to (`[esi+0x28]`,
+/// `hw.dll+0x23d8a` pre-Anniversary, `[edi+0x28]` at `+0x1b09f4` Anniversary).
+#[repr(C)]
+pub struct ClientTextMessage {
+    pub effect: i32,
+    pub colour1: [u8; 4],
+    pub colour2: [u8; 4],
+    pub x: f32,
+    pub y: f32,
+    pub fadein: f32,
+    pub fadeout: f32,
+    pub holdtime: f32,
+    pub fxtime: f32,
+    pub p_name: *const c_char,
+    pub p_message: *const c_char,
+}
+
+#[cfg(target_pointer_width = "32")]
+const _: () = {
+    assert!(std::mem::offset_of!(ClientTextMessage, p_name) == 0x24);
+    assert!(std::mem::offset_of!(ClientTextMessage, p_message) == 0x28);
+};
 
 /// `hud_player_info_t` (`cdll_int.h`), the Steam-era layout: 0x20 bytes, with
 /// `m_nSteamID` at +0x18. The size is what DoD's `client.dll` strides its
@@ -544,7 +586,8 @@ pub struct EngineStudioApiPartial {
 /// lists every field of the real struct in declaration order -- confirmed
 /// against it field-by-field. Every field up through `IsSpectateOnly` is
 /// present, in order, so the ones we actually use (`pfn_add_command`,
-/// `pfn_get_player_info`, `pfn_console_print`, `cmd_argc`, `cmd_argv`, `pfn_weapon_anim`,
+/// `pfn_get_player_info`, `pfn_text_message_get`, `pfn_console_print`, `cmd_argc`,
+/// `cmd_argv`, `pfn_weapon_anim`,
 /// `pfn_get_game_directory`, `pfn_get_level_name`, `p_event_api`,
 /// `is_spectate_only`) land at the
 /// correct byte offsets; everything else is kept as an opaque, untyped slot
@@ -567,7 +610,10 @@ pub struct ClEngineFuncsPartial {
     _slots_before_get_player_info: [*mut c_void; 2], // pfnServerCmd, pfnClientCmd
     /// Slot 21. See [`GetPlayerInfoFn`].
     pub pfn_get_player_info: GetPlayerInfoFn,
-    _slots_before_draw_console_string: [*mut c_void; 5], // pfnPlaySoundByName .. pfnDrawCharacter
+    _slots_before_text_message_get: [*mut c_void; 3], // pfnPlaySoundByName .. pfnAngleVectors
+    /// Slot 25. See [`TextMessageGetFn`].
+    pub pfn_text_message_get: TextMessageGetFn,
+    _slots_before_draw_console_string: [*mut c_void; 1], // pfnDrawCharacter
     /// Slot 27. See [`DrawConsoleStringFn`]; the kill feed's names go through
     /// it (`CHudDeathNotice::Draw`, `call [gEngfuncs+0x6c]` at
     /// `client.dll+0x2b089` and `+0x2b135`) (#562).
@@ -805,6 +851,13 @@ pub fn set_per_frame_callback(callback: fn()) {
     }
 }
 
+/// Whether the engine's own `HUD_Frame` drives the per-frame callback, rather
+/// than the fallback timer thread: then `client.dll`'s `HUD_Init` has run and
+/// the callback is on the game's thread.
+pub fn hud_frame_driving() -> bool {
+    HUD_FRAME_DRIVING.load(Ordering::Acquire)
+}
+
 fn run_per_frame_callback() {
     if let Some(prologue) = PER_FRAME_PROLOGUE.get() {
         prologue();
@@ -1006,6 +1059,15 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
 /// is all either caller needs.
 static DEMO_ELAPSED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Whether a demo is playing: `pDemoAPI->IsPlayingback()`. False before
+/// `client.dll` is up, and in live play.
+pub fn playing_demo() -> bool {
+    engfuncs().is_some_and(|engfuncs| {
+        let api = engfuncs.p_demo_api;
+        // Safety: the engine's own demo API table, checked for null.
+        !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
+    })
+}
 /// The engine's own client clock (`cl.time`), which the game's HUD timers
 /// (kill feed, centre text, the clan countdown) run on; `None` before the
 /// engine is ready.
