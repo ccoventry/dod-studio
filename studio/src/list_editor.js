@@ -173,6 +173,18 @@ export function createListEditor({ container, getItems, fields, unique = false, 
     return true;
   }
 
+  /** Removes the item whose primary value is `value`. Returns false when
+   *  there is none. */
+  function removeItem(value) {
+    const items = getItems();
+    const idx = items.findIndex((item) => primaryValue(item, fields) === value);
+    if (idx === -1) return false;
+    items.splice(idx, 1);
+    notify();
+    render();
+    return true;
+  }
+
   render();
-  return { render, addItem };
+  return { render, addItem, removeItem };
 }

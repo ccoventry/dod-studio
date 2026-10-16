@@ -153,7 +153,9 @@ fn merge_dir_entries(
             continue;
         }
 
-        if source_path.is_dir() && destination_path.is_dir() {
+        // `file_type` never follows a junction, so a link in the old folder
+        // is skipped like a file collision, never merged through (#376).
+        if entry.file_type().is_ok_and(|t| t.is_dir()) && destination_path.is_dir() {
             merge_dir_entries(&source_path, &destination_path, &name, report);
             // Only succeeds once the merge above has moved everything out --
             // anything left behind (a skipped file-vs-file collision) keeps

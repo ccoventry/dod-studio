@@ -1376,7 +1376,7 @@ pub fn get_render_required_estimate_gb(state: tauri::State<'_, RenderManager>) -
     total as f64 / 1_073_741_824.0
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_export_pool_free_gb(directories: Vec<String>) -> f64 {
     let mut total: u64 = 0;
     for dir in &directories {
@@ -1395,7 +1395,7 @@ pub struct RenderAutosaveSummary {
     pub completed_count: usize,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn check_render_autosave(
     state: tauri::State<'_, RenderManager>,
 ) -> Option<RenderAutosaveSummary> {
@@ -1427,7 +1427,7 @@ pub fn check_render_autosave(
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn discard_render_autosave() -> Result<(), String> {
     match std::fs::remove_file(autosave_path()) {
         Ok(_) => Ok(()),
@@ -1443,7 +1443,7 @@ pub fn discard_render_autosave() -> Result<(), String> {
 /// (`main.rs`'s render-recovery modal rebuilds the same kind of stub with
 /// blank stream/frames/date — dev never had richer data to recover either).
 /// Does not auto-start rendering; the user still clicks Start Render.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recover_render_batch(
     state: tauri::State<'_, RenderManager>,
 ) -> Result<Vec<RenderJobView>, String> {

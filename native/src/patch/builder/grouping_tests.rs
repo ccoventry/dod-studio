@@ -29,6 +29,8 @@ fn test_build_batch_queue_grouping() {
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
     };
 
     let streak2 = CaptureStreak {
@@ -51,6 +53,8 @@ fn test_build_batch_queue_grouping() {
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
     };
 
     let streak3 = CaptureStreak {
@@ -73,6 +77,8 @@ fn test_build_batch_queue_grouping() {
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
     };
 
     let raw_streaks = vec![streak1, streak2, streak3];
