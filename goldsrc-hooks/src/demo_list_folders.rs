@@ -611,15 +611,19 @@ fn push_place(places: &mut Vec<Place>, dod: &Path, kind: &str, folder: &str) {
     });
 }
 
-/// The last two folders of a path, `.../Movies/dod/`, for a narrow list; a
-/// path of two folders or fewer (`D:/demos/`) in full.
+/// A path's drive and its last two folders, `C:/.../Movies/dod/`, for a
+/// narrow list; a path with nothing between them (`D:/demos/`,
+/// `C:/Steam/common/`) in full. A path with no drive keeps only the last two
+/// folders.
 fn short_folder(folder: &str) -> String {
     let parts: Vec<&str> = folder.split('/').filter(|p| !p.is_empty()).collect();
-    match parts.len() {
-        0 => folder.to_string(),
-        1 => format!("{}/", parts[0]),
-        2 => format!("{}/{}/", parts[0], parts[1]),
-        n => format!(".../{}/{}/", parts[n - 2], parts[n - 1]),
+    let drive = parts.first().filter(|p| is_drive_path(&format!("{p}/")));
+    match (drive, parts.len()) {
+        (_, 0) => folder.to_string(),
+        (Some(_), n) if n <= 3 => format!("{}/", parts.join("/")),
+        (Some(drive), n) => format!("{drive}/.../{}/{}/", parts[n - 2], parts[n - 1]),
+        (None, n) if n <= 2 => format!("{}/", parts.join("/")),
+        (None, n) => format!(".../{}/{}/", parts[n - 2], parts[n - 1]),
     }
 }
 
@@ -1466,22 +1470,26 @@ mod tests {
                 "This PC (every drive)",
                 "Drive: C:/",
                 "Drive: D:/",
-                "Studio: .../Half-Life/dod/",
+                "Studio: C:/.../Half-Life/dod/",
                 "Studio: D:/demos/",
-                "Recent: .../dod/temp demos/",
-                "Recent: .../Steam/common/",
-                "Recent: .../common/HL/",
-                "Recent: .../Half-Life/dod/",
+                "Recent: C:/.../dod/temp demos/",
+                "Recent: C:/Steam/common/",
+                "Recent: C:/.../common/HL/",
+                "Recent: C:/.../Half-Life/dod/",
             ]
         );
         assert_eq!(places[1].folder, STUDIO_PLACE);
         assert_eq!(places[2].folder, DRIVES_PLACE);
         assert_eq!(places[5].folder, "C:/Games/Half-Life/dod/");
-        // Two different folders with the same last two names stay apart.
-        let twins = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
+        // Two different folders with the same drive and last two names stay
+        // apart; on different drives the drive tells them apart.
+        let twins = ["C:/a/x/dod/".to_string(), "C:/b/x/dod/".to_string()];
         let places = build_places(dod, "dod", &[], &twins, &[]);
-        assert_eq!(places[3].label, "Studio: .../x/dod/");
-        assert_eq!(places[4].label, "Studio: .../x/dod/ (2)");
+        assert_eq!(places[3].label, "Studio: C:/.../x/dod/");
+        assert_eq!(places[4].label, "Studio: C:/.../x/dod/ (2)");
+        let apart = ["C:/a/x/dod/".to_string(), "D:/b/x/dod/".to_string()];
+        let places = build_places(dod, "dod", &[], &apart, &[]);
+        assert_eq!(places[4].label, "Studio: D:/.../x/dod/");
     }
 
     #[test]
