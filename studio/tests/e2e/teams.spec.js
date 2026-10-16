@@ -19,6 +19,7 @@ test.describe('Teams list', () => {
     expect(tags).toHaveLength(5);
     await expect(row(page, 'dicE').locator('.teams-count')).toHaveText('2');
     await expect(row(page, 'dicE').locator('.teams-count')).toHaveAttribute('title', 'a.dem\nb.dem');
+    await expect(row(page, 'dicE').locator('.teams-sides')).toHaveText('1 Allied, 1 Axis');
   });
 
   test('a tag from a player name is shown as text, not markup', async ({ page }) => {

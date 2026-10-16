@@ -29,7 +29,9 @@ const scanParses = parseClock();
  *   selectDemoAndRenderDetail(demo, idx), updateDemoFooter(demos),
  *   markProjectDirty(), readScanWorkers(), offerIdenticalCopies(copies,
  *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
- *   list (pushed to in place), and persistAppSettings().
+ *   list (pushed to in place), persistAppSettings(), and regroupMatches()
+ *   from queue_match_groups.js, run after a scan so {match} and {half}
+ *   know the new demos (#685).
  */
 export function createQueueScan({
   getDemos,
@@ -41,6 +43,7 @@ export function createQueueScan({
   offerIdenticalCopies,
   getScanPaths,
   persistAppSettings,
+  regroupMatches = () => {},
 }) {
   // ── scan_progress event listener (registered once on load) ────────────────
   let unlistenScanProgress = null;
@@ -122,10 +125,11 @@ export function createQueueScan({
       // re-parsed; ones from an older project (no file_key, no map_name:
       // saved before clip names, #441, no teams: #445, no map list: #217, or
       // highlights without `spectated`: saved before an HLTV demo listed
-      // everyone's, #247) are scanned.
+      // everyone's, #247, or without `viewdemo_times`: saved before a batch
+      // seeked between clips by them, #434) are scanned.
       const known = getDemos()
         .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined
-          && (d.streaks || []).every((s) => s.spectated !== undefined))
+          && (d.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined))
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -186,6 +190,9 @@ export function createQueueScan({
         document.querySelector('#hl-path-input')?.value?.trim() || ''
       );
       refreshTeamsPane();
+      // Which match and half each demo is (#685), from the analyzer cache
+      // the scan just warmed. Not awaited: the queue is already usable.
+      if (newlyScanned.length > 0) regroupMatches();
       if (copies.length > 0) await offerIdenticalCopies(copies, pickedFiles);
       return true;
     } catch (err) {
@@ -223,6 +230,22 @@ export function createQueueScan({
     });
   }
 
+  // Shared by + Add Folder and the Setup window's demo step (#599).
+  async function addDemoFolder(folder) {
+    // Always scan (#432): a folder added before, then emptied from the
+    // list (bin icon, Clear All), used to be a silent no-op here.
+    // scanPaths only decides whether to remember it, and a folder that
+    // turned out not to exist is not remembered. The merge in
+    // triggerAutoScan replaces demos by path, so a re-scan adds no
+    // duplicate rows.
+    const scanned = await triggerAutoScan([folder]);
+    if (scanned && !getScanPaths().includes(folder)) {
+      getScanPaths().push(folder);
+      markProjectDirty();
+      await persistAppSettings();
+    }
+  }
+
   // Native Demo Folder Ingestion (+ Add Folder)
   const addFolderBtn = document.querySelector('#add-folder-btn');
   if (addFolderBtn) {
@@ -233,26 +256,12 @@ export function createQueueScan({
           multiple: false,
           title: STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE
         });
-        if (selected) {
-          const folder = Array.isArray(selected) ? selected[0] : selected;
-          // Always scan (#432): a folder added before, then emptied from the
-          // list (bin icon, Clear All), used to be a silent no-op here.
-          // scanPaths only decides whether to remember it, and a folder that
-          // turned out not to exist is not remembered. The merge in
-          // triggerAutoScan replaces demos by path, so a re-scan adds no
-          // duplicate rows.
-          const scanned = await triggerAutoScan([folder]);
-          if (scanned && !getScanPaths().includes(folder)) {
-            getScanPaths().push(folder);
-            markProjectDirty();
-            await persistAppSettings();
-          }
-        }
+        if (selected) await addDemoFolder(Array.isArray(selected) ? selected[0] : selected);
       } catch (err) {
         console.error("Error opening demo directory dialog:", err);
       }
     });
   }
 
-  return { triggerAutoScan };
+  return { triggerAutoScan, addDemoFolder };
 }

@@ -711,12 +711,61 @@ export async function demoRenameUndoable() {
     });
 }
 
+/** Which match and half each queued demo is (#685). `parseMissing` reads
+ *  demos the analyzer cache doesn't have (about a second each); without it
+ *  they are left out of the answer. */
+export async function queueMatchGroups(paths, parseMissing = false) {
+  return invoke("queue_match_groups", { paths, parseMissing })
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups):", err);
+      showToast(STRINGS.IPC.matchGroupsFailed(err), 'error');
+      throw err;
+    });
+}
+
+export async function queueMatchGroupsCancel() {
+  return invoke("queue_match_groups_cancel")
+    .catch((err) => {
+      console.error("IPC Execution Error (queue_match_groups_cancel):", err);
+      throw err;
+    });
+}
+
 /** Picked demos on a map a session crashed on (#207). Never toasts: the
  *  warning it feeds is skipped when it fails. */
 export async function crashMapWarnings(demoPaths) {
   return invoke("crash_map_warnings", { demoPaths })
     .catch((err) => {
       console.error("IPC Execution Error (crash_map_warnings):", err);
+      throw err;
+    });
+}
+
+/** The demo folders linked into the game folder of `hlExe` (#376). Throws
+ *  the reason when it cannot read them; demo_links.js shows it. */
+export async function listDemoLinks(hlExe) {
+  return invoke("list_demo_links", { hlExe })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_demo_links):", err);
+      throw err;
+    });
+}
+
+/** Links `folder` into the game folder of `hlExe` (#376). Throws why it was
+ *  refused; demo_links.js shows it. */
+export async function addDemoLink(hlExe, folder) {
+  return invoke("add_demo_link", { hlExe, folder })
+    .catch((err) => {
+      console.error("IPC Execution Error (add_demo_link):", err);
+      throw err;
+    });
+}
+
+/** Removes the link `name` only; the folder it points at stays (#376). */
+export async function removeDemoLink(hlExe, name) {
+  return invoke("remove_demo_link", { hlExe, name })
+    .catch((err) => {
+      console.error("IPC Execution Error (remove_demo_link):", err);
       throw err;
     });
 }
@@ -1082,6 +1131,17 @@ export async function hdSaveMapList(gamePath, text) {
     .catch((err) => {
       console.error("IPC Execution Error (hd_save_map_list):", err);
       showToast(STRINGS.IPC.hdMapListFailed(err), 'error');
+      throw err;
+    });
+}
+
+/** Which maps each style has map textures for (#426):
+ *  native::hd::map_textures::WorldCoverage. The HD page shows a failure in
+ *  its own coverage line, so there is no toast. */
+export async function hdWorldCoverage(gamePath) {
+  return invoke("hd_world_coverage", { gamePath })
+    .catch((err) => {
+      console.error("IPC Execution Error (hd_world_coverage):", err);
       throw err;
     });
 }

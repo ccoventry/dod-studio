@@ -18,7 +18,8 @@ import { getGameFolder, setGameFolder } from './game_folder_ui.js';
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
  *   form doesn't hold ({ scanPaths, demoFolderHistory, scanFoldersForDemos,
- *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers }),
+ *   analyzerExplorerWidth, targetDrives, renderExportDirs, scanWorkers,
+ *   setupDismissed }),
  *   and currentCaptureMode().
  */
 export function createSettingsSync({ getState, currentCaptureMode }) {
@@ -73,7 +74,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
     const fastForwardSpeed = numberField('#config-fast-forward-speed', 0.05, { positive: true });
 
     const saveLocalPatchedCopy = document.querySelector('#config-save-local-patched')?.checked || false;
-    const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked || false;
+    const hookRunsBatch = document.querySelector('#config-hook-runs-batch')?.checked ?? true;
     const keepGameBehind = document.querySelector('#config-keep-game-behind')?.checked ?? true;
 
     const renderCodec = document.querySelector('#render-codec-select')?.value || 'prores';
@@ -154,6 +155,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_obs: finishCodecObs,
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
+      setup_dismissed: !!state.setupDismissed,
       // "After a clip is finished" (#644).
       ...getTakeCleanupSetting()
     };
@@ -325,7 +327,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   const saveLocalPatchedEl = document.querySelector('#config-save-local-patched');
   if (saveLocalPatchedEl) saveLocalPatchedEl.checked = !!settings.save_local_patched_copy;
   const hookRunsBatchEl = document.querySelector('#config-hook-runs-batch');
-  if (hookRunsBatchEl) hookRunsBatchEl.checked = !!settings.hook_runs_batch;
+  if (hookRunsBatchEl) hookRunsBatchEl.checked = settings.hook_runs_batch !== false;
   const keepGameBehindEl = document.querySelector('#config-keep-game-behind');
   if (keepGameBehindEl) keepGameBehindEl.checked = settings.keep_game_behind !== false;
   if (settings.render_codec) {

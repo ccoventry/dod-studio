@@ -153,7 +153,9 @@ fn merge_dir_entries(
             continue;
         }
 
-        if source_path.is_dir() && destination_path.is_dir() {
+        // `file_type` never follows a junction, so a link in the old folder
+        // is skipped like a file collision, never merged through (#376).
+        if entry.file_type().is_ok_and(|t| t.is_dir()) && destination_path.is_dir() {
             merge_dir_entries(&source_path, &destination_path, &name, report);
             // Only succeeds once the merge above has moved everything out --
             // anything left behind (a skipped file-vs-file collision) keeps
@@ -196,7 +198,8 @@ pub fn preview_sidecar(demo: &Path) -> Option<PathBuf> {
 }
 
 /// Stem of the primer demo `build_batch_queue` writes into the game folder
-/// ([`mod_dir`]). The `dodstudio_` prefix matches every other file this app writes
+/// ([`mod_dir`]) when the batch launches without the hook DLL (#365). The
+/// cleanup still removes one left by such a batch. The `dodstudio_` prefix matches every other file this app writes
 /// there (`dodstudio_helper.cfg`, `dodstudio_capture_done.cfg`) and keeps the
 /// name out of the space a player's own demo could plausibly occupy (#197).
 pub const PRIMER_DEMO_STEM: &str = "dodstudio_primer";

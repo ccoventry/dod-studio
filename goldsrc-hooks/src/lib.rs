@@ -28,6 +28,12 @@
 //!     are drawn by different code paths and do not otherwise share a look.
 //!   - `spectator_eye`: the in-eye camera drops to the ground for a prone
 //!     player, where the game leaves it at crouch height.
+//!   - `spectator_gun`: the gun drops off the bottom of the screen when the
+//!     player's own would (sprint, jump, prone, ladder).
+//! - `spectator_deathcam`: `dodstudio_spec_deathcam`, the game's own death cam
+//!   when the watched player dies, as his recording shows it, instead of the
+//!   rolled view from his dead eyes. Its own switch: a movie wants it, a
+//!   shoutcast does not.
 //! - `fire_sounds`: the `EV_PlaySound` hook the first two of those hear
 //!   gunshots through. It changes no sound.
 //! - `deathmsg`: the `dodstudio_deathmsg` command -- raise the four-line cap on
@@ -87,6 +93,9 @@
 //! - `demo_list_folders`: the `dodstudio_demo_list_folders` cvar -- the Load
 //!   Demo window lists folders (and `../`) as well as demos, and opens them,
 //!   so `viewdemo` can reach demos outside `dod/` (issue #408).
+//! - `demo_other_drives`: the `dodstudio_demo_other_drives` cvar -- `viewdemo`
+//!   and `playdemo` open a demo on another drive by its full path, through a
+//!   swap of the file system's `Open` slot (issue #776).
 //! - `engine_buttons`: a button inside a GameUI window whose command is
 //!   `engine <console command>` runs it, as the ESC menu's entries do
 //!   (issue #408). On by default, since it only acts on commands the window
@@ -183,6 +192,7 @@ mod debug;
 mod decals;
 mod demo_file;
 mod demo_list_folders;
+mod demo_other_drives;
 mod demo_reload;
 mod demo_rosters;
 mod demo_scope;
@@ -232,6 +242,7 @@ mod screen_effects;
 mod server_query;
 mod spectator_bars;
 mod spectator_crosshair;
+mod spectator_deathcam;
 mod spectator_eye;
 mod spectator_follow;
 mod spectator_gun;

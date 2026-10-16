@@ -42,3 +42,27 @@ export function parseClock(now = () => Date.now()) {
     },
   };
 }
+
+/**
+ * Cache all's progress line and bar for one `demo_cache_progress` event:
+ * while older cached analyses are being upgraded, that step and its count;
+ * then the caching count with its time left. `parses` is the run's
+ * `parseClock`, which only starts once the upgrades are over, so their time
+ * doesn't count as parsing.
+ */
+export function cacheRunView(payload, parses) {
+  const upgrade = payload.upgrade ?? {};
+  if (upgrade.running) {
+    return {
+      text: STRINGS.ANALYZER.cacheUpgrading(payload),
+      value: upgrade.done ?? 0,
+      max: Math.max(1, upgrade.total ?? 0),
+    };
+  }
+  return {
+    text: STRINGS.ANALYZER.cacheProgress(payload)
+      + timeLeftText(payload, parses.elapsed(payload.done, payload.cached)),
+    value: payload.done ?? 0,
+    max: Math.max(1, payload.total ?? 0),
+  };
+}

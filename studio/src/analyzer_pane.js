@@ -676,6 +676,9 @@ async function setCurrentDir(path) {
   try {
     listing = await browseDirectory(path);
   } catch (err) {
+    // A slow read can finish after the user has moved on (#789): only the
+    // folder still open may set the table.
+    if (currentDir !== path) return;
     browserError = String(err);
     currentFolderDemos = [];
     await forgetInvalidFolder(path);
@@ -686,6 +689,7 @@ async function setCurrentDir(path) {
   }
 
   dirCache.set(path, listing);
+  if (currentDir !== path) return;
   browserError = null;
   currentFolderDemos = listing.demos;
   startPlayerIndex(listing.demos);

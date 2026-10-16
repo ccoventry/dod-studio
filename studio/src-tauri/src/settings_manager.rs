@@ -154,9 +154,14 @@ pub struct AppSettings {
     pub command_profile_active: String,
     #[serde(default)]
     pub save_local_patched_copy: bool,
-    /// `PatcherConfig::hook_runs_batch` (#434).
-    #[serde(default)]
+    /// `PatcherConfig::hook_runs_batch` (#434): Seek Between Clips, the
+    /// default route. The setting stays as the switch back to patching.
+    #[serde(default = "native::patch::types::default_hook_runs_batch")]
     pub hook_runs_batch: bool,
+    /// Which one-time changes to saved values have run (`MIGRATIONS`), so a
+    /// new default can reach a settings file that saved the old one.
+    #[serde(default)]
+    pub settings_migrations: u32,
     /// `PatcherConfig::keep_game_behind`.
     #[serde(default = "default_keep_game_behind")]
     pub keep_game_behind: bool,
@@ -245,6 +250,11 @@ pub struct AppSettings {
     /// on each placeholder.
     #[serde(default)]
     pub demo_rename_lowercase: bool,
+    /// "Skip setup for now" in the Setup window (#599): it stops opening by
+    /// itself at launch. Finishing setup clears it, so a required path that
+    /// goes missing later opens the window again.
+    #[serde(default)]
+    pub setup_dismissed: bool,
 }
 
 fn default_game_folder() -> String {
@@ -325,7 +335,7 @@ fn default_update_channel() -> String {
 }
 /// Keep in step with `DEFAULT_TEMPLATE` in `studio/src/clip_name.js`.
 fn default_clip_name_template() -> String {
-    "{map}_{player}_{kills}k_{weapons}_{time}".to_string()
+    "{map}_{name}_{kills}k_{weapons}_{time}".to_string()
 }
 /// Keep in step with `DEFAULT_POV_TEMPLATE` in `studio/src/demo_rename.js`.
 fn default_demo_rename_pov_template() -> String {
@@ -405,7 +415,8 @@ impl Default for AppSettings {
             command_profiles: Vec::new(),
             command_profile_active: String::new(),
             save_local_patched_copy: false,
-            hook_runs_batch: false,
+            hook_runs_batch: native::patch::types::default_hook_runs_batch(),
+            settings_migrations: MIGRATIONS,
             keep_game_behind: default_keep_game_behind(),
             render_codec: default_render_codec(),
             render_custom_codec_args: String::new(),
@@ -433,6 +444,7 @@ impl Default for AppSettings {
             demo_rename_pov_template: default_demo_rename_pov_template(),
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
+            setup_dismissed: false,
         }
     }
 }
@@ -444,16 +456,33 @@ pub fn settings_path() -> PathBuf {
     native::shared::paths::get_appdata_dir().join("settings.json")
 }
 
+/// How many one-time changes to saved values exist; `migrate` runs the ones
+/// past a file's `settings_migrations`. The frontend saves settings without
+/// this field, so `save_settings` keeps the loaded value.
+pub const MIGRATIONS: u32 = 1;
+
 impl AppSettings {
     pub fn load_or_default() -> Self {
         let path = settings_path();
         if path.exists()
             && let Ok(content) = fs::read_to_string(&path)
-            && let Ok(settings) = serde_json::from_str::<AppSettings>(&content)
+            && let Ok(mut settings) = serde_json::from_str::<AppSettings>(&content)
         {
+            settings.migrate();
             return settings;
         }
         Self::default()
+    }
+
+    /// Applies the one-time changes this file hasn't had.
+    pub fn migrate(&mut self) {
+        if self.settings_migrations < 1 {
+            // Seek Between Clips was off by default while experimental; a
+            // file saved then has the old default and gets the new one once
+            // (#434). Turning it off again after this sticks.
+            self.hook_runs_batch = true;
+        }
+        self.settings_migrations = MIGRATIONS;
     }
 
     pub fn save(&self) -> Result<(), String> {
@@ -557,6 +586,46 @@ mod tests {
             settings.scan_workers,
             crate::capture_manager::SCAN_CONCURRENCY as i32
         );
+        // Settings saved before #599 still open Setup when a path is missing.
+        assert!(!settings.setup_dismissed);
+    }
+
+    #[test]
+    fn test_setup_dismissed_roundtrip() {
+        let original = AppSettings {
+            setup_dismissed: true,
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert!(restored.setup_dismissed);
+    }
+
+    /// A file saved while Seek Between Clips was experimental (off by default)
+    /// gets the new default once; a later choice sticks (#434).
+    #[test]
+    fn seek_between_clips_turns_on_once_for_an_older_settings_file() {
+        let file = |extra: &str| -> AppSettings {
+            serde_json::from_str(&format!(
+                r#"{{"hlae_path": "C:/hlae/hlae.exe", "hl_path": "C:/dod/hl.exe", "ffmpeg_path": null,
+                    "pinned_folders": [], "language": "en", "capture_fps": 300,
+                    "pre_roll_seconds": 2.0, "post_roll_seconds": 0.6{extra}}}"#
+            ))
+            .expect("a settings file")
+        };
+        let mut saved_off = file(r#", "hook_runs_batch": false"#);
+        saved_off.migrate();
+        assert!(saved_off.hook_runs_batch);
+        assert_eq!(saved_off.settings_migrations, MIGRATIONS);
+
+        let mut turned_off_again = file(r#", "hook_runs_batch": false, "settings_migrations": 1"#);
+        turned_off_again.migrate();
+        assert!(!turned_off_again.hook_runs_batch);
+
+        // A file from before the setting existed has the new default.
+        let mut older = file("");
+        older.migrate();
+        assert!(older.hook_runs_batch);
     }
 
     #[test]
