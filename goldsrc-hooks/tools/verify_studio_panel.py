@@ -381,6 +381,18 @@ def verify(game, src):
     check(b"ButtonClicked" in pushed,
           f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
 
+    # The Go to dropdown is widened through the menu's SetFixedWidth(int):
+    # it stores its argument and invalidates the layout (Panel slot 58,
+    # +0xe8), the slot the box itself calls with its own width when the
+    # list opens.
+    fixed_slot = vwl.rust_usize(src, "MENU_SLOT_SET_FIXED_WIDTH")
+    fixed_fn = ui.u32(menu_vt + 4 * fixed_slot) - ui.base if menu_vt else 0
+    fixed = ui.body(fixed_fn, 0x30)
+    stores = any(re.fullmatch(r"mov dword ptr \[ecx \+ 0x[0-9a-f]+\], eax", x) for x in fixed)
+    lays_out = any(re.fullmatch(r"call dword ptr \[e[a-d]x \+ 0xe8\]", x) for x in fixed)
+    check(stores and lays_out and ui.last_ret(fixed_fn) == "ret 4",
+          f"Menu slot {fixed_slot} is SetFixedWidth(int): stores it and invalidates the layout: {fixed[:6]}")
+
     # 21: the Highlights tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
     check(bar_vt == build["progress_bar_vftable"],

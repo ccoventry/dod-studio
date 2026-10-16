@@ -626,6 +626,10 @@ const COMBO_SLOT_ACTIVATE_ITEM_BY_ROW: usize = 208;
 /// marks every item for deletion): the Player dropdown's list is rebuilt
 /// for what is typed.
 const COMBO_SLOT_DELETE_ALL_ITEMS: usize = 203;
+/// `Menu::SetFixedWidth(int)`, on a `ComboBox`'s drop-down menu: the box sets
+/// it to its own width each time the list opens, which cuts the Go to
+/// list's folder names short, so the tab widens it again while it is open.
+const MENU_SLOT_SET_FIXED_WIDTH: usize = 166;
 /// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
 /// or closes it if open.
 const BUTTON_CLICKED: &CStr = c"ButtonClicked";
@@ -769,6 +773,17 @@ fn folder_line(dod: &std::path::Path, folder: &str, max: usize) -> String {
         shown.push('/');
     }
     format!("Currently in {}", keep_the_end(&shown, max))
+}
+
+/// How wide the Go to list opens for its longest label of `longest`
+/// characters: six pixels a character and room for the scroll bar, no
+/// wider than the tab's `room` past the box, never narrower than the box.
+fn place_menu_width(longest: usize, box_wide: i32, room: i32) -> i32 {
+    let text = i32::try_from(longest)
+        .unwrap_or(i32::MAX)
+        .saturating_mul(6)
+        .saturating_add(32);
+    text.min(room).max(box_wide)
 }
 
 /// The Demos tab's line above the list (`ui/Demos.res`).
@@ -1906,6 +1921,7 @@ mod hook {
                 }
                 refill_demo_list();
             }
+            widen_place_menu(vgui, page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -2276,6 +2292,39 @@ mod hook {
             activate_row(o, 0);
         }
         *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
+    }
+
+    /// Widens the Go to list, while it is open, to fit its longest label
+    /// (as far as the tab has room). Every frame, since the box narrows it
+    /// again each time it opens.
+    unsafe fn widen_place_menu(vgui: &Vgui, page: Vpanel) {
+        let Ok((base, build)) = gameui() else {
+            return;
+        };
+        unsafe {
+            let Some(vp) = vgui.child_named(page, DEMO_PLACE) else {
+                return;
+            };
+            let combo = vgui.object(vp);
+            if combo.is_null() || *(combo as *const usize) != base + build.combo_box_vftable {
+                return;
+            }
+            let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
+            if menu.is_null() || !vgui.visible(vpanel_of(menu)) {
+                return;
+            }
+            let longest = PLACES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .map(|p| p.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            let (x, _, w, _) = vgui.rect(vp);
+            let (_, _, page_w, _) = vgui.rect(page);
+            let set_width: ListIntVoidFn = slot(menu, MENU_SLOT_SET_FIXED_WIDTH);
+            set_width(menu, place_menu_width(longest, w, page_w - x - 8));
+        }
     }
 
     /// Back, Forward or Up on the Demos tab: `step` moves the lists'
@@ -4374,6 +4423,16 @@ mod tests {
             folder_line(dod, "temp demos/", 20),
             "Currently in .../dod/temp demos/"
         );
+    }
+
+    #[test]
+    fn the_go_to_list_opens_wide_enough() {
+        // A long recent folder: wider than the 150 px box.
+        assert_eq!(place_menu_width(50, 150, 432), 332);
+        // Never past the tab, never narrower than the box.
+        assert_eq!(place_menu_width(200, 150, 432), 432);
+        assert_eq!(place_menu_width(5, 150, 432), 150);
+        assert_eq!(place_menu_width(50, 150, 0), 150);
     }
 
     #[test]
