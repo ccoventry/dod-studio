@@ -210,6 +210,16 @@ def verify(game, src):
             func = int(tail.split()[1], 16) - ui.base
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # The Demos tab scrolls its list to the top after a new filter through
+    # OnMouseWheeled: the scroll bar's GetValue (+0x21c), less delta * 3,
+    # into its SetValue (+0x218).
+    wheel_slot = vwl.rust_usize(src, "LIST_SLOT_ON_MOUSE_WHEELED")
+    wheel = ui.body(ui.u32(list_vt + 4 * wheel_slot) - ui.base, 0x40)
+    times_three = any(re.fullmatch(r"lea ecx, \[e[a-d]x \+ e[a-d]x\*2\]", x) for x in wheel)
+    sets = any(x.endswith("+ 0x218]") and x.startswith(("jmp", "call")) for x in wheel)
+    gets = any(x.endswith("+ 0x21c]") and x.startswith("call") for x in wheel)
+    check(times_three and sets and gets,
+          f"ListPanel slot {wheel_slot} is OnMouseWheeled: scroll bar value - delta * 3 into SetValue")
 
     # 19: the Map and Date columns. The window's constructor makes its one
     # column through AddColumnHeader, just after pushing "demoname".

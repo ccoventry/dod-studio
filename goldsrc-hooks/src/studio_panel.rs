@@ -545,6 +545,12 @@ const DEMO_FILTER: &str = "DemoFilter";
 const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
+/// `ListPanel::OnMouseWheeled(int delta)`: moves its scroll bar by `delta`
+/// times three rows through `ScrollBar::SetValue`, which clamps to the
+/// bar's range. Hiding rows shrinks the range but leaves the bar's value
+/// where it was, so a list scrolled down showed nothing until the next
+/// scroll; a big wheel up after each new filter puts it back at the top.
+const LIST_SLOT_ON_MOUSE_WHEELED: usize = 99;
 /// `AddColumnHeader(int index, const char *name, const char *text, int width,
 /// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
 /// and Date columns are built with.
@@ -1774,6 +1780,10 @@ mod hook {
     /// What the search box held when the list was last filtered, and
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    /// The filters as typed when the list was last scrolled to the top: a
+    /// new search starts at the top, a background refilter (rosters, a
+    /// refill) leaves the scroll alone.
+    static SCROLLED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
     /// [`folder_settings`] as the Demos tab's list was last filled with them.
     static LISTED_FOLDERS: std::sync::atomic::AtomicU8 =
@@ -2024,6 +2034,16 @@ mod hook {
                 }
                 id = next(list, id);
             }
+            // A new search starts at the top, and puts the scroll bar back in
+            // the range that hiding rows shrank.
+            let typed = format!("{filters:?} {player:?} {all} {recorded}");
+            let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+            if *scrolled != typed {
+                let wheel: ListIntVoidFn = slot(list, LIST_SLOT_ON_MOUSE_WHEELED);
+                wheel(list, 100_000);
+                *scrolled = typed;
+            }
+            drop(scrolled);
             show_player_note(
                 vgui,
                 page,
