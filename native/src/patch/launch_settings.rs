@@ -7,8 +7,8 @@
 //! added to the struct fails to compile until both sides handle it.
 //!
 //! The running game's side comes from its own process: the image path gives
-//! the install, and `-w`/`-h` are on its command line because HLAE starts
-//! `hl.exe` with the `-cmdLine` text. That works for a game started in an
+//! the install, and `-game`/`-w`/`-h` are on its command line because HLAE
+//! starts `hl.exe` with the `-cmdLine` text. That works for a game started in an
 //! earlier Studio session too, with nothing to record.
 
 use serde::Serialize;
@@ -19,6 +19,9 @@ use std::path::PathBuf;
 pub struct LaunchSettings {
     /// `hl.exe`, passed as `-programPath`: which install the game runs from.
     pub game_path: String,
+    /// `-game` on the game's command line: the mod folder beside `hl.exe`
+    /// (#402).
+    pub game_folder: String,
     /// `-w` on the game's command line.
     pub width: i32,
     /// `-h` on the game's command line.
@@ -37,6 +40,8 @@ pub enum LaunchDifference {
     Install,
     /// It was started at another resolution.
     Resolution,
+    /// It runs another game folder (`-game`, #402).
+    GameFolder,
 }
 
 /// One side of a mismatch, as the frontend words it.
@@ -49,6 +54,8 @@ pub struct GameLaunch {
     pub exe: String,
     pub width: Option<i32>,
     pub height: Option<i32>,
+    /// `-game`'s folder, when it can be read.
+    pub game_folder: Option<String>,
 }
 
 /// Whether a game is running, and whether it was started with the launch
@@ -126,6 +133,7 @@ pub fn check(want: &LaunchSettings, games: &[RunningGame]) -> RunningGameCheck {
 pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
     let LaunchSettings {
         game_path,
+        game_folder,
         width,
         height,
         // Not compared: HLAE passes the hook DLLs as `-hookDllPath` on its own
@@ -150,6 +158,14 @@ pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
     {
         differs.push(LaunchDifference::Resolution);
     }
+    // Folder names are case-insensitive on Windows, as the engine's own
+    // `-game` lookup is.
+    let running_folder = game_folder_from_cmd(&game.cmd);
+    if let Some(folder) = &running_folder
+        && !folder.eq_ignore_ascii_case(game_folder)
+    {
+        differs.push(LaunchDifference::GameFolder);
+    }
 
     if differs.is_empty() {
         return RunningGameCheck::Match { pid: game.pid };
@@ -163,12 +179,14 @@ pub fn compare(want: &LaunchSettings, game: &RunningGame) -> RunningGameCheck {
             exe: clean_path(&running_exe),
             width: running_size.map(|s| s.0),
             height: running_size.map(|s| s.1),
+            game_folder: running_folder,
         },
         wanted: GameLaunch {
             install: wanted_install,
             exe: clean_path(game_path),
             width: Some(*width),
             height: Some(*height),
+            game_folder: Some(game_folder.clone()),
         },
         differs,
     }
@@ -208,6 +226,25 @@ pub fn resolution_from_cmd(cmd: &[String]) -> Option<(i32, i32)> {
             .and_then(|v| v.parse::<i32>().ok())
     };
     Some((value_of("-w")?, value_of("-h")?))
+}
+
+/// `-game <mod>` from a command line, split the way [`resolution_from_cmd`]
+/// splits it; the first counts. `None` when it isn't there: the engine then
+/// runs `valve`, which no DoD Studio launch does, so such a game was started
+/// by something else and is left to the reuse paths' own handling.
+pub fn game_folder_from_cmd(cmd: &[String]) -> Option<String> {
+    let tokens: Vec<&str> = cmd
+        .iter()
+        .flat_map(|a| a.split_whitespace())
+        .map(unquote)
+        .collect();
+    let at = tokens
+        .iter()
+        .position(|t| t.eq_ignore_ascii_case("-game"))?;
+    tokens
+        .get(at + 1)
+        .filter(|v| !v.is_empty() && !v.starts_with(['-', '+']))
+        .map(|v| v.to_string())
 }
 
 fn unquote(s: &str) -> &str {
@@ -267,6 +304,7 @@ mod tests {
     fn want(game_path: &str, width: i32, height: i32) -> LaunchSettings {
         LaunchSettings {
             game_path: game_path.to_string(),
+            game_folder: "dod".to_string(),
             width,
             height,
             afx_hook_dll: PathBuf::from(r"C:\HLAE\AfxHookGoldSrc.dll"),
@@ -279,7 +317,7 @@ mod tests {
     fn game(pid: u32, exe: &str, width: i32, height: i32) -> RunningGame {
         let mut cmd = vec![format!("\"{exe}\"")];
         cmd.extend(
-            format!("-game dod -insecure -addons -demoedit -windowed -w {width} -h {height} -gl -condebug")
+            format!("-game dod -insecure -addons -demoedit -windowed -w {width} -h {height} -afxForceAlpha8 1 -condebug")
                 .split(' ')
                 .map(String::from),
         );
@@ -337,6 +375,56 @@ mod tests {
         assert_eq!((wanted.width, wanted.height), (Some(3440), Some(1440)));
     }
 
+    /// A `dod_movies` game left running is not reused for a `dod` launch
+    /// (#402): the game folder, like the resolution, only applies at start.
+    #[test]
+    fn another_game_folder_is_a_mismatch() {
+        let mut running = game(7, PRE, 1920, 1080);
+        for arg in running.cmd.iter_mut() {
+            if arg == "dod" {
+                *arg = "dod_movies".to_string();
+            }
+        }
+        let RunningGameCheck::Mismatch {
+            running,
+            wanted,
+            differs,
+            ..
+        } = compare(&want(PRE, 1920, 1080), &running)
+        else {
+            panic!("expected a mismatch");
+        };
+        assert_eq!(differs, vec![LaunchDifference::GameFolder]);
+        assert_eq!(running.game_folder.as_deref(), Some("dod_movies"));
+        assert_eq!(wanted.game_folder.as_deref(), Some("dod"));
+
+        // Same folder in other case: the same folder on Windows.
+        let mut upper = game(8, PRE, 1920, 1080);
+        for arg in upper.cmd.iter_mut() {
+            if arg == "dod" {
+                *arg = "DOD".to_string();
+            }
+        }
+        assert_eq!(
+            compare(&want(PRE, 1920, 1080), &upper),
+            RunningGameCheck::Match { pid: 8 }
+        );
+    }
+
+    #[test]
+    fn the_game_folder_is_read_from_split_or_whole_command_lines() {
+        let split: Vec<String> = ["hl.exe", "-game", "dod_movies", "-w", "800"]
+            .map(String::from)
+            .to_vec();
+        assert_eq!(game_folder_from_cmd(&split).as_deref(), Some("dod_movies"));
+        let whole = vec![PRE.to_string(), "-GAME \"dod_1_2\" -insecure".to_string()];
+        assert_eq!(game_folder_from_cmd(&whole).as_deref(), Some("dod_1_2"));
+        let none: Vec<String> = ["hl.exe", "-w", "800"].map(String::from).to_vec();
+        assert_eq!(game_folder_from_cmd(&none), None);
+        let dangling: Vec<String> = ["hl.exe", "-game", "-insecure"].map(String::from).to_vec();
+        assert_eq!(game_folder_from_cmd(&dangling), None);
+    }
+
     #[test]
     fn a_resolution_change_alone_is_a_mismatch() {
         let check = compare(&want(PRE, 2560, 1440), &game(7, PRE, 1920, 1080));
@@ -367,7 +455,7 @@ mod tests {
         assert_eq!(resolution_from_cmd(&split), Some((1920, 1080)));
         let whole = vec![
             PRE.to_string(),
-            "-game dod -windowed -w 3440 -h 1440 -gl".to_string(),
+            "-game dod -windowed -w 3440 -h 1440 -afxForceAlpha8 1".to_string(),
         ];
         assert_eq!(resolution_from_cmd(&whole), Some((3440, 1440)));
         let quoted = vec![

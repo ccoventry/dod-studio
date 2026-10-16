@@ -53,10 +53,11 @@ consumes them. Per player, alongside the untouched server-counter `stats`:
 `obj_points` (the sum of `ObjScore` increments), `cap_credits` (the `CapMsg` capper plus
 every same-frame `ObjScore` riser, minus anyone known to be on the other team),
 `teamkills` and `suicides`. Per demo, `state.objectives`: the flag layout and owners,
-every capture with its cappers and the flag's owner just before it (`is_break()` is the
-artifact's "enemy-owned flag" rule; `owners_before` supports narrower ones), and every
-timed capture attempt with its outcome (cancelled = a cap block for the defenders). All of
-it clears when the match goes live. `dod-studio-cli stats <demos>` prints it as JSON.
+every capture with its cappers and the flag's owner just before it (`taken_from_enemy()`
+is the artifact's "enemy-owned flag" rule, which it called a break; it was renamed once
+breaks got the league's meaning, below), and every timed capture attempt with its outcome
+(cancelled = a cap block for the defenders). All of it clears when the match goes live.
+`dod-studio-cli stats <demos>` prints it as JSON.
 
 Measured by `analysis/examples/objective_probe` over the local library (484 of 488
 demos parsed; 52 classed HLTV by `SvcHltv`): HLTV 2,103 captures, 22.3% multi-capper,
@@ -66,10 +67,55 @@ named capper's own increment in the capture frame 99.3% of the time. About 30% o
 attempts are cancelled (28.6% HLTV, 31.5% POV). The artifact's 19.8% / 1.22 are from a
 different corpus (the 126 LAN HLTV demos).
 
+## Cap breaks (#192)
+
+**Definition** (decided 2026-10-12): a break is stopping an enemy capture in progress.
+The enemy starts a timed capture (`StartProg`) and it is cancelled (`CancelProg`) because
+a defender killed the capper or stepped onto the point; the break is credited to that
+defender. This matches the league scoreboard the stats copy, which credits one player
+with 2 breaks and 0 captures.
+
+**What the demo can show.** Neither `StartProg` nor `CancelProg` names a player, so an
+attempt's cappers are never on the wire, and the capture areas are brush triggers the
+server never sends. `InitObj`'s flag origin is no help either: the attackers whose deaths
+cancelled a capture died a median 7,148 units from it, so it is not a world position. So
+the analyzer attributes by timing, in `objective::cancel_cause`, for every cancelled
+attempt:
+
+1. An attacking-team player who died after the attempt started and at most
+   `BREAK_WINDOW` (**1.1 s**) before the cancel is taken to be a capper. If a defender
+   killed one, the last such defender gets the break (`Player::cap_breaks`).
+2. If attackers died in the window but none by a defender (a teamkill, the world, a
+   suicide), the block is counted in `objectives.blocks_unattributed` and credited to
+   nobody.
+3. If no attacker died in the window, the cappers walked off alive:
+   `objectives.attempts_abandoned`, not a break. A defender stepping onto the point lands
+   here too: with no area bounds, the demo cannot show who stood in one, so that branch
+   of the definition is not built.
+
+Each attempt keeps its `cancel_cause`. `dod-studio-cli stats` prints `cap_breaks` per
+player and `blocks_unattributed` and `attempts_abandoned` per demo; each capture's old
+`break` field is now `taken_from_enemy`. The analyzer's Flags tab has a Breaks column.
+
+**The window, measured** by `analysis/examples/cap_break_probe` over the PRE `dod\`
+library (458 demos, 2,558 cancelled attempts after the match went live). The cancel does
+not come with the death: the gap from the last
+attacker death to the cancel piles up between 0.5 and 1.1 s (1,441 of the 1,744 cancels
+with an attacker death in the 2 s before; 1.0–1.1 s alone holds 121, 1.1–1.2 s 12). The
+same lookup 5 s before each cancel, where nothing is being cancelled, finds an attacker
+death within 1.1 s 9.5% of the time, and past 1.1 s the real gaps are no more common
+than that chance rate: everything a death causes lands within 1.1 s. The cost is
+coincidence: an attacker dying elsewhere within the window gets counted, roughly 5% of
+the breaks credited.
+
+**Totals over the library** with the 1.1 s window: of the 2,558 cancels, 1,673 breaks
+(65.4%), 21 unattributed (0.8%: 23 of the deaths were teamkills, 5 the world or the
+victim), 864 abandoned (33.8%). Demos of the same half from different recorders can
+differ by a break (`wsod25_ply2_m1_h1`: 6 on the HLTV demo, 7 on m00cat's POV); not
+looked into yet.
+
 Still open from the punch list: half modelling (the CLI only reads `_h1`/`_h2` from the
-file name), the demo-type check (PR #395, still open), and a per-player cap-break column, which needs
-the league's definition first: the scoreboard it copies credits one player with 2 breaks
-and 0 captures, so its "break" is not a capture at all.
+file name; a content-based library is on #685).
 
 ## Repo changes already made in service of this (on dev/main)
 

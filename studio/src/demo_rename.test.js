@@ -3,7 +3,7 @@ import {
   DEFAULT_POV_TEMPLATE, DEFAULT_HLTV_TEMPLATE, parseDemoTemplate, demoValues, planRenames, renamePairs,
   placeholdersFor, nameWithoutTag, DEMO_PLACEHOLDERS, DEMO_PLACEHOLDER_GROUPS, listProgressView,
 } from './demo_rename.js';
-import { emptyProjectTeams } from './project_teams.js';
+import { emptyProjectTeams, renameTeam, mergeTeam } from './project_teams.js';
 
 const DIR = 'C:\\demos\\';
 // 2026-09-28 12:00 local time, whatever the test machine's zone.
@@ -135,6 +135,30 @@ describe('planRenames', () => {
   it('gives a missing value its fallback word, else unknown', () => {
     const rows = plan([hltv('h.dem', { teams: [] })], { hltvTemplate: '{team1|mix}_{allies}_{map}' });
     expect(rows[0].to).toBe('mix_unknown_anzio.dem');
+  });
+
+  it('names the match and half the listing decided, and never guesses an unknown half (#685)', () => {
+    const rows = plan([
+      pov('a.dem', { match_number: 1, half: 1 }),
+      hltv('b.dem', { match_number: 1, half: 2 }),
+      pov('c.dem', { match_number: 2, half: null }),
+      pov('d.dem'),
+    ], { povTemplate: '{match|m}_{half|h}_{map}', hltvTemplate: '{match}_{half}_{map}' });
+    expect(rows.map((r) => r.to)).toEqual(['1_h1_anzio.dem', '1_h2_anzio.dem', '2_h_anzio.dem', 'm_h_anzio.dem']);
+  });
+
+  it("names the recorder's opponent from the Teams list, and an untagged side unknown (#445)", () => {
+    const teams = emptyProjectTeams();
+    renameTeam(teams, 'dicE', 'dice');
+    mergeTeam(teams, 'gskiLL', 'gskill');
+    const named = plan([pov('a.dem')], { projectTeams: teams, povTemplate: '{name}_{team_name}_v_{opponent}_{map}' });
+    expect(named[0].to).toBe('krod_gskill_v_dice_anzio.dem');
+
+    const pug = pov('b.dem', { teams: [{ side: 'Allies', tag: null }, { side: 'Axis', tag: 'gskiLL' }] });
+    const plain = plan([pug], { projectTeams: teams, povTemplate: '{name}_v_{opponent}_{map}' });
+    expect(plain[0].to).toBe('krod_v_unknown_anzio.dem');
+    const fallback = plan([pug], { projectTeams: teams, povTemplate: '{name}_v_{opponent|mix}_{map}' });
+    expect(fallback[0].to).toBe('krod_v_mix_anzio.dem');
   });
 
   it('makes every name plain: letters, digits, - and _ only', () => {

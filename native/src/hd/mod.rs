@@ -19,7 +19,9 @@
 
 pub mod build;
 pub mod gl_max_size;
+pub mod map_keys_cache;
 pub mod map_list;
+pub mod map_textures;
 pub mod misses;
 pub mod my_styles;
 pub mod preview;
@@ -177,11 +179,12 @@ pub struct HdStatus {
 /// `<game>\dod_addon\dodstudio_hd` (#415), or `<game>\dod\dodstudio_hd`
 /// while that one exists and the `dod_addon` one doesn't -- where an install
 /// built before #415 has them. The hook and `tools/hd/hdcommon.py` pick the
-/// same way, so a build lands where the game reads.
+/// same way, so a build lands where the game reads. Both folders are named
+/// from the Game folder setting (#402).
 pub fn hd_root(game_exe: &Path) -> Option<PathBuf> {
     let game = game_exe.parent()?;
-    let addon = game.join("dod_addon").join("dodstudio_hd");
-    let dod = game.join("dod").join("dodstudio_hd");
+    let addon = crate::shared::paths::addon_dir(game).join("dodstudio_hd");
+    let dod = crate::shared::paths::mod_dir(game).join("dodstudio_hd");
     Some(if dod.is_dir() && !addon.is_dir() {
         dod
     } else {
@@ -258,7 +261,9 @@ fn count_files(dir: &Path) -> (u64, u64, Option<PathBuf>) {
     let mut files = 0;
     let mut bytes = 0;
     let mut biggest: Option<(u64, PathBuf)> = None;
+    // walkdir does not follow links by default; the depth cap is #376's.
     for e in walkdir::WalkDir::new(dir)
+        .max_depth(crate::sys::folder_walk::Walker::DEFAULT_MAX_DEPTH)
         .into_iter()
         .flatten()
         .filter(|e| e.file_type().is_file())
