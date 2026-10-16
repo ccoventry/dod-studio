@@ -548,6 +548,19 @@ const DEMO_FILTER: &str = "DemoFilter";
 const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
+/// `ListPanel::OnMouseWheeled(int delta)`: moves its scroll bar by `delta`
+/// times three rows through `ScrollBar::SetValue`, which clamps to the
+/// bar's range. Hiding rows shrinks the range but leaves the bar's value
+/// where it was, so a list scrolled down showed nothing until the next
+/// scroll; a big wheel up after each new filter puts it back at the top.
+const LIST_SLOT_ON_MOUSE_WHEELED: usize = 99;
+/// `Panel::InvalidateLayout(bool layoutNow, bool reloadScheme)`, what
+/// `Menu::SetFixedWidth` calls (`verify_studio_panel.py`). The list is laid
+/// out now, before the wheel above, so its scroll bar has the new folder's
+/// range: against the old one (a folder that fitted, whose range ends below
+/// zero) the clamp left the bar above its top, drawn short until the next
+/// scroll.
+const PANEL_SLOT_INVALIDATE_LAYOUT: usize = 58;
 /// `AddColumnHeader(int index, const char *name, const char *text, int width,
 /// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
 /// and Date columns are built with.
@@ -606,6 +619,13 @@ const PLAYER_CHOSEN: &str = "PlayerChosen";
 const PLAYER_MATCH: &str = "PlayerMatch";
 /// Any first: the usual case is one player under several names.
 const PLAYER_MATCHES: [&CStr; 2] = [c"Any", c"All"];
+/// The Demos tab's Go to dropdown (#779): its first row is this heading;
+/// picking any other row goes to that folder, and the heading shows again.
+const DEMO_PLACE: &str = "DemoPlace";
+const PLACE_HEADING: &CStr = c"Go to...";
+/// What a drive row (`D:/`) says in the Type column, where a folder row says
+/// Folder; it has no demo count.
+const DRIVE_TYPE: &CStr = c"Drive";
 /// `TextEntry::SetText(const char *)`: the Player box is emptied after a
 /// name is picked from its list.
 const TEXT_ENTRY_SLOT_SET_TEXT: usize = 134;
@@ -619,6 +639,16 @@ const COMBO_SLOT_ACTIVATE_ITEM_BY_ROW: usize = 208;
 /// marks every item for deletion): the Player dropdown's list is rebuilt
 /// for what is typed.
 const COMBO_SLOT_DELETE_ALL_ITEMS: usize = 203;
+/// `Menu::SetFixedWidth(int)`, on a `ComboBox`'s drop-down menu: the box sets
+/// it to its own width each time the list opens, which cuts the Go to
+/// list's folder names short, so the tab widens it again while it is open.
+const MENU_SLOT_SET_FIXED_WIDTH: usize = 166;
+/// `Panel::SetEnabled(bool)`, what a `.res` file's `enabled` key calls: the
+/// Demos tab's Back, Forward and Up are greyed out where they have nowhere
+/// to go.
+const PANEL_SLOT_SET_ENABLED: usize = 47;
+/// The Demos tab's Back, Forward and Up buttons (`ui/Demos.res`).
+const DEMO_NAV_BUTTONS: [&str; 3] = ["DemoBack", "DemoForward", "DemoUp"];
 /// What a `ComboBox`'s own arrow button sends it: `OnCommand` opens the list,
 /// or closes it if open.
 const BUTTON_CLICKED: &CStr = c"ButtonClicked";
@@ -709,18 +739,15 @@ struct DemoFilters {
 /// POV or HLTV.
 const FOLDER_TYPE: &CStr = c"Folder";
 
-/// The marks in front of a Demos tab row's name. The font has none of them:
-/// the game draws them from a fallback font but spaces them by its own font's
-/// narrower width, so each is followed by enough spaces to clear it
-/// (measured on PRE, 2026-10-05; one more each after the 25th Anniversary
-/// build drew them almost touching the name, 2026-10-06). The folder mark is a square: the 25th
-/// Anniversary build drew the folder emoji (U+1F4C1) as an empty box, while
-/// it draws these shapes and arrows. Not the rectangle (U+25AC): in Tahoma,
-/// the list's font, that is a 20x4 bar that reads as a dash, where the square
-/// is a solid block about 11x9.
-const FOLDER_MARK: &str = "\u{25A0}   ";
-const DEMO_MARK: &str = "\u{25B6}   ";
-const UP_MARK: &str = "\u{2191}   ";
+/// What goes in front of a Demos tab row's name, and only sorts it: the list
+/// sorts the name column by its text, so a leading space puts the up row,
+/// the folders and the drives before the demos, and the up row's `..`
+/// before any folder's name. The pictures are in the icon column
+/// (`list_icons`, #779); before it, these were an arrow, a square and a
+/// triangle drawn from a fallback font.
+const FOLDER_MARK: &str = " ";
+const DEMO_MARK: &str = "";
+const UP_MARK: &str = " ";
 
 /// What the Demos tab's Demo File column shows for a row's `path` from
 /// `dod/`: a mark, then a demo's file name, a folder's name and a slash, or
@@ -747,8 +774,15 @@ fn display_name(path: &str, count: Option<&str>) -> String {
 /// The Demos tab's line above the list, naming the folder the list is in: as
 /// a path under the install folder's parent (`Half-Life - PRE-Anniversary for
 /// Movies/dod/temp demos/`) when it is under it, otherwise in full -- that
-/// parent itself included, where the path under it would be empty.
-fn folder_line(dod: &std::path::Path, folder: &str) -> String {
+/// parent itself included, where the path under it would be empty. A long
+/// path keeps its end, to fit `max` characters.
+fn folder_line(dod: &std::path::Path, folder: &str, max: usize) -> String {
+    if crate::demo_list_folders::is_studio_place(folder) {
+        return "Currently in Studio's analysed demos".to_string();
+    }
+    if crate::demo_list_folders::is_drives_place(folder) {
+        return "Currently in This PC (every drive)".to_string();
+    }
     let here = crate::folder_counts::normalize(&dod.join(folder));
     let shown = dod
         .parent()
@@ -760,17 +794,32 @@ fn folder_line(dod: &std::path::Path, folder: &str) -> String {
     if !shown.is_empty() && !shown.ends_with('/') {
         shown.push('/');
     }
-    format!("Currently in {}", keep_the_end(&shown, FOLDER_LINE_CHARS))
+    format!("Currently in {}", keep_the_end(&shown, max))
+}
+
+/// How wide the Go to list opens for its longest label of `longest`
+/// characters: six pixels a character and room for the scroll bar, no
+/// wider than the tab's `room` past the box, never narrower than the box.
+fn place_menu_width(longest: usize, box_wide: i32, room: i32) -> i32 {
+    let text = i32::try_from(longest)
+        .unwrap_or(i32::MAX)
+        .saturating_mul(6)
+        .saturating_add(32);
+    text.min(room).max(box_wide)
 }
 
 /// The Demos tab's line above the list (`ui/Demos.res`).
 const FOLDER_LINE: &str = "FolderPath";
 
-/// How much of a folder path the line above the list shows. A label clips on
-/// the right at its width, which would cut off the folder's own name; a long
-/// path loses folders from the left instead. (The label's own limit is about
-/// 1,023 characters, so nothing overflows either way.)
-const FOLDER_LINE_CHARS: usize = 90;
+/// How much of a folder path fits the line above the list, `wide` pixels
+/// wide. A label clips on the right at its width, which would cut off the
+/// folder's own name; a long path loses folders from the left instead. Six
+/// pixels a character, about the tab font's average, less "Currently in ".
+fn folder_line_chars(wide: i32) -> usize {
+    (usize::try_from(wide / 6).unwrap_or(0))
+        .saturating_sub(13)
+        .max(20)
+}
 
 /// `path` (folders, each ending in `/`) cut to at most about `max` characters
 /// by dropping whole folders from the left behind `.../`. The last folder is
@@ -844,12 +893,23 @@ fn demos_hint(folders: bool) -> &'static CStr {
     }
 }
 
+/// The name a row shows: its last part, without quotes or the folder's
+/// `/`. A row is a path (`temp demos/x.dem`, `"D:/demos/x.dem"`), and the
+/// search matches only what the list shows, so the folders above it (the
+/// one the list is in) don't match every row.
+fn row_name(row: &str) -> &str {
+    let path = row.trim().trim_matches('"');
+    let path = path.strip_suffix('/').unwrap_or(path);
+    path.rsplit('/').next().unwrap_or(path)
+}
+
 /// Whether a row passes every filter. `info` is `None` for a row whose
 /// header couldn't be read (or a folder): only the search applies to it.
 fn passes(row: &str, info: Option<&DemoInfo>, f: &DemoFilters, now: u64) -> bool {
+    let name = row_name(row);
     let haystack = match info {
-        Some(i) => format!("{row} {}", i.map),
-        None => row.to_string(),
+        Some(i) => format!("{name} {}", i.map),
+        None => name.to_string(),
     };
     if !matches_filter(&haystack, &f.search) {
         return false;
@@ -1191,6 +1251,10 @@ enum Action<'a> {
     ResetSettings,
     /// Forget the players picked on the Demos tab.
     ClearPlayers,
+    /// The Demos tab's Back, Forward and Up buttons (#779).
+    DemoBack,
+    DemoForward,
+    DemoUp,
     /// Anything else, for the class's own `OnCommand`.
     Own,
 }
@@ -1201,6 +1265,15 @@ fn action(command: &str) -> Action<'_> {
     }
     if command.eq_ignore_ascii_case("goto") {
         return Action::Goto;
+    }
+    if command.eq_ignore_ascii_case("demo_back") {
+        return Action::DemoBack;
+    }
+    if command.eq_ignore_ascii_case("demo_forward") {
+        return Action::DemoForward;
+    }
+    if command.eq_ignore_ascii_case("demo_up") {
+        return Action::DemoUp;
     }
     if command.eq_ignore_ascii_case("reset_settings") {
         return Action::ResetSettings;
@@ -1506,6 +1579,8 @@ mod hook {
 
     /// The Demos tab's counting bar (#409).
     mod folder_progress;
+    /// The icons in the Demos tab's list (#779).
+    mod list_icons;
     /// The Playback tab's loading progress (#465).
     mod load_progress;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
@@ -1569,8 +1644,10 @@ mod hook {
     type AddColumnFn =
         unsafe extern "thiscall" fn(*mut c_void, i32, *const c_char, *const c_char, i32, i32);
     type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
+    type ListIntIntFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32);
     type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
+    type SetIntFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, i32);
     type GetStringFn =
         unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char) -> *const c_char;
     type GetActivePageFn = unsafe extern "thiscall" fn(*mut c_void) -> *mut c_void;
@@ -1700,12 +1777,10 @@ mod hook {
                 // A folder: #409's handler opens it, reading the path from
                 // the column the tab gave a display name.
                 Some(_) => unsafe { restore_selected_path(this) },
-                None => {
-                    crate::commands::console_print(&format!(
-                        "{NAME}: pick a demo in the list first\n"
-                    ));
-                    return;
-                }
+                // Nothing picked: Enter anywhere on the tab lands here too
+                // (the window's default button), so no console line (#777);
+                // the hint under the list already says what to do.
+                None => return,
             }
         }
         let original = DEMO_LIST_ON_COMMAND.load(Ordering::Acquire);
@@ -1719,6 +1794,10 @@ mod hook {
     /// What the search box held when the list was last filtered, and
     /// whether the list has been refilled since (every row shows again).
     static FILTERED_FOR: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+    /// The folder and the filters as typed when the list was last scrolled
+    /// to the top: a new folder or search starts at the top, a background
+    /// refilter (rosters, a recount) leaves the scroll alone.
+    static SCROLLED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
     /// [`folder_settings`] as the Demos tab's list was last filled with them.
     static LISTED_FOLDERS: std::sync::atomic::AtomicU8 =
@@ -1784,7 +1863,7 @@ mod hook {
         if name.ends_with('/') || name.is_empty() {
             return None;
         }
-        Some(dod_dir().join(name))
+        Some(crate::demo_list_folders::full_path(&dod_dir(), name))
     }
 
     /// The header facts of the demo a row names (a path from `dod/`).
@@ -1835,13 +1914,19 @@ mod hook {
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
             // The line above the list says which folder the list is in, and
             // is empty while folders are off.
-            let line_text = match folders & 1 {
-                1 => folder_line(&dod_dir(), &crate::demo_list_folders::current_folder()),
+            // The line stretches with the tab, so how much path fits does too.
+            let line = vgui.child_named(page, FOLDER_LINE);
+            let line_text = match (folders & 1, line) {
+                (1, Some(line)) => folder_line(
+                    &dod_dir(),
+                    &crate::demo_list_folders::current_folder(),
+                    folder_line_chars(vgui.rect(line).2),
+                ),
                 _ => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
             if *headed != (page as usize, line_text.clone()) {
-                if let Some(line) = vgui.child_named(page, FOLDER_LINE)
+                if let Some(line) = line
                     && let Ok(text) = std::ffi::CString::new(line_text.clone())
                 {
                     let object = vgui.object(line);
@@ -1862,6 +1947,23 @@ mod hook {
                     set_text(object, demos_hint(folders & 1 == 1).as_ptr());
                 }
             }
+            // The Go to dropdown: a pick goes to that place, and the list
+            // fills again, which puts the heading back (#779).
+            let picked = box_text(vgui, page, DEMO_PLACE);
+            if !picked.is_empty() && picked.as_bytes() != PLACE_HEADING.to_bytes() {
+                let folder = PLACES
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .iter()
+                    .find(|p| p.label == picked)
+                    .map(|p| p.folder.clone());
+                if let Some(folder) = folder {
+                    crate::demo_list_folders::go_to(&folder);
+                }
+                refill_demo_list();
+            }
+            widen_place_menu(vgui, page);
+            show_nav_enabled(vgui, page, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -1946,6 +2048,21 @@ mod hook {
                 }
                 id = next(list, id);
             }
+            // A new folder or search starts at the top, and puts the scroll
+            // bar back in the range that a shorter list shrank.
+            let typed = format!(
+                "{:?} {filters:?} {player:?} {all} {recorded}",
+                crate::demo_list_folders::current_folder()
+            );
+            let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+            if *scrolled != typed {
+                let lay_out: ListIntIntFn = slot(list, PANEL_SLOT_INVALIDATE_LAYOUT);
+                lay_out(list, 1, 0);
+                let wheel: ListIntVoidFn = slot(list, LIST_SLOT_ON_MOUSE_WHEELED);
+                wheel(list, 100_000);
+                *scrolled = typed;
+            }
+            drop(scrolled);
             show_player_note(
                 vgui,
                 page,
@@ -2005,10 +2122,22 @@ mod hook {
             // position, so columns change only while the list is empty (the
             // window filled it as it was built); `refill_demo_list` refills it.
             delete_all(list);
+            // The icon column first (#779): an image column, fixed width,
+            // drawn from our own image list; a row picks its icon with the
+            // `int` under the column's key.
+            add(
+                list,
+                0,
+                list_icons::ICON_KEY.as_ptr(),
+                c"".as_ptr(),
+                list_icons::ICON_COLUMN_WIDE,
+                list_icons::COLUMN_FIXEDSIZE | list_icons::COLUMN_IMAGE,
+            );
+            list_icons::install(vgui.surface, list);
             for (index, (key, heading, width)) in DEMO_COLUMNS.iter().enumerate() {
                 add(
                     list,
-                    index as i32 + 1,
+                    index as i32 + 2,
                     key.as_ptr(),
                     heading.as_ptr(),
                     *width,
@@ -2019,7 +2148,8 @@ mod hook {
                 let (x, y, _, tall) = vgui.rect(heading);
                 vgui.place(heading, (x, y, NAME_COLUMN_WIDE, tall));
             }
-            for index in 0..=DEMO_COLUMNS.len() as i32 {
+            // Every column but the icons' sorts by a click on its heading.
+            for index in 1..=DEMO_COLUMNS.len() as i32 + 1 {
                 sortable(list, index, 1);
             }
         }
@@ -2118,20 +2248,36 @@ mod hook {
                     // the Map column to maps.
                     let name = path.clone();
                     let mut folder_count = None;
+                    // The icon column (#779): the row's int picks the image.
+                    let is_up = name
+                        .trim()
+                        .trim_matches('"')
+                        .strip_suffix('/')
+                        .is_some_and(|folder| folder.rsplit('/').next() == Some(".."));
+                    let icon = list_icons::icon_for(
+                        is_folder_row(&name),
+                        is_up,
+                        crate::demo_list_folders::is_drive_root(&name),
+                        info_for(&path).map(|info| info.hltv),
+                    );
+                    let set_int: SetIntFn = slot(row, list_icons::KEYVALUES_SLOT_SET_INT);
+                    set_int(row, list_icons::ICON_KEY.as_ptr(), icon as i32);
                     if is_folder_row(&name) {
                         set_string(row, DEMO_COLUMNS[1].0.as_ptr(), FOLDER_TYPE.as_ptr());
                         // Counted in the background: "counting..." until
-                        // then, and the tab lists again when it is done.
-                        let count = Some(dod_dir().join(name.trim().trim_matches('"'))).and_then(
-                            |folder| {
-                                crate::folder_counts::count(
-                                    &folder,
-                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
-                                )
-                            },
-                        );
-                        folder_count =
-                            Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                        // then, and the tab lists again when it is done. A
+                        // drive row (#779) is never counted: it says Drive.
+                        if crate::demo_list_folders::is_drive_root(&name) {
+                            set_string(row, DEMO_COLUMNS[1].0.as_ptr(), DRIVE_TYPE.as_ptr());
+                        } else {
+                            let folder = crate::demo_list_folders::full_path(&dod_dir(), &name);
+                            let count = crate::folder_counts::count(
+                                &folder,
+                                crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                            );
+                            folder_count =
+                                Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                        }
                     }
                     if let Some(info) = info_for(&path) {
                         // A dash for HLTV (nobody recorded it); blank for a
@@ -2166,6 +2312,120 @@ mod hook {
         }
     }
 
+    /// What the Go to dropdown offered last, by label, for the pick (#779).
+    static PLACES: std::sync::Mutex<Vec<crate::demo_list_folders::Place>> =
+        std::sync::Mutex::new(Vec::new());
+
+    /// Fills the Demos tab's Go to dropdown: the heading, then every place
+    /// (#779). Again at each list fill, so a new drive or one of Studio's
+    /// folders shows up, and after a pick, which puts the heading back.
+    unsafe fn fill_place_box(vgui: &Vgui, base: usize, build: &Build) {
+        let demos_page =
+            unsafe { vpanel_of(PAGE_OBJECTS[DEMOS_PAGE].load(Ordering::Acquire) as *mut c_void) };
+        if demos_page == 0 {
+            return;
+        }
+        // Only a ComboBox (by its vftable) is filled, as the Type box is.
+        let found = unsafe {
+            vgui.child_named(demos_page, DEMO_PLACE)
+                .map(|vp| vgui.object(vp))
+                .filter(|o| !o.is_null() && *(*o as *const usize) == base + build.combo_box_vftable)
+        };
+        let Some(o) = found else {
+            return;
+        };
+        let places = crate::demo_list_folders::places();
+        unsafe {
+            let clear: ActivateFn = slot(o, COMBO_SLOT_DELETE_ALL_ITEMS);
+            clear(o);
+            let add_item: ComboAddItemFn = slot(o, COMBO_SLOT_ADD_ITEM);
+            add_item(o, PLACE_HEADING.as_ptr(), std::ptr::null());
+            for place in &places {
+                if let Ok(label) = std::ffi::CString::new(place.label.clone()) {
+                    add_item(o, label.as_ptr(), std::ptr::null());
+                }
+            }
+            let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
+            activate_row(o, 0);
+        }
+        *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
+    }
+
+    /// Back, Forward and Up as last set, a bit each in that order; `0xff`
+    /// for not yet. Set again only on a change or a new page.
+    static NAV_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0xff);
+
+    /// Greys out the Demos tab's Back, Forward and Up where each has nowhere
+    /// to go: Back at the oldest folder remembered, Forward at the newest, Up
+    /// on This PC.
+    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+        use crate::demo_list_folders::{can_go_back, can_go_forward, can_go_up};
+        let can = [can_go_back(), can_go_forward(), can_go_up()];
+        let want = can
+            .iter()
+            .enumerate()
+            .fold(0u8, |bits, (i, &on)| bits | (u8::from(on) << i));
+        if !new_page && NAV_ENABLED.load(Ordering::Acquire) == want {
+            return;
+        }
+        for (name, on) in DEMO_NAV_BUTTONS.iter().zip(can) {
+            unsafe {
+                let Some(vp) = vgui.child_named(page, name) else {
+                    continue;
+                };
+                let button = vgui.object(vp);
+                if button.is_null() {
+                    continue;
+                }
+                let set_enabled: ListIntVoidFn = slot(button, PANEL_SLOT_SET_ENABLED);
+                set_enabled(button, i32::from(on));
+            }
+        }
+        NAV_ENABLED.store(want, Ordering::Release);
+    }
+
+    /// Widens the Go to list, while it is open, to fit its longest label
+    /// (as far as the tab has room). Every frame, since the box narrows it
+    /// again each time it opens.
+    unsafe fn widen_place_menu(vgui: &Vgui, page: Vpanel) {
+        let Ok((base, build)) = gameui() else {
+            return;
+        };
+        unsafe {
+            let Some(vp) = vgui.child_named(page, DEMO_PLACE) else {
+                return;
+            };
+            let combo = vgui.object(vp);
+            if combo.is_null() || *(combo as *const usize) != base + build.combo_box_vftable {
+                return;
+            }
+            let menu = *((combo as *const u8).add(build.combo_menu) as *const *mut c_void);
+            if menu.is_null() || !vgui.visible(vpanel_of(menu)) {
+                return;
+            }
+            let longest = PLACES
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .iter()
+                .map(|p| p.label.chars().count())
+                .max()
+                .unwrap_or(0);
+            let (x, _, w, _) = vgui.rect(vp);
+            let (_, _, page_w, _) = vgui.rect(page);
+            let set_width: ListIntVoidFn = slot(menu, MENU_SLOT_SET_FIXED_WIDTH);
+            set_width(menu, place_menu_width(longest, w, page_w - x - 8));
+        }
+    }
+
+    /// Back, Forward or Up on the Demos tab: `step` moves the lists'
+    /// folder, and a move lists again.
+    unsafe fn navigate(step: fn() -> bool) -> Result<(), String> {
+        if step() {
+            unsafe { refill_demo_list() };
+        }
+        Ok(())
+    }
+
     /// Lists the demos again in our Load Demo window (new recordings, or a
     /// folder change), with the window's own fill.
     unsafe fn refill_demo_list() {
@@ -2176,7 +2436,10 @@ mod hook {
         if let Ok((base, build)) = gameui() {
             unsafe {
                 let fill: ActivateFn = std::mem::transmute(base + build.file_dialog_fill);
-                fill(dialog);
+                crate::demo_list_folders::tab_fill(|| fill(dialog));
+                if let Ok(vgui) = Vgui::get() {
+                    fill_place_box(&vgui, base, build);
+                }
             }
             // Every row shows again: filter afresh.
             *FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner()) = None;
@@ -2664,12 +2927,18 @@ mod hook {
                 let activate_row: ListIntVoidFn = slot(o, COMBO_SLOT_ACTIVATE_ITEM_BY_ROW);
                 activate_row(o, 0);
             }
+            // The Go to dropdown: the heading, then the places (#779).
+            fill_place_box(&vgui, base, build);
 
             // Our own Load Demo window, never shown: the Demos tab borrows its
             // list and Load button. It fills its list as it is built.
             let dialog = allocate(base, build, build.frame_size + 4)?;
             let dialog_ctor: SheetCtor = std::mem::transmute(base + build.file_dialog_ctor);
-            dialog_ctor(dialog, frame, c"DodStudioDemoList".as_ptr());
+            // Its list has Back, Forward and Up, so no up row (#779).
+            crate::demo_list_folders::set_tab_dialog(dialog as usize);
+            crate::demo_list_folders::tab_fill(|| {
+                dialog_ctor(dialog, frame, c"DodStudioDemoList".as_ptr())
+            });
             vgui.set_visible(vpanel_of(dialog), false);
             DEMO_LIST_ON_COMMAND.store(
                 own_on_command(dialog, demo_list_on_command as *const () as usize),
@@ -3375,8 +3644,28 @@ mod hook {
         }
     }
 
+    /// The game's own Load Demo window, just filled: its rows get short
+    /// names (`demo_list_folders::name_stock_rows`). Not ours, nor the
+    /// Highlights tab's hidden one.
+    fn name_stock_demo_rows() {
+        if !crate::demo_list_folders::stock_naming_pending() {
+            return;
+        }
+        let Ok(vgui) = Vgui::get() else { return };
+        let mut named = false;
+        unsafe {
+            for (vp, name) in vgui.gameui_popups() {
+                if name != DEMO_LIST && name != STREAK_LIST {
+                    named |= crate::demo_list_folders::name_stock_rows(vgui.object(vp));
+                }
+            }
+        }
+        crate::demo_list_folders::stock_naming_frame(named);
+    }
+
     pub(super) fn poll() {
         hook_taskbar();
+        name_stock_demo_rows();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0
@@ -3558,6 +3847,9 @@ mod hook {
                     .clear();
                 Ok(())
             }
+            Action::DemoBack => unsafe { navigate(crate::demo_list_folders::go_back) },
+            Action::DemoForward => unsafe { navigate(crate::demo_list_folders::go_forward) },
+            Action::DemoUp => unsafe { navigate(crate::demo_list_folders::go_up) },
             Action::ResetSettings => {
                 crate::commands::console_print(&format!("{NAME}: {}\n", reset_settings()));
                 Ok(())
@@ -3674,6 +3966,11 @@ mod hook {
             let typed = CStr::from_bytes_until_nul(&buf)
                 .map(|c| c.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            // Enter anywhere on the tab lands here (#777): an empty box is
+            // not a mistake to report, just nothing to do.
+            if typed.trim().is_empty() {
+                return Ok(());
+            }
             let seconds = parse_time(&typed)?;
             let line = std::ffi::CString::new(format!(
                 "{} {seconds:.2}\n",
@@ -4228,20 +4525,50 @@ mod tests {
     #[test]
     fn the_line_above_the_list_names_the_folder() {
         let dod = std::path::Path::new("C:/Steam/common/Half-Life - PRE/dod");
-        assert_eq!(folder_line(dod, ""), "Currently in Half-Life - PRE/dod/");
         assert_eq!(
-            folder_line(dod, "temp demos/"),
+            folder_line(dod, "", 90),
+            "Currently in Half-Life - PRE/dod/"
+        );
+        assert_eq!(
+            folder_line(dod, "temp demos/", 90),
             "Currently in Half-Life - PRE/dod/temp demos/"
         );
-        assert_eq!(folder_line(dod, "../"), "Currently in Half-Life - PRE/");
+        assert_eq!(folder_line(dod, "../", 90), "Currently in Half-Life - PRE/");
         // The installs' own folder: nothing under it to show, so in full.
-        assert_eq!(folder_line(dod, "../../"), "Currently in C:/Steam/common/");
         assert_eq!(
-            folder_line(dod, "temp demos/../"),
+            folder_line(dod, "../../", 90),
+            "Currently in C:/Steam/common/"
+        );
+        assert_eq!(
+            folder_line(dod, "temp demos/../", 90),
             "Currently in Half-Life - PRE/dod/"
         );
         // Above the installs: the whole path.
-        assert_eq!(folder_line(dod, "../../../"), "Currently in C:/Steam/");
+        assert_eq!(folder_line(dod, "../../../", 90), "Currently in C:/Steam/");
+        // A narrow line keeps the folder's own name.
+        assert_eq!(
+            folder_line(dod, "temp demos/", 20),
+            "Currently in .../dod/temp demos/"
+        );
+    }
+
+    #[test]
+    fn the_go_to_list_opens_wide_enough() {
+        // A long recent folder: wider than the 150 px box.
+        assert_eq!(place_menu_width(50, 150, 432), 332);
+        // Never past the tab, never narrower than the box.
+        assert_eq!(place_menu_width(200, 150, 432), 432);
+        assert_eq!(place_menu_width(5, 150, 432), 150);
+        assert_eq!(place_menu_width(50, 150, 0), 150);
+    }
+
+    #[test]
+    fn the_line_fits_its_width() {
+        // The drawn 276 px line: the cache place's line fits whole.
+        let chars = folder_line_chars(276);
+        assert!("Studio's analysed demos".len() <= chars, "{chars}");
+        assert!(folder_line_chars(800) > chars);
+        assert_eq!(folder_line_chars(0), 20);
     }
 
     #[test]
@@ -4338,6 +4665,26 @@ mod tests {
         };
         let now = 1_000_000 + 3 * 86_400;
         assert!(passes("x.dem", Some(&anzio), &all, now));
+        // The search matches the name shown, not the folders above it.
+        let typed = |search: &str| DemoFilters {
+            search: search.to_string(),
+            ..all.clone()
+        };
+        assert!(!passes(
+            "\"H:/Programs/Clips/\"",
+            None,
+            &typed("h:/programs"),
+            now
+        ));
+        assert!(passes("\"H:/Programs/Clips/\"", None, &typed("clip"), now));
+        assert!(!passes(
+            "temp demos/x.dem",
+            Some(&anzio),
+            &typed("temp"),
+            now
+        ));
+        assert_eq!(row_name("\"D:/demos/x.dem\""), "x.dem");
+        assert_eq!(row_name("temp demos/"), "temp demos");
         // The search also sees the map.
         assert!(passes(
             "x.dem",
@@ -4426,6 +4773,9 @@ mod tests {
         );
         assert_eq!(action("Close"), Action::Own);
         assert_eq!(action("goto"), Action::Goto);
+        assert_eq!(action("demo_back"), Action::DemoBack);
+        assert_eq!(action("Demo_Forward"), Action::DemoForward);
+        assert_eq!(action("demo_up"), Action::DemoUp);
         assert_eq!(action("reset_settings"), Action::ResetSettings);
     }
 
