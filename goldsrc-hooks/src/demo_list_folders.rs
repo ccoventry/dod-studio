@@ -266,6 +266,9 @@ fn up_row_wanted() -> bool {
 /// fill reads it. Recorded for Back, and kept for the next session. False
 /// when the lists were there already.
 pub fn go_to(folder: &str) -> bool {
+    let folder = drive_root_of(&crate::texture_hires::game_dir(), folder)
+        .unwrap_or_else(|| folder.to_string());
+    let folder = folder.as_str();
     let moved = NAV.lock().map(|mut nav| nav.go(folder)).unwrap_or(false);
     set_current(folder);
     if moved {
@@ -304,6 +307,28 @@ pub fn go_up() -> bool {
     let here = current_folder();
     let up = resolve(&format!("{here}../"));
     up != here && go_to(&up)
+}
+
+/// `folder`, a path from `dod`, as its drive (`C:/`) when it climbs to the
+/// drive's root or past it. Windows lists `C:/../` as `C:/`, so without this
+/// Up and the up row at the root only grew the path by `../` each time, and
+/// the line above the list read `.../../../`. As a drive path, Up goes back
+/// to `dod/` as from any drive row. `None` for any other folder.
+fn drive_root_of(dod: &Path, folder: &str) -> Option<String> {
+    if folder.is_empty() || is_drive_path(folder) || is_studio_place(folder) {
+        return None;
+    }
+    let full = crate::folder_counts::normalize(&full_path(dod, folder));
+    let at_root = full.parent().is_none()
+        || full
+            .components()
+            .any(|c| c == std::path::Component::ParentDir);
+    if !full.has_root() || !at_root {
+        return None;
+    }
+    let text = full.to_string_lossy();
+    let drive = text.chars().next().filter(char::is_ascii_alphabetic)?;
+    (text.chars().nth(1) == Some(':')).then(|| format!("{}:/", drive.to_ascii_uppercase()))
 }
 
 /// The folders visited lately, newest first, for the Go to list.
@@ -1287,6 +1312,24 @@ mod tests {
         assert!(!nav.forward());
         assert_eq!(nav.recent(5), vec!["demos/", ""]);
         assert_eq!(nav.recent(1), vec!["demos/"]);
+    }
+
+    #[test]
+    fn climbing_to_a_drive_root_lands_on_the_drive() {
+        let dod = Path::new("C:/Steam/common/HL/dod");
+        assert_eq!(drive_root_of(dod, "../../../../"), Some("C:/".to_string()));
+        // Past the root, as a saved state from before this could hold.
+        assert_eq!(
+            drive_root_of(dod, "../../../../../../../"),
+            Some("C:/".to_string())
+        );
+        assert_eq!(drive_root_of(dod, "../../../"), None);
+        assert_eq!(drive_root_of(dod, "temp demos/"), None);
+        assert_eq!(drive_root_of(dod, ""), None);
+        assert_eq!(drive_root_of(dod, "D:/"), None);
+        assert_eq!(drive_root_of(dod, STUDIO_PLACE), None);
+        // Up from the drive goes back to dod/, as from a drive row.
+        assert_eq!(resolve("C:/../"), "");
     }
 
     #[test]
