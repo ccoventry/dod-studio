@@ -230,6 +230,22 @@ export function createQueueScan({
     });
   }
 
+  // Shared by + Add Folder and the Setup window's demo step (#599).
+  async function addDemoFolder(folder) {
+    // Always scan (#432): a folder added before, then emptied from the
+    // list (bin icon, Clear All), used to be a silent no-op here.
+    // scanPaths only decides whether to remember it, and a folder that
+    // turned out not to exist is not remembered. The merge in
+    // triggerAutoScan replaces demos by path, so a re-scan adds no
+    // duplicate rows.
+    const scanned = await triggerAutoScan([folder]);
+    if (scanned && !getScanPaths().includes(folder)) {
+      getScanPaths().push(folder);
+      markProjectDirty();
+      await persistAppSettings();
+    }
+  }
+
   // Native Demo Folder Ingestion (+ Add Folder)
   const addFolderBtn = document.querySelector('#add-folder-btn');
   if (addFolderBtn) {
@@ -240,26 +256,12 @@ export function createQueueScan({
           multiple: false,
           title: STRINGS.MAIN.SELECT_DEMO_FOLDER_TITLE
         });
-        if (selected) {
-          const folder = Array.isArray(selected) ? selected[0] : selected;
-          // Always scan (#432): a folder added before, then emptied from the
-          // list (bin icon, Clear All), used to be a silent no-op here.
-          // scanPaths only decides whether to remember it, and a folder that
-          // turned out not to exist is not remembered. The merge in
-          // triggerAutoScan replaces demos by path, so a re-scan adds no
-          // duplicate rows.
-          const scanned = await triggerAutoScan([folder]);
-          if (scanned && !getScanPaths().includes(folder)) {
-            getScanPaths().push(folder);
-            markProjectDirty();
-            await persistAppSettings();
-          }
-        }
+        if (selected) await addDemoFolder(Array.isArray(selected) ? selected[0] : selected);
       } catch (err) {
         console.error("Error opening demo directory dialog:", err);
       }
     });
   }
 
-  return { triggerAutoScan };
+  return { triggerAutoScan, addDemoFolder };
 }

@@ -11,7 +11,7 @@ import { TRASH_ICON_SVG } from './list_editor.js';
 import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { multiMapSplitButton } from './queue_multimap.js';
-import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { isGroupedByMatch, matchesInQueue, groupedQueue, matchHeaderText } from './queue_match_groups.js';
 import { makeClearable } from './clearable_input.js';
 import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
@@ -248,9 +248,9 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
 
 // ── Status helpers ────────────────────────────────────────────────────────────
 
-// recordingPlayerStreaks lives in queue_filters.js now, beside the quick
+// listedStreaks lives in queue_filters.js, beside the quick
 // filters that share it; re-exported for main.js and detail callers.
-export { recordingPlayerStreaks };
+export { listedStreaks };
 
 /** Count streaks matching a given status string. An unset status (still
  *  `undefined` — see take_index.js's isHighlightTracked doc comment) counts
@@ -383,7 +383,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     const originalIdx = currentDemos.indexOf(demo);
     // Highlights/Pending/Captured/Rendered all count only the recording
     // player's own streaks, matching the Highlight Details table's rows.
-    const ownStreaks = recordingPlayerStreaks(demo);
+    const ownStreaks = listedStreaks(demo);
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;

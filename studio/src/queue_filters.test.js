@@ -1,18 +1,41 @@
 import { describe, it, expect } from 'vitest';
-import { recordingPlayerStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
+import { listedStreaks, dropOtherPlayersSavedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 
 const streak = (player_index, kill_count) => ({ player_index, kill_count });
 
-describe('recordingPlayerStreaks', () => {
-  it('keeps only the recording player\'s streaks, or all when there is none', () => {
-    const demo = { local_player_index: 2, streaks: [streak(2, 1), streak(5, 3)] };
-    expect(recordingPlayerStreaks(demo)).toEqual([streak(2, 1)]);
-    expect(recordingPlayerStreaks({ ...demo, local_player_index: null })).toHaveLength(2);
+describe('listedStreaks', () => {
+  it('lists every highlight the scan kept, whoever recorded the demo', () => {
+    // The scan already kept a POV demo's recorder's alone (#573).
+    const hltv = { local_player_index: null, streaks: [streak(2, 1), streak(5, 3)] };
+    expect(listedStreaks(hltv)).toHaveLength(2);
+    expect(listedStreaks({ local_player_index: 2, streaks: [streak(2, 1)] })).toHaveLength(1);
+    expect(listedStreaks({})).toEqual([]);
+  });
+});
+
+describe('dropOtherPlayersSavedStreaks', () => {
+  it('keeps the recorder\'s highlights in a project saved before #573', () => {
+    const demo = { local_player_index: 2, streaks: [streak(2, 1), streak(5, 3), streak(2, 2)] };
+    expect(dropOtherPlayersSavedStreaks(demo)).toBe(true);
+    expect(demo.streaks.map((s) => s.kill_count)).toEqual([1, 2]);
+    expect(demo.streaks.every((s) => s.recorded_this_demo)).toBe(true);
+    // Once is enough: the kept rows now carry the flag.
+    expect(dropOtherPlayersSavedStreaks(demo)).toBe(false);
+  });
+
+  it('leaves new scans and demos with no recorder alone', () => {
+    const scanned = { local_player_index: 2, streaks: [{ ...streak(5, 3), recorded_this_demo: false }] };
+    expect(dropOtherPlayersSavedStreaks(scanned)).toBe(false);
+    expect(scanned.streaks).toHaveLength(1);
+    const hltv = { local_player_index: null, streaks: [streak(2, 1), streak(5, 3)] };
+    expect(dropOtherPlayersSavedStreaks(hltv)).toBe(false);
+    expect(hltv.streaks).toHaveLength(2);
+    expect(dropOtherPlayersSavedStreaks({ local_player_index: 2 })).toBe(false);
   });
 });
 
 describe('matchesQuickFilters', () => {
-  const noKills = { local_player_index: 2, streaks: [streak(5, 4)] };
+  const noKills = { local_player_index: 2, streaks: [] };
   const singles = { local_player_index: 2, streaks: [streak(2, 1), streak(2, 1)] };
   const multi = { local_player_index: 2, streaks: [streak(2, 1), streak(2, 3)] };
   const ownerless = { local_player_index: null, streaks: [streak(5, 4)] };
