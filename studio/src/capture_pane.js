@@ -21,8 +21,9 @@ import { STRINGS } from './strings.js';
 import { notify, isNotificationEnabled } from './os_notifications.js';
 import { isLocalOrDebugBuild } from './updater_pane.js';
 import { numberField } from './number_field.js';
-import { requestFinishClips } from './finish_clips.js';
-import { syncCommandProfileRow } from './command_profiles_ui.js';
+import { requestFinishClips, finishSummary } from './finish_clips.js';
+import { syncCommandProfileRow, getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
+import { profileState } from './command_profiles.js';
 import { initCaptureSummary, renderCaptureSummary } from './capture_summary_ui.js';
 import { computeRequiredCaptureBytes, AGR_BYTES_PER_FRAME } from './capture_estimate.js';
 import { setStatusLine, uiStatusText } from './status_line.js';
@@ -558,8 +559,10 @@ let customCommandsEditor = null;
 function currentCaptureSetup() {
   const state = (currentGetState ? currentGetState() : null) || {};
   const codecEl = document.querySelector('#config-capture-codec');
+  const mode = document.querySelector('#config-capture-mode')?.value || 'frame_sequence';
+  const lists = getCommandsState();
   return {
-    mode: document.querySelector('#config-capture-mode')?.value || 'frame_sequence',
+    mode,
     codecLabel: codecEl?.selectedOptions?.[0]?.textContent?.trim() || '',
     obsFps: numberField('#config-obs-capture-fps', 120, { integer: true, positive: true }),
     // An empty AGR FPS records at Capture FPS, as the batch does.
@@ -567,9 +570,12 @@ function currentCaptureSetup() {
     width: numberField('#config-res-width', 1280, { integer: true, positive: true }),
     height: numberField('#config-res-height', 720, { integer: true, positive: true }),
     fps: numberField('#config-capture-fps', 300, { integer: true, positive: true }),
-    scheduledCount: getCommandsState().custom_commands.length,
+    // The same reading the Commands tab's profile row shows.
+    commandProfile: profileState(getCommandProfiles(), getActiveCommandProfile(), lists),
+    scheduledCount: lists.custom_commands.length,
     bannedCount: bannedCommandCount(),
     decalFlush: document.querySelector('#config-decal-flush')?.checked ?? true,
+    finish: finishSummary(mode),
     destinations: (state.targetDrives || []).filter(Boolean).length > 0,
   };
 }
@@ -1275,7 +1281,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
     const obsPortVal = parseInt(document.querySelector("#config-obs-port")?.value, 10) || 4455;
     const obsPasswordVal = document.querySelector("#config-obs-password")?.value || "";
     const saveLocalPatchedCopyVal = document.querySelector("#config-save-local-patched")?.checked || false;
-    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked || false;
+    const hookRunsBatchVal = document.querySelector("#config-hook-runs-batch")?.checked ?? true;
     const keepGameBehindVal = document.querySelector("#config-keep-game-behind")?.checked ?? true;
 
     const autoClearLogsVal = document.querySelector("#config-auto-clear-logs")?.checked || false;

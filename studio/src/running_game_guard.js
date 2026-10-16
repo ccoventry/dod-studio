@@ -1,6 +1,6 @@
 // running_game_guard.js
 // Before DoD Studio reuses or starts the game (#666): a running game started
-// with other launch settings (another install or resolution) would be reused
+// with other launch settings (another install, game folder or resolution) would be reused
 // as it is, because the game only reads them when it starts. This asks to
 // close it and start again, naming what differs. Called by Launch Preview,
 // Launch Game, Start Capture Batch and Review highlights before their own

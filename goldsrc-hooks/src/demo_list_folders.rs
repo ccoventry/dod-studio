@@ -145,7 +145,10 @@ pub fn status() -> String {
     if enabled() {
         "the Load Demo window lists and opens folders".to_string()
     } else {
-        "the Load Demo window lists only the demos in dod/".to_string()
+        format!(
+            "the Load Demo window lists only the demos in {}/",
+            crate::game_folder::name()
+        )
     }
 }
 
@@ -501,7 +504,10 @@ mod hook {
                 if let Ok(mut current) = super::CURRENT_FOLDER.lock() {
                     current.clone_from(&folder);
                 }
-                crate::debug::report(&format!("demo_list_folders: opened dod/{folder}"));
+                crate::debug::report(&format!(
+                    "demo_list_folders: opened {}/{folder}",
+                    crate::game_folder::name()
+                ));
                 let fill: FillFn = cast(FILL.load(Ordering::Relaxed));
                 fill(dialog);
                 return;
@@ -511,20 +517,10 @@ mod hook {
         }
     }
 
-    /// Repoints one vftable slot, saving what it held into `original`
-    /// **before** the slot changes. The other order leaves a window where the
-    /// slot already points at our thunk but `original` still reads 0, and a
-    /// call landing in that window (any thread) would jump to address 0.
+    /// Repoints one vftable slot, saving what it held into `original` first
+    /// (`patch::swap_vftable_slot` says why that order).
     unsafe fn swap(vftable_slot: usize, ours: usize, original: &AtomicUsize) -> Result<(), String> {
-        let old = unsafe { *(vftable_slot as *const usize) };
-        original.store(old, Ordering::Release);
-        if unsafe { crate::patch::write_code_bytes(vftable_slot, &(ours as u32).to_le_bytes()) } {
-            Ok(())
-        } else {
-            Err(format!(
-                "could not make the vftable at {vftable_slot:#x} writable"
-            ))
-        }
+        unsafe { crate::patch::swap_vftable_slot(vftable_slot, ours, original) }
     }
 
     fn install(gameui: usize, filesystem: usize) -> Result<String, String> {

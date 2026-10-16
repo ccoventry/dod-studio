@@ -211,6 +211,50 @@ lands, then sends `-forward`, `-speed` and the rest
 wsod25_grp2_h1_m00cat (PRE): 18 blinks under 0.1 s before, none after, the
 same as reaching it by fast-forward.
 
+## Demos on another drive (#376, #776)
+
+`viewdemo` and `playdemo` take a path relative to `dod\`, `../` included,
+and nothing else. Where that comes from, read out of both installs' DLLs
+(#776): every demo open ends in the file system's `Open(name, "rb", pathID
+= 0)` -- `hw.dll`'s `FS_Open` for `playdemo`, `Core.dll`'s
+`DemoFile::LoadDemo` (through `DemoPlayer.dll`'s `IDemoPlayer::LoadDemo`,
+slot 41) for `viewdemo` -- and `FileSystem_Stdio.dll`'s `Open` only tries
+`<search path> + name` for each search path in turn. Nothing on the way
+checks the name (the "Relative pathnames are not allowed" test belongs to
+`record`, `appenddemo` and the other demo-editing commands). So on the
+pre-Anniversary build `viewdemo "D:/x"` is "Coudn't open demo file"; on the
+25th Anniversary build its `Open` first asserts `!strchr(pFileName, ':')`
+(`BaseFileSystem.cpp` line 471, `_wassert`: a fatal dialog), the assert the
+old version of this section mentioned without a place.
+
+**With the hook DLL**, `viewdemo "D:/folder/demo"` works
+(`dodstudio_demo_other_drives`, `goldsrc-hooks/src/demo_other_drives.rs`):
+its `Open` slot adds `D:\` as a search path the first time the drive is
+named (`AddSearchPath` takes a path with a drive letter as it is and
+appends it last; its own path ID keeps the engine's `GAME` lookups out of
+it) and opens `folder/demo.dem` under it, before the original `Open` and
+its assert. `tools/verify_demo_other_drives.py` checks the slots and the
+assert on both installs.
+
+**Without it**, a demo on `D:\` needs a path under `dod\`. A directory
+junction gives it one with no copy and no engine change: Studio's + Link
+Folder to Game makes `dod\demos\<name>` point at the folder
+(`native::demo_links`), and the game follows it like any folder, for
+opening and for the Load Demo list (#409).
+
+The link's rules, each there so no folder walk can loop through it: it
+points at the folder picked, never a drive root; a folder that holds the
+install or is inside it is refused, as are links and network paths; Remove
+unlinks the junction only (`RemoveDirectoryW` on the link, never a
+recursive delete). Studio's own walks skip every junction and symlink and
+stop at a depth cap (`native::sys::folder_walk`); the hook's walks read the
+entry kind from the listing, which never follows a link.
+
+Checked in game on the Anniversary install (#764): `viewdemo
+"demos/<link>/<demo>"` from the console, and the link's folder and demos in
+the Load Demo window. Still unchecked: the same path on the launch line
+(`+viewdemo "demos/<link>/<demo>"`).
+
 ## What this means for moving the batch
 
 Nothing found blocks it. Today's patched chain demos would run under
@@ -220,3 +264,15 @@ needs the skip: without it, a jump over earlier clips replays their
 `mirv_recordmovie_start`/`stop`. Still to measure live: one batch under
 `viewdemo`, and the load times above. (`dodstudio_seek_*` is in use; its
 forward-jump problem is #596.)
+
+### The first ESC after a second demo (#663)
+
+GameUI's VCR bar (`CDemoPlayerDialog`) treats "the slider's value differs
+from the one I set last" as the user dragging it, and seeks there and
+pauses. Its `OnThink` only runs while the bar shows, so after a second
+`viewdemo` the hidden bar still holds the first demo's slider state, and the
+first ESC sent playback to the new demo's first whole second, paused (PRE,
+traced: `SetWorldTime(726.00)`, `SetPaused(1)` from 1706 s). The hook keeps
+the hidden bar's slider range, value and last value in step with playback
+(`goldsrc-hooks/src/studio_panel/hook/vcr_sync.rs`), so that first think
+finds nothing changed.
