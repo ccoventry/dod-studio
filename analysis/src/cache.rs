@@ -390,9 +390,7 @@ struct PlayersEntry {
     demo: DemoPlayers,
 }
 
-fn steam_id_of(id: &str) -> Option<String> {
-    (id.len() == 17 && id.bytes().all(|b| b.is_ascii_digit())).then(|| id.to_string())
-}
+use crate::player::steam_id_of;
 
 /// The players an analysis saw, recorder first, then by name.
 pub fn players_in(analysis: &Analysis) -> DemoPlayers {

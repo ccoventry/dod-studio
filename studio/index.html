@@ -43,6 +43,7 @@
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
                 <button class="menu-dropdown-item" id="view-logs-btn" data-str="FOOTER.VIEW_LOGS_BUTTON" data-str-title="FOOTER.VIEW_LOGS_TITLE" title="Open today's activity log in Explorer">View Logs</button>
+                <button class="menu-dropdown-item" id="setup-menu-btn" data-str="SETUP.MENU_ITEM" data-str-title="SETUP.MENU_ITEM_TITLE">Setup…</button>
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
               </div>
             </div>
@@ -97,6 +98,13 @@
                 <span id="scan-spinner" class="spinner" style="display: none;"></span>
                 <p id="scan-status" class="status-indicator" data-str="WORKSPACE.SCAN_STATUS_READY">Status: Ready</p>
               </div>
+              <!-- demo_links.js (#376) -->
+              <details id="demo-links-section" class="demo-links">
+                <summary data-str="DEMO_LINKS.TITLE">Demo folders the game can play</summary>
+                <p class="demo-links-hint" data-str="DEMO_LINKS.HINT">The game only plays demos inside its own folder. Link a demo folder from any drive and the game plays its demos where they are, with nothing copied.</p>
+                <button id="link-folder-btn" data-str="DEMO_LINKS.LINK_BUTTON" data-str-title="DEMO_LINKS.LINK_BUTTON_TITLE">+ Link Folder to Game</button>
+                <ul id="demo-links-list" class="demo-links-list"></ul>
+              </details>
             </div>
           </div>
 
@@ -146,6 +154,9 @@
                  that is missing or is a different build than it was recorded
                  on. Stays hidden when the library is complete. -->
             <div id="map-warning-banner" hidden></div>
+            <!-- Setup checklist (#599), setup_card.js: shown while something
+                 Start needs is missing; it stands in for the empty queue. -->
+            <div id="setup-card" class="setup-card" hidden></div>
             <div class="table-wrapper">
               <table id="master-demo-table">
                 <thead>
@@ -560,6 +571,7 @@
                 <button id="browse-drive-btn" data-str="CAPTURE_CONFIG.BROWSE_BUTTON">Browse</button>
               </div>
               <div id="target-drive-list" class="list-editor-list"></div>
+              <div id="target-drive-same-warning" class="path-warning" style="display: none;"></div>
             </div>
 
             <!-- Tab Content: Render Studio's settings — codec/FPS/concurrency
@@ -612,6 +624,7 @@
                 <button id="browse-render-export-btn" data-str="RENDER.BROWSE_DRIVE_BUTTON">Browse Drive</button>
               </div>
               <div id="render-export-dir-list" class="list-editor-list"></div>
+              <div id="render-export-dir-same-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 4px; align-items: center;">
                 <strong data-str="RENDER.TOTAL_EXPORT_POOL_FREE_LABEL">Total Export Pool Free:</strong>
                 <span id="render-export-pool-free" data-str="RENDER.EXPORT_POOL_FREE_DEFAULT">0.0 GB</span>
@@ -980,6 +993,14 @@
                   <button id="hd-copy-cfg-btn" data-str="HD.COPY_BUTTON">Copy</button>
                 </div>
                 <p id="hd-style-coverage" class="hd-hint hd-style-coverage" hidden></p>
+                <!-- #426: which maps the selected style has map textures for, and the
+                     warning when the maps being built include one it hasn't. -->
+                <details id="hd-style-maps" class="hd-style-maps" hidden>
+                  <summary><span id="hd-style-maps-summary" class="hd-hint"></span></summary>
+                  <div id="hd-style-maps-groups" class="hd-style-maps-groups"></div>
+                </details>
+                <progress id="hd-style-maps-progress" class="hd-style-maps-progress" max="1" value="0" hidden></progress>
+                <p id="hd-style-map-warning" class="hd-hint hd-style-coverage" hidden></p>
                 <pre id="hd-cfg-lines" class="hd-code"></pre>
                 <p id="hd-gl-max-size" class="hd-hint" hidden></p>
               </div>
@@ -1834,6 +1855,25 @@
         </div>
         <div style="display: flex; gap: 8px; margin-top: 16px; justify-content: center;">
           <button id="about-modal-close-btn" data-str="UPDATE_MODAL.CLOSE_BUTTON">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Setup window (#599), setup_window.js: opens by itself on a first
+         launch or when a required path is missing, and from Help > Setup….
+         The step's content is drawn by the module; only the frame is here. -->
+    <div id="setup-modal" class="modal" style="display: none;">
+      <div class="modal-content setup-modal-content" role="dialog" aria-labelledby="setup-step-title">
+        <div class="setup-header">
+          <ol id="setup-steps" class="setup-steps"></ol>
+          <h2 id="setup-step-title"></h2>
+        </div>
+        <div id="setup-step-content" class="setup-content"></div>
+        <div class="setup-footer">
+          <button id="setup-skip-btn" class="setup-skip" data-str="SETUP.SKIP_SETUP" data-str-title="SETUP.SKIP_SETUP_TITLE">Skip setup for now</button>
+          <span class="setup-footer-spacer"></span>
+          <button id="setup-back-btn" data-str="SETUP.BACK">Back</button>
+          <button id="setup-next-btn" class="primary-btn" data-str="SETUP.NEXT">Next</button>
         </div>
       </div>
     </div>

@@ -33,9 +33,8 @@ describe('Review highlights queue (#623)', () => {
     expect(h.key).toBe(streakUid('a.dem', s));
   });
 
-  it('leaves out other players, short lives and highlights with no demo-player times', () => {
+  it('leaves out short lives and highlights with no demo-player times', () => {
     const demos = [demo('a.dem', [
-      streak({ player_index: 2 }),
       streak({ kill_count: 1, kills: [[1, 1, 'K98']], viewdemo_times: [1] }),
       streak({ viewdemo_times: undefined }),
     ])];

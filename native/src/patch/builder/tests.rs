@@ -67,6 +67,8 @@ fn test_build_batch_queue_merging() {
             match_start_tick: None,
             source_key: None,
             spectated: false,
+            steam_id: None,
+            recorded_this_demo: false,
             status: Default::default(),
         },
         CaptureStreak {
@@ -89,6 +91,8 @@ fn test_build_batch_queue_merging() {
             match_start_tick: None,
             source_key: None,
             spectated: false,
+            steam_id: None,
+            recorded_this_demo: false,
             status: Default::default(),
         },
         CaptureStreak {
@@ -110,6 +114,8 @@ fn test_build_batch_queue_merging() {
             match_start_tick: None,
             source_key: None,
             spectated: false,
+            steam_id: None,
+            recorded_this_demo: false,
             status: Default::default(),
         },
     ];
@@ -288,6 +294,8 @@ fn the_helper_cfg_fast_forwards_at_the_configured_speed() {
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
         status: Default::default(),
     };
     build_batch_queue(vec![streak], &config, &std::collections::HashMap::new()).unwrap();
@@ -407,6 +415,8 @@ fn every_injected_command_fits_a_console_command_frame_and_passes_the_demo_filte
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
         status: Default::default(),
     }];
 
@@ -599,6 +609,8 @@ fn streak_with_kills(start_tick: i32, end_tick: i32, kill_frames: &[i32]) -> Cap
         match_start_tick: None,
         source_key: None,
         spectated: false,
+        steam_id: None,
+        recorded_this_demo: false,
         status: Default::default(),
     }
 }
@@ -1770,6 +1782,8 @@ fn an_hltv_highlight_points_the_camera_at_its_player() {
         match_start_tick: None,
         source_key: None,
         spectated,
+        steam_id: None,
+        recorded_this_demo: false,
         status: Default::default(),
     };
 

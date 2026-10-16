@@ -72,6 +72,21 @@ pub fn scan_dir(
     cancel: &AtomicBool,
     progress: &Option<Sender<AuditProgress>>,
 ) {
+    scan_dir_to_depth(dir, files, cancel, progress, 0);
+}
+
+/// Folder levels [`scan_dir`] reads below the folder it is given.
+const SCAN_MAX_DEPTH: usize = 32;
+
+/// `file_type` never follows a junction or symlink, so a link is never
+/// entered; with the depth cap, no folder layout can make this loop (#376).
+fn scan_dir_to_depth(
+    dir: &Path,
+    files: &mut Vec<PathBuf>,
+    cancel: &AtomicBool,
+    progress: &Option<Sender<AuditProgress>>,
+    depth: usize,
+) {
     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
         return;
     }
@@ -84,8 +99,10 @@ pub fn scan_dir(
                 break;
             }
             let path = entry.path();
-            if path.is_dir() {
-                scan_dir(&path, files, cancel, progress);
+            if entry.file_type().is_ok_and(|t| t.is_dir()) {
+                if depth < SCAN_MAX_DEPTH {
+                    scan_dir_to_depth(&path, files, cancel, progress, depth + 1);
+                }
             } else if path
                 .extension()
                 .is_some_and(|ext| ext.eq_ignore_ascii_case("dem"))
@@ -336,5 +353,31 @@ mod tests {
             duplicates
         );
         assert_eq!(wasted, 0);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_junction_back_up_the_tree_is_not_followed() {
+        let root = std::env::temp_dir().join(format!("auditor_loop_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("sub")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("sub/b.dem"), b"").unwrap();
+        let link = root.join("sub").join("loop");
+        let made = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(&link)
+            .arg(&root)
+            .output()
+            .unwrap();
+        assert!(made.status.success(), "mklink /J failed");
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files.len(), 2, "{files:?}");
+
+        // A junction is a directory to `remove_dir`, which unlinks it only.
+        fs::remove_dir(&link).unwrap();
+        let _ = fs::remove_dir_all(&root);
     }
 }
