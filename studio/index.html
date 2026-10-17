@@ -677,6 +677,25 @@
                   </select>
                 </div>
               </div>
+              <!-- "After a clip is finished" (#644) — take_cleanup.js. Keep by
+                   default; the permanent choice asks once when turned on, and
+                   "Only when space is needed" needs it, since the Recycle Bin
+                   frees nothing until emptied. -->
+              <div class="inline-controls" style="margin-top: 10px;">
+                <div class="control-group">
+                  <label for="config-take-after-finish" data-str="TAKE_CLEANUP.AFTER_LABEL" data-str-title="TAKE_CLEANUP.AFTER_TITLE">After a clip is finished:</label>
+                  <select id="config-take-after-finish" data-str-title="TAKE_CLEANUP.AFTER_TITLE">
+                    <option value="keep" data-str="TAKE_CLEANUP.AFTER_KEEP">Keep the take</option>
+                    <option value="recycle" data-str="TAKE_CLEANUP.AFTER_RECYCLE">Move the take to the Recycle Bin</option>
+                    <option value="delete" data-str="TAKE_CLEANUP.AFTER_DELETE">Delete the take permanently</option>
+                  </select>
+                </div>
+                <div class="control-group">
+                  <input type="checkbox" id="config-take-delete-when-needed" disabled />
+                  <label for="config-take-delete-when-needed" data-str="TAKE_CLEANUP.WHEN_NEEDED_LABEL">Only when space is needed</label>
+                </div>
+              </div>
+              <p id="config-take-after-finish-hint" class="setting-hint">Takes stay on disk. Delete them from the Render tab when you are done.</p>
               <!-- Clip names (#441): the finished file of each highlight is
                    named from this template, unless its row has a typed name. -->
               <div class="input-row" style="margin-top: 10px;">

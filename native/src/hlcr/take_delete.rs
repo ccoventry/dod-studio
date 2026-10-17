@@ -1,7 +1,8 @@
 //! Delete Take (#644): sends a finished take's folder to the Recycle Bin.
 //!
 //! Takes are big (a 120 fps frame sequence is gigabytes) and only needed again
-//! to re-render. The Render tab's Delete Take button lands here.
+//! to re-render. The Render tab's Delete Take button lands here, and so does
+//! the automatic mode (`take_cleanup`), with the same check.
 //!
 //! Two rules shape this module:
 //!
@@ -166,6 +167,41 @@ pub fn recycle_take(deletion: &TakeDeletion) -> Result<(), String> {
     })
 }
 
+/// Deletes a take for good: the automatic mode's permanent choice (#644). The
+/// Recycle Bin frees no space until it is emptied, so "only when space is
+/// needed" has to delete outright.
+///
+/// Same check and same file list as `recycle_take`, so the render history
+/// stays and nothing outside a take folder goes. It plans again here, right
+/// before anything is removed, rather than trusting a plan made earlier: the
+/// disk may have changed, and a wrong path must still fail with a message.
+pub fn delete_take_permanently(
+    take_folder: &Path,
+    capture_dirs: &[PathBuf],
+) -> Result<TakeDeletion, String> {
+    let plan = plan_take_deletion(take_folder, capture_dirs)?;
+    for path in &plan.recycle {
+        remove_path(path).map_err(|e| format!("Couldn't delete {}: {e}", path.display()))?;
+    }
+    Ok(plan)
+}
+
+/// Removes one entry of a take's file list. A link is removed as a link,
+/// never followed: `remove_dir_all` doesn't follow links inside a folder, and
+/// a link at the top is unlinked here rather than walked.
+fn remove_path(path: &Path) -> std::io::Result<()> {
+    let file_type = std::fs::symlink_metadata(path)?.file_type();
+    if file_type.is_symlink() {
+        // A directory link or junction on Windows needs `remove_dir`.
+        return std::fs::remove_file(path).or_else(|_| std::fs::remove_dir(path));
+    }
+    if file_type.is_dir() {
+        std::fs::remove_dir_all(path)
+    } else {
+        std::fs::remove_file(path)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +320,87 @@ mod tests {
         std::fs::write(inner.join("all").join("00000.bmp"), b"b").unwrap();
         let err = check_take_folder(&take, &dirs(&capture)).unwrap_err();
         assert!(err.contains("holds other takes"), "{err}");
+    }
+
+    #[test]
+    fn a_permanent_delete_removes_the_take_and_keeps_its_history() {
+        let (capture, take) = capture_with_take("permanent_whole");
+        let block = take.parent().unwrap().to_path_buf();
+        take_meta::write(&block, &take_meta::SessionMeta::new("s", 120)).unwrap();
+        let plan = delete_take_permanently(&take, &dirs(&capture)).expect("a real take");
+        assert_eq!(plan.size_bytes, 7 + 3 + 3);
+        assert!(!take.exists(), "the take folder is gone");
+        assert!(block.join(take_meta::TAKE_FILE).is_file(), "history kept");
+    }
+
+    #[test]
+    fn a_permanent_delete_of_a_folder_holding_its_history_keeps_the_file() {
+        let (capture, take) = capture_with_take("permanent_own_history");
+        take_meta::write(&take, &take_meta::SessionMeta::new("s", 120)).unwrap();
+        delete_take_permanently(&take, &dirs(&capture)).unwrap();
+        let left: Vec<_> = std::fs::read_dir(&take)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name())
+            .collect();
+        assert_eq!(left, vec![std::ffi::OsString::from(take_meta::TAKE_FILE)]);
+    }
+
+    /// The permanent delete runs the same check as the Recycle Bin one, and a
+    /// refused folder is left exactly as it was.
+    #[test]
+    fn a_permanent_delete_refuses_what_the_check_refuses() {
+        let (capture, take) = capture_with_take("permanent_refused");
+        let block = take.parent().unwrap().to_path_buf();
+        let session = block.parent().unwrap().to_path_buf();
+        for folder in [capture.path().to_path_buf(), session, block.clone()] {
+            let err = delete_take_permanently(&folder, &dirs(&capture)).unwrap_err();
+            assert!(
+                err.contains("not deleted"),
+                "{folder:?} was accepted: {err}"
+            );
+        }
+        let elsewhere = Scratch::new("take_delete_permanent_elsewhere");
+        assert!(
+            delete_take_permanently(&take, &dirs(&elsewhere))
+                .unwrap_err()
+                .contains("isn't inside a Destinations folder")
+        );
+        assert!(delete_take_permanently(&take, &[]).is_err());
+        let relative = PathBuf::from("session").join("block").join("take0000");
+        assert!(
+            delete_take_permanently(&relative, &dirs(&capture))
+                .unwrap_err()
+                .contains("isn't a full path")
+        );
+        assert!(
+            delete_take_permanently(&take.join("sound.wav"), &dirs(&capture))
+                .unwrap_err()
+                .contains("isn't a folder")
+        );
+        let inner = take.join("take0001");
+        std::fs::create_dir_all(inner.join("all")).unwrap();
+        std::fs::write(inner.join("sound.wav"), b"w").unwrap();
+        std::fs::write(inner.join("all").join("00000.bmp"), b"b").unwrap();
+        assert!(
+            delete_take_permanently(&take, &dirs(&capture))
+                .unwrap_err()
+                .contains("holds other takes")
+        );
+        assert!(
+            take.join("all").join("00000.bmp").is_file(),
+            "nothing removed"
+        );
+        assert!(take.join("sound.wav").is_file(), "nothing removed");
+    }
+
+    #[test]
+    fn a_permanent_delete_refuses_a_folder_with_no_streams() {
+        let (capture, take) = capture_with_take("permanent_no_streams");
+        std::fs::remove_dir_all(take.join("all")).unwrap();
+        let err = delete_take_permanently(&take, &dirs(&capture)).unwrap_err();
+        assert!(err.contains("isn't a take folder"), "{err}");
+        assert!(take.join("sound.wav").is_file(), "nothing removed");
     }
 
     #[test]

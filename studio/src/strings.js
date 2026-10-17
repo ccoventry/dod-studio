@@ -793,6 +793,49 @@ export const STRINGS = {
     SKIPPED_CUSTOM_ARGS: 'Clips were not finished: the Custom codec has no FFmpeg arguments. Add them in Configuration → Render Settings.',
   },
 
+  // ── Deleting takes automatically (#644) + take_cleanup.js ────────────────
+  TAKE_CLEANUP: {
+    AFTER_LABEL: 'After a clip is finished:',
+    AFTER_TITLE:
+        'What happens to a take once its clip has rendered successfully. Only a take whose every render finished, with the clip file still there, is ever deleted. A failed, cancelled or unrendered take always stays. The render history stays either way.',
+    AFTER_KEEP: 'Keep the take',
+    AFTER_RECYCLE: 'Move the take to the Recycle Bin',
+    AFTER_DELETE: 'Delete the take permanently',
+    WHEN_NEEDED_LABEL: 'Only when space is needed',
+    WHEN_NEEDED_TITLE:
+        'Takes stay until a capture or a render batch needs room on its drive. Then the oldest finished takes there are deleted until it fits.',
+    WHEN_NEEDED_OFF_TITLE:
+        'Needs "Delete the take permanently": the Recycle Bin frees no space until you empty it.',
+    HINT_KEEP: 'Takes stay on disk. Delete them from the Render tab when you are done.',
+    HINT_RECYCLE:
+        'Each take goes to the Recycle Bin once its clip renders. The Recycle Bin frees no space until you empty it.',
+    HINT_DELETE: 'Each take is deleted for good once its clip renders. It cannot be restored.',
+    HINT_DELETE_WHEN_NEEDED:
+        'Takes stay until a capture or render batch is short of room. Then the oldest finished takes on that drive are deleted for good until it fits.',
+    CONFIRM_TITLE: 'Delete takes permanently?',
+    CONFIRM_MESSAGE:
+        'Takes deleted this way skip the Recycle Bin and cannot be restored. Only takes whose clip rendered successfully are deleted, and the render history stays.',
+    CONFIRM_BUTTON: 'Delete permanently',
+    progressLine: (step, done, total) => {
+      if (step === 'looking') return 'Making room: looking for finished takes';
+      if (step === 'measuring') return `Making room: measuring finished takes (${done} of ${total})`;
+      if (step === 'recycling') return `Moving finished takes to the Recycle Bin (${done} of ${total})`;
+      return `Deleting finished takes (${done} of ${total})`;
+    },
+    /** `reason`: `finished`, `capture` or `finish`; `method`: `recycle` or `delete`. */
+    doneToast: (n, size, reason, method) => {
+      const takes = n === 1 ? 'a finished take' : `${n} finished takes`;
+      if (method === 'recycle') return `Moved ${takes} to the Recycle Bin (${size}).`;
+      if (reason === 'capture') return `Deleted ${takes} (${size}) to make room for the capture.`;
+      if (reason === 'finish') return `Deleted ${takes} (${size}) to make room for the renders.`;
+      return `Deleted ${takes} for good (${size}).`;
+    },
+    failedToast: (n, error) =>
+      `Couldn't delete ${n === 1 ? 'a finished take' : `${n} finished takes`}: ${error}. Scan for Takes to list it again.`,
+    shortToast: (reason, needed, available) =>
+      `${reason === 'capture' ? 'The capture needs' : 'The renders need'} ${needed} of room, and deleting every finished take would give only ${available}. No takes were deleted.`,
+  },
+
   // ── FFmpeg Error Log modal ───────────────────────────────────────────────
   ERROR_LOG_MODAL: {
     TITLE_DEFAULT: 'FFmpeg Error Log',
