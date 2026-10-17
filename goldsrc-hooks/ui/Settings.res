@@ -208,7 +208,7 @@
 		"enabled"		"1"
 		"labelText"		"Hide empty folders"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_demo_list_hide_empty: a folder with no demo anywhere inside it is not listed."
+		"helptext"		"dodstudio_demo_list_hide_empty: a folder with no demos anywhere inside, subfolders included, isn't listed."
 	}
 	"cvar_dodstudio_demo_list_count_subfolders"
 	{
@@ -220,9 +220,9 @@
 		"tall"		"22"
 		"visible"		"1"
 		"enabled"		"1"
-		"labelText"		"Count subfolders"
+		"labelText"		"Include subfolders"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_demo_list_count_subfolders: a folder's demo count includes its subfolders."
+		"helptext"		"dodstudio_demo_list_count_subfolders: a folder's demo count includes the demos in its subfolders."
 	}
 	"cvar_dodstudio_demo_list_show_counts"
 	{

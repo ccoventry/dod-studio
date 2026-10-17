@@ -880,10 +880,32 @@ fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
     }
 }
 
+/// A folder row's count from its counts `direct` (in it) and `all` (at any
+/// depth): `all` with `subfolders`, else `direct`. A folder with no demo
+/// directly in it but some deeper says both, "0 here, 12 inside": Hide empty
+/// folders keeps it (empty means none at any depth, or those demos couldn't
+/// be reached), and "0 demos" alone would read as empty.
+fn folder_count_text(
+    (direct, all): (
+        crate::folder_counts::FolderCount,
+        crate::folder_counts::FolderCount,
+    ),
+    subfolders: bool,
+) -> String {
+    if subfolders {
+        demo_count_text(all)
+    } else if direct.demos == 0 && direct.complete && all.demos > 0 {
+        let more = if all.complete { "" } else { "+" };
+        format!("0 here, {}{more} inside", all.demos)
+    } else {
+        demo_count_text(direct)
+    }
+}
+
 /// What a folder row shows in brackets: its count, "counting..." until that
 /// is in, or nothing while `dodstudio_demo_list_show_counts` is off (#787).
-fn shown_count(hidden: bool, count: Option<crate::folder_counts::FolderCount>) -> Option<String> {
-    (!hidden).then(|| count.map_or_else(|| COUNTING.to_string(), demo_count_text))
+fn shown_count(hidden: bool, count: Option<String>) -> Option<String> {
+    (!hidden).then(|| count.unwrap_or_else(|| COUNTING.to_string()))
 }
 
 /// The four folder settings as one value, so a change to any lists again.
@@ -897,7 +919,7 @@ fn folder_settings() -> u8 {
 
 /// Whether a folder setting's Settings-tab box shows: Show folders' demo
 /// counts only while folders are listed, and the two boxes that need the
-/// counts (Hide empty folders, Count subfolders) only while those are on too
+/// counts (Hide empty folders, Include subfolders) only while those are on too
 /// (#787). `None` for every other box, which always shows.
 fn folder_box_shown(cvar: &str, folders: bool, counts: bool) -> Option<bool> {
     use crate::demo_list_folders as f;
@@ -2334,10 +2356,12 @@ mod hook {
                             set_string(row, DEMO_COLUMNS[1].0.as_ptr(), DRIVE_TYPE.as_ptr());
                         } else {
                             let folder = crate::demo_list_folders::full_path(&dod_dir(), &name);
-                            let count = crate::folder_counts::count(
-                                &folder,
-                                crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
-                            );
+                            let count = crate::folder_counts::counts(&folder).map(|counts| {
+                                folder_count_text(
+                                    counts,
+                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                                )
+                            });
                             folder_count =
                                 shown_count(!crate::demo_list_folders::SHOW_COUNTS.on(), count);
                         }
@@ -4707,15 +4731,42 @@ mod tests {
     }
 
     #[test]
-    fn hidden_counts_leave_a_folder_row_its_name_alone() {
+    fn a_folder_with_demos_only_deeper_says_where_they_are() {
         use crate::folder_counts::FolderCount;
-        let counted = Some(FolderCount {
-            demos: 73,
-            complete: true,
-        });
-        assert_eq!(shown_count(false, counted).as_deref(), Some("73 demos"));
+        let c = |demos, complete| FolderCount { demos, complete };
+        // Include subfolders on: every demo at any depth.
+        assert_eq!(
+            folder_count_text((c(0, true), c(12, true)), true),
+            "12 demos"
+        );
+        // Off: the demos in it, unless there are none there but some deeper.
+        assert_eq!(
+            folder_count_text((c(3, true), c(12, true)), false),
+            "3 demos"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(12, true)), false),
+            "0 here, 12 inside"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(500, false)), false),
+            "0 here, 500+ inside"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(0, true)), false),
+            "0 demos"
+        );
+    }
+
+    #[test]
+    fn hidden_counts_leave_a_folder_row_its_name_alone() {
+        let counted = Some("73 demos".to_string());
+        assert_eq!(
+            shown_count(false, counted.clone()).as_deref(),
+            Some("73 demos")
+        );
         assert_eq!(shown_count(false, None).as_deref(), Some(COUNTING));
-        assert_eq!(shown_count(true, counted), None);
+        assert_eq!(shown_count(true, counted.clone()), None);
         assert_eq!(shown_count(true, None), None);
         assert_eq!(
             display_name("temp demos/", shown_count(true, counted).as_deref()),
