@@ -59,6 +59,8 @@ DEMO PLAYBACK
       Jump forward (or back, with a minus) by that many seconds.
   dodstudio_seek_skip_between 0/1
       A jump skips the events and commands it passes over.
+  dodstudio_demo_fast_load 0/1/<ms>
+      viewdemo loads the demo up to 8 ms a frame (1, the default) or <ms>, not 33 packets a frame (0).
   dodstudio_reload_demo
       Play the last demo again.
   dodstudio_review yes|no|replay|next|back|stop

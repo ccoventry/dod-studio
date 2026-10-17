@@ -203,6 +203,7 @@ mod engine;
 mod engine_buttons;
 mod events;
 mod ex_interp;
+mod fast_load;
 mod filtered_commands;
 mod fire_sounds;
 mod folder_counts;
