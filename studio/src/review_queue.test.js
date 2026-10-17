@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -79,6 +79,18 @@ describe('Review highlights answers (#623)', () => {
     expect(answered).toEqual(['yes', null]);
   });
 
+  it('Maybe marks Maybe, never ticks, and leaves an earlier tick alone (#661)', () => {
+    const fresh = streak();
+    const ticked = streak({ kills: [[5, 1, 'K98'], [6, 2, 'K98'], [7, 3, 'K98']], selected: true });
+    const d = demo('a.dem', [fresh, ticked]);
+    applyReviewAnswer([d], answerFor(d, fresh, { verdict: 'maybe' }), { tickYes: true });
+    applyReviewAnswer([d], answerFor(d, ticked, { verdict: 'maybe' }), { tickYes: true });
+    expect(fresh).toMatchObject({ curation: 'Maybe', notes: 'nice' });
+    expect(fresh.selected).toBeUndefined();
+    expect(ticked).toMatchObject({ curation: 'Maybe', selected: true });
+    expect(buildReviewQueue([d], ['a.dem']).highlights.map((h) => h.answered)).toEqual(['maybe', 'maybe']);
+  });
+
   it('a range past the kills is pulled in', () => {
     const s = streak();
     const d = demo('a.dem', [s]);
@@ -92,6 +104,37 @@ describe('Review highlights answers (#623)', () => {
     expect(applyReviewAnswer([d], { ...answerFor(d, s), demo: 'gone.dem' })).toBeNull();
     expect(applyReviewAnswer([d], { ...answerFor(d, s), key: 'nope' })).toBeNull();
     expect(s.curation).toBeUndefined();
+  });
+});
+
+describe('What a review covers (#661)', () => {
+  const marked = (curation, at) => streak({ kills: [[at, 1, 'K98']], viewdemo_times: [at], kill_count: 1, curation });
+  const d = demo('a.dem', [marked('Keep', 10), marked(undefined, 20), marked('Maybe', 30), marked('Skip', 40)]);
+  const times = (covers) => buildReviewQueue([d], ['a.dem'], 1, covers).highlights.map((h) => h.kill_times[0]);
+
+  it('All plays every highlight, whatever its mark', () => {
+    expect(times(REVIEW_COVERS.ALL)).toEqual([10, 20, 30, 40]);
+    expect(times(undefined)).toEqual([10, 20, 30, 40]);
+  });
+
+  it('each mark, or no mark, picks just those rows', () => {
+    expect(times(REVIEW_COVERS.UNMARKED)).toEqual([20]);
+    expect(times(REVIEW_COVERS.KEEP)).toEqual([10]);
+    expect(times(REVIEW_COVERS.MAYBE)).toEqual([30]);
+    expect(times(REVIEW_COVERS.SKIP)).toEqual([40]);
+  });
+
+  it('ticked demos win; with none ticked, the shown demos are reviewed', () => {
+    expect(reviewDemoPaths(['b.dem'], ['a.dem', 'b.dem'])).toEqual(['b.dem']);
+    expect(reviewDemoPaths([], ['a.dem', 'b.dem'])).toEqual(['a.dem', 'b.dem']);
+    expect(reviewDemoPaths(undefined, undefined)).toEqual([]);
+  });
+
+  it('coveredByReview agrees with the queue', () => {
+    expect(coveredByReview({ curation: 'Maybe' }, REVIEW_COVERS.MAYBE)).toBe(true);
+    expect(coveredByReview({ curation: 'Maybe' }, REVIEW_COVERS.UNMARKED)).toBe(false);
+    expect(coveredByReview({}, REVIEW_COVERS.UNMARKED)).toBe(true);
+    expect(coveredByReview({ curation: 'Skip' }, 'something new')).toBe(true);
   });
 });
 

@@ -134,6 +134,14 @@
                   <span data-str="WORKSPACE.GROUP_BY_MATCH_LABEL">Group by match</span>
                 </label>
                 <button id="review-highlights-btn" data-str="REVIEW.BUTTON" data-str-title="REVIEW.TITLE">Review highlights</button>
+                <!-- #661: which Review marks a review plays. -->
+                <select id="review-covers-select" data-str-title="REVIEW.COVERS_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="all" data-str="REVIEW.COVERS_ALL">All</option>
+                  <option value="unmarked" data-str="REVIEW.COVERS_UNMARKED">Unmarked</option>
+                  <option value="keep" data-str="REVIEW.COVERS_KEEP">Keep</option>
+                  <option value="maybe" data-str="REVIEW.COVERS_MAYBE">Maybe</option>
+                  <option value="skip" data-str="REVIEW.COVERS_SKIP">Skip</option>
+                </select>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>

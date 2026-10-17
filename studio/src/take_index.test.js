@@ -92,6 +92,15 @@ describe('curation (#44)', () => {
     expect(isDemoTracked({ streaks: [s] })).toBe(true);
   });
 
+  it('Maybe keeps the row tickable and counts as tracked (#661)', () => {
+    const s = streak({ selected: true });
+    setCuration(s, CURATION.MAYBE);
+    expect(s.curation).toBe('Maybe');
+    expect(s.selected).toBe(true);
+    expect(isSkipped(s)).toBe(false);
+    expect(isDemoTracked({ streaks: [s] })).toBe(true);
+  });
+
   it('survives a re-scan', () => {
     const before = { path: 'd.dem', streaks: [streak({ curation: CURATION.SKIP })] };
     const after = preserveHighlightState(before, { path: 'd.dem', streaks: [streak()] });

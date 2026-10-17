@@ -3,34 +3,67 @@
 // and what an answer the game sends back changes on its row.
 //
 // What an answer changes on the row:
-//  - Review mark (#44): Yes = Keep, No = Skip. A second review starts at the
-//    first row with no mark.
+//  - Review mark (#44): Yes = Keep, Maybe = Maybe (#661), No = Skip. The game
+//    starts at the first row with no mark, so a second review passes over
+//    Maybe rows unless the review covers only them.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
 //  - Ticked for capture: only when the user turned on "tick Yes" (people who
-//    only time demos don't want rows ticked). Skip always unticks.
+//    only time demos don't want rows ticked), and never for Maybe. Skip always
+//    unticks.
 // Status is left alone: it records what the pipeline did, not the user's call.
 
 import { listedStreaks } from './queue_filters.js';
 import { streakUid, setCuration, CURATION } from './take_index.js';
 
-/** The game speaks yes/no; the row keeps Keep/Skip. */
-const ANSWER_FOR_MARK = { [CURATION.KEEP]: 'yes', [CURATION.SKIP]: 'no' };
+/** The game speaks yes/maybe/no; the row keeps Keep/Maybe/Skip. */
+const ANSWER_FOR_MARK = { [CURATION.KEEP]: 'yes', [CURATION.MAYBE]: 'maybe', [CURATION.SKIP]: 'no' };
+const MARK_FOR_ANSWER = { yes: CURATION.KEEP, maybe: CURATION.MAYBE, no: CURATION.SKIP };
+
+/** Which highlights a review covers, by their Review mark (#661). */
+export const REVIEW_COVERS = {
+  ALL: 'all',
+  UNMARKED: 'unmarked',
+  KEEP: 'keep',
+  MAYBE: 'maybe',
+  SKIP: 'skip',
+};
+
+const MARK_FOR_COVERS = {
+  [REVIEW_COVERS.KEEP]: CURATION.KEEP,
+  [REVIEW_COVERS.MAYBE]: CURATION.MAYBE,
+  [REVIEW_COVERS.SKIP]: CURATION.SKIP,
+};
+
+/** The demos a review takes: the ticked ones, or with none ticked, every
+ *  demo the Master Demo Queue shows under its search and filters. */
+export function reviewDemoPaths(checkedPaths, shownPaths) {
+  return checkedPaths?.length ? checkedPaths : shownPaths || [];
+}
+
+/** True when a review covering `covers` includes this highlight. */
+export function coveredByReview(streak, covers = REVIEW_COVERS.ALL) {
+  if (covers === REVIEW_COVERS.UNMARKED) return !streak.curation;
+  const mark = MARK_FOR_COVERS[covers];
+  return mark ? streak.curation === mark : true;
+}
 
 /**
  * The highlights to review, in queue order: each ticked demo's recording-
- * player highlights with at least `minKills` kills, by time. A highlight with
- * no demo-player times (a project saved before they existed) can't be found
- * in the demo, so it is counted in `skipped` instead.
+ * player highlights with at least `minKills` kills and a Review mark `covers`
+ * takes in, by time. A highlight with no demo-player times (a project saved
+ * before they existed) can't be found in the demo, so it is counted in
+ * `skipped` instead.
  */
-export function buildReviewQueue(demos, checkedPaths, minKills = 1) {
+export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL) {
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
   for (const demo of demos || []) {
     if (!checked.has(demo.path)) continue;
     const streaks = listedStreaks(demo)
-      .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills);
+      .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
+      .filter((s) => coveredByReview(s, covers));
     const rows = [];
     for (const streak of streaks) {
       const times = streak.viewdemo_times || [];
@@ -75,9 +108,9 @@ export function applyReviewAnswer(demos, answer, { tickYes = false } = {}) {
   streak.start_index = start;
   streak.end_index = end;
   streak.notes = answer.note || '';
-  const yes = answer.verdict === 'yes';
-  setCuration(streak, yes ? CURATION.KEEP : CURATION.SKIP);
-  if (yes && tickYes) streak.selected = true;
+  const mark = MARK_FOR_ANSWER[answer.verdict] ?? CURATION.SKIP;
+  setCuration(streak, mark);
+  if (mark === CURATION.KEEP && tickYes) streak.selected = true;
   return streak;
 }
 

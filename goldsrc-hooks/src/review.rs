@@ -10,7 +10,7 @@
 //! first kill, and plays at normal speed until [`TAIL`] seconds after the
 //! last. There it pauses and opens the DoD Studio window on its Review tab.
 //!
-//! `yes` or `no` sends the answer -- with the kill range and note from the
+//! `yes`, `maybe` (#661) or `no` sends the answer -- with the kill range and note from the
 //! Review tab's boxes -- to Studio as a `[dod-studio] REVIEW` line on the
 //! events pipe (#434), then moves on. `replay` plays the highlight again,
 //! `next` and `back` move without answering, `stop` ends the review.
@@ -22,8 +22,8 @@
 //! separated: the demo's full path, Studio's key for the row, the player,
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
-//! `no` or `-`), and the note. The review starts at the first highlight with
-//! no answer yet.
+//! `maybe`, `no` or `-`), and the note. The review starts at the first
+//! highlight with no answer yet.
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 
@@ -59,6 +59,9 @@ const NOTE_MAX: usize = 500;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Verdict {
     Yes,
+    /// Undecided: look again later (#661). Counts as answered, so the next
+    /// review passes over it unless Studio queues only Maybe rows.
+    Maybe,
     No,
 }
 
@@ -66,6 +69,7 @@ impl Verdict {
     fn word(self) -> &'static str {
         match self {
             Verdict::Yes => "yes",
+            Verdict::Maybe => "maybe",
             Verdict::No => "no",
         }
     }
@@ -211,6 +215,7 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
             .clamp(from, count);
         let verdict = match fields[6].trim() {
             "yes" => Some(Verdict::Yes),
+            "maybe" => Some(Verdict::Maybe),
             "no" => Some(Verdict::No),
             _ => None,
         };
@@ -446,7 +451,7 @@ fn detail(h: &Highlight, phase: &Phase) -> String {
     let what = match phase {
         Phase::Loading { .. } => "loading the demo...".to_string(),
         Phase::Playing { .. } => "playing...".to_string(),
-        Phase::Waiting => "Yes or No?".to_string(),
+        Phase::Waiting => "Yes, Maybe or No?".to_string(),
         Phase::Failed(why) => format!("can't play this one: {why}"),
     };
     format!("{who}{kills}{answered} -- {what}")
@@ -723,7 +728,7 @@ fn rest_of_line(from: i32) -> String {
     words.join(" ")
 }
 
-const USAGE: &str = "start \"<queue file>\" | yes | no | replay | next | back | range <from> <to> | note <text> | stop";
+const USAGE: &str = "start \"<queue file>\" | yes | maybe | no | replay | next | back | range <from> <to> | note <text> | stop";
 
 /// `dodstudio_review <what>`.
 pub unsafe extern "C" fn command() {
@@ -740,6 +745,7 @@ pub unsafe extern "C" fn command() {
         }
         "start" => start(rest_of_line(2).trim().trim_matches('"')),
         "yes" => answer(Verdict::Yes),
+        "maybe" => answer(Verdict::Maybe),
         "no" => answer(Verdict::No),
         "replay" => {
             let mut guard = lock();
@@ -998,6 +1004,23 @@ mod tests {
     }
 
     #[test]
+    fn maybe_is_read_sent_and_passed_over_like_any_answer() {
+        let (queue, _) = parse_queue(&queue_text(&[
+            "d.dem\t1\tp\t5\t1\t1\tmaybe\t",
+            "d.dem\t2\tp\t9\t1\t1\t-\t",
+        ]))
+        .unwrap();
+        assert_eq!(queue[0].verdict, Some(Verdict::Maybe));
+        assert_eq!(first_unanswered(&queue), 1);
+        assert_eq!(
+            answer_label(&queue[0], Verdict::Maybe),
+            "REVIEW\td.dem\t1\tmaybe\t1\t1\t"
+        );
+        // A review of only Maybe rows starts at the first of them.
+        assert_eq!(first_unanswered(&queue[..1]), 0);
+    }
+
+    #[test]
     fn playback_runs_from_before_the_first_kill_to_after_the_last() {
         let mut h = highlight("a", None);
         h.kills = vec![100.0, 112.0];
@@ -1076,7 +1099,10 @@ mod tests {
         let mut h = highlight("a", None);
         h.player = "m00cat".to_string();
         h.kills = vec![1.0, 2.0];
-        assert_eq!(detail(&h, &Phase::Waiting), "m00cat, 2 kills -- Yes or No?");
+        assert_eq!(
+            detail(&h, &Phase::Waiting),
+            "m00cat, 2 kills -- Yes, Maybe or No?"
+        );
         h.verdict = Some(Verdict::No);
         assert_eq!(
             detail(&h, &Phase::Failed("gone".into())),
