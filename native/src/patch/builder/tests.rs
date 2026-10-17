@@ -1690,6 +1690,7 @@ fn test_ffd_allocation_succeeds_where_arrival_order_would_strand_a_block() {
 
     let assignments = allocate_blocks_first_fit_decreasing(
         &block_estimates,
+        &[0, 1],
         &mut drive_free,
         &mut active_drive_idx,
         0,
@@ -1713,12 +1714,57 @@ fn test_ffd_allocation_fails_when_no_drive_has_room() {
 
     let result = allocate_blocks_first_fit_decreasing(
         &block_estimates,
+        &[0, 1],
         &mut drive_free,
         &mut active_drive_idx,
         0,
     );
 
     assert_eq!(result, Err(0));
+}
+
+/// #774: two capture folders on one drive share its free space. With room
+/// for one block, the second block must not land on the other folder as if
+/// the drive's space were there twice.
+#[test]
+fn test_ffd_two_folders_on_one_drive_share_one_budget() {
+    let block_estimates = vec![10u64, 10u64];
+    let mut volume_free = vec![15u64];
+    let mut active_drive_idx = 0usize;
+
+    let result = allocate_blocks_first_fit_decreasing(
+        &block_estimates,
+        &[0, 0],
+        &mut volume_free,
+        &mut active_drive_idx,
+        0,
+    );
+
+    assert_eq!(result, Err(1));
+}
+
+/// #774, through the planner: `group_by_volume` maps two folders on one
+/// drive to one budget, so the allocator sees the drive's space once.
+#[cfg(windows)]
+#[test]
+fn test_two_capture_folders_on_one_drive_get_one_block_of_room() {
+    let dirs = vec![
+        std::path::PathBuf::from(r"C:\a"),
+        std::path::PathBuf::from(r"C:\b"),
+    ];
+    let (volume_of_drive, mut volume_free) = crate::sys::disk::group_by_volume(&dirs, |_| 15);
+    let mut active_drive_idx = 0usize;
+
+    let result = allocate_blocks_first_fit_decreasing(
+        &[10, 10],
+        &volume_of_drive,
+        &mut volume_free,
+        &mut active_drive_idx,
+        0,
+    );
+
+    assert_eq!(result, Err(1));
+    assert_eq!(volume_free, vec![5]);
 }
 
 /// A regression guard for #198's fix -- `workspace_guard_drop_actually_
