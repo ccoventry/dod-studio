@@ -972,6 +972,10 @@ unsafe extern "C" fn tramp_initialize(engfuncs: *mut ClEngineFuncsPartial, versi
     // gEngfuncs is only populated once the real Initialize has run, so this
     // has to come after it.
     unsafe { watch_client_commands() };
+    // The HUD loads its sheets (`SPR_Load`) at the first VidInit, right after
+    // this, so the hooks that map handles to paths go in now, not on the
+    // first `dodstudio_hide_asset add` (#808).
+    crate::hud_sprites::install();
 
     if !engfuncs.is_null()
         && let Some(callback) = ON_ENGINE_READY.get()

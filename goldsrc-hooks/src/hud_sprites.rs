@@ -25,8 +25,11 @@
 //! `icon_mg_deploy` both start at 0,0 of `hud_icons`), so the whole
 //! rectangle is the key, not the corner.
 //!
-//! Installed on the first `add`, like `particle_hide`. The slot numbers are
-//! checked against the binary by `tools/verify_hud_sprite_slots.py`.
+//! Installed from `engine.rs` as soon as client.dll's `Initialize` has run,
+//! before the HUD's first `VidInit` loads its sheets (a hook put in on the
+//! first `add` would never see those loads and could not name a handle).
+//! The slot numbers are checked against the binary by
+//! `tools/verify_hud_sprite_slots.py`.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
 use std::ffi::{CStr, c_char, c_void};
