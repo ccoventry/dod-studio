@@ -24,7 +24,8 @@
 //! range's first and last kill (from 1), the answer already given (`yes`,
 //! `maybe`, `no` or `-`), the note, and, for an HLTV demo, the player's
 //! number (#822; `-` or missing for a POV demo). The review starts at the
-//! first highlight with no answer yet.
+//! first highlight: Studio's Review box decides what the queue holds, so
+//! picking up where a review left off is its Unmarked choice.
 //!
 //! ## HLTV demos
 //!
@@ -265,12 +266,6 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
         return Err("the queue has no highlights".to_string());
     }
     Ok((queue, options))
-}
-
-/// Where a review picks up: the first highlight not answered yet, or the
-/// first of all when every one has been.
-fn first_unanswered(queue: &[Highlight]) -> usize {
-    queue.iter().position(|h| h.verdict.is_none()).unwrap_or(0)
 }
 
 /// A note as one line Studio can split on tabs.
@@ -877,12 +872,8 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    let at = first_unanswered(&queue);
-    say(&format!(
-        "{} highlight(s); starting at {}",
-        queue.len(),
-        at + 1
-    ));
+    let at = 0;
+    say(&format!("{} highlight(s)", queue.len()));
     crate::events::send(&format!("REVIEW_START\t{}", queue.len()));
     // Held for the whole review: it only matters on an HLTV highlight, and
     // it adds to the cvar rather than changing it (see the module docs).
@@ -1047,33 +1038,18 @@ mod tests {
     }
 
     #[test]
-    fn the_review_starts_at_the_first_unanswered_highlight() {
-        let mut queue = vec![
-            highlight("a", Some(Verdict::Yes)),
-            highlight("a", None),
-            highlight("b", None),
-        ];
-        assert_eq!(first_unanswered(&queue), 1);
-        queue[1].verdict = Some(Verdict::No);
-        queue[2].verdict = Some(Verdict::No);
-        assert_eq!(first_unanswered(&queue), 0);
-    }
-
-    #[test]
-    fn maybe_is_read_sent_and_passed_over_like_any_answer() {
+    fn maybe_is_read_and_sent_like_any_answer() {
         let (queue, _) = parse_queue(&queue_text(&[
             "d.dem\t1\tp\t5\t1\t1\tmaybe\t",
             "d.dem\t2\tp\t9\t1\t1\t-\t",
         ]))
         .unwrap();
         assert_eq!(queue[0].verdict, Some(Verdict::Maybe));
-        assert_eq!(first_unanswered(&queue), 1);
+        assert_eq!(queue[1].verdict, None);
         assert_eq!(
             answer_label(&queue[0], Verdict::Maybe),
             "REVIEW\td.dem\t1\tmaybe\t1\t1\t"
         );
-        // A review of only Maybe rows starts at the first of them.
-        assert_eq!(first_unanswered(&queue[..1]), 0);
     }
 
     #[test]

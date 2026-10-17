@@ -4,8 +4,8 @@
 //
 // What an answer changes on the row:
 //  - Review mark (#44): Yes = Keep, Maybe = Maybe (#661), No = Skip. The game
-//    starts at the first row with no mark, so a second review passes over
-//    Maybe rows unless the review covers only them.
+//    starts at the queue's first highlight; the Review box's Unmarked is how
+//    a second review picks up where the first left off.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
 //  - Ticked for capture: only when the user turned on "tick Yes" (people who
@@ -106,16 +106,32 @@ export function hltvPlayersFor(choice, recorders, queue = {}) {
   return all.filter((p) => p.id === choice);
 }
 
+/** The order a demo's highlights play in: by time, or (for an HLTV demo
+ *  with several players) one player at a time, players A to Z. */
+export const REVIEW_ORDER = { TIME: 'time', PLAYER: 'player' };
+
+const byName = (a, b) => a.player.localeCompare(b.player, undefined, { sensitivity: 'base' });
+const byTime = (a, b) => a.kill_times[0] - b.kill_times[0];
+
+/** Sorts one demo's review rows: by first kill, two at the same moment by
+ *  player A to Z; or by player, each player's by first kill. The game
+ *  seeks to each highlight, backwards as readily as forwards. */
+export function sortReviewRows(rows, order = REVIEW_ORDER.TIME) {
+  return rows.sort(order === REVIEW_ORDER.PLAYER
+    ? (a, b) => byName(a, b) || byTime(a, b)
+    : (a, b) => byTime(a, b) || byName(a, b));
+}
+
 /**
  * The highlights to review, in queue order: each ticked demo's highlights
- * with at least `minKills` kills and a Review mark `covers` takes in, by
- * time; in an HLTV demo, only `hltvPlayers`' (#822: a list, a function of
- * the demo giving one, or null = everyone's), each with the player the
- * game's camera goes on. A highlight with no demo-player times (a project
- * saved before they existed) can't be found in the demo, so it is counted
- * in `skipped` instead.
+ * with at least `minKills` kills and a Review mark `covers` takes in, in
+ * `order` (sortReviewRows); in an HLTV demo, only `hltvPlayers`' (#822: a
+ * list, a function of the demo giving one, or null = everyone's), each with
+ * the player the game's camera goes on. A highlight with no demo-player
+ * times (a project saved before they existed) can't be found in the demo,
+ * so it is counted in `skipped` instead.
  */
-export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null) {
+export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null, order = REVIEW_ORDER.TIME) {
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
@@ -157,8 +173,7 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
         spectate: hltv && Number.isInteger(streak.player_index) ? streak.player_index + 1 : null,
       });
     }
-    rows.sort((a, b) => a.kill_times[0] - b.kill_times[0]);
-    highlights.push(...rows);
+    highlights.push(...sortReviewRows(rows, order));
   }
   return { highlights, skipped, notChosen };
 }
