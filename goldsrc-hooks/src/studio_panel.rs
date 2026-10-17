@@ -829,6 +829,22 @@ fn folder_line_chars(wide: i32) -> usize {
         .max(20)
 }
 
+/// The folder the Demos tab's list shows: `dod/` (`""`) while folders are
+/// off, when the game lists only `dod/`'s demos whatever folder Go to or Up
+/// last went to.
+fn listed_folder(folders: bool, current: String) -> String {
+    if folders { current } else { String::new() }
+}
+
+/// Whether the Demos tab's Back, Forward, Up and Go to can be used, in that
+/// order, given whether each of the first three has somewhere to go. With
+/// folders off none of them can: the list is `dod/`'s demos, wherever they
+/// would go.
+fn nav_enabled(folders: bool, can_go: [bool; 3]) -> [bool; 4] {
+    let [back, forward, up] = can_go;
+    [back, forward, up, true].map(|on| folders && on)
+}
+
 /// `path` (folders, each ending in `/`) cut to at most about `max` characters
 /// by dropping whole folders from the left behind `.../`. The last folder is
 /// always kept, however long.
@@ -867,17 +883,56 @@ fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
     }
 }
 
-/// The three folder settings as one value, so a change to any lists again.
-fn folder_settings() -> u8 {
-    use crate::demo_list_folders as f;
-    f::enabled() as u8 | (f::HIDE_EMPTY.on() as u8) << 1 | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+/// A folder row's count from its counts `direct` (in it) and `all` (at any
+/// depth): `all` with `subfolders`, else `direct`. A folder with no demo
+/// directly in it but some deeper says both, "0 here, 12 inside": Hide empty
+/// folders keeps it (empty means none at any depth, or those demos couldn't
+/// be reached), and "0 demos" alone would read as empty.
+fn folder_count_text(
+    (direct, all): (
+        crate::folder_counts::FolderCount,
+        crate::folder_counts::FolderCount,
+    ),
+    subfolders: bool,
+) -> String {
+    if subfolders {
+        demo_count_text(all)
+    } else if direct.demos == 0 && direct.complete && all.demos > 0 {
+        let more = if all.complete { "" } else { "+" };
+        format!("0 here, {}{more} inside", all.demos)
+    } else {
+        demo_count_text(direct)
+    }
 }
 
-/// A Settings-tab box that only applies while folders are listed, and so
-/// only shows then.
-fn shown_with_folders(cvar: &str) -> bool {
+/// What a folder row shows in brackets: its count, "counting..." until that
+/// is in, or nothing while `dodstudio_demo_list_show_counts` is off (#787).
+fn shown_count(hidden: bool, count: Option<String>) -> Option<String> {
+    (!hidden).then(|| count.unwrap_or_else(|| COUNTING.to_string()))
+}
+
+/// The four folder settings as one value, so a change to any lists again.
+fn folder_settings() -> u8 {
     use crate::demo_list_folders as f;
-    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name
+    f::enabled() as u8
+        | (f::HIDE_EMPTY.on() as u8) << 1
+        | (f::COUNT_SUBFOLDERS.on() as u8) << 2
+        | (f::SHOW_COUNTS.on() as u8) << 3
+}
+
+/// Whether a folder setting's Settings-tab box shows: Show folders' demo
+/// counts only while folders are listed, and the two boxes that need the
+/// counts (Hide empty folders, Include subfolders) only while those are on too
+/// (#787). `None` for every other box, which always shows.
+fn folder_box_shown(cvar: &str, folders: bool, counts: bool) -> Option<bool> {
+    use crate::demo_list_folders as f;
+    if cvar == f::SHOW_COUNTS.name {
+        Some(folders)
+    } else if cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name {
+        Some(folders && counts)
+    } else {
+        None
+    }
 }
 
 /// [`folder_settings`] before anything was seen: the tab has only just
@@ -1926,17 +1981,17 @@ mod hook {
             }
             // The hint says whether folders are on, not just the command.
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
-            // The line above the list says which folder the list is in, and
-            // is empty while folders are off.
+            // The line above the list says which folder the list is in:
+            // `dod/` while folders are off, the game's own listing.
             // The line stretches with the tab, so how much path fits does too.
             let line = vgui.child_named(page, FOLDER_LINE);
-            let line_text = match (folders & 1, line) {
-                (1, Some(line)) => folder_line(
+            let line_text = match line {
+                Some(line) => folder_line(
                     &dod_dir(),
-                    &crate::demo_list_folders::current_folder(),
+                    &listed_folder(folders & 1 == 1, crate::demo_list_folders::current_folder()),
                     folder_line_chars(vgui.rect(line).2),
                 ),
-                _ => String::new(),
+                None => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
             if *headed != (page as usize, line_text.clone()) {
@@ -1964,7 +2019,10 @@ mod hook {
             // The Go to dropdown: a pick goes to that place, and the list
             // fills again, which puts the heading back (#779).
             let picked = box_text(vgui, page, DEMO_PLACE);
-            if !picked.is_empty() && picked.as_bytes() != PLACE_HEADING.to_bytes() {
+            if folders & 1 == 1
+                && !picked.is_empty()
+                && picked.as_bytes() != PLACE_HEADING.to_bytes()
+            {
                 let folder = PLACES
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -1977,7 +2035,7 @@ mod hook {
                 refill_demo_list();
             }
             widen_place_menu(vgui, page);
-            show_nav_enabled(vgui, page, new_page);
+            show_nav_enabled(vgui, page, folders & 1 == 1, new_page);
             show_clear_enabled(vgui, page, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
@@ -2017,6 +2075,7 @@ mod hook {
             let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             // A refilled list shows every row again: stamp it and filter afresh.
             if stamp_demo_rows(list) {
+                resort_demo_list(list, build);
                 *last = None;
             }
             if last.as_deref() == Some(filter.as_str()) {
@@ -2201,6 +2260,27 @@ mod hook {
         date_text((year, month, day, hour, minute))
     }
 
+    /// Sorts the Demos tab's rows again by what they show now. The list
+    /// sorted them as the window added them, by their whole paths, and
+    /// [`stamp_demo_rows`] renaming a row doesn't move it, so a refill after
+    /// a folder setting changed left the folders below the demos while the
+    /// heading still said ascending. With a column chosen, flipping its
+    /// direction twice sorts twice and leaves the direction as it was.
+    unsafe fn resort_demo_list(list: *mut c_void, build: &Build) {
+        unsafe {
+            let column = *((list as *const u8).add(build.list_sort_column) as *const i32);
+            let on_set: KeyFn = slot(list, LIST_SLOT_ON_SET_SORT_COLUMN);
+            if column < 0 {
+                // No column chosen: sort by Demo File (column 1, after the
+                // icons), ascending.
+                on_set(list, 1);
+            } else {
+                on_set(list, column);
+                on_set(list, column);
+            }
+        }
+    }
+
     /// Fills in every row's Map, Type, Player and Date, and its short name, when
     /// the list was (re)filled or the players files changed since the last
     /// time. Returns whether it did.
@@ -2286,12 +2366,14 @@ mod hook {
                             set_string(row, DEMO_COLUMNS[1].0.as_ptr(), DRIVE_TYPE.as_ptr());
                         } else {
                             let folder = crate::demo_list_folders::full_path(&dod_dir(), &name);
-                            let count = crate::folder_counts::count(
-                                &folder,
-                                crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
-                            );
+                            let count = crate::folder_counts::counts(&folder).map(|counts| {
+                                folder_count_text(
+                                    counts,
+                                    crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
+                                )
+                            });
                             folder_count =
-                                Some(count.map_or_else(|| COUNTING.to_string(), demo_count_text));
+                                shown_count(!crate::demo_list_folders::SHOW_COUNTS.on(), count);
                         }
                     }
                     if let Some(info) = info_for(&path) {
@@ -2366,16 +2448,16 @@ mod hook {
         *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
     }
 
-    /// Back, Forward and Up as last set, a bit each in that order; `0xff`
-    /// for not yet. Set again only on a change or a new page.
+    /// Back, Forward, Up and Go to as last set, a bit each in that order;
+    /// `0xff` for not yet. Set again only on a change or a new page.
     static NAV_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0xff);
 
     /// Greys out the Demos tab's Back, Forward and Up where each has nowhere
-    /// to go: Back at the oldest folder remembered, Forward at the newest, Up
-    /// on This PC.
-    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+    /// to go ([`nav_enabled`]), and all of them and Go to while folders are
+    /// off.
+    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, folders: bool, new_page: bool) {
         use crate::demo_list_folders::{can_go_back, can_go_forward, can_go_up};
-        let can = [can_go_back(), can_go_forward(), can_go_up()];
+        let can = nav_enabled(folders, [can_go_back(), can_go_forward(), can_go_up()]);
         let want = can
             .iter()
             .enumerate()
@@ -2383,7 +2465,8 @@ mod hook {
         if !new_page && NAV_ENABLED.load(Ordering::Acquire) == want {
             return;
         }
-        for (name, on) in DEMO_NAV_BUTTONS.iter().zip(can) {
+        let names = DEMO_NAV_BUTTONS.iter().copied().chain([DEMO_PLACE]);
+        for (name, on) in names.zip(can) {
             unsafe {
                 let Some(vp) = vgui.child_named(page, name) else {
                     continue;
@@ -3408,11 +3491,13 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
-                if shown_with_folders(cvar) {
-                    let want = crate::demo_list_folders::enabled();
-                    if vgui.visible(control) != want {
-                        vgui.set_visible(control, want);
-                    }
+                if let Some(want) = folder_box_shown(
+                    cvar,
+                    crate::demo_list_folders::enabled(),
+                    crate::demo_list_folders::SHOW_COUNTS.on(),
+                ) && vgui.visible(control) != want
+                {
+                    vgui.set_visible(control, want);
                 }
                 let object = vgui.object(control);
                 if object.is_null()
@@ -4624,6 +4709,17 @@ mod tests {
     }
 
     #[test]
+    fn with_folders_off_the_navigation_greys_out_and_the_line_says_dod() {
+        assert_eq!(
+            nav_enabled(true, [true, false, true]),
+            [true, false, true, true]
+        );
+        assert_eq!(nav_enabled(false, [true, true, true]), [false; 4]);
+        assert_eq!(listed_folder(true, "D:/demos/".into()), "D:/demos/");
+        assert_eq!(listed_folder(false, "D:/demos/".into()), "");
+    }
+
+    #[test]
     fn the_go_to_list_opens_wide_enough() {
         // A long recent folder: wider than the 150 px box.
         assert_eq!(place_menu_width(50, 150, 432), 332);
@@ -4701,11 +4797,66 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_sub_options_show_only_with_folders() {
-        assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
-        assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
-        assert!(!shown_with_folders("dodstudio_demo_list_folders"));
-        assert!(!shown_with_folders("hud_draw"));
+    fn a_folder_with_demos_only_deeper_says_where_they_are() {
+        use crate::folder_counts::FolderCount;
+        let c = |demos, complete| FolderCount { demos, complete };
+        // Include subfolders on: every demo at any depth.
+        assert_eq!(
+            folder_count_text((c(0, true), c(12, true)), true),
+            "12 demos"
+        );
+        // Off: the demos in it, unless there are none there but some deeper.
+        assert_eq!(
+            folder_count_text((c(3, true), c(12, true)), false),
+            "3 demos"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(12, true)), false),
+            "0 here, 12 inside"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(500, false)), false),
+            "0 here, 500+ inside"
+        );
+        assert_eq!(
+            folder_count_text((c(0, true), c(0, true)), false),
+            "0 demos"
+        );
+    }
+
+    #[test]
+    fn hidden_counts_leave_a_folder_row_its_name_alone() {
+        let counted = Some("73 demos".to_string());
+        assert_eq!(
+            shown_count(false, counted.clone()).as_deref(),
+            Some("73 demos")
+        );
+        assert_eq!(shown_count(false, None).as_deref(), Some(COUNTING));
+        assert_eq!(shown_count(true, counted.clone()), None);
+        assert_eq!(shown_count(true, None), None);
+        assert_eq!(
+            display_name("temp demos/", shown_count(true, counted).as_deref()),
+            format!("{FOLDER_MARK}temp demos/")
+        );
+    }
+
+    #[test]
+    fn the_folder_sub_options_show_only_with_folders_and_counts() {
+        let counts = "dodstudio_demo_list_show_counts";
+        let hide_empty = "dodstudio_demo_list_hide_empty";
+        let subfolders = "dodstudio_demo_list_count_subfolders";
+        assert_eq!(folder_box_shown(counts, true, false), Some(true));
+        assert_eq!(folder_box_shown(counts, false, true), Some(false));
+        for cvar in [hide_empty, subfolders] {
+            assert_eq!(folder_box_shown(cvar, true, true), Some(true));
+            assert_eq!(folder_box_shown(cvar, true, false), Some(false), "{cvar}");
+            assert_eq!(folder_box_shown(cvar, false, true), Some(false), "{cvar}");
+        }
+        assert_eq!(
+            folder_box_shown("dodstudio_demo_list_folders", false, false),
+            None
+        );
+        assert_eq!(folder_box_shown("hud_draw", false, false), None);
     }
 
     #[test]
