@@ -4,8 +4,8 @@
 //
 // What an answer changes on the row:
 //  - Review mark (#44): Yes = Keep, Maybe = Maybe (#661), No = Skip. The game
-//    starts at the first row with no mark, so a second review passes over
-//    Maybe rows unless the review covers only them.
+//    starts at the queue's first highlight; the Review box's Unmarked is how
+//    a second review picks up where the first left off.
 //  - Kill Range: the from/to kills given in game
 //  - Notes: the note typed in game
 //  - Ticked for capture: only when the user turned on "tick Yes" (people who
