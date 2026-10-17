@@ -54,7 +54,10 @@
 //!   icon on the overview map -- the game's own team, everyone, the other
 //!   team, only the player being watched, or nobody (issue #304).
 //! - `overview_marker`: `dodstudio_hud_map_team_marker`, which marks the
-//!   player being watched in HLTV with his team's camera icon (#304).
+//!   player being watched in HLTV with his team's camera icon (#304), or
+//!   leaves the camera icon off the map (`2`, #677).
+//! - `overview_speaker`: `dodstudio_hud_map_hide_speaker`, which leaves the
+//!   speaker icon off the players' overview map icons (#677).
 //! - `demo_scope`: `dodstudio_show_demo_scope`, which draws the sniper scope
 //!   while a demo plays, in-eye with the watched player's rifle (#307).
 //! - `run_in_background`: `dodstudio_run_in_background`, full speed while
@@ -150,6 +153,11 @@
 //! - `clan_text`: the `dodstudio_hide_clan_text` cvar -- hide all of DoD's
 //!   clan-match text: the warm-up and ready rules, "Warmup Mode", the
 //!   countdown and "MATCH IS LIVE!" (issue #608).
+//! - `center_text`: the `dodstudio_hide_center_text` cvar -- drop every
+//!   `TextMsg` the server sends to the middle of the screen (#677).
+//! - `spectator_text`: the `dodstudio_hide_spectator_text` cvar -- hide the
+//!   camera mode's name and the green "Press DUCK for Spectator Menu" when
+//!   the view becomes a spectator camera (#677).
 //! - `hltv_messages`: the `dodstudio_hide_hltv_messages` cvar -- drop the
 //!   HLTV proxy's on-screen text ("You're watching HLTV...") as it arrives,
 //!   instead of patching it out of the demo (issue #30).
@@ -181,6 +189,7 @@ mod anim_fix;
 mod batch;
 mod batch_end;
 mod behind_imports;
+mod center_text;
 mod clan_text;
 mod cmd_list;
 mod commands;
@@ -225,6 +234,7 @@ mod overview_hd;
 mod overview_map;
 mod overview_marker;
 mod overview_players;
+mod overview_speaker;
 mod panic_log;
 mod particle_hide;
 mod patch;
@@ -248,6 +258,7 @@ mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
+mod spectator_text;
 mod sprite_blend;
 mod streaks;
 mod studio_panel;

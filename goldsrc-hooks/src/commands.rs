@@ -542,6 +542,11 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // dodstudio_hide_clan_text changes.
     crate::clan_text::poll();
+    // dodstudio_hide_center_text: its filter rides on clan_text's TextMsg
+    // handler, so this only follows the cvar.
+    crate::center_text::poll();
+    // dodstudio_hide_spectator_text: two code patches, byte-checked each frame.
+    crate::spectator_text::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -581,6 +586,7 @@ pub fn poll() {
     crate::spectator_follow::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
+    crate::overview_speaker::poll();
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).
     crate::demo_scope::poll();
     crate::run_in_background::poll();
@@ -775,6 +781,9 @@ fn status_text() -> String {
     if let Some(marker) = crate::overview_marker::status_line() {
         lines.push(marker);
     }
+    if let Some(speaker) = crate::overview_speaker::status_line() {
+        lines.push(speaker);
+    }
     if let Some(scope) = crate::demo_scope::status_line() {
         lines.push(scope);
     }
@@ -786,6 +795,12 @@ fn status_text() -> String {
     }
     if let Some(clan_text) = crate::clan_text::status_line() {
         lines.push(clan_text);
+    }
+    if let Some(center_text) = crate::center_text::status_line() {
+        lines.push(center_text);
+    }
+    if let Some(spectator_text) = crate::spectator_text::status_line() {
+        lines.push(spectator_text);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1586,6 +1601,12 @@ pub fn install() {
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
         crate::clan_text::set_cvar(clan_text);
     }
+    if let Some(center_text) = register(crate::center_text::NAME, "0") {
+        crate::center_text::set_cvar(center_text);
+    }
+    if let Some(spectator_text) = register(crate::spectator_text::NAME, "0") {
+        crate::spectator_text::set_cvar(spectator_text);
+    }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.
     if let Some(hltv_messages) = register(crate::hltv_messages::NAME, "0") {
@@ -1606,6 +1627,9 @@ pub fn install() {
     }
     if let Some(marker) = register(crate::overview_marker::NAME, "0") {
         crate::overview_marker::set_cvar(marker);
+    }
+    if let Some(speaker) = register(crate::overview_speaker::NAME, "0") {
+        crate::overview_speaker::set_cvar(speaker);
     }
     if let Some(scope) = register(crate::demo_scope::NAME, "0") {
         crate::demo_scope::set_cvar(scope);
@@ -1784,6 +1808,9 @@ mod tests {
             crate::spectator_deathcam::NAME,
             crate::overview_players::NAME,
             crate::overview_marker::NAME,
+            crate::overview_speaker::NAME,
+            crate::center_text::NAME,
+            crate::spectator_text::NAME,
             crate::demo_scope::NAME,
             crate::run_in_background::NAME,
             crate::hlae_window::CLOAK_NAME,
@@ -1794,6 +1821,43 @@ mod tests {
             crate::detail_cache::KEEP_NAME,
         ] {
             assert!(!other.starts_with(SPEC_MATCH_POV_NAME), "{other}");
+        }
+    }
+
+    /// The console's autocomplete swaps a name that is the whole start of
+    /// another for the longer one on space, so none of #677's names may be
+    /// the start of any name in the crate, or have one as its start.
+    #[test]
+    fn the_hide_text_names_are_no_other_names_start() {
+        let ours = [
+            crate::overview_speaker::NAME,
+            crate::center_text::NAME,
+            crate::spectator_text::NAME,
+        ];
+        let mut all: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir("src")
+            .unwrap()
+            .chain(std::fs::read_dir("src/anim_fix").unwrap())
+        {
+            let path = entry.unwrap().path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(&path).unwrap();
+            for part in text.split("console_name!(\"").skip(1) {
+                let name = part.split('"').next().unwrap();
+                all.push(format!("dodstudio_{name}"));
+            }
+        }
+        assert!(all.len() > 50, "found only {} names", all.len());
+        for a in ours {
+            for b in &all {
+                if a == b {
+                    continue;
+                }
+                assert!(!b.starts_with(a), "{a} is the start of {b}");
+                assert!(!a.starts_with(b.as_str()), "{b} is the start of {a}");
+            }
         }
     }
 

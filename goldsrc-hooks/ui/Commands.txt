@@ -9,6 +9,8 @@ SPECTATING (HLTV demos)
       Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
       Hide the spectator bars and everything on them.
+  dodstudio_hide_spectator_text 0/1
+      Hide the camera mode's name ('Free Look', ...) and the green 'Press DUCK for Spectator Menu' (POV deaths too).
   dodstudio_hide_hltv_messages 0/1
       Hide the HLTV proxy's on-screen messages.
 
@@ -31,6 +33,8 @@ HUD
       Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
+  dodstudio_hide_center_text 0/1
+      Hide the text the server prints in the middle of the screen (plugin countdowns and notices).
   dodstudio_hide_asset list|add|del|clear <model>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
@@ -41,8 +45,10 @@ HUD
       Move or resize the overview map.
   dodstudio_hud_map_players 0-4
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
-  dodstudio_hud_map_team_marker 0/1
-      HLTV: mark the watched player on the overview map with his team's camera icon.
+  dodstudio_hud_map_team_marker 0-2
+      The camera icon on the overview map: 0 the game's own, 1 his team's icon in HLTV too, 2 none.
+  dodstudio_hud_map_hide_speaker 0/1
+      Leave the speaker icon off the players on the overview map.
   dodstudio_show_demo_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
