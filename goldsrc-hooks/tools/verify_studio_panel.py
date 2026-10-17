@@ -324,6 +324,40 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(list_vt + add_item) - ui.base)
     check(got == "ret 0x10", f"which returns with {got!r} (data, userData, scrollTo, sortOnAdd)")
 
+    # 26: the Highlights tab frees each row after AddItem (#812). AddItem
+    # keeps `data->MakeCopy()` (KeyValues slot 21, +0x54), never `data`;
+    # MakeCopy allocates a new KEYVALUES_SIZE row; DeleteAllItems frees the
+    # list's copies through slot KEYVALUES_SLOT_DELETE_THIS; and that slot
+    # (null-checked) runs the destructor, which stores KeyValues' vftable,
+    # and gives the memory back to the KeyValuesSystem slot (+0xc) next to
+    # the one keyvalues_new allocates from (+8).
+    add_body = ui.body(ui.u32(list_vt + add_item) - ui.base, 0x60)
+    copy_at = next((n for n, x in enumerate(add_body) if x == "call dword ptr [eax + 0x54]"), None)
+    data_arg = ("mov ecx, dword ptr [esp + 0x18]", "mov ecx, dword ptr [ebp + 8]")
+    check(copy_at is not None and add_body[copy_at - 2] in data_arg
+          and re.fullmatch(r"mov dword ptr \[e[a-z]{2}\], eax", add_body[copy_at + 1 + (add_body[copy_at + 1].startswith("mov ecx"))]),
+          f"AddItem stores its data's KeyValues slot 21 (MakeCopy) in the new item: {add_body[(copy_at or 2) - 2:(copy_at or 0) + 3]}")
+    copy_fn = ui.u32(kv_vt + 4 * 21) - ui.base if kv_vt else 0
+    copy_body = ui.body(copy_fn, 0x40)
+    allocs = (f"call {hex(ui.base + build['keyvalues_new'])}", "call dword ptr [edx + 8]")
+    check(f"push {hex(size)}" in copy_body and any(x in allocs for x in copy_body),
+          f"KeyValues slot 21 (MakeCopy, +{copy_fn:#x}) allocates a new {size:#x}-byte row")
+    delete_this = vwl.rust_usize(src, "KEYVALUES_SLOT_DELETE_THIS")
+    clear_body = ui.body(ui.u32(list_vt + delete_all) - ui.base, 0x200)
+    check(any(re.fullmatch(rf"call dword ptr \[e[a-d]x \+ {hex(4 * delete_this)}\]", x) for x in clear_body),
+          f"DeleteAllItems frees the list's own copies through KeyValues slot {delete_this}")
+    free_fn = ui.u32(kv_vt + 4 * delete_this) - ui.base if kv_vt else 0
+    free_body = ui.body(free_fn, 0x20)
+    callees = [int(x.split()[1], 16) - ui.base for x in free_body if re.fullmatch(r"call 0x[0-9a-f]+", x)]
+    destroys = any(f"mov dword ptr [e{r}], {hex(ui.base + kv_vt)}" in ui.body(c, 0x40)
+                   for c in callees for r in ("bx", "di", "si"))
+    gives_back = any("call dword ptr [edx + 0xc]" in ui.body(c, 0x100) for c in callees)
+    news = ui.body(build["keyvalues_new"], 0x20)
+    check(ui.last_ret(free_fn) == "ret" and any(re.fullmatch(r"test e[a-z]{2}, e[a-z]{2}", x) for x in free_body[:3])
+          and destroys and gives_back and "call dword ptr [edx + 8]" in news,
+          f"KeyValues slot {delete_this} (deleteThis, +{free_fn:#x}) destroys the row and frees it "
+          f"where keyvalues_new allocates: {free_body}")
+
     # 22: the Demos tab's Type dropdown. The labeled combo box in the
     # Options dialog adds its items through slot COMBO_SLOT_ADD_ITEM's
     # function on PRE; on both builds that function makes the "SetText"
@@ -342,7 +376,8 @@ def verify(game, src):
     body = ui.body(row_fn, 0x20)
     jumps = [x for x in body if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
     menu_vt = ui.vftable("Menu@vgui2")
-    ok = False
+    # Not `ok`: that name holds the whole run's result.
+    forwards = False
     if jumps and menu_vt:
         menu_slot = int(jumps[0].split("+ ")[1].rstrip("]"), 16)
         menu_fn = ui.u32(menu_vt + menu_slot) - ui.base
@@ -350,8 +385,8 @@ def verify(game, src):
         # The menu's ActivateItemByRow turns the row into an item id and hands
         # it to ActivateItem, the slot before it.
         before = hex(menu_slot - 4)
-        ok = any(x.endswith(f"+ {before}]") and x.split()[0] in ("jmp", "call") for x in menu_body)
-    check(ok, f"ComboBox slot {row_slot} forwards to the menu's ActivateItemByRow, which calls ActivateItem: {jumps}")
+        forwards = any(x.endswith(f"+ {before}]") and x.split()[0] in ("jmp", "call") for x in menu_body)
+    check(forwards, f"ComboBox slot {row_slot} forwards to the menu's ActivateItemByRow, which calls ActivateItem: {jumps}")
     text_vt = ui.vftable("TextEntry@vgui2")
     get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
     check(combo_vt and ui.u32(combo_vt + 4 * get_text) == ui.u32(text_vt + 4 * get_text),

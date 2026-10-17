@@ -562,7 +562,8 @@ const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
 /// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
 const LIST_SLOT_DELETE_ALL_ITEMS: usize = 165;
 /// `AddItem(const KeyValues *data, int userData, bool scrollToItem, bool
-/// sortOnAdd)`, which keeps a copy of `data` (`MakeCopy`).
+/// sortOnAdd)`, which keeps a copy of `data` (`MakeCopy`, KeyValues slot
+/// 21), never `data` itself.
 const LIST_SLOT_ADD_ITEM: usize = 151;
 /// `sizeof(KeyValues)`, what the fill allocates for each row.
 const KEYVALUES_SIZE: usize = 0x18;
@@ -571,6 +572,11 @@ const PROGRESS_BAR_SLOT_SET_PROGRESS: usize = 134;
 /// `KeyValues::SetString(const char *key, const char *value)`: the 3-argument
 /// `KeyValues` constructor the demo list's rows are made with calls it.
 const KEYVALUES_SLOT_SET_STRING: usize = 17;
+/// `KeyValues::deleteThis()`: destroys the row and hands its memory back to
+/// the `KeyValuesSystem` that `Build::keyvalues_new` took it from. A vftable
+/// slot, the same on both builds; `ListPanel::DeleteAllItems` frees its own
+/// rows through it (#812).
+const KEYVALUES_SLOT_DELETE_THIS: usize = 24;
 /// The width the Demos tab gives the demo name column.
 const NAME_COLUMN_WIDE: i32 = 170;
 /// The Demos tab's columns past the demo's own name: key, heading, width.
