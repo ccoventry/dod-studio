@@ -202,13 +202,27 @@ fn matches(hidden: &[Entry], model_name: &str, drawn_as: DrawnAs) -> bool {
     }
 }
 
+/// Whether a rectangle the HUD is drawing is `icon`: the same one, or the
+/// icon cut down vertically, as `CHudAmmo` draws the bullets in a clip
+/// (`clip_garand_full` and friends) to the ammo left: the same horizontal
+/// span, a vertical span inside the icon's. Not any rectangle inside it:
+/// `number_0` (0,0 20x25) sits inside `icon_mg_deploy` (0,0 64x64) on the
+/// same sheet, and hiding the one must not hide the other.
+fn draws_icon(icon: &Wrect, drawn: &Wrect) -> bool {
+    drawn.left == icon.left
+        && drawn.right == icon.right
+        && drawn.top >= icon.top
+        && drawn.bottom <= icon.bottom
+        && drawn.bottom > drawn.top
+}
+
 /// Pure matcher for a `hud.txt` icon: the sheet the HUD picked and the
 /// rectangle it is drawing, against the icon entries (#808).
 fn matches_icon(hidden: &[Entry], sheet: &str, rect: &Wrect) -> bool {
     match hidden.iter().find(|h| {
         h.hud
             .as_ref()
-            .is_some_and(|i| i.rect == *rect && i.sheet.eq_ignore_ascii_case(sheet))
+            .is_some_and(|i| draws_icon(&i.rect, rect) && i.sheet.eq_ignore_ascii_case(sheet))
     }) {
         Some(entry) => {
             entry
@@ -486,6 +500,22 @@ mod tests {
         };
         assert!(!matches_icon(&list, "sprites/hud_icons.spr", &other));
         assert!(!matches_icon(&list, "sprites/clip_bullets.spr", &rect));
+        // Cut down to the ammo left (same width, less height): still the icon.
+        let cut = Wrect {
+            left: 65,
+            right: 129,
+            top: 40,
+            bottom: 64,
+        };
+        assert!(matches_icon(&list, "sprites/hud_icons.spr", &cut));
+        // A narrower rectangle inside it is another icon, not this one.
+        let inside = Wrect {
+            left: 65,
+            right: 85,
+            top: 0,
+            bottom: 64,
+        };
+        assert!(!matches_icon(&list, "sprites/hud_icons.spr", &inside));
         // An icon entry is not a model path: the sheet itself stays drawn.
         assert!(!matches(&list, "sprites/hud_icons.spr", DrawnAs::HudSprite));
         assert!(
