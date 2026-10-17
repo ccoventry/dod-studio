@@ -230,6 +230,32 @@ fn ready_text(found: &Found, file: &str) -> String {
     }
 }
 
+/// The status line's height for a control `name` on `page` fitted `tall`:
+/// one line while the progress bar or the filter row under it shows, so a
+/// wrapped second line never draws over them (#797: once the loading strip
+/// moved the tab's controls, the line re-wrapped onto the Min kills row). A
+/// failure, with nothing under it, keeps the room to wrap (#684). Any other
+/// control keeps `tall`.
+pub(super) unsafe fn status_tall(vgui: &Vgui, page: Vpanel, name: &str, tall: i32) -> i32 {
+    if name != STATUS_LABEL {
+        return tall;
+    }
+    let below = unsafe {
+        [PROGRESS, MIN_KILLS_BOX]
+            .iter()
+            .any(|&n| vgui.child_named(page, n).is_some_and(|vp| vgui.visible(vp)))
+    };
+    if below {
+        tall.min(STATUS_ONE_LINE)
+    } else {
+        tall
+    }
+}
+
+/// The status line's height as one line: it ends above the progress bar and
+/// the filter row (`Highlights.res`: the line at y 6, those at 27 and 30).
+const STATUS_ONE_LINE: i32 = 20;
+
 /// The filter boxes: none while nothing is listed (`None`), Min kills once
 /// the streaks are found, and Player too for an HLTV demo (`Some(true)`).
 unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {

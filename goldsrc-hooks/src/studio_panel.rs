@@ -3388,12 +3388,14 @@ mod hook {
                 }
                 for &(control, at) in &design.controls {
                     // A tab's list fills whatever height the tab gains (#612).
-                    let want = if FILL_HEIGHT.contains(&vgui.name(control).as_str()) {
+                    let name = vgui.name(control);
+                    let want = if FILL_HEIGHT.contains(&name.as_str()) {
                         crate::window_layout::fit_rect_tall(at, fit_design, fit_now)
                     } else {
                         crate::window_layout::fit_rect(at, fit_design, fit_now)
                     };
-                    vgui.place(control, (want.0, want.1 + inset, want.2, want.3));
+                    let tall = streaks_tab::status_tall(vgui, page, &name, want.3);
+                    vgui.place(control, (want.0, want.1 + inset, want.2, tall));
                 }
             }
         }
