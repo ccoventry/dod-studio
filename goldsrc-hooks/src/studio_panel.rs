@@ -3746,11 +3746,41 @@ mod hook {
         unsafe {
             for (vp, name) in vgui.gameui_popups() {
                 if name != DEMO_LIST && name != STREAK_LIST {
-                    named |= crate::demo_list_folders::name_stock_rows(vgui.object(vp));
+                    let dialog = vgui.object(vp);
+                    if crate::demo_list_folders::name_stock_rows(dialog) {
+                        named = true;
+                        sort_stock_rows(dialog);
+                    }
                 }
             }
         }
         crate::demo_list_folders::stock_naming_frame(named);
+    }
+
+    /// Sorts the game's own Load Demo window's rows again by their short
+    /// names. The window sorted them by their whole paths, where a demo
+    /// with a space comes quoted and `"` sorts before `.`, so `../` landed
+    /// below the last demo (#790); renaming a row doesn't move it. With a
+    /// column chosen, flipping its direction twice sorts twice and leaves the
+    /// direction as it was.
+    unsafe fn sort_stock_rows(dialog: *mut c_void) {
+        let Ok((_, build)) = gameui() else { return };
+        unsafe {
+            let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
+            if list.is_null() {
+                return;
+            }
+            let column = *((list as *const u8).add(build.list_sort_column) as *const i32);
+            let on_set: KeyFn = slot(list, LIST_SLOT_ON_SET_SORT_COLUMN);
+            if column < 0 {
+                // No column chosen: the window still sorted each row in as it
+                // was added. Sort by the names, ascending.
+                on_set(list, 0);
+            } else {
+                on_set(list, column);
+                on_set(list, column);
+            }
+        }
     }
 
     pub(super) fn poll() {
