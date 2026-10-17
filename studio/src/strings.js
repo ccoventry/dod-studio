@@ -2143,7 +2143,7 @@ export const STRINGS = {
     BUTTON: 'Review highlights',
     TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
     // #661: which Review marks a review plays.
-    COVERS_TITLE: 'Which highlights the review plays, by their Review mark. All starts at the first one with no mark and passes over Keep, Maybe and Skip rows; pick Maybe to look at those again.',
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
     COVERS_ALL: 'All',
     COVERS_UNMARKED: 'Unmarked',
     COVERS_KEEP: 'Keep',
@@ -2155,6 +2155,9 @@ export const STRINGS = {
     HLTV_MISSING: 'Players missing their POV for this half',
     HLTV_RECORDERS: 'Players with a POV demo in the queue',
     HLTV_ALL: 'Everyone',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
     // The HLTV box left out every highlight there was (#822).
     hltvNoneChosen: (choice, count) => {
       const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;

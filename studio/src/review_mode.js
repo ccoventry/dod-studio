@@ -85,7 +85,8 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const ticked = getCheckedPaths();
     const paths = reviewDemoPaths(ticked, getShownPaths());
     const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf });
-    const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, minKills, covers, hltvPlayers);
+    const order = document.querySelector('#review-order-select')?.value;
+    const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, minKills, covers, hltvPlayers, order);
     if (highlights.length === 0) {
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
       if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;

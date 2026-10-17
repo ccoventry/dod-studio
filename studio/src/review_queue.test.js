@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS, REVIEW_ORDER } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -35,6 +35,27 @@ describe('HLTV demos in a review (#822)', () => {
   it('plays only the chosen players, matched by SteamID or else by name, and every POV highlight', () => {
     const rows = queue(hltvPlayersFor(HLTV_PLAYERS.RECORDERS, recorders));
     expect(rows.map((h) => [h.demo, h.player])).toEqual([['h.dem', 'm00cat'], ['h.dem', 'DICE | stealth'], ['p.dem', '']]);
+  });
+
+  describe('order', () => {
+    // gorilla 2:10, m00cat 2:15 (inside gorilla's clip), gorilla 3:00,
+    // and Alpha at the same moment as gorilla's first.
+    const mixed = {
+      path: 'o.dem', is_pov: false, streaks: [
+        life('m00cat', 1, 135), life('gorilla', 2, 130), life('gorilla', 2, 180), life('Alpha', 3, 130),
+      ],
+    };
+    const played = (order) => buildReviewQueue([mixed], ['o.dem'], 1, REVIEW_COVERS.ALL, null, order)
+      .highlights.map((h) => `${h.player}@${h.kill_times[0]}`);
+
+    it('chronological by default: a later clip starting earlier than one ends still goes by its start, ties A to Z', () => {
+      expect(played(undefined)).toEqual(['Alpha@130', 'gorilla@130', 'm00cat@135', 'gorilla@180']);
+      expect(played(REVIEW_ORDER.TIME)).toEqual(played(undefined));
+    });
+
+    it('by player: A to Z regardless of case, each player by time', () => {
+      expect(played(REVIEW_ORDER.PLAYER)).toEqual(['Alpha@130', 'gorilla@130', 'gorilla@180', 'm00cat@135']);
+    });
   });
 
   it('sends the camera player numbered from 1, and none for a POV demo', () => {
