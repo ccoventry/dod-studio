@@ -662,6 +662,9 @@ const DAYS_FILTER: &str = "DaysFilter";
 /// how many demos it can see, shown in place of the hint while it is in use.
 const PLAYER_FILTER: &str = "PlayerFilter";
 const PLAYER_RECORDED: &str = "PlayerRecorded";
+/// The Clear button beside the Player box: greyed out while no player is
+/// picked, since it would do nothing (#800).
+const PLAYER_CLEAR: &str = "PlayerClear";
 const PLAYER_NOTE: &str = "PlayerNote";
 const DEMOS_HINT: &str = "Hint";
 
@@ -940,6 +943,12 @@ const SETTINGS_UNSEEN: u8 = 0xff;
 /// last filled.
 fn folders_changed(last: u8, now: u8) -> bool {
     last != SETTINGS_UNSEEN && last != now
+}
+
+/// Whether the Player box's Clear button has anything to clear: it is greyed
+/// out while no player is picked (#800).
+fn clear_players_enabled(picked: &[String]) -> bool {
+    !picked.is_empty()
 }
 
 /// The Demos tab's hint: how to load, and whether folders are listed, as a
@@ -2027,6 +2036,7 @@ mod hook {
             }
             widen_place_menu(vgui, page);
             show_nav_enabled(vgui, page, folders & 1 == 1, new_page);
+            show_clear_enabled(vgui, page, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -2470,6 +2480,32 @@ mod hook {
             }
         }
         NAV_ENABLED.store(want, Ordering::Release);
+    }
+
+    /// The Clear button as last set: 0 or 1, `0xff` for not yet. Set again
+    /// only on a change or a new page.
+    static CLEAR_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0xff);
+
+    /// Greys out the Player box's Clear button while no player is picked
+    /// (#800), the way [`show_nav_enabled`] does the navigation.
+    unsafe fn show_clear_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+        let on = clear_players_enabled(&PICKED_PLAYERS.lock().unwrap_or_else(|e| e.into_inner()));
+        let want = u8::from(on);
+        if !new_page && CLEAR_ENABLED.load(Ordering::Acquire) == want {
+            return;
+        }
+        unsafe {
+            let Some(vp) = vgui.child_named(page, PLAYER_CLEAR) else {
+                return;
+            };
+            let button = vgui.object(vp);
+            if button.is_null() {
+                return;
+            }
+            let set_enabled: ListIntVoidFn = slot(button, PANEL_SLOT_SET_ENABLED);
+            set_enabled(button, i32::from(on));
+        }
+        CLEAR_ENABLED.store(want, Ordering::Release);
     }
 
     /// Widens the Go to list, while it is open, to fit its longest label
@@ -4821,6 +4857,12 @@ mod tests {
             None
         );
         assert_eq!(folder_box_shown("hud_draw", false, false), None);
+    }
+
+    #[test]
+    fn clear_is_enabled_only_while_a_player_is_picked() {
+        assert!(!clear_players_enabled(&[]));
+        assert!(clear_players_enabled(&["STEAM_0:1:6155141".to_string()]));
     }
 
     #[test]
