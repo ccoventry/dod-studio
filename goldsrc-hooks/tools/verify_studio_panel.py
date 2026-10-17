@@ -678,7 +678,8 @@ def constructor_of(ui, cls):
 
 def main():
     games = [Path(a) for a in sys.argv[1:]] or [g for g in vwl.DEFAULT_GAMES if g.is_dir()]
-    src = RUST.read_text(encoding="utf-8")
+    # The shared list slots (#796) live beside studio_panel.rs.
+    src = RUST.read_text(encoding="utf-8") + (RUST.parent / "list_panel.rs").read_text(encoding="utf-8")
     ok = all([verify(g, src) for g in games])
     print("\nOFFSETS VERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

@@ -565,19 +565,6 @@ const DEMO_FILTER: &str = "DemoFilter";
 const LIST_SLOT_FIRST_ITEM: usize = 167;
 const LIST_SLOT_NEXT_ITEM: usize = 168;
 const LIST_SLOT_SET_ITEM_VISIBLE: usize = 171;
-/// `ListPanel::OnMouseWheeled(int delta)`: moves its scroll bar by `delta`
-/// times three rows through `ScrollBar::SetValue`, which clamps to the
-/// bar's range. Hiding rows shrinks the range but leaves the bar's value
-/// where it was, so a list scrolled down showed nothing until the next
-/// scroll; a big wheel up after each new filter puts it back at the top.
-const LIST_SLOT_ON_MOUSE_WHEELED: usize = 99;
-/// `Panel::InvalidateLayout(bool layoutNow, bool reloadScheme)`, what
-/// `Menu::SetFixedWidth` calls (`verify_studio_panel.py`). The list is laid
-/// out now, before the wheel above, so its scroll bar has the new folder's
-/// range: against the old one (a folder that fitted, whose range ends below
-/// zero) the clamp left the bar above its top, drawn short until the next
-/// scroll.
-const PANEL_SLOT_INVALIDATE_LAYOUT: usize = 58;
 /// `AddColumnHeader(int index, const char *name, const char *text, int width,
 /// int flags)` and `SetColumnSortable(int, bool)`: what the Demos tab's Map
 /// and Date columns are built with.
@@ -589,10 +576,6 @@ const LIST_SLOT_SET_COLUMN_VISIBLE: usize = 149;
 /// `ApplyItemChanges(int itemID)`: re-indexes a row after its values
 /// changed. The rows shown keep their order until the list sorts again.
 const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
-/// `OnSetSortColumn(int column)`, the "SetSortColumn" message's handler: on
-/// the column already sorted it flips the direction and sorts the list
-/// (`sort_arrows`, #611, `verify_studio_panel.py`).
-const LIST_SLOT_ON_SET_SORT_COLUMN: usize = 190;
 /// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
 const LIST_SLOT_DELETE_ALL_ITEMS: usize = 165;
 /// `AddItem(const KeyValues *data, int userData, bool scrollToItem, bool
@@ -1752,7 +1735,6 @@ mod hook {
     type AddColumnFn =
         unsafe extern "thiscall" fn(*mut c_void, i32, *const c_char, *const c_char, i32, i32);
     type ListIntVoidFn = unsafe extern "thiscall" fn(*mut c_void, i32);
-    type ListIntIntFn = unsafe extern "thiscall" fn(*mut c_void, i32, i32);
     type ListIntBoolFn = unsafe extern "thiscall" fn(*mut c_void, i32, u32);
     type SetStringFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, *const c_char);
     type SetIntFn = unsafe extern "thiscall" fn(*mut c_void, *const c_char, i32);
@@ -2169,10 +2151,7 @@ mod hook {
             );
             let mut scrolled = SCROLLED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             if *scrolled != typed {
-                let lay_out: ListIntIntFn = slot(list, PANEL_SLOT_INVALIDATE_LAYOUT);
-                lay_out(list, 1, 0);
-                let wheel: ListIntVoidFn = slot(list, LIST_SLOT_ON_MOUSE_WHEELED);
-                wheel(list, 100_000);
+                crate::list_panel::scroll_to_top(list);
                 *scrolled = typed;
             }
             drop(scrolled);
@@ -2332,21 +2311,10 @@ mod hook {
     /// sorted them as the window added them, by their whole paths, and
     /// [`stamp_demo_rows`] renaming a row doesn't move it, so a refill after
     /// a folder setting changed left the folders below the demos while the
-    /// heading still said ascending. With a column chosen, flipping its
-    /// direction twice sorts twice and leaves the direction as it was.
+    /// heading still said ascending (`list_panel`, #796). With no column
+    /// chosen: by Demo File (column 1, after the icons), ascending.
     unsafe fn resort_demo_list(list: *mut c_void, build: &Build) {
-        unsafe {
-            let column = *((list as *const u8).add(build.list_sort_column) as *const i32);
-            let on_set: KeyFn = slot(list, LIST_SLOT_ON_SET_SORT_COLUMN);
-            if column < 0 {
-                // No column chosen: sort by Demo File (column 1, after the
-                // icons), ascending.
-                on_set(list, 1);
-            } else {
-                on_set(list, column);
-                on_set(list, column);
-            }
-        }
+        unsafe { crate::list_panel::resort(list, build.list_sort_column, Some(1)) }
     }
 
     /// Fills in every row's Map, Type, Player and Date, and its short name, when
@@ -3861,12 +3829,13 @@ mod hook {
         crate::demo_list_folders::stock_naming_frame(named);
     }
 
-    /// Sorts the game's own Load Demo window's rows again by their short
-    /// names. The window sorted them by their whole paths, where a demo
-    /// with a space comes quoted and `"` sorts before `.`, so `../` landed
-    /// below the last demo (#790); renaming a row doesn't move it. With a
-    /// column chosen, flipping its direction twice sorts twice and leaves the
-    /// direction as it was.
+    /// The game's own Load Demo window, its rows just named: sorts them
+    /// again by their short names and starts the list at the top
+    /// (`list_panel`, #796). The window sorted them by their whole paths,
+    /// where a demo with a space comes quoted and `"` sorts before `.`, so
+    /// `../` landed below the last demo (#790); renaming a row doesn't move
+    /// it. With no column chosen (the window sorted each row in as it was
+    /// added): by the names, ascending.
     unsafe fn sort_stock_rows(dialog: *mut c_void) {
         let Ok((_, build)) = gameui() else { return };
         unsafe {
@@ -3874,16 +3843,7 @@ mod hook {
             if list.is_null() {
                 return;
             }
-            let column = *((list as *const u8).add(build.list_sort_column) as *const i32);
-            let on_set: KeyFn = slot(list, LIST_SLOT_ON_SET_SORT_COLUMN);
-            if column < 0 {
-                // No column chosen: the window still sorted each row in as it
-                // was added. Sort by the names, ascending.
-                on_set(list, 0);
-            } else {
-                on_set(list, column);
-                on_set(list, column);
-            }
+            crate::list_panel::after_refill(list, build.list_sort_column, Some(0));
         }
     }
 
