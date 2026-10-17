@@ -31,7 +31,10 @@
 //! An HLTV demo's camera follows no one by itself, so a highlight with a
 //! player number puts the camera on them in first person (`spec_mode 4` and
 //! `dodstudio_spec_target`) once each seek has landed, the way the
-//! Highlights tab's Go does: the player may only exist after the seek.
+//! Highlights tab's Go does: the player may only exist after the seek. While
+//! such a highlight plays the review holds `dodstudio_spec_lock`'s lock on
+//! (without touching the cvar), so a death before the highlight ends can't
+//! move the camera to someone else; the hold ends with the review.
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 
@@ -487,6 +490,9 @@ fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
     let spans = fast_spans(&h.kills, review.options.gap);
+    // Keep the camera on an HLTV highlight's player even if they die before
+    // it ends; a POV highlight lets the cvar decide again.
+    crate::spectator_follow::hold_for_review(h.spectate.is_some());
     let started = crate::demo_seek::seek_to_seconds_then(from, h.camera_line()).and_then(|seek| {
         crate::demo_seek::set_time_scale(1.0)?;
         crate::demo_seek::set_paused(false)?;
@@ -573,6 +579,7 @@ fn advance(guard: &mut Option<Review>) {
         ));
         crate::events::send("REVIEW_END\tdone");
         *guard = None;
+        crate::spectator_follow::hold_for_review(false);
         GENERATION.fetch_add(1, Ordering::Relaxed);
         open_tab();
     }
@@ -844,6 +851,7 @@ pub unsafe extern "C" fn command() {
                     let _ = crate::demo_seek::set_time_scale(1.0);
                 }
                 crate::events::send("REVIEW_END\tstopped");
+                crate::spectator_follow::hold_for_review(false);
                 GENERATION.fetch_add(1, Ordering::Relaxed);
                 say("stopped");
             } else {
