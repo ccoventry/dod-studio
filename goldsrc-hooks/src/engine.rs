@@ -105,6 +105,51 @@ pub struct DemoApiPartial {
     pub is_playingback: unsafe extern "C" fn() -> i32,
 }
 
+/// Partial mirror of `triangleapi_s` (`common/triangleapi.h`) from `version`
+/// through `WorldToScreen`. Every offset is pinned by a call in DoD's
+/// `CHudScope::DrawTriApiScope` (`client+0x46690`): `RenderMode` `+0x4`,
+/// `Begin` `+0x8`, `End` `+0xc`, `Color4f` `+0x10`, `TexCoord2f` `+0x18`,
+/// `Vertex3fv` `+0x1c`, `Brightness` `+0x24`, `CullFace` `+0x28`,
+/// `SpriteTexture` `+0x2c`; `Vertex3f` `+0x20` and `WorldToScreen` `+0x30`
+/// by other client calls through the same pointer.
+#[repr(C)]
+pub struct TriangleApiPartial {
+    pub version: i32,
+    pub render_mode: unsafe extern "C" fn(mode: i32),
+    pub begin: unsafe extern "C" fn(primitive: i32),
+    pub end: unsafe extern "C" fn(),
+    pub color4f: unsafe extern "C" fn(r: f32, g: f32, b: f32, a: f32),
+    _color4ub: *mut c_void,
+    pub tex_coord2f: unsafe extern "C" fn(u: f32, v: f32),
+    pub vertex3fv: unsafe extern "C" fn(point: *const f32),
+    pub vertex3f: unsafe extern "C" fn(x: f32, y: f32, z: f32),
+    pub brightness: unsafe extern "C" fn(brightness: f32),
+    pub cull_face: unsafe extern "C" fn(style: i32),
+    pub sprite_texture: unsafe extern "C" fn(model: *mut ModelSPartial, frame: i32) -> i32,
+    /// Writes the point's normalised screen position (-1..1, y up) and
+    /// returns 1 when it is behind the eye.
+    pub world_to_screen: unsafe extern "C" fn(world: *const f32, screen: *mut f32) -> i32,
+}
+
+/// `SCREENINFO` (`cdll_int.h`): `iSize`, `iWidth`, `iHeight`, `iFlags`,
+/// `iCharHeight`, `charWidths[256]`. `CHud::VidInit` sets `iSize` to 0x214
+/// before `pfnGetScreenInfo` (`client+0x36b2c`), which pins the size.
+#[repr(C)]
+pub struct ScreenInfo {
+    pub size: i32,
+    pub width: i32,
+    pub height: i32,
+    pub flags: i32,
+    pub char_height: i32,
+    pub char_widths: [i16; 256],
+}
+
+const _: () = assert!(size_of::<ScreenInfo>() == 0x214);
+
+/// `gEngfuncs.pfnGetScreenInfo` (slot 12): fills `info`, whose `size` the
+/// caller sets first.
+pub type GetScreenInfoFn = unsafe extern "C" fn(info: *mut ScreenInfo) -> i32;
+
 /// `gEngfuncs.pfnGetCvarPointer` (slot 72). Looks up any registered cvar by
 /// name -- the engine's own included -- and returns its `cvar_s`, or null.
 /// DoD's `client.dll` calls this slot 11 times with a cvar name
@@ -558,7 +603,10 @@ pub struct EngineStudioApiPartial {
 /// leave no room for the count between them to be wrong.
 #[repr(C)]
 pub struct ClEngineFuncsPartial {
-    _slots_before_register_variable: [*mut c_void; 14], // pfnSPR_Load .. pfnSetCrosshair
+    _slots_before_get_screen_info: [*mut c_void; 12], // pfnSPR_Load .. pfnFillRGBA
+    /// Slot 12, `call [gEngfuncs+0x30]` in `CHud::VidInit` (`client+0x36b32`).
+    pub pfn_get_screen_info: GetScreenInfoFn,
+    _slot_set_crosshair: *mut c_void,
     pub pfn_register_variable: RegisterVariableFn,
     pub pfn_get_cvar_float: GetCvarFloatFn,
     _slots_before_add_command: [*mut c_void; 1], // pfnGetCvarString
@@ -602,7 +650,11 @@ pub struct ClEngineFuncsPartial {
     /// through `gEngfuncs+0x128`): the one at RVA 0x26c00 prefixes the result
     /// with `"dod/"` and cuts it at the last `'.'` -- a map path.
     pub pfn_get_level_name: GetLevelNameFn,
-    _slots_after_level_name: [*mut c_void; 9], // pfnGetScreenFade .. pEfxAPI
+    _slots_after_level_name: [*mut c_void; 7], // pfnGetScreenFade .. COM_FreeFile
+    /// Slot 82: the client's copy sits at `gEngfuncs+0x148`, which
+    /// `DrawTriApiScope` loads before every TriAPI call.
+    pub p_tri_api: *mut TriangleApiPartial,
+    _slot_efx_api: *mut c_void,
     pub p_event_api: *mut EventApiPartial,
     /// Slot 85. See [`DemoApiPartial`].
     pub p_demo_api: *mut DemoApiPartial,
@@ -1305,7 +1357,8 @@ unsafe extern "C" fn tramp_calc_refdef(pparams: *mut RefParamsPartial) {
 }
 
 /// Runs `client.dll`'s own `HUD_DrawTransparentTriangles` (where the sniper
-/// scope is drawn), after `demo_scope` has read the frame's render view.
+/// scope is drawn), after `demo_scope` has read the frame's render view, and
+/// with its black fill around the scope (#799).
 unsafe extern "C" fn tramp_draw_transparent_triangles() {
     let real = REAL_DRAW_TRANSPARENT_TRIANGLES.load(Ordering::Acquire);
     if real.is_null() {
@@ -1313,7 +1366,8 @@ unsafe extern "C" fn tramp_draw_transparent_triangles() {
     }
     crate::demo_scope::before_transparent_triangles();
     let real: DrawTransparentTrianglesFn = unsafe { std::mem::transmute(real) };
-    unsafe { real() };
+    // Safety: the client's own export, called on the engine's thread.
+    crate::demo_scope::with_black_fill(|| unsafe { real() });
 }
 
 /// Called once per entity the engine is about to add to the render list.

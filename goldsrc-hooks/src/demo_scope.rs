@@ -111,6 +111,17 @@
 //! change shows one frame after it is written. `CHudScope::Think`'s black
 //! blink fires only on a `Scope` message (`SetScope` sets its dirty flag at
 //! `+0x4640e`); the store here does not, so no blink.
+//!
+//! ## Black around the scope
+//!
+//! The quads only reach a little past the view DoD expects, so a wider one
+//! (`gl_widescreen_yfov 1`, `mirv_fov`) shows the map around the frame. In a
+//! demo, [`fill`] draws black from the frame's edges outward in the same
+//! plane (#799).
+
+mod fill;
+
+pub use fill::with_black_fill;
 
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 
@@ -529,6 +540,7 @@ pub fn poll() {
         return;
     }
     let wanted = unsafe { (*cvar).value } != 0.0;
+    fill::poll(wanted && playing_demo());
     let was = ON.load(Ordering::Relaxed);
     match set_on(wanted) {
         Ok(wrote) => {
@@ -565,8 +577,9 @@ pub fn status_line() -> Option<String> {
             format!("{} (id {id})", sprite_name(id))
         });
     Some(format!(
-        "demo scope: {NAME} = {}; in-eye draws {rifle}",
-        describe(true)
+        "demo scope: {NAME} = {}; in-eye draws {rifle}; {}",
+        describe(true),
+        fill::describe_last()
     ))
 }
 
