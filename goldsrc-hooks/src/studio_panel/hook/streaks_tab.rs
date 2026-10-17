@@ -197,7 +197,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     fill_player_box(vgui, page, &found);
                 }
                 show_filters(vgui, page, Some(found.hltv));
-                narrow(vgui, page, list, found.hltv);
+                narrow(vgui, page, list, build, found.hltv);
             }
             Status::Failed(why) => {
                 let text = format!("Could not find the highlights: {why}");
@@ -275,7 +275,7 @@ unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {
 /// In an HLTV demo, shows only the rows whose player matches the Player box
 /// (every word, case ignored), when the box changed or the list was
 /// refilled. A POV demo's box names its one player, so every row shows.
-unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
+unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, build: &Build, hltv: bool) {
     unsafe {
         let wanted = if hltv {
             box_text(vgui, page, PLAYER_BOX).trim().to_string()
@@ -312,6 +312,11 @@ unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
             }
             id = next(list, id);
         }
+        // A row shown again goes to the end of the list's visible rows, not
+        // back to its place, so typing a name and then deleting some of it
+        // left those rows out of order. Sort again (by Row # unless a heading
+        // was clicked), and start at the top of the shorter list (#796).
+        crate::list_panel::after_refill(list, build.list_sort_column, Some(0));
         *filtered = Some(wanted);
     }
 }
