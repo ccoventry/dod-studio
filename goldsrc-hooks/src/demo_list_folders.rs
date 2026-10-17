@@ -133,6 +133,31 @@ pub static HIDE_EMPTY: Setting = Setting::new(console_name!("demo_list_hide_empt
 pub static COUNT_SUBFOLDERS: Setting =
     Setting::new(console_name!("demo_list_count_subfolders"), true);
 
+/// `dodstudio_demo_list_show_counts 1` (the default): folders are counted in
+/// the background, and folder rows on the Demos tab end in "(N demos)". At
+/// `0` nothing is counted at all (#787), so a folder opens with no progress
+/// bar and no second fill; [`HIDE_EMPTY`] and [`COUNT_SUBFOLDERS`] need the
+/// counts and are off with it.
+pub static SHOW_COUNTS: Setting = Setting::new(console_name!("demo_list_show_counts"), true);
+
+/// Whether empty folders are left out: only while folders are counted, the
+/// one way to know a folder is empty.
+pub fn hides_empty(show_counts: bool, hide_empty: bool) -> bool {
+    show_counts && hide_empty
+}
+
+fn hides_empty_now() -> bool {
+    hides_empty(SHOW_COUNTS.on(), HIDE_EMPTY.on())
+}
+
+pub fn show_counts_status() -> String {
+    if SHOW_COUNTS.on() {
+        "folders are counted, and folder rows on the Demos tab end in their demo count".to_string()
+    } else {
+        "folders aren't counted: no demo counts, and empty folders are listed".to_string()
+    }
+}
+
 /// For the fallback toggle commands' bare-name query.
 pub fn hide_empty_status() -> String {
     if HIDE_EMPTY.on() {
@@ -1019,6 +1044,18 @@ mod hook {
         entries
     }
 
+    /// [`crate::folder_counts::count_later`], unless the counts are off
+    /// ([`super::SHOW_COUNTS`], #787).
+    fn count_later(
+        listing: &str,
+        folders: Vec<std::path::PathBuf>,
+        up: Option<(std::path::PathBuf, std::path::PathBuf)>,
+    ) {
+        if super::SHOW_COUNTS.on() {
+            crate::folder_counts::count_later(listing, folders, up);
+        }
+    }
+
     /// Lists `folder` as rows: through the real file system for a path from
     /// `dod/`, straight from the disk for a drive-rooted one.
     unsafe fn list(
@@ -1037,7 +1074,7 @@ mod hook {
                 .unwrap_or_default();
             let listed =
                 super::studio_rows(paths, |path| std::path::Path::new(path).is_file(), up_row);
-            crate::folder_counts::count_later(
+            count_later(
                 folder,
                 Vec::new(),
                 up_row.then(|| (dod.clone(), dod.join(super::STUDIO_PLACE))),
@@ -1050,7 +1087,7 @@ mod hook {
         if super::is_drives_place(folder) {
             // This PC: a row per drive, not counted (a whole drive is too
             // much to walk); the up row counts `dod/`, where it goes.
-            crate::folder_counts::count_later(
+            count_later(
                 folder,
                 Vec::new(),
                 up_row.then(|| (dod.clone(), dod.join(super::DRIVES_PLACE))),
@@ -1065,7 +1102,7 @@ mod hook {
         } else {
             unsafe { fs_entries(fs, folder, path_id) }
         };
-        let hide_empty = super::HIDE_EMPTY.on();
+        let hide_empty = super::hides_empty_now();
         // No counting here, on the game thread: a folder known to be empty
         // is left out, and the rest are counted in the background
         // (`folder_counts`), the Demos tab listing again when that is done.
@@ -1105,7 +1142,7 @@ mod hook {
         } else {
             Some((here.join(".."), here))
         };
-        crate::folder_counts::count_later(folder, to_count.into_inner(), up);
+        count_later(folder, to_count.into_inner(), up);
         listed
             .into_iter()
             .filter_map(|row| CString::new(row).ok())
@@ -1485,6 +1522,15 @@ pub fn poll() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_folders_are_hidden_only_while_folders_are_counted() {
+        assert!(hides_empty(true, true));
+        assert!(!hides_empty(true, false));
+        assert!(!hides_empty(false, true), "no counts, no way to know");
+        assert!(!hides_empty(false, false));
+        assert!(SHOW_COUNTS.on(), "counts show by default");
+    }
 
     #[test]
     fn a_drive_rooted_listing_path_is_told_from_one_under_dod() {
