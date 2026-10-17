@@ -173,15 +173,15 @@
                     <th data-str="WORKSPACE.TABLE_HEADER_DEMO_FILE">Demo File</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_HIGHLIGHTS">Highlights</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_SELECTED">Selected</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_PENDING">Pending</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_CAPTURED">Captured</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_RENDERED">Rendered</th>
+                    <!-- Counts in one cell each, a legend of coloured letters under the name (queue_counts.js). -->
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_STATUS_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_STATUS">Status</span><div class="count-legend" id="status-count-legend"></div></th>
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_REVIEW_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_REVIEW">Review</span><div class="count-legend" id="review-count-legend"></div></th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="master-demo-table-body">
                   <tr>
-                    <td colspan="8" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
+                    <td colspan="7" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
                   </tr>
                 </tbody>
               </table>

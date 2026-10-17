@@ -646,8 +646,8 @@ button.primary-btn:hover:not(:disabled) {
   font-weight: 600;
 }
 
-/* Every centered <td> column in this table (checkbox, Highlights, Pending,
-   Captured, Rendered, Actions — master_pane.js) needs its <th> centered too,
+/* Every centered <td> column in this table (checkbox, Highlights, Selected,
+   Status, Review, Actions — master_pane.js) needs its <th> centered too,
    or a header/body mismatch that's invisible while the column is barely
    wider than its content visibly drifts apart once the table stretches
    wider than that content (e.g. a maximized window) and the extra slack
@@ -664,6 +664,25 @@ button.primary-btn:hover:not(:disabled) {
 
 #master-demo-table tr:hover {
   background: rgba(255, 255, 255, 0.04);
+}
+
+/* Status and Review: coloured counts joined by slashes (queue_counts.js);
+   the header's legend shows the same letters in the same colours. */
+#master-demo-table td.queue-counts-cell {
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  cursor: help;
+}
+
+#master-demo-table .count-legend {
+  font-size: 10px;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+#master-demo-table .count-slash {
+  color: #555;
 }
 
 /* Highlight table "Details" column (weapon/timing chain) — wraps instead of

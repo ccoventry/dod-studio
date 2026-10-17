@@ -14,7 +14,8 @@ import { multiMapSplitButton } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
 import { isGroupedByMatch, matchesInQueue, groupedQueue, matchHeaderText } from './queue_match_groups.js';
 import { makeClearable } from './clearable_input.js';
-import { statusCountColor, HIGHLIGHT_STATUS } from './status_colors.js';
+import { HIGHLIGHT_STATUS } from './status_colors.js';
+import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
 
 // Feather "bookmark" icon, same stroke="currentColor" pattern as
 // list_editor.js's trash icon — WebView2 renders emoji as a flat monochrome
@@ -166,6 +167,7 @@ export function getVisibleDemos() {
 }
 
 export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLocateDemo, onUseFoundCopy, onSplitDemo) {
+  initCountLegends();
   if (onDeleteDemo) {
     currentOnDeleteDemo = onDeleteDemo;
   }
@@ -251,14 +253,6 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
 // listedStreaks lives in queue_filters.js, beside the quick
 // filters that share it; re-exported for main.js and detail callers.
 export { listedStreaks };
-
-/** Count streaks matching a given status string. An unset status (still
- *  `undefined` — see take_index.js's isHighlightTracked doc comment) counts
- *  as 'None', not 'Pending': Pending is now a deliberate flag the user sets
- *  to mark a highlight for later capture, not the implicit default. */
-function countByStatus(streaks, status) {
-  return (streaks || []).filter((s) => (s.status || STRINGS.HIGHLIGHTS.STATUS_UNSET_DEFAULT) === status).length;
-}
 
 // ── Row selection (Clear Selected) ──────────────────────────────────────────
 
@@ -348,7 +342,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
 
   if (filteredDemos.length === 0) {
     tableBody.innerHTML =
-      `<tr><td colspan="8" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
+      `<tr><td colspan="7" class="table-empty">${STRINGS.WORKSPACE.TABLE_EMPTY_NO_MATCH_SEARCH}</td></tr>`;
     syncClearSelectedButtonState();
     return;
   }
@@ -371,7 +365,7 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       const tr = document.createElement('tr');
       tr.className = 'queue-match-header';
       const td = document.createElement('td');
-      td.colSpan = 8;
+      td.colSpan = 7;
       td.textContent = matchHeaderText(header.match, header.demos);
       // Which signal called the half, from the first demo that has one.
       const detail = header.demos.find((d) => d.match_info?.detail)?.match_info.detail;
@@ -381,15 +375,12 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       return;
     }
     const originalIdx = currentDemos.indexOf(demo);
-    // Highlights/Pending/Captured/Rendered all count only the recording
-    // player's own streaks, matching the Highlight Details table's rows.
+    // Every count column counts only the recording player's own streaks,
+    // matching the Highlight Details table's rows.
     const ownStreaks = listedStreaks(demo);
 
     // ── Derive live column values ─────────────────────────────────────────
     const selected    = ownStreaks.filter((s) => s.selected === true).length;
-    const pending     = countByStatus(ownStreaks, HIGHLIGHT_STATUS.PENDING); // M4
-    const captured    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.CAPTURED); // M4
-    const rendered    = countByStatus(ownStreaks, HIGHLIGHT_STATUS.RENDERED); // M4
 
     const tr = document.createElement('tr');
     tr.style.borderBottom = '1px solid #333';
@@ -488,28 +479,12 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     tdSelected.style.color = selected > 0 ? '#64b5f6' : '#555';
     tdSelected.textContent = selected;
 
-    // Col 5: Pending count   [M4]
-    const tdPending = document.createElement('td');
-    tdPending.style.padding = '6px 8px';
-    tdPending.style.textAlign = 'center';
-    tdPending.style.color = statusCountColor(HIGHLIGHT_STATUS.PENDING, pending);
-    tdPending.textContent = pending;
+    // Col 5: Status, Pending / Captured / Rendered in one cell; col 6: Review,
+    // unmarked / Keep / Maybe / Skip (queue_counts.js).
+    const tdStatus = countsCell(statusCounts(ownStreaks));
+    const tdReview = countsCell(reviewCounts(ownStreaks));
 
-    // Col 6: Captured count  [M4]
-    const tdCaptured = document.createElement('td');
-    tdCaptured.style.padding = '6px 8px';
-    tdCaptured.style.textAlign = 'center';
-    tdCaptured.style.color = statusCountColor(HIGHLIGHT_STATUS.CAPTURED, captured);
-    tdCaptured.textContent = captured;
-
-    // Col 7: Rendered count  [M4]
-    const tdRendered = document.createElement('td');
-    tdRendered.style.padding = '6px 8px';
-    tdRendered.style.textAlign = 'center';
-    tdRendered.style.color = statusCountColor(HIGHLIGHT_STATUS.RENDERED, rendered);
-    tdRendered.textContent = rendered;
-
-    // Col 8: Actions — remove-from-queue only, no status badge  [M3]
+    // Col 7: Actions — remove-from-queue only, no status badge  [M3]
     const tdActions = document.createElement('td');
     tdActions.style.padding = '6px 8px';
     tdActions.style.textAlign = 'center';
@@ -587,9 +562,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
     tr.appendChild(tdName);
     tr.appendChild(tdYield);
     tr.appendChild(tdSelected);
-    tr.appendChild(tdPending);
-    tr.appendChild(tdCaptured);
-    tr.appendChild(tdRendered);
+    tr.appendChild(tdStatus);
+    tr.appendChild(tdReview);
     tr.appendChild(tdActions);
 
     // Row click selects the demo (but not when clicking the delete btn)
