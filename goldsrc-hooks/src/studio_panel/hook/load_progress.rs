@@ -29,10 +29,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         if page == 0 || !vgui.visible(page) {
             return;
         }
-        let percent = crate::demo_seek::buffered_while_loading().and_then(|buffered| {
-            let total = length_of_current_demo()?;
-            Some(crate::demo_file::load_percent(buffered, total))
-        });
+        let percent = demo_percent();
         let mut shown = SHOWN.lock().unwrap_or_else(|e| e.into_inner());
         if *shown == percent {
             return;
@@ -72,6 +69,16 @@ pub(super) unsafe fn update(vgui: &Vgui) {
             }
         }
     }
+}
+
+/// How much of the playing demo the demo player has read, while it is still
+/// reading. Shared with the loading strip (#797), so both say the same, and
+/// worked out whatever tab is showing.
+pub(super) fn demo_percent() -> Option<u32> {
+    crate::demo_seek::buffered_while_loading().and_then(|buffered| {
+        let total = length_of_current_demo()?;
+        Some(crate::demo_file::load_percent(buffered, total))
+    })
 }
 
 /// The playing demo's playback length, read once per demo.

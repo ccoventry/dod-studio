@@ -124,8 +124,9 @@ pub(super) unsafe fn build(
     }
 }
 
-/// Keeps the tab showing the playing demo's streaks. Runs every frame; asks
-/// for an analysis only while the tab is showing.
+/// Keeps the tab showing the playing demo's streaks. Runs every frame while
+/// the tab shows; the analysis itself starts as soon as the demo plays
+/// (`load_strip::request_highlights`, #797), so asking here again is a no-op.
 pub(super) unsafe fn update(vgui: &Vgui) {
     unsafe {
         let page = vpanel_of(PAGE_OBJECTS[STREAKS_PAGE].load(Ordering::Acquire) as *mut c_void);

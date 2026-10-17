@@ -1382,6 +1382,28 @@ fn help_bounds(sheet: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
 const HELP_LINE: &str = "HelpLine";
 const HELP_TALL: i32 = 22;
 
+/// The loading strip's panel name, in `DodStudio.res` (#797).
+const LOAD_STRIP: &str = "LoadStrip";
+/// How far the pages' controls move down while the strip shows.
+const LOAD_STRIP_TALL: i32 = 20;
+
+/// Where the loading strip goes on a page `page_wide` across: along its top,
+/// above the controls, which [`LOAD_STRIP_TALL`] pushes down.
+fn load_strip_bounds(page_wide: i32) -> (i32, i32, i32, i32) {
+    (8, 2, (page_wide - 16).max(1), LOAD_STRIP_TALL - 2)
+}
+
+/// What the loading strip says: how far the demo player has read the demo
+/// and how far the highlights analysis has got, each while it runs; `None`
+/// once both are done, and the strip goes.
+fn load_strip_text(demo: Option<u32>, highlights: Option<u32>) -> Option<String> {
+    let parts: Vec<String> = [("Demo", demo), ("Highlights", highlights)]
+        .into_iter()
+        .filter_map(|(what, percent)| Some(format!("{what} {}%", percent?)))
+        .collect();
+    (!parts.is_empty()).then(|| format!("Loading: {}", parts.join("   ")))
+}
+
 /// Every control's `"helptext"` in a `.res` file, by its name (an older layout's
 /// `"tooltiptext"` too; vgui2 shows that one as a tooltip on a check box):
 /// what the help line shows for it. (GameUI reads the key but shows no tooltip, so
@@ -1652,6 +1674,8 @@ mod hook {
     mod list_icons;
     /// The Playback tab's loading progress (#465).
     mod load_progress;
+    /// The loading strip along the top of every tab (#797).
+    mod load_strip;
     /// The Demos tab's Player box, a dropdown narrowed as you type (#565).
     mod player_picker;
     /// The Review tab (#623).
@@ -3344,8 +3368,11 @@ mod hook {
                 // bigger than drawn still keeps its bottom row at the bottom
                 // (#609).
                 let rects: Vec<_> = design.controls.iter().map(|&(_, at)| at).collect();
+                // The loading strip takes the top of the tab (#797): fit the
+                // controls to the rest and move them down under it.
+                let inset = load_strip::inset();
                 let (fit_design, fit_now) =
-                    crate::window_layout::content_frame(&rects, size, (w, h));
+                    crate::window_layout::content_frame(&rects, size, (w, (h - inset).max(1)));
                 if design.logged != Some((w, h)) {
                     design.logged = Some((w, h));
                     crate::debug::report(&format!(
@@ -3366,7 +3393,7 @@ mod hook {
                     } else {
                         crate::window_layout::fit_rect(at, fit_design, fit_now)
                     };
-                    vgui.place(control, want);
+                    vgui.place(control, (want.0, want.1 + inset, want.2, want.3));
                 }
             }
         }
@@ -3822,6 +3849,7 @@ mod hook {
     pub(super) fn poll() {
         hook_taskbar();
         name_stock_demo_rows();
+        load_strip::request_highlights();
         let pending = VIEWDEMO_PENDING.load(Ordering::Relaxed);
         if OBJECT.load(Ordering::Relaxed) == 0
             && pending == 0
@@ -3859,6 +3887,7 @@ mod hook {
                 };
                 hold_minimum(&vgui, frame, vp, &mut lent);
                 if vgui.visible(vp) {
+                    load_strip::update(&vgui, vp);
                     fit_pages(&vgui, &mut lent);
                     sync_settings(&vgui, &mut lent);
                     update_help(&vgui, vp, &mut lent);
@@ -5005,6 +5034,31 @@ mod tests {
         assert_eq!(action("Demo_Forward"), Action::DemoForward);
         assert_eq!(action("demo_up"), Action::DemoUp);
         assert_eq!(action("reset_settings"), Action::ResetSettings);
+    }
+
+    #[test]
+    fn the_loading_strip_names_each_load_still_running() {
+        assert_eq!(
+            load_strip_text(Some(45), Some(60)).as_deref(),
+            Some("Loading: Demo 45%   Highlights 60%")
+        );
+        assert_eq!(
+            load_strip_text(Some(0), None).as_deref(),
+            Some("Loading: Demo 0%")
+        );
+        assert_eq!(
+            load_strip_text(None, Some(100)).as_deref(),
+            Some("Loading: Highlights 100%")
+        );
+        assert_eq!(load_strip_text(None, None), None);
+    }
+
+    #[test]
+    fn the_loading_strip_sits_above_the_controls_it_pushes_down() {
+        let (x, y, w, h) = load_strip_bounds(540);
+        assert_eq!((x, w), (8, 524));
+        assert!(y >= 0 && y + h <= LOAD_STRIP_TALL);
+        assert!(load_strip_bounds(4).2 >= 1);
     }
 
     #[test]

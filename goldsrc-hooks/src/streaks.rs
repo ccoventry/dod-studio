@@ -269,6 +269,19 @@ pub fn status() -> Option<(u64, Status, u32)> {
     ))
 }
 
+/// The current analysis' progress (0 to 100) while it runs, `Some(None)`
+/// when none runs, or `None` while the worker is saving its result. Cheaper
+/// than [`status`] for the loading strip (#797), which asks every frame: it
+/// never copies the streaks found.
+pub fn loading_percent() -> Option<Option<u32>> {
+    let job = JOB.try_lock().ok()?;
+    Some(
+        job.as_ref()
+            .filter(|j| matches!(j.status, Status::Loading))
+            .map(|_| PERCENT.load(Ordering::Acquire)),
+    )
+}
+
 /// The streaks, and where they came from (for the log).
 fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
     let root = cache_root();
