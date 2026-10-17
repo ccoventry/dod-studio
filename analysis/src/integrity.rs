@@ -93,7 +93,7 @@ impl IntegrityReport {
 
 /// `m:ss`. A negative or non-finite time (a damaged `SvcTime`) shows as 0:00;
 /// the cast saturates rather than panicking.
-fn clock(seconds: f32) -> String {
+pub(crate) fn clock(seconds: f32) -> String {
     let total = if seconds.is_finite() && seconds > 0.0 {
         seconds as u32
     } else {
@@ -238,7 +238,7 @@ pub fn check_demo_bytes(bytes: &[u8]) -> Result<IntegrityReport, String> {
 /// `nom_fail` puts its message in the nom error's `input`, which `Display`
 /// prints as a list of byte values; any other nom error's `input` is the rest
 /// of the file, so that is cut short instead of printed whole.
-fn parse_error_reason(error: &str) -> String {
+pub fn parse_error_reason(error: &str) -> String {
     const MAX: usize = 200;
     let message = error
         .split_once("input: [")

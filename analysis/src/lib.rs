@@ -191,6 +191,98 @@ pub struct DemoInfo {
     /// before it was counted.
     #[serde(default)]
     pub peak_packet_entities: Option<u32>,
+
+    /// Where the demo stopped being read, when a frame partway through does
+    /// not parse (#811): the analysis covers everything before it. `None` for
+    /// a demo that reads to the end, and in an analysis cached before this
+    /// was noted (a damaged demo had no analysis then).
+    #[serde(default)]
+    pub damage: Option<DemoDamage>,
+}
+
+/// Where a damaged demo stopped being read, and why (#811).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DemoDamage {
+    /// The `viewdemo` clock (the last `SvcTime`) at the last frame read, in
+    /// seconds: the analysis covers the demo up to here.
+    pub read_up_to_secs: f32,
+    /// Index of the first frame that does not parse, counting every frame of
+    /// every directory entry from 0.
+    pub frame_index: usize,
+    /// Where that frame starts in the file.
+    pub byte_offset: u64,
+    /// What was not read, from there to the end of the frames.
+    pub bytes_unread: u64,
+    /// Why the frame does not parse, in words.
+    pub reason: String,
+}
+
+impl DemoDamage {
+    fn new(demo: &Demo, damage: dem::demo_parser::ParseDamage) -> Self {
+        Self {
+            read_up_to_secs: last_svc_time(demo)
+                .or(damage.last_frame_time)
+                .filter(|t| t.is_finite() && *t >= 0.0)
+                .unwrap_or(0.0),
+            frame_index: damage.frame_index,
+            byte_offset: damage.byte_offset as u64,
+            bytes_unread: damage.bytes_unread as u64,
+            reason: damage.reason,
+        }
+    }
+
+    /// "read up to 2:05", on the `viewdemo` clock.
+    pub fn read_up_to_text(&self) -> String {
+        format!("read up to {}", integrity::clock(self.read_up_to_secs))
+    }
+
+    /// One line for a person: "Damaged demo: read up to 2:05, the rest
+    /// (14.2 MB) does not parse."
+    pub fn summary(&self) -> String {
+        format!(
+            "Damaged demo: {}, the rest ({}) does not parse.",
+            self.read_up_to_text(),
+            size_text(self.bytes_unread)
+        )
+    }
+}
+
+/// A byte count as "14.2 MB" or "312 KB".
+fn size_text(bytes: u64) -> String {
+    if bytes >= 1 << 20 {
+        format!("{:.1} MB", bytes as f64 / (1u64 << 20) as f64)
+    } else {
+        format!("{} KB", bytes.div_ceil(1 << 10))
+    }
+}
+
+/// The last `SvcTime` in the demo: the `viewdemo` clock where it ends.
+fn last_svc_time(demo: &Demo) -> Option<f32> {
+    let frames = demo
+        .directory
+        .entries
+        .iter()
+        .rev()
+        .flat_map(|e| e.frames.iter().rev());
+    for frame in frames {
+        let FrameData::NetworkMessage(box_type) = &frame.frame_data else {
+            continue;
+        };
+        let MessageData::Parsed(msgs) = &box_type.1.messages else {
+            continue;
+        };
+        let time = msgs.iter().rev().find_map(|m| match m {
+            NetMessage::EngineMessage(e) => match &**e {
+                EngineMessage::SvcTime(t) => Some(t.time),
+                _ => None,
+            },
+            _ => None,
+        });
+        if time.is_some() {
+            return time;
+        }
+    }
+    None
 }
 
 /// The most entities in any one snapshot of `demo` (#207).
@@ -285,6 +377,7 @@ impl From<&Demo> for DemoInfo {
             demo_type,
             map_checksum: value.header.map_checksum,
             peak_packet_entities: Some(peak_packet_entities(value)),
+            damage: None,
         }
     }
 }
@@ -766,14 +859,22 @@ impl Analysis {
         // `BitReader::is_bad_read` turns an overrun into a parse error. See
         // #225, and `dem-patch/examples/mangle_probe.rs` for the harness that
         // proves it.
+        //
+        // A demo damaged partway (#811) is read up to the frame that breaks,
+        // and the analysis says where that is (`DemoInfo::damage`).
         let demo_res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            dem::open_demo_from_bytes_with_progress(value, &mut |read, total| {
+            dem::open_demo_from_bytes_tolerant_with_progress(value, &mut |read, total| {
                 progress_cb(scaled(read, total, 0, PARSE_SHARE), PROGRESS_SCALE)
             })
         }));
-        let demo = match demo_res {
+        let (demo, damage) = match demo_res {
             Ok(Ok(d)) => d,
-            Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
+            Ok(Err(e)) => {
+                return Err(format!(
+                    "Parse error: {}",
+                    integrity::parse_error_reason(&e.to_string())
+                ));
+            }
             Err(_) => return Err("Parser panicked during demo structural decoding".to_string()),
         };
 
@@ -828,7 +929,8 @@ impl Analysis {
 
         process_event(&mut state, &AnalyzerEvent::Finalization);
 
-        let info = DemoInfo::from(&demo);
+        let mut info = DemoInfo::from(&demo);
+        info.damage = damage.map(|d| DemoDamage::new(&demo, d));
         release_frames(demo);
         Ok(Analysis::new(info, state))
     }

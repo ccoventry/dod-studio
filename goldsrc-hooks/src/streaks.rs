@@ -109,6 +109,9 @@ pub struct Found {
     pub hltv: bool,
     /// A POV demo's recording player, whose streaks alone are listed.
     pub recorder: Option<String>,
+    /// For a demo damaged partway, where it stopped being read (#811):
+    /// "Damaged demo: read up to 2:05, ...". The streaks are those before it.
+    pub damage: Option<String>,
 }
 
 /// The streaks to list, earliest first: the highlights
@@ -144,6 +147,16 @@ pub fn streaks_of(analysis: &analysis::Analysis) -> Found {
         streaks,
         hltv: found.hltv,
         recorder: found.recorder,
+        damage: analysis.demo_info.damage.as_ref().map(|d| d.summary()),
+    }
+}
+
+/// The tab's line once the streaks are found: `text`, then for a damaged
+/// demo where it stopped being read (#811).
+pub fn with_damage(text: String, found: &Found) -> String {
+    match &found.damage {
+        Some(damage) => format!("{damage} {text}"),
+        None => text,
     }
 }
 
@@ -504,6 +517,32 @@ mod tests {
 
     fn kills(list: &[(f32, &str)]) -> Vec<(f32, String)> {
         list.iter().map(|(t, w)| (*t, w.to_string())).collect()
+    }
+
+    /// #811: a demo cut short lists the highlights before the cut, and the
+    /// tab's line says where it stopped; an intact one's line is unchanged.
+    #[test]
+    fn a_damaged_demo_says_where_it_stopped() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../test-fixtures/ci_fixture.dem"
+        );
+        let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+        let intact = streaks_of(&analysis::Analysis::try_from_bytes(&bytes).unwrap());
+        assert_eq!(intact.damage, None);
+        assert_eq!(
+            with_damage("3 highlights.".into(), &intact),
+            "3 highlights."
+        );
+
+        let cut = analysis::Analysis::try_from_bytes(&bytes[..bytes.len() / 2]).unwrap();
+        let found = streaks_of(&cut);
+        assert!(found.streaks.len() <= intact.streaks.len());
+        let line = with_damage("3 highlights.".into(), &found);
+        assert!(
+            line.starts_with("Damaged demo: read up to ") && line.ends_with(" 3 highlights."),
+            "{line}"
+        );
     }
 
     /// Whose highlights are listed is `analysis::highlights`' rule, tested
