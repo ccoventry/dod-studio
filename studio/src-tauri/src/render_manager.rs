@@ -285,6 +285,9 @@ pub struct RenderManager {
     /// Persisted so Start can run the existing job list again (after a
     /// Reset) without a fresh scan+payload.
     last_config: Arc<Mutex<Option<RenderConfig>>>,
+    /// Why a recovered batch has no `last_config` (#770): what Start says
+    /// instead of "nothing queued" until a scan replaces the batch.
+    recovery_gap: Arc<Mutex<Option<String>>>,
     /// JIT export-drive reservation ledger — bytes each concurrently-running
     /// `run_render_job` has provisionally claimed per drive, so one job's
     /// drive check accounts for what other in-flight jobs have already
@@ -328,6 +331,7 @@ impl RenderManager {
             wake_lock: Arc::new(Mutex::new(None)),
             render_session: Arc::new(Mutex::new(None)),
             last_config: Arc::new(Mutex::new(None)),
+            recovery_gap: Arc::new(Mutex::new(None)),
             export_reservations: Arc::new(Mutex::new(HashMap::new())),
             clear_on_finish: Arc::new(AtomicBool::new(false)),
         }
@@ -373,6 +377,69 @@ impl RenderManager {
         clear_batch_state_if_empty(self);
         emit_jobs_snapshot(app, &self.jobs);
         Ok(())
+    }
+
+    /// Whether this process already holds a batch (#771): a page reload
+    /// over it is not an interruption to recover from.
+    fn holds_batch(&self) -> bool {
+        self.is_rendering.load(Ordering::SeqCst) || !self.jobs.lock().unwrap().is_empty()
+    }
+
+    fn views(&self) -> Vec<RenderJobView> {
+        self.jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .map(RenderJobRuntime::to_view)
+            .collect()
+    }
+
+    /// What Start runs with, and how many rows it starts. A recovered batch
+    /// that couldn't rebuild its config says what a scan has to fill in.
+    fn start_config(&self) -> Result<(RenderConfig, usize), String> {
+        let starting = self
+            .jobs
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|j| j.status == "Queued")
+            .count();
+        if starting == 0 {
+            return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
+        }
+        match self.last_config.lock().unwrap().clone() {
+            Some(config) => Ok((config, starting)),
+            None => Err(self
+                .recovery_gap
+                .lock()
+                .unwrap()
+                .clone()
+                .unwrap_or_else(|| crate::messages::NOTHING_QUEUED_TO_RENDER.to_string())),
+        }
+    }
+
+    /// Puts an autosaved batch back as the job list (#770), with the config
+    /// Start needs rebuilt from the autosave and the current settings.
+    fn install_recovered(
+        &self,
+        session: RenderSessionData,
+        settings: &RecoverySettings,
+    ) -> Vec<RenderJobView> {
+        let jobs = recovered_jobs(&session);
+        match recovered_config(&session, settings) {
+            Ok(config) => {
+                *self.last_config.lock().unwrap() = Some(config);
+                *self.recovery_gap.lock().unwrap() = None;
+            }
+            Err(gap) => {
+                log_markdown(&format!("[render] recover_render_batch: {}", gap));
+                *self.last_config.lock().unwrap() = None;
+                *self.recovery_gap.lock().unwrap() = Some(gap);
+            }
+        }
+        *self.jobs.lock().unwrap() = jobs;
+        *self.render_session.lock().unwrap() = Some(session);
+        self.views()
     }
 
     fn handles(&self) -> SchedulerHandles {
@@ -917,6 +984,7 @@ pub async fn queue_render_batch(
     write_autosave(&state.render_session, &jobs, &config);
     *state.jobs.lock().unwrap() = jobs;
     *state.last_config.lock().unwrap() = Some(config.clone());
+    *state.recovery_gap.lock().unwrap() = None;
 
     emit_jobs_snapshot(&app, &state.jobs);
 
@@ -940,17 +1008,12 @@ pub async fn start_queued_render(
         log_markdown("[render] start_queued_render rejected: a batch is already in progress");
         return Err(crate::messages::RENDER_BATCH_ALREADY_IN_PROGRESS.to_string());
     }
-    let config = state.last_config.lock().unwrap().clone();
-    let starting = state
-        .jobs
-        .lock()
-        .unwrap()
-        .iter()
-        .filter(|j| j.status == "Queued")
-        .count();
-    let Some(config) = config.filter(|_| starting > 0) else {
-        state.is_rendering.store(false, Ordering::SeqCst);
-        return Err(crate::messages::NOTHING_QUEUED_TO_RENDER.to_string());
+    let (config, starting) = match state.start_config() {
+        Ok(found) => found,
+        Err(e) => {
+            state.is_rendering.store(false, Ordering::SeqCst);
+            return Err(e);
+        }
     };
 
     log_markdown(&format!(
@@ -1085,6 +1148,7 @@ pub async fn cancel_render_job(
 fn clear_batch_state_if_empty(state: &RenderManager) {
     if state.jobs.lock().unwrap().is_empty() {
         *state.last_config.lock().unwrap() = None;
+        *state.recovery_gap.lock().unwrap() = None;
         let _ = std::fs::remove_file(autosave_path());
         *state.render_session.lock().unwrap() = None;
     }
@@ -1404,8 +1468,10 @@ pub fn check_render_autosave(
     // file (written continuously as jobs finish, not just at batch end)
     // genuinely exists on disk even though nothing was actually interrupted
     // — the "recovery" prompt was firing on every reload of an active batch.
-    // Only treat it as a real interruption when nothing is actively running.
-    if state.is_rendering.load(Ordering::SeqCst) {
+    // Only treat it as a real interruption when nothing is actively running,
+    // and nothing is queued either (#771): a reload over a staged batch
+    // leaves the file there too, and Recover would replace the live queue.
+    if state.holds_batch() {
         return None;
     }
     let json = std::fs::read_to_string(autosave_path()).ok()?;
@@ -1442,18 +1508,94 @@ pub fn discard_render_autosave() -> Result<(), String> {
 /// codec/fps, not the full scanner output). Matches dev's own recovery flow exactly
 /// (`main.rs`'s render-recovery modal rebuilds the same kind of stub with
 /// blank stream/frames/date — dev never had richer data to recover either).
-/// Does not auto-start rendering; the user still clicks Start Render.
+/// Does not auto-start rendering; the user still clicks Start Render, which
+/// runs with the config rebuilt here (#770).
 #[tauri::command(async)]
 pub fn recover_render_batch(
     state: tauri::State<'_, RenderManager>,
+    settings: tauri::State<'_, crate::settings_manager::SettingsManager>,
 ) -> Result<Vec<RenderJobView>, String> {
-    let json = std::fs::read_to_string(autosave_path()).map_err(|e| e.to_string())?;
-    let session: RenderSessionData = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-    // Each job recovers with its own codec/fps (#85): the snapshot records
-    // them per job, and `set_render_job_codec` updates it when a job's Skip
-    // toggle changes. A snapshot from before that falls back to the batch's.
+    let path = autosave_path();
+    let json = std::fs::read_to_string(&path)
+        .map_err(|e| format!("Couldn't read {}: {}", path.display(), e))?;
+    let session: RenderSessionData = serde_json::from_str(&json)
+        .map_err(|e| format!("Couldn't parse {}: {}", path.display(), e))?;
+    let recovery_settings = RecoverySettings::from(&*settings.inner.lock().unwrap());
+    let views = state.install_recovered(session, &recovery_settings);
+    let _ = std::fs::remove_file(&path);
+    Ok(views)
+}
 
-    let jobs: Vec<RenderJobRuntime> = session
+/// The job list as this process holds it (#771). The page asks for it on
+/// load, since a webview reload (F5, HMR) keeps the queue here but the page
+/// otherwise only learns of it from the next `render_jobs_snapshot`.
+#[tauri::command(async)]
+pub fn get_render_jobs(state: tauri::State<'_, RenderManager>) -> Vec<RenderJobView> {
+    state.views()
+}
+
+/// The batch-wide settings a recovered batch takes from Settings, the same
+/// ones the Render tab puts in a scan's payload: the autosave doesn't hold
+/// them.
+struct RecoverySettings {
+    ffmpeg_path: Option<String>,
+    export_directories: Vec<String>,
+    max_concurrent_renders: i32,
+}
+
+impl From<&crate::settings_manager::AppSettings> for RecoverySettings {
+    fn from(s: &crate::settings_manager::AppSettings) -> Self {
+        Self {
+            ffmpeg_path: s.ffmpeg_path.clone(),
+            export_directories: s.render_export_dirs.clone(),
+            max_concurrent_renders: s.render_max_concurrent,
+        }
+    }
+}
+
+/// The `RenderConfig` Start needs for a recovered batch (#770): codec and
+/// fps from the autosave (each job also carries its own), FFmpeg, export
+/// pool and concurrency from current settings. A Queued job the autosave
+/// stored without its scanned take can't render, so that one needs a scan.
+fn recovered_config(
+    session: &RenderSessionData,
+    settings: &RecoverySettings,
+) -> Result<RenderConfig, String> {
+    if let Some(stub) = session
+        .jobs
+        .iter()
+        .find(|j| j.status == AutosaveJobStatus::Pending && j.clip.is_none())
+    {
+        return Err(crate::messages::recovered_batch_needs_scan(&format!(
+            "the frames and audio of {}",
+            stub.name
+        )));
+    }
+    Ok(RenderConfig {
+        ffmpeg_path: resolve_ffmpeg(settings.ffmpeg_path.as_ref())
+            .to_string_lossy()
+            .into_owned(),
+        source_folder: session.source_folder.clone(),
+        export_directories: settings
+            .export_directories
+            .iter()
+            .filter(|d| !d.trim().is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        fps: session.fps.max(1),
+        target_codec: RenderCodec::from_str_id(&session.target_codec),
+        custom_codec_args: session.target_custom_codec_args.clone(),
+        // The Render tab's own range for this field.
+        max_concurrent_renders: settings.max_concurrent_renders.clamp(1, 8) as usize,
+    })
+}
+
+/// The autosave's jobs as rows: Completed ones Finished, Pending ones Queued.
+/// Each job recovers with its own codec/fps (#85): the snapshot records them
+/// per job, and `set_render_job_codec` updates it when a job's Skip toggle
+/// changes. A snapshot from before that falls back to the batch's.
+fn recovered_jobs(session: &RenderSessionData) -> Vec<RenderJobRuntime> {
+    session
         .jobs
         .iter()
         .enumerate()
@@ -1512,15 +1654,7 @@ pub fn recover_render_batch(
                 current_attempt: None,
             }
         })
-        .collect();
-
-    let views: Vec<RenderJobView> = jobs.iter().map(RenderJobRuntime::to_view).collect();
-
-    *state.jobs.lock().unwrap() = jobs;
-    *state.render_session.lock().unwrap() = Some(session);
-    let _ = std::fs::remove_file(autosave_path());
-
-    Ok(views)
+        .collect()
 }
 
 #[cfg(test)]
@@ -1575,5 +1709,124 @@ mod tests {
         ];
         assert_eq!(last_finished_output(&history, "all"), None);
         assert_eq!(last_finished_output(&[], "all"), None);
+    }
+
+    fn clip(take_folder: &str) -> ClipData {
+        ClipData {
+            clip_name: None,
+            take_folder: take_folder.to_string(),
+            clip_type: "single".to_string(),
+            img_folder: "all".to_string(),
+            wav_file: Some("sound.wav".to_string()),
+            base_name: "take".to_string(),
+            frame_count: 300,
+            width: 1920,
+            height: 1080,
+            date: String::new(),
+            video_file: None,
+            alpha_folder: None,
+        }
+    }
+
+    fn autosave_job(name: &str, status: AutosaveJobStatus, with_clip: bool) -> AutosaveJob {
+        let take_folder = format!("Z:/no-such-takes/{}", name);
+        AutosaveJob {
+            output_path: String::new(),
+            status,
+            name: name.to_string(),
+            codec: Some("h264".to_string()),
+            custom_codec_args: Some(String::new()),
+            fps: Some(60),
+            clip: with_clip.then(|| clip(&take_folder)),
+            take_folder,
+        }
+    }
+
+    fn session(jobs: Vec<AutosaveJob>) -> RenderSessionData {
+        RenderSessionData {
+            source_folder: "Z:/no-such-takes".to_string(),
+            fps: 300,
+            target_codec: "prores".to_string(),
+            target_custom_codec_args: String::new(),
+            jobs,
+        }
+    }
+
+    fn settings() -> RecoverySettings {
+        RecoverySettings {
+            ffmpeg_path: None,
+            export_directories: vec!["E:/exports".to_string(), "  ".to_string()],
+            max_concurrent_renders: 3,
+        }
+    }
+
+    #[test]
+    fn a_recovered_batch_starts_with_a_config_rebuilt_from_autosave_and_settings() {
+        let manager = RenderManager::new();
+        let views = manager.install_recovered(
+            session(vec![
+                autosave_job("a", AutosaveJobStatus::Pending, true),
+                autosave_job("b", AutosaveJobStatus::Completed, true),
+            ]),
+            &settings(),
+        );
+        assert_eq!(views.len(), 2);
+        let (config, starting) = manager.start_config().expect("a recovered batch starts");
+        assert_eq!(starting, 1);
+        assert_eq!(config.source_folder, "Z:/no-such-takes");
+        assert_eq!(config.fps, 300);
+        assert_eq!(config.target_codec, RenderCodec::from_str_id("prores"));
+        assert_eq!(config.export_directories, vec![PathBuf::from("E:/exports")]);
+        assert_eq!(config.max_concurrent_renders, 3);
+        assert!(!config.ffmpeg_path.is_empty());
+        // Each job keeps its own settings, not the batch's.
+        assert_eq!(views[0].codec_id, "h264");
+        assert!(views[0].settings_summary.ends_with("@ 60fps"));
+    }
+
+    #[test]
+    fn reset_to_queued_on_a_recovered_finished_row_can_start() {
+        let manager = RenderManager::new();
+        manager.install_recovered(
+            session(vec![autosave_job("b", AutosaveJobStatus::Completed, true)]),
+            &settings(),
+        );
+        assert_eq!(
+            manager.start_config().unwrap_err(),
+            crate::messages::NOTHING_QUEUED_TO_RENDER
+        );
+        for job in manager.jobs.lock().unwrap().iter_mut() {
+            requeue(job);
+        }
+        assert!(manager.start_config().is_ok());
+    }
+
+    #[test]
+    fn a_queued_job_saved_without_its_take_asks_for_a_scan() {
+        let manager = RenderManager::new();
+        manager.install_recovered(
+            session(vec![autosave_job("old", AutosaveJobStatus::Pending, false)]),
+            &settings(),
+        );
+        let err = manager.start_config().unwrap_err();
+        assert!(
+            err.starts_with("recovered batch: scan again to set "),
+            "{}",
+            err
+        );
+        assert!(err.contains("old"), "{}", err);
+    }
+
+    #[test]
+    fn the_autosave_prompt_stays_away_while_the_process_holds_a_batch() {
+        let manager = RenderManager::new();
+        assert!(!manager.holds_batch());
+        assert!(manager.views().is_empty());
+        manager.install_recovered(
+            session(vec![autosave_job("a", AutosaveJobStatus::Pending, true)]),
+            &settings(),
+        );
+        assert!(manager.holds_batch());
+        assert_eq!(manager.views().len(), 1);
     }
 }
