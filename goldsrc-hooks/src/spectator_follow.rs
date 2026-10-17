@@ -98,9 +98,9 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(false);
 /// Whether a failure to apply has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
-/// Review highlights holds the lock while it plays an HLTV highlight (#822),
-/// so a death before the highlight ends can't move the camera off its
-/// player; the cvar itself is left as the user set it.
+/// Review highlights holds the lock for the whole review (#822), so a death
+/// before an HLTV highlight ends can't move the camera off its player; the
+/// cvar itself is left as the user set it.
 static REVIEW_HOLD: AtomicBool = AtomicBool::new(false);
 
 /// Holds the lock on (or lets the cvar decide again) for Review highlights.
