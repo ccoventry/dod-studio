@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -122,6 +122,12 @@ describe('What a review covers (#661)', () => {
     expect(times(REVIEW_COVERS.KEEP)).toEqual([10]);
     expect(times(REVIEW_COVERS.MAYBE)).toEqual([30]);
     expect(times(REVIEW_COVERS.SKIP)).toEqual([40]);
+  });
+
+  it('ticked demos win; with none ticked, the shown demos are reviewed', () => {
+    expect(reviewDemoPaths(['b.dem'], ['a.dem', 'b.dem'])).toEqual(['b.dem']);
+    expect(reviewDemoPaths([], ['a.dem', 'b.dem'])).toEqual(['a.dem', 'b.dem']);
+    expect(reviewDemoPaths(undefined, undefined)).toEqual([]);
   });
 
   it('coveredByReview agrees with the queue', () => {

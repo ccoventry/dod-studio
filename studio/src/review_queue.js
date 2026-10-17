@@ -35,6 +35,12 @@ const MARK_FOR_COVERS = {
   [REVIEW_COVERS.SKIP]: CURATION.SKIP,
 };
 
+/** The demos a review takes: the ticked ones, or with none ticked, every
+ *  demo the Master Demo Queue shows under its search and filters. */
+export function reviewDemoPaths(checkedPaths, shownPaths) {
+  return checkedPaths?.length ? checkedPaths : shownPaths || [];
+}
+
 /** True when a review covering `covers` includes this highlight. */
 export function coveredByReview(streak, covers = REVIEW_COVERS.ALL) {
   if (covers === REVIEW_COVERS.UNMARKED) return !streak.curation;

@@ -2137,7 +2137,7 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
     // #661: which Review marks a review plays.
     COVERS_TITLE: 'Which highlights the review plays, by their Review mark. All starts at the first one with no mark and passes over Keep, Maybe and Skip rows; pick Maybe to look at those again.',
     COVERS_ALL: 'All',
@@ -2145,16 +2145,16 @@ export const STRINGS = {
     COVERS_KEEP: 'Keep',
     COVERS_MAYBE: 'Maybe',
     COVERS_SKIP: 'Skip',
-    nothingCovered: (covers) => {
+    nothingCovered: (covers, ticked) => {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
-      return `The ticked demos have no highlights ${which}.`;
+      return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
     },
     TICK_YES_LABEL: 'Tick Yes for capture',
     TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
     FAST_FORWARD_UNIT: 's',
     FAST_FORWARD_TITLE: 'When two kills in a highlight are further apart than this, the stretch between them plays at 4x: from 2 s after one kill to 4 s before the next. You still see everything, just quicker. Takes effect when a review starts.',
-    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     startedToast: (count, launched, skipped) =>
