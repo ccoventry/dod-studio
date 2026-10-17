@@ -572,6 +572,7 @@ export function renderDetailView(demo, selectedDemoIdx) {
         <select class="streak-curation-select" style="font-size: 0.85em;">
           <option value="" ${!streak.curation ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_UNREVIEWED}</option>
           <option value="${CURATION.KEEP}" ${streak.curation === CURATION.KEEP ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_KEEP}</option>
+          <option value="${CURATION.MAYBE}" ${streak.curation === CURATION.MAYBE ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_MAYBE}</option>
           <option value="${CURATION.SKIP}" ${skipped ? 'selected' : ''}>${STRINGS.HIGHLIGHTS.CURATION_SKIP}</option>
         </select>
       </td>

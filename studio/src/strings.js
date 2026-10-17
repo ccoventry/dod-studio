@@ -141,7 +141,7 @@ export const STRINGS = {
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
     REASON_CLIP_NAME: 'a typed clip name',
-    REASON_REVIEW: 'a Keep/Skip review mark',
+    REASON_REVIEW: 'a Keep/Maybe/Skip review mark',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
@@ -186,9 +186,10 @@ export const STRINGS = {
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
-    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, or Skip. Skip unticks the row and locks it out of every capture batch.',
+    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
     CURATION_UNREVIEWED: '–',
     CURATION_KEEP: 'Keep',
+    CURATION_MAYBE: 'Maybe',
     CURATION_SKIP: 'Skip',
     SKIPPED_CB_TITLE: 'Marked Skip in the Review column, so it can\'t be captured. Set Review back to use it.',
     COL_STATUS: 'Status',
@@ -2136,9 +2137,20 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
+    // #661: which Review marks a review plays.
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark. All starts at the first one with no mark and passes over Keep, Maybe and Skip rows; pick Maybe to look at those again.',
+    COVERS_ALL: 'All',
+    COVERS_UNMARKED: 'Unmarked',
+    COVERS_KEEP: 'Keep',
+    COVERS_MAYBE: 'Maybe',
+    COVERS_SKIP: 'Skip',
+    nothingCovered: (covers) => {
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      return `The ticked demos have no highlights ${which}.`;
+    },
     TICK_YES_LABEL: 'Tick Yes for capture',
-    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
     FAST_FORWARD_UNIT: 's',
     FAST_FORWARD_TITLE: 'When two kills in a highlight are further apart than this, the stretch between them plays at 4x: from 2 s after one kill to 4 s before the next. You still see everything, just quicker. Takes effect when a review starts.',

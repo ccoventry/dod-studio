@@ -210,8 +210,8 @@ normal speed, from 4 s before its first kill to 2 s after its last, pauses,
 and opens the window's Review tab. When the queue's header asks for it
 (`gap=` and `speed=`, #665), a stretch between two kills further apart than
 `gap` seconds plays at `speed`. `start "<queue file>"` begins (Studio
-sends it over the game's pipe); `yes` and `no` answer with the Review tab's
-kill range and note and move on; `replay`, `next` (skip without answering),
+sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
+`no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
 answer from the console, for key binds. Bare prints where the review is.
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events

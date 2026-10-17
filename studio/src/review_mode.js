@@ -1,12 +1,13 @@
 // review_mode.js
 // Review highlights (#623): the Master Demo Queue's ticked demos go to the
-// game, which plays every highlight in turn; each Yes/No the user gives there
+// game, which plays every highlight in turn (or only those with the Review
+// mark the "Review" box picks, #661); each Yes/Maybe/No the user gives there
 // comes back over the game's events pipe and lands on that highlight's row
 // (review_queue.js says how).
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, REVIEW_COVERS } from './review_queue.js';
 import { closeGameWithOtherSettings } from './running_game_guard.js';
 import { showToast } from './toast.js';
 import { STRINGS } from './strings.js';
@@ -42,9 +43,14 @@ export function initReviewMode({ getDemos, getCheckedPaths, onChanged }) {
 
   btn.addEventListener('click', async () => {
     const minKills = parseInt(document.querySelector('#input-min-kills')?.value || '1', 10) || 1;
-    const { highlights, skipped } = buildReviewQueue(getDemos(), getCheckedPaths(), minKills);
+    const covers = document.querySelector('#review-covers-select')?.value || REVIEW_COVERS.ALL;
+    const checkedPaths = getCheckedPaths();
+    const { highlights, skipped } = buildReviewQueue(getDemos(), checkedPaths, minKills, covers);
     if (highlights.length === 0) {
-      showToast(skipped > 0 ? STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS : STRINGS.REVIEW.NOTHING_TO_REVIEW, 'info');
+      let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
+      if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;
+      else if (checkedPaths.length > 0 && covers !== REVIEW_COVERS.ALL) why = STRINGS.REVIEW.nothingCovered(covers);
+      showToast(why, 'info');
       return;
     }
     btn.disabled = true;
