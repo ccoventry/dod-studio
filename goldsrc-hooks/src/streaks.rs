@@ -313,7 +313,14 @@ fn find(path: &Path, generation: u64) -> Result<(Found, &'static str), String> {
                     "DoD Studio read it, but its result is not in the cache".to_string()
                 });
         }
-        Some(Err(why)) => return Err(format!("DoD Studio could not read it: {why}")),
+        // An older Studio sends the parse error with its byte dump; the
+        // Highlights tab has one line for it.
+        Some(Err(why)) => {
+            return Err(format!(
+                "DoD Studio could not read it: {}",
+                analysis::integrity::parse_error_reason(&why)
+            ));
+        }
         None => {}
     }
     let size = std::fs::metadata(path)
