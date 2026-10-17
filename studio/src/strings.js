@@ -2155,6 +2155,9 @@ export const STRINGS = {
     HLTV_MISSING: 'Players missing their POV for this half',
     HLTV_RECORDERS: 'Players with a POV demo in the queue',
     HLTV_ALL: 'Everyone',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
     // The HLTV box left out every highlight there was (#822).
     hltvNoneChosen: (choice, count) => {
       const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;

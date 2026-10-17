@@ -147,6 +147,11 @@
                   <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
                   <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
                 </label>
+                <!-- The order an HLTV demo's players' highlights play in. -->
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
+                  <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
+                </select>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
