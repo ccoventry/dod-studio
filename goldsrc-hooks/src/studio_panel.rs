@@ -821,6 +821,22 @@ fn folder_line_chars(wide: i32) -> usize {
         .max(20)
 }
 
+/// The folder the Demos tab's list shows: `dod/` (`""`) while folders are
+/// off, when the game lists only `dod/`'s demos whatever folder Go to or Up
+/// last went to.
+fn listed_folder(folders: bool, current: String) -> String {
+    if folders { current } else { String::new() }
+}
+
+/// Whether the Demos tab's Back, Forward, Up and Go to can be used, in that
+/// order, given whether each of the first three has somewhere to go. With
+/// folders off none of them can: the list is `dod/`'s demos, wherever they
+/// would go.
+fn nav_enabled(folders: bool, can_go: [bool; 3]) -> [bool; 4] {
+    let [back, forward, up] = can_go;
+    [back, forward, up, true].map(|on| folders && on)
+}
+
 /// `path` (folders, each ending in `/`) cut to at most about `max` characters
 /// by dropping whole folders from the left behind `.../`. The last folder is
 /// always kept, however long.
@@ -1929,17 +1945,17 @@ mod hook {
             }
             // The hint says whether folders are on, not just the command.
             let new_page = HINTED_PAGE.swap(page as usize, Ordering::AcqRel) != page as usize;
-            // The line above the list says which folder the list is in, and
-            // is empty while folders are off.
+            // The line above the list says which folder the list is in:
+            // `dod/` while folders are off, the game's own listing.
             // The line stretches with the tab, so how much path fits does too.
             let line = vgui.child_named(page, FOLDER_LINE);
-            let line_text = match (folders & 1, line) {
-                (1, Some(line)) => folder_line(
+            let line_text = match line {
+                Some(line) => folder_line(
                     &dod_dir(),
-                    &crate::demo_list_folders::current_folder(),
+                    &listed_folder(folders & 1 == 1, crate::demo_list_folders::current_folder()),
                     folder_line_chars(vgui.rect(line).2),
                 ),
-                _ => String::new(),
+                None => String::new(),
             };
             let mut headed = HEADED.lock().unwrap_or_else(|e| e.into_inner());
             if *headed != (page as usize, line_text.clone()) {
@@ -1967,7 +1983,10 @@ mod hook {
             // The Go to dropdown: a pick goes to that place, and the list
             // fills again, which puts the heading back (#779).
             let picked = box_text(vgui, page, DEMO_PLACE);
-            if !picked.is_empty() && picked.as_bytes() != PLACE_HEADING.to_bytes() {
+            if folders & 1 == 1
+                && !picked.is_empty()
+                && picked.as_bytes() != PLACE_HEADING.to_bytes()
+            {
                 let folder = PLACES
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -1980,7 +1999,7 @@ mod hook {
                 refill_demo_list();
             }
             widen_place_menu(vgui, page);
-            show_nav_enabled(vgui, page, new_page);
+            show_nav_enabled(vgui, page, folders & 1 == 1, new_page);
             let filters = DemoFilters {
                 search: box_text(vgui, page, DEMO_FILTER),
                 map: box_text(vgui, page, MAP_FILTER),
@@ -2368,16 +2387,16 @@ mod hook {
         *PLACES.lock().unwrap_or_else(|e| e.into_inner()) = places;
     }
 
-    /// Back, Forward and Up as last set, a bit each in that order; `0xff`
-    /// for not yet. Set again only on a change or a new page.
+    /// Back, Forward, Up and Go to as last set, a bit each in that order;
+    /// `0xff` for not yet. Set again only on a change or a new page.
     static NAV_ENABLED: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0xff);
 
     /// Greys out the Demos tab's Back, Forward and Up where each has nowhere
-    /// to go: Back at the oldest folder remembered, Forward at the newest, Up
-    /// on This PC.
-    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, new_page: bool) {
+    /// to go ([`nav_enabled`]), and all of them and Go to while folders are
+    /// off.
+    unsafe fn show_nav_enabled(vgui: &Vgui, page: Vpanel, folders: bool, new_page: bool) {
         use crate::demo_list_folders::{can_go_back, can_go_forward, can_go_up};
-        let can = [can_go_back(), can_go_forward(), can_go_up()];
+        let can = nav_enabled(folders, [can_go_back(), can_go_forward(), can_go_up()]);
         let want = can
             .iter()
             .enumerate()
@@ -2385,7 +2404,8 @@ mod hook {
         if !new_page && NAV_ENABLED.load(Ordering::Acquire) == want {
             return;
         }
-        for (name, on) in DEMO_NAV_BUTTONS.iter().zip(can) {
+        let names = DEMO_NAV_BUTTONS.iter().copied().chain([DEMO_PLACE]);
+        for (name, on) in names.zip(can) {
             unsafe {
                 let Some(vp) = vgui.child_named(page, name) else {
                     continue;
@@ -4569,6 +4589,17 @@ mod tests {
             folder_line(dod, "temp demos/", 20),
             "Currently in .../dod/temp demos/"
         );
+    }
+
+    #[test]
+    fn with_folders_off_the_navigation_greys_out_and_the_line_says_dod() {
+        assert_eq!(
+            nav_enabled(true, [true, false, true]),
+            [true, false, true, true]
+        );
+        assert_eq!(nav_enabled(false, [true, true, true]), [false; 4]);
+        assert_eq!(listed_folder(true, "D:/demos/".into()), "D:/demos/");
+        assert_eq!(listed_folder(false, "D:/demos/".into()), "");
     }
 
     #[test]
