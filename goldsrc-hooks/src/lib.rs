@@ -216,6 +216,7 @@ mod hltv_messages;
 mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
+mod list_panel;
 mod map_text;
 mod missing_shots;
 mod msglog;
