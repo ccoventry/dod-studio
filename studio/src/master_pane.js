@@ -114,6 +114,18 @@ listen('demo_players', (event) => {
   if (recorder) renderMasterList(currentDemos, null, currentOnSelectDemo);
 }).catch((err) => console.error('Failed to register demo_players listener:', err));
 
+/** Every player who recorded a demo in the queue, one entry per id with
+ *  every name it was seen with (player_filter.js's groupPlayers). */
+export function getQueueRecorders() {
+  return groupPlayers(currentDemos.map(recorderOf).filter(Boolean));
+}
+
+/** Who recorded `demo` (`{ id, name }`), from the scan or a lookup; null for
+ *  an HLTV demo or one not looked up yet. */
+export function queueRecorderOf(demo) {
+  return recorderOf(demo);
+}
+
 /** Refills the player filter from the queue's recorders, keeping the pick
  *  while that player still has a demo in the queue. */
 function renderPlayerFilterOptions() {

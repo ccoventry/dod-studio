@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths } from './review_queue.js';
+import { buildReviewQueue, applyReviewAnswer, fastForwardGap, MIN_FAST_FORWARD_GAP, REVIEW_COVERS, coveredByReview, reviewDemoPaths, hltvPlayersFor, HLTV_PLAYERS } from './review_queue.js';
 import { streakUid } from './take_index.js';
 
 const streak = (overrides = {}) => ({
@@ -13,6 +13,74 @@ const streak = (overrides = {}) => ({
 });
 
 const demo = (path, streaks) => ({ path, local_player_index: 1, streaks });
+
+describe('HLTV demos in a review (#822)', () => {
+  const life = (player, index, at, extra = {}) =>
+    streak({ target_player: player, player_index: index, kills: [[at, at, 'K98']], viewdemo_times: [at], kill_count: 1, ...extra });
+  const hltv = {
+    path: 'h.dem', is_pov: false, local_player_index: null,
+    streaks: [
+      life('m00cat', 4, 10),
+      life('DICE | stealth', 6, 20, { steam_id: '76561197960265729', spectated: true }),
+      life('gskiLL greetz', 9, 30),
+    ],
+  };
+  const pov = demo('p.dem', [streak()]);
+  const recorders = [
+    { id: '76561197960265729', names: ['stealth'], label: 'stealth' },
+    { id: '76561197960265730', names: ['m00cat'], label: 'm00cat' },
+  ];
+  const queue = (players) => buildReviewQueue([hltv, pov], ['h.dem', 'p.dem'], 1, REVIEW_COVERS.ALL, players).highlights;
+
+  it('plays only the chosen players, matched by SteamID or else by name, and every POV highlight', () => {
+    const rows = queue(hltvPlayersFor(HLTV_PLAYERS.RECORDERS, recorders));
+    expect(rows.map((h) => [h.demo, h.player])).toEqual([['h.dem', 'm00cat'], ['h.dem', 'DICE | stealth'], ['p.dem', '']]);
+  });
+
+  it('sends the camera player numbered from 1, and none for a POV demo', () => {
+    const rows = queue(null);
+    expect(rows.map((h) => h.spectate)).toEqual([5, 7, 10, null]);
+  });
+
+  it('the box: everyone, every recorder, or one', () => {
+    expect(hltvPlayersFor(HLTV_PLAYERS.ALL, recorders)).toBeNull();
+    expect(hltvPlayersFor(HLTV_PLAYERS.RECORDERS, recorders)).toEqual(recorders);
+    expect(queue(hltvPlayersFor('76561197960265730', recorders)).map((h) => h.player)).toEqual(['m00cat', '']);
+  });
+
+  describe('the default: players missing their POV for this half', () => {
+    const half = (match, h) => ({ match, half: h });
+    const withInfo = (d, info) => Object.assign({ ...d }, { match_info: info });
+    // stealth recorded this half; m00cat recorded only another one.
+    const here = withInfo(hltv, half(2, 1));
+    const stealthHere = withInfo(demo('s1.dem', [streak()]), half(2, 1));
+    const m00catElsewhere = withInfo(demo('m2.dem', [streak()]), half(3, 2));
+    const demos = [here, stealthHere, m00catElsewhere];
+    const recorderOf = (d) => ({ 's1.dem': { id: '76561197960265729' }, 'm2.dem': { id: '76561197960265730' } })[d.path] || null;
+    const players = (choice) =>
+      buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL, hltvPlayersFor(choice, recorders, { demos, recorderOf }))
+        .highlights.map((h) => h.player);
+
+    it('is what an empty box means, and leaves out whoever recorded this half', () => {
+      expect(players(HLTV_PLAYERS.MISSING)).toEqual(['m00cat']);
+      expect(players('')).toEqual(['m00cat']);
+      expect(players(HLTV_PLAYERS.RECORDERS)).toEqual(['m00cat', 'DICE | stealth']);
+    });
+
+    it('counts what the box left out, so an empty review can say why', () => {
+      const result = buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL,
+        hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos, recorderOf }));
+      expect(result.notChosen).toBe(2);
+    });
+
+    it('an HLTV demo whose half is not known reviews every recorder', () => {
+      const unplaced = [withInfo(hltv, null), stealthHere, m00catElsewhere];
+      const rows = buildReviewQueue(unplaced, ['h.dem'], 1, REVIEW_COVERS.ALL,
+        hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos: unplaced, recorderOf })).highlights;
+      expect(rows.map((h) => h.player)).toEqual(['m00cat', 'DICE | stealth']);
+    });
+  });
+});
 
 describe('Review highlights queue (#623)', () => {
   it('takes only ticked demos, in queue order, each demo by time', () => {

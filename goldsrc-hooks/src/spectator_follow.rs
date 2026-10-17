@@ -98,6 +98,15 @@ static SCANNED_BASE: AtomicUsize = AtomicUsize::new(0);
 static LOCKED: AtomicBool = AtomicBool::new(false);
 /// Whether a failure to apply has been reported, so it is said once.
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
+/// Review highlights holds the lock for the whole review (#822), so a death
+/// before an HLTV highlight ends can't move the camera off its player; the
+/// cvar itself is left as the user set it.
+static REVIEW_HOLD: AtomicBool = AtomicBool::new(false);
+
+/// Holds the lock on (or lets the cvar decide again) for Review highlights.
+pub fn hold_for_review(on: bool) {
+    REVIEW_HOLD.store(on, Ordering::Relaxed);
+}
 
 /// Called once the cvar is registered.
 pub fn set_cvar(cvar: *mut CvarSPartial) {
@@ -147,13 +156,14 @@ pub fn set_locked(locked: bool) -> Result<bool, String> {
     Ok(true)
 }
 
-/// Follows the cvar. Called every frame from `commands::poll`.
+/// Follows the cvar, or a review's hold. Called every frame from
+/// `commands::poll`.
 pub fn poll() {
     let cvar = CVAR.load(Ordering::Acquire);
     if cvar.is_null() {
         return;
     }
-    let wanted = unsafe { (*cvar).value } != 0.0;
+    let wanted = unsafe { (*cvar).value } != 0.0 || REVIEW_HOLD.load(Ordering::Relaxed);
     match set_locked(wanted) {
         Ok(false) => COMPLAINED.store(false, Ordering::Relaxed),
         Ok(true) => {
