@@ -389,6 +389,10 @@ unsafe fn fill(
             // through a slot nothing here has verified.
             add_item(list, row, 0, 0, 0);
         }
+        // A list scrolled down for the last demo showed nothing for one with
+        // fewer highlights until the next scroll (#796). Nothing is sorted
+        // unless a heading was clicked: the rows are in highlight order.
+        crate::list_panel::after_refill(list, build.list_sort_column, None);
         if !streaks.is_empty() {
             // What the list holds now, counted back through it.
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
