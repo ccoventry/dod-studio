@@ -918,6 +918,25 @@ export async function writeTextFile(path, contents) {
     });
 }
 
+/** Checks the takes of capture batches that ran while Studio was closed
+ *  (#545). Resolves to `{ batches, waiting_for_game }`. */
+export async function catchUpUnwatchedBatches() {
+  return invoke("catch_up_unwatched_batches")
+    .catch((err) => {
+      console.error("IPC Execution Error (catch_up_unwatched_batches):", err);
+      throw err;
+    });
+}
+
+/** A project file's text, for a change made without opening it (#545). */
+export async function readProjectFile(path) {
+  return invoke("load_project_session", { path })
+    .catch((err) => {
+      console.error("IPC Execution Error (load_project_session, catch-up):", err);
+      throw err;
+    });
+}
+
 export async function scanDemoFolders(root) {
   return invoke("scan_demo_folders", { root: root ?? null })
     .catch((err) => {

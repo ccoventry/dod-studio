@@ -185,6 +185,13 @@ pub struct CapturePayload {
     pub keep_game_behind: bool,
     /// Highlight streaks to capture.
     pub streaks: Vec<SerializedStreak>,
+    /// Each streak's durable id (`take_index.js`'s `streakUid`), index-aligned
+    /// with `streaks`, recorded in the manifest (#545).
+    #[serde(default)]
+    pub streak_uids: Vec<String>,
+    /// The project file the batch was started from, when it had one.
+    #[serde(default)]
+    pub project_path: Option<String>,
     /// Pre-roll added before each streak (seconds). Converted → ticks at 100 Hz.
     pub pre_roll_seconds: f32,
     /// Post-roll padding after each streak (seconds).
@@ -736,6 +743,18 @@ pub struct CaptureManifest {
     /// The rate an AGR batch recorded at; unused for the movie modes.
     #[serde(default)]
     pub agr_fps: i32,
+    /// Each payload highlight's durable id (`take_index.js`'s `streakUid`),
+    /// index-aligned with the payload's `streaks`, so a batch Studio stopped
+    /// watching can still be mapped back to its highlights after a restart
+    /// (#545, `batch_catch_up`). Empty in manifests from before it existed.
+    #[serde(default)]
+    pub streak_uids: Vec<String>,
+    /// Each payload highlight's source demo, index-aligned the same way.
+    #[serde(default)]
+    pub streak_sources: Vec<String>,
+    /// The project file the batch was started from, when it had one.
+    #[serde(default)]
+    pub project_path: Option<String>,
 }
 
 /// One block's post-batch verdict, checked against what's actually on disk.
@@ -786,6 +805,15 @@ fn take_folder_has_content(path: &Path) -> bool {
 /// silently marking nothing; "renderable" reuses Render Studio's own admission
 /// predicate so the two views can't disagree without saying so.
 fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
+    verify_capture_takes_settling(manifest, Some(std::time::Duration::from_millis(1500)))
+}
+
+/// [`verify_capture_takes`], with the re-check of misses after `settle`, or
+/// none: a batch caught up on after a restart (#545) ended long ago.
+pub(crate) fn verify_capture_takes_settling(
+    manifest: &CaptureManifest,
+    settle: Option<std::time::Duration>,
+) -> Vec<VerifiedBlock> {
     let mut verified: Vec<VerifiedBlock> = manifest
         .blocks
         .iter()
@@ -803,8 +831,10 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
 
     // HLAE is force-killed the moment the exit trigger appears, so a take can
     // still be mid-flush when we first look. Re-check only the misses once.
-    if verified.iter().any(|v| !v.captured) {
-        std::thread::sleep(std::time::Duration::from_millis(1500));
+    if let Some(settle) = settle
+        && verified.iter().any(|v| !v.captured)
+    {
+        std::thread::sleep(settle);
         for (v, block) in verified.iter_mut().zip(manifest.blocks.iter()) {
             if !v.captured {
                 v.captured = take_folder_has_content(&block.take_folder);
@@ -836,7 +866,7 @@ fn verify_capture_takes(manifest: &CaptureManifest) -> Vec<VerifiedBlock> {
 ///
 /// Best-effort throughout: a capture that succeeded must never be reported as
 /// failed because a metadata file could not be written.
-fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock]) {
+pub(crate) fn record_capture_settings(manifest: &CaptureManifest, blocks: &[VerifiedBlock]) {
     if manifest.capture_fps <= 0 {
         return;
     }
@@ -1017,6 +1047,15 @@ pub async fn start_capture_batch_impl(
         *slot = Some(patcher_config.clone());
     }
 
+    // For the manifest (#545): which highlight each payload index is.
+    let streak_uids = payload.streak_uids.clone();
+    let streak_sources: Vec<String> = payload
+        .streaks
+        .iter()
+        .map(|s| s.source_demo.clone())
+        .collect();
+    let project_path = payload.project_path.clone().filter(|p| !p.is_empty());
+
     // ── Convert IPC streaks → native CaptureStreak ────────────────────────────
     let raw_streaks: Vec<CaptureStreak> = payload
         .streaks
@@ -1118,6 +1157,9 @@ pub async fn start_capture_batch_impl(
                 capture_fps: patcher_config.capture_fps,
                 capture_mode: patcher_config.capture_mode.to_str_id().to_string(),
                 agr_fps: patcher_config.effective_agr_fps(),
+                streak_uids,
+                streak_sources,
+                project_path,
             };
             // On disk as well (#19), so a batch that goes wrong leaves a record
             // behind after the process is gone. Rewritten with outcomes at the end.
@@ -3535,6 +3577,8 @@ mod tests {
             hook_runs_batch: false,
             keep_game_behind: true,
             streaks: Vec::new(),
+            streak_uids: Vec::new(),
+            project_path: None,
             pre_roll_seconds: 2.0,
             post_roll_seconds: 0.6,
             capture_directories: vec!["D:/capture".to_string()],

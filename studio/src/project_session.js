@@ -290,5 +290,12 @@ export function createProjectSession({
     });
   }
 
-  return { markProjectDirty, saveProjectSession, needsSavePrompt, requestUnsavedChangesConfirmation };
+  return {
+    markProjectDirty,
+    saveProjectSession,
+    needsSavePrompt,
+    requestUnsavedChangesConfirmation,
+    // The open project file, or null for an unsaved queue.
+    getSessionPath: () => currentSessionPath,
+  };
 }
