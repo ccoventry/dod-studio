@@ -432,6 +432,5 @@ Each of these is true on `dev` today. Items with an issue number are tracked; th
 
 **Naming and docs drift**
 
-- The installer and first window title still say "DoD Tools Studio", with identifier `com.dodtools.studio` (#258).
 - `goldsrc-hooks/README.md` still describes the gunshots fix as "full volume with no distance attenuation"; the code only lowers attenuation.
 - `goldsrc-hooks/src/engine.rs` still says `client.dll` reloads between demos; it does not.

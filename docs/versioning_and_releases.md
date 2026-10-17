@@ -73,6 +73,12 @@ One plain-language line for players. The optional prefix (`New:`, `Fixed:`, `Cha
 
 Not automatic on either channel — deliberately a human decision. Edit `studio/src-tauri/Cargo.toml`'s `version` field (e.g. `0.1.0` → `0.2.0`) as part of whatever PR is landing the milestone that justifies it, same as any other code change. The next push to `main` after that lands will have no existing `v0.2.*` tags yet, so `release_stable.yml`'s patch computation naturally starts that new line at `0.2.0`.
 
+## The app's Windows identity
+
+`tauri.conf.json` holds three values that are the installed app's identity, not just labels: `productName` (`DoD Studio`: the install folder `%LOCALAPPDATA%\DoD Studio`, the Apps entry and its uninstall registry key, the Start-menu shortcut), `identifier` (`com.dodstudio.app`: the WebView2 profile in `%LOCALAPPDATA%\com.dodstudio.app`, which holds the panes' `localStorage`, and the notification app id) and `mainBinaryName` (`dod-studio`, so the shipped exe is `dod-studio.exe` whatever the cargo package is called). A new `productName` makes the next installer install beside the old one instead of upgrading it; a new identifier starts an empty WebView2 profile; a new `mainBinaryName` orphans shortcuts that point at the old exe.
+
+They changed once, from `DoD Tools Studio` / `com.dodtools.studio` / `desktop-studio.exe` (#258). The NSIS hook `studio/src-tauri/windows/installer_hooks.nsh` handles that move: after installing, it copies the old profile's `Local Storage` into the new one and runs the old install's uninstaller silently. It is NSIS only: an MSI install of the old name has to be uninstalled by hand. Rename again only with a hook like it. The app's own data in `%APPDATA%\dod-studio` (`native::shared::paths::APPDATA_DIR_NAME`) does not depend on any of the three.
+
 A push to `main` also runs `.github/workflows/sync_wiki.yml`, which publishes `docs/wiki/` and the generated Commands page to the GitHub wiki (#493); that is separate from the releases.
 
 ## Open questions (not yet decided — your call)
