@@ -2147,8 +2147,9 @@ export const STRINGS = {
     COVERS_SKIP: 'Skip',
     // #822: whose highlights an HLTV demo's review plays.
     HLTV_LABEL: 'HLTV:',
-    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: the players who recorded a POV demo in the queue (your team, usually), everyone, or one player. The game puts the camera on that player in first person for each one.',
-    HLTV_RECORDERS: 'Players with a POV demo',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_MISSING: 'Players missing their POV for this half',
+    HLTV_RECORDERS: 'Players with a POV demo in the queue',
     HLTV_ALL: 'Everyone',
     nothingCovered: (covers, ticked) => {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';

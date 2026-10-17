@@ -4,7 +4,8 @@
 // mark the "Review" box picks, #661); each Yes/Maybe/No the user gives there
 // comes back over the game's events pipe and lands on that highlight's row
 // (review_queue.js says how). In an HLTV demo only the players the "HLTV"
-// box picks are played, with the camera on them (#822).
+// box picks are played, with the camera on them (#822); by default, the
+// players who didn't record that half themselves.
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
@@ -21,9 +22,11 @@ import { STRINGS } from './strings.js';
  *    reviewed when nothing is ticked
  *  - getRecorders(): every player who recorded a demo in the queue, for the
  *    HLTV box (master_pane.js's getQueueRecorders)
+ *  - recorderOf(demo): who recorded a demo, `{ id, name }` or null, to tell
+ *    which players an HLTV demo's half is missing
  *  - onChanged(): re-render and mark the project dirty after an answer
  */
-export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, onChanged }) {
+export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged }) {
   const btn = document.querySelector('#review-highlights-btn');
   if (!btn) return;
   let answers = 0;
@@ -49,10 +52,11 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
       option.textContent = label;
       hltvSelect.appendChild(option);
     };
+    add(HLTV_PLAYERS.MISSING, STRINGS.REVIEW.HLTV_MISSING);
     add(HLTV_PLAYERS.RECORDERS, STRINGS.REVIEW.HLTV_RECORDERS);
     add(HLTV_PLAYERS.ALL, STRINGS.REVIEW.HLTV_ALL);
     for (const p of recorders) add(p.id, p.label);
-    hltvSelect.value = [...hltvSelect.options].some((o) => o.value === keep) ? keep : HLTV_PLAYERS.RECORDERS;
+    hltvSelect.value = [...hltvSelect.options].some((o) => o.value === keep) ? keep : HLTV_PLAYERS.MISSING;
   };
   fillHltvSelect();
   hltvSelect?.addEventListener('mousedown', fillHltvSelect);
@@ -80,7 +84,7 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const covers = document.querySelector('#review-covers-select')?.value;
     const ticked = getCheckedPaths();
     const paths = reviewDemoPaths(ticked, getShownPaths());
-    const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || []);
+    const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf });
     const { highlights, skipped } = buildReviewQueue(getDemos(), paths, minKills, covers, hltvPlayers);
     if (highlights.length === 0) {
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;

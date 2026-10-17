@@ -44,8 +44,35 @@ describe('HLTV demos in a review (#822)', () => {
 
   it('the box: everyone, every recorder, or one', () => {
     expect(hltvPlayersFor(HLTV_PLAYERS.ALL, recorders)).toBeNull();
-    expect(hltvPlayersFor('', recorders)).toEqual(recorders);
+    expect(hltvPlayersFor(HLTV_PLAYERS.RECORDERS, recorders)).toEqual(recorders);
     expect(queue(hltvPlayersFor('76561197960265730', recorders)).map((h) => h.player)).toEqual(['m00cat', '']);
+  });
+
+  describe('the default: players missing their POV for this half', () => {
+    const half = (match, h) => ({ match, half: h });
+    const withInfo = (d, info) => Object.assign({ ...d }, { match_info: info });
+    // stealth recorded this half; m00cat recorded only another one.
+    const here = withInfo(hltv, half(2, 1));
+    const stealthHere = withInfo(demo('s1.dem', [streak()]), half(2, 1));
+    const m00catElsewhere = withInfo(demo('m2.dem', [streak()]), half(3, 2));
+    const demos = [here, stealthHere, m00catElsewhere];
+    const recorderOf = (d) => ({ 's1.dem': { id: '76561197960265729' }, 'm2.dem': { id: '76561197960265730' } })[d.path] || null;
+    const players = (choice) =>
+      buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL, hltvPlayersFor(choice, recorders, { demos, recorderOf }))
+        .highlights.map((h) => h.player);
+
+    it('is what an empty box means, and leaves out whoever recorded this half', () => {
+      expect(players(HLTV_PLAYERS.MISSING)).toEqual(['m00cat']);
+      expect(players('')).toEqual(['m00cat']);
+      expect(players(HLTV_PLAYERS.RECORDERS)).toEqual(['m00cat', 'DICE | stealth']);
+    });
+
+    it('an HLTV demo whose half is not known reviews every recorder', () => {
+      const unplaced = [withInfo(hltv, null), stealthHere, m00catElsewhere];
+      const rows = buildReviewQueue(unplaced, ['h.dem'], 1, REVIEW_COVERS.ALL,
+        hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos: unplaced, recorderOf })).highlights;
+      expect(rows.map((h) => h.player)).toEqual(['m00cat', 'DICE | stealth']);
+    });
   });
 });
 

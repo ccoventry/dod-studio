@@ -67,26 +67,53 @@ export function hltvPlayerChosen(streak, players) {
   return !!name && players.some((p) => (p.names || []).some((n) => n.trim().toLowerCase() === name));
 }
 
-/** The HLTV players box's two fixed choices; any other value is one
- *  recorder's id (#822). */
-export const HLTV_PLAYERS = { RECORDERS: 'recorders', ALL: 'all' };
+/** The HLTV players box's fixed choices; any other value is one recorder's
+ *  id (#822). */
+export const HLTV_PLAYERS = { MISSING: 'missing', RECORDERS: 'recorders', ALL: 'all' };
 
-/** The players an HLTV review covers for the box's `choice`: every recorder
- *  in the queue (the default), everyone (null), or the one picked. */
-export function hltvPlayersFor(choice, recorders) {
+/**
+ * The queue's recorders who have no POV demo of `hltvDemo`'s half in the
+ * queue: the players an HLTV demo stands in for. The half comes from the
+ * match grouping (`match_info`, queue_match_groups.js); an HLTV demo it
+ * hasn't placed can't say who recorded that half, so it gets every
+ * recorder rather than none.
+ */
+export function playersMissingThisHalf(hltvDemo, demos, recorders, recorderOf) {
+  const info = hltvDemo?.match_info;
+  if (!info || info.half === null || info.half === undefined) return recorders;
+  const recordedHere = new Set(
+    (demos || [])
+      .filter((d) => d !== hltvDemo && d.match_info?.match === info.match && d.match_info?.half === info.half)
+      .map((d) => recorderOf(d)?.id)
+      .filter(Boolean),
+  );
+  return recorders.filter((p) => !recordedHere.has(p.id));
+}
+
+/**
+ * The players an HLTV review covers for the box's `choice`: the recorders
+ * missing their POV for that half (the default; a function of the demo),
+ * every recorder in the queue, everyone (null), or the one picked.
+ * `queue`: `{ demos, recorderOf }`, for the default.
+ */
+export function hltvPlayersFor(choice, recorders, queue = {}) {
   if (choice === HLTV_PLAYERS.ALL) return null;
   const all = recorders || [];
-  if (!choice || choice === HLTV_PLAYERS.RECORDERS) return all;
+  if (!choice || choice === HLTV_PLAYERS.MISSING) {
+    return (demo) => playersMissingThisHalf(demo, queue.demos, all, queue.recorderOf || (() => null));
+  }
+  if (choice === HLTV_PLAYERS.RECORDERS) return all;
   return all.filter((p) => p.id === choice);
 }
 
 /**
  * The highlights to review, in queue order: each ticked demo's highlights
  * with at least `minKills` kills and a Review mark `covers` takes in, by
- * time; in an HLTV demo, only `hltvPlayers`' (#822, null = everyone's), each
- * with the player the game's camera goes on. A highlight with no
- * demo-player times (a project saved before they existed) can't be found in
- * the demo, so it is counted in `skipped` instead.
+ * time; in an HLTV demo, only `hltvPlayers`' (#822: a list, a function of
+ * the demo giving one, or null = everyone's), each with the player the
+ * game's camera goes on. A highlight with no demo-player times (a project
+ * saved before they existed) can't be found in the demo, so it is counted
+ * in `skipped` instead.
  */
 export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null) {
   const checked = new Set(checkedPaths);
@@ -94,10 +121,11 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
   let skipped = 0;
   for (const demo of demos || []) {
     if (!checked.has(demo.path)) continue;
+    const players = typeof hltvPlayers === 'function' ? hltvPlayers(demo) : hltvPlayers;
     const streaks = listedStreaks(demo)
       .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
       .filter((s) => coveredByReview(s, covers))
-      .filter((s) => !isHltvHighlight(demo, s) || hltvPlayerChosen(s, hltvPlayers));
+      .filter((s) => !isHltvHighlight(demo, s) || hltvPlayerChosen(s, players));
     const rows = [];
     for (const streak of streaks) {
       const times = streak.viewdemo_times || [];
