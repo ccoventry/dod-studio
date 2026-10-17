@@ -29,9 +29,9 @@ static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
 /// it changes.
 static SHOWN_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 static SHOWN_ROWS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-/// The Player box's text the list was last narrowed by; `None` after a
-/// refill.
-static FILTERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// The list the Player box was last set for, so it is set once per demo and
+/// then left to what is typed.
+static BOXED_FOR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
 /// The row keys Go reads: the bar time to seek to, and in an HLTV demo the
 /// player's number to put the camera on.
@@ -89,6 +89,7 @@ pub(super) unsafe fn build(
             .unwrap_or_else(|e| e.into_inner())
             .clear();
         SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner()).clear();
 
         let list = *((dialog as *const u8).add(build.frame_size) as *const *mut c_void);
         if list.is_null() {
@@ -153,7 +154,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 ),
                 None,
             );
-            fill(list, base, build, "none", &[], false);
+            fill(list, base, build, "none", &[], false, "");
             show_filters(vgui, page, None);
             return;
         };
@@ -179,25 +180,37 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     &format!("{generation}:loading"),
                     &[],
                     false,
+                    "",
                 );
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
                 let text = ready_hint(&found);
                 show(vgui, page, build, (&text, &text), None);
-                let refilled = fill(
+                let demo_key = format!("{generation}:ready");
+                {
+                    let mut boxed = BOXED_FOR.lock().unwrap_or_else(|e| e.into_inner());
+                    if *boxed != demo_key {
+                        fill_player_box(vgui, page, &found);
+                        *boxed = demo_key.clone();
+                    }
+                }
+                // A POV demo's box names its one player: every row shows.
+                let player = if found.hltv {
+                    box_text(vgui, page, PLAYER_BOX).trim().to_string()
+                } else {
+                    String::new()
+                };
+                fill(
                     list,
                     base,
                     build,
-                    &format!("{generation}:ready"),
+                    &format!("{demo_key}|{player}"),
                     &found.streaks,
                     found.hltv,
+                    &player,
                 );
-                if refilled {
-                    fill_player_box(vgui, page, &found);
-                }
                 show_filters(vgui, page, Some(found.hltv));
-                narrow(vgui, page, list, build, found.hltv);
             }
             Status::Failed(why) => {
                 let text = format!("Could not find the highlights: {why}");
@@ -209,6 +222,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     &format!("{generation}:failed"),
                     &[],
                     false,
+                    "",
                 );
                 show_filters(vgui, page, None);
             }
@@ -272,55 +286,6 @@ unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {
     }
 }
 
-/// In an HLTV demo, shows only the rows whose player matches the Player box
-/// (every word, case ignored), when the box changed or the list was
-/// refilled. A POV demo's box names its one player, so every row shows.
-unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, build: &Build, hltv: bool) {
-    unsafe {
-        let wanted = if hltv {
-            box_text(vgui, page, PLAYER_BOX).trim().to_string()
-        } else {
-            String::new()
-        };
-        let player = wanted.as_str();
-        let mut filtered = FILTERED.lock().unwrap_or_else(|e| e.into_inner());
-        if filtered.as_deref() == Some(wanted.as_str()) {
-            return;
-        }
-        let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
-        let next: ListItemIdFn = slot(list, LIST_SLOT_NEXT_ITEM);
-        let is_valid: ListIntFn = slot(list, LIST_SLOT_IS_VALID_ITEM_ID);
-        let get_item: ListItemFn = slot(list, LIST_SLOT_GET_ITEM);
-        let set_visible: ListSetVisibleFn = slot(list, LIST_SLOT_SET_ITEM_VISIBLE);
-        let mut id = first(list);
-        let mut guard = 0;
-        while is_valid(list, id) & 0xff != 0 && guard < 100_000 {
-            guard += 1;
-            let row = get_item(list, id);
-            if !row.is_null() {
-                let get_string: GetStringFn = slot(row, KEYVALUES_SLOT_GET_STRING);
-                let get = |key: &CStr| {
-                    let raw = get_string(row, key.as_ptr(), c"".as_ptr());
-                    if raw.is_null() {
-                        String::new()
-                    } else {
-                        text(raw)
-                    }
-                };
-                let shown = matches_filter(&get(COLUMNS[0].0), player);
-                set_visible(list, id, shown as u32);
-            }
-            id = next(list, id);
-        }
-        // A row shown again goes to the end of the list's visible rows, not
-        // back to its place, so typing a name and then deleting some of it
-        // left those rows out of order. Sort again (by Row # unless a heading
-        // was clicked), and start at the top of the shorter list (#796).
-        crate::list_panel::after_refill(list, build.list_sort_column, Some(0));
-        *filtered = Some(wanted);
-    }
-}
-
 /// Sets the hint line (when `key` changed) and the progress bar: shown with
 /// `percent`, hidden without.
 unsafe fn show(
@@ -354,7 +319,11 @@ unsafe fn show(
     }
 }
 
-/// Lists `streaks`, when `key` (which list it is) changed; whether it did.
+/// Lists the `streaks` whose player matches `player` (every word, case
+/// ignored; "" matches all), when `key` (which list, and which filter)
+/// changed. Each keeps its Row # from the whole list. Typing in the Player
+/// box lists the rows again rather than hiding the others: a row
+/// `SetItemVisible` shows again goes to the end of the list, out of order.
 unsafe fn fill(
     list: *mut c_void,
     base: usize,
@@ -362,15 +331,14 @@ unsafe fn fill(
     key: &str,
     streaks: &[Streak],
     hltv: bool,
-) -> bool {
+    player: &str,
+) {
     unsafe {
         let mut shown = SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner());
         if *shown == key {
-            return false;
+            return;
         }
         *shown = key.to_string();
-        // Every row shows again: narrow it afresh.
-        *FILTERED.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let delete_all: ListVoidFn = slot(list, LIST_SLOT_DELETE_ALL_ITEMS);
         delete_all(list);
         // One player in a POV demo: no Player column.
@@ -380,6 +348,9 @@ unsafe fn fill(
         let ctor: KeyValuesCtor = std::mem::transmute(base + build.keyvalues_ctor);
         let add_item: AddItemFn = slot(list, LIST_SLOT_ADD_ITEM);
         for (index, streak) in streaks.iter().enumerate() {
+            if !matches_filter(&streak.player, player) {
+                continue;
+            }
             let target = match (hltv, streak.player_number) {
                 (true, Some(number)) => number.to_string(),
                 _ => String::new(),
@@ -408,7 +379,8 @@ unsafe fn fill(
                 }
             }
             // The list keeps its own copy; `row` stays ours, and is left
-            // (a few dozen bytes a row, once per demo) rather than freed
+            // (a few hundred bytes a row, per demo and per change to the
+            // Player box) rather than freed
             // through a slot nothing here has verified.
             add_item(list, row, 0, 0, 0);
         }
@@ -431,7 +403,6 @@ unsafe fn fill(
                 streaks.len()
             ));
         }
-        true
     }
 }
 
