@@ -48,14 +48,47 @@ export function coveredByReview(streak, covers = REVIEW_COVERS.ALL) {
   return mark ? streak.curation === mark : true;
 }
 
+/** An HLTV demo's highlight: the camera follows no one by itself (#822).
+ *  `spectated` comes with a scan since #247; an older project only has the
+ *  demo's `is_pov`. */
+export function isHltvHighlight(demo, streak) {
+  return streak.spectated === true || demo.is_pov === false;
+}
+
 /**
- * The highlights to review, in queue order: each ticked demo's recording-
- * player highlights with at least `minKills` kills and a Review mark `covers`
- * takes in, by time. A highlight with no demo-player times (a project saved
- * before they existed) can't be found in the demo, so it is counted in
- * `skipped` instead.
+ * Whether an HLTV highlight's player is one of `players` (`[{ id, names }]`,
+ * the queue's recorders, player_filter.js's groupPlayers), by SteamID when
+ * the highlight has one, else by name. `null` takes everyone.
  */
-export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL) {
+export function hltvPlayerChosen(streak, players) {
+  if (!players) return true;
+  if (streak.steam_id && players.some((p) => p.id === streak.steam_id)) return true;
+  const name = String(streak.target_player || '').trim().toLowerCase();
+  return !!name && players.some((p) => (p.names || []).some((n) => n.trim().toLowerCase() === name));
+}
+
+/** The HLTV players box's two fixed choices; any other value is one
+ *  recorder's id (#822). */
+export const HLTV_PLAYERS = { RECORDERS: 'recorders', ALL: 'all' };
+
+/** The players an HLTV review covers for the box's `choice`: every recorder
+ *  in the queue (the default), everyone (null), or the one picked. */
+export function hltvPlayersFor(choice, recorders) {
+  if (choice === HLTV_PLAYERS.ALL) return null;
+  const all = recorders || [];
+  if (!choice || choice === HLTV_PLAYERS.RECORDERS) return all;
+  return all.filter((p) => p.id === choice);
+}
+
+/**
+ * The highlights to review, in queue order: each ticked demo's highlights
+ * with at least `minKills` kills and a Review mark `covers` takes in, by
+ * time; in an HLTV demo, only `hltvPlayers`' (#822, null = everyone's), each
+ * with the player the game's camera goes on. A highlight with no
+ * demo-player times (a project saved before they existed) can't be found in
+ * the demo, so it is counted in `skipped` instead.
+ */
+export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REVIEW_COVERS.ALL, hltvPlayers = null) {
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
@@ -63,7 +96,8 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
     if (!checked.has(demo.path)) continue;
     const streaks = listedStreaks(demo)
       .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
-      .filter((s) => coveredByReview(s, covers));
+      .filter((s) => coveredByReview(s, covers))
+      .filter((s) => !isHltvHighlight(demo, s) || hltvPlayerChosen(s, hltvPlayers));
     const rows = [];
     for (const streak of streaks) {
       const times = streak.viewdemo_times || [];
@@ -75,15 +109,18 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
       const last = times.length - 1;
       const to = Math.min(streak.end_index ?? last, last);
       const from = Math.min(streak.start_index ?? 0, to);
+      const hltv = isHltvHighlight(demo, streak);
       rows.push({
         demo: demo.path,
         key: streakUid(demo.path, streak),
-        player: '',
+        player: hltv ? streak.target_player || '' : '',
         kill_times: times,
         from: from + 1,
         to: to + 1,
         answered: ANSWER_FOR_MARK[streak.curation] ?? null,
         note: streak.notes || '',
+        // The game numbers players from 1; the scan from 0 (as capture does).
+        spectate: hltv && Number.isInteger(streak.player_index) ? streak.player_index + 1 : null,
       });
     }
     rows.sort((a, b) => a.kill_times[0] - b.kill_times[0]);

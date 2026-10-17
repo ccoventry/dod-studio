@@ -2145,6 +2145,11 @@ export const STRINGS = {
     COVERS_KEEP: 'Keep',
     COVERS_MAYBE: 'Maybe',
     COVERS_SKIP: 'Skip',
+    // #822: whose highlights an HLTV demo's review plays.
+    HLTV_LABEL: 'HLTV:',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: the players who recorded a POV demo in the queue (your team, usually), everyone, or one player. The game puts the camera on that player in first person for each one.',
+    HLTV_RECORDERS: 'Players with a POV demo',
+    HLTV_ALL: 'Everyone',
     nothingCovered: (covers, ticked) => {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;

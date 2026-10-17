@@ -22,8 +22,16 @@
 //! separated: the demo's full path, Studio's key for the row, the player,
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
-//! `maybe`, `no` or `-`), and the note. The review starts at the first
-//! highlight with no answer yet.
+//! `maybe`, `no` or `-`), the note, and, for an HLTV demo, the player's
+//! number (#822; `-` or missing for a POV demo). The review starts at the
+//! first highlight with no answer yet.
+//!
+//! ## HLTV demos
+//!
+//! An HLTV demo's camera follows no one by itself, so a highlight with a
+//! player number puts the camera on them in first person (`spec_mode 4` and
+//! `dodstudio_spec_target`) once each seek has landed, the way the
+//! Highlights tab's Go does: the player may only exist after the seek.
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 
@@ -90,9 +98,18 @@ pub(crate) struct Highlight {
     pub to: usize,
     pub verdict: Option<Verdict>,
     pub note: String,
+    /// HLTV: the player the camera goes on, by number (#822).
+    pub spectate: Option<i32>,
 }
 
 impl Highlight {
+    /// What runs once the seek has landed: the camera onto the player, in
+    /// first person, for an HLTV highlight.
+    fn camera_line(&self) -> Option<String> {
+        self.spectate
+            .map(|n| format!("spec_mode 4; {} {n}", crate::spectator_follow::TARGET_NAME))
+    }
+
     /// Where playback starts and stops.
     fn window(&self) -> (f64, f64) {
         let first = self.kills.first().copied().unwrap_or(0.0);
@@ -191,7 +208,11 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
         }
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 7 {
-            return Err(format!("line {} has {} fields, not 8", n + 2, fields.len()));
+            return Err(format!(
+                "line {} has {} fields, not 8 or 9",
+                n + 2,
+                fields.len()
+            ));
         }
         let kills = fields[3]
             .split(',')
@@ -230,6 +251,10 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
             note: fields
                 .get(7)
                 .map_or(String::new(), |n| n.trim().to_string()),
+            spectate: fields
+                .get(8)
+                .and_then(|n| n.trim().parse::<i32>().ok())
+                .filter(|n| (1..=32).contains(n)),
         });
     }
     if queue.is_empty() {
@@ -462,7 +487,7 @@ fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
     let spans = fast_spans(&h.kills, review.options.gap);
-    let started = crate::demo_seek::seek_to_seconds(from).and_then(|seek| {
+    let started = crate::demo_seek::seek_to_seconds_then(from, h.camera_line()).and_then(|seek| {
         crate::demo_seek::set_time_scale(1.0)?;
         crate::demo_seek::set_paused(false)?;
         Ok(seek)
@@ -885,7 +910,29 @@ mod tests {
             to: 1,
             verdict,
             note: String::new(),
+            spectate: None,
         }
+    }
+
+    #[test]
+    fn an_hltv_highlight_names_the_player_the_camera_goes_on() {
+        let (queue, _) = parse_queue(&queue_text(&[
+            "h.dem\t1\tgskiLL\t5\t1\t1\t-\t\t7",
+            "h.dem\t2\tp\t9\t1\t1\t-\tnote\t-",
+            "p.dem\t3\tp\t9\t1\t1\t-\tnote",
+            "h.dem\t4\tp\t9\t1\t1\t-\t\t40",
+        ]))
+        .unwrap();
+        assert_eq!(queue[0].spectate, Some(7));
+        assert_eq!(
+            queue[0].camera_line().as_deref(),
+            Some("spec_mode 4; dodstudio_spec_target 7")
+        );
+        // A POV demo's line has no number, or `-`; a number out of range is none.
+        assert_eq!(queue[1].spectate, None);
+        assert_eq!(queue[2].spectate, None);
+        assert_eq!(queue[3].spectate, None);
+        assert_eq!(queue[2].camera_line(), None);
     }
 
     #[test]

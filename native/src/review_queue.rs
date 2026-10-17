@@ -31,6 +31,10 @@ pub struct ReviewHighlight {
     pub answered: Option<String>,
     #[serde(default)]
     pub note: String,
+    /// HLTV: the player number the game's camera goes on (#822); `None` for
+    /// a POV demo.
+    #[serde(default)]
+    pub spectate: Option<u32>,
 }
 
 /// A field as one tab-free line.
@@ -64,7 +68,7 @@ pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64
             _ => "-",
         };
         out.push_str(&format!(
-            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             field(&h.demo),
             field(&h.key),
             field(&h.player),
@@ -74,6 +78,11 @@ pub fn format_queue(highlights: &[ReviewHighlight], fast_forward_gap: Option<f64
             answered,
             field(&h.note)
         ));
+        // A ninth field only for an HLTV highlight; an older game ignores it.
+        if let Some(n) = h.spectate {
+            out.push_str(&format!("\t{n}"));
+        }
+        out.push('\n');
     }
     out
 }
@@ -149,7 +158,19 @@ mod tests {
             to: 2,
             answered: None,
             note: "nice\tflick\n".to_string(),
+            spectate: None,
         }
+    }
+
+    #[test]
+    fn an_hltv_highlight_adds_the_camera_player_as_a_ninth_field() {
+        let mut h = highlight();
+        h.spectate = Some(7);
+        h.note = String::new();
+        assert_eq!(
+            format_queue(&[h], None).lines().nth(1),
+            Some("C:\\demos\\a b.dem\t3\tm00cat\t100.500,104.000\t1\t2\t-\t\t7")
+        );
     }
 
     #[test]
