@@ -1160,6 +1160,52 @@ unsafe fn find_gengfuncs(real_initialize: *const u8) -> Option<*mut *mut c_void>
     None
 }
 
+/// `client.dll`'s own `cl_enginefunc_t` copy, once the real `Initialize` is
+/// known (see [`find_gengfuncs`]); `hud_sprites` patches its `SPR_*`
+/// pointers the way [`watch_client_commands`] patches `pfnClientCmd`.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) fn client_gengfuncs() -> Option<*mut *mut c_void> {
+    let real_initialize = REAL_INITIALIZE.load(Ordering::Acquire) as *const u8;
+    if real_initialize.is_null() {
+        return None;
+    }
+    unsafe { find_gengfuncs(real_initialize) }
+}
+
+/// Writes `hook` into slot `slot` of client.dll's `gEngfuncs` copy and
+/// returns what was there.
+///
+/// # Safety
+/// `gengfuncs` is the live copy from [`client_gengfuncs`], and `hook` has
+/// the slot's signature.
+#[cfg_attr(not(target_arch = "x86"), allow(dead_code))]
+pub(crate) unsafe fn patch_gengfuncs_slot(
+    gengfuncs: *mut *mut c_void,
+    slot: usize,
+    hook: *mut c_void,
+) -> Result<*mut c_void, String> {
+    unsafe {
+        let at = gengfuncs.add(slot);
+        let was = *at;
+        if was.is_null() {
+            return Err(format!("slot {slot} is null"));
+        }
+        let mut old: PAGE_PROTECTION_FLAGS = 0;
+        if VirtualProtect(
+            at as *mut c_void,
+            size_of::<*mut c_void>(),
+            PAGE_EXECUTE_READWRITE,
+            &mut old,
+        ) == 0
+        {
+            return Err(format!("slot {slot} could not be made writable"));
+        }
+        *at = hook;
+        VirtualProtect(at as *mut c_void, size_of::<*mut c_void>(), old, &mut old);
+        Ok(was)
+    }
+}
+
 /// Redirects `client.dll`'s own `pfnClientCmd` through `hook_client_cmd`.
 ///
 /// This patches one function pointer inside a struct client.dll owns, rather
