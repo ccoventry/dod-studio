@@ -294,10 +294,16 @@ world entities and the engine's temporary effects (shell casings, blood
 sprites, popped helmets) in `HUD_AddEntity`, and DoD's own particles (impact
 debris, the grenade dirt cloud `sprites/effects/adrian/dirt_puff.spr`, smoke
 trails, splashes, snow) where they are made. The status says where each path
-was seen: `seen as an entity`, `an effect` or `a particle`. DoD draws some sprite-looking things -- the crosshair, the
-capture-area icon -- as ordinary 2D HUD elements instead, which this command
-can never reach regardless of path spelling
-(`dodstudio_hide_crosshair`/`dodstudio_hide_hudelement` reach those). The
+was seen: `seen as an entity`, `an effect` or `a particle`. Since #808 the HUD's own 2D sprites are reachable too, through client.dll's
+`SPR_Load`/`SPR_Set`/`SPR_Draw*` engine-function pointers: name the sheet
+(`dodstudio_hide_asset add sprites/hud_icons.spr` hides everything drawn from
+it) or one icon by its name in `sprites/hud.txt` (`dodstudio_hide_asset add
+icon_bandage`; the file names every icon with its sheet and rectangle, and the
+whole rectangle is the key, since `number_0` and `icon_mg_deploy` share a
+corner). A name that is not in `hud.txt` is refused. `list` ends with the
+sheets the HUD has drawn so far and the `hud.txt` names each holds, so there
+is no need to open the file. The crosshair and whole HUD elements still have
+their own switches (`dodstudio_hide_crosshair`, `dodstudio_hide_hudelement`). The
 status, bare or in `dodstudio_debug_status`, says whether each path has
 matched anything this session, so a typo no longer fails silently. See
 `src/hide_asset.rs`'s module doc.
