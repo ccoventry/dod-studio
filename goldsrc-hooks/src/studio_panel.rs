@@ -860,7 +860,7 @@ fn demo_count_text(count: crate::folder_counts::FolderCount) -> String {
 }
 
 /// What a folder row shows in brackets: its count, "counting..." until that
-/// is in, or nothing while `dodstudio_demo_list_hide_counts` is on (#787).
+/// is in, or nothing while `dodstudio_demo_list_show_counts` is off (#787).
 fn shown_count(hidden: bool, count: Option<crate::folder_counts::FolderCount>) -> Option<String> {
     (!hidden).then(|| count.map_or_else(|| COUNTING.to_string(), demo_count_text))
 }
@@ -871,14 +871,22 @@ fn folder_settings() -> u8 {
     f::enabled() as u8
         | (f::HIDE_EMPTY.on() as u8) << 1
         | (f::COUNT_SUBFOLDERS.on() as u8) << 2
-        | (f::HIDE_COUNTS.on() as u8) << 3
+        | (f::SHOW_COUNTS.on() as u8) << 3
 }
 
-/// A Settings-tab box that only applies while folders are listed, and so
-/// only shows then.
-fn shown_with_folders(cvar: &str) -> bool {
+/// Whether a folder setting's Settings-tab box shows: Show folders' demo
+/// counts only while folders are listed, and the two boxes that need the
+/// counts (Hide empty folders, Count subfolders) only while those are on too
+/// (#787). `None` for every other box, which always shows.
+fn folder_box_shown(cvar: &str, folders: bool, counts: bool) -> Option<bool> {
     use crate::demo_list_folders as f;
-    cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name || cvar == f::HIDE_COUNTS.name
+    if cvar == f::SHOW_COUNTS.name {
+        Some(folders)
+    } else if cvar == f::HIDE_EMPTY.name || cvar == f::COUNT_SUBFOLDERS.name {
+        Some(folders && counts)
+    } else {
+        None
+    }
 }
 
 /// [`folder_settings`] before anything was seen: the tab has only just
@@ -2285,7 +2293,7 @@ mod hook {
                                 crate::demo_list_folders::COUNT_SUBFOLDERS.on(),
                             );
                             folder_count =
-                                shown_count(crate::demo_list_folders::HIDE_COUNTS.on(), count);
+                                shown_count(!crate::demo_list_folders::SHOW_COUNTS.on(), count);
                         }
                     }
                     if let Some(info) = info_for(&path) {
@@ -3376,11 +3384,13 @@ mod hook {
                 let Some(cvar) = bound_cvar(&name) else {
                     continue;
                 };
-                if shown_with_folders(cvar) {
-                    let want = crate::demo_list_folders::enabled();
-                    if vgui.visible(control) != want {
-                        vgui.set_visible(control, want);
-                    }
+                if let Some(want) = folder_box_shown(
+                    cvar,
+                    crate::demo_list_folders::enabled(),
+                    crate::demo_list_folders::SHOW_COUNTS.on(),
+                ) && vgui.visible(control) != want
+                {
+                    vgui.set_visible(control, want);
                 }
                 let object = vgui.object(control);
                 if object.is_null()
@@ -4656,12 +4666,22 @@ mod tests {
     }
 
     #[test]
-    fn the_folder_sub_options_show_only_with_folders() {
-        assert!(shown_with_folders("dodstudio_demo_list_hide_empty"));
-        assert!(shown_with_folders("dodstudio_demo_list_count_subfolders"));
-        assert!(shown_with_folders("dodstudio_demo_list_hide_counts"));
-        assert!(!shown_with_folders("dodstudio_demo_list_folders"));
-        assert!(!shown_with_folders("hud_draw"));
+    fn the_folder_sub_options_show_only_with_folders_and_counts() {
+        let counts = "dodstudio_demo_list_show_counts";
+        let hide_empty = "dodstudio_demo_list_hide_empty";
+        let subfolders = "dodstudio_demo_list_count_subfolders";
+        assert_eq!(folder_box_shown(counts, true, false), Some(true));
+        assert_eq!(folder_box_shown(counts, false, true), Some(false));
+        for cvar in [hide_empty, subfolders] {
+            assert_eq!(folder_box_shown(cvar, true, true), Some(true));
+            assert_eq!(folder_box_shown(cvar, true, false), Some(false), "{cvar}");
+            assert_eq!(folder_box_shown(cvar, false, true), Some(false), "{cvar}");
+        }
+        assert_eq!(
+            folder_box_shown("dodstudio_demo_list_folders", false, false),
+            None
+        );
+        assert_eq!(folder_box_shown("hud_draw", false, false), None);
     }
 
     #[test]

@@ -1230,13 +1230,13 @@ unsafe extern "C" fn cmd_demo_list_count_subfolders() {
     );
 }
 
-/// Only registered when `dodstudio_demo_list_hide_counts` could not be a
+/// Only registered when `dodstudio_demo_list_show_counts` could not be a
 /// cvar.
-unsafe extern "C" fn cmd_demo_list_hide_counts() {
+unsafe extern "C" fn cmd_demo_list_show_counts() {
     handle_toggle(
-        demo_list_folders::HIDE_COUNTS.name,
-        &demo_list_folders::HIDE_COUNTS.fallback,
-        demo_list_folders::hide_counts_status,
+        demo_list_folders::SHOW_COUNTS.name,
+        &demo_list_folders::SHOW_COUNTS.fallback,
+        demo_list_folders::show_counts_status,
     );
 }
 
@@ -1521,11 +1521,11 @@ pub fn install() {
             cmd_demo_list_count_subfolders,
         ),
     }
-    match register(demo_list_folders::HIDE_COUNTS.name, "0") {
-        Some(cvar) => demo_list_folders::HIDE_COUNTS.set_cvar(cvar),
+    match register(demo_list_folders::SHOW_COUNTS.name, "1") {
+        Some(cvar) => demo_list_folders::SHOW_COUNTS.set_cvar(cvar),
         None => add_command(
-            demo_list_folders::HIDE_COUNTS.name,
-            cmd_demo_list_hide_counts,
+            demo_list_folders::SHOW_COUNTS.name,
+            cmd_demo_list_show_counts,
         ),
     }
 
