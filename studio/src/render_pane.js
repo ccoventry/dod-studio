@@ -15,6 +15,7 @@ import {
   checkRenderAutosave,
   discardRenderAutosave,
   recoverRenderBatch,
+  getRenderJobs,
   revealInExplorer,
   writeTextFile,
   measureTakeFolders,
@@ -36,6 +37,7 @@ import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { createTakeDelete, renderingTakeFolders, progressLine } from './take_delete.js';
 import { themedConfirm } from './themed_confirm.js';
 import { createRenderSelection } from './render_selection.js';
+import { createRenderJobsRestore } from './render_jobs_restore.js';
 
 let jobs = []; // RenderJobView[] — latest snapshot from 'render_jobs_snapshot'
 // The ticked rows (#70), set up by initRenderUI.
@@ -702,8 +704,17 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
   // single source of truth for whether a batch is actually running — Start
   // and Cancel follow it rather than only the Start click and
   // render_batch_finished.
+  // A page reload keeps the backend's queue (#771): the list it holds is
+  // asked for once, and painted unless a snapshot got here first.
+  const jobsRestore = createRenderJobsRestore({ fetchJobs: getRenderJobs, applyJobs: applyJobsSnapshot });
   listen('render_jobs_snapshot', (event) => {
-    jobs = event.payload || [];
+    jobsRestore.noteSnapshot();
+    applyJobsSnapshot(event.payload || []);
+  }).catch((err) => console.error('Failed to register render_jobs_snapshot listener:', err));
+  jobsRestore.restore();
+
+  function applyJobsSnapshot(list) {
+    jobs = list;
     if (jobs.some((j) => j.status === JOB_STATUS.RENDERING)) {
       for (const j of jobs) {
         if (j.status === JOB_STATUS.RENDERING || j.status === JOB_STATUS.QUEUED) batchJobIds.add(j.id);
@@ -734,7 +745,7 @@ export function initRenderUI(getCaptureLocations, getExportDirs, onSettingsChang
       lastJobsFingerprint = fingerprint;
       refreshExportPoolFree(getExportDirs);
     }
-  });
+  }
 
   listen('render_batch_finished', () => {
     // A row that was Retried during the batch is still Queued, so Scan stays
