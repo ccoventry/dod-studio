@@ -569,8 +569,13 @@ const LIST_SLOT_SET_COLUMN_SORTABLE: usize = 148;
 /// `SetColumnVisible(int, bool)`: the Highlights tab hides its Player
 /// column for a POV demo (one player).
 const LIST_SLOT_SET_COLUMN_VISIBLE: usize = 149;
-/// `ApplyItemChanges(int itemID)`: re-sorts a row after its values changed.
+/// `ApplyItemChanges(int itemID)`: re-indexes a row after its values
+/// changed. The rows shown keep their order until the list sorts again.
 const LIST_SLOT_APPLY_ITEM_CHANGES: usize = 161;
+/// `OnSetSortColumn(int column)`, the "SetSortColumn" message's handler: on
+/// the column already sorted it flips the direction and sorts the list
+/// (`sort_arrows`, #611, `verify_studio_panel.py`).
+const LIST_SLOT_ON_SET_SORT_COLUMN: usize = 190;
 /// `DeleteAllItems()`: what the Load Demo window's own fill starts with.
 const LIST_SLOT_DELETE_ALL_ITEMS: usize = 165;
 /// `AddItem(const KeyValues *data, int userData, bool scrollToItem, bool
@@ -2038,6 +2043,7 @@ mod hook {
             let mut last = FILTERED_FOR.lock().unwrap_or_else(|e| e.into_inner());
             // A refilled list shows every row again: stamp it and filter afresh.
             if stamp_demo_rows(list) {
+                resort_demo_list(list, build);
                 *last = None;
             }
             if last.as_deref() == Some(filter.as_str()) {
@@ -2220,6 +2226,27 @@ mod hook {
         }
         let [year, month, _, day, hour, minute, ..] = local.map(u64::from);
         date_text((year, month, day, hour, minute))
+    }
+
+    /// Sorts the Demos tab's rows again by what they show now. The list
+    /// sorted them as the window added them, by their whole paths, and
+    /// [`stamp_demo_rows`] renaming a row doesn't move it, so a refill after
+    /// a folder setting changed left the folders below the demos while the
+    /// heading still said ascending. With a column chosen, flipping its
+    /// direction twice sorts twice and leaves the direction as it was.
+    unsafe fn resort_demo_list(list: *mut c_void, build: &Build) {
+        unsafe {
+            let column = *((list as *const u8).add(build.list_sort_column) as *const i32);
+            let on_set: KeyFn = slot(list, LIST_SLOT_ON_SET_SORT_COLUMN);
+            if column < 0 {
+                // No column chosen: sort by Demo File (column 1, after the
+                // icons), ascending.
+                on_set(list, 1);
+            } else {
+                on_set(list, column);
+                on_set(list, column);
+            }
+        }
     }
 
     /// Fills in every row's Map, Type, Player and Date, and its short name, when
