@@ -180,7 +180,7 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
-                let text = ready_text(&found, &file);
+                let text = streaks::with_damage(ready_text(&found, &file), &found);
                 show(vgui, page, build, (&text, &text), None);
                 fill(
                     list,
