@@ -119,13 +119,19 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
   const checked = new Set(checkedPaths);
   const highlights = [];
   let skipped = 0;
+  // HLTV highlights the HLTV box left out, so an empty review can say why.
+  let notChosen = 0;
   for (const demo of demos || []) {
     if (!checked.has(demo.path)) continue;
     const players = typeof hltvPlayers === 'function' ? hltvPlayers(demo) : hltvPlayers;
     const streaks = listedStreaks(demo)
       .filter((s) => (s.kill_count ?? (s.kills || []).length) >= minKills)
       .filter((s) => coveredByReview(s, covers))
-      .filter((s) => !isHltvHighlight(demo, s) || hltvPlayerChosen(s, players));
+      .filter((s) => {
+        const keep = !isHltvHighlight(demo, s) || hltvPlayerChosen(s, players);
+        if (!keep) notChosen += 1;
+        return keep;
+      });
     const rows = [];
     for (const streak of streaks) {
       const times = streak.viewdemo_times || [];
@@ -154,7 +160,7 @@ export function buildReviewQueue(demos, checkedPaths, minKills = 1, covers = REV
     rows.sort((a, b) => a.kill_times[0] - b.kill_times[0]);
     highlights.push(...rows);
   }
-  return { highlights, skipped };
+  return { highlights, skipped, notChosen };
 }
 
 /**

@@ -2151,6 +2151,14 @@ export const STRINGS = {
     HLTV_MISSING: 'Players missing their POV for this half',
     HLTV_RECORDERS: 'Players with a POV demo in the queue',
     HLTV_ALL: 'Everyone',
+    // The HLTV box left out every highlight there was (#822).
+    hltvNoneChosen: (choice, count) => {
+      const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'missing' || !choice) {
+        return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
+      }
+      return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
+    },
     nothingCovered: (covers, ticked) => {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;

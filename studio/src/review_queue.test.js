@@ -67,6 +67,12 @@ describe('HLTV demos in a review (#822)', () => {
       expect(players(HLTV_PLAYERS.RECORDERS)).toEqual(['m00cat', 'DICE | stealth']);
     });
 
+    it('counts what the box left out, so an empty review can say why', () => {
+      const result = buildReviewQueue(demos, ['h.dem'], 1, REVIEW_COVERS.ALL,
+        hltvPlayersFor(HLTV_PLAYERS.MISSING, recorders, { demos, recorderOf }));
+      expect(result.notChosen).toBe(2);
+    });
+
     it('an HLTV demo whose half is not known reviews every recorder', () => {
       const unplaced = [withInfo(hltv, null), stealthHere, m00catElsewhere];
       const rows = buildReviewQueue(unplaced, ['h.dem'], 1, REVIEW_COVERS.ALL,
