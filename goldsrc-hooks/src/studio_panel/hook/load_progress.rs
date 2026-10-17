@@ -5,7 +5,8 @@
 //! ("Demo file completely loaded."), and plays and seeks only as far as it
 //! has read. How far: the buffered span (`GetEndTime - GetStartTime`, through
 //! [`crate::demo_seek::buffered_while_loading`]) over the playback length in
-//! the file's own directory ([`crate::demo_file::playback_seconds`]).
+//! the file's own directory ([`crate::demo_file::length`]), less the stretch
+//! the LOADING segment adds in front (#810).
 
 use std::ffi::{CString, c_void};
 use std::sync::atomic::Ordering;
@@ -17,7 +18,8 @@ const BAR: &str = "LoadProgress";
 
 /// The demo whose length is known, and that length; and the last percent
 /// shown (`None` while hidden).
-static LENGTH: std::sync::Mutex<Option<(String, Option<f32>)>> = std::sync::Mutex::new(None);
+static LENGTH: std::sync::Mutex<Option<(String, Option<crate::demo_file::DemoLength>)>> =
+    std::sync::Mutex::new(None);
 static SHOWN: std::sync::Mutex<Option<u32>> = std::sync::Mutex::new(None);
 
 type SetProgressFn = unsafe extern "thiscall" fn(*mut c_void, f32);
@@ -76,13 +78,13 @@ pub(super) unsafe fn update(vgui: &Vgui) {
 /// worked out whatever tab is showing.
 pub(super) fn demo_percent() -> Option<u32> {
     crate::demo_seek::buffered_while_loading().and_then(|buffered| {
-        let total = length_of_current_demo()?;
-        Some(crate::demo_file::load_percent(buffered, total))
+        let length = length_of_current_demo()?;
+        Some(crate::demo_file::load_percent(buffered, length))
     })
 }
 
 /// The playing demo's playback length, read once per demo.
-fn length_of_current_demo() -> Option<f32> {
+fn length_of_current_demo() -> Option<crate::demo_file::DemoLength> {
     let name = crate::demo_reload::current_demo()?;
     let mut known = LENGTH.lock().unwrap_or_else(|e| e.into_inner());
     if let Some((demo, length)) = known.as_ref()
@@ -91,7 +93,7 @@ fn length_of_current_demo() -> Option<f32> {
         return *length;
     }
     let game_dir = dod_dir();
-    let length = crate::demo_file::playback_seconds(&crate::streaks::demo_path(&game_dir, &name));
+    let length = crate::demo_file::length(&crate::streaks::demo_path(&game_dir, &name));
     *known = Some((name, length));
     length
 }
