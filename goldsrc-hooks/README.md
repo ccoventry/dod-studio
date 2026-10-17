@@ -107,7 +107,9 @@ is the complete list):
   the scope off for demo playback; this turns it back on, so a POV demo shows
   it whenever the recorder zoomed, and in-eye it is the watched player's rifle
   rather than the Springfield DoD always picks there. Two one-byte patches in
-  `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307).
+  `CHudScope::DrawTriApiScope`; see `src/demo_scope.rs` (#307). Outside the
+  scope's frame the screen is black at any FOV (`gl_widescreen_yfov 1`,
+  `mirv_fov`), in demos only; see `src/demo_scope/fill.rs` (#799).
 - **Spectator target** (`dodstudio_spec_target <player>`): puts the camera on
   a player by number, the one `dodstudio_deathmsg players` lists. Same doc.
 - **Spectator bars** (`dodstudio_hide_spectator_bars 1`): hides the two dark

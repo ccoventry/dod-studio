@@ -15,6 +15,10 @@ pattern's offsets line up with its own tokens; only the binaries can prove:
   4. The sprite switch at `+0x46750` draws a scope for every id the module
      writes (6, 9, 25), and 6 reads the same sprite member as 23 (the
      scoped FG42) without 23's `g_iWeaponFlags` test.
+  5. The black fill (`demo_scope/fill.rs`, #799): the demo gate's
+     `pDemoAPI` operand is the client's `gEngfuncs` copy, its `pTriAPI` is
+     what the scope draws through, the scope's quads and their size, and no
+     client TriAPI call reaches past the table the module copies.
 
 Constants are read out of `demo_scope.rs` rather than restated.
 
@@ -41,6 +45,7 @@ DEFAULT_DLLS = [
     STEAM / "Half-Life - POST-Anniversary for Movies" / "dod" / "cl_dlls" / "client.dll",
 ]
 RUST = Path(__file__).resolve().parent.parent / "src" / "demo_scope.rs"
+FILL_RUST = Path(__file__).resolve().parent.parent / "src" / "demo_scope" / "fill.rs"
 
 EXPECTED_SITE = 0x466C7
 G_IUSER1 = 0xE88D4
@@ -209,12 +214,112 @@ def check_view_operands(path):
     ]
 
 
+SCOPE_END = 0x470CA
+# gEngfuncs slots, as byte offsets: pfnGetScreenInfo, pTriAPI, pDemoAPI.
+GET_SCREEN_INFO = 12 * 4
+TRI_API = 82 * 4
+DEMO_API = 85 * 4
+
+
+def fill_constants():
+    text = FILL_RUST.read_text(encoding="utf-8")
+    found = {}
+    for name in ["DEMO_API_OPERAND_AT", "TABLE_SLOTS", "SCOPE_QUADS"]:
+        n = re.search(rf"const {name}: \w+ = (\d+);", text)
+        if not n:
+            sys.exit(f"no {name} in {FILL_RUST}")
+        found[name] = int(n.group(1))
+    slots = {name: int(v) for name, v in re.findall(r"const SLOT_(\w+): usize = (\d+);", text)}
+    return found, slots
+
+
+def tri_calls(md, image, base, at, reg_load):
+    """The TriAPI slot offset called right after `mov reg, [pTriAPI]` at `at`."""
+    insns = list(md.disasm(image[at:at + 48], base + at))
+    if not insns or insns[0].mnemonic != "mov" or not insns[0].op_str.endswith(reg_load):
+        return None
+    reg = insns[0].op_str.split(",")[0]
+    for nxt in insns[1:8]:
+        if nxt.mnemonic == "call" and nxt.op_str.startswith(f"dword ptr [{reg}"):
+            off = nxt.op_str[len(f"dword ptr [{reg}"):].strip(" +]")
+            return int(off, 16) if off else 0
+    return None
+
+
+def check_black_fill(path):
+    """What `demo_scope/fill.rs` relies on (#799): the client's `gEngfuncs`
+    copy found through the demo gate's `pDemoAPI` operand, `pTriAPI` three
+    slots before it, the scope drawing its four quads through that pointer
+    with the slots the wrappers replace, 5.5 x tan(fov/2) at depth 5,
+    `pfnGetScreenInfo` at slot 12, and no TriAPI call in the client past the
+    table the module copies."""
+    consts, slots = fill_constants()
+    pe = pefile.PE(str(path), fast_load=True)
+    image = bytes(pe.get_memory_mapped_image())
+    base = pe.OPTIONAL_HEADER.ImageBase
+    problems = []
+    demo_slot = struct.unpack_from("<I", image, EXPECTED_SITE + consts["DEMO_API_OPERAND_AT"])[0]
+    engfuncs = demo_slot - DEMO_API
+    tri_slot = engfuncs + TRI_API
+    tri_load = f"dword ptr [{tri_slot:#x}]"
+    md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
+
+    # Every `mov reg, [pTriAPI]` in .text, and the slot called after it.
+    text = next(s for s in pe.sections if s.Name.startswith(b".text"))
+    start, end = text.VirtualAddress, text.VirtualAddress + text.Misc_VirtualSize
+    needle = struct.pack("<I", tri_slot)
+    calls = {}
+    i = image.find(needle, start, end)
+    while i != -1:
+        for back in (1, 2):
+            off = tri_calls(md, image, base, i - back, tri_load)
+            if off is not None:
+                calls[i - back] = off
+                break
+        i = image.find(needle, i + 1, end)
+
+    scope = {off for at, off in calls.items() if 0x46690 <= at < SCOPE_END}
+    for name in ["END", "TEX_COORD2F", "VERTEX3FV", "SPRITE_TEXTURE"]:
+        off = slots[name] * 4
+        if off not in scope:
+            problems.append(f"the scope never calls TriAPI {name} (+{off:#x}) through +{tri_slot - base:#x}")
+    if 8 not in scope:
+        problems.append("the scope never calls TriAPI Begin (+0x8)")
+    scope_code = list(md.disasm(image[0x46690:SCOPE_END], base + 0x46690))
+    if not any(i.mnemonic == "cmp" and i.op_str == f"esi, {consts['SCOPE_QUADS']}" for i in scope_code):
+        problems.append(f"no `cmp esi, {consts['SCOPE_QUADS']}`: the scope's quad count changed")
+    width = struct.unpack_from("<d", image, 0xACDE8)[0]
+    depth = struct.unpack_from("<f", image, 0xA54E0)[0]
+    if (width, depth) != (5.5, 5.0):
+        problems.append(f"the quads are {width} x tan(fov/2) at depth {depth}, not 5.5 at 5")
+
+    vidinit = image[0x36B2C:0x36B38]
+    if (vidinit[:6] != bytes.fromhex("C7 00 14 02 00 00") or vidinit[6:8] != b"\xff\x15"
+            or vidinit[8:] != struct.pack("<I", engfuncs + GET_SCREEN_INFO)):
+        problems.append(f"CHud::VidInit at +0x36b2c is {vidinit.hex(' ')}, "
+                        "not iSize = 0x214; call [gEngfuncs+0x30]")
+
+    highest = max(calls.values(), default=0)
+    if highest >= consts["TABLE_SLOTS"] * 4:
+        problems.append(f"the client calls TriAPI +{highest:#x}, past the {consts['TABLE_SLOTS']} slots copied")
+
+    if problems:
+        return [f"{path}: {p}" for p in problems]
+    return [
+        f"{path.parents[2].name}: OK -- gEngfuncs copy +{engfuncs - base:#x}, pTriAPI "
+        f"+{tri_slot - base:#x}; the scope calls TriAPI {sorted(hex(c) for c in scope)} for "
+        f"{consts['SCOPE_QUADS']} quads, 5.5 x tan(fov/2) at depth 5; GetScreenInfo at slot 12; "
+        f"{len(calls)} client TriAPI calls, highest +{highest:#x} < {consts['TABLE_SLOTS'] * 4:#x}"
+    ]
+
+
 def main():
     dlls = [Path(p) for p in sys.argv[1:]] or DEFAULT_DLLS
     pattern, in_eye_at, je_at, ids = constants()
     failed = False
     for dll in dlls:
-        for line in check(dll, pattern, in_eye_at, je_at, ids) + check_view_operands(dll):
+        lines = check(dll, pattern, in_eye_at, je_at, ids) + check_view_operands(dll)
+        for line in lines + check_black_fill(dll):
             print(line)
             failed |= ": OK --" not in line
     sys.exit(1 if failed else 0)
