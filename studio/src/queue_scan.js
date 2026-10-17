@@ -118,7 +118,7 @@ export function createQueueScan({
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
 
     const masterTableBody = document.querySelector('#master-demo-table-body');
-    if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="8">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
+    if (masterTableBody) masterTableBody.innerHTML = `<tr style="text-align:center"><td colspan="7">${STRINGS.MAIN.SCANNING_PLEASE_WAIT_ROW}</td></tr>`;
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
