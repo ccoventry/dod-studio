@@ -128,6 +128,38 @@ fn record_output_size(clip: &ClipData, codec: RenderCodec, custom_args: &str, by
     }
 }
 
+/// The reservation ledger's key for an export directory: its volume, so
+/// folders on one drive share one reservation total (#774); the directory
+/// itself when it has no drive or share prefix.
+fn ledger_key(dir: &Path) -> PathBuf {
+    crate::sys::disk::volume_key(dir)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| dir.to_path_buf())
+}
+
+/// Reserves `amount` on the first of `dirs` whose volume has more than
+/// `amount + margin` free once the ledger's reservations there are taken off.
+/// Returns that directory, what was already reserved on its volume, and its
+/// live free space.
+fn try_reserve(
+    ledger: &mut HashMap<PathBuf, u64>,
+    dirs: &[PathBuf],
+    amount: u64,
+    margin: u64,
+    mut free_of: impl FnMut(&Path) -> u64,
+) -> Option<(PathBuf, u64, u64)> {
+    for dir in dirs {
+        let key = ledger_key(dir);
+        let live_free = free_of(dir);
+        let already_reserved = *ledger.get(&key).unwrap_or(&0);
+        if live_free.saturating_sub(already_reserved) > amount + margin {
+            *ledger.entry(key).or_insert(0) += amount;
+            return Some((dir.clone(), already_reserved, live_free));
+        }
+    }
+    None
+}
+
 /// RAII release for a JIT export-drive reservation claimed in
 /// `run_render_job`'s routing block below. `run_render_job` has many early
 /// returns after a drive is selected (success, error, cancellation) —
@@ -295,31 +327,29 @@ pub async fn run_render_job(
     let mut selected_export_dir: Option<PathBuf> = None;
     {
         let mut ledger = reservations.lock().unwrap_or_else(|p| p.into_inner());
-        for dir in &config.export_directories {
-            let live_free = crate::sys::disk::get_available_bytes(dir);
-            let already_reserved = *ledger.get(dir).unwrap_or(&0);
-            if live_free.saturating_sub(already_reserved)
-                > reservation_estimate + SAFETY_MARGIN_BYTES
-            {
-                *ledger.entry(dir.clone()).or_insert(0) += reservation_estimate;
-                selected_export_dir = Some(dir.clone());
-                // Shows this job's own estimate against what else was already
-                // reserved on this drive *before* this job's own addition, so
-                // concurrent jobs' numbers are directly comparable in the log —
-                // this is what made it possible to confirm live, under a real
-                // concurrent batch, that the ledger correctly reflects other
-                // in-flight jobs' reservations rather than every job seeing the
-                // same live free-space number.
-                crate::log_markdown(&format!(
-                    "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
-                    job_id,
-                    reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
-                    dir,
-                    already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
-                    live_free as f64 / (1024.0 * 1024.0 * 1024.0),
-                ));
-                break;
-            }
+        if let Some((dir, already_reserved, live_free)) = try_reserve(
+            &mut ledger,
+            &config.export_directories,
+            reservation_estimate,
+            SAFETY_MARGIN_BYTES,
+            crate::sys::disk::get_available_bytes,
+        ) {
+            // Shows this job's own estimate against what else was already
+            // reserved on this drive *before* this job's own addition, so
+            // concurrent jobs' numbers are directly comparable in the log —
+            // this is what made it possible to confirm live, under a real
+            // concurrent batch, that the ledger correctly reflects other
+            // in-flight jobs' reservations rather than every job seeing the
+            // same live free-space number.
+            crate::log_markdown(&format!(
+                "[render-reservation] job {} reserved {:.2} GB on {:?} (already had {:.2} GB reserved by other jobs, {:.2} GB live free)",
+                job_id,
+                reservation_estimate as f64 / (1024.0 * 1024.0 * 1024.0),
+                dir,
+                already_reserved as f64 / (1024.0 * 1024.0 * 1024.0),
+                live_free as f64 / (1024.0 * 1024.0 * 1024.0),
+            ));
+            selected_export_dir = Some(dir);
         }
     }
     if selected_export_dir.is_none() && !config.export_directories.is_empty() {
@@ -338,7 +368,7 @@ pub async fn run_render_job(
     // see `ReservationGuard`'s own doc comment.
     let _reservation_guard = selected_export_dir.as_ref().map(|dir| ReservationGuard {
         ledger: reservations.clone(),
-        dir: dir.clone(),
+        dir: ledger_key(dir),
         amount: reservation_estimate,
         job_id: job_id.clone(),
     });
@@ -1093,6 +1123,30 @@ mod tests {
             alpha_folder: None,
             clip_name: None,
         }
+    }
+
+    /// #774: a reservation on C:\a comes off what C:\b has, so with room for
+    /// one job on C: the second goes to D:, and to nowhere once D: is full.
+    #[cfg(windows)]
+    #[test]
+    fn reservations_on_one_folder_reduce_its_drives_other_folders() {
+        let mut ledger = HashMap::new();
+        let free = |p: &Path| if p.starts_with(r"C:\") { 15 } else { 12 };
+        let c_only = [PathBuf::from(r"C:\a"), PathBuf::from(r"C:\b")];
+        let with_d = [
+            PathBuf::from(r"C:\a"),
+            PathBuf::from(r"C:\b"),
+            PathBuf::from(r"D:\x"),
+        ];
+
+        let first = try_reserve(&mut ledger, &c_only, 10, 0, free);
+        assert_eq!(first.map(|r| r.0), Some(PathBuf::from(r"C:\a")));
+        assert_eq!(try_reserve(&mut ledger, &c_only, 10, 0, free), None);
+        let second = try_reserve(&mut ledger, &with_d, 10, 0, free);
+        assert_eq!(second.map(|r| r.0), Some(PathBuf::from(r"D:\x")));
+        assert_eq!(try_reserve(&mut ledger, &with_d, 10, 0, free), None);
+        assert_eq!(ledger.get(Path::new("c:")), Some(&10));
+        assert_eq!(ledger.get(Path::new("d:")), Some(&10));
     }
 
     /// #120: the first clip of a kind reserves the raw estimate; once one
