@@ -27,8 +27,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
-/// Every life with a kill is listed; the tab's Min kills box narrows the
-/// list, so nothing is hidden by a number fixed here.
+/// Every life with a kill is listed: one kill is a highlight too.
 pub const MIN_KILLS: usize = 1;
 /// Go jumps this long before a streak's first kill.
 pub const LEAD_IN_SECS: f32 = 5.0;

@@ -5,10 +5,12 @@
 //! Player, Kills, Time, Dur. and Details, its Load button is Go, and its `OnCommand` is
 //! ours: Go, or a double-click, seeks to just before the streak.
 //!
-//! Every life with a kill is listed; a Min kills box narrows the list. A POV
-//! demo lists only the recording player's (the footage follows no one else).
-//! An HLTV demo lists everyone's, a Player box narrows them, and Go also puts
-//! the camera on the streak's player (`dodstudio_spec_target`).
+//! Every life with a kill is listed. A POV demo lists only the recording
+//! player's (the footage follows no one else), named in a greyed-out Player
+//! box. An HLTV demo lists everyone's, the Player box narrows them, and Go
+//! also puts the camera on the streak's player (`dodstudio_spec_target`).
+//! The hint line under the list says when there is nothing to list, and why;
+//! how far the analysis has got is the loading strip's and the progress bar's.
 
 use std::ffi::{CString, c_char, c_void};
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -23,12 +25,12 @@ pub(super) fn dialog() -> usize {
     DIALOG.load(Ordering::Acquire)
 }
 static ON_COMMAND: AtomicUsize = AtomicUsize::new(0);
-/// What the status line and the list show now, so each is redrawn only when
+/// What the hint line and the list show now, so each is redrawn only when
 /// it changes.
 static SHOWN_STATUS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 static SHOWN_ROWS: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-/// The Player and Min kills boxes' text the list was last narrowed by;
-/// `None` after a refill.
+/// The Player box's text the list was last narrowed by; `None` after a
+/// refill.
 static FILTERED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 
 /// The row keys Go reads: the bar time to seek to, and in an HLTV demo the
@@ -47,14 +49,12 @@ const COLUMNS: [(&CStr, &CStr, i32); 5] = [
 ];
 const PLAYER_COLUMN: i32 = 1;
 const ROW_COLUMN_WIDE: i32 = 44;
-const STATUS_LABEL: &str = "StreakStatus";
+/// The line under the list, beside Go (`Highlights.res`).
+const HINT_LABEL: &str = "Hint";
 const PROGRESS: &str = "StreakProgress";
-/// The Player box, and its label: shown for an HLTV demo only.
+/// The Player box, and its label: shown once the streaks are found.
 const PLAYER_BOX: &str = "StreakPlayer";
 const PLAYER_LABEL: &str = "StreakPlayerLabel";
-/// The Min kills box, and its label: shown once the streaks are found.
-const MIN_KILLS_BOX: &str = "StreakMinKills";
-const MIN_KILLS_LABEL: &str = "StreakMinKillsLabel";
 
 type KeyValuesCtor = unsafe extern "thiscall" fn(
     *mut c_void,
@@ -163,13 +163,15 @@ pub(super) unsafe fn update(vgui: &Vgui) {
         let Some((generation, status, percent)) = streaks::status() else {
             return;
         };
-        let file = path
-            .file_name()
-            .map_or(name.clone(), |f| f.to_string_lossy().into_owned());
         match status {
             Status::Loading => {
-                let text = format!("Finding the highlights in {file}... {percent}%");
-                show(vgui, page, build, (&text, &text), Some(percent));
+                show(
+                    vgui,
+                    page,
+                    build,
+                    (&format!("loading {percent}"), GO_HINT),
+                    Some(percent),
+                );
                 fill(
                     list,
                     base,
@@ -181,9 +183,9 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                 show_filters(vgui, page, None);
             }
             Status::Ready(found) => {
-                let text = ready_text(&found, &file);
+                let text = ready_hint(&found);
                 show(vgui, page, build, (&text, &text), None);
-                fill(
+                let refilled = fill(
                     list,
                     base,
                     build,
@@ -191,11 +193,14 @@ pub(super) unsafe fn update(vgui: &Vgui) {
                     &found.streaks,
                     found.hltv,
                 );
+                if refilled {
+                    fill_player_box(vgui, page, &found);
+                }
                 show_filters(vgui, page, Some(found.hltv));
                 narrow(vgui, page, list, found.hltv);
             }
             Status::Failed(why) => {
-                let text = format!("Could not find the highlights in {file}: {why}");
+                let text = format!("Could not find the highlights: {why}");
                 show(vgui, page, build, (&text, &text), None);
                 fill(
                     list,
@@ -211,86 +216,73 @@ pub(super) unsafe fn update(vgui: &Vgui) {
     }
 }
 
-/// The status line once the streaks are found.
-fn ready_text(found: &Found, file: &str) -> String {
-    let n = found.streaks.len();
-    let lead = streaks::LEAD_IN_SECS;
-    match (&found.recorder, n) {
-        (Some(recorder), 0) => format!("No kills by {recorder} in {file}."),
-        (Some(recorder), _) => format!(
-            "{n} highlights by {recorder} in {file}. Go jumps to {lead} s before the first kill."
-        ),
-        (None, 0) => format!("No kills in {file}."),
-        (None, _) if found.hltv => {
-            format!("{n} highlights in {file}. Go jumps to {lead} s before and watches the player.")
+/// The hint under the list while the streaks are found or loading: what Go
+/// does.
+const GO_HINT: &str = "Double-click a streak, or pick one and Go.";
+
+/// The hint under the list once the streaks are found: what Go does, or that
+/// there is nothing to go to.
+fn ready_hint(found: &Found) -> String {
+    match (&found.recorder, found.streaks.is_empty()) {
+        (Some(recorder), true) => format!("No kills by {recorder} in this demo."),
+        (None, true) => "No kills in this demo.".to_string(),
+        (_, false) if found.hltv => {
+            "Double-click a streak, or pick one and Go: the camera follows its player.".to_string()
         }
-        (None, _) => {
-            format!("{n} highlights in {file}. Go jumps to {lead} s before the first kill.")
-        }
+        (_, false) => GO_HINT.to_string(),
     }
 }
 
-/// The status line's height for a control `name` on `page` fitted `tall`:
-/// one line while the progress bar or the filter row under it shows, so a
-/// wrapped second line never draws over them (#797: once the loading strip
-/// moved the tab's controls, the line re-wrapped onto the Min kills row). A
-/// failure, with nothing under it, keeps the room to wrap (#684). Any other
-/// control keeps `tall`.
-pub(super) unsafe fn status_tall(vgui: &Vgui, page: Vpanel, name: &str, tall: i32) -> i32 {
-    if name != STATUS_LABEL {
-        return tall;
-    }
-    let below = unsafe {
-        [PROGRESS, MIN_KILLS_BOX]
-            .iter()
-            .any(|&n| vgui.child_named(page, n).is_some_and(|vp| vgui.visible(vp)))
-    };
-    if below {
-        tall.min(STATUS_ONE_LINE)
-    } else {
-        tall
+/// The Player box for a newly listed demo: empty and editable in an HLTV
+/// demo, the recording player's name and greyed out in a POV demo, which
+/// lists no one else.
+unsafe fn fill_player_box(vgui: &Vgui, page: Vpanel, found: &Found) {
+    unsafe {
+        let Some(entry) = vgui
+            .child_named(page, PLAYER_BOX)
+            .map(|vp| vgui.object(vp))
+            .filter(|o| !o.is_null())
+        else {
+            return;
+        };
+        let name = match (&found.recorder, found.hltv) {
+            (Some(recorder), false) => recorder.replace('\0', ""),
+            _ => String::new(),
+        };
+        if let Ok(name) = CString::new(name) {
+            let set_text: SetTextFn = slot(entry, TEXT_ENTRY_SLOT_SET_TEXT);
+            set_text(entry, name.as_ptr());
+        }
+        let set_enabled: ListIntVoidFn = slot(entry, PANEL_SLOT_SET_ENABLED);
+        set_enabled(entry, i32::from(found.hltv));
     }
 }
 
-/// The status line's height as one line: it ends above the progress bar and
-/// the filter row (`Highlights.res`: the line at y 6, those at 27 and 30).
-const STATUS_ONE_LINE: i32 = 20;
-
-/// The filter boxes: none while nothing is listed (`None`), Min kills once
-/// the streaks are found, and Player too for an HLTV demo (`Some(true)`).
+/// The Player box and its label: hidden while nothing is listed (`None`),
+/// shown once the streaks are found.
 unsafe fn show_filters(vgui: &Vgui, page: Vpanel, hltv: Option<bool>) {
     unsafe {
-        let shown = [
-            (PLAYER_BOX, hltv == Some(true)),
-            (PLAYER_LABEL, hltv == Some(true)),
-            (MIN_KILLS_BOX, hltv.is_some()),
-            (MIN_KILLS_LABEL, hltv.is_some()),
-        ];
-        for (name, on) in shown {
+        for name in [PLAYER_BOX, PLAYER_LABEL] {
             if let Some(vp) = vgui.child_named(page, name)
-                && vgui.visible(vp) != on
+                && vgui.visible(vp) != hltv.is_some()
             {
-                vgui.set_visible(vp, on);
+                vgui.set_visible(vp, hltv.is_some());
             }
         }
     }
 }
 
-/// Shows only the rows whose player matches the Player box (every word, case
-/// ignored) with at least the Min kills box's kills, when either box changed
-/// or the list was refilled.
+/// In an HLTV demo, shows only the rows whose player matches the Player box
+/// (every word, case ignored), when the box changed or the list was
+/// refilled. A POV demo's box names its one player, so every row shows.
 unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
     unsafe {
-        let player = if hltv {
+        let wanted = if hltv {
             box_text(vgui, page, PLAYER_BOX).trim().to_string()
         } else {
             String::new()
         };
-        let min_kills: usize = box_text(vgui, page, MIN_KILLS_BOX)
-            .trim()
-            .parse()
-            .unwrap_or(0);
-        let wanted = format!("{player}|{min_kills}");
+        let player = wanted.as_str();
         let mut filtered = FILTERED.lock().unwrap_or_else(|e| e.into_inner());
         if filtered.as_deref() == Some(wanted.as_str()) {
             return;
@@ -315,8 +307,7 @@ unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
                         text(raw)
                     }
                 };
-                let kills: usize = get(COLUMNS[1].0).trim().parse().unwrap_or(0);
-                let shown = matches_filter(&get(COLUMNS[0].0), &player) && kills >= min_kills;
+                let shown = matches_filter(&get(COLUMNS[0].0), player);
                 set_visible(list, id, shown as u32);
             }
             id = next(list, id);
@@ -325,8 +316,8 @@ unsafe fn narrow(vgui: &Vgui, page: Vpanel, list: *mut c_void, hltv: bool) {
     }
 }
 
-/// Sets the status line (when `key` changed) and the progress bar: shown
-/// with `percent`, hidden without.
+/// Sets the hint line (when `key` changed) and the progress bar: shown with
+/// `percent`, hidden without.
 unsafe fn show(
     vgui: &Vgui,
     page: Vpanel,
@@ -339,7 +330,7 @@ unsafe fn show(
         if *shown == key {
             return;
         }
-        if let Some(label) = vgui.child_named(page, STATUS_LABEL) {
+        if let Some(label) = vgui.child_named(page, HINT_LABEL) {
             set_label(vgui.object(label), text);
         }
         if let Some(bar) = vgui.child_named(page, PROGRESS) {
@@ -358,7 +349,7 @@ unsafe fn show(
     }
 }
 
-/// Lists `streaks`, when `key` (which list it is) changed.
+/// Lists `streaks`, when `key` (which list it is) changed; whether it did.
 unsafe fn fill(
     list: *mut c_void,
     base: usize,
@@ -366,11 +357,11 @@ unsafe fn fill(
     key: &str,
     streaks: &[Streak],
     hltv: bool,
-) {
+) -> bool {
     unsafe {
         let mut shown = SHOWN_ROWS.lock().unwrap_or_else(|e| e.into_inner());
         if *shown == key {
-            return;
+            return false;
         }
         *shown = key.to_string();
         // Every row shows again: narrow it afresh.
@@ -431,6 +422,7 @@ unsafe fn fill(
                 streaks.len()
             ));
         }
+        true
     }
 }
 

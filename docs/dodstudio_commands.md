@@ -318,9 +318,9 @@ The Demos tab lists the demos, with each one's map and date, and loads one
 with no demo playing. Click a column heading to sort by it; the boxes above
 filter by name or map (Search), map, HLTV or POV, and age in days.
 The Highlights tab lists every life with a kill in the demo playing
-(player, kills, weapons, time), narrowed by a Min kills box. A POV demo lists
-only the recording player's; an HLTV demo lists everyone's, with a Player box,
-and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
+(player, kills, weapons, time). A POV demo lists only the recording player's,
+named in a greyed-out Player box; an HLTV demo lists everyone's, the Player box
+narrows them, and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
 double-click jumps to 5 s before the first kill. It reads Studio's analyzer cache
 (`%APPDATA%\dod-studio\analyzer_cache`), so a demo Studio's Demo Analyzer or
 Master Queue already read shows at once; anything else is analysed in the
