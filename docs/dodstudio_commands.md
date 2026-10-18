@@ -50,6 +50,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_screen_shake` | `0` | POV demos: drops every server `ScreenShake`, which in DoD demos is the blast shake from a grenade going off nearby (always amplitude 15 for 1 s; no WSOD25 map has an `env_shake`) (#606) | same |
 | `dodstudio_show_demo_scope` | `0` | shows the sniper scope while a demo plays. The game turns it off for playback (`CHudScope::DrawTriApiScope` skips its draw when `IsPlayingback()`). A POV demo shows the recorder's own scope whenever they zoomed. Watching in-eye, the game always picks the Springfield's scope; with this on it is the watched player's rifle: the scoped K98 and scoped FG42 get `scope_k43`, the Springfield `scope_spring`, the scoped Enfield `scope_enfield` (that one only when the game's scoped-weapon flag is set, which an HLTV viewer may not have). Still only while the view is zoomed (#307). The round scope keeps its size and everything outside its frame is black, at any FOV: DoD sizes the frame for the view it expects, so `gl_widescreen_yfov 1` (25th Anniversary) or a wider `mirv_fov` used to show the map around it; demos only, live play keeps the game's own scope (#799) | `goldsrc-hooks/src/demo_scope.rs`, `goldsrc-hooks/src/demo_scope/fill.rs`, [`goldsrc_hud_elements.md`](goldsrc_hud_elements.md) |
 | `dodstudio_hide_hand_signals` | `0` | replaces any `hs_*` body sequence (the nod, the point, the wave -- players miming their own voice commands) with that player's last ordinary one, for everyone in view | [`goldsrc_hltv_animation_fix.md`](goldsrc_hltv_animation_fix.md) §12 |
+| `dodstudio_hide_voice_menus` | `0` | hides the numbered menus a POV demo's player picked voice commands and hand signals from: the three voice-command menus (`voice_menu1`-`3`, which the server sends as `ShowMenu` with the nine `#Menu_*Voice*` keys) and the command menu `+commandmenu` opens, where the hand signals are. The menus still take the recorded number presses, so weapon switches replay as recorded; other `ShowMenu` text menus (server plugin votes) still show. While on, `+commandmenu` doesn't open in live play either. Turning it on or off with a voice menu up hides or shows it at once | `goldsrc-hooks/src/voice_menus.rs` |
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
@@ -93,8 +94,9 @@ state, not the state from before that line ran.
 ### `dodstudio_deathmsg`
 
 Raises DoD's four-line cap on the kill feed, moves it, hides frags, injects
-one by hand, or changes the names' font. The font takes effect on the next
-frame (#562). HLAE's own `mirv_deathmsg` supports only
+one by hand, changes the names' font, or scales the weapon icons. The font
+(#562) and the scale (#728) take effect on the next frame. HLAE's own
+`mirv_deathmsg` supports only
 `cstrike` and `tfc`, so none of it works for DoD. See
 [`goldsrc_death_notices.md`](goldsrc_death_notices.md).
 
@@ -109,8 +111,10 @@ frame (#562). HLAE's own `mirv_deathmsg` supports only
 | `dodstudio_deathmsg block clear` | stop hiding anything |
 | `dodstudio_deathmsg players` | list each player's slot, name and SteamID as `block` sees them (0 = the engine gave none) |
 | `dodstudio_deathmsg fake <killer> <victim> <weapon>` | inject one by hand; weapon is a name (`d_garand`, `garand`) or `1..43` |
-| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font, the icon stays as it is (#728); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
+| `dodstudio_deathmsg font <face> <size> [bold] [shadow]` | draw the names in that Windows font, `size` 4..200 px, from the next frame on (no reload); the face can be unquoted (`font Times New Roman 24`); the line step grows with the font (`scale` sizes the icon); each name keeps its team colour. `outline` is accepted but this engine's font renderer has none |
 | `dodstudio_deathmsg font default` | the game's own font again (`EngineFont` in `TrackerScheme.res`) |
+| `dodstudio_deathmsg scale <1..8>` | draw the weapon icons that many times their size (`1.5`, `2`, `3`), from the next frame on; the lines are spaced and right-aligned to match, the names are centred on the line beside a taller icon, and an icon is centred on its line when the `font` is taller than it. It is the same sprite magnified (bilinear, alpha-tested), so HD HUD sprites (#728 (a)) are what make it sharp |
+| `dodstudio_deathmsg scale default` | the game's own size again (`scale 1` is the same) |
 
 A `block` id is any of:
 
@@ -215,6 +219,9 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 `no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
 answer from the console, for key binds. Bare prints where the review is.
+While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
+`+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
+move the camera off the highlight's player (#826).
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 
@@ -410,13 +417,16 @@ The Demos tab lists the demos, with each one's map and date, and loads one
 with no demo playing. Click a column heading to sort by it; the boxes above
 filter by name or map (Search), map, HLTV or POV, and age in days.
 The Highlights tab lists every life with a kill in the demo playing
-(player, kills, weapons, time), narrowed by a Min kills box. A POV demo lists
-only the recording player's; an HLTV demo lists everyone's, with a Player box,
-and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
+(player, kills, weapons, time). A POV demo lists only the recording player's,
+named in a greyed-out Player box; an HLTV demo lists everyone's, the Player box
+narrows them, and Go also puts the camera on that player (`dodstudio_spec_target`). Go or a
 double-click jumps to 5 s before the first kill. It reads Studio's analyzer cache
 (`%APPDATA%\dod-studio\analyzer_cache`), so a demo Studio's Demo Analyzer or
 Master Queue already read shows at once; anything else is analysed in the
-game, with a progress bar, and saved there for Studio too. A demo too big for
+game, with a progress bar, and saved there for Studio too. That analysis
+starts as soon as a demo plays, with the window open or not; while it or the
+demo player's own load still runs, a strip along the top of every tab says how
+far each has got (`Loading: Demo 45%   Highlights 60%`, #797). A demo too big for
 the game's memory (analysis takes about 12 times the demo's size; the
 pre-Anniversary game has under 1 GB free) is refused with a note to open it in
 the Demo Analyzer instead. On the
