@@ -26,7 +26,7 @@
 		"enabled"		"1"
 		"labelText"		"Keep the camera on one player"
 		"textAlignment"		"west"
-		"helptext"		"dodstudio_spec_lock: the camera stays on the player when he dies."
+		"helptext"		"dodstudio_spec_lock: the camera stays on the player when they die."
 	}
 	"cvar_dodstudio_hide_spectator_bars"
 	{

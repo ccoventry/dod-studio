@@ -31,7 +31,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks, getVisibleDemos, getQueueRecorders, queueRecorderOf } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -48,7 +48,9 @@ import { initRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
+import { createProjectRescan } from './project_rescan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
+import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
@@ -56,6 +58,8 @@ import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
+import { createPlayersUi } from './players_ui.js';
+import { getGameFolder } from './game_folder_ui.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -134,6 +138,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
     checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    offerRescan: () => offerRescan(),
   });
 
   // Initialize modular UI panes
@@ -330,12 +335,20 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
-    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    getTakeIndex: () => takeIndex,
+    refreshQueue: () => refreshAfterRelocation(true),
     pickedDemosPresent,
   });
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  // Configuration > Players (#428): players_ui.js.
+  createPlayersUi({
+    getDemos: () => currentScannedDemos,
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getGameFolder,
+    persist: () => persistAppSettings(),
+  }).refresh();
 
   // ── Shared "a demo row was selected" handler ────────────────────────────────
   // Extracted so every renderMasterList call site behaves identically —
@@ -367,11 +380,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     setup?.refresh();
   }
 
-  // Which match and half each queued demo is, and Group by match (#685):
-  // queue_match_groups.js. Runs after a scan and a project load.
+  // Which match and half each queued demo is (#685): queue_match_groups.js.
+  // Runs after a scan and a project load. The Group by dropdown (#823):
+  // queue_group_by.js; grouped by match, a regroup also reads uncached demos.
   const { regroup: regroupMatches } = createQueueMatchGroups({
     getDemos: () => currentScannedDemos,
     renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    parseMissingByDefault: isGroupedByMatch,
+  });
+  createQueueGroupBy({
+    getDemos: () => currentScannedDemos,
+    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    regroupMatches: (opts) => regroupMatches(opts),
   });
 
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
@@ -388,6 +408,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     getScanPaths: () => scanPaths,
     persistAppSettings: () => persistAppSettings(),
     regroupMatches: () => regroupMatches(),
+    getTakeIndex: () => takeIndex,
+  });
+
+  // Demos an older DoD Studio scanned, offered for a rescan when a project
+  // opens: project_rescan.js.
+  const { offerRescan } = createProjectRescan({
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
   });
 
   async function updateExportPoolIndicator() {
@@ -505,6 +533,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initReviewMode({
     getDemos: () => currentScannedDemos,
     getCheckedPaths: getCheckedDemoPaths,
+    getShownPaths: () => getVisibleDemos().map((d) => d.path),
+    getRecorders: getQueueRecorders,
+    recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
   });
 
@@ -649,7 +680,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Clear Untracked / Selected / All and the tracked-work modal:
   // queue_actions.js.
-  const { requestTrackedClearConfirmation, requestTrackedDeleteConfirm } = createQueueActions({
+  const { requestTrackedDeleteConfirm } = createQueueActions({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     saveProjectSession: () => saveProjectSession(),

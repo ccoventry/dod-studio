@@ -28,6 +28,7 @@ documented in its own `//!` header.
 | `cap_break_probe` | How long after a capper's death does the capture cancel, and how many breaks does that credit? (#192) |
 | `weapon_switch_probe` | Where does a player rapidly cycle weapons, on the demo's own clock? |
 | `map_text_probe` | Which channel carries a map's on-screen text, and what does it say? |
+| `voice_menu_probe` | When does a POV demo show a voice menu (`ShowMenu`) or open the command menu, on the viewdemo clock? |
 | `svc_sound_probe` | Which carrier does a given sound arrive on, and does it name an entity? |
 | `position_field_probe` | Which movement fields do entity/client deltas carry, and how often? (#448) |
 | `kill_position_probe` | Does the entity replay agree with a naive one, and what does it cost? (#448) |
