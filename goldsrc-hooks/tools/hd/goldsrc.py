@@ -111,6 +111,57 @@ def skyname(game, m):
     return hit.group(1).lower() if hit else "desert"
 
 
+# ── Decals ───────────────────────────────────────────────────────────────────
+
+# The last palette entry that makes the engine treat a decal as a cut-out.
+DECAL_CUTOUT_KEY = b"\x00\x00\xff"
+
+
+def wad_miptexes(path):
+    """[(name, w, h, indices, palette)] for every uncompressed miptex lump
+    (type 0x43) in a WAD3, read as Draw_MiptexTexture reads a decal: mip 0 at
+    the lump's own offsets[0], and the palette after the four mips, at
+    pix + pix/4 + pix/16 + pix/64 + 2 (a 2-byte palette size) past it. For
+    the power-of-two sizes decals.wad has that is read_miptex's layout too;
+    this follows the header, as the engine does (#729)."""
+    with open(path, "rb") as f:
+        buf = f.read()
+    out = []
+    if buf[:4] != b"WAD3":
+        return out
+    n, diro = struct.unpack_from("<ii", buf, 4)
+    for i in range(n):
+        at = diro + 32 * i
+        if at + 32 > len(buf):
+            break
+        off, _disk, _size, kind, compressed = struct.unpack_from("<iiiBB", buf, at)
+        name = buf[at + 16:at + 32].split(b"\0")[0].decode("latin1")
+        if kind != 0x43 or compressed or off < 0 or off + 40 > len(buf):
+            continue
+        w, h = struct.unpack_from("<II", buf, off + 16)
+        (mip0,) = struct.unpack_from("<I", buf, off + 24)
+        pix = w * h
+        data_at = off + mip0
+        pal_at = data_at + pix + (pix >> 2) + (pix >> 4) + (pix >> 6) + 2
+        if w == 0 or h == 0 or w > 4096 or h > 4096 or pal_at + 768 > len(buf):
+            continue
+        out.append((name, w, h, bytes(buf[data_at:data_at + pix]), bytes(buf[pal_at:pal_at + 768])))
+    return out
+
+
+def decal_name(name, pal):
+    """The name GL_LoadTexture2 sees for a decal lump: Draw_MiptexTexture
+    overwrites its first character with `{` when palette entry 255 is pure
+    blue (then the decal is a cut-out, TEX_TYPE_ALPHA) and `}` otherwise
+    (index = alpha in palette entry 255's colour, TEX_TYPE_ALPHA_GRADIENT).
+    Same in both engine builds (#729)."""
+    return ("{" if pal[765:768] == DECAL_CUTOUT_KEY else "}") + name[1:]
+
+
+def is_cutout_decal(pal):
+    return pal[765:768] == DECAL_CUTOUT_KEY
+
+
 # ── Studio models ────────────────────────────────────────────────────────────
 
 STUDIO_NF_MASKED = 0x40

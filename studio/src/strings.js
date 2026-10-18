@@ -1679,7 +1679,7 @@ export const STRINGS = {
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
-    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
+    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
     // #426: how much of the game a style covers.
@@ -1687,7 +1687,7 @@ export const STRINGS = {
     CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
     largestSize: (width, height) => `up to ${width}×${height}`,
     LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
-    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', decals: 'decals', detail: 'detail textures', sky: 'skies' },
     someOf: (files, most, type) => `${files} of ${most} ${type}`,
     styleGaps: (style, none, some) => {
       const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
@@ -1859,12 +1859,12 @@ export const STRINGS = {
     // What to do about each reason, after the hook's own heading.
     MISSES_ADVICE: {
       wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
-      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      no_file: "Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps. A decal that isn't in decals.wad is a player's spray, which has no HD version.",
       failed: "A file was found but couldn't be used; each line says why.",
       on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
     },
     // The hook's asset kinds in the miss list (singular, unlike the folders).
-    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', decal: 'Decal', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
