@@ -80,6 +80,9 @@
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
+//! - `hud_sprites`: `dodstudio_hide_asset` for the HUD's own 2D sprites, by
+//!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
+//!   function pointers (#808). Installed when client.dll initialises.
 //! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
@@ -213,9 +216,11 @@ mod hand_signals;
 mod hide_asset;
 mod hlae_window;
 mod hltv_messages;
+mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
+mod list_panel;
 mod map_text;
 mod missing_shots;
 mod msglog;

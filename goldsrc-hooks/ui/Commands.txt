@@ -31,7 +31,7 @@ HUD
       Hide the text a map puts on screen itself (mortar warnings, round results).
   dodstudio_hide_clan_text 0/1
       Hide clan-match text: warm-up and ready rules, Warmup Mode, the countdown, MATCH IS LIVE!
-  dodstudio_hide_asset list|add|del|clear <model>...
+  dodstudio_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
       Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow] (live). The bare command shows the options.
@@ -61,7 +61,7 @@ DEMO PLAYBACK
       A jump skips the events and commands it passes over.
   dodstudio_reload_demo
       Play the last demo again.
-  dodstudio_review yes|no|replay|next|back|stop
+  dodstudio_review yes|maybe|no|replay|next|back|stop
       Answer the highlight DoD Studio's Review highlights is playing, or move through them (the Review tab).
   dodstudio_schedule load "<file>"|clear
       Run the commands in a schedule file at their demo times, from the hook (#434, R&D).
@@ -87,6 +87,8 @@ DOD STUDIO WINDOW
       Folders with no demo anywhere inside them aren't listed.
   dodstudio_demo_list_count_subfolders 0/1
       A folder's demo count includes its subfolders.
+  dodstudio_demo_list_show_counts 0/1
+      Folders are counted, and folder rows on the Demos tab show their demo count. 0: nothing is counted.
   dodstudio_demo_other_drives 0/1
       viewdemo and playdemo open a demo on another drive by its full path: viewdemo "D:/folder/demo".
   dodstudio_remember_window_layout 0/1

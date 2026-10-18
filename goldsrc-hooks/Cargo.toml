@@ -25,6 +25,9 @@ analysis = { path = "../analysis" }
 # HD player sprays are PNGs in the game's `logos` folder (#428); the one
 # image format the rest of the hook reads is TGA, decoded by hand.
 png = "0.18"
+# The Demos tab's Go to list reads Studio's demo folders out of its
+# settings.json (`demo_list_folders::studio_folders`, #779).
+serde_json = { workspace = true }
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
     "Win32_System_Memory",
