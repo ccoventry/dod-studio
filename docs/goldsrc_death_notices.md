@@ -635,9 +635,11 @@ length (`goldsrc-hooks/src/deathmsg/scale.rs`):
    the step `max(S·icon height, font height)`.
 2. The `call [gEngfuncs+0x18]` becomes `call rel32; nop` into the hook. At
    S = 1 it forwards to whatever the table held (HLAE's wrapper, if HLAE hooked
-   the slot). At S ≠ 1 it looks the unscaled rect up (same index in the copy),
-   moves the icon down by `(font height - S·icon height) / 2` when the font is
-   taller, and calls that same function with the **unscaled** rect under
+   the slot), moving the icon down by `(font height - icon height) / 2` when a
+   font is set and taller. At S ≠ 1 it looks the unscaled rect up (same index
+   in the copy), moves the icon down by `(font height - S·icon height) / 2`
+   when the font is taller, and calls that same function with the
+   **unscaled** rect under
    `glPushMatrix; glTranslatef(x+.5, y+.5); glScalef(S, S, 1);
    glTranslatef(-(x+.5), -(y+.5)); …; glPopMatrix` on `GL_MODELVIEW`
    (`opengl32.dll`'s exports; the matrix mode is restored if it was another).
@@ -645,6 +647,16 @@ length (`goldsrc-hooks/src/deathmsg/scale.rs`):
    `gl_spriteblend`, scissor, `GL_Bind`'s cache -- S× bigger about the icon's
    corner. `glTranslatef`/`glScalef` post-multiply, so this is the engine's
    pixel space whatever matrix the HUD pass has current.
+3. The names are centred on the line when the icon is the taller. The
+   killer's name is drawn before the icon (`0x2b089`, the icon at `0x2b0f1`),
+   so the line's height has to be known at its start: a 6-byte detour at
+   `0x2b026` (`shl ebx, 4; add esp, 0xc`, just after the first rect read, with
+   `ebx` the line's sprite index and `eax` the array `Draw` reads) stores
+   `rect.bottom - rect.top` -- the scaled height at S ≠ 1. §6's name draws
+   then use `y + (max(icon height, font height) - text height) / 2`, the text
+   height being our font's, or the engine font's as its length call reports
+   it. At S = 1 with no font they leave `y` alone, so the stock layout is
+   untouched.
 
 Why not a vftable wrapper around `Draw` (slot 3 of `+0xac1c4`, which does hold
 `Draw`) with a per-call swap of the table slot: `hudelement` owns that slot --
@@ -656,6 +668,6 @@ engine's own draw already has.
 The magnified icon is the 640-set sprite under bilinear filtering with the
 engine's alpha test (`GL_GREATER 0.632`), so it is soft at 2×; HD HUD sprites
 (#728 (a), `texture_hires` with `mipmap = 1`) are what make it sharp.
-`tools/verify_killfeed_scale_offsets.py` checks the three operands, the field
-offsets, the stride, the vftable slot and that both installs ship the same
-`client.dll`.
+`tools/verify_killfeed_scale_offsets.py` checks the three operands, the
+line-start detour's span and registers, the field offsets, the stride, the
+vftable slot and that both installs ship the same `client.dll`.

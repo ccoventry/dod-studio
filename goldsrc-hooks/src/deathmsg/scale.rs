@@ -41,7 +41,16 @@
 //!    alpha test, `gl_spriteblend`, the scissor, `GL_Bind`'s cache -- S times
 //!    bigger about the icon's corner. `glTranslatef`/`glScalef` post-multiply
 //!    the current matrix, so this is the engine's pixel space whatever matrix
-//!    the HUD pass has current; the push/pop leave nothing behind.
+//!    the HUD pass has current; the push/pop leave nothing behind. With a
+//!    font taller than the icon it drops the icon to the line's middle at
+//!    S = 1 too.
+//! 3. A 6-byte detour at the line's start (`shl ebx, 4; add esp, 0xc`,
+//!    `+0x2b026`), right after the first rect read, where `ebx` is the line's
+//!    sprite index and `eax` the array `Draw` reads: its stub stores the icon's
+//!    height (`bottom - top`, so the scaled one) in [`ICON_TALL`]. The killer's
+//!    name is drawn before the icon, so this is the only point where the
+//!    line's height is known in time to centre both names on it
+//!    ([`name_draw_y`], used by `font`'s name draws).
 //!
 //! A vftable wrapper around `Draw` with a per-call swap of the table slot
 //! would do the same, but `hudelement` owns that vftable slot (it refuses a
@@ -50,16 +59,18 @@
 //! neither, and they compose with `max`, `offset` and `font`, which all leave
 //! these three operands alone.
 //!
-//! Installed on the first `scale` other than 1, never undone (`scale 1` keeps
-//! the game's pointer in `RECTS` and forwards the call), re-checked every
-//! frame like `font`, re-applied should `client.dll` be loaded afresh. At S =
-//! 1 a frame costs one pointer copy and a forwarded call per line.
+//! Installed on the first `scale` other than 1 or the first `font`, never
+//! undone (`scale 1` keeps the game's pointer in `RECTS` and forwards the
+//! call), re-checked every frame like `font`, re-applied should `client.dll`
+//! be loaded afresh. At S = 1 with no font a frame costs one pointer copy, a
+//! forwarded call and a four-instruction stub per line, and draws exactly
+//! what the game does.
 
 // The patching runs only in the 32-bit DLL; a host build (workspace clippy,
 // tests) keeps the tables and helpers for the unit tests alone.
 #![cfg_attr(not(target_arch = "x86"), allow(dead_code, unused_imports))]
 
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU32, Ordering};
 
 use super::font;
 
@@ -101,10 +112,19 @@ const DRAW_HOLES_SLOT: usize = 6;
 const SPR_SET_CALL: usize = 0xdc;
 const SPR_SET_SLOT: usize = 4;
 
+/// The line-start detour (`+0x2b026`): `shl ebx, 4` (the sprite index into a
+/// byte offset) and `add esp, 0xc` (the victim width call's arguments). It
+/// sits after the first rect read and its `mov esi`/`mov ecx`, and before
+/// the anchor's `[ebx+eax+4]`; `edx` is dead there (the next use writes it).
+const LINE_AT: usize = 0x24;
+const LINE_STOLEN: &[u8] = &[0xc1, 0xe3, 0x04, 0x83, 0xc4, 0x0c];
+
 /// A sprite count past this is not `CHud`'s: `hud.txt` has ~200 entries.
 const MAX_SPRITES: usize = 4096;
 
 // The sites in `Draw`'s order, and the count before the array in `CHud`.
+const _: () = assert!(RECTS_READS[0] + READ_LEN <= LINE_AT);
+const _: () = assert!(LINE_AT + LINE_STOLEN.len() < RECTS_READS[1]);
 const _: () = assert!(RECTS_READS[0] < RECTS_READS[1]);
 const _: () = assert!(RECTS_READS[1] < SPRITES_READ);
 const _: () = assert!(SPRITES_READ < SPR_SET_CALL);
@@ -176,6 +196,60 @@ pub(super) fn line_step(icon_height: i32, font_tall: i32) -> i32 {
 /// draws it.
 pub(super) fn icon_y(y: i32, icon_height: i32, font_tall: i32) -> i32 {
     y + (line_step(icon_height, font_tall) - icon_height) / 2
+}
+
+/// Where a name's top goes on a line that starts at `y`, for text
+/// `text_tall` px tall: centred on the line (the taller of the icon and our
+/// font), so it sits mid-icon when the icon is the taller. Text as tall as
+/// the line, or of unknown height (0), stays at the top.
+pub(super) fn name_y(y: i32, icon_height: i32, font_tall: i32, text_tall: i32) -> i32 {
+    if text_tall <= 0 {
+        return y;
+    }
+    y + (line_step(icon_height, font_tall) - text_tall).max(0) / 2
+}
+
+/// The icon height of the line `Draw` is on, as the line-start stub stored
+/// it: the scaled height while a scale is in force. 0 until the stub ran.
+/// Written by game code, so an address rather than a value:
+/// [`AtomicI32::as_ptr`] goes into the stub.
+static ICON_TALL: AtomicI32 = AtomicI32::new(0);
+
+/// The y `font`'s name draws use on a line that starts at `y`, for text
+/// `text_tall` px tall: the game's own `y` at scale 1 with no font (stock
+/// top-aligned names), else [`name_y`] on the current line.
+pub(super) fn name_draw_y(y: i32, text_tall: i32) -> i32 {
+    let font_tall = font::tall();
+    if is_unity(scale()) && font_tall == 0 {
+        return y;
+    }
+    name_y(y, ICON_TALL.load(Ordering::Relaxed), font_tall, text_tall)
+}
+
+/// The line-start stub, hand-assembled:
+///
+/// ```asm
+/// shl ebx, 4                   ; stolen: the sprite index as a byte offset
+/// mov edx, [ebx+eax+0xc]       ; rect.bottom, from the array Draw reads
+/// sub edx, [ebx+eax+8]         ; - rect.top
+/// mov [ICON_TALL], edx
+/// add esp, 0xc                 ; stolen, last, so the flags are the game's
+/// jmp dword ptr [RESUME]
+/// ```
+///
+/// The rect is the one `Draw` reads at `[ebx+eax]` and `[ebx+eax+4]` right
+/// after, so the stub reads nothing the game would not.
+fn line_stub(icon_tall: usize, resume: usize) -> Vec<u8> {
+    let (shl, add) = LINE_STOLEN.split_at(3);
+    let mut code = shl.to_vec();
+    code.extend_from_slice(&[0x8b, 0x54, 0x03, 0x0c]); // mov edx, [ebx+eax+0xc]
+    code.extend_from_slice(&[0x2b, 0x54, 0x03, 0x08]); // sub edx, [ebx+eax+8]
+    code.extend_from_slice(&[0x89, 0x15]); // mov [abs32], edx
+    code.extend_from_slice(&(icon_tall as u32).to_le_bytes());
+    code.extend_from_slice(add); // add esp, 0xc
+    code.extend_from_slice(&[0xff, 0x25]); // jmp dword ptr [abs32]
+    code.extend_from_slice(&(resume as u32).to_le_bytes());
+    code
 }
 
 /// The screen span the engine's quad covers once scaled about `(x + 0.5)`:
@@ -263,6 +337,12 @@ mod hook {
     static COMPLAINED: AtomicBool = AtomicBool::new(false);
     /// Whether a bad sprite count has been logged.
     static COUNT_COMPLAINED: AtomicBool = AtomicBool::new(false);
+    /// Where the line-start stub jumps back to, and the base its detour went
+    /// into (0 before).
+    static LINE_RESUME: AtomicUsize = AtomicUsize::new(0);
+    static LINE_BASE: AtomicUsize = AtomicUsize::new(0);
+    static LINE_DETOUR: std::sync::Mutex<Option<crate::detour::Detour>> =
+        std::sync::Mutex::new(None);
 
     const GL_MATRIX_MODE: u32 = 0x0ba0;
     const GL_MODELVIEW: u32 = 0x1700;
@@ -426,7 +506,21 @@ mod hook {
         // signature.
         let original: DrawHolesFn = unsafe { std::mem::transmute(original) };
         let s = scale();
-        if is_unity(s) || prc.is_null() {
+        if prc.is_null() {
+            unsafe { original(frame, x, y, prc) };
+            return;
+        }
+        if is_unity(s) {
+            // The game's rect at the game's size; only a taller font moves
+            // the icon, down to the line's middle.
+            let tall = font::tall();
+            let y = if tall == 0 {
+                y
+            } else {
+                // Safety: `Draw`'s stack copy of the game's rect.
+                let r = unsafe { *prc };
+                icon_y(y, r.bottom - r.top, tall)
+            };
             unsafe { original(frame, x, y, prc) };
             return;
         }
@@ -555,6 +649,34 @@ mod hook {
         sync_rects();
 
         let mut wrote = false;
+        if LINE_BASE.load(Ordering::Acquire) != base {
+            let at = found + LINE_AT;
+            // Safety: inside the matched span.
+            let present = unsafe { std::slice::from_raw_parts(at as *const u8, LINE_STOLEN.len()) };
+            if present != LINE_STOLEN {
+                return Err(format!(
+                    "expected the line start {LINE_STOLEN:02x?} at +{:#x}, found {present:02x?}",
+                    at - base
+                ));
+            }
+            LINE_RESUME.store(at + LINE_STOLEN.len(), Ordering::Release);
+            let stub = line_stub(ICON_TALL.as_ptr() as usize, LINE_RESUME.as_ptr() as usize);
+            // Safety: the span was checked byte for byte, and nothing in Draw
+            // branches into it (tools/verify_killfeed_scale_offsets.py).
+            let detour = unsafe { crate::detour::install(at, LINE_STOLEN.len(), &stub) }?;
+            unsafe {
+                crate::debug::report(&format!(
+                    "deathmsg scale: line-start detour at client+{:#x}, stub at {:#x}",
+                    at - base,
+                    detour.stub_address()
+                ))
+            };
+            if let Ok(mut held) = LINE_DETOUR.lock() {
+                *held = Some(detour);
+            }
+            LINE_BASE.store(base, Ordering::Release);
+            wrote = true;
+        }
         for address in pending_reads {
             // Safety: a stock `A1 imm32` in the matched span; the same five
             // bytes long, so no instruction boundary moves.
@@ -593,6 +715,9 @@ mod hook {
         install(base)?;
         if !is_unity(s) {
             gl().map_err(|why| format!("cannot scale the icons: {why}"))?;
+            // The names are centred beside the bigger icon through `font`'s
+            // text calls, which forward to the engine while no font is set.
+            font::ensure_installed().map_err(|why| format!("cannot centre the names: {why}"))?;
         }
         SCALE_BITS.store(s.to_bits(), Ordering::Release);
         sync_rects();
@@ -604,6 +729,16 @@ mod hook {
             format_scale(s),
             format_scale(s)
         ))
+    }
+
+    /// Installs the operands and the line-start detour at the scale in force,
+    /// for `font`: its icon centring goes through [`draw_holes`] and its name
+    /// centring needs [`ICON_TALL`].
+    pub(in crate::deathmsg) fn ensure_installed() -> Result<(), String> {
+        let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
+        install(base)?;
+        sync_rects();
+        Ok(())
     }
 
     /// Keeps the operands ours and the rect pointer current, once the module
@@ -650,6 +785,9 @@ pub(super) fn poll() {
     #[cfg(target_arch = "x86")]
     hook::poll();
 }
+
+#[cfg(target_arch = "x86")]
+pub(super) use hook::ensure_installed;
 
 #[cfg(test)]
 mod tests {
@@ -755,6 +893,67 @@ mod tests {
     }
 
     #[test]
+    fn names_are_centred_on_the_line_beside_a_taller_icon() {
+        // `scale 2` + `font "Verdana" 28`: a 2x skull is 104 px, the line
+        // 104, the names (104 - 28) / 2 = 38 px down.
+        let skull2 = scale_rect(SKULL, 2.0);
+        let icon = skull2.bottom - skull2.top;
+        assert_eq!(line_step(icon, 28), 104);
+        assert_eq!(name_y(20, icon, 28, 28), 58);
+        // `scale 2`, no font: the engine font's own height (16 px here) is
+        // centred on the 104 px line, and the line is the icon's.
+        assert_eq!(line_step(icon, 0), 104);
+        assert_eq!(name_y(20, icon, 0, 16), 64);
+        // An odd gap rounds toward the top, as the icon's does.
+        assert_eq!(name_y(20, 41, 0, 16), 32);
+    }
+
+    #[test]
+    fn names_stay_at_the_top_when_the_font_is_the_taller() {
+        // `scale 1` + `font "Verdana" 60`: the line is the font's, so the
+        // names fill it and the icon is the one centred.
+        assert_eq!(line_step(40, 60), 60);
+        assert_eq!(name_y(20, 40, 60, 60), 20);
+        assert_eq!(icon_y(20, 40, 60), 30);
+        // Unknown text height (the stub or the length call not run yet):
+        // the game's y.
+        assert_eq!(name_y(20, 104, 0, 0), 20);
+        // Text taller than the line cannot go up past its top.
+        assert_eq!(name_y(20, 10, 0, 16), 20);
+    }
+
+    #[test]
+    fn scale_1_with_no_font_draws_the_names_where_the_game_does() {
+        assert_eq!(scale(), 1.0);
+        assert_eq!(font::tall(), 0);
+        // Whatever the last line's icon was, the stock layout is untouched.
+        ICON_TALL.store(104, Ordering::Relaxed);
+        assert_eq!(name_draw_y(20, 16), 20);
+        assert_eq!(name_draw_y(20, 0), 20);
+        // And a scaled rect at 1 is the game's.
+        assert_eq!(scale_rect(GARAND, 1.0), GARAND);
+        assert_eq!(icon_y(20, 34, 0), 20);
+    }
+
+    #[test]
+    fn the_line_stub_reproduces_the_stolen_bytes_around_the_height_store() {
+        let code = line_stub(0x1111_1111, 0x2222_2222);
+        assert_eq!(&code[..3], &LINE_STOLEN[..3], "shl ebx, 4 first");
+        assert_eq!(
+            &code[3..11],
+            &[0x8b, 0x54, 0x03, 0x0c, 0x2b, 0x54, 0x03, 0x08],
+            "edx = [ebx+eax+0xc] - [ebx+eax+8]: bottom - top"
+        );
+        assert_eq!(&code[11..17], &[0x89, 0x15, 0x11, 0x11, 0x11, 0x11]);
+        assert_eq!(&code[17..20], &LINE_STOLEN[3..], "add esp, 0xc last");
+        assert_eq!(&code[20..], &[0xff, 0x25, 0x22, 0x22, 0x22, 0x22]);
+        assert!(LINE_STOLEN.len() >= 5, "room for the jump");
+        // The stub's reads are the rect's top and bottom.
+        assert_eq!(std::mem::offset_of!(WRect, top), 8);
+        assert_eq!(std::mem::offset_of!(WRect, bottom), 0xc);
+    }
+
+    #[test]
     fn scale_arguments_parse_as_typed() {
         assert_eq!(parse_args(&argv(&["2"])), Ok(2.0));
         assert_eq!(parse_args(&argv(&["1.5"])), Ok(1.5));
@@ -787,6 +986,11 @@ mod tests {
             RECTS_READS[0],
             0x0b + font::CALL_LEN + 4,
             "mov ebx, [esp+0x28] between"
+        );
+        assert_eq!(
+            LINE_AT,
+            RECTS_READS[0] + READ_LEN + 6 + 4,
+            "the rect read, mov esi, [imm32], mov ecx, [esp+0x3c], then the line start"
         );
         assert_eq!(
             DRAW_HOLES_CALL,

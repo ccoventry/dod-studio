@@ -27,6 +27,13 @@ runtime proves they land on the instructions the Rust assumes. This does:
      one `nop`.
   8. Both movie installs ship the same `client.dll` (so one table serves both
      engine builds; nothing in `hw.dll` is touched).
+  9. The line-start detour (`LINE_AT`, `LINE_STOLEN`): the bytes are
+     `shl ebx, 4; add esp, 0xc`, right after the first rect read with `ebx`
+     the line's sprite index (`[esp+0x1c]`, the one `SPR_Set`'s handle
+     lookup reads) and nothing between writing `eax`/`ebx`; `edx` is written
+     before it is next read; nothing branches into the span; and `[ebx+8]` /
+     `[ebx+0xc]`, the stub's top and bottom, are what the line step
+     subtracts.
 
 Usage:
     python goldsrc-hooks/tools/verify_killfeed_scale_offsets.py [client.dll] [game-folder ...]
@@ -74,6 +81,11 @@ def rust_const(src, name):
     if not match:
         raise SystemExit(f"could not find `const {name}`")
     return num(match.group(1))
+
+
+def rust_byte_list(src, name):
+    body = re.search(rf"const {name}: &\[u8\] = &\[(.*?)\];", src, re.S).group(1)
+    return [num(t) for t in re.findall(r"0x[0-9a-fA-F_]+|\d+", body)]
 
 
 def hudelement_vftable(src, cls):
@@ -242,6 +254,41 @@ def check_client(dll):
     strip = lambda ms: [m for m in ms if m != "nop"]  # noqa: E731
     check(after.count("nop") == before.count("nop") + 1 and strip(after) == strip(before),
           "with the three operands rewritten, Draw decodes to the same instructions plus one nop")
+
+    # -- 9. the line-start detour -----------------------------------------------
+    line_at = rust_const(scale_src, "LINE_AT")
+    line_stolen = rust_byte_list(scale_src, "LINE_STOLEN")
+    start = found + line_at
+    present = bytes(img.img[start:start + len(line_stolen)])
+    check(present == bytes(line_stolen), f"+{start:#x} holds LINE_STOLEN {bytes(line_stolen).hex(' ')}: {present.hex(' ')}")
+    span = []
+    at = start
+    while at < start + len(line_stolen) and at in decoded:
+        span.append(f"{decoded[at].mnemonic} {decoded[at].op_str}")
+        at += decoded[at].size
+    check(span == ["shl ebx, 4", "add esp, 0xc"] and at == start + len(line_stolen),
+          f"and decodes as `shl ebx, 4; add esp, 0xc`, ending on a boundary: {span}")
+    between = [f"{decoded[r].mnemonic} {decoded[r].op_str}" for r in sorted(decoded) if found <= r < start]
+    read_text = f"mov eax, dword ptr [{img.base + rects_field:#x}]" if rects_field is not None else None
+    after_read = between[between.index(read_text) + 1:] if read_text in between else None
+    check(after_read is not None and all(not re.match(r"\w+ (eax|ebx|ax|al|bx|bl),", t) for t in after_read),
+          f"between the first rect read and the span nothing writes eax or ebx: {after_read}")
+    loads = [t for t in between if t.startswith("mov ebx, ")]
+    pushes = sum(t.startswith("push ") for t in between)
+    check(loads == ["mov ebx, dword ptr [esp + 0x28]"] and pushes == 3 and not any(t.startswith("add esp") for t in between),
+          f"ebx is [esp+0x28] under three pushes, i.e. the local [esp+0x1c]: {loads}, {pushes} pushes")
+    sprite = [r for r in sorted(decoded) if f"{decoded[r].mnemonic} {decoded[r].op_str}" == "mov eax, dword ptr [esp + 0x1c]"
+              and found + sprites_read - 0x20 < r < found + sprites_read]
+    check(len(sprite) == 1, "the same local [esp+0x1c] is the index SPR_Set's handle lookup reads (the line's sprite)")
+    nxt = decoded.get(start + len(line_stolen))
+    nxt_text = f"{nxt.mnemonic} {nxt.op_str}" if nxt else ""
+    check(nxt_text.startswith("mov edx, "), f"edx, which the stub uses, is written next: {nxt_text}")
+    hits = branches_into(decoded, img, start, start + len(line_stolen))
+    check(not hits, f"nothing in Draw branches into the line-start span {hits}")
+    copies = [f"{decoded[r].mnemonic} {decoded[r].op_str}" for r in sorted(decoded) if found + reads[1] < r < found + sprites_read]
+    check("mov eax, dword ptr [ebx + 8]" in copies and "mov ecx, dword ptr [ebx + 0xc]" in copies
+          and "mov dword ptr [esp + 0x50], eax" in copies and "mov dword ptr [esp + 0x54], ecx" in copies,
+          "Draw copies rect+8 / rect+0xc to the [esp+0x50] / [esp+0x54] its line step subtracts: the stub's top and bottom")
     return ok
 
 
