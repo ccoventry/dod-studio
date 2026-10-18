@@ -572,6 +572,12 @@ pub fn poll() {
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
+    // Once a second: rereads Studio's Players table when it changed and
+    // installs the demo spray detours once it asks for anything (#428).
+    crate::spray_hltv::poll();
+    // After the table is read: this frame's crosshair for the player on
+    // screen, which the HUD's sprite draws then pick up (#428).
+    crate::player_crosshair::poll();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();
     crate::missing_shots::poll();
@@ -732,6 +738,13 @@ fn status_text() -> String {
     }
     if let Some(hull) = crate::hull_trace_guard::status_line() {
         lines.push(hull);
+    }
+    lines.push(crate::player_overrides::status());
+    if let Some(sprays) = crate::spray_hltv::status_line() {
+        lines.push(sprays);
+    }
+    if let Some(crosshair) = crate::player_crosshair::status_line() {
+        lines.push(crosshair);
     }
     if let Some(esc) = crate::frame_esc::status_line() {
         lines.push(esc);
@@ -1483,6 +1496,7 @@ pub fn install() {
     add_command(crate::review::NAME, crate::review::command);
     add_command(crate::schedule::NAME, crate::schedule::command);
     add_command(crate::batch::NAME, crate::batch::command);
+    add_command(crate::spray::NAME, crate::spray::command);
 
     // Standalone, like `dodstudio_hd_enabled`: the seek reads it when it runs,
     // so it needs no poll, and a failed registration costs only this one
@@ -1635,6 +1649,11 @@ pub fn install() {
     }
     if let Some(bob) = register(crate::pov_live_bob::NAME, "0") {
         crate::pov_live_bob::set_cvar(bob);
+    }
+    // Off unless Studio turns it on: a game not started from Studio keeps
+    // its own sprays and crosshair (#428).
+    if let Some(overrides) = register(crate::player_overrides::NAME, "0") {
+        crate::player_overrides::set_cvar(overrides);
     }
     if let (Some(flash), Some(shake)) = (
         register(crate::screen_effects::FLASH_NAME, "0"),

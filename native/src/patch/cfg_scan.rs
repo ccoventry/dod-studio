@@ -453,6 +453,10 @@ pub const FAST_FORWARD_CVARS: &[&str] = &["fps_override", "fps_max", "gl_vsync"]
 /// - `dodstudio_batch` / `dodstudio_schedule` — the hook DLL's runners for a
 ///   batch run without patched demos (#434). One started from a batch's own
 ///   commands would replace the batch that is running.
+/// - `dodstudio_spray` — writes the game's own spray file (`tempdecal.wad`)
+///   (#428). A demo draws the sprays it recorded (or Configuration > Players'),
+///   never that file, so from a batch it would change the user's spray on
+///   disk and nothing on screen.
 pub const BANNED_COMMANDS: &[&str] = &[
     "mirv_recordmovie_start",
     "mirv_recordmovie_stop",
@@ -461,6 +465,7 @@ pub const BANNED_COMMANDS: &[&str] = &[
     "r_norefresh",
     "dodstudio_batch",
     "dodstudio_schedule",
+    "dodstudio_spray",
     "r_drawentities",
     "cl_lw",
 ];

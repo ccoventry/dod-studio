@@ -761,7 +761,7 @@ pub fn apply() {
                     // have fired, and its draw plays below.
                     unsafe {
                         crate::debug::report(
-                            "anim_fix: spectated player fired just as he switched -- the previous gun's round, the draw plays instead",
+                            "anim_fix: spectated player fired just as they switched -- the previous gun's round, the draw plays instead",
                         )
                     };
                 }
