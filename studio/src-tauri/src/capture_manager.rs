@@ -1628,6 +1628,11 @@ pub struct SerializedDemo {
     /// existed; the frontend scans those again.
     #[serde(default)]
     pub signon_maps: Vec<String>,
+    /// The `analysis::highlights::HIGHLIGHTS_VERSION` that listed this demo's
+    /// highlights; 0 for a demo from a project saved before it was recorded.
+    /// Opening a project offers to rescan demos below the current one.
+    #[serde(default)]
+    pub highlights_version: u32,
 }
 
 /// A demo already in the queue, as the frontend passes it to a scan.
@@ -1657,6 +1662,84 @@ pub struct ScanCopy {
     /// `same_as` was already in the queue; otherwise it's the copy this scan
     /// kept.
     pub queued: bool,
+}
+
+/// What `scan_demo_for_highlights_with_analysis` lists for one demo, before
+/// its analysis.
+type ScannedHighlights = (
+    f32,
+    Vec<CaptureStreak>,
+    bool,
+    Option<usize>,
+    i32,
+    Option<i32>,
+    std::sync::Arc<Vec<f32>>,
+);
+
+/// One scanned demo as the queue holds it, stamped with the version of
+/// highlight detection that listed its highlights.
+fn serialized_demo(
+    file: &std::path::Path,
+    file_name: String,
+    file_key: Option<String>,
+    highlights: ScannedHighlights,
+    analysis: &::analysis::Analysis,
+) -> SerializedDemo {
+    let (
+        tickrate,
+        streaks,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        match_start_tick,
+        frame_times_arc,
+    ) = highlights;
+    let recorder = native::player_index::players_in(analysis)
+        .players
+        .into_iter()
+        .find(|p| p.recorder);
+
+    let serialized_streaks: Vec<SerializedStreak> = streaks
+        .into_iter()
+        .map(|mut s| {
+            s.match_start_tick = match_start_tick;
+            s.frame_times = frame_times_arc.clone();
+            let facts = native::clip_facts::streak_facts(
+                analysis,
+                s.player_index,
+                s.kills.first().map_or(s.start_tick, |k| k.0),
+            )
+            .unwrap_or_default();
+            let mut serialized = SerializedStreak::from(s);
+            serialized.faction = Some(facts.faction).filter(|f| !f.is_empty());
+            serialized.victims = facts.victims;
+            serialized.victim_factions = facts.victim_factions;
+            serialized
+        })
+        .collect();
+
+    SerializedDemo {
+        path: file.to_string_lossy().to_string(),
+        name: file_name,
+        tickrate,
+        is_pov,
+        local_player_index,
+        playback_frames,
+        streaks: serialized_streaks,
+        file_key,
+        map_name: Some(analysis.demo_info.map_name.clone()).filter(|m| !m.is_empty()),
+        modified_unix_secs: std::fs::metadata(file)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs()),
+        peak_packet_entities: analysis.demo_info.peak_packet_entities,
+        recorder_id: recorder.as_ref().map(|p| p.id.clone()),
+        recorder_name: recorder.map(|p| p.name),
+        teams: ::analysis::team_tags(&analysis.state),
+        signon_maps: analysis.state.signon_maps.clone(),
+        highlights_version: ::analysis::highlights::HIGHLIGHTS_VERSION,
+    }
 }
 
 impl From<CaptureStreak> for SerializedStreak {
@@ -2210,75 +2293,22 @@ pub async fn scan_directory_impl(
                                 plain_scan_failure(file, reason),
                             ));
                         }
-                        let serialized = scanned.ok().map(
-                            |(
-                                (
-                                    tickrate,
-                                    streaks,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    match_start_tick,
-                                    frame_times_arc,
-                                ),
-                                analysis,
-                            )| {
-                                // Pre-warm the analyzer cache with the Analysis
-                                // this scan already computed, so opening this
-                                // demo in the Demo Analyzer afterward hits the
-                                // cache path instead of re-parsing.
-                                // Best-effort/silent, and safe under concurrency:
-                                // keyed per demo path, not one shared cache.
-                                native::warm_analyzer_cache(file, &analysis);
-                                let recorder = native::player_index::players_in(&analysis)
-                                    .players
-                                    .into_iter()
-                                    .find(|p| p.recorder);
-
-                                let serialized_streaks: Vec<SerializedStreak> = streaks
-                                    .into_iter()
-                                    .map(|mut s| {
-                                        s.match_start_tick = match_start_tick;
-                                        s.frame_times = frame_times_arc.clone();
-                                        let facts = native::clip_facts::streak_facts(
-                                            &analysis,
-                                            s.player_index,
-                                            s.kills.first().map_or(s.start_tick, |k| k.0),
-                                        )
-                                        .unwrap_or_default();
-                                        let mut serialized = SerializedStreak::from(s);
-                                        serialized.faction =
-                                            Some(facts.faction).filter(|f| !f.is_empty());
-                                        serialized.victims = facts.victims;
-                                        serialized.victim_factions = facts.victim_factions;
-                                        serialized
-                                    })
-                                    .collect();
-
-                                SerializedDemo {
-                                    path: file.to_string_lossy().to_string(),
-                                    name: file_name.clone(),
-                                    tickrate,
-                                    is_pov,
-                                    local_player_index,
-                                    playback_frames,
-                                    streaks: serialized_streaks,
-                                    file_key: file_keys[idx].clone(),
-                                    map_name: Some(analysis.demo_info.map_name.clone())
-                                        .filter(|m| !m.is_empty()),
-                                    modified_unix_secs: std::fs::metadata(file)
-                                        .and_then(|m| m.modified())
-                                        .ok()
-                                        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                                        .map(|d| d.as_secs()),
-                                    peak_packet_entities: analysis.demo_info.peak_packet_entities,
-                                    recorder_id: recorder.as_ref().map(|p| p.id.clone()),
-                                    recorder_name: recorder.map(|p| p.name),
-                                    teams: ::analysis::team_tags(&analysis.state),
-                                    signon_maps: analysis.state.signon_maps.clone(),
-                                }
-                            },
-                        );
+                        let serialized = scanned.ok().map(|(highlights, analysis)| {
+                            // Pre-warm the analyzer cache with the Analysis
+                            // this scan already computed, so opening this
+                            // demo in the Demo Analyzer afterward hits the
+                            // cache path instead of re-parsing.
+                            // Best-effort/silent, and safe under concurrency:
+                            // keyed per demo path, not one shared cache.
+                            native::warm_analyzer_cache(file, &analysis);
+                            serialized_demo(
+                                file,
+                                file_name.clone(),
+                                file_keys[idx].clone(),
+                                highlights,
+                                &analysis,
+                            )
+                        });
 
                         if serialized.is_some() {
                             found.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -3857,5 +3887,63 @@ mod tests {
 
         clips.session_finished();
         assert_eq!(clips.done, 5);
+    }
+
+    fn fixture_path() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test-fixtures/ci_fixture.dem")
+    }
+
+    #[test]
+    fn a_scanned_demo_carries_the_current_highlights_version() {
+        let path = fixture_path();
+        let bytes = std::fs::read(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+        let analysis = ::analysis::Analysis::try_from_bytes(&bytes).unwrap();
+        let highlights = (
+            100.0,
+            Vec::new(),
+            true,
+            None,
+            0,
+            None,
+            std::sync::Arc::new(Vec::new()),
+        );
+        let demo = serialized_demo(&path, "ci_fixture.dem".into(), None, highlights, &analysis);
+        assert_eq!(
+            demo.highlights_version,
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            demo.highlights_version > 0,
+            "0 means 'scanned before it was recorded'"
+        );
+        let json = serde_json::to_value(&demo).unwrap();
+        assert_eq!(
+            json["highlights_version"],
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+    }
+
+    #[test]
+    fn a_demo_from_an_older_project_has_highlights_version_0() {
+        let old = r#"{"path":"D:/demos/a.dem","name":"a.dem","tickrate":100.0,"is_pov":true,
+            "local_player_index":null,"playback_frames":10,"streaks":[]}"#;
+        let demo: SerializedDemo = serde_json::from_str(old).unwrap();
+        assert_eq!(demo.highlights_version, 0);
+    }
+
+    #[test]
+    fn the_frontend_mirrors_the_highlights_version() {
+        let js = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../src/scan_version.js"),
+        )
+        .unwrap();
+        let line = format!(
+            "export const HIGHLIGHTS_VERSION = {};",
+            ::analysis::highlights::HIGHLIGHTS_VERSION
+        );
+        assert!(
+            js.contains(&line),
+            "studio/src/scan_version.js must say `{line}`"
+        );
     }
 }

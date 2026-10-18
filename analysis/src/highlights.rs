@@ -13,6 +13,19 @@
 
 use crate::{Analysis, Connection, Weapon};
 
+/// Which version of highlight detection a scan used. Studio saves it with
+/// each scanned demo and, on opening a project, offers to rescan the demos
+/// scanned with an older one (or before it was saved: 0), so a project made
+/// by an older build is noticed even when no field is missing. Bump it
+/// whenever the highlights a scan lists change: this module, the streak cuts
+/// in `kill.rs`, or `native::patch::scanner::capture_streaks`. Separate from
+/// `cache::SCHEMA_VERSION`, which bumps for any cached field (scoreboard,
+/// chat, ...) and would offer a rescan when every highlight stayed the same.
+/// A change to what `kill.rs` caches needs both bumps, or the rescan reads
+/// the old highlights back out of the analyzer cache. Mirrored in
+/// `studio/src/scan_version.js`; a test checks the two agree.
+pub const HIGHLIGHTS_VERSION: u32 = 1;
+
 /// One kill in a highlight.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HighlightKill {

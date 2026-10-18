@@ -7,12 +7,14 @@
 
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen } from '@tauri-apps/api/event';
-import { scanDirectory, cancelScan } from './ipc_bridge.js';
+import { scanDirectory, cancelScan, logFrontendEvent } from './ipc_bridge.js';
 import { renderMasterList } from './master_pane.js';
 import { refreshMapWarnings } from './map_warnings.js';
 import { refreshTeamsPane } from './teams_pane.js';
-import { preserveHighlightState } from './take_index.js';
-import { demoHasTeams } from './project_teams.js';
+import { renameUidsInTakeIndex } from './take_index.js';
+import { scanIsCurrent } from './scan_version.js';
+import { applyRescanWork, matchRescanHighlights, rescanReport } from './rescan_carry.js';
+import { updateStreakVisuals } from './detail_pane.js';
 import { splitIdenticalCopies } from './demo_copies.js';
 import { fileNameOf, samePath } from './path_display.js';
 import { parseClock, timeLeftText } from './scan_progress.js';
@@ -31,7 +33,8 @@ const scanParses = parseClock();
  *   pickedFiles) from project_demos.js, getScanPaths() the pinned-folder
  *   list (pushed to in place), persistAppSettings(), and regroupMatches()
  *   from queue_match_groups.js, run after a scan so {match} and {half}
- *   know the new demos (#685).
+ *   know the new demos (#685), and getTakeIndex() the project's take index,
+ *   whose uids follow a rescanned highlight's work (rescan_carry.js).
  */
 export function createQueueScan({
   getDemos,
@@ -44,6 +47,7 @@ export function createQueueScan({
   getScanPaths,
   persistAppSettings,
   regroupMatches = () => {},
+  getTakeIndex = () => ({}),
 }) {
   // ── scan_progress event listener (registered once on load) ────────────────
   let unlistenScanProgress = null;
@@ -51,7 +55,7 @@ export function createQueueScan({
     const p = event.payload || {};
     const scanStatusEl = document.querySelector('#scan-status');
     const cancelScanBtn = document.querySelector('#cancel-scan-btn');
-    const masterTableBody = document.querySelector('#master-demo-table-body');
+    showScanBar(p);
 
     // Demos the scan could not read (#23). Only the final event carries it.
     const skipped = Array.isArray(p.skipped) ? p.skipped : [];
@@ -74,6 +78,21 @@ export function createQueueScan({
       if (cancelScanBtn) cancelScanBtn.disabled = false;
     }
   }).then(fn => { unlistenScanProgress = fn; });
+
+  // The bar under the status line: demos done of the scan's total.
+  function showScanBar(p) {
+    const fill = document.querySelector('#scan-progress .progress-bar-fill');
+    if (!fill || !(p.total > 0)) return;
+    fill.style.width = `${Math.min(100, (100 * (p.scanned || 0)) / p.total)}%`;
+  }
+
+  function scanBarShown(shown) {
+    const bar = document.querySelector('#scan-progress');
+    if (!bar) return;
+    bar.hidden = !shown;
+    const fill = bar.querySelector('.progress-bar-fill');
+    if (fill && shown) fill.style.width = '0%';
+  }
 
   // ── Cancel Scan button ────────────────────────────────────────────────────
   const cancelScanBtn = document.querySelector('#cancel-scan-btn');
@@ -113,6 +132,7 @@ export function createQueueScan({
     if (addFolderBtn) addFolderBtn.disabled = true;
     if (cancelScanBtnInner) cancelScanBtnInner.disabled = false;
     if (scanSpinnerEl) scanSpinnerEl.style.display = 'inline-block';
+    scanBarShown(true);
     if (scanStatusEl) scanStatusEl.textContent = STRINGS.MAIN.SCANNING_STATUS;
     scanParses.reset();
     showToast(STRINGS.MAIN.SCANNING_TOAST, 'info');
@@ -122,14 +142,10 @@ export function createQueueScan({
 
     try {
       // Demos already queued and unchanged on disk are skipped, not
-      // re-parsed; ones from an older project (no file_key, no map_name:
-      // saved before clip names, #441, no teams: #445, no map list: #217, or
-      // highlights without `spectated`: saved before an HLTV demo listed
-      // everyone's, #247, or without `viewdemo_times`: saved before a batch
-      // seeked between clips by them, #434) are scanned.
+      // re-parsed; ones an older Studio scanned (older highlight detection,
+      // or a field a scan now fills missing: scan_version.js) are scanned.
       const known = getDemos()
-        .filter((d) => d.file_key && d.map_name !== undefined && demoHasTeams(d) && d.signon_maps !== undefined
-          && (d.streaks || []).every((s) => s.spectated !== undefined && s.viewdemo_times !== undefined))
+        .filter(scanIsCurrent)
         .map((d) => ({ path: d.path, file_key: d.file_key }));
       const { demos: scanned, unchanged, copies: unparsedCopies = [] } = await scanDirectory(pathsToScan, known, readScanWorkers());
       // An identical copy under another name would be a second row for the
@@ -152,25 +168,33 @@ export function createQueueScan({
       // re-scanning everything in `scanPaths`, which is what caused a single
       // "Add Demo Files" click to report hundreds of demos.)
       const indexByPath = new Map(getDemos().map((d, i) => [d.path, i]));
+      const rescans = [];
       newlyScanned.forEach((demo) => {
         const existingIdx = indexByPath.get(demo.path);
         if (existingIdx !== undefined) {
           // A re-scan produces brand new streak objects, so replacing
-          // outright would wipe every status, selection, note and Kill
-          // Range edit on this demo — carry that user-owned state across by
-          // highlight uid instead.
-          getDemos()[existingIdx] = preserveHighlightState(getDemos()[existingIdx], demo);
+          // outright would wipe every status, mark, note and Kill Range
+          // edit on this demo: carry that work across (rescan_carry.js).
+          const previous = getDemos()[existingIdx];
+          const result = matchRescanHighlights(previous, demo);
+          renameUidsInTakeIndex(getTakeIndex(), applyRescanWork(previous, result));
+          result.carried.forEach((c) => { if (!c.exact) updateStreakVisuals(c.to); });
+          rescans.push({ previous, result });
+          getDemos()[existingIdx] = demo;
         } else {
           indexByPath.set(demo.path, getDemos().length);
           getDemos().push(demo);
         }
       });
+      const carryReport = rescanReport(rescans);
+      carryReport.log.forEach((line) => logFrontendEvent(line));
 
       // footer is also updated on the Complete scan_progress event, but set
       // it here in case the event arrives before renderMasterList finishes.
       updateDemoFooter(getDemos());
       if (newlyScanned.length > 0) markProjectDirty();
       showToast(STRINGS.MAIN.scanCompleteToast(newlyScanned.length, unchanged), 'success');
+      if (carryReport.toast) showToast(carryReport.toast.text, carryReport.toast.type, 10000);
       const selectedDemoIdx = newlyScanned.length > 0
         ? getDemos().indexOf(newlyScanned[0])
         : (getDemos().length > 0 ? 0 : null);
@@ -205,6 +229,7 @@ export function createQueueScan({
       if (addFolderBtn) addFolderBtn.disabled = false;
       if (cancelScanBtnInner) cancelScanBtnInner.disabled = true;
       if (scanSpinnerEl) scanSpinnerEl.style.display = 'none';
+      scanBarShown(false);
     }
   }
 
