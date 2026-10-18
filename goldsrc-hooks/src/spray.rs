@@ -1,4 +1,4 @@
-//! Player sprays in HD, and switching your own (#428).
+//! Player sprays in demos, per player, and switching your own (#428).
 //!
 //! ## How a spray reaches the GPU
 //!
@@ -9,15 +9,16 @@
 //! `Draw_MiptexTexture` -> `GL_LoadTexture(name, GLT_DECAL, w, h, mip0, 1,
 //! iType, palette)`, the same `GL_LoadTexture2` branch `texture_hires` hooks
 //! for every other kind. Two things set a spray apart from a `decals.wad`
-//! decal there, and neither is its content:
+//! decal there:
 //!
-//! - **The name is the slot, not the player.** `Draw_CacheLoadFromCustom`
-//!   sets a global `gfCustomBuild` and builds the texture name from the cache
-//!   entry's name, `"%03i%02i"` of the player slot and lump index; then
-//!   `Draw_MiptexTexture` rewrites the first character to `{` (palette entry
-//!   255 is pure blue, a cut-out) or `}` (index-alpha). So player 1's spray
-//!   is `{00100` in every demo, whoever he is. A replacement keyed by name
-//!   would follow the slot. This module keys by **content** instead.
+//! - **The name is the slot.** `Draw_CacheLoadFromCustom` sets a global
+//!   `gfCustomBuild` and builds the texture name from the cache entry's name,
+//!   `"%03i%02i"` of the player slot (0-based, `cl.players`' index) and lump
+//!   index; then `Draw_MiptexTexture` rewrites the first character to `{`
+//!   (palette entry 255 is pure blue, a cut-out) or `}` (index-alpha). So the
+//!   second player's spray is `{00100` in every demo, whoever he is: the slot
+//!   leads to the player through the engine's player info, and from him to
+//!   Studio's Sprays table (`spray_table.rs`).
 //! - **`gfCustomBuild` is 1 for exactly that upload** (pre-Anniversary
 //!   `hw+0x1ff5718`, 25th Anniversary `hw+0x104b77d8`, read out of the one
 //!   `mov [flag], 1` in `Draw_CacheLoadFromCustom` by signature), which is
@@ -28,62 +29,42 @@
 //! (a working file, not in the tree); the summary is in
 //! `docs/dodstudio_commands.md`.
 //!
-//! ## The content key
+//! ## Who gets which spray
 //!
-//! `texture_t` overlaps the lump header the engine loaded (the miptex copy
-//! sits 0x20 bytes into the texture record, and the record's own fields are
-//! written over it), so the lump's name is gone by upload time and the whole
-//! lump cannot be hashed as stored. What survives, and what the engine
-//! draws, is hashed instead: **MD5 of `width` (LE32), `height` (LE32), the
-//! mip-0 indices, the palette count (LE16) and the palette (3 bytes a
-//! colour)**, the values `GL_LoadTexture2` is handed plus the count just
-//! before the palette. The same bytes can be read from any spray WAD
-//! (`tools/spray_key.py`), so a key written from a file matches the upload.
-//! It is not the resource MD5 the demo and `custom.hpk` carry: that one is
-//! over the whole WAD file, which the upload never sees.
+//! Studio's Configuration > Sprays: a table of players and the PNG (in
+//! `<game>\logos\`) each gets, and a fallback for everyone else per demo type
+//! (POV: the game's own, one PNG or none; HLTV: one PNG or none), mirrored to
+//! `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt` (`spray_table.rs`). It
+//! applies only while a demo plays. Two routes, one rule:
 //!
-//! ## Files, all under `<game>\dod\logos\`
+//! - **A spray the demo carries the image for** (a POV demo that caught the
+//!   player's `svc_customization`) is swapped at upload, here and in
+//!   `texture_hires`' spray arm: the PNG resampled to the largest power of
+//!   two `gl_max_size` allows per side (alpha kept, drawn at the spray's own
+//!   size because the decal is sized from `texture_t`), or a fully
+//!   transparent texture for "no spray". This route is `texture_hires`' hook,
+//!   so it needs HD textures on (`dodstudio_hd_enabled 1`).
+//! - **A spray it doesn't** (every HLTV demo, and POV players who joined
+//!   before the recording) goes through `spray_hltv.rs`, which shoots a
+//!   texture of its own built from the PNG instead of the bullet hole.
 //!
-//! - `<name>.png`: the HD source, RGBA, any size. Uploaded at the largest
-//!   power of two `gl_max_size` allows per side (up to 4096, like every
-//!   other HD kind), alpha kept, and drawn at the spray's own size because
-//!   the decal is sized from `texture_t`, not the GL texture.
-//! - `dodstudio_sprays.txt`, the mapping the hook reads (`//` comments):
-//!   `<key>\t<png>` replaces every spray whose content hashes to `<key>`;
-//!   `player\t<SteamID or name>\t<png or custom.hpk MD5>` is for the HLTV
-//!   route (below). PNG names are relative to `logos\`.
-//!
-//! A spray with no line is listed by `dodstudio_debug_hd_misses` as
-//! `decal spray <key>`, which is how a key is found from a demo. A missing
-//! or unreadable PNG is logged once and the engine's spray stays.
+//! The content key below names a spray in the HD-miss list and keeps
+//! `texture_hires` from reusing a slot's texture that now stands for
+//! someone else.
 //!
 //! ## `dodstudio_spray <name>`
 //!
-//! Makes `<name>.png` the user's own spray: writes a `tempdecal.wad` the
-//! engine accepts (one `{LOGO` lump, sides in steps of 16 and the file at
-//! most 20480 bytes, which makes a square picture 112x112; 8-bit, the palette
-//! quantised to 255 colours with entry 255 the transparent blue), keeps `tempdecal.wad.dodstudio-backup` of the file
-//! that was there the first time, and writes the lump's key to the mapping,
-//! so the spray comes back in HD wherever it is seen. The engine reads
-//! `tempdecal.wad` when it connects, so the switch shows from the next
-//! connect; a demo draws the sprays it recorded, never this file.
-//! `tempdecal.wad` is the game's spray file, and the one file in the game's
-//! folder this DLL writes, because that is what the command is for: the
-//! user's `.cfg` and `.res` files stay untouched, and `cl_logofile` is left
-//! as it is (it only names what Options shows).
-//!
-//! ## HLTV demos
-//!
-//! An HLTV demo carries every `TE_PLAYERDECAL` with decal index 0 (the
-//! bullet hole) and no `svc_customization` (#368), so `CL_ParseTEnt` finds no
-//! `customdata` for the slot and shoots the wad decal. A `player` line names
-//! the spray to draw instead, by SteamID or name: a PNG here, or the
-//! `custom.hpk` entry with that resource MD5 (the player's real spray, which
-//! the cache already holds). `spray_hltv.rs` builds a texture from it and
-//! sends the decal down the engine's own custom-spray path; the texture's
-//! upload comes back through this module as a spray, so a PNG line or a
-//! `<key>` line gives it in HD. `dodstudio_spray players` lists every slot
-//! with its name, SteamID and the spray it gets.
+//! Makes `<name>.png` the user's own spray for live play: writes a
+//! `tempdecal.wad` the engine accepts (one `{LOGO` lump, sides in steps of 16
+//! and the file at most 20480 bytes, which makes a square picture 112x112;
+//! 8-bit, the palette quantised to 255 colours with entry 255 the transparent
+//! blue), and keeps `tempdecal.wad.dodstudio-backup` of the file that was
+//! there the first time. The engine reads `tempdecal.wad` when it connects,
+//! so the switch shows from the next connect; a demo draws the sprays it
+//! recorded, never this file. `tempdecal.wad` is the game's spray file, and
+//! the one file in the game's folder this DLL writes, because that is what
+//! the command is for: the user's `.cfg` and `.res` files stay untouched,
+//! and `cl_logofile` is left as it is (it only names what Options shows).
 
 use std::collections::HashMap;
 use std::ffi::CStr;
@@ -95,11 +76,10 @@ use crate::engine;
 use crate::names::console_name;
 use crate::texture_hires::{Rgba, game_dir};
 
-/// `dodstudio_spray`: list the PNGs in `logos\`, switch to one, or list the
-/// players a mapping line would reach. Registered in `commands.rs`.
+/// `dodstudio_spray`: list the PNGs in `logos\`, switch to one, or list
+/// each player and the spray the Sprays table gives him. Registered in
+/// `commands.rs`.
 pub const NAME: &str = console_name!("spray");
-/// The mapping file, in `logos\`.
-pub const MAPPING_FILE: &str = "dodstudio_sprays.txt";
 const LOGOS: &str = "logos";
 const TEMPDECAL: &str = "tempdecal.wad";
 const BACKUP: &str = "tempdecal.wad.dodstudio-backup";
@@ -192,18 +172,6 @@ pub fn md5(parts: &[&[u8]]) -> Key {
 
 pub fn hex(key: &Key) -> String {
     key.iter().map(|b| format!("{b:02x}")).collect()
-}
-
-fn parse_key(text: &str) -> Option<Key> {
-    let text = text.trim();
-    if text.len() != 32 {
-        return None;
-    }
-    let mut key = [0u8; 16];
-    for (i, pair) in text.as_bytes().as_chunks::<2>().0.iter().enumerate() {
-        key[i] = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
-    }
-    Some(key)
 }
 
 // ── The content key ─────────────────────────────────────────────────────────
@@ -343,65 +311,9 @@ pub fn is_custom_upload(identifier: &str) -> bool {
     }
 }
 
-// ── The mapping file ────────────────────────────────────────────────────────
+// ── Files ───────────────────────────────────────────────────────────────────
 
-/// Who a `player` line names.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PlayerId {
-    /// SteamID64, written as the 17 digits, `STEAM_0:X:Y` or `[U:1:N]`.
-    SteamId(u64),
-    /// A player name, matched case-insensitively.
-    Name(String),
-}
-
-/// What a `player` line gives that player (#428): a PNG in `logos\`, or the
-/// `custom.hpk` entry whose resource MD5 (the whole-WAD hash demos and the
-/// cache name a spray by, #368) is this.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum PlayerSource {
-    Png(String),
-    Hpk(Key),
-}
-
-impl std::fmt::Display for PlayerSource {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            PlayerSource::Png(png) => f.write_str(png),
-            PlayerSource::Hpk(md5) => write!(f, "custom.hpk {}", hex(md5)),
-        }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub struct Mapping {
-    /// Content key -> PNG name.
-    pub by_key: HashMap<Key, String>,
-    /// `player` lines, in file order; the first match wins.
-    pub players: Vec<(PlayerId, PlayerSource)>,
-    /// Lines that weren't a comment, blank, or one of the two shapes.
-    pub bad: Vec<(usize, String)>,
-}
-
-/// `STEAM_0:X:Y`, `[U:1:N]` or the 17-digit SteamID64.
-pub fn parse_steam_id(text: &str) -> Option<u64> {
-    const BASE: u64 = 76561197960265728;
-    let text = text.trim();
-    if let Some(rest) = text.strip_prefix("STEAM_") {
-        let mut it = rest.split(':');
-        let _universe = it.next()?;
-        let x: u64 = it.next()?.parse().ok()?;
-        let y: u64 = it.next()?.parse().ok()?;
-        return (it.next().is_none() && x <= 1).then(|| BASE + y * 2 + x);
-    }
-    if let Some(inner) = text.strip_prefix("[U:1:").and_then(|t| t.strip_suffix(']')) {
-        let n: u64 = inner.parse().ok()?;
-        return Some(BASE + n);
-    }
-    let id: u64 = text.parse().ok()?;
-    (id > BASE).then_some(id)
-}
-
-/// A PNG name from a mapping line: a file name inside `logos\`, never a path.
+/// A PNG name: a file name inside `logos\`, never a path.
 fn clean_png_name(raw: &str) -> Option<String> {
     let name = raw.trim();
     (!name.is_empty()
@@ -411,113 +323,35 @@ fn clean_png_name(raw: &str) -> Option<String> {
     .then(|| name.to_string())
 }
 
-/// Splits a line into its fields: at tabs when it has any, else at runs of
-/// spaces, keeping the last field whole so a PNG name may contain spaces.
-fn fields(line: &str, n: usize) -> Vec<&str> {
-    if line.contains('\t') {
-        let mut out: Vec<&str> = line.splitn(n, '\t').map(str::trim).collect();
-        out.retain(|f| !f.is_empty());
-        return out;
-    }
-    let mut out = Vec::new();
-    let mut rest = line.trim();
-    while out.len() + 1 < n {
-        match rest.split_once(char::is_whitespace) {
-            Some((head, tail)) => {
-                out.push(head);
-                rest = tail.trim_start();
-            }
-            None => break,
-        }
-    }
-    if !rest.is_empty() {
-        out.push(rest);
-    }
-    out
-}
-
-pub fn parse_mapping(text: &str) -> Mapping {
-    let mut map = Mapping::default();
-    for (i, raw) in text.lines().enumerate() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with("//") || line.starts_with('#') {
-            continue;
-        }
-        let bad = |map: &mut Mapping| map.bad.push((i + 1, raw.to_string()));
-        if line.to_ascii_lowercase().starts_with("player") {
-            let f = fields(line, 3);
-            let source = f.get(2).and_then(|s| {
-                parse_key(s)
-                    .map(PlayerSource::Hpk)
-                    .or_else(|| clean_png_name(s).map(PlayerSource::Png))
-            });
-            match (f.get(1), source) {
-                (Some(id), Some(source)) if f.len() == 3 => {
-                    let id = parse_steam_id(id)
-                        .map(PlayerId::SteamId)
-                        .unwrap_or_else(|| PlayerId::Name(id.to_string()));
-                    map.players.push((id, source));
-                }
-                _ => bad(&mut map),
-            }
-            continue;
-        }
-        let f = fields(line, 2);
-        match (
-            f.first().and_then(|k| parse_key(k)),
-            f.get(1).and_then(|p| clean_png_name(p)),
-        ) {
-            (Some(key), Some(png)) if f.len() == 2 => {
-                map.by_key.insert(key, png);
-            }
-            _ => bad(&mut map),
-        }
-    }
-    map
-}
-
 pub fn logos_dir() -> PathBuf {
     game_dir().join(LOGOS)
 }
 
-pub fn mapping_path() -> PathBuf {
-    logos_dir().join(MAPPING_FILE)
-}
-
-/// Reads the mapping afresh: a spray loads once per connect or demo, so the
-/// file is read that rarely, and an edit between demos is seen.
-pub fn load_mapping() -> Mapping {
-    match std::fs::read_to_string(mapping_path()) {
-        Ok(text) => parse_mapping(&text),
-        Err(_) => Mapping::default(),
+/// A token for what a slot-named spray upload stands for: its content key
+/// and what the Sprays table gives the slot's player now. `texture_hires`
+/// keeps one per GL texture and lets the engine reuse a same-named texture
+/// only while the token matches, because the engine's cache matches decals
+/// by name and size alone, and a slot is a different player in the next
+/// demo. `None` for anything but a slot-named spray.
+///
+/// # Safety
+///
+/// As [`upload_key`].
+pub unsafe fn slot_upload_token(
+    identifier: &str,
+    data: *const u8,
+    palette: *const u8,
+    width: u32,
+    height: u32,
+) -> Option<u64> {
+    let slot = crate::spray_table::slot_of_custom_name(identifier)?;
+    if crate::spray_hltv::building() {
+        return None;
     }
-}
-
-/// The PNG mapped to `key`, as a path, or `None`. A line in the file wins;
-/// then the PNG a `player` line's HLTV spray was built from
-/// (`spray_hltv.rs`), whose key exists only in memory.
-pub fn png_for_key(key: &Key) -> Option<PathBuf> {
-    load_mapping()
-        .by_key
-        .get(key)
-        .map(|png| logos_dir().join(png))
-        .or_else(|| crate::spray_hltv::png_for_built_key(key))
-}
-
-/// Which `player` line a slot's name and SteamID match, if any.
-pub fn source_for_player<'a>(
-    mapping: &'a Mapping,
-    name: &str,
-    steam_id: u64,
-) -> Option<&'a PlayerSource> {
-    mapping
-        .players
-        .iter()
-        .find(|(id, _)| match id {
-            PlayerId::SteamId(s) => steam_id != 0 && *s == steam_id,
-            PlayerId::Name(n) => n.eq_ignore_ascii_case(name),
-        })
-        .map(|(_, source)| source)
+    let key = unsafe { upload_key(data, palette, width, height) }?;
+    let choice = crate::spray_hltv::choice_for_slot(slot).unwrap_or_default();
+    let digest = md5(&[&key, choice.to_string().as_bytes()]);
+    Some(u64::from_le_bytes(digest[..8].try_into().ok()?))
 }
 
 // ── PNG in, fitted RGBA out ─────────────────────────────────────────────────
@@ -999,39 +833,6 @@ pub fn wad_key(wad: &[u8]) -> Result<(Key, u32, u32), String> {
     lump_key(wad_lump(wad)?)
 }
 
-/// The spray WAD `custom.hpk` holds under the resource MD5 `md5` (#368):
-/// `HPAK`, a version, the directory's offset; the directory is a count, then
-/// 144-byte entries (`resource_t`, its MD5 at +77, then the data's offset
-/// and length). The entry's bytes must hash to its MD5, the check the
-/// engine makes before it trusts a cached customization.
-pub fn hpk_find<'a>(hpk: &'a [u8], md5_wanted: &Key) -> Result<&'a [u8], String> {
-    const ENTRY: usize = 144;
-    if hpk.get(..4) != Some(b"HPAK") {
-        return Err("not an HPAK file".into());
-    }
-    let dir_at = u32_in(hpk, 8)? as usize;
-    let count = u32_in(hpk, dir_at)? as usize;
-    if count > (hpk.len() - dir_at.min(hpk.len())) / ENTRY {
-        return Err(format!("{count} entries don't fit the file"));
-    }
-    for i in 0..count {
-        let at = dir_at + 4 + ENTRY * i;
-        let entry = hpk.get(at..at + ENTRY).ok_or("truncated directory")?;
-        if &entry[77..93] != md5_wanted {
-            continue;
-        }
-        let (offset, length) = (u32_in(entry, 136)? as usize, u32_in(entry, 140)? as usize);
-        let wad = hpk
-            .get(offset..offset.saturating_add(length))
-            .ok_or("the entry runs past the file")?;
-        if &md5(&[wad]) != md5_wanted {
-            return Err("the entry's bytes don't hash to its MD5".into());
-        }
-        return Ok(wad);
-    }
-    Err("no entry with that MD5".into())
-}
-
 // ── The command ─────────────────────────────────────────────────────────────
 
 fn args() -> Vec<String> {
@@ -1053,12 +854,15 @@ fn args() -> Vec<String> {
 
 fn usage() -> String {
     format!(
-        "{NAME}: list the PNGs in dod\\{LOGOS}\\ and say which is your spray\n\
-         {NAME} <name>: make dod\\{LOGOS}\\<name>.png your spray (writes dod\\{TEMPDECAL}, the game's spray file; \
-         shows from the next connect) and map it for HD playback\n\
-         {NAME} players: each slot in the demo and the spray a player line in {MAPPING_FILE} gives it\n"
+        "{NAME}: list the PNGs in dod\\{LOGOS}\\ and say how big your spray is\n\
+         {NAME} <name>: make dod\\{LOGOS}\\<name>.png your spray for live play (writes dod\\{TEMPDECAL}, \
+         the game's spray file; shows from the next connect)\n\
+         {NAME} players: each player in the demo and the spray Studio's Sprays table gives him\n"
     )
 }
+
+/// The PNG the last `dodstudio_spray <name>` this session wrote.
+static SWITCHED_TO: Mutex<String> = Mutex::new(String::new());
 
 /// The PNGs in `logos\`, sorted, with their sizes.
 fn logo_pngs() -> Vec<(String, Option<(u32, u32)>)> {
@@ -1093,13 +897,10 @@ fn png_size(path: &Path) -> Option<(u32, u32)> {
 }
 
 fn list() -> String {
-    let mapping = load_mapping();
     let current = std::fs::read(game_dir().join(TEMPDECAL))
         .ok()
         .and_then(|wad| wad_key(&wad).ok());
-    let current_png = current
-        .as_ref()
-        .and_then(|(key, ..)| mapping.by_key.get(key).cloned());
+    let switched = SWITCHED_TO.lock().map(|s| s.clone()).unwrap_or_default();
     let mut out = format!("{NAME}: PNGs in dod\\{LOGOS}\\ --\n");
     let pngs = logo_pngs();
     if pngs.is_empty() {
@@ -1107,80 +908,21 @@ fn list() -> String {
     }
     for (name, size) in &pngs {
         let size = size.map_or("not a PNG".to_string(), |(w, h)| format!("{w}x{h}"));
-        let keys = mapping
-            .by_key
-            .iter()
-            .filter(|(_, png)| png.eq_ignore_ascii_case(name))
-            .count();
-        let mapped = match keys {
-            0 => String::new(),
-            1 => ", mapped to one spray".to_string(),
-            n => format!(", mapped to {n} sprays"),
-        };
-        let own = if current_png
-            .as_deref()
-            .is_some_and(|c| c.eq_ignore_ascii_case(name))
-        {
-            "  <- your spray"
+        let own = if !switched.is_empty() && switched.eq_ignore_ascii_case(name) {
+            "  <- your spray (from the next connect)"
         } else {
             ""
         };
-        out.push_str(&format!("  {name}  {size}{mapped}{own}\n"));
+        out.push_str(&format!("  {name}  {size}{own}\n"));
     }
-    match (&current, &current_png) {
-        (Some((key, w, h)), None) => out.push_str(&format!(
-            "your spray (dod\\{TEMPDECAL}): {w}x{h}, key {}, not made by this command\n",
-            hex(key)
-        )),
-        (None, _) => out.push_str(&format!("your spray: no readable dod\\{TEMPDECAL}\n")),
-        _ => {}
+    match &current {
+        Some((_, w, h)) => out.push_str(&format!("your spray (dod\\{TEMPDECAL}): {w}x{h}\n")),
+        None => out.push_str(&format!("your spray: no readable dod\\{TEMPDECAL}\n")),
     }
     out.push_str(&format!(
-        "mapping dod\\{LOGOS}\\{MAPPING_FILE}: {} spray line(s), {} player line(s){}\n",
-        mapping.by_key.len(),
-        mapping.players.len(),
-        if mapping.bad.is_empty() {
-            String::new()
-        } else {
-            format!(
-                ", {} line(s) not understood (first: line {})",
-                mapping.bad.len(),
-                mapping.bad[0].0
-            )
-        }
+        "who gets which spray in a demo is Studio's Configuration > Sprays; {NAME} players shows it\n"
     ));
     out
-}
-
-/// Rewrites the mapping with `key -> png`, replacing any line for that key
-/// and creating the file (with its header) when there is none.
-fn write_mapping_line(key: &Key, png: &str) -> Result<(), String> {
-    let path = mapping_path();
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut text = String::new();
-    if existing.trim().is_empty() {
-        text.push_str(&format!(
-            "// DoD Studio spray mapping (#428). One spray a line: the key, a tab, a PNG in this\n\
-             // folder. The key is the MD5 {NAME} prints (width, height, mip 0, palette count and\n\
-             // palette of the spray as the game loads it). player, a tab, a SteamID or name, a tab,\n\
-             // a PNG or the custom.hpk MD5 of his spray is a line for HLTV demos. Written by\n\
-             // {NAME} <name>; edit freely.\n"
-        ));
-    } else {
-        let hexed = hex(key);
-        for line in existing.lines() {
-            let keep = fields(line.trim(), 2)
-                .first()
-                .and_then(|k| parse_key(k))
-                .is_none_or(|k| hex(&k) != hexed);
-            if keep {
-                text.push_str(line);
-                text.push('\n');
-            }
-        }
-    }
-    text.push_str(&format!("{}\t{png}\n", hex(key)));
-    std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 fn switch(name: &str) -> Result<String, String> {
@@ -1193,7 +935,7 @@ fn switch(name: &str) -> Result<String, String> {
     let path = logos_dir().join(&file);
     let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
     let img = decode_png(&bytes).map_err(|why| format!("{}: {why}", path.display()))?;
-    let (wad, key) = build_wad(&img)?;
+    let (wad, _) = build_wad(&img)?;
     let (_, w, h) = wad_key(&wad)?;
 
     let dod = game_dir();
@@ -1208,62 +950,70 @@ fn switch(name: &str) -> Result<String, String> {
     let tmp = dod.join("tempdecal.wad.dodstudio-tmp");
     std::fs::write(&tmp, &wad).map_err(|e| format!("{}: {e}", tmp.display()))?;
     std::fs::rename(&tmp, &target).map_err(|e| format!("{}: {e}", target.display()))?;
-    write_mapping_line(&key, &file)?;
+    if let Ok(mut switched) = SWITCHED_TO.lock() {
+        *switched = file.clone();
+    }
     Ok(format!(
-        "{NAME}: wrote dod\\{TEMPDECAL} (the game's spray file) from {file}: {w}x{h}, 8-bit, key {}{kept}. \
-         Mapped the key to {file} in dod\\{LOGOS}\\{MAPPING_FILE}, so it plays back in HD. \
+        "{NAME}: wrote dod\\{TEMPDECAL} (the game's spray file) from {file}: {w}x{h}, 8-bit{kept}. \
          The game reads the file when it connects: the new spray shows from the next connect, not in a demo \
-         already playing.\n",
-        hex(&key)
+         already playing.\n"
     ))
 }
 
-/// `players`: every slot the engine has a player in, with what a `player`
-/// line gives him. The SteamID comes from the slot's userinfo, as
-/// `dodstudio_deathmsg players` reads it.
+/// `players`: every slot the engine has a player in, with the spray the
+/// Sprays table gives him in this demo. The SteamID comes from the slot's
+/// userinfo, as `dodstudio_deathmsg players` reads it.
 fn players() -> String {
     let Some(engfuncs) = engine::engfuncs() else {
         return format!("{NAME} players: the game's functions aren't captured yet\n");
     };
-    let mapping = load_mapping();
+    let table = crate::spray_table::load();
     let hltv = unsafe { (engfuncs.is_spectate_only)() } != 0;
     let mut out = format!(
-        "{NAME} players ({} demo; {} player line(s) in {MAPPING_FILE}):\n",
+        "{NAME} players ({} demo; Studio's Sprays table: {} player(s), anyone else gets {}{}):\n",
         if hltv { "HLTV" } else { "POV" },
-        mapping.players.len()
+        table.players.len(),
+        if hltv { &table.hltv } else { &table.pov },
+        if table.bad.is_empty() {
+            String::new()
+        } else {
+            format!("; {} line(s) not understood", table.bad.len())
+        }
     );
     let mut any = false;
-    for slot in 1..=32 {
-        let mut info = engine::HudPlayerInfo::empty();
-        unsafe { (engfuncs.pfn_get_player_info)(slot, &mut info) };
-        if info.name.is_null() {
+    for slot in 0..32 {
+        let Some((name, steam_id)) = crate::spray_hltv::player(slot) else {
             continue;
-        }
-        any = true;
-        let name = unsafe { CStr::from_ptr(info.name) }
-            .to_string_lossy()
-            .into_owned();
-        let steam_id = if info.steam_id != 0 {
-            info.steam_id
-        } else {
-            unsafe { crate::deathmsg::steam_id_from_record(info.name) }
         };
+        any = true;
         let id = if steam_id == 0 {
             "SteamID unknown".to_string()
         } else {
             steam_id.to_string()
         };
-        let source = source_for_player(&mapping, &name, steam_id)
-            .map_or("no player line".to_string(), |s| {
-                format!("-> {s} ({})", crate::spray_hltv::source_state(s))
-            });
-        out.push_str(&format!("  {slot:>2}  {name}  {id}  {source}\n"));
+        let listed = if table.row_for(&name, steam_id).is_some() {
+            "listed"
+        } else {
+            "not listed"
+        };
+        let choice = table.choose(hltv, &name, steam_id);
+        let state = match &choice {
+            crate::spray_table::Choice::Png(png) => {
+                format!(" ({})", crate::spray_hltv::png_state(png))
+            }
+            _ => String::new(),
+        };
+        out.push_str(&format!(
+            "  {:>2}  {name}  {id}  {listed} -> {choice}{state}\n",
+            slot + 1
+        ));
     }
     if !any {
         out.push_str("  nobody: no demo or game loaded\n");
     }
     out.push_str(&format!(
-        "  a demo with no image for a player's spray (every HLTV demo) draws his line's spray instead of the bullet hole: {}\n",
+        "  sprays with no image in the demo (every HLTV demo): {}\n  sprays with one: swapped as they load, \
+         which needs HD textures on (dodstudio_hd_enabled 1)\n",
         crate::spray_hltv::status()
     ));
     out
@@ -1451,8 +1201,8 @@ mod tests {
 
     #[test]
     fn the_same_picture_always_gives_the_same_key() {
-        // Each run of the command maps its key, so a key that changed from
-        // run to run left one stale mapping line per run.
+        // The same PNG must make the same spray: a key that changed from run
+        // to run would name one picture as many sprays in the HD-miss list.
         let mut img = Rgba {
             width: 64,
             height: 64,
@@ -1480,107 +1230,6 @@ mod tests {
     }
 
     #[test]
-    fn the_mapping_file_has_two_line_shapes_and_comments() {
-        let text = "// a comment\n\
-                    8e506e748e506e748e506e748e506e74\tchris_teamwork.png\n\
-                    FFE83715FFE83715FFE83715FFE83715 two words.png\n\
-                    player\tSTEAM_0:1:6155141\tchris_teamwork.png\n\
-                    player\t[U:1:12310283]\tsame.png\n\
-                    player\tSome Name\tname.png\n\
-                    player 76561197972310283 plain.png\n\
-                    not a line\n\
-                    8e506e748e506e748e506e748e506e74\t../escape.png\n\
-                    player\twarchyld\tFFE83715FFE83715FFE83715FFE83715\n\
-                    player\tx\tnot-a-png-or-md5\n";
-        let m = parse_mapping(text);
-        assert_eq!(m.by_key.len(), 2);
-        assert_eq!(
-            m.by_key[&parse_key("8e506e748e506e748e506e748e506e74").unwrap()],
-            "chris_teamwork.png"
-        );
-        assert_eq!(
-            m.by_key[&parse_key("ffe83715ffe83715ffe83715ffe83715").unwrap()],
-            "two words.png"
-        );
-        assert_eq!(m.players.len(), 5);
-        assert_eq!(m.players[0].0, PlayerId::SteamId(76561197972576011));
-        assert_eq!(m.players[1].0, PlayerId::SteamId(76561197972576011));
-        assert_eq!(m.players[2].0, PlayerId::Name("Some Name".into()));
-        assert_eq!(m.players[3].0, PlayerId::SteamId(76561197972310283));
-        assert_eq!(m.players[4].0, PlayerId::Name("warchyld".into()));
-        assert_eq!(
-            m.players[4].1,
-            PlayerSource::Hpk(parse_key("ffe83715ffe83715ffe83715ffe83715").unwrap())
-        );
-        assert_eq!(
-            m.bad.iter().map(|(n, _)| *n).collect::<Vec<_>>(),
-            vec![8, 9, 11]
-        );
-        let png = |s: &str| PlayerSource::Png(s.to_string());
-        assert_eq!(
-            source_for_player(&m, "some name", 0),
-            Some(&png("name.png"))
-        );
-        assert_eq!(
-            source_for_player(&m, "x", 76561197972576011),
-            Some(&png("chris_teamwork.png"))
-        );
-        assert_eq!(source_for_player(&m, "x", 1), None);
-        assert_eq!(
-            m.players[4].1.to_string(),
-            "custom.hpk ffe83715ffe83715ffe83715ffe83715"
-        );
-    }
-
-    /// An HPAK the way `custom.hpk` lays one out, holding `wads`.
-    fn hpak(wads: &[&[u8]]) -> Vec<u8> {
-        let mut out = b"HPAK".to_vec();
-        out.extend_from_slice(&1u32.to_le_bytes());
-        out.extend_from_slice(&0u32.to_le_bytes()); // directory, patched below
-        let mut at = Vec::new();
-        for wad in wads {
-            at.push(out.len());
-            out.extend_from_slice(wad);
-        }
-        let dir_at = out.len() as u32;
-        out[8..12].copy_from_slice(&dir_at.to_le_bytes());
-        out.extend_from_slice(&(wads.len() as u32).to_le_bytes());
-        for (wad, offset) in wads.iter().zip(at) {
-            let mut entry = [0u8; 144];
-            entry[..13].copy_from_slice(b"tempdecal.wad");
-            entry[77..93].copy_from_slice(&md5(&[wad]));
-            entry[136..140].copy_from_slice(&(offset as u32).to_le_bytes());
-            entry[140..144].copy_from_slice(&(wad.len() as u32).to_le_bytes());
-            out.extend_from_slice(&entry);
-        }
-        out
-    }
-
-    #[test]
-    fn hpk_find_returns_the_wad_with_that_md5_and_checks_it() {
-        let (a, _) = build_wad(&sample()).unwrap();
-        let (b, key_b) = build_wad_sized(&sample(), 8).unwrap();
-        let file = hpak(&[&a, &b]);
-        assert_eq!(hpk_find(&file, &md5(&[&b])).unwrap(), &b[..]);
-        assert_eq!(
-            wad_key(hpk_find(&file, &md5(&[&b])).unwrap()).unwrap().0,
-            key_b
-        );
-        assert!(hpk_find(&file, &[7; 16]).is_err());
-        // A corrupted entry is refused, not drawn.
-        let mut bad = file.clone();
-        bad[12 + 50] ^= 0xff;
-        assert!(hpk_find(&bad, &md5(&[&a])).is_err());
-        // A count that can't fit, and garbage, are errors rather than panics.
-        let mut huge = file.clone();
-        let dir_at = u32::from_le_bytes(huge[8..12].try_into().unwrap()) as usize;
-        huge[dir_at..dir_at + 4].copy_from_slice(&u32::MAX.to_le_bytes());
-        assert!(hpk_find(&huge, &md5(&[&a])).is_err());
-        assert!(hpk_find(b"HPAK\x01\0\0\0\xff\xff\xff\xff", &[0; 16]).is_err());
-        assert!(hpk_find(b"nope", &[0; 16]).is_err());
-    }
-
-    #[test]
     fn lump_key_refuses_what_validate_custom_logo_refuses() {
         let (wad, key) = build_wad_sized(&sample(), 16).unwrap();
         let lump = wad_lump(&wad).unwrap().to_vec();
@@ -1597,15 +1246,6 @@ mod tests {
         for len in 0..lump.len() {
             assert!(lump_key(&lump[..len]).is_err(), "{len}");
         }
-    }
-
-    #[test]
-    fn steam_ids_in_every_spelling() {
-        assert_eq!(parse_steam_id("STEAM_0:1:6155141"), Some(76561197972576011));
-        assert_eq!(parse_steam_id("[U:1:12310283]"), Some(76561197972576011));
-        assert_eq!(parse_steam_id("76561197972576011"), Some(76561197972576011));
-        assert_eq!(parse_steam_id("12"), None);
-        assert_eq!(parse_steam_id("m00cat"), None);
     }
 
     #[test]

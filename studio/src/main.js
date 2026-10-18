@@ -56,6 +56,8 @@ import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
+import { createSpraysUi } from './sprays_ui.js';
+import { getGameFolder } from './game_folder_ui.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
 // from the earliest possible moment, not just once the app's own init
@@ -336,6 +338,13 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
+  // Configuration > Sprays (#428): sprays_ui.js.
+  createSpraysUi({
+    getDemos: () => currentScannedDemos,
+    getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
+    getGameFolder,
+    persist: () => persistAppSettings(),
+  }).refresh();
 
   // ── Shared "a demo row was selected" handler ────────────────────────────────
   // Extracted so every renderMasterList call site behaves identically —

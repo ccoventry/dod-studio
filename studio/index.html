@@ -241,6 +241,7 @@
               <button class="config-tab-btn" data-tab="tab-custom-commands" data-str="CAPTURE_CONFIG.TAB_CUSTOM_COMMANDS">Commands</button>
               <button class="config-tab-btn" data-tab="tab-drive-overrides" data-str="CAPTURE_CONFIG.TAB_CAPTURE_OUTPUT">Destinations</button>
               <button class="config-tab-btn" data-tab="tab-render-output" data-str="CAPTURE_CONFIG.TAB_RENDER_OUTPUT">Render Output</button>
+              <button class="config-tab-btn" data-tab="tab-sprays" data-str="CAPTURE_CONFIG.TAB_SPRAYS">Sprays</button>
               <button class="config-tab-btn" data-tab="tab-notifications" data-str="CAPTURE_CONFIG.TAB_NOTIFICATIONS">Notifications</button>
             </div>
 
@@ -710,6 +711,40 @@
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
                  by default, each stage independently switchable. -->
+            <!-- Tab Content: Sprays (#428) -- who gets which spray in a demo.
+                 sprays_ui.js fills it; the hook DLL applies it. -->
+            <div id="tab-sprays" class="config-tab-content" style="display: none;">
+              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 8px;" data-str="SPRAYS.HELP">Pick the spray each player shows in your demos, from the PNGs in the game's logos folder.</p>
+              <div class="input-row">
+                <input type="text" id="sprays-player-input" list="sprays-player-options" style="flex: 1;" data-str-placeholder="SPRAYS.PLAYER_PLACEHOLDER" placeholder="A player from the queue, a SteamID or a name" />
+                <datalist id="sprays-player-options"></datalist>
+                <select id="sprays-add-png" data-str-title="SPRAYS.ADD_PNG_TITLE"></select>
+                <button id="sprays-add-btn" disabled data-str="SPRAYS.ADD_BUTTON">Add</button>
+                <button id="sprays-refresh-btn" data-str="SPRAYS.REFRESH_BUTTON" data-str-title="SPRAYS.REFRESH_TITLE">Refresh</button>
+              </div>
+              <div id="sprays-players-status" class="sprays-status"></div>
+              <div id="sprays-list" class="sprays-list"></div>
+              <div id="sprays-warning" class="path-warning" style="display: none;"></div>
+              <div class="input-row" style="margin-top: 12px;">
+                <label for="sprays-pov-fallback" data-str="SPRAYS.POV_FALLBACK_LABEL" data-str-title="SPRAYS.POV_FALLBACK_TITLE">Players not listed, POV demos:</label>
+                <select id="sprays-pov-fallback">
+                  <option value="own" data-str="SPRAYS.FALLBACK_OWN">Their own spray</option>
+                  <option value="png" data-str="SPRAYS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="SPRAYS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="sprays-pov-fallback-png"></span>
+              </div>
+              <div class="input-row">
+                <label for="sprays-hltv-fallback" data-str="SPRAYS.HLTV_FALLBACK_LABEL" data-str-title="SPRAYS.HLTV_FALLBACK_TITLE">Players not listed, HLTV demos:</label>
+                <select id="sprays-hltv-fallback">
+                  <option value="png" data-str="SPRAYS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="SPRAYS.FALLBACK_NONE">No spray</option>
+                </select>
+                <span id="sprays-hltv-fallback-png"></span>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0 0;" data-str="SPRAYS.HD_NOTE">In a POV demo, a spray the demo saved is swapped as it loads, which needs HD textures on.</p>
+            </div>
+
             <div id="tab-notifications" class="config-tab-content" style="display: none;">
               <div class="notification-settings-grid">
                 <div class="setting-toggle">

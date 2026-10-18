@@ -1,5 +1,5 @@
-//! HLTV demos draw each player's real spray instead of the bullet hole
-//! (#428, #368).
+//! Sprays a demo has no image for: each player's spray from Studio's Sprays
+//! table instead of the bullet hole (#428, #368).
 //!
 //! ## Why a demo draws the bullet hole
 //!
@@ -43,30 +43,31 @@
 //!    `texture_hires`'s spray arm, which keys it by content and swaps the
 //!    HD PNG in (`spray.rs`).
 //!
-//! What a slot gets comes from the `player` lines of
-//! `logos\dodstudio_sprays.txt` (`spray.rs`), by SteamID or name:
+//! What a slot gets is Studio's Sprays table (`spray_table.rs`): the
+//! player's PNG when he is listed, by SteamID or name, else the fallback for
+//! the demo's type. A PNG becomes a spray built with `spray.rs`'s writer,
+//! [`PNG_SIDE`] a side (the drawn size; the real one is unknown), with the
+//! PNG itself as its HD version; "no spray" is a fully transparent one; the
+//! game's own is the engine's bullet hole, untouched. Each PNG is read on a
+//! background thread whenever the table changes, so a 3840 px PNG never
+//! stalls a demo; a spray that isn't ready yet draws the bullet hole.
 //!
-//! - `player <id> <md5>`: the `custom.hpk` entry with that resource MD5, the
-//!   player's real spray as the game cached it (#368 found every WSOD25
-//!   player's in the cache). Checked like the engine checks a cached
-//!   customization; a `<key> <png>` line for its key gives it in HD.
-//! - `player <id> <name>.png`: a spray built from the PNG with `spray.rs`'s
-//!   writer, [`PNG_SIDE`] a side (the drawn size; the real one is unknown),
-//!   and the PNG itself as its HD version.
-//!
-//! Both are read on a background thread whenever the mapping file changes,
-//! so a 3840 px PNG never stalls a demo; a spray that isn't ready yet draws
-//! the bullet hole.
+//! "No spray" draws a transparent texture rather than skipping the shoot:
+//! skipping would need another patch inside `CL_ParseTEnt` on both builds,
+//! and the custom branch with a texture of ours is the path already proven
+//! on both. Every pixel is palette index 255, the cut-out key, so nothing
+//! shows, and the decal costs one slot of the ring like any spray.
 //!
 //! ## Installing
 //!
-//! Only while the mapping has a `player` line: [`poll`] reads the file's
-//! time once a second and installs both detours the first time one appears.
+//! Only once the table asks for something (`Table::active`): [`poll`] reads
+//! the file's time once a second and installs both detours the first time.
 //! The `Draw_DecalTexture` one goes in first, because a decal shot through
 //! step 1 without step 2 would crash the next frame. Each site's bytes are
 //! checked before patching, and [`poll`] checks the jumps are still there.
-//! Detours are never removed (see [`detour::Detour`]); with no `player` line
-//! left, [`hltv_texture`] answers "none" and the engine runs as before.
+//! Detours are never removed (see [`detour::Detour`]); with the table back
+//! to the defaults, [`hltv_texture`] answers "none" and the engine runs as
+//! before.
 //!
 //! `tools/verify_hltv_spray_offsets.py` checks every offset and register
 //! above against both builds' `hw.dll`. The reading behind it is in
@@ -78,7 +79,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
-use crate::spray::{self, Key, Mapping, PlayerSource};
+use crate::spray::{self, Key};
+use crate::spray_table::{self, Choice, Table};
 use crate::{detour, engine, scan};
 
 /// One engine build's three sites.
@@ -204,15 +206,15 @@ static BUILDING: AtomicBool = AtomicBool::new(false);
 /// Sprays drawn through the custom branch this session.
 static DRAWN: AtomicU32 = AtomicU32::new(0);
 
-/// Whether the mapping has a `player` line.
-static HAS_PLAYERS: AtomicBool = AtomicBool::new(false);
-/// The mapping as last read by [`poll`].
-static MAPPING: RwLock<Option<Arc<Mapping>>> = RwLock::new(None);
-/// The mapping file's modification time when last read, in nanoseconds
-/// since the epoch plus one; 0 before the first read, 1 with no file.
-static MAPPING_STAMP: AtomicU64 = AtomicU64::new(0);
+/// Whether the Sprays table asks for anything (`Table::active`).
+static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// The table as last read by [`poll`].
+static TABLE: RwLock<Option<Arc<Table>>> = RwLock::new(None);
+/// The table file's modification time when last read, in nanoseconds
+/// since the epoch plus two; 0 before the first read, 1 with no file.
+static TABLE_STAMP: AtomicU64 = AtomicU64::new(0);
 static FRAMES: AtomicU32 = AtomicU32::new(0);
-/// Frames between two looks at the mapping file's time: about a second.
+/// Frames between two looks at the table file's time: about a second.
 const STAMP_EVERY: u32 = 60;
 
 /// A spray ready to become a texture: one lump, checked as the engine
@@ -227,8 +229,9 @@ struct Lump {
 /// A source read, or why it couldn't be.
 type Prepared = Result<Arc<Lump>, String>;
 
-/// Each `player` line's source, read (or failed) on the background thread.
-static PREPARED: LazyLock<RwLock<HashMap<PlayerSource, Prepared>>> =
+/// Each PNG the table names, and the blank spray, read (or failed) on the
+/// background thread. Keyed by [`Choice::Png`] and [`Choice::Blank`].
+static PREPARED: LazyLock<RwLock<HashMap<Choice, Prepared>>> =
     LazyLock::new(|| RwLock::new(HashMap::new()));
 static PREPARING: AtomicBool = AtomicBool::new(false);
 static PREPARE_AGAIN: AtomicBool = AtomicBool::new(false);
@@ -249,8 +252,8 @@ struct Texture {
 static TEXTURES: LazyLock<Mutex<HashMap<Key, Texture>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
-/// Sources already reported unusable, so each is said once per mapping.
-static WARNED: Mutex<Vec<PlayerSource>> = Mutex::new(Vec::new());
+/// Sprays already reported unusable, so each is said once per table.
+static WARNED: Mutex<Vec<Choice>> = Mutex::new(Vec::new());
 
 /// Whether a texture of ours is being uploaded right now.
 pub fn building() -> bool {
@@ -465,7 +468,7 @@ fn install() {
             INSTALLED.store(true, Ordering::Release);
             unsafe {
                 crate::debug::report(&format!(
-                    "spray: HLTV sprays on ({} hw.dll): CL_ParseTEnt +{:#x}, Draw_DecalTexture +{:#x}, \
+                    "spray: demo sprays on ({} hw.dll): CL_ParseTEnt +{:#x}, Draw_DecalTexture +{:#x}, \
                      Draw_MiptexTexture +{:#x}, customdata {:#x} (#428)",
                     sites.build.name,
                     sites.te - base,
@@ -479,17 +482,17 @@ fn install() {
             GAVE_UP.store(true, Ordering::Relaxed);
             unsafe {
                 crate::debug::report(&format!(
-                    "spray: HLTV sprays not installed -- {why}; demos draw the bullet hole as before"
+                    "spray: demo sprays not installed -- {why}; sprays with no image draw the bullet hole as before"
                 ))
             };
         }
     }
 }
 
-/// Once a second: rereads the mapping when its file changed, installs the
-/// detours the first time it has a `player` line, and checks they are still
-/// in place. Runs every frame from `commands::poll`; one atomic add on the
-/// other frames.
+/// Once a second: rereads the Sprays table when its file changed, installs
+/// the detours the first time it asks for anything, and checks they are
+/// still in place. Runs every frame from `commands::poll`; one atomic add on
+/// the other frames.
 pub fn poll() {
     if !FRAMES
         .fetch_add(1, Ordering::Relaxed)
@@ -497,27 +500,40 @@ pub fn poll() {
     {
         return;
     }
-    let stamp = std::fs::metadata(spray::mapping_path())
-        .and_then(|m| m.modified())
-        .ok()
+    let stamp = spray_table::path()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(1, |d| (d.as_nanos() as u64).wrapping_add(2));
-    if MAPPING_STAMP.swap(stamp, Ordering::Relaxed) != stamp {
-        reload_mapping();
+    if TABLE_STAMP.swap(stamp, Ordering::Relaxed) != stamp {
+        reload_table();
     }
-    if HAS_PLAYERS.load(Ordering::Relaxed) {
+    if ACTIVE.load(Ordering::Relaxed) {
         install();
     }
     check_sites();
 }
 
-fn reload_mapping() {
-    let mapping = Arc::new(spray::load_mapping());
-    let has = !mapping.players.is_empty();
-    if let Ok(mut slot) = MAPPING.write() {
-        *slot = Some(mapping);
+fn reload_table() {
+    let table = Arc::new(spray_table::load());
+    let active = table.active();
+    unsafe {
+        crate::debug::report(&format!(
+            "spray: Sprays table read: {} player(s), POV others -> {}, HLTV others -> {}{}",
+            table.players.len(),
+            table.pov,
+            table.hltv,
+            if table.bad.is_empty() {
+                String::new()
+            } else {
+                format!("; line(s) {:?} not understood", table.bad)
+            }
+        ))
+    };
+    if let Ok(mut slot) = TABLE.write() {
+        *slot = Some(table);
     }
-    HAS_PLAYERS.store(has, Ordering::Relaxed);
+    ACTIVE.store(active, Ordering::Relaxed);
     // A changed file is read again from scratch: a PNG may have been
     // replaced under the same name.
     if let Ok(mut prepared) = PREPARED.write() {
@@ -526,7 +542,7 @@ fn reload_mapping() {
     if let Ok(mut warned) = WARNED.lock() {
         warned.clear();
     }
-    if has {
+    if active {
         kick_prepare();
     }
 }
@@ -545,7 +561,7 @@ fn check_sites() {
             OVERWRITTEN.store(true, Ordering::Relaxed);
             unsafe {
                 crate::debug::report(&format!(
-                    "spray: the HLTV spray jump in {what} was overwritten by something else"
+                    "spray: the demo spray jump in {what} was overwritten by something else"
                 ))
             };
         }
@@ -554,21 +570,28 @@ fn check_sites() {
 
 // ── Preparing a source ──────────────────────────────────────────────────────
 
-fn prepare(source: &PlayerSource) -> Result<Lump, String> {
+/// The sides of the "no spray" texture: the smallest the writer makes.
+const BLANK_SIDE: u32 = 16;
+
+fn prepare(source: &Choice) -> Result<Lump, String> {
     let (lump, png) = match source {
-        PlayerSource::Png(name) => {
+        Choice::Png(name) => {
             let path = spray::logos_dir().join(name);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let img = spray::decode_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
             let (wad, _) = spray::build_wad_sized(&img, PNG_SIDE)?;
             (spray::wad_lump(&wad)?.to_vec(), Some(path))
         }
-        PlayerSource::Hpk(md5) => {
-            let path = crate::texture_hires::game_dir().join("custom.hpk");
-            let hpk = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let wad = spray::hpk_find(&hpk, md5).map_err(|e| format!("{}: {e}", path.display()))?;
-            (spray::wad_lump(wad)?.to_vec(), None)
+        Choice::Blank => {
+            let img = crate::texture_hires::Rgba {
+                width: BLANK_SIDE,
+                height: BLANK_SIDE,
+                pixels: vec![0; (BLANK_SIDE * BLANK_SIDE * 4) as usize],
+            };
+            let (wad, _) = spray::build_wad_sized(&img, BLANK_SIDE)?;
+            (spray::wad_lump(&wad)?.to_vec(), None)
         }
+        Choice::Game => return Err("the game's own spray isn't built".into()),
     };
     let (key, width, height) = spray::lump_key(&lump)?;
     if let Some(png) = png
@@ -584,12 +607,19 @@ fn prepare(source: &PlayerSource) -> Result<Lump, String> {
     })
 }
 
-fn current_mapping() -> Option<Arc<Mapping>> {
-    MAPPING.read().ok()?.clone()
+fn current_table() -> Option<Arc<Table>> {
+    TABLE.read().ok()?.clone()
 }
 
-/// Reads every `player` line's source on a thread of its own. A change
-/// while it runs makes it go round again.
+/// What the table can ask to be built: every PNG it names, and the blank.
+fn sources(table: &Table) -> Vec<Choice> {
+    let mut out: Vec<Choice> = table.pngs().into_iter().map(Choice::Png).collect();
+    out.push(Choice::Blank);
+    out
+}
+
+/// Builds every spray the table can ask for on a thread of its own. A
+/// change while it runs makes it go round again.
 fn kick_prepare() {
     PREPARE_AGAIN.store(true, Ordering::Release);
     if PREPARING.swap(true, Ordering::AcqRel) {
@@ -600,10 +630,10 @@ fn kick_prepare() {
         .spawn(|| {
             loop {
                 while PREPARE_AGAIN.swap(false, Ordering::AcqRel) {
-                    let Some(mapping) = current_mapping() else {
+                    let Some(table) = current_table() else {
                         continue;
                     };
-                    for (_, source) in &mapping.players {
+                    for source in &sources(&table) {
                         let done = PREPARED
                             .read()
                             .is_ok_and(|p| p.get(source).is_some_and(Result::is_ok));
@@ -613,12 +643,12 @@ fn kick_prepare() {
                         let result = prepare(source).map(Arc::new);
                         let line = match &result {
                             Ok(lump) => format!(
-                                "spray: HLTV spray {source}: {}x{}, key {}",
+                                "spray: built {source}: {}x{}, key {}",
                                 lump.width,
                                 lump.height,
                                 spray::hex(&lump.key)
                             ),
-                            Err(why) => format!("spray: HLTV spray {source} not used -- {why}"),
+                            Err(why) => format!("spray: {source} not used -- {why}"),
                         };
                         unsafe { crate::debug::report(&line) };
                         if let Ok(mut prepared) = PREPARED.write() {
@@ -720,8 +750,10 @@ fn playing_demo() -> bool {
     !api.is_null() && unsafe { ((*api).is_playingback)() } != 0
 }
 
-/// A slot's name and SteamID, the way `dodstudio_spray players` reads them.
-fn player(slot: usize) -> Option<(String, u64)> {
+/// A slot's name and SteamID (`slot` 0-based, as `cl.players` and the
+/// spray texture names count), the way `dodstudio_deathmsg players` reads
+/// them.
+pub fn player(slot: usize) -> Option<(String, u64)> {
     let engfuncs = engine::engfuncs()?;
     let mut info = engine::HudPlayerInfo::empty();
     // Safety: the engine's own call, with an entity number 1..=32.
@@ -741,7 +773,7 @@ fn player(slot: usize) -> Option<(String, u64)> {
     Some((name, steam_id))
 }
 
-fn warn_once(source: &PlayerSource, line: String) {
+fn warn_once(source: &Choice, line: String) {
     let Ok(mut warned) = WARNED.lock() else {
         return;
     };
@@ -751,47 +783,55 @@ fn warn_once(source: &PlayerSource, line: String) {
     }
 }
 
+/// Whether the demo playing is an HLTV one: a spectator-only client, the
+/// test `deathmsg` and `anim_fix` use.
+fn hltv() -> bool {
+    engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
+}
+
+/// What the Sprays table gives the player in `slot` (0-based) in the demo
+/// playing. `None` outside a demo, with the table at its defaults, or with
+/// nobody in the slot: the engine's own then.
+pub fn choice_for_slot(slot: usize) -> Option<Choice> {
+    if !ACTIVE.load(Ordering::Relaxed) || slot >= MAX_PLAYERS || !playing_demo() {
+        return None;
+    }
+    let (name, steam_id) = player(slot)?;
+    Some(current_table()?.choose(hltv(), &name, steam_id))
+}
+
 /// Called by the `CL_ParseTEnt` stub for a spray whose player has no
 /// `customdata`. Returns the `texture_t` to shoot it with, or 0 for the
 /// engine's wad decal.
 unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
-    if !HAS_PLAYERS.load(Ordering::Relaxed) {
+    if !ACTIVE.load(Ordering::Relaxed) {
         return 0;
     }
     let Ok(slot) = usize::try_from(playernum) else {
         return 0;
     };
-    if slot >= MAX_PLAYERS || !playing_demo() {
+    let Some(choice) = choice_for_slot(slot) else {
+        return 0;
+    };
+    if choice == Choice::Game {
         return 0;
     }
-    let Some((name, steam_id)) = player(slot) else {
-        return 0;
-    };
-    let Some(mapping) = current_mapping() else {
-        return 0;
-    };
-    let Some(source) = spray::source_for_player(&mapping, &name, steam_id) else {
-        return 0;
-    };
-    let lump = match PREPARED.read().ok().and_then(|p| p.get(source).cloned()) {
+    let name = player(slot).map(|(n, _)| n).unwrap_or_default();
+    let lump = match PREPARED.read().ok().and_then(|p| p.get(&choice).cloned()) {
         Some(Ok(lump)) => lump,
         Some(Err(_)) => return 0, // said when it failed
         None => {
             warn_once(
-                source,
-                format!(
-                    "spray: HLTV TE_PLAYERDECAL for {name}: {source} isn't read yet, bullet hole"
-                ),
+                &choice,
+                format!("spray: TE_PLAYERDECAL for {name}: {choice} isn't built yet, bullet hole"),
             );
             return 0;
         }
     };
     let Some(texture) = texture_for(&lump) else {
         warn_once(
-            source,
-            format!(
-                "spray: HLTV TE_PLAYERDECAL for {name}: the engine made no texture from {source}"
-            ),
+            &choice,
+            format!("spray: TE_PLAYERDECAL for {name}: the engine made no texture from {choice}"),
         );
         return 0;
     };
@@ -799,7 +839,7 @@ unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
     DRAWN.fetch_add(1, Ordering::Relaxed);
     unsafe {
         crate::debug::report(&format!(
-            "spray: HLTV TE_PLAYERDECAL for {name} (slot {}) -> {source}",
+            "spray: TE_PLAYERDECAL with no image for {name} (slot {}) -> {choice}",
             slot + 1
         ))
     };
@@ -808,18 +848,14 @@ unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
 
 // ── Reporting ───────────────────────────────────────────────────────────────
 
-/// How a `player` line's source stands, for `dodstudio_spray players`.
-pub fn source_state(source: &PlayerSource) -> String {
-    match PREPARED.read().ok().and_then(|p| p.get(source).cloned()) {
-        Some(Ok(lump)) => format!(
-            "{}x{}, key {}",
-            lump.width,
-            lump.height,
-            spray::hex(&lump.key)
-        ),
+/// How a PNG the table names stands, for `dodstudio_spray players`.
+pub fn png_state(png: &str) -> String {
+    let source = Choice::Png(png.to_string());
+    match PREPARED.read().ok().and_then(|p| p.get(&source).cloned()) {
+        Some(Ok(lump)) => format!("built {}x{}", lump.width, lump.height),
         Some(Err(why)) => format!("not used: {why}"),
-        None if HAS_PLAYERS.load(Ordering::Relaxed) => "being read".to_string(),
-        None => "not read: the mapping is read once a second".to_string(),
+        None if ACTIVE.load(Ordering::Relaxed) => "being read".to_string(),
+        None => "not read: the table is read once a second".to_string(),
     }
 }
 
@@ -833,10 +869,10 @@ pub fn status() -> String {
         )
     } else if GAVE_UP.load(Ordering::Relaxed) {
         "not installed (see the log)".to_string()
-    } else if HAS_PLAYERS.load(Ordering::Relaxed) {
+    } else if ACTIVE.load(Ordering::Relaxed) {
         "installing".to_string()
     } else {
-        "off until a player line exists".to_string()
+        "off while Studio's Sprays table is at its defaults".to_string()
     }
 }
 
@@ -844,7 +880,7 @@ pub fn status() -> String {
 pub fn status_line() -> Option<String> {
     INSTALLED
         .load(Ordering::Relaxed)
-        .then(|| format!("HLTV sprays: {}", status()))
+        .then(|| format!("Sprays with no image in the demo: {}", status()))
 }
 
 #[cfg(test)]

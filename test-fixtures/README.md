@@ -34,3 +34,10 @@ recording means updating `analysis/src/tests_fixture.rs` from the analyzer's
 own output (`cargo run -p native --bin dod-studio-cli -- analyze
 test-fixtures/ci_fixture.dem`) after checking the numbers against what was
 played.
+
+## `sprays_table.txt`
+
+The Sprays table file Studio writes for the hook DLL (#428), the one format
+both sides share: `native::sprays::table_text` must write exactly this from
+its test table, and `goldsrc-hooks`' `spray_table` parser tests read it back.
+Change the format in all three places together.

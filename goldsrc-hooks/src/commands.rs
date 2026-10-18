@@ -572,8 +572,8 @@ pub fn poll() {
     crate::batch_end::poll();
     texture_hires::poll_hd();
     texture_hires::poll_map();
-    // Once a second: rereads logos\dodstudio_sprays.txt when it changed and
-    // installs the HLTV spray detours once it has a player line (#428).
+    // Once a second: rereads Studio's Sprays table when it changed and
+    // installs the demo spray detours once it asks for anything (#428).
     crate::spray_hltv::poll();
     // Re-raises sv_allow_shaders after each demo load's disconnect reset.
     crate::world_shaders::poll();

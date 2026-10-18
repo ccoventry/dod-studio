@@ -354,16 +354,17 @@ those files; see its README. It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
 
-`src/spray.rs` does the same for player sprays (#428): a spray reaching the
-upload is keyed by its content and replaced from the PNG
-`dod\logos\dodstudio_sprays.txt` maps it to, and `dodstudio_spray <name>`
-makes a `logos\<name>.png` the user's own spray by writing the game's
-`tempdecal.wad` (with a backup) and mapping it. `tools/spray_key.py` prints
-the keys of spray WADs and `custom.hpk` entries. `src/spray_hltv.rs` makes a
-demo with no customization for a player (every HLTV demo, #368) draw the
-spray his `player` line names -- his `custom.hpk` entry by MD5, or a PNG --
-instead of the bullet hole, through the engine's own custom-spray path, on
-both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`).
+`src/spray.rs` does the same for player sprays (#428): in a demo, each
+player's spray becomes what Studio's Sprays table (Configuration > Sprays,
+mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt`, read by
+`src/spray_table.rs`) gives him -- his PNG from `<game>\logos\`, or the
+fallback for the demo's type -- swapped at upload when the demo carries the
+image. `src/spray_hltv.rs` covers sprays the demo has no image for (every
+HLTV demo, #368): it draws the table's PNG, or a transparent spray, instead
+of the bullet hole, through the engine's own custom-spray path, on both
+builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`).
+`dodstudio_spray <name>` makes a `logos\<name>.png` the user's own spray for
+live play by writing the game's `tempdecal.wad` (with a backup).
 
 ### Always-on crash guards
 

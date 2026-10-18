@@ -93,7 +93,7 @@ Covered in section 4.
 
 ### 2.4 Studio → Configuration
 
-Eight tabs. Every field saves to `settings.json` as soon as it changes.
+Nine tabs. Every field saves to `settings.json` as soon as it changes.
 
 | Tab | What is on it |
 |---|---|
@@ -104,6 +104,7 @@ Eight tabs. Every field saves to `settings.json` as soon as it changes.
 | **Commands** | **Initial Commands** (run once at demo load; first-run defaults `r_decals 256` and `mirv_fov 90`; Import Config reads a `.cfg`), and **Scheduled Commands** (each runs a number of seconds before or after a highlight). Typing the start of a console name lists every name it could be, and says so when Studio refuses or overrides one. Warning banners explain what will not take effect, what is refused, and what your own game configs set (including a `config.cfg` that is not read-only). See 3.6 for the tiers. |
 | **Destinations** | Folders that captures are written to. Render Studio scans the same folders. |
 | **Render Settings** | Codec, custom FFmpeg args, source FPS, max concurrent renders (1–8, default 2), export drives, and **When a batch finishes** (see 4) with a finish codec per capture mode. |
+| **Sprays** | Who gets which spray in a demo (#428): players from the queue's demos (or a typed SteamID or name), each with a PNG from the game's `logos` folder, and what everyone not listed gets: in POV demos their own spray (the default), one fallback PNG or none; in HLTV demos one fallback PNG (the default) or none, since an HLTV demo never records the picture. Mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt` for the hook DLL, which applies it while a demo plays (`dodstudio_spray` in `dodstudio_commands.md`). In POV demos a saved spray is swapped as it loads, which needs HD textures on. |
 | **Notifications** | Six switches: patching started/finished, demo loading, fast-forward to clip, captures done, renders done, errors. |
 
 ### 2.5 Demo Auditor
@@ -295,7 +296,7 @@ Four fixes have no console name and are on by default: the **temp-entity crash f
 
 ## 6. HD textures
 
-**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `decals` (#729), `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide. Player sprays are replaced too (#428), from PNGs in the game's `dod\logos\` folder named by `dod\logos\dodstudio_sprays.txt`, keyed by the spray's content so a replacement follows its player through every demo; `dodstudio_spray <name>` makes one of those PNGs your own spray. See [`dodstudio_commands.md`](dodstudio_commands.md).
+**In the game:** the DLL replaces textures as the engine uploads them, from `dod_addon\dodstudio_hd\<type>\<style>\` (`dod\dodstudio_hd` for an install built before #415, while `dod_addon` has none), where type is `world`, `models`, `sprites`, `decals` (#729), `detail` or `sky`. An `overrides` folder per type wins over any style. Replacements are capped at 1024 pixels a side. The engine's own `gl_max_size` (default 256) still clamps each side, so set it to 512 or 1024 to see the gain. PR #423 raises the cap to 4096 and lets `gl_max_size` decide. Player sprays follow Configuration > Sprays (#428): each listed player's spray, in POV and HLTV demos alike, is a PNG from the game's `logos` folder, and everyone else gets the fallback for the demo type; `dodstudio_spray <name>` makes one of those PNGs your own spray for live play. See [`dodstudio_commands.md`](dodstudio_commands.md).
 
 **The page** (HD Textures tab):
 
@@ -375,6 +376,7 @@ A highlight is any streak with at least one kill, for every connected player. Th
 | Analyzer cache | `%APPDATA%\dod-studio\analyzer_cache\v6\` (the number is the cache schema version; an entry an older version left is upgraded into the current folder when it can be, `analysis::cache::migrations`; older version folders that can't be upgraded from are deleted once a week old; entries within a version are never evicted) |
 | Render lockfile | `%APPDATA%\dod-studio\.render_autosave.json` |
 | Capture manifests | `%APPDATA%\dod-studio\manifests\<session_id>.json`. Written as `planned` when a batch starts and rewritten as `complete` or `cancelled` with each block's verdict. The newest 50 are kept. |
+| Sprays table for the hook DLL | `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt`, rewritten from Configuration > Sprays |
 | HD tools | `%APPDATA%\dod-studio\hd_tools\` |
 | Project files | wherever you save them |
 | Patched demos, helper cfg | `<game>\dod\` (`dodstudio_chain_NN.dem`, `dodstudio_helper.cfg`, and `dodstudio_primer.dem` without the hook DLL) |

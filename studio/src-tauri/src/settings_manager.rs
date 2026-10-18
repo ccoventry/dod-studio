@@ -246,6 +246,11 @@ pub struct AppSettings {
     /// goes missing later opens the window again.
     #[serde(default)]
     pub setup_dismissed: bool,
+    /// Configuration > Sprays (#428): which spray each player gets in a
+    /// demo, and what everyone else gets. Mirrored for the hook DLL by
+    /// `mirror_spray_table` on load and on every save.
+    #[serde(default)]
+    pub sprays: native::sprays::SprayTable,
 }
 
 fn default_game_folder() -> String {
@@ -431,6 +436,7 @@ impl Default for AppSettings {
             demo_rename_hltv_template: default_demo_rename_hltv_template(),
             demo_rename_lowercase: false,
             setup_dismissed: false,
+            sprays: native::sprays::SprayTable::default(),
         }
     }
 }
@@ -492,6 +498,9 @@ impl SettingsManager {
     pub fn new() -> Self {
         let settings = AppSettings::load_or_default();
         apply_game_folder(&settings);
+        // At start too, so the hook's copy follows a settings.json edited or
+        // restored while Studio was closed.
+        mirror_spray_table(&settings);
         Self {
             inner: Arc::new(Mutex::new(settings)),
         }
@@ -509,6 +518,35 @@ pub fn apply_game_folder(settings: &AppSettings) {
         ));
         let _ = native::shared::paths::set_game_folder("");
     }
+}
+
+/// Writes the Sprays table where the hook DLL reads it (#428). A failure is
+/// said in the activity log rather than failing the save: the rest of the
+/// settings are already written, and the hook keeps its last copy.
+pub fn mirror_spray_table(settings: &AppSettings) {
+    if let Err(e) = native::sprays::write_table(&settings.sprays) {
+        native::log_markdown(&format!(
+            "⚠️ **Sprays** — {e}. The game keeps the table it last read."
+        ));
+    }
+}
+
+/// The PNGs in the game install's `logos` folder, for Configuration >
+/// Sprays (#428). Empty with no `hl.exe` set or no such folder.
+#[tauri::command(async)]
+pub fn list_logo_pngs(game_path: String, game_folder: String) -> Vec<String> {
+    let folder = if game_folder.trim().is_empty() {
+        native::shared::paths::DEFAULT_GAME_FOLDER.to_string()
+    } else {
+        game_folder
+    };
+    if native::shared::paths::validate_game_folder(&folder).is_err() {
+        return Vec::new();
+    }
+    std::path::Path::new(&game_path)
+        .parent()
+        .map(|dir| native::sprays::list_logo_pngs(&dir.join(&folder)))
+        .unwrap_or_default()
 }
 
 /// The folders beside `hl.exe` that the Game folder setting can name: those

@@ -256,6 +256,7 @@ export const STRINGS = {
     TAB_CAPTURE_OUTPUT: 'Destinations',
     TAB_CUSTOM_COMMANDS: 'Commands',
     TAB_RENDER_OUTPUT: 'Render Settings',
+    TAB_SPRAYS: 'Sprays',
     TAB_NOTIFICATIONS: 'Notifications',
     HLAE_EXEC_LABEL: 'HLAE Executable:',
     HLAE_EXEC_PLACEHOLDER: 'Path to hlae.exe',
@@ -2449,6 +2450,38 @@ export const STRINGS = {
   },
 
   // ── First-run Setup window and the Capture page's checklist (#599) ──────
+  // Configuration > Sprays (#428): sprays_ui.js.
+  SPRAYS: {
+    HELP: "Pick the spray each player shows in your demos, from the PNGs in the game's logos folder. Players are matched by SteamID, or by name when there is none.",
+    PLAYER_PLACEHOLDER: 'A player from the queue, a SteamID or a name',
+    ADD_PNG_TITLE: "The spray: a PNG in the game's logos folder",
+    ADD_BUTTON: 'Add',
+    REFRESH_BUTTON: 'Refresh',
+    REFRESH_TITLE: "Read the logos folder and the queue's players again",
+    PICK_PNG: 'Pick a PNG…',
+    pngMissingOption: (name) => `${name} (not in logos)`,
+    NO_PLAYERS: 'No players listed yet: everyone gets the fallbacks below.',
+    MATCHED_BY_STEAMID: 'Matched by SteamID, whatever name he plays under',
+    MATCHED_BY_NAME: 'Matched by name, ignoring case',
+    REMOVE_TITLE: 'Remove this player',
+    removeAria: (who) => `Remove ${who}`,
+    readingPlayers: (done, total) => `Reading the queue's players… ${done} of ${total} demos`,
+    playersFound: (players, demos) => (demos
+      ? `${players} player${players === 1 ? '' : 's'} in the queue's ${demos} demo${demos === 1 ? '' : 's'}`
+      : 'No demos in the queue: type a SteamID or a name.'),
+    NO_PNGS: "No PNG in the game's logos folder (in the game folder beside hl.exe). Put your spray pictures there, then Refresh.",
+    pngsMissing: (names) => `Not in the logos folder: ${names.join(', ')}. Those sprays stay as the game draws them.`,
+    HLTV_FALLBACK_UNSET: 'HLTV demos: pick the fallback spray, or players not listed keep the bullet hole.',
+    POV_FALLBACK_UNSET: 'POV demos: pick the fallback spray, or players not listed keep their own.',
+    POV_FALLBACK_LABEL: 'Players not listed, POV demos:',
+    POV_FALLBACK_TITLE: 'Their own spray is the one the demo saved. A player who joined before the recording started has none saved and shows a bullet hole.',
+    HLTV_FALLBACK_LABEL: 'Players not listed, HLTV demos:',
+    HLTV_FALLBACK_TITLE: 'An HLTV demo records that a player sprayed, never the picture, so "their own" is not offered.',
+    FALLBACK_OWN: 'Their own spray',
+    FALLBACK_PNG: 'One fallback spray',
+    FALLBACK_NONE: 'No spray',
+    HD_NOTE: 'In a POV demo, a spray the demo saved is swapped as it loads, which needs HD textures on (dodstudio_hd_enabled 1). A change shows from the next demo you play.',
+  },
   SETUP: {
     MENU_ITEM: 'Setup…',
     MENU_ITEM_TITLE: 'Walk through what DoD Studio needs: the game, HLAE, FFmpeg, output folders and demos',

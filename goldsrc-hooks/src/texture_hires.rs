@@ -56,10 +56,9 @@
 //! imports a `glGetTex*`, so nothing can read the uploaded size back. A
 //! bigger upload therefore draws at the decal's own size, as for walls.
 //! Player sprays (`tempdecal.wad`, built with `gfCustomBuild` set) go through
-//! the same loader under a generated name (`T` + five characters of the lump
-//! name, then the same `{`/`}` rewrite) with per-player pixels, so nothing
-//! tells one from a wad decal by name; one shows in the miss list as a decal
-//! with no HD file, which is what it is.
+//! the same loader, named after the player's slot (`spray.rs`); they get
+//! their own arm, [`spray_upload`], which swaps in what Studio's Sprays table
+//! gives the slot's player.
 //!
 //! ## What `GL_Upload8` would have done that the replacement must copy
 //!
@@ -738,8 +737,8 @@ static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Decals seen, and how many were replaced (#729).
 static DECAL_SEEN: AtomicU32 = AtomicU32::new(0);
 static DECAL_REPLACED: AtomicU32 = AtomicU32::new(0);
-/// Of the decals, player sprays (`spray.rs`, #428): seen, and replaced from
-/// a mapped PNG. Counted among the decals too.
+/// Of the decals, player sprays (`spray.rs`, #428): seen, and replaced as
+/// the Sprays table says. Counted among the decals too.
 static SPRAY_SEEN: AtomicU32 = AtomicU32::new(0);
 static SPRAY_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
@@ -2255,9 +2254,11 @@ fn match_engine_gamma_keep_alpha(pixels: &mut [u8], gamma: &[u8; 256]) {
 }
 
 /// The spray arm of [`decide`]: a `GLT_DECAL` upload made while the engine
-/// builds a player's custom logo. Looks the content key up in the mapping
-/// (`spray.rs`) and uploads the PNG it names; a spray with no line is
-/// recorded as a miss under its key, which is how the key is found.
+/// builds a player's custom logo, or one `spray_hltv` builds. A slot-named
+/// spray gets what Studio's Sprays table gives the slot's player in the demo
+/// playing (`spray_table.rs`): his PNG, the fallback PNG, or a fully
+/// transparent texture for "no spray"; the game's own is left alone. A
+/// spray `spray_hltv` built from a PNG gets that PNG in HD.
 fn spray_upload(
     identifier: &str,
     key: Option<crate::spray::Key>,
@@ -2266,48 +2267,70 @@ fn spray_upload(
     i_type: u32,
     log: bool,
 ) -> *const AtomicUsize {
+    use crate::spray_table::Choice;
     SPRAY_SEEN.fetch_add(1, Ordering::Relaxed);
-    let Some(key) = key else {
-        record_miss(
-            Miss::OnPurpose,
-            "decal",
-            &format!("spray {identifier}"),
-            || format!("{width}x{height}, a player spray with a palette this hook doesn't read"),
-        );
-        return std::ptr::null();
+    let shown = match &key {
+        Some(key) => format!("spray {}", crate::spray::hex(key)),
+        None => format!("spray {identifier}"),
     };
-    let hexed = crate::spray::hex(&key);
-    let shown = format!("spray {hexed}");
-    let Some(path) = crate::spray::png_for_key(&key) else {
-        if log {
-            unsafe {
-                crate::debug::report(&format!(
-                    "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: key {hexed}, no line in {}",
-                    crate::spray::mapping_path().display()
-                ))
-            };
+    let choice = if crate::spray_hltv::building() {
+        // A spray of ours: the PNG it was built from, or nothing to swap
+        // (the blank one).
+        match key.and_then(|k| crate::spray_hltv::png_for_built_key(&k)) {
+            Some(path) => Some(path),
+            None => return std::ptr::null(),
         }
-        record_miss(Miss::NoFile, "decal", &shown, || {
-            format!(
-                "{width}x{height}, a player spray with no line in logos\\{} (add `{hexed}<tab><name>.png`)",
-                crate::spray::MAPPING_FILE
-            )
-        });
-        return std::ptr::null();
-    };
-    let mut img = match crate::spray::load_png_fit(&path, replacement_cap()) {
-        Ok(img) => img,
-        Err(why) => {
-            crate::spray::warn_once(&path, &why);
-            record_miss(Miss::Failed, "decal", &shown, || {
-                format!("{width}x{height}, {}: {why}", path.display())
-            });
-            return std::ptr::null();
+    } else {
+        match crate::spray_table::slot_of_custom_name(identifier)
+            .and_then(crate::spray_hltv::choice_for_slot)
+        {
+            Some(Choice::Png(png)) => Some(crate::spray::logos_dir().join(png)),
+            Some(Choice::Blank) => None,
+            Some(Choice::Game) | None => {
+                if log {
+                    unsafe {
+                        crate::debug::report(&format!(
+                            "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: \
+                             the game's own (Studio's Sprays table)"
+                        ))
+                    };
+                }
+                record_miss(Miss::OnPurpose, "decal", &shown, || {
+                    format!(
+                        "{width}x{height}, a player spray the Sprays table leaves as the game's own"
+                    )
+                });
+                return std::ptr::null();
+            }
         }
     };
-    // Safety: read out of GL_Upload8's own instructions and checked at install.
-    let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
-    match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
+    let (img, from) = match &choice {
+        Some(path) => match crate::spray::load_png_fit(path, replacement_cap()) {
+            Ok(mut img) => {
+                // Safety: read out of GL_Upload8's own instructions and
+                // checked at install.
+                let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
+                match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
+                (img, path.display().to_string())
+            }
+            Err(why) => {
+                crate::spray::warn_once(path, &why);
+                record_miss(Miss::Failed, "decal", &shown, || {
+                    format!("{width}x{height}, {}: {why}", path.display())
+                });
+                return std::ptr::null();
+            }
+        },
+        // "No spray": every pixel transparent, at the spray's own size.
+        None => (
+            Rgba {
+                width,
+                height,
+                pixels: vec![0; (width * height * 4) as usize],
+            },
+            "nothing (no spray)".to_string(),
+        ),
+    };
 
     let Ok(mut owned) = PENDING_PIXELS.lock() else {
         return std::ptr::null();
@@ -2330,10 +2353,8 @@ fn spray_upload(
     if log {
         unsafe {
             crate::debug::report(&format!(
-                "texture_hires: spray {identifier:?} {width}x{height} iType {i_type} key {hexed} -> {}x{} from {}",
-                img.width,
-                img.height,
-                path.display()
+                "texture_hires: spray {identifier:?} {width}x{height} iType {i_type} -> {}x{} from {from}",
+                img.width, img.height,
             ))
         };
     }
@@ -2367,6 +2388,26 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         && let Ok(mut hashes) = RECORD_HASH.lock()
     {
         hashes.insert(record as usize, hash);
+    }
+    // What a slot-named spray's record stands for, for `keep_cached_spray`.
+    // Only while the swap below can run: with HD off the record holds the
+    // engine's own picture, whatever the table says.
+    if texture_type == GLT_DECAL
+        && enabled()
+        && !record.is_null()
+        && !name_ptr.is_null()
+        && let Some(token) = unsafe {
+            crate::spray::slot_upload_token(
+                &std::ffi::CStr::from_ptr(name_ptr).to_string_lossy(),
+                data,
+                palette,
+                width,
+                height,
+            )
+        }
+        && let Ok(mut tokens) = SPRAY_TOKEN.lock()
+    {
+        tokens.insert(record as usize, token);
     }
     if !enabled() {
         return std::ptr::null();
@@ -2985,6 +3026,56 @@ static STALE_REFRESHED: AtomicU32 = AtomicU32::new(0);
 static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
     Mutex::new(std::collections::BTreeMap::new());
 
+/// What each slot-named spray's GL texture (by record address) stood for
+/// when it was uploaded: `spray::slot_upload_token`, noted by [`decide`].
+static SPRAY_TOKEN: Mutex<std::collections::BTreeMap<usize, u64>> =
+    Mutex::new(std::collections::BTreeMap::new());
+
+/// [`keep_cached`] for decals. A spray's texture is named after the player
+/// slot and kept for the session (decals carry no servercount), so the next
+/// demo's player in that slot would get the last one's texture whenever the
+/// sizes match -- with the Sprays table, his PNG or blank. While the table
+/// applies, a slot-named texture is reused only when its token (content and
+/// the table's answer) is the one the incoming spray would get; otherwise
+/// the lookup moves on and the engine loads a new copy (the old one stays,
+/// as when the engine renames a texture whose size changed). With the table
+/// at its defaults or outside a demo, the engine decides as it always did.
+///
+/// # Safety
+///
+/// As [`keep_cached`].
+unsafe fn keep_cached_spray(frame: *const u8, record: *const u8) -> u32 {
+    let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
+    let name_ptr = arg(0x08) as *const std::ffi::c_char;
+    if !enabled() || name_ptr.is_null() {
+        return 1;
+    }
+    // Safety: the identifier every caller passes is a NUL-terminated name.
+    let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
+    let Some(slot) = crate::spray_table::slot_of_custom_name(&identifier) else {
+        return 1;
+    };
+    if crate::spray_hltv::choice_for_slot(slot).is_none() {
+        return 1;
+    }
+    let Some(token) = (unsafe {
+        crate::spray::slot_upload_token(
+            &identifier,
+            arg(0x18) as *const u8,
+            arg(0x24) as *const u8,
+            arg(0x10),
+            arg(0x14),
+        )
+    }) else {
+        return 1;
+    };
+    let stored = SPRAY_TOKEN
+        .lock()
+        .ok()
+        .and_then(|t| t.get(&(record as usize)).copied());
+    u32::from(stored == Some(token))
+}
+
 /// Whether a cached texture whose name matches may be used for this load.
 ///
 /// The engine's cache matches on name and size only. The previous map's
@@ -3004,7 +3095,13 @@ static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
 /// lookup is comparing, both live for the call.
 unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
     let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
-    if frame.is_null() || record.is_null() || arg(0x0c) != GLT_WORLD {
+    if frame.is_null() || record.is_null() {
+        return 1;
+    }
+    if arg(0x0c) == GLT_DECAL {
+        return unsafe { keep_cached_spray(frame, record) };
+    }
+    if arg(0x0c) != GLT_WORLD {
         return 1;
     }
     let servercount_at = SERVERCOUNT.load(Ordering::Acquire);
@@ -3640,7 +3737,7 @@ pub fn status() -> String {
             .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
     let decals = format!(
-        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) from logos\\{}",
+        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Sprays table says",
         DECAL_REPLACED.load(Ordering::Relaxed),
         DECAL_SEEN.load(Ordering::Relaxed),
         DECAL_INDEX
@@ -3649,7 +3746,6 @@ pub fn status() -> String {
             .unwrap_or_else(|| not_read(&DECAL_SEEN, "restart the game")),
         SPRAY_REPLACED.load(Ordering::Relaxed),
         SPRAY_SEEN.load(Ordering::Relaxed),
-        crate::spray::MAPPING_FILE
     );
     let renamed = match RENAMED.load(Ordering::Relaxed) {
         0 => String::new(),

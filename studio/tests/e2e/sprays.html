@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<!--
+  Harness for sprays_ui.js (#428): Configuration > Sprays. The backend's
+  list_logo_pngs and index_demo_players are window.__mockInvokeHandlers;
+  window.__persisted counts saves, window.__sprays() reads the setting.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>sprays_ui.js test harness</title>
+</head>
+<body>
+  <input type="text" id="hl-path-input" value="C:/Games/Half-Life/hl.exe" />
+  <button class="config-tab-btn" data-tab="tab-sprays">Sprays</button>
+  <div id="tab-sprays">
+    <input type="text" id="sprays-player-input" list="sprays-player-options" />
+    <datalist id="sprays-player-options"></datalist>
+    <select id="sprays-add-png"></select>
+    <button id="sprays-add-btn" disabled>Add</button>
+    <button id="sprays-refresh-btn">Refresh</button>
+    <div id="sprays-players-status"></div>
+    <div id="sprays-list"></div>
+    <div id="sprays-warning" style="display: none;"></div>
+    <select id="sprays-pov-fallback">
+      <option value="own">Their own spray</option>
+      <option value="png">One fallback spray</option>
+      <option value="none">No spray</option>
+    </select>
+    <span id="sprays-pov-fallback-png"></span>
+    <select id="sprays-hltv-fallback">
+      <option value="png">One fallback spray</option>
+      <option value="none">No spray</option>
+    </select>
+    <span id="sprays-hltv-fallback-png"></span>
+  </div>
+  <script type="module">
+    import { createSpraysUi, getSprays, setSprays } from '/src/sprays_ui.js';
+    window.__persisted = 0;
+    window.__demos = [{ path: 'C:/demos/a.dem' }, { path: 'C:/demos/b.dem' }];
+    const ui = createSpraysUi({
+      getDemos: () => window.__demos,
+      getHlPath: () => document.querySelector('#hl-path-input').value.trim(),
+      getGameFolder: () => 'dod',
+      persist: () => { window.__persisted += 1; },
+    });
+    window.__sprays = () => getSprays();
+    window.__setSprays = (t) => setSprays(t);
+    window.__refresh = () => ui.refresh();
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

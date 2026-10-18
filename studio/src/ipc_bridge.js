@@ -173,6 +173,16 @@ export async function listGameFolders(gamePath) {
     });
 }
 
+/** The PNGs in the game install's logos folder, for Configuration >
+ *  Sprays (#428). Empty when they can't be listed. */
+export async function listLogoPngs(gamePath, gameFolder) {
+  return invoke('list_logo_pngs', { gamePath, gameFolder })
+    .catch((err) => {
+      console.error("IPC Execution Error (list_logo_pngs):", err);
+      return [];
+    });
+}
+
 export async function checkHlaeFfmpeg(hlaePath, ffmpegPath) {
   return await invoke('check_hlae_ffmpeg', { hlaePath, ffmpegPath })
     .catch((err) => {
