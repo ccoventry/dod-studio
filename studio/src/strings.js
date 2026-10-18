@@ -90,11 +90,30 @@ export const STRINGS = {
     KILLS_FILTER_MULTI_KILL: 'With a multi-kill',
     OWNER_ONLY_LABEL: 'POV only',
     OWNER_ONLY_TITLE: 'Hide demos where no single recording player could be found. Their highlights list every player in the match.',
-    // #685: the queue grouped by match, with a header line per match.
-    GROUP_BY_MATCH_LABEL: 'Group by match',
-    GROUP_BY_MATCH_TITLE: 'Put the demos of one match together: the HLTV demo and every POV of each half, under a line naming the match. '
+    // #685, #823: the queue grouped by match, player, map, ..., with a header line per group.
+    GROUP_BY_LABEL: 'Group by:',
+    GROUP_BY_TITLE: 'Show the queue in groups, each under a line with its counts. Only the order changes: '
+      + 'the same demos stay shown, and Review highlights and the bulk actions use them as before.\n'
+      + 'Match puts the demos of one match together: the HLTV demo and every POV of each half. '
       + 'Which match and half a demo is comes from what it recorded (the players, their sides, the kills and the chat), never from its file name. '
-      + 'The same numbers feed {match} and {half} in clip names.',
+      + 'The same numbers feed {match} and {half} in clip names.\n'
+      + 'Player groups POV demos by who recorded them. Date is the day the demo file was last changed.',
+    GROUP_BY_NONE: 'None',
+    GROUP_BY_MATCH: 'Match',
+    GROUP_BY_PLAYER: 'Player',
+    GROUP_BY_MAP: 'Map',
+    GROUP_BY_FOLDER: 'Folder',
+    GROUP_BY_DATE: 'Date',
+    GROUP_BY_TYPE: 'Demo type',
+    groupHeader: (label, demos, highlights) =>
+      `${label} · ${demos} demo${demos === 1 ? '' : 's'}, ${highlights} highlight${highlights === 1 ? '' : 's'}`,
+    GROUP_HLTV: 'HLTV demos',
+    GROUP_POV: 'POV demos',
+    GROUP_NO_RECORDER: 'No recording player found',
+    GROUP_NO_MAP: 'Map not known',
+    GROUP_NO_DATE: 'Date not known',
+    GROUP_NO_TYPE: 'Demo type not known',
+    groupDateTitle: (day) => `Demo files last changed on ${day}`,
     groupingStatus: (done, total) => `Grouping by match: ${done} / ${total}`,
     matchHeader: (number, map, teams, halves) => [`Match ${number}`, map, teams, halves].filter(Boolean).join(' · '),
     matchTeams: (a, b) => `${a || '?'} vs ${b || '?'}`,
