@@ -40,7 +40,7 @@ joins this switch rather than adding a command:
   at crouch height. See `docs/goldsrc_spectator_camera.md`.
 - **Gun lowering**: the gun drops off the bottom of the screen while the
   spectated player sprints, jumps, goes prone or gets up, crawls or climbs a
-  ladder, as his own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
+  ladder, as their own does (DoD's `DoDGunGoOnOffScreen`, which skips itself
   while spectating). Same speed as the game: 55 frames down, 19 back. See
   `src/spectator_gun.rs`.
 
@@ -86,7 +86,7 @@ is the complete list):
   hidden, which the stock `crosshair` cvar cannot do -- `CHud::Redraw` forces
   that value back every frame. Same doc.
 - **Spectator lock** (`dodstudio_spec_lock 1`): in an HLTV demo the camera
-  stays on the player being watched when he dies; the game otherwise moves to
+  stays on the player being watched when they die; the game otherwise moves to
   the next player four seconds later. One byte in `client.dll`'s own death
   switch. See `docs/goldsrc_spectator_camera.md`.
 - **High-quality overviews:** when `overviews/<map>_hd.tga` sits beside the
@@ -94,8 +94,8 @@ is the complete list):
   replace the game's 128x128 ones: 4096x3072 gives 512x512 tiles. The
   Overviews page writes it. See `src/overview_hd.rs`.
 - **Death cam** (`dodstudio_spec_deathcam 1`): when the spectated player dies,
-  the camera pulls back from his body and turns to the killer for 2.4 s, as his
-  own recording shows, then returns to his eyes. DoD's own `V_GetDeathCam`,
+  the camera pulls back from their body and turns to the killer for 2.4 s, as
+  their own recording shows, then returns to their eyes. DoD's own `V_GetDeathCam`,
   which `V_CalcRefdef` never reaches for a spectator. A movie wants it, a
   shoutcast does not, so it is not part of `spec_match_pov`. See
   `docs/goldsrc_spectator_camera.md`.
