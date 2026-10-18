@@ -4,8 +4,9 @@
 // (native::match_groups over analysis::group_matches, which reads the
 // demos' contents, never their names). The answer is kept on each demo as
 // a runtime-only `match_info` (not saved in the project) for the {match}
-// and {half} placeholders, and "Group by match" shows the queue in match
-// order with a header line per match. The pure parts come first, so they
+// and {half} placeholders, and Group by: Match (queue_group_by.js, #823)
+// shows the queue in match order with a header line per match. The pure
+// parts come first, so they
 // can be tested on their own.
 
 import { listen } from '@tauri-apps/api/event';
@@ -136,13 +137,7 @@ export function matchHeaderText(match, demos) {
 }
 
 // What master_pane.js reads at render time.
-let groupBy = false;
 let currentMatches = [];
-
-/** Whether the queue is shown in match order. */
-export function isGroupedByMatch() {
-  return groupBy;
-}
 
 /** The matches of the last grouping, session-numbered. */
 export function matchesInQueue() {
@@ -153,9 +148,11 @@ export function matchesInQueue() {
  * Wires the grouping. `getDemos()` is the queue; `renderQueue()` redraws
  * it. `regroup({ parseMissing })` asks the backend again, from the analyzer
  * cache alone unless `parseMissing` (then demos the cache lacks are parsed,
- * about a second each). A regroup asked for while one runs follows it.
+ * about a second each; the default while `parseMissingByDefault()` says so,
+ * i.e. while the queue is grouped by match, #823). A regroup asked for while
+ * one runs follows it.
  */
-export function createQueueMatchGroups({ getDemos, renderQueue }) {
+export function createQueueMatchGroups({ getDemos, renderQueue, parseMissingByDefault = () => false }) {
   let previous = new Map();
   let running = false;
   let queued = null;
@@ -168,7 +165,7 @@ export function createQueueMatchGroups({ getDemos, renderQueue }) {
     if (running && el) el.textContent = STRINGS.WORKSPACE.groupingStatus(p.done || 0, p.total || 0);
   }).catch((err) => console.error('Failed to register match_group_progress listener:', err));
 
-  async function regroup({ parseMissing = false } = {}) {
+  async function regroup({ parseMissing = parseMissingByDefault() } = {}) {
     if (running) {
       queued = { parseMissing: parseMissing || queued?.parseMissing || false };
       return;
@@ -201,14 +198,6 @@ export function createQueueMatchGroups({ getDemos, renderQueue }) {
       }
     }
   }
-
-  document.querySelector('#master-group-by-match-cb')?.addEventListener('change', (e) => {
-    groupBy = e.target.checked;
-    renderQueue();
-    // Demos the grouping hasn't placed yet (a project loaded with a cold
-    // cache, a split demo) are read now that the order matters.
-    if (groupBy && getDemos().some((d) => !d.missing && !d.match_info)) regroup({ parseMissing: true });
-  });
 
   return {
     regroup,
