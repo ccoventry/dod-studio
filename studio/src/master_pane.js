@@ -12,7 +12,8 @@ import { STRINGS } from './strings.js';
 import { overLimitBadge } from './packet_entity_limit.js';
 import { multiMapSplitButton } from './queue_multimap.js';
 import { listedStreaks, matchesQuickFilters, KILLS_FILTER } from './queue_filters.js';
-import { isGroupedByMatch, matchesInQueue, groupedQueue, matchHeaderText } from './queue_match_groups.js';
+import { matchesInQueue } from './queue_match_groups.js';
+import { groupDemos, currentGroupBy } from './queue_group_by.js';
 import { makeClearable } from './clearable_input.js';
 import { HIGHLIGHT_STATUS } from './status_colors.js';
 import { countsCell, statusCounts, reviewCounts, initCountLegends } from './queue_counts.js';
@@ -242,7 +243,7 @@ export function initMasterPane(onDeleteDemo, onRequestTrackedDeleteConfirm, onLo
     const activeTab = document.querySelector('.nav-tab-btn.active')?.dataset.nav;
     if (activeTab !== 'workspace') return;
 
-    // Match header lines (#685) are not demos, so the arrows step over them.
+    // Group header lines (#685, #823) are not demos, so the arrows step over them.
     const rows = Array.from(document.querySelectorAll('#master-demo-table-body tr:not(.queue-match-header)'));
     if (!rows.length || rows[0].querySelector('.table-empty')) return;
 
@@ -366,10 +367,11 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
   Array.from(checkedPaths).forEach(p => { if (!allPaths.has(p)) checkedPaths.delete(p); });
   syncClearSelectedButtonState();
 
-  // Group by match (#685): the visible demos in match order, a header line
-  // before each match; otherwise the queue's own order.
-  const rows = isGroupedByMatch()
-    ? groupedQueue(filteredDemos, matchesInQueue()).flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
+  // Group by (#685, #823): the visible demos in groups, a header line before
+  // each group; otherwise the queue's own order. Either way the same demos.
+  const groups = groupDemos(filteredDemos, currentGroupBy(), { matches: matchesInQueue(), recorderOf });
+  const rows = groups
+    ? groups.flatMap((g) => [{ header: g }, ...g.demos.map((demo) => ({ demo }))])
     : filteredDemos.map((demo) => ({ demo }));
 
   rows.forEach(({ header, demo }) => {
@@ -378,10 +380,8 @@ export function renderMasterList(demos, selectedDemoIdx, onSelectDemo) {
       tr.className = 'queue-match-header';
       const td = document.createElement('td');
       td.colSpan = 7;
-      td.textContent = matchHeaderText(header.match, header.demos);
-      // Which signal called the half, from the first demo that has one.
-      const detail = header.demos.find((d) => d.match_info?.detail)?.match_info.detail;
-      if (detail) td.title = STRINGS.WORKSPACE.halfTooltip(detail);
+      td.textContent = header.text;
+      if (header.title) td.title = header.title;
       tr.appendChild(td);
       tableBody.appendChild(tr);
       return;
