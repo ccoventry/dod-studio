@@ -542,6 +542,9 @@ pub fn poll() {
     // the game's countdown and warm-up flag right when
     // dodstudio_hide_clan_text changes.
     crate::clan_text::poll();
+    // Keeps the ShowMenu handler prepended and the voice and command menus
+    // hidden while dodstudio_hide_voice_menus is on.
+    crate::voice_menus::poll();
     // Follows dodstudio_hd_enabled / dodstudio_hd_style, then notes what each map
     // uses for dodstudio_debug_hd_misses. Cheap unless one of them changed.
     log_level_changes();
@@ -799,6 +802,9 @@ fn status_text() -> String {
     }
     if let Some(clan_text) = crate::clan_text::status_line() {
         lines.push(clan_text);
+    }
+    if let Some(voice_menus) = crate::voice_menus::status_line() {
+        lines.push(voice_menus);
     }
     if let Some(hltv_messages) = crate::hltv_messages::status_line() {
         lines.push(hltv_messages);
@@ -1130,10 +1136,12 @@ unsafe extern "C" fn cmd_hudelement() {
     if is_all {
         if on {
             // Deliberately refused. Hiding every element at once includes the
-            // menus, and a capture session that cannot see the class menu is a
-            // support question, not a feature.
+            // text menus (`menu`: voice commands and server votes; the team
+            // and class menus are VGUI and not on this list), and a capture
+            // session that cannot see a vote is a support question, not a
+            // feature.
             console_print(&format!(
-                "{HUDELEMENT_NAME}: `all 1` would hide the team and class menus too -- name the elements you want gone\n"
+                "{HUDELEMENT_NAME}: `all 1` would hide every text menu too -- name the elements you want gone\n"
             ));
             return;
         }
@@ -1616,6 +1624,9 @@ pub fn install() {
     }
     if let Some(clan_text) = register(crate::clan_text::NAME, "0") {
         crate::clan_text::set_cvar(clan_text);
+    }
+    if let Some(voice_menus) = register(crate::voice_menus::NAME, "0") {
+        crate::voice_menus::set_cvar(voice_menus);
     }
     // Same again: read by the HUD_DirectorMessage trampoline itself, not
     // polled.

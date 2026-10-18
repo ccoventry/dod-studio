@@ -67,6 +67,9 @@
 //!   `docs/goldsrc_scoreboard.md`.
 //! - `voice`: the `dodstudio_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
+//! - `voice_menus`: the `dodstudio_hide_voice_menus` cvar -- hide the
+//!   numbered voice-command menus and the hand-signal command menu a POV
+//!   demo's player opened.
 //! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
@@ -264,6 +267,7 @@ mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod voice_menus;
 mod window_layout;
 mod world_shaders;
 
