@@ -2,9 +2,9 @@ SPECTATING (HLTV demos)
   dodstudio_spec_match_pov 0/1
       Make a spectated first-person view match the player's own recording: gun animations, lost gunshots, the crosshair, prone eye height, the gun lowering.
   dodstudio_spec_lock 0/1
-      Keep the camera on the player you are watching when he dies.
+      Keep the camera on the player you are watching when they die.
   dodstudio_spec_deathcam 0/1
-      When the player you are watching dies, show the death cam his own recording shows (2.4 s behind his body, turning to the killer), then his eyes again.
+      When the player you are watching dies, show the death cam their own recording shows (2.4 s behind their body, turning to the killer), then their eyes again.
   dodstudio_spec_target <player>
       Put the camera on a player (number 1-32; dodstudio_deathmsg players lists them).
   dodstudio_hide_spectator_bars 0/1
@@ -42,7 +42,7 @@ HUD
   dodstudio_hud_map_players 0-4
       Which players the overview map shows: 0 the game's own, 1 everyone, 2 the other team, 3 the watched player, 4 nobody.
   dodstudio_hud_map_team_marker 0/1
-      HLTV: mark the watched player on the overview map with his team's camera icon.
+      HLTV: mark the watched player on the overview map with their team's camera icon.
   dodstudio_show_demo_scope 0/1
       Show the sniper scope while a demo plays; in-eye it is the watched player's rifle.
 
