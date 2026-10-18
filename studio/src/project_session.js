@@ -124,8 +124,8 @@ export function createProjectSession({
       });
       if (!filePath) return false;
 
-      const hlaePath = document.querySelector('#hlae-path-input')?.value || "";
-      const hlPath = document.querySelector('#hl-path-input')?.value || "";
+      // No HLAE or hl.exe path: those are this PC's settings, not the
+      // project's, and a project carrying them switched them on every open.
       const projectData = JSON.stringify({
         version: "0.12.0",
         // The folders this project's demos are in, not the app-wide pinned
@@ -133,8 +133,6 @@ export function createProjectSession({
         // project). Read back only to look for demos that have moved (#21).
         scanPaths: projectFolders(getDemos()),
         demos: getDemos(),
-        hlaePath: hlaePath,
-        hlPath: hlPath,
         // Pruned against what's actually still scanned so the index
         // doesn't accumulate uids for demos removed from the project.
         takeIndex: pruneTakeIndex(getTakeIndex(), collectAllUids()),
@@ -188,14 +186,9 @@ export function createProjectSession({
           // pattern as detail_pane.js's "View Match Telemetry" button.
           switchNavTab('workspace');
           clearCheckedPaths();
-          if (data.hlaePath) {
-            const hlaeInput = document.querySelector('#hlae-path-input');
-            if (hlaeInput) hlaeInput.value = data.hlaePath;
-          }
-          if (data.hlPath) {
-            const hlInput = document.querySelector('#hl-path-input');
-            if (hlInput) hlInput.value = data.hlPath;
-          }
+          // An older project's hlaePath / hlPath are ignored: Settings own
+          // those paths, and applying them here silently switched the game
+          // install (a PRE project opened on a POST setup).
           // Tolerant: a 0.10.0 project file has no takeIndex at all — load
           // as empty rather than reject the file. Auto-Rendered just won't
           // retroactively apply to takes captured before this existed.
