@@ -16,7 +16,7 @@ start of another, because the console's autocomplete would otherwise swap
 the shorter one for the longer when you press space.
 
 **Scope:** the surface actually on `dev` today: twenty-four cvars and
-fourteen commands. Entries still in open PRs are not listed -- update this file as
+fifteen commands. Entries still in open PRs are not listed -- update this file as
 part of merging each one, the same way every one of them already updates
 `README.md`'s own control-surface list.
 
@@ -41,6 +41,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when they die. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_spec_deathcam` | `0` | HLTV demos: when the player being watched in first person dies, the view becomes the death cam their own recording shows, the camera 64 units behind their body pulling back and turning to the killer, with no gun, for 2.4 s; then it is the game's own view from their eyes again until they respawn. Without it the game rolls the dead player's eye view 80° and the dropped weapon fills the clip. A switch of its own, not part of `dodstudio_spec_match_pov`: a movie wants it, a shoutcast following the fight does not. Stands down in a POV demo (`goldsrc-hooks/src/spectator_deathcam.rs`) | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
+| `dodstudio_player_overrides` | `0` | sprays and crosshairs in demos follow Studio's Players table (Configuration > Players, #428); 0 leaves both to the game. Studio sets it from the tab's "Use in the game" box when it starts the game, a review or a batch, and sends it to a running game when the box changes. A flip reaches the crosshair on the next frame, and sprays loaded after it: a spray already on a wall keeps its texture, so reload the demo to compare | `goldsrc-hooks/src/player_overrides.rs`, `player_crosshair.rs`, `spray.rs` |
 | `dodstudio_pov_live_bob` | `0` | a POV demo bobs the view and the gun by the `cl_bob` (and `cl_bobcycle`, `cl_bobup`) set now (#359). Without it a POV demo doesn't bob at all: the engine replaces the view `client.dll` works out live with the recorded one, which carries no bob (HLTV demos already follow the cvars). This adds the live bob and keeps the rest of the recorded view. The gun's bob tilt stays out, as in every POV demo | `goldsrc-hooks/src/pov_live_bob.rs` |
 | `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
 | `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording. A minimised game records black frames (its window owns no pixels), so while this is on a minimise parks the game off-screen instead: restored without being activated and moved left of the whole desktop, same size, taskbar button kept (#723). Activating it (its taskbar button, alt-tab) or turning this off moves it back where it was. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
@@ -52,7 +53,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_hide_map_text` | `0` | hides the text a map puts on screen itself -- the `dod_anzio` mortar warning, the round result -- by matching each `HudText` message against the `message` strings the loaded map's own entities declare. DoD's own prompts on the same channel (`#Clan_allies_ready` and friends) still show. Reads the map's BSP once per level | `goldsrc-hooks/src/map_text.rs` |
 | `dodstudio_hide_clan_text` | `0` | hides all of DoD's clan-match text: the warm-up and ready rules, "Warmup Mode" on the left, the countdown to the match and "MATCH IS LIVE!". Drops the `#clan_*` `TextMsg` keys, swallows `ClanTimer` (which draws both the countdown and "MATCH IS LIVE!") and clears `GameRules`' warm-up flag. Turning it off mid-countdown brings the countdown back at once; turning it on mid-countdown removes "Warmup Mode" but not yet a countdown already showing (#618). Leaves everything else alone, round-start text included | `goldsrc-hooks/src/clan_text.rs` |
 | `dodstudio_ex_interp_max` | `100` (the engine's own ceiling) | raises the engine's clamp on `ex_interp` above its stock 100 ms ceiling, for smoother entity motion between snapshots; refuses `<=50` or `>1000`. Mechanism live-proven on pre-Anniversary, no specific value settled on yet. On the 25th Anniversary build (where HLTV demos already get 200 ms) any value but the default sets both paths | [`goldsrc_ex_interp.md`](goldsrc_ex_interp.md) |
-| `dodstudio_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, decals, detail textures and skies from `dodstudio_hd`. A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
+| `dodstudio_hd_enabled` | `1` if there's a `dodstudio_hd` folder (in `dod_addon`, or `dod` for an install built before #415), else `0`; `GOLDSRC_HOOKS_TEXTURE_HIRES=1`/`0` at launch overrides | HD textures on/off: map textures, model skins, sprites, decals, detail textures and skies from `dodstudio_hd`, and player sprays from PNGs in `logos` (`dodstudio_spray`). A change applies to what loads next -- walls, detail and skies from the next map, models, sprites and decals already loaded after a restart. Turning it on in a session that started off installs the hook then | `goldsrc-hooks/src/texture_hires.rs`, `goldsrc-hooks/tools/hd/README.md` |
 | `dodstudio_hd_style` | `ultrasharp` | which `dodstudio_hd/<type>/<style>` folder to use; a name with no folder means originals (plus `overrides`). Same timing as `dodstudio_hd_enabled` | same |
 | `dodstudio_allow_shaders` | `0` | 25th Anniversary only: lets the engine draw map surfaces through its own GLSL shaders (`platform/gl_shaders/fs_world.frag`) during demo playback. The engine gates them on `sv_allow_shaders`, which a demo can never turn on: the console refuses it in multiplayer and every demo load resets it to 0. This writes 1 into it while a demo plays. Needs `gl_use_shaders 1` too. `gl_reloadshaders` recompiles the files live. Does nothing on the pre-Anniversary engine | `goldsrc-hooks/src/world_shaders.rs` |
 | `dodstudio_hide_hltv_messages` | `0` | drops the text an HLTV proxy puts on screen during playback ("You're watching HLTV. Visit www.valvesoftware.com", and a proxy operator's own `msg` lines) as it arrives, so an HLTV demo needs no patched copy. Only director text messages: the pipeline's highlight labels and everything that drives the spectator camera still go through. A message already on screen when it's turned on fades out on its own | `goldsrc-hooks/src/hltv_messages.rs` |
@@ -270,6 +271,91 @@ file (naming the file that would match), the file couldn't be used, or it
 was left alone on purpose (tool textures, blank sprites, per-player skins). A
 texture several maps use is listed under each. `dodstudio_debug_hd_misses <map>`
 shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
+
+### `dodstudio_spray`
+
+Player sprays and crosshairs per player in demos, and switching your own
+spray (#428). Who gets what is Studio's **Configuration > Players**: a table
+of players (by SteamID, or by name when there is none), each with a spray (a
+PNG from the game's own `<game>\logos\` folder, any size, RGBA, or **From
+the demo**) and a crosshair (a 64x64 tile of a sprite in `<game>\sprites\`, picked from a 4x4
+preview), and what everyone not listed gets:
+
+- **Sprays, POV demos:** their own spray (the default: the one the demo
+  saved), one fallback PNG, or no spray;
+- **Sprays, HLTV demos:** one fallback PNG (the default) or no spray. "Their
+  own" is not offered: an HLTV demo records that a player sprayed, never the
+  image.
+- **Crosshair:** the game's own (the default: the viewer's `cl_xhair_style`
+  tile of `customXHair.spr`, as without the table) or one sprite and tile.
+
+Studio mirrors the table to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
+whenever it changes (it never writes into the game install for this); the
+hook rereads it when its time changes, checked once a second, and applies it
+only while a demo plays and `dodstudio_player_overrides` is 1. Players are
+looked up through the engine's player info: SteamID first, then the name,
+ignoring case.
+
+**Sprays.** One rule for both demo types, and who the camera follows plays
+no part: when a player sprays, the wall shows the PNG the table gives that
+player, or the fallback.
+
+- **Every spray from a PNG** -- a listed player's, and every fallback PNG --
+  is a spray the hook builds from the PNG and shoots in place of the
+  engine's, whether or not the demo saved one for that player: the same in
+  every demo, at the Players tab's **Spray size** (the longer side, 64 by
+  default, 96 or 128; the picture's shape kept). It needs no HD textures;
+  with them on, its upload is swapped for the PNG itself at the largest
+  power of two `gl_max_size` allows, drawn at the built size. A size change,
+  like any other spray change, reaches sprays built after the table is
+  read again.
+- **"No spray"** is a fully transparent spray, shot the same way. It is
+  drawn rather than skipped because skipping would need another patch
+  inside `CL_ParseTEnt` on both builds; this path is the one already checked
+  on both.
+- **"From the demo"** (a listed player) and **"Their own spray"** (the POV
+  fallback) draw the spray the demo saved, untouched, at its real size.
+  With none saved (the player joined before the recording, or any HLTV
+  demo), "From the demo" is the fallback for that demo type, and "Their own
+  spray" is no spray: never the engine's bullet-hole stand-in.
+
+How: `CL_ParseTEnt`'s `customdata` test asks the hook for every spray, and
+`Draw_DecalTexture` answers each frame with the hook's texture for that
+player, from one table for players with no saved spray and one for players
+whose saved spray the table replaces (`goldsrc-hooks/src/spray_hltv.rs`;
+`tools/verify_hltv_spray_offsets.py`). These detours install once the table
+asks for anything and the cvar is 1. The log says `spray: TE_PLAYERDECAL for
+<player> (slot <n>, ...) -> <spray>` for each one drawn.
+
+A flip of `dodstudio_player_overrides` reaches sprays loaded after it; a
+spray already on a wall keeps its texture, so reload the demo to compare.
+
+**Crosshairs.** The crosshair on screen is the recorder's in a POV demo and
+the watched player's in an HLTV demo's in-eye view (free and chase cameras
+draw none). It changes on the next frame. No code is patched: the hook
+already sits on the engine's `SPR_Set`/`SPR_Draw*` in client.dll's own
+`gEngfuncs` copy (`hud_sprites.rs`, #808), and when a draw is the
+crosshair's -- any rect of `customXHair.spr`, or exactly the stock 24x24
+spectator rect of `crosshairs.spr` while in-eye -- it sets the table's
+sprite (loaded once per level with the engine's `SPR_Load`, after checking
+the file is a Half-Life sprite), draws its tile centred where the game
+centred its own, and sets the game's sprite back. When the crosshair shows
+stays the game's: `ShouldDrawCrossHair`, `dodstudio_hide_crosshair` and
+`dodstudio_spec_match_pov`'s hides are untouched. In a POV demo it needs the
+viewer's `cl_xhair_style` at 1-16: style 0 is DoD's classic crosshair, which
+draws no tile to swap. Details: `docs/goldsrc_crosshair.md` §3.
+
+| subcommand | does |
+| --- | --- |
+| `dodstudio_spray` | lists the PNGs in `logos\` and your spray's size |
+| `dodstudio_spray <name>` | makes `logos\<name>.png` your spray for live play: writes `dod\tempdecal.wad` (the game's spray file -- the one file in the game's folder the hook writes, because that is what the command is for; sides in steps of 16 and the file at most 20480 bytes, the most a server takes, so a square picture is 112x112; 8-bit, 255 colours, transparent where the PNG is) and keeps `tempdecal.wad.dodstudio-backup` of the original the first time. The engine reads the file when it connects, so it shows from the next connect; a demo already playing draws the sprays it recorded |
+| `dodstudio_spray players` | each player in the demo with their name, SteamID, whether the Players table lists them and the spray they get, then whether the detours are on |
+
+`cl_logofile` and the game's `.cfg` files are left alone. Refused in a
+capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a
+batch draws recorded sprays and would only change the file on disk.
+Source: `goldsrc-hooks/src/spray.rs`, `goldsrc-hooks/src/spray_hltv.rs`
+(offsets checked by `goldsrc-hooks/tools/verify_hltv_spray_offsets.py`).
 
 ### `dodstudio_hide_asset`
 

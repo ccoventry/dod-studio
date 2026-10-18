@@ -354,6 +354,24 @@ those files; see its README. It works the same on the 25th Anniversary
 `hw.dll` (#370), from that build's own offsets
 (`tools/verify_texture_hires_offsets.py --anniversary`).
 
+`src/spray.rs` does the same for player sprays (#428): in a demo, while
+`dodstudio_player_overrides` is 1, a player's spray becomes what Studio's
+Players table (Configuration > Players, mirrored to
+`%APPDATA%\dod-studio\goldsrc_hooks_players.txt`, read by
+`src/player_table.rs`) gives that player. `src/spray_hltv.rs` shoots every
+spray from a PNG (and every "no spray") as a spray of its own, built at the
+tab's spray size, in place of the engine's -- whether or not the demo saved
+one, POV or HLTV (#368) -- through the engine's own custom-spray path, on
+both builds (`tools/verify_hltv_spray_offsets.py`, `--anniversary`); with HD
+textures on, its upload gets the PNG itself. A spray the demo saved is drawn
+untouched ("From the demo", "Their own spray").
+`dodstudio_spray <name>` makes a `logos\<name>.png` the user's own spray for
+live play by writing the game's `tempdecal.wad` (with a backup).
+`src/player_crosshair.rs` gives the crosshair on screen (the recorder's in
+POV, the in-eye target's in HLTV) the table's sprite and tile, through the
+`SPR_Set`/`SPR_Draw*` hooks `src/hud_sprites.rs` already has in client.dll's
+`gEngfuncs` copy: no code patch, one table for every install.
+
 ### Always-on crash guards
 
 Each is on by default, because it only acts where the game would otherwise

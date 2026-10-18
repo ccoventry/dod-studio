@@ -51,6 +51,8 @@ DEMO PLAYBACK
       Run at full speed while another window is in front, so a capture batch doesn't need the screen.
   dodstudio_pov_live_bob 0/1
       POV demos: the view and gun bob by the cl_bob set now (otherwise they don't bob at all).
+  dodstudio_player_overrides 0/1
+      Sprays and crosshairs in demos follow DoD Studio's Players table (Configuration > Players); 0 is the game's own. Studio sets it.
   dodstudio_stay_behind_while_capturing 0/1
       Keep the game behind your other windows while it records, instead of coming to the front.
   dodstudio_seek_to <time>
@@ -99,6 +101,8 @@ HD TEXTURES
       Load the HD textures built by DoD Studio's HD page.
   dodstudio_hd_style <name>
       Which HD style to use (ultrasharp by default).
+  dodstudio_spray [<name>|players]
+      Make logos\<name>.png your spray for live play (writes tempdecal.wad, shows from the next connect); bare lists the PNGs; players shows what Studio's Players table gives each player in the demo.
   dodstudio_allow_shaders 0/1
       25th Anniversary only: allow the engine's map-surface shaders during playback.
 
