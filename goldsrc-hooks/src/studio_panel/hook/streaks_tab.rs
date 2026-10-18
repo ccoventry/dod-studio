@@ -378,11 +378,12 @@ unsafe fn fill(
                     set_string(row, cell.as_ptr(), value.as_ptr());
                 }
             }
-            // The list keeps its own copy; `row` stays ours, and is left
-            // (a few hundred bytes a row, per demo and per change to the
-            // Player box) rather than freed
-            // through a slot nothing here has verified.
+            // AddItem keeps its own `MakeCopy` of the row, so ours is freed
+            // straight after: the list is filled again on every change to
+            // the Player box (#812).
             add_item(list, row, 0, 0, 0);
+            let delete_this: ListVoidFn = slot(row, KEYVALUES_SLOT_DELETE_THIS);
+            delete_this(row);
         }
         // A list scrolled down for the last demo showed nothing for one with
         // fewer highlights until the next scroll (#796). Nothing is sorted
