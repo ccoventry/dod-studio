@@ -6,6 +6,7 @@
 // channel-based worker spawner), `preview` (preview patches).
 // Calls std::fs::create_dir_all and std::thread::spawn — native-only.
 
+use crate::patch::command_players::{ClipPlayer, CommandAnchor, command_anchor};
 use crate::patch::engine::StreamPatcher;
 use crate::patch::types::{
     CaptureStreak, CaptureWorker, CommandRelation, PatchEvent, PatchJob, PatcherConfig,
@@ -893,8 +894,24 @@ pub fn build_batch_queue(
                 block.record_stop_tick = r_stop;
             }
 
-            // Custom command overrides
+            // Custom command overrides. One limited to some players runs only
+            // around their clips (`command_players`); the hook-run batch is
+            // built from this same schedule, so both routes honour it.
+            let block_clips: Vec<(ClipPlayer<'_>, i32, i32)> = merged_sources[i]
+                .iter()
+                .filter_map(|&k| raw_streaks.get(k))
+                .map(|s| (ClipPlayer::of(s), first_kill_frame(s), last_kill_frame(s)))
+                .collect();
             for (idx, custom) in config.custom_commands.iter().enumerate() {
+                let (anchor_first, anchor_last) =
+                    match command_anchor(&custom.players, block_clips.iter().copied()) {
+                        CommandAnchor::Skip => continue,
+                        CommandAnchor::Block => (physical_frame, physical_end_frame),
+                        CommandAnchor::Clips {
+                            first_frame,
+                            last_frame,
+                        } => (first_frame.max(0) as usize, last_frame.max(0) as usize),
+                    };
                 let relation_str = match custom.relation {
                     CommandRelation::Before => "BEFORE",
                     CommandRelation::After => "AFTER",
@@ -902,7 +919,7 @@ pub fn build_batch_queue(
                 let target_tick = match custom.relation {
                     CommandRelation::Before => {
                         let mut t = find_tick_backwards(
-                            physical_frame,
+                            anchor_first,
                             custom.offset,
                             frame_times_ref,
                             demo_fps,
@@ -914,7 +931,7 @@ pub fn build_batch_queue(
                     }
                     CommandRelation::After => {
                         let mut t = find_tick_forwards(
-                            physical_end_frame,
+                            anchor_last,
                             custom.offset,
                             frame_times_ref,
                             demo_fps,

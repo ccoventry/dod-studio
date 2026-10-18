@@ -1,0 +1,48 @@
+<!doctype html>
+<!--
+  Minimal harness for command_players_ui.js: one Scheduled Commands list with
+  its Players cell, fed a stand-in queue (one POV demo, one HLTV demo).
+  window.__items() reads the rows back; window.__changes counts notifies.
+-->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>command_players_ui.js test harness</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <div id="custom-commands-list" class="list-editor-list"></div>
+
+  <script type="module">
+    import { createListEditor } from '/src/list_editor.js';
+    import { createCommandPlayersField } from '/src/command_players_ui.js';
+
+    const demos = [
+      { path: 'pov.dem', recorder_id: '76561197961831029', recorder_name: 'm00cat',
+        streaks: [{ target_player: 'm00cat', steam_id: '76561197961831029' }] },
+      { path: 'hltv.dem', streaks: [{ target_player: 'Brain', steam_id: '76561197972575011', spectated: true }] },
+    ];
+    const items = [{ command: 'cl_xhair_style 1', relation: 'Before', offsetSeconds: 5, players: [] }];
+    window.__changes = 0;
+    window.__items = () => items;
+    createListEditor({
+      container: document.querySelector('#custom-commands-list'),
+      getItems: () => items,
+      fields: [
+        { key: 'command', type: 'text' },
+        { key: 'relation', type: 'select', options: ['Before', 'After'] },
+        { key: 'offsetSeconds', type: 'number', width: '70px' },
+        {
+          key: 'players', type: 'custom',
+          build: createCommandPlayersField({
+            getDemos: () => demos,
+            recorderOf: (d) => (d.recorder_id ? { id: d.recorder_id, name: d.recorder_name } : null),
+          }).build,
+        },
+      ],
+      onChange: () => { window.__changes += 1; },
+    });
+    window.__harnessReady = true;
+  </script>
+</body>
+</html>

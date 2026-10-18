@@ -1069,6 +1069,61 @@ button.primary-btn:hover:not(:disabled) {
   cursor: not-allowed;
 }
 
+/* A Scheduled Command's Players: chips, then a box for the next one. Kept
+   to one line's height until it holds several players. */
+.command-players {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  width: 190px;
+  flex-shrink: 0;
+  padding: 1px 3px;
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  background: var(--bg-input);
+}
+
+.command-players-input {
+  flex: 1;
+  min-width: 60px;
+  border: none !important;
+  background: transparent !important;
+  padding: 2px !important;
+}
+
+/* No players is everyone: dimmed, so a limited row stands out. */
+.command-players-everyone {
+  opacity: 0.6;
+}
+
+.command-player-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 2px 0 7px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-player-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 3px;
+  font-size: 12px;
+}
+
+.command-player-remove:hover {
+  color: #ef4444;
+}
+
 .scan-status-row {
   display: flex;
   align-items: center;

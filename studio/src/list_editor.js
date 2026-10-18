@@ -38,7 +38,9 @@ export const TRASH_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 24 24" f
  * @param {() => Promise<string|null>} [opts.browse] - opens a native picker for the primary field; adds a per-row 📁 button when set
  *
  * A text field may carry `enhance(input)`, called on each of its inputs as
- * the row is built (the Commands tab's type-ahead, #215).
+ * the row is built (the Commands tab's type-ahead, #215). A `custom` field
+ * gives `build(item, notify)`, which returns the cell (a Scheduled Command's
+ * Players).
  */
 export function createListEditor({ container, getItems, fields, unique = false, onChange, browse }) {
   function notify() {
@@ -55,6 +57,11 @@ export function createListEditor({ container, getItems, fields, unique = false, 
     row.className = 'input-row list-editor-row';
 
     fields.forEach((field) => {
+      if (field.type === 'custom') {
+        // The field builds its own cell and edits the item itself.
+        row.appendChild(field.build(item, notify));
+        return;
+      }
       const value = fieldValue(item, field);
       let input;
       if (field.type === 'select') {

@@ -517,6 +517,12 @@ export const STRINGS = {
     INIT_COMMAND_PLACEHOLDER: 'e.g. mirv_streams add all',
     CUSTOM_COMMAND_PLACEHOLDER: 'Command',
     CUSTOM_COMMAND_RELATION_OPTIONS: ['Before', 'After'],
+    // A Scheduled Command's Players (command_players_ui.js).
+    COMMAND_PLAYERS_EVERYONE: 'Everyone',
+    COMMAND_PLAYERS_TITLE: 'Players: run this only around these players\' clips (a POV demo\'s recorder, or the player an HLTV highlight follows). Pick from the queue, or type a name or SteamID and press Enter. Empty runs it for everyone.',
+    COMMAND_PLAYERS_ARIA_LABEL: 'Players this command runs for',
+    COMMAND_PLAYER_BY_NAME: 'Matched by name',
+    commandPlayerRemove: (name) => `Remove ${name}`,
     footerRequiredSpace: (gb) => `Required: ${gb} GB`,
     REQUIRED_SPACE_DEFAULT: 'Required: 0.00 GB',
   },

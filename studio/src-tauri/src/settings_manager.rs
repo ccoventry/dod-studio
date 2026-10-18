@@ -648,6 +648,7 @@ mod tests {
                     command: "host_timescale 0.5".to_string(),
                     relation: "Before".to_string(),
                     offset_seconds: 1.5,
+                    players: Vec::new(),
                 }],
             }],
             command_profile_active: "FOTW".to_string(),
@@ -661,6 +662,47 @@ mod tests {
         assert_eq!(
             restored.command_profiles[0].custom_commands[0].offset_seconds,
             1.5
+        );
+    }
+
+    #[test]
+    fn a_scheduled_commands_players_survive_settings_and_profiles() {
+        // Saved before the field: everyone.
+        let old: CustomCommandPayload = serde_json::from_str(
+            r#"{"command":"cl_xhair_style 1","relation":"Before","offset_seconds":5.0}"#,
+        )
+        .expect("a command without players must deserialize");
+        assert!(old.players.is_empty());
+
+        let players = vec![
+            native::patch::CommandPlayer {
+                id: Some("76561197961831029".to_string()),
+                name: "m00cat".to_string(),
+            },
+            native::patch::CommandPlayer {
+                id: None,
+                name: "Brain".to_string(),
+            },
+        ];
+        let command = CustomCommandPayload {
+            players: players.clone(),
+            ..old
+        };
+        let original = AppSettings {
+            custom_commands: vec![command.clone()],
+            command_profiles: vec![CommandProfile {
+                name: "Crosshairs".to_string(),
+                init_commands: Vec::new(),
+                custom_commands: vec![command],
+            }],
+            ..AppSettings::default()
+        };
+        let json = serde_json::to_string(&original).expect("settings must serialize");
+        let restored: AppSettings = serde_json::from_str(&json).expect("settings must deserialize");
+        assert_eq!(restored.custom_commands[0].players, players);
+        assert_eq!(
+            restored.command_profiles[0].custom_commands[0].players,
+            players
         );
     }
 

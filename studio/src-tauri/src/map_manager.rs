@@ -700,6 +700,7 @@ pub fn roll_floors(
                 "After" => native::patch::CommandRelation::After,
                 _ => native::patch::CommandRelation::Before,
             },
+            players: c.players.clone(),
         })
         .collect();
 
@@ -863,6 +864,7 @@ mod tests {
             command: command.to_string(),
             relation: relation.to_string(),
             offset_seconds: offset,
+            players: Vec::new(),
         }
     }
 

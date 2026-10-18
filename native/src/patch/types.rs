@@ -91,6 +91,24 @@ pub struct CustomCommand {
     pub command: String,
     pub offset: f32,
     pub relation: CommandRelation,
+    /// Whose clips the command runs around (a crosshair per player). Empty is
+    /// everyone's, which is what settings from before the field mean. See
+    /// `patch::command_players`.
+    #[serde(default)]
+    pub players: Vec<CommandPlayer>,
+}
+
+/// One player a Scheduled Command is limited to. Both are kept so the entry
+/// matches a clip either way and can be shown: the id when both sides carry
+/// one, else the name.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
+pub struct CommandPlayer {
+    /// SteamID64. `None` for a player typed by name, or one whose demo
+    /// carries no SteamID.
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub name: String,
 }
 
 #[derive(Clone, Copy, Debug, serde::Serialize, serde::Deserialize, PartialEq, Eq)]

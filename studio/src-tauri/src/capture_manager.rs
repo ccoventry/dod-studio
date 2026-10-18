@@ -263,6 +263,10 @@ pub struct CustomCommandPayload {
     pub command: String,
     pub relation: String,
     pub offset_seconds: f32,
+    /// `CustomCommand::players`: empty, or absent from settings and profiles
+    /// saved before it, is everyone.
+    #[serde(default)]
+    pub players: Vec<native::patch::CommandPlayer>,
 }
 
 /// One highlight streak — serialisable across the Tauri IPC boundary.
@@ -477,6 +481,7 @@ fn config_from_payload(payload: &CapturePayload) -> PatcherConfig {
                 "After" => CommandRelation::After,
                 _ => CommandRelation::Before,
             },
+            players: c.players.clone(),
         })
         .collect();
     if let Some(v) = payload.decal_flush {
@@ -3556,11 +3561,13 @@ mod tests {
                     command: "say after".to_string(),
                     relation: "After".to_string(),
                     offset_seconds: 1.0,
+                    players: Vec::new(),
                 },
                 CustomCommandPayload {
                     command: "say unrecognized".to_string(),
                     relation: "Sideways".to_string(),
                     offset_seconds: 1.0,
+                    players: Vec::new(),
                 },
             ],
             decal_flush: None,
@@ -3743,6 +3750,7 @@ mod tests {
             command: long,
             relation: "Before".to_string(),
             offset_seconds: 1.0,
+            players: Vec::new(),
         }];
         assert!(first_banned_command_error(&[], &scheduled).is_some());
 
@@ -3771,6 +3779,7 @@ mod tests {
             command: "mirv_movie_filename foo".to_string(),
             relation: "Before".to_string(),
             offset_seconds: 1.0,
+            players: Vec::new(),
         }];
         let err = first_banned_command_error(&[], &scheduled);
         assert!(err.is_some(), "must be refused");
@@ -3783,6 +3792,7 @@ mod tests {
             command: "host_framerate 0.05".to_string(),
             relation: "Before".to_string(),
             offset_seconds: 1.0,
+            players: Vec::new(),
         }];
         let err = first_banned_command_error(&[], &scheduled);
         assert!(err.is_some(), "must be refused");
@@ -3823,6 +3833,7 @@ mod tests {
             command: "mirv_fov 105".to_string(),
             relation: "Before".to_string(),
             offset_seconds: 1.0,
+            players: Vec::new(),
         }];
         let err = first_banned_command_error(&[], &scheduled);
         assert!(err.is_some(), "must be refused");

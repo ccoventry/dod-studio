@@ -13,6 +13,8 @@ import { showToast } from './toast.js';
 import { requestProcessGuardedLaunch } from './detail_pane.js';
 import { createListEditor } from './list_editor.js';
 import { attachCommandSuggest } from './command_suggest.js';
+import { normalisePlayers } from './command_players.js';
+import { createCommandPlayersField } from './command_players_ui.js';
 import { refreshCfgWarnings, bannedCommandCount } from './cfg_warnings.js';
 import { isObsConnected, obsConnectionChecked, setObsConnected } from './obs_status.js';
 import { refreshRollFloors } from './roll_floors.js';
@@ -587,6 +589,7 @@ export function getCommandsState() {
       command: c.command,
       relation: c.relation === 'After' ? 'After' : 'Before',
       offset_seconds: c.offsetSeconds,
+      players: normalisePlayers(c.players),
     })),
   };
 }
@@ -600,6 +603,7 @@ export function hydrateCommandsState(persistedInitCommands, persistedCustomComma
         command: c.command || '',
         relation: c.relation === 'After' ? 'After' : 'Before',
         offsetSeconds: typeof c.offset_seconds === 'number' ? c.offset_seconds : 2.0,
+        players: normalisePlayers(c.players),
       }))
     : [];
   initCommandsEditor?.render();
@@ -899,6 +903,13 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
       },
       { key: 'relation', type: 'select', options: STRINGS.CAPTURE_CONFIG.CUSTOM_COMMAND_RELATION_OPTIONS },
       { key: 'offsetSeconds', type: 'number', step: 0.1, min: 0, width: '70px' },
+      {
+        key: 'players', type: 'custom',
+        build: createCommandPlayersField({
+          getDemos: () => currentGetState?.()?.currentScannedDemos || [],
+          recorderOf: (demo) => currentGetState?.()?.recorderOf?.(demo) || null,
+        }).build,
+      },
     ],
     onChange: () => {
       syncCommandProfileRow();
@@ -933,7 +944,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
   const addCustomCommandBtn = document.querySelector('#add-custom-command-btn');
   if (addCustomCommandBtn) {
     addCustomCommandBtn.addEventListener('click', () => {
-      customCommandsEditor.addItem({ command: '', relation: 'Before', offsetSeconds: 2.0 });
+      customCommandsEditor.addItem({ command: '', relation: 'Before', offsetSeconds: 2.0, players: [] });
     });
   }
 
@@ -1316,6 +1327,7 @@ export function initCaptureUI(getState, onSettingsChange, onStatusChange, getTak
         command: c.command.trim(),
         relation: c.relation === 'After' ? 'After' : 'Before',
         offset_seconds: c.offsetSeconds,
+        players: normalisePlayers(c.players),
       }));
 
     return {
