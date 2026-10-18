@@ -47,8 +47,10 @@ function resolveAndClose(result) {
  * `details`: an optional list shown under the message, one entry per item,
  * each `{ primary, secondary, title }` (a main line, a smaller second line,
  * and a hover text). `footer`: an optional line after the list.
+ * `focusConfirm`: the confirm button takes focus, so Enter picks it; only for
+ * a question whose yes loses nothing.
  */
-export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false } = {}) {
+export function themedConfirm(message, { title, confirmLabel, cancelLabel, details, footer, hideCancel = false, focusConfirm = false } = {}) {
   if (titleEl) titleEl.textContent = title || STRINGS.THEMED_CONFIRM_MODAL.TITLE_DEFAULT;
   if (messageEl) messageEl.textContent = message;
   if (detailsEl) {
@@ -81,5 +83,6 @@ export function themedConfirm(message, { title, confirmLabel, cancelLabel, detai
     cancelBtn.style.display = hideCancel ? 'none' : '';
   }
   if (modal) modal.style.display = 'flex';
+  if (focusConfirm) okBtn?.focus();
   return new Promise((resolve) => { pendingResolve = resolve; });
 }

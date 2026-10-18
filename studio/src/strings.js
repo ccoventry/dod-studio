@@ -1470,8 +1470,28 @@ export const STRINGS = {
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
-    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_QUESTION: "Rescan them now? Their highlights are replaced by the new scan; marks, notes, status and kill ranges go with any highlight found again.",
     CHANGED_DEMOS_RESCAN: 'Rescan',
+    // Opening a project with demos an older DoD Studio scanned (scan_version.js).
+    OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
+    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
+    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    OUTDATED_DEMOS_RESCAN: 'Rescan',
+    OUTDATED_DEMOS_NOT_NOW: 'Not now',
+    // What a rescan did with the highlights' work (rescan_carry.js).
+    rescanCarryToast: (kept, total) => kept === total
+      ? `Rescan kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `Rescan kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the new scan; their marks and notes are listed in the activity log (View Logs).`,
+    rescanCarryLog: (kept, total, demos) => `[rescan] kept the work on ${kept} of ${total} highlight(s) across ${demos} demo(s)`,
+    rescanDemoLog: (name) => `[rescan] ${name}:`,
+    rescanNarrowedLog: (time, player) => `[rescan]   ${time} ${player}: the new scan splits its Kill Range over two highlights; kept on the one holding most of its kills`,
+    rescanUncarriedLog: (time, player, timeline, reason, work) => `[rescan]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    RESCAN_UNCARRIED_REASON: {
+      'no-piece': 'the demo did not scan',
+      'not-found': 'no highlight in the new scan has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
     // #217: splitting a queued demo that recorded more than one map.
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
     // What happened to the original's highlight work (split_carry.js).
