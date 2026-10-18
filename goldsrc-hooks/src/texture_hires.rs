@@ -199,6 +199,9 @@
 //! `hw+0x23d4a4`, the mip loop at `hw+0x3e580` / `hw+0x23d573`. The atlases
 //! are 256x256 (the `weapons*` ones 512x512), so at 4x they need
 //! `gl_max_size 1024`, which the HD `movie.cfg` lines already set.
+//! Crosshair sheets are the exception and stay stock ([`is_crosshair_sheet`]):
+//! 1:1 pixel art gains nothing from an HD copy, and the mipmapped one drew
+//! fainter on PRE and ignored `gl_spriteblend 0`.
 //!
 //! Decals (`GLT_DECAL`: bullet holes, blood, scorch marks, the map logos,
 //! from `decals.wad`; #729) go in `decals\<style>\<name>_<hash>.tga`, where
@@ -2293,6 +2296,19 @@ fn replacement_mipmap(texture_type: u32, engine_mipmap: u32) -> u32 {
     }
 }
 
+/// Crosshair sheets (`crosshairs.spr`, `customXHair.spr` and the Players
+/// table's `customxhair-*`, `dodcross*`) are 1-3 px bars drawn at 1:1, so an
+/// HD copy has nothing to add, and a mipmapped one changes how they draw:
+/// on PRE the 1:1 draw comes out fainter than stock, and `gl_spriteblend 0`
+/// (alpha test, no blend) no longer brightens it, because the sampled alpha
+/// of a thin bar falls below stock's. Left to the engine, they draw exactly
+/// as stock on both builds (#733). `name` is [`sprite_frame_name`]'s.
+fn is_crosshair_sheet(name: &str) -> bool {
+    ["crosshair", "customogxhair", "customxhair", "dodcross"]
+        .iter()
+        .any(|p| name.starts_with(p))
+}
+
 /// Texture gamma on the colour of every pixel, alpha kept as the file has
 /// it: what a spray gets instead of [`match_engine_expansion`], whose cut-out
 /// threshold would throw the PNG's soft edges away.
@@ -2488,6 +2504,12 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         return skip(
             Miss::OnPurpose,
             &format!("iType {i_type}, a format this hook doesn't replace"),
+        );
+    }
+    if texture_type == GLT_HUDSPRITE && is_crosshair_sheet(&name) {
+        return skip(
+            Miss::OnPurpose,
+            "a crosshair sheet, drawn as stock (1:1 pixel art gains nothing)",
         );
     }
     if data.is_null()
@@ -3999,6 +4021,28 @@ mod tests {
             3,
             "same length as the old push [ebp+0x1c]"
         );
+    }
+
+    /// #733: crosshair sheets stay stock, by their frame name (lower-cased
+    /// by `sprite_frame_name`); the other HUD atlases don't.
+    #[test]
+    fn crosshair_sheets_are_left_stock() {
+        for id in [
+            "sprites/crosshairs.spr_0",
+            "sprites/customXHair.spr_0",
+            "sprites/customxhair-diceWSOD.spr_0",
+            "sprites/customogxhair.spr_0",
+            "sprites/dodcross1.spr_0",
+        ] {
+            assert!(is_crosshair_sheet(&sprite_frame_name(id)), "{id}");
+        }
+        for id in [
+            "sprites/weapons1.spr_0",
+            "sprites/scope_k43.spr_0",
+            "sprites/hud_icons.spr_0",
+        ] {
+            assert!(!is_crosshair_sheet(&sprite_frame_name(id)), "{id}");
+        }
     }
 
     /// #728: HUD atlases are sprites to everything but the counters -- same

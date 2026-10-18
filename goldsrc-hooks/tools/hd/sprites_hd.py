@@ -10,7 +10,7 @@ sprite's palette) exactly as texture_hires.rs computes it:
   alphtest           cut-outs filled first; alpha from the original mask
   indexalpha         the palette index *is* the alpha: upscaled as a greyscale
                      image; RGB is palette[255], all the engine ever draws
-  crosshair sheets   nearest-neighbour 4x, no upscaler (PIXEL_ART below)
+  crosshair sheets   not built: the hook draws them stock (CROSSHAIR below)
 
 then Lanczos to the power-of-two target (4x, capped at HD_CAP a side, 1024
 by default). Fully
@@ -48,35 +48,11 @@ from goldsrc import SPR_ALPHTEST, SPR_INDEXALPHA, Sprite
 HUD = re.compile(r"^(320|640|1clip_|1hud_|1rockets|clip_|crosshair|customogxhair|customxhair|dodcross"
                  r"|hud_|scope_|weapons\d|hint_|hltv_icons|number_)")
 
-# Crosshair sheets are pixel art: 1-3 px bars drawn at 1:1. An AI upscale
-# softens their edges, and the mip level the engine draws at 1:1 then averages
-# the soft edge in, so the crosshair comes out thinner and dimmer than stock
-# (seen on PRE at 1280x720 and POST at 2560x1440). Nearest-neighbour 4x keeps
-# every bar exact: its 1:1 mip level is the original pixels, and drawn
-# magnified it stays sharp.
-PIXEL_ART = re.compile(r"^(crosshair|customogxhair|customxhair|dodcross)")
-
-
-def pixel_art_frame(fmt, w, h, idx, pal):
-    """The frame as RGBA, scaled 4x (to the power-of-two target) by nearest neighbour."""
-    ind = np.frombuffer(idx, np.uint8).reshape(h, w)
-    if fmt == SPR_INDEXALPHA:
-        rgba = np.empty((h, w, 4), np.uint8)
-        rgba[:, :, :3] = np.frombuffer(pal, np.uint8)[765:768]
-        rgba[:, :, 3] = ind
-    else:
-        rgb = np.frombuffer(pal, np.uint8).reshape(256, 3)[ind]
-        alpha = np.full((h, w), 255, np.uint8)
-        if fmt == SPR_ALPHTEST:
-            mask = ind == 255
-            if mask.any() and not mask.all():
-                # Same fill as the upscaled path: no key colour bleeds into
-                # a bar's edge when the engine filters it magnified.
-                _, (iy, ix) = distance_transform_edt(mask, return_indices=True)
-                rgb = rgb[iy, ix]
-            alpha[mask] = 0
-        rgba = np.dstack([rgb, alpha]).astype(np.uint8)
-    return Image.fromarray(rgba, "RGBA").resize((C.pot(w * 4), C.pot(h * 4)), Image.NEAREST)
+# Crosshair sheets are pixel art: 1-3 px bars drawn at 1:1. The HD hook
+# leaves them stock (texture_hires.rs, is_crosshair_sheet): an HD copy has
+# nothing to add at 1:1, and the mipmapped one drew fainter than stock on PRE
+# and ignored gl_spriteblend 0 (#733). So they are not built.
+CROSSHAIR = re.compile(r"^(crosshair|customogxhair|customxhair|dodcross)")
 
 
 def hud_layout_names(game):
@@ -135,7 +111,7 @@ def main():
 
     files = [f for s in sources for f in sprite_files(s)] or game_sprites([C.game_root()] + C.extra_installs(), with_hud)
     jobs = {}
-    pixel_art = 0
+    crosshairs = 0
     for f in files:
         try:
             spr = Sprite(f)
@@ -146,20 +122,16 @@ def main():
             print(f"skipped {f}: {spr.numcolors} colours, format {spr.tex_format}")
             continue
         base = C.file_stem_name(os.path.splitext(os.path.basename(f))[0])
+        if CROSSHAIR.match(base.lower()):
+            crosshairs += 1
+            continue  # the hook draws these stock
         for n, w, h, idx in spr.frames:
             if spr.tex_format == SPR_ALPHTEST and idx.count(255) == len(idx):
                 continue  # a blanked-out frame: nothing to upscale
             key = f"{base}_{n}_{C.fnv1a32(idx, spr.palette):08x}"
-            if PIXEL_ART.match(base.lower()):
-                # Always rewritten (no upscaler run, so it costs nothing):
-                # this replaces an upscaled file an older build left.
-                C.save_output(pixel_art_frame(spr.tex_format, w, h, idx, spr.palette),
-                              os.path.join(out_dir, key + ".tga"))
-                pixel_art += 1
-                continue
             if not C.built(os.path.join(out_dir, key + ".tga"), C.pot(w * 4), C.pot(h * 4)):
                 jobs.setdefault(key, (spr.tex_format, w, h, idx, spr.palette))
-    print(f"{pixel_art} crosshair frame(s) written pixel-exact at 4x; {len(jobs)} sprite frames to build")
+    print(f"{crosshairs} crosshair sheet(s) left stock; {len(jobs)} sprite frames to build")
 
     masks = {}
 
