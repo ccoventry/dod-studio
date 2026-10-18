@@ -1,6 +1,0 @@
-// DoD Studio's Sprays table (Configuration > Sprays), for the hook DLL (#428).
-// Studio rewrites this file whenever the table changes: edit it there.
-pov_fallback	none
-hltv_fallback	png	team_allies.png
-player	steamid	76561197972576011	chris_teamwork.png	dicE[: :]m00cat :D
-player	name	Cpl. Preddy	bot spray.png

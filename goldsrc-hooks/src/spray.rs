@@ -18,7 +18,7 @@
 //!   (palette entry 255 is pure blue, a cut-out) or `}` (index-alpha). So the
 //!   second player's spray is `{00100` in every demo, whoever he is: the slot
 //!   leads to the player through the engine's player info, and from him to
-//!   Studio's Sprays table (`spray_table.rs`).
+//!   Studio's Players table (`player_table.rs`).
 //! - **`gfCustomBuild` is 1 for exactly that upload** (pre-Anniversary
 //!   `hw+0x1ff5718`, 25th Anniversary `hw+0x104b77d8`, read out of the one
 //!   `mov [flag], 1` in `Draw_CacheLoadFromCustom` by signature), which is
@@ -31,10 +31,10 @@
 //!
 //! ## Who gets which spray
 //!
-//! Studio's Configuration > Sprays: a table of players and the PNG (in
+//! Studio's Configuration > Players: a table of players and the PNG (in
 //! `<game>\logos\`) each gets, and a fallback for everyone else per demo type
 //! (POV: the game's own, one PNG or none; HLTV: one PNG or none), mirrored to
-//! `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt` (`spray_table.rs`). It
+//! `%APPDATA%\dod-studio\goldsrc_hooks_players.txt` (`player_table.rs`). It
 //! applies only while a demo plays. Two routes, one rule:
 //!
 //! - **A spray the demo carries the image for** (a POV demo that caught the
@@ -77,7 +77,7 @@ use crate::names::console_name;
 use crate::texture_hires::{Rgba, game_dir};
 
 /// `dodstudio_spray`: list the PNGs in `logos\`, switch to one, or list
-/// each player and the spray the Sprays table gives him. Registered in
+/// each player and the spray the Players table gives him. Registered in
 /// `commands.rs`.
 pub const NAME: &str = console_name!("spray");
 const LOGOS: &str = "logos";
@@ -328,7 +328,7 @@ pub fn logos_dir() -> PathBuf {
 }
 
 /// A token for what a slot-named spray upload stands for: its content key
-/// and what the Sprays table gives the slot's player now. `texture_hires`
+/// and what the Players table gives the slot's player now. `texture_hires`
 /// keeps one per GL texture and lets the engine reuse a same-named texture
 /// only while the token matches, because the engine's cache matches decals
 /// by name and size alone, and a slot is a different player in the next
@@ -344,7 +344,7 @@ pub unsafe fn slot_upload_token(
     width: u32,
     height: u32,
 ) -> Option<u64> {
-    let slot = crate::spray_table::slot_of_custom_name(identifier)?;
+    let slot = crate::player_table::slot_of_custom_name(identifier)?;
     if crate::spray_hltv::building() {
         return None;
     }
@@ -857,7 +857,7 @@ fn usage() -> String {
         "{NAME}: list the PNGs in dod\\{LOGOS}\\ and say how big your spray is\n\
          {NAME} <name>: make dod\\{LOGOS}\\<name>.png your spray for live play (writes dod\\{TEMPDECAL}, \
          the game's spray file; shows from the next connect)\n\
-         {NAME} players: each player in the demo and the spray Studio's Sprays table gives him\n"
+         {NAME} players: each player in the demo and the spray Studio's Players table gives him\n"
     )
 }
 
@@ -920,7 +920,7 @@ fn list() -> String {
         None => out.push_str(&format!("your spray: no readable dod\\{TEMPDECAL}\n")),
     }
     out.push_str(&format!(
-        "who gets which spray in a demo is Studio's Configuration > Sprays; {NAME} players shows it\n"
+        "who gets which spray in a demo is Studio's Configuration > Players; {NAME} players shows it\n"
     ));
     out
 }
@@ -961,16 +961,16 @@ fn switch(name: &str) -> Result<String, String> {
 }
 
 /// `players`: every slot the engine has a player in, with the spray the
-/// Sprays table gives him in this demo. The SteamID comes from the slot's
+/// Players table gives him in this demo. The SteamID comes from the slot's
 /// userinfo, as `dodstudio_deathmsg players` reads it.
 fn players() -> String {
     let Some(engfuncs) = engine::engfuncs() else {
         return format!("{NAME} players: the game's functions aren't captured yet\n");
     };
-    let table = crate::spray_table::load();
+    let table = crate::player_table::load();
     let hltv = unsafe { (engfuncs.is_spectate_only)() } != 0;
     let mut out = format!(
-        "{NAME} players ({} demo; Studio's Sprays table: {} player(s), anyone else gets {}{}):\n",
+        "{NAME} players ({} demo; Studio's Players table: {} player(s), anyone else gets {}{}):\n",
         if hltv { "HLTV" } else { "POV" },
         table.players.len(),
         if hltv { &table.hltv } else { &table.pov },
@@ -998,7 +998,7 @@ fn players() -> String {
         };
         let choice = table.choose(hltv, &name, steam_id);
         let state = match &choice {
-            crate::spray_table::Choice::Png(png) => {
+            crate::player_table::Choice::Png(png) => {
                 format!(" ({})", crate::spray_hltv::png_state(png))
             }
             _ => String::new(),

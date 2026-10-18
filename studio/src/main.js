@@ -56,7 +56,7 @@ import { createQueueActions } from './queue_actions.js';
 import { initReviewMode } from './review_mode.js';
 import { initDemoLinks } from './demo_links.js';
 import { createSetup } from './setup_wiring.js';
-import { createSpraysUi } from './sprays_ui.js';
+import { createPlayersUi } from './players_ui.js';
 import { getGameFolder } from './game_folder_ui.js';
 
 // Registered at module load, before DOMContentLoaded — so it's catching
@@ -338,8 +338,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Configuration's paths, capture mode, OBS and HLAE FFmpeg: config_wiring.js.
   initConfigWiring({ persistAppSettings });
-  // Configuration > Sprays (#428): sprays_ui.js.
-  createSpraysUi({
+  // Configuration > Players (#428): players_ui.js.
+  createPlayersUi({
     getDemos: () => currentScannedDemos,
     getHlPath: () => document.querySelector('#hl-path-input')?.value?.trim() || '',
     getGameFolder,

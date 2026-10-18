@@ -241,7 +241,7 @@
               <button class="config-tab-btn" data-tab="tab-custom-commands" data-str="CAPTURE_CONFIG.TAB_CUSTOM_COMMANDS">Commands</button>
               <button class="config-tab-btn" data-tab="tab-drive-overrides" data-str="CAPTURE_CONFIG.TAB_CAPTURE_OUTPUT">Destinations</button>
               <button class="config-tab-btn" data-tab="tab-render-output" data-str="CAPTURE_CONFIG.TAB_RENDER_OUTPUT">Render Output</button>
-              <button class="config-tab-btn" data-tab="tab-sprays" data-str="CAPTURE_CONFIG.TAB_SPRAYS">Sprays</button>
+              <button class="config-tab-btn" data-tab="tab-players" data-str="CAPTURE_CONFIG.TAB_PLAYERS">Players</button>
               <button class="config-tab-btn" data-tab="tab-notifications" data-str="CAPTURE_CONFIG.TAB_NOTIFICATIONS">Notifications</button>
             </div>
 
@@ -711,38 +711,54 @@
 
             <!-- Tab Content: Windows toast notifications (issue #98) — silent
                  by default, each stage independently switchable. -->
-            <!-- Tab Content: Sprays (#428) -- who gets which spray in a demo.
-                 sprays_ui.js fills it; the hook DLL applies it. -->
-            <div id="tab-sprays" class="config-tab-content" style="display: none;">
-              <p style="font-size: 12px; color: var(--text-muted); margin: 0 0 8px;" data-str="SPRAYS.HELP">Pick the spray each player shows in your demos, from the PNGs in the game's logos folder.</p>
-              <div class="input-row">
-                <input type="text" id="sprays-player-input" list="sprays-player-options" style="flex: 1;" data-str-placeholder="SPRAYS.PLAYER_PLACEHOLDER" placeholder="A player from the queue, a SteamID or a name" />
-                <datalist id="sprays-player-options"></datalist>
-                <select id="sprays-add-png" data-str-title="SPRAYS.ADD_PNG_TITLE"></select>
-                <button id="sprays-add-btn" disabled data-str="SPRAYS.ADD_BUTTON">Add</button>
-                <button id="sprays-refresh-btn" data-str="SPRAYS.REFRESH_BUTTON" data-str-title="SPRAYS.REFRESH_TITLE">Refresh</button>
+            <!-- Tab Content: Players (#428) -- each player's spray and
+                 crosshair in a demo. players_ui.js fills it; the hook DLL
+                 applies it while dodstudio_player_overrides is 1. -->
+            <div id="tab-players" class="config-tab-content" style="display: none;">
+              <div class="setting-toggle">
+                <span class="setting-label"><span data-str="PLAYERS.USE_IN_GAME_LABEL">Use in the game</span><span class="info-icon" data-str-title="PLAYERS.USE_IN_GAME_TITLE"><svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg></span></span>
+                <label class="setting-switch">
+                  <input type="checkbox" id="players-use-in-game" checked />
+                  <span class="setting-switch-slider"></span>
+                </label>
               </div>
-              <div id="sprays-players-status" class="sprays-status"></div>
-              <div id="sprays-list" class="sprays-list"></div>
-              <div id="sprays-warning" class="path-warning" style="display: none;"></div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0;" data-str="PLAYERS.HELP">Pick the spray and the crosshair each player shows in your demos.</p>
+              <div class="input-row">
+                <input type="text" id="players-player-input" list="players-player-options" style="flex: 1;" data-str-placeholder="PLAYERS.PLAYER_PLACEHOLDER" placeholder="A player from the queue, a SteamID or a name" />
+                <datalist id="players-player-options"></datalist>
+                <button id="players-add-btn" disabled data-str="PLAYERS.ADD_BUTTON">Add Player</button>
+                <button id="players-refresh-btn" data-str="PLAYERS.REFRESH_BUTTON" data-str-title="PLAYERS.REFRESH_TITLE">Refresh</button>
+              </div>
+              <div id="players-players-status" class="players-status"></div>
+              <div id="players-list" class="players-list"></div>
+              <div id="players-warning" class="path-warning" style="display: none;"></div>
               <div class="input-row" style="margin-top: 12px;">
-                <label for="sprays-pov-fallback" data-str="SPRAYS.POV_FALLBACK_LABEL" data-str-title="SPRAYS.POV_FALLBACK_TITLE">Players not listed, POV demos:</label>
-                <select id="sprays-pov-fallback">
-                  <option value="own" data-str="SPRAYS.FALLBACK_OWN">Their own spray</option>
-                  <option value="png" data-str="SPRAYS.FALLBACK_PNG">One fallback spray</option>
-                  <option value="none" data-str="SPRAYS.FALLBACK_NONE">No spray</option>
+                <label for="players-pov-fallback" data-str="PLAYERS.POV_FALLBACK_LABEL" data-str-title="PLAYERS.POV_FALLBACK_TITLE">Spray, players not listed, POV demos:</label>
+                <select id="players-pov-fallback">
+                  <option value="own" data-str="PLAYERS.FALLBACK_OWN">Their own spray</option>
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
                 </select>
-                <span id="sprays-pov-fallback-png"></span>
+                <span id="players-pov-fallback-png"></span>
               </div>
               <div class="input-row">
-                <label for="sprays-hltv-fallback" data-str="SPRAYS.HLTV_FALLBACK_LABEL" data-str-title="SPRAYS.HLTV_FALLBACK_TITLE">Players not listed, HLTV demos:</label>
-                <select id="sprays-hltv-fallback">
-                  <option value="png" data-str="SPRAYS.FALLBACK_PNG">One fallback spray</option>
-                  <option value="none" data-str="SPRAYS.FALLBACK_NONE">No spray</option>
+                <label for="players-hltv-fallback" data-str="PLAYERS.HLTV_FALLBACK_LABEL" data-str-title="PLAYERS.HLTV_FALLBACK_TITLE">Spray, players not listed, HLTV demos:</label>
+                <select id="players-hltv-fallback">
+                  <option value="png" data-str="PLAYERS.FALLBACK_PNG">One fallback spray</option>
+                  <option value="none" data-str="PLAYERS.FALLBACK_NONE">No spray</option>
                 </select>
-                <span id="sprays-hltv-fallback-png"></span>
+                <span id="players-hltv-fallback-png"></span>
               </div>
-              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0 0;" data-str="SPRAYS.HD_NOTE">In a POV demo, a spray the demo saved is swapped as it loads, which needs HD textures on.</p>
+              <div class="input-row">
+                <label for="players-crosshair-fallback" data-str="PLAYERS.CROSSHAIR_FALLBACK_LABEL" data-str-title="PLAYERS.CROSSHAIR_FALLBACK_TITLE">Crosshair, players not listed:</label>
+                <select id="players-crosshair-fallback">
+                  <option value="game" data-str="PLAYERS.CROSSHAIR_GAME">Game's own</option>
+                  <option value="sprite" data-str="PLAYERS.CROSSHAIR_ONE">One fallback crosshair</option>
+                </select>
+                <span id="players-crosshair-fallback-pick"></span>
+              </div>
+              <div id="players-crosshair-fallback-picker"></div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 8px 0 0;" data-str="PLAYERS.HD_NOTE">In a POV demo, a spray the demo saved is swapped as it loads, which needs HD textures on.</p>
             </div>
 
             <div id="tab-notifications" class="config-tab-content" style="display: none;">

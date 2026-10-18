@@ -3405,22 +3405,24 @@ button.setup-skip:hover:not(:disabled) {
   min-width: 0;
 }
 
-/* Configuration > Sprays (#428): one row per player, a chip with a remove x. */
-.sprays-status {
+/* Configuration > Players (#428): one row per player -- name, spray,
+   crosshair, remove x -- and the crosshair tile picker under it. */
+.players-status {
   font-size: 12px;
   color: var(--text-muted);
   margin: 2px 0 6px;
 }
 
-.sprays-list {
+.players-list {
   display: flex;
   flex-direction: column;
   gap: 6px;
   margin: 4px 0;
 }
 
-.sprays-row {
-  display: flex;
+.players-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(120px, 1fr) minmax(200px, 1.4fr) 24px;
   align-items: center;
   gap: 8px;
   padding: 2px 4px 2px 10px;
@@ -3430,24 +3432,111 @@ button.setup-skip:hover:not(:disabled) {
   font-size: 12px;
 }
 
-.sprays-player {
-  flex: 1;
+.players-head {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.players-name {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sprays-arrow {
-  color: var(--text-muted);
+.players-crosshair {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
 
-.sprays-empty {
+.players-crosshair select {
+  min-width: 0;
+  max-width: 160px;
+}
+
+.players-tile {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+}
+
+.players-tile-preview {
+  width: 24px;
+  height: 24px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 8px 8px;
+  border-radius: 3px;
+}
+
+.players-picker {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 0 0 4px 12px;
+}
+
+.players-grid {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 48px);
+  grid-template-rows: repeat(4, 48px);
+  width: 192px;
+  height: 192px;
+  background: repeating-conic-gradient(#555 0% 25%, #333 0% 50%) 50% / 16px 16px;
+}
+
+.players-grid-image {
+  position: absolute;
+  inset: 0;
+  width: 192px;
+  height: 192px;
+  pointer-events: none;
+}
+
+.players-cell {
+  position: relative;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 10px;
+  text-align: left;
+  vertical-align: top;
+  padding: 2px 3px;
+  cursor: pointer;
+  align-self: stretch;
+  justify-self: stretch;
+}
+
+.players-grid-numbers .players-cell {
+  color: #fff;
+  font-size: 13px;
+  text-align: center;
+}
+
+.players-cell:hover {
+  border-color: var(--accent-color, #4a90d9);
+}
+
+.players-cell.selected {
+  border: 2px solid var(--accent-color, #4a90d9);
+  color: #fff;
+}
+
+.players-picker-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 280px;
+}
+
+.players-empty {
   font-size: 12px;
   color: var(--text-muted);
 }
 
-.sprays-x {
+.players-x {
   border: none;
   background: transparent;
   color: var(--text-muted);
@@ -3457,6 +3546,6 @@ button.setup-skip:hover:not(:disabled) {
   cursor: pointer;
 }
 
-.sprays-x:hover {
+.players-x:hover {
   color: #fff;
 }

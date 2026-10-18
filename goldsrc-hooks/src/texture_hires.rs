@@ -57,7 +57,7 @@
 //! bigger upload therefore draws at the decal's own size, as for walls.
 //! Player sprays (`tempdecal.wad`, built with `gfCustomBuild` set) go through
 //! the same loader, named after the player's slot (`spray.rs`); they get
-//! their own arm, [`spray_upload`], which swaps in what Studio's Sprays table
+//! their own arm, [`spray_upload`], which swaps in what Studio's Players table
 //! gives the slot's player.
 //!
 //! ## What `GL_Upload8` would have done that the replacement must copy
@@ -738,7 +738,7 @@ static SPRITE_REPLACED: AtomicU32 = AtomicU32::new(0);
 static DECAL_SEEN: AtomicU32 = AtomicU32::new(0);
 static DECAL_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Of the decals, player sprays (`spray.rs`, #428): seen, and replaced as
-/// the Sprays table says. Counted among the decals too.
+/// the Players table says. Counted among the decals too.
 static SPRAY_SEEN: AtomicU32 = AtomicU32::new(0);
 static SPRAY_REPLACED: AtomicU32 = AtomicU32::new(0);
 /// Textures of any type seen -- what `has_observed` keys on.
@@ -2255,8 +2255,8 @@ fn match_engine_gamma_keep_alpha(pixels: &mut [u8], gamma: &[u8; 256]) {
 
 /// The spray arm of [`decide`]: a `GLT_DECAL` upload made while the engine
 /// builds a player's custom logo, or one `spray_hltv` builds. A slot-named
-/// spray gets what Studio's Sprays table gives the slot's player in the demo
-/// playing (`spray_table.rs`): his PNG, the fallback PNG, or a fully
+/// spray gets what Studio's Players table gives the slot's player in the demo
+/// playing (`player_table.rs`): his PNG, the fallback PNG, or a fully
 /// transparent texture for "no spray"; the game's own is left alone. A
 /// spray `spray_hltv` built from a PNG gets that PNG in HD.
 fn spray_upload(
@@ -2267,7 +2267,7 @@ fn spray_upload(
     i_type: u32,
     log: bool,
 ) -> *const AtomicUsize {
-    use crate::spray_table::Choice;
+    use crate::player_table::Choice;
     SPRAY_SEEN.fetch_add(1, Ordering::Relaxed);
     let shown = match &key {
         Some(key) => format!("spray {}", crate::spray::hex(key)),
@@ -2281,7 +2281,7 @@ fn spray_upload(
             None => return std::ptr::null(),
         }
     } else {
-        match crate::spray_table::slot_of_custom_name(identifier)
+        match crate::player_table::slot_of_custom_name(identifier)
             .and_then(crate::spray_hltv::choice_for_slot)
         {
             Some(Choice::Png(png)) => Some(crate::spray::logos_dir().join(png)),
@@ -2291,13 +2291,13 @@ fn spray_upload(
                     unsafe {
                         crate::debug::report(&format!(
                             "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: \
-                             the game's own (Studio's Sprays table)"
+                             the game's own (Studio's Players table)"
                         ))
                     };
                 }
                 record_miss(Miss::OnPurpose, "decal", &shown, || {
                     format!(
-                        "{width}x{height}, a player spray the Sprays table leaves as the game's own"
+                        "{width}x{height}, a player spray the Players table leaves as the game's own"
                     )
                 });
                 return std::ptr::null();
@@ -3034,7 +3034,7 @@ static SPRAY_TOKEN: Mutex<std::collections::BTreeMap<usize, u64>> =
 /// [`keep_cached`] for decals. A spray's texture is named after the player
 /// slot and kept for the session (decals carry no servercount), so the next
 /// demo's player in that slot would get the last one's texture whenever the
-/// sizes match -- with the Sprays table, his PNG or blank. While the table
+/// sizes match -- with the Players table, his PNG or blank. While the table
 /// applies, a slot-named texture is reused only when its token (content and
 /// the table's answer) is the one the incoming spray would get; otherwise
 /// the lookup moves on and the engine loads a new copy (the old one stays,
@@ -3052,7 +3052,7 @@ unsafe fn keep_cached_spray(frame: *const u8, record: *const u8) -> u32 {
     }
     // Safety: the identifier every caller passes is a NUL-terminated name.
     let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
-    let Some(slot) = crate::spray_table::slot_of_custom_name(&identifier) else {
+    let Some(slot) = crate::player_table::slot_of_custom_name(&identifier) else {
         return 1;
     };
     if crate::spray_hltv::choice_for_slot(slot).is_none() {
@@ -3737,7 +3737,7 @@ pub fn status() -> String {
             .unwrap_or_else(|| not_read(&SPRITE_SEEN, "restart the game"))
     );
     let decals = format!(
-        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Sprays table says",
+        "{} of {} decal load(s) replaced ({}), of which {} of {} player spray(s) as Studio's Players table says",
         DECAL_REPLACED.load(Ordering::Relaxed),
         DECAL_SEEN.load(Ordering::Relaxed),
         DECAL_INDEX

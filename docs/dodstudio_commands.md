@@ -41,6 +41,7 @@ standing "user `.cfg` files are never written" rule (`CLAUDE.md`).
 | `dodstudio_spec_lock` | `0` | HLTV demos: the camera stays on the player being watched when he dies. Without it the game moves to the next player four seconds later. The viewer's own keys still change player | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_spec_deathcam` | `0` | HLTV demos: when the player being watched in first person dies, the view becomes the death cam his own recording shows, the camera 64 units behind his body pulling back and turning to the killer, with no gun, for 2.4 s; then it is the game's own view from his eyes again until he respawns. Without it the game rolls the dead player's eye view 80° and the dropped weapon fills the clip. A switch of its own, not part of `dodstudio_spec_match_pov`: a movie wants it, a shoutcast following the fight does not. Stands down in a POV demo (`goldsrc-hooks/src/spectator_deathcam.rs`) | [`goldsrc_spectator_camera.md`](goldsrc_spectator_camera.md) |
 | `dodstudio_hud_map_players` | `0` | which players get an icon on the overview map: `0` the game's own (the team of the player being watched), `1` everyone, `2` only the other team, `3` only the player being watched (the recorder in a POV demo), `4` nobody. A POV demo only holds the enemies the recorder was sent, so in one they come and go; HLTV demos have everybody | `goldsrc-hooks/src/overview_players.rs` |
+| `dodstudio_player_overrides` | `0` | sprays and crosshairs in demos follow Studio's Players table (Configuration > Players, #428); 0 leaves both to the game. Studio sets it from the tab's "Use in the game" box when it starts the game, a review or a batch, and sends it to a running game when the box changes. A flip reaches the crosshair on the next frame, and sprays loaded after it: a spray already on a wall keeps its texture, so reload the demo to compare | `goldsrc-hooks/src/player_overrides.rs`, `player_crosshair.rs`, `spray.rs` |
 | `dodstudio_pov_live_bob` | `0` | a POV demo bobs the view and the gun by the `cl_bob` (and `cl_bobcycle`, `cl_bobup`) set now (#359). Without it a POV demo doesn't bob at all: the engine replaces the view `client.dll` works out live with the recorded one, which carries no bob (HLTV demos already follow the cvars). This adds the live bob and keeps the rest of the recorded view. The gun's bob tilt stays out, as in every POV demo | `goldsrc-hooks/src/pov_live_bob.rs` |
 | `dodstudio_run_in_background` | `0` | the game runs at full speed while another window is in front. The engine otherwise waits up to 20 ms for input every frame while it isn't the active app (`CEngine::Frame` calls `SleepUntilInput` when `IsActiveApp` is false), about 45 frames a second, which slows a capture batch's fast-forward between clips 5-8x; this skips that wait. A menu left in the background keeps drawing at full speed while it's on | `goldsrc-hooks/src/run_in_background.rs` |
 | `dodstudio_stay_behind_while_capturing` | `0` | the game window stays behind the other windows while it records: HLAE no longer brings it to the front, topmost, for every recording. A minimised game records black frames (its window owns no pixels), so while this is on a minimise parks the game off-screen instead: restored without being activated and moved left of the whole desktop, same size, taskbar button kept (#723). Activating it (its taskbar button, alt-tab) or turning this off moves it back where it was. Studio turns it on for every batch unless Keep the Game Behind Your Windows While Capturing is off | `goldsrc-hooks/src/hlae_window.rs` |
@@ -273,24 +274,30 @@ shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 
 ### `dodstudio_spray`
 
-Player sprays per player in demos, and switching your own (#428). Who gets
-which spray is Studio's **Configuration > Sprays**: a table of players (by
-SteamID, or by name when there is none) and the PNG each gets, from the
-game's own `<game>\logos\` folder (any size, RGBA), and what everyone not in
-the table gets:
+Player sprays and crosshairs per player in demos, and switching your own
+spray (#428). Who gets what is Studio's **Configuration > Players**: a table
+of players (by SteamID, or by name when there is none), each with a spray (a
+PNG from the game's own `<game>\logos\` folder, any size, RGBA) and a
+crosshair (a 64x64 tile of a sprite in `<game>\sprites\`, picked from a 4x4
+preview), and what everyone not listed gets:
 
-- **POV demos:** their own spray (the default: the one the demo saved), one
-  fallback PNG, or no spray;
-- **HLTV demos:** one fallback PNG (the default) or no spray. "Their own" is
-  not offered: an HLTV demo records that a player sprayed, never the image.
+- **Sprays, POV demos:** their own spray (the default: the one the demo
+  saved), one fallback PNG, or no spray;
+- **Sprays, HLTV demos:** one fallback PNG (the default) or no spray. "Their
+  own" is not offered: an HLTV demo records that a player sprayed, never the
+  image.
+- **Crosshair:** the game's own (the default: the viewer's `cl_xhair_style`
+  tile of `customXHair.spr`, as without the table) or one sprite and tile.
 
-Studio mirrors the table to `%APPDATA%\dod-studio\goldsrc_hooks_sprays.txt`
+Studio mirrors the table to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
 whenever it changes (it never writes into the game install for this); the
 hook rereads it when its time changes, checked once a second, and applies it
-only while a demo plays. One rule for both demo types, and who the camera
-follows plays no part: when a player sprays, the hook looks him up (the
-engine's player info for the spray's slot: SteamID first, then the name,
-ignoring case), and the wall shows his PNG, or the fallback.
+only while a demo plays and `dodstudio_player_overrides` is 1. Players are
+looked up through the engine's player info: SteamID first, then the name,
+ignoring case.
+
+**Sprays.** One rule for both demo types, and who the camera follows plays
+no part: when a player sprays, the wall shows his PNG, or the fallback.
 
 - **A spray the demo saved the image for** (a POV demo that caught the
   player's customization) is swapped as it uploads: the PNG at the largest
@@ -310,15 +317,33 @@ ignoring case), and the wall shows his PNG, or the fallback.
   skipping would need another patch inside `CL_ParseTEnt` on both builds;
   this path is the one already checked on both. The game's own (a POV
   player not listed, with no saved image) stays the bullet hole. These
-  detours install once the table asks for anything. The log says
-  `spray: TE_PLAYERDECAL with no image for <player> (slot <n>) -> <spray>`
-  for each one drawn.
+  detours install once the table asks for anything and the cvar is 1. The
+  log says `spray: TE_PLAYERDECAL with no image for <player> (slot <n>) ->
+  <spray>` for each one drawn.
+
+A flip of `dodstudio_player_overrides` reaches sprays loaded after it; a
+spray already on a wall keeps its texture, so reload the demo to compare.
+
+**Crosshairs.** The crosshair on screen is the recorder's in a POV demo and
+the watched player's in an HLTV demo's in-eye view (free and chase cameras
+draw none). It changes on the next frame. No code is patched: the hook
+already sits on the engine's `SPR_Set`/`SPR_Draw*` in client.dll's own
+`gEngfuncs` copy (`hud_sprites.rs`, #808), and when a draw is the
+crosshair's -- any rect of `customXHair.spr`, or exactly the stock 24x24
+spectator rect of `crosshairs.spr` while in-eye -- it sets the table's
+sprite (loaded once per level with the engine's `SPR_Load`, after checking
+the file is a Half-Life sprite), draws its tile centred where the game
+centred its own, and sets the game's sprite back. When the crosshair shows
+stays the game's: `ShouldDrawCrossHair`, `dodstudio_hide_crosshair` and
+`dodstudio_spec_match_pov`'s hides are untouched. In a POV demo it needs the
+viewer's `cl_xhair_style` at 1-16: style 0 is DoD's classic crosshair, which
+draws no tile to swap. Details: `docs/goldsrc_crosshair.md` §3.
 
 | subcommand | does |
 | --- | --- |
 | `dodstudio_spray` | lists the PNGs in `logos\` and your spray's size |
 | `dodstudio_spray <name>` | makes `logos\<name>.png` your spray for live play: writes `dod\tempdecal.wad` (the game's spray file -- the one file in the game's folder the hook writes, because that is what the command is for; sides in steps of 16 and the file at most 20480 bytes, the most a server takes, so a square picture is 112x112; 8-bit, 255 colours, transparent where the PNG is) and keeps `tempdecal.wad.dodstudio-backup` of the original the first time. The engine reads the file when it connects, so it shows from the next connect; a demo already playing draws the sprays it recorded |
-| `dodstudio_spray players` | each player in the demo with his name, SteamID, whether the Sprays table lists him and the spray he gets, then whether the detours are on |
+| `dodstudio_spray players` | each player in the demo with his name, SteamID, whether the Players table lists him and the spray he gets, then whether the detours are on |
 
 `cl_logofile` and the game's `.cfg` files are left alone. Refused in a
 capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a

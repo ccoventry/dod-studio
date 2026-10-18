@@ -13,7 +13,7 @@ import { setClipNameTemplate, getClipNameTemplate } from './clip_name_ui.js';
 import { getCommandProfiles, getActiveCommandProfile } from './command_profiles_ui.js';
 import { setRenderPresets, getRenderPresets } from './render_presets_ui.js';
 import { getGameFolder, setGameFolder } from './game_folder_ui.js';
-import { getSprays, setSprays } from './sprays_ui.js';
+import { getPlayers, setPlayers } from './players_ui.js';
 
 /**
  * @param {object} app  What this needs from main.js: getState() the lists the
@@ -156,7 +156,7 @@ export function createSettingsSync({ getState, currentCaptureMode }) {
       finish_codec_video: finishCodecVideo,
       finish_codec_frames: finishCodecFrames,
       setup_dismissed: !!state.setupDismissed,
-      sprays: getSprays(),
+      players: getPlayers(),
     };
     // Reflects a just-flipped toggle immediately, rather than waiting on the
     // save round-trip below to come back through a settings reload.
@@ -194,7 +194,7 @@ export function applySettingsToForm(settings, { refreshHlaeFfmpegStatus, applyCa
   // Always, so a file without one (written before #402) shows `dod`.
   setGameFolder(settings.game_folder);
   // Always, so a file without a table (written before #428) shows the defaults.
-  setSprays(settings.sprays);
+  setPlayers(settings.players);
   if (settings.ffmpeg_path) {
     const inputEl = document.querySelector('#ffmpeg-override-path-input');
     if (inputEl) inputEl.value = settings.ffmpeg_path;

@@ -17,6 +17,7 @@ mod match_group_cmd;
 mod messages;
 mod overview_manager;
 mod packet_limit_manager;
+mod players_tab;
 mod preview_in_place;
 mod render_manager;
 mod review_manager;
@@ -95,7 +96,7 @@ async fn save_settings(
         settings.settings_migrations = guard.settings_migrations.max(settings.settings_migrations);
         settings.save()?;
         settings_manager::apply_game_folder(&settings);
-        settings_manager::mirror_spray_table(&settings);
+        players_tab::mirror_table(&settings);
         *guard = settings;
         Ok(())
     }))
@@ -525,11 +526,11 @@ pub struct AnalyzerReportPayload {
 
 /// Which request `index_demo_players` is serving, per lane; a newer one stops
 /// an older one between demos (the Demo Analyzer moved to another folder).
-/// One lane each, so the Master Queue's and Configuration > Sprays' lookups
+/// One lane each, so the Master Queue's and Configuration > Players' lookups
 /// never cancel the Analyzer's or each other's.
 static PLAYER_INDEX_ANALYZER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 static PLAYER_INDEX_QUEUE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-static PLAYER_INDEX_SPRAYS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static PLAYER_INDEX_PLAYERS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 /// Who is in each demo (#437, #174), one `demo_players` event per demo as it
 /// is read: from the small player index when it is current (milliseconds), or
@@ -544,7 +545,7 @@ async fn index_demo_players(
 ) -> Result<usize, String> {
     let current: &'static std::sync::atomic::AtomicU64 = match lane.as_str() {
         "queue" => &PLAYER_INDEX_QUEUE,
-        "sprays" => &PLAYER_INDEX_SPRAYS,
+        "players" => &PLAYER_INDEX_PLAYERS,
         _ => &PLAYER_INDEX_ANALYZER,
     };
     current.store(request_id, Ordering::SeqCst);
@@ -751,7 +752,10 @@ pub fn run() {
             check_hlae_ffmpeg,
             diagnose_executable_paths,
             settings_manager::list_game_folders,
-            settings_manager::list_logo_pngs,
+            players_tab::list_logo_pngs,
+            players_tab::list_crosshair_sprites,
+            players_tab::crosshair_sprite_image,
+            players_tab::set_player_overrides,
             link_hlae_ffmpeg,
             analyze_demo_full,
             get_weapon_display_names,

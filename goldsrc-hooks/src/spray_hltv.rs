@@ -1,4 +1,4 @@
-//! Sprays a demo has no image for: each player's spray from Studio's Sprays
+//! Sprays a demo has no image for: each player's spray from Studio's Players
 //! table instead of the bullet hole (#428, #368).
 //!
 //! ## Why a demo draws the bullet hole
@@ -43,7 +43,7 @@
 //!    `texture_hires`'s spray arm, which keys it by content and swaps the
 //!    HD PNG in (`spray.rs`).
 //!
-//! What a slot gets is Studio's Sprays table (`spray_table.rs`): the
+//! What a slot gets is Studio's Players table (`player_table.rs`): the
 //! player's PNG when he is listed, by SteamID or name, else the fallback for
 //! the demo's type. A PNG becomes a spray built with `spray.rs`'s writer,
 //! [`PNG_SIDE`] a side (the drawn size; the real one is unknown), with the
@@ -79,8 +79,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex, RwLock};
 
+use crate::player_table::{self, Choice, Table};
 use crate::spray::{self, Key};
-use crate::spray_table::{self, Choice, Table};
 use crate::{detour, engine, scan};
 
 /// One engine build's three sites.
@@ -206,7 +206,7 @@ static BUILDING: AtomicBool = AtomicBool::new(false);
 /// Sprays drawn through the custom branch this session.
 static DRAWN: AtomicU32 = AtomicU32::new(0);
 
-/// Whether the Sprays table asks for anything (`Table::active`).
+/// Whether the Players table asks for anything (`Table::active`).
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 /// The table as last read by [`poll`].
 static TABLE: RwLock<Option<Arc<Table>>> = RwLock::new(None);
@@ -489,7 +489,7 @@ fn install() {
     }
 }
 
-/// Once a second: rereads the Sprays table when its file changed, installs
+/// Once a second: rereads the Players table when its file changed, installs
 /// the detours the first time it asks for anything, and checks they are
 /// still in place. Runs every frame from `commands::poll`; one atomic add on
 /// the other frames.
@@ -500,7 +500,7 @@ pub fn poll() {
     {
         return;
     }
-    let stamp = spray_table::path()
+    let stamp = player_table::path()
         .and_then(|p| std::fs::metadata(p).ok())
         .and_then(|m| m.modified().ok())
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -508,18 +508,18 @@ pub fn poll() {
     if TABLE_STAMP.swap(stamp, Ordering::Relaxed) != stamp {
         reload_table();
     }
-    if ACTIVE.load(Ordering::Relaxed) {
+    if ACTIVE.load(Ordering::Relaxed) && crate::player_overrides::on() {
         install();
     }
     check_sites();
 }
 
 fn reload_table() {
-    let table = Arc::new(spray_table::load());
+    let table = Arc::new(player_table::load());
     let active = table.active();
     unsafe {
         crate::debug::report(&format!(
-            "spray: Sprays table read: {} player(s), POV others -> {}, HLTV others -> {}{}",
+            "spray: Players table read: {} player(s), POV others -> {}, HLTV others -> {}{}",
             table.players.len(),
             table.pov,
             table.hltv,
@@ -607,7 +607,8 @@ fn prepare(source: &Choice) -> Result<Lump, String> {
     })
 }
 
-fn current_table() -> Option<Arc<Table>> {
+/// The table as last read, for the crosshair (`player_crosshair`) too.
+pub fn current_table() -> Option<Arc<Table>> {
     TABLE.read().ok()?.clone()
 }
 
@@ -741,7 +742,7 @@ fn texture_for(lump: &Arc<Lump>) -> Option<usize> {
 
 // ── The callback ────────────────────────────────────────────────────────────
 
-fn playing_demo() -> bool {
+pub fn playing_demo() -> bool {
     let Some(engfuncs) = engine::engfuncs() else {
         return false;
     };
@@ -785,15 +786,19 @@ fn warn_once(source: &Choice, line: String) {
 
 /// Whether the demo playing is an HLTV one: a spectator-only client, the
 /// test `deathmsg` and `anim_fix` use.
-fn hltv() -> bool {
+pub fn hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
-/// What the Sprays table gives the player in `slot` (0-based) in the demo
+/// What the Players table gives the player in `slot` (0-based) in the demo
 /// playing. `None` outside a demo, with the table at its defaults, or with
 /// nobody in the slot: the engine's own then.
 pub fn choice_for_slot(slot: usize) -> Option<Choice> {
-    if !ACTIVE.load(Ordering::Relaxed) || slot >= MAX_PLAYERS || !playing_demo() {
+    if !ACTIVE.load(Ordering::Relaxed)
+        || !crate::player_overrides::on()
+        || slot >= MAX_PLAYERS
+        || !playing_demo()
+    {
         return None;
     }
     let (name, steam_id) = player(slot)?;
@@ -869,10 +874,12 @@ pub fn status() -> String {
         )
     } else if GAVE_UP.load(Ordering::Relaxed) {
         "not installed (see the log)".to_string()
+    } else if ACTIVE.load(Ordering::Relaxed) && !crate::player_overrides::on() {
+        format!("off while {} is 0", crate::player_overrides::NAME)
     } else if ACTIVE.load(Ordering::Relaxed) {
         "installing".to_string()
     } else {
-        "off while Studio's Sprays table is at its defaults".to_string()
+        "off while Studio's Players table is at its defaults".to_string()
     }
 }
 
