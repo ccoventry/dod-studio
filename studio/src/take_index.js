@@ -164,6 +164,18 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
 }
 
 /**
+ * Points each recorded uid in `renames` (old uid -> new uid) at its new one:
+ * a split demo's highlights live on in its pieces under new uids (#217), and
+ * their captured takes must still resolve to them.
+ */
+export function renameUidsInTakeIndex(takeIndex, renames) {
+  if (!takeIndex || !renames || renames.size === 0) return;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = Array.from(new Set(takeIndex[key].map((uid) => renames.get(uid) ?? uid)));
+  });
+}
+
+/**
  * Highlight uids the given take key maps to, or an empty array if this take
  * was never recorded (e.g. captured before Phase 3, or from a project saved
  * on an older version that had no take index at all).
