@@ -25,6 +25,10 @@
 //! `icon_mg_deploy` both start at 0,0 of `hud_icons`), so the whole
 //! rectangle is the key, not the corner.
 //!
+//! The same hooks draw each player's crosshair from Studio's Players table
+//! (#428): `SPR_Set` also notes whether the sheet is one of the crosshair's,
+//! and a draw of it goes through `player_crosshair::swap`.
+//!
 //! Installed from `engine.rs` as soon as client.dll's `Initialize` has run,
 //! before the HUD's first `VidInit` loads its sheets (a hook put in on the
 //! first `add` would never see those loads and could not name a handle).
@@ -34,7 +38,7 @@
 
 use std::ffi::{CStr, c_char, c_void};
 use std::sync::RwLock;
-use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicPtr, AtomicU8, AtomicUsize, Ordering};
 
 use crate::hide_asset::DrawnAs;
 
@@ -189,6 +193,12 @@ static HANDLES: RwLock<Vec<(i32, String)>> = RwLock::new(Vec::new());
 /// run many times a frame.
 static CURRENT: AtomicUsize = AtomicUsize::new(usize::MAX);
 static CURRENT_HIDDEN: AtomicBool = AtomicBool::new(false);
+/// The handle and colour `SPR_Set` was given last, and whether its sheet is
+/// one of the crosshair's (`player_crosshair::Sheet`), so a swapped draw can
+/// set the game's sprite back after it.
+static CURRENT_HANDLE: AtomicI32 = AtomicI32::new(0);
+static CURRENT_RGB: [AtomicI32; 3] = [const { AtomicI32::new(0) }; 3];
+static CURRENT_SHEET: AtomicU8 = AtomicU8::new(0);
 
 type SprLoadFn = unsafe extern "C" fn(*const c_char) -> i32;
 type SprSetFn = unsafe extern "C" fn(i32, i32, i32, i32);
@@ -213,6 +223,11 @@ unsafe extern "C" fn hook_spr_load(name: *const c_char) -> i32 {
         let path = unsafe { CStr::from_ptr(name) }
             .to_string_lossy()
             .into_owned();
+        // The HUD loads its sheets again at every level load, and handles
+        // loaded for the crosshair may then name other sprites.
+        if crate::player_crosshair::Sheet::of(&path) == crate::player_crosshair::Sheet::Custom {
+            crate::player_crosshair::hud_reloaded();
+        }
         if let Ok(mut map) = HANDLES.write() {
             match map.iter_mut().find(|(h, _)| *h == handle) {
                 Some(entry) => entry.1 = path,
@@ -224,19 +239,29 @@ unsafe extern "C" fn hook_spr_load(name: *const c_char) -> i32 {
 }
 
 unsafe extern "C" fn hook_spr_set(handle: i32, r: i32, g: i32, b: i32) {
-    let (index, hidden) = match HANDLES.read() {
+    use crate::player_crosshair::Sheet;
+    let (index, hidden, sheet) = match HANDLES.read() {
         Ok(map) => match map.iter().position(|(h, _)| *h == handle) {
             Some(i) => {
                 let path = &map[i].1;
                 note_drawn(path);
-                (i, crate::hide_asset::should_hide(path, DrawnAs::HudSprite))
+                (
+                    i,
+                    crate::hide_asset::should_hide(path, DrawnAs::HudSprite),
+                    Sheet::of(path),
+                )
             }
-            None => (usize::MAX, false),
+            None => (usize::MAX, false, Sheet::Other),
         },
-        Err(_) => (usize::MAX, false),
+        Err(_) => (usize::MAX, false, Sheet::Other),
     };
     CURRENT.store(index, Ordering::Relaxed);
     CURRENT_HIDDEN.store(hidden, Ordering::Relaxed);
+    CURRENT_HANDLE.store(handle, Ordering::Relaxed);
+    for (slot, value) in CURRENT_RGB.iter().zip([r, g, b]) {
+        slot.store(value, Ordering::Relaxed);
+    }
+    CURRENT_SHEET.store(sheet as u8, Ordering::Relaxed);
     let real = REAL_SPR_SET.load(Ordering::Acquire);
     if !real.is_null() {
         let real: SprSetFn = unsafe { std::mem::transmute(real) };
@@ -263,37 +288,73 @@ fn skip_draw(prc: *const Wrect) -> bool {
     }
 }
 
+/// One of the three draws, through to the engine: the crosshair's own as the
+/// Players table says (`player_crosshair::swap`: the table's sprite set for
+/// this one draw, then the game's set back), anything else as asked.
+///
+/// # Safety
+///
+/// `prc` is the rect the game passed, null or valid for the call.
+unsafe fn draw_through(real: &AtomicPtr<c_void>, frame: i32, x: i32, y: i32, prc: *const Wrect) {
+    let real = real.load(Ordering::Acquire);
+    if real.is_null() {
+        return;
+    }
+    let real: SprDrawFn = unsafe { std::mem::transmute(real) };
+    let sheet = crate::player_crosshair::Sheet::from_u8(CURRENT_SHEET.load(Ordering::Relaxed));
+    let set = REAL_SPR_SET.load(Ordering::Acquire);
+    if !set.is_null()
+        && let Some((handle, rect, nx, ny)) =
+            unsafe { crate::player_crosshair::swap(sheet, prc, x, y) }
+    {
+        let set: SprSetFn = unsafe { std::mem::transmute(set) };
+        let [r, g, b] = CURRENT_RGB.each_ref().map(|c| c.load(Ordering::Relaxed));
+        unsafe {
+            set(handle, r, g, b);
+            real(0, nx, ny, &rect);
+            set(CURRENT_HANDLE.load(Ordering::Relaxed), r, g, b);
+        }
+        return;
+    }
+    unsafe { real(frame, x, y, prc) };
+}
+
 unsafe extern "C" fn hook_spr_draw(frame: i32, x: i32, y: i32, prc: *const Wrect) {
     if skip_draw(prc) {
         return;
     }
-    let real = REAL_SPR_DRAW.load(Ordering::Acquire);
-    if !real.is_null() {
-        let real: SprDrawFn = unsafe { std::mem::transmute(real) };
-        unsafe { real(frame, x, y, prc) };
-    }
+    unsafe { draw_through(&REAL_SPR_DRAW, frame, x, y, prc) };
 }
 
 unsafe extern "C" fn hook_spr_draw_holes(frame: i32, x: i32, y: i32, prc: *const Wrect) {
     if skip_draw(prc) {
         return;
     }
-    let real = REAL_SPR_DRAW_HOLES.load(Ordering::Acquire);
-    if !real.is_null() {
-        let real: SprDrawFn = unsafe { std::mem::transmute(real) };
-        unsafe { real(frame, x, y, prc) };
-    }
+    unsafe { draw_through(&REAL_SPR_DRAW_HOLES, frame, x, y, prc) };
 }
 
 unsafe extern "C" fn hook_spr_draw_additive(frame: i32, x: i32, y: i32, prc: *const Wrect) {
     if skip_draw(prc) {
         return;
     }
-    let real = REAL_SPR_DRAW_ADDITIVE.load(Ordering::Acquire);
-    if !real.is_null() {
-        let real: SprDrawFn = unsafe { std::mem::transmute(real) };
-        unsafe { real(frame, x, y, prc) };
+    unsafe { draw_through(&REAL_SPR_DRAW_ADDITIVE, frame, x, y, prc) };
+}
+
+/// Loads a sprite with the engine's own `SPR_Load` for the crosshair
+/// (`player_crosshair`), past [`hook_spr_load`] so loading `customXHair.spr`
+/// for a row doesn't count as the HUD reloading. 0 when the hooks aren't in
+/// or the engine refused it. Called from `HUD_Frame`, on the game's thread.
+pub fn load_sprite(path: &str) -> i32 {
+    let real = REAL_SPR_LOAD.load(Ordering::Acquire);
+    let Ok(name) = std::ffi::CString::new(path) else {
+        return 0;
+    };
+    if real.is_null() {
+        return 0;
     }
+    let real: SprLoadFn = unsafe { std::mem::transmute(real) };
+    // The engine keeps its own copy of the name.
+    unsafe { real(name.as_ptr()) }
 }
 
 /// Redirects the five `SPR_*` pointers in client.dll's `gEngfuncs` copy
