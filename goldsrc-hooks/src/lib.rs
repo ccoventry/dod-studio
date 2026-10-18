@@ -249,6 +249,7 @@ mod scoreboard;
 mod screen_effects;
 mod server_query;
 mod spectator_bars;
+mod spectator_buttons;
 mod spectator_crosshair;
 mod spectator_deathcam;
 mod spectator_eye;
