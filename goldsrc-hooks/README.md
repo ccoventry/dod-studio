@@ -348,8 +348,10 @@ analysis only, are in each module's `//!` doc and the linked `docs/` pages.
 `tools/` holds a verifier per patched site, which checks the Rust constants
 against a real `client.dll` or `hw.dll`.
 
-`src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites,
-decals, detail textures and skies as the game loads them: on when there's a
+`src/texture_hires.rs` swaps in upscaled map textures, model skins, sprites
+(world sprites and the HUD's atlases -- kill feed, weapon icons, scopes, but
+not the crosshairs, which stay stock -- the latter uploaded with mipmaps so they stay clean at the HUD's
+1:1 draw, #728), decals, detail textures and skies as the game loads them: on when there's a
 `dodstudio_hd` folder (`dod_addon`, or `dod` from before #415), `dodstudio_hd_enabled 0/1` in game, and
 `GOLDSRC_HOOKS_TEXTURE_HIRES=0/1` to force it at startup. `tools/hd/` holds
 the scripts that build
