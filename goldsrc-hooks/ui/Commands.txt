@@ -25,6 +25,8 @@ HUD
       Replace players' hand-signal animations.
   dodstudio_mute_voice_commands 0/1
       Silence voice commands ('fire in the hole!' and the rest).
+  dodstudio_hide_voice_menus 0/1
+      Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   dodstudio_hide_hudelement <name> 0/1
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
@@ -34,7 +36,7 @@ HUD
   dodstudio_hide_asset list|add|del|clear <model|hud.txt name>...
       Hide an asset (sprite, model) by its file path, like mirv_matte_entities.
   dodstudio_deathmsg
-      Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow] (live). The bare command shows the options.
+      Kill feed: max lines, offset, block players, fake a kill, font <face> <size> [bold] [shadow], scale <1..8> (both live). The bare command shows the options.
   dodstudio_objectives
       Move the objective icons and the objective timer.
   dodstudio_overviewmap
