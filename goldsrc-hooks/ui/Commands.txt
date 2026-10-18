@@ -25,6 +25,8 @@ HUD
       Replace players' hand-signal animations.
   dodstudio_mute_voice_commands 0/1
       Silence voice commands ('fire in the hole!' and the rest).
+  dodstudio_hide_voice_menus 0/1
+      Hide the numbered voice-command and hand-signal menus a POV demo's player opened.
   dodstudio_hide_hudelement <name> 0/1
       Hide one HUD element; the bare command lists them.
   dodstudio_hide_map_text 0/1
