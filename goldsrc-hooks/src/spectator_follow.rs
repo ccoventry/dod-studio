@@ -191,9 +191,9 @@ pub fn poll() {
 
 fn describe(locked: bool) -> &'static str {
     if locked {
-        "1: the camera stays on the player being watched when he dies"
+        "1: the camera stays on the player being watched when they die"
     } else {
-        "0: the game moves the camera on four seconds after he dies"
+        "0: the game moves the camera on four seconds after they die"
     }
 }
 
