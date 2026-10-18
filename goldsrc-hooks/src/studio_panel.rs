@@ -58,7 +58,7 @@
 //!
 //! ## Per build
 //!
-//! Sixteen `GameUI.dll` addresses and sizes differ between the pre-Anniversary
+//! Its `GameUI.dll` addresses, sizes and offsets differ between the pre-Anniversary
 //! and 25th Anniversary builds, and the Anniversary `Frame::Frame` takes a
 //! fourth argument. [`BUILDS`] names each build by PE timestamp and image
 //! size, and anything else is refused. `tools/verify_studio_panel.py` checks
@@ -238,6 +238,17 @@ pub struct Build {
     /// secondary column and its flag follow each (#611).
     pub list_sort_column: usize,
     pub list_sort_ascending: usize,
+    /// Where a `ListPanel` keeps its column records (a pointer to
+    /// [`COLUMN_RECORD_SIZE`]-byte records, their allocated count after it)
+    /// and the order the columns show in (a pointer to one record index per
+    /// column, the count at +0xc), as `AddColumnHeader` and
+    /// `OnColumnResized` read them (#801).
+    pub list_columns: usize,
+    pub list_column_order: usize,
+    /// Where a column's drag handle (vgui2's `Dragger`) keeps the column it
+    /// resizes, the position it was added at, which its "ColumnResized"
+    /// message names (#801).
+    pub dragger_column: usize,
 }
 
 pub const BUILDS: [Build; 2] = [
@@ -264,6 +275,9 @@ pub const BUILDS: [Build; 2] = [
         combo_menu: 0x13c,
         list_sort_column: 0xfc,
         list_sort_ascending: 0x104,
+        list_columns: 0x78,
+        list_column_order: 0xa4,
+        dragger_column: 0x70,
     },
     Build {
         name: "25th Anniversary",
@@ -288,6 +302,9 @@ pub const BUILDS: [Build; 2] = [
         combo_menu: 0x140,
         list_sort_column: 0x100,
         list_sort_ascending: 0x108,
+        list_columns: 0x7c,
+        list_column_order: 0xa8,
+        dragger_column: 0x74,
     },
 ];
 
@@ -571,8 +588,30 @@ const PROGRESS_BAR_SLOT_SET_PROGRESS: usize = 134;
 /// `KeyValues::SetString(const char *key, const char *value)`: the 3-argument
 /// `KeyValues` constructor the demo list's rows are made with calls it.
 const KEYVALUES_SLOT_SET_STRING: usize = 17;
-/// The width the Demos tab gives the demo name column.
+/// The width the Demos tab gives the demo name column. The list is 520 wide
+/// and the columns already add up to more, so a long name is dragged wider
+/// instead (#801).
 const NAME_COLUMN_WIDE: i32 = 170;
+/// `sizeof` a `ListPanel` column record (`column_t` plus its linked-list
+/// links) and where in it the column's `Dragger *` sits, on both builds
+/// (#801, `verify_studio_panel.py`).
+const COLUMN_RECORD_SIZE: usize = 0x44;
+const COLUMN_DRAGGER: usize = 0x14;
+
+/// Each column's drag handle and the position it must name: (record index,
+/// position) for every column in `order` whose record is among the
+/// `allocated` ones. A `Dragger` keeps the position its column was added at,
+/// and `AddColumnHeader` never renumbers them, so a column inserted before
+/// others (the Demos tab's icons, #779) left Demo File's handle naming
+/// position 0, the fixed icon column, and dragging it did nothing (#801).
+fn dragger_positions(order: &[u8], allocated: usize) -> impl Iterator<Item = (usize, i32)> + '_ {
+    order
+        .iter()
+        .enumerate()
+        .filter(move |&(_, &record)| usize::from(record) < allocated)
+        .map(|(position, &record)| (usize::from(record), position as i32))
+}
+
 /// The Demos tab's columns past the demo's own name: key, heading, width.
 /// Type is POV or HLTV, read from the demo's header like the Type filter.
 /// Player is who recorded a POV demo, from the players file Studio saves
@@ -2201,9 +2240,38 @@ mod hook {
                 let (x, y, _, tall) = vgui.rect(heading);
                 vgui.place(heading, (x, y, NAME_COLUMN_WIDE, tall));
             }
+            renumber_draggers(list, build);
             // Every column but the icons' sorts by a click on its heading.
             for index in 1..=DEMO_COLUMNS.len() as i32 + 1 {
                 sortable(list, index, 1);
+            }
+        }
+    }
+
+    /// Points every column's drag handle at the column's position now, as
+    /// `ListPanel::OnColumnResized` (and a double-click's
+    /// `ResizeColumnToContents`) looks the column up by position: without it
+    /// Demo File's handle, added at 0 before the icon column was put there,
+    /// resized the fixed icon column instead (#801).
+    unsafe fn renumber_draggers(list: *mut c_void, build: &Build) {
+        unsafe {
+            let base = list as *const u8;
+            let records = *(base.add(build.list_columns) as *const *const u8);
+            let allocated = *(base.add(build.list_columns + 4) as *const i32);
+            let order = *(base.add(build.list_column_order) as *const *const u8);
+            let count = *(base.add(build.list_column_order + 0xc) as *const i32);
+            // A list never holds more columns than its one-byte record index
+            // can name.
+            if records.is_null() || order.is_null() || !(0..=0x100).contains(&count) {
+                return;
+            }
+            let order = std::slice::from_raw_parts(order, count as usize);
+            for (record, position) in dragger_positions(order, allocated.max(0) as usize) {
+                let at = records.add(record * COLUMN_RECORD_SIZE + COLUMN_DRAGGER);
+                let dragger = *(at as *const *mut u8);
+                if !dragger.is_null() {
+                    *(dragger.add(build.dragger_column) as *mut i32) = position;
+                }
             }
         }
     }
@@ -4392,6 +4460,19 @@ pub unsafe extern "C" fn command() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_drag_handle_names_its_column_position() {
+        // The Demos tab: Demo File was record 0 at position 0, the icons'
+        // record 1 went in at position 0, then Map..Date were appended.
+        let order = [1u8, 0, 2, 3, 4, 5];
+        let got: Vec<_> = dragger_positions(&order, 6).collect();
+        assert_eq!(got, [(1, 0), (0, 1), (2, 2), (3, 3), (4, 4), (5, 5)]);
+        // A record index past the allocated records is skipped, not read.
+        let got: Vec<_> = dragger_positions(&[0, 7, 1], 2).collect();
+        assert_eq!(got, [(0, 0), (1, 2)]);
+        assert_eq!(dragger_positions(&[], 0).count(), 0);
+    }
 
     #[test]
     fn the_layouts_follow_the_hd_files_into_dod_addon_only_with_addons() {
