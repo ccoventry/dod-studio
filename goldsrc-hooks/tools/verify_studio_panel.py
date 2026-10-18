@@ -21,6 +21,10 @@ GameUI builds its own Load Demo window (`CDemoPlayerFileDialog`):
   8. GameUI calls the engine's `BaseUI001` slot before
      `BASEUI_SLOT_ACTIVATE_GAME_UI` (HideGameUI) after an `engine ...` menu
      command, and calls that slot (ActivateGameUI) itself.
+  26. The Demos tab's drag handles (#801): the column records, the column
+     order and the `Dragger`'s stored position `renumber_draggers` rewrites,
+     read off `AddColumnHeader`, `OnColumnResized` and the Dragger's
+     "ColumnResized" message (see `verify_column_draggers`).
 
 Usage:
     python goldsrc-hooks/tools/verify_studio_panel.py [game-folder ...]
@@ -269,6 +273,10 @@ def verify(game, src):
           and any(re.fullmatch(r"mov byte ptr \[e[a-z]{2} \+ 0x1d\], [a-d]l", x) for x in body)
           and any("+ 0x1e]" in x for x in body),
           f"ListPanel slot {visible_slot} is SetColumnVisible (hidden byte +0x1d, unhidable +0x1e)")
+
+    # 26: Demo File's drag handle (#801).
+    ok &= verify_column_draggers(ui, src, build, list_vt, check)
+
     # ApplyItemChanges: re-index the row, then InvalidateLayout (slot 58).
     body = ui.body(ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_APPLY_ITEM_CHANGES")) - ui.base, 0x40)
     calls = [x for x in body if x.startswith("call")]
@@ -376,7 +384,7 @@ def verify(game, src):
     body = ui.body(row_fn, 0x20)
     jumps = [x for x in body if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
     menu_vt = ui.vftable("Menu@vgui2")
-    # Not `ok`: that name holds the whole run's result.
+    # Its own name: `ok` is the whole run's result, which `check` adds to.
     forwards = False
     if jumps and menu_vt:
         menu_slot = int(jumps[0].split("+ ")[1].rstrip("]"), 16)
@@ -582,6 +590,104 @@ def verify(game, src):
     handler = taskbar_vt and ui.u32(taskbar_vt + 4 * on_command) - ui.base
     check(handler and any(0 < site - handler < 0x1000 for site in engine_sites),
           f"CTaskbar's slot {on_command} (OnCommand, +{handler or 0:#x}) handles `engine ...` menu commands")
+    return ok
+
+
+def verify_column_draggers(ui, src, build, list_vt, check):
+    """Item 26 (#801): what `renumber_draggers` reads and writes.
+
+    The Load Demo window adds "demoname" with flags 0, which the 5-argument
+    AddColumnHeader turns into a 20..10000 width range: the column was always
+    resizable. The 7-argument one (the slot after) allocates a record from
+    the linked list at `list_columns` (`[+0]` memory, `[+4]` allocated count,
+    `COLUMN_RECORD_SIZE` bytes each), stores the column's `Dragger` at
+    `COLUMN_DRAGGER` in it, gives the Dragger the position it was added at
+    (`dragger_column`), and inserts the record's index into the order at
+    `list_column_order`. Nothing renumbers the Draggers afterwards; the
+    Dragger's "ColumnResized" message names its stored position, and
+    `OnColumnResized` looks the column up by position in that order.
+    """
+    ok = True
+    cols, order, dcol = build["list_columns"], build["list_column_order"], build["dragger_column"]
+    record_size = vwl.rust_usize(src, "COLUMN_RECORD_SIZE")
+    dragger_at = vwl.rust_usize(src, "COLUMN_DRAGGER")
+
+    def has(body, pattern):
+        return any(re.fullmatch(pattern, x) for x in body)
+
+    add5 = ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER")) - ui.base
+    body = ui.body(add5, 0x100)
+    passed = "push 0x2710" in body and "push 0x14" in body
+    ok &= passed
+    check(passed, "AddColumnHeader without the fixed-size flag gives a column a width range of 20..10000")
+
+    demoname = ui.base + ui.img.find(b"demoname\0")
+    ctor = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(
+        ui.img[build["file_dialog_ctor"]:build["file_dialog_ctor"] + 0x400], ui.base + build["file_dialog_ctor"])]
+    at = ctor.index(f"push {hex(demoname)}") if f"push {hex(demoname)}" in ctor else 0
+    # Pushed right to left: flags, then the width (GetWide's eax), the text, the name.
+    width_at = max((n for n in range(max(0, at - 10), at) if ctor[n] == "push eax"), default=None)
+    flags = next((ctor[n] for n in range((width_at or 0) - 1, max(0, at - 12), -1) if ctor[n].startswith("push")), None)
+    passed = width_at is not None and flags == "push 0"
+    ok &= passed
+    check(passed, f"the Load Demo window adds \"demoname\" with flags {flags!r} (no fixed size), the list's width wide")
+
+    slot7 = vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER") + 1
+    add7 = ui.u32(list_vt + 4 * slot7) - ui.base
+    body = ui.body(add7, 0x500)
+    passed = ui.last_ret(add7, 0x500) == "ret 0x1c" and has(body, rf"(lea|mov) e\w\w, (dword ptr )?\[e\w\w \+ {hex(cols)}\]")
+    ok &= passed
+    check(passed, f"slot {slot7} (AddColumnHeader with min/max) takes its record from the list at +{cols:#x}")
+    # The linked list's Alloc: the first call made on that list.
+    lea = next((n for n, x in enumerate(body) if re.fullmatch(rf"lea e\w\w, \[e\w\w \+ {hex(cols)}\]", x)), None)
+    alloc = next((int(x.split()[1], 16) - ui.base for x in body[lea or 0:] if re.fullmatch(r"call 0x[0-9a-f]+", x)), None)
+    alloc_body = ui.body(alloc, 0x100) if alloc else []
+    text = " | ".join(alloc_body)
+    stride = re.search(r"shl (e\w\w), 4 \| add \1, e\w\w \| shl \1, 2", text)
+    passed = record_size == 0x44 and stride and has(alloc_body, r"mov dword ptr \[esi \+ 4\], e\w\w")
+    ok &= passed
+    check(passed, f"whose Alloc +{alloc or 0:#x} grows the allocated count at +4 and reallocates count * 0x44 "
+                  f"(COLUMN_RECORD_SIZE {record_size:#x})")
+    passed = has(body, rf"mov dword ptr \[e\w\w \+ {hex(dragger_at)}\], esi")
+    ok &= passed
+    check(passed, f"it stores the column's Dragger at record +{dragger_at:#x} (COLUMN_DRAGGER)")
+    vft = next((n for n, x in enumerate(body) if re.fullmatch(r"mov dword ptr \[esi\], 0x1[0-9a-f]{7}", x)
+                and any(re.fullmatch(rf"mov dword ptr \[esi \+ {hex(dcol)}\], e\w\w", y) for y in body[n:n + 4])), None)
+    passed = vft is not None
+    ok &= passed
+    check(passed, f"and the column's position in the Dragger at +{dcol:#x} (dragger_column), after its vftable")
+    passed = has(body, rf"lea e\w\w, \[e\w\w \+ {hex(order)}\]")
+    ok &= passed
+    check(passed, f"then inserts the record's index into the column order at +{order:#x} (list_column_order)")
+    reset = [int(x.split()[1], 16) - ui.base for x in body if re.fullmatch(r"call 0x[0-9a-f]+", x)]
+    renumbers = any(has(ui.body(f, 0x200), rf"mov dword ptr \[e\w\w \+ {hex(dcol)}\], e\w\w") for f in reset)
+    ok &= not renumbers
+    check(not renumbers, "and nothing it calls renumbers the Draggers (why the hook does)")
+
+    # OnColumnResized, slot 189, the "ColumnResized" handler.
+    resized = 189
+    thunk = ["mov eax, dword ptr [ecx]", f"jmp dword ptr [eax + {hex(4 * resized)}]"]
+    name_at = ui.img.find(b"\0ColumnResized\0") + 1
+    registered = any(
+        ui.code[0] <= ui.u32(a) - ui.base < ui.code[1] and ui.body(ui.u32(a) - ui.base, 0x10)[:2] == thunk
+        for ref in ui.refs(name_at) for a in range(ref - 0x20, ref + 0x40))
+    body = ui.body(ui.u32(list_vt + 4 * resized) - ui.base, 0x300)
+    reads = all(any(f"+ {hex(off)}]" in x for x in body) for off in (cols, order, order + 0xc))
+    passed = registered and reads
+    ok &= passed
+    check(passed, f"\"ColumnResized\" is handled by ListPanel slot {resized} (OnColumnResized), which looks the "
+                  f"column up by position: order +{order:#x}, its count +{order + 0xc:#x}, records +{cols:#x}")
+
+    # The Dragger's own "ColumnResized" message carries its stored position.
+    column = ui.base + ui.img.find(b"\0column\0") + 1
+    sends = False
+    for ref in ui.refs(name_at):
+        after = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[ref + 4:ref + 0x40], ui.base + ref + 4)]
+        k = next((n for n, x in enumerate(after) if x == f"push {hex(column)}"), None)
+        if k is not None and has(after[:k], rf"(mov e\w\w, |push )dword ptr \[e\w\w \+ {hex(dcol)}\]"):
+            sends = True
+    ok &= sends
+    check(sends, f"the Dragger's \"ColumnResized\" message sends the column at +{dcol:#x}")
     return ok
 
 

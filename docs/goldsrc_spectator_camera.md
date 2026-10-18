@@ -66,6 +66,23 @@ With the lock on, the same stretch of the demo has no `ClientCmd` line and
 target (near the ground where he fell); it is his view again when he respawns,
 6.6 seconds later in that stretch.
 
+### The viewer's buttons during a review
+
+Every spectator button reaches the camera through
+`CHudSpectator::HandleButtonsDown(int buttons)` (`client+0x386a0`, thiscall,
+`ret 4`), called only from the nine `+` commands' down handlers: `+attack`
+(1) and `+attack2` (0x800) step to the next or previous player, `+jump` (2)
+cycles the mode, `+duck` (4) opens the spectator menu, `+use` (0x20) toggles
+the inset, and the four moves (8, 0x10, 0x200, 0x400) do nothing outside the
+map modes DoD doesn't have. The death switch's `+attack` goes through it too.
+The console's `spec_mode`, the spectator panel's dropdown and ESC do not.
+
+While Review highlights runs (#826), `spectator_buttons.rs` writes `ret 4`
+over its first instruction (`sub esp, 0xc`, three bytes) and puts it back
+when the review ends, so a stray click or jump can't move a highlight's
+camera. `goldsrc-hooks/tools/verify_spectator_buttons_offsets.py` checks the
+function and its nine callers.
+
 ### The target
 
 `dodstudio_spec_target <player>` writes `g_iUser2`. The in-eye camera, the

@@ -388,6 +388,11 @@ pub fn demo_segments(path: &std::path::Path) -> Result<Vec<MapSegment>, String> 
 /// One demo a split wrote.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct Written {
+    /// Which map of the original this is ([`MapSegment::index`], 0 for the
+    /// first). The original's own analysis covers map 0 only
+    /// (`analysis::use_segment_boundary`), so the queue carries a highlight's
+    /// work over to that piece alone (#217).
+    pub index: usize,
     pub path: String,
     pub map: String,
     pub seconds: f32,
@@ -544,6 +549,7 @@ pub fn split_file_with_progress(
         std::fs::write(&target, &out)
             .map_err(|e| format!("could not write {}: {e}", target.display()))?;
         written.push(Written {
+            index: i,
             path: target.to_string_lossy().to_string(),
             map: seg.map.clone(),
             seconds: back_segs[0].seconds(),
