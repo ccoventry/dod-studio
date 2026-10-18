@@ -44,7 +44,8 @@
 //! treated as alive by this routine alone, the timer stays cleared and the
 //! keypress is never issued. Nothing is corrected after the fact, so there
 //! is no frame in which the camera has already moved. A viewer's own
-//! `+attack` still changes player.
+//! `+attack` still changes player, except during Review highlights
+//! (`spectator_buttons`, #826).
 //!
 //! While the watched player is dead the view is the game's own for a dead
 //! target (`V_GetInEyePos` rolls the camera and lowers it by 8), and it is
@@ -106,6 +107,12 @@ static REVIEW_HOLD: AtomicBool = AtomicBool::new(false);
 /// Holds the lock on (or lets the cvar decide again) for Review highlights.
 pub fn hold_for_review(on: bool) {
     REVIEW_HOLD.store(on, Ordering::Relaxed);
+}
+
+/// Whether a review holds the lock: `spectator_buttons` ignores the viewer's
+/// spectator buttons for as long (#826).
+pub fn review_holds() -> bool {
+    REVIEW_HOLD.load(Ordering::Relaxed)
 }
 
 /// Called once the cvar is registered.

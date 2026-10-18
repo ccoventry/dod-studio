@@ -215,6 +215,9 @@ sends it over the game's pipe); `yes`, `maybe` (#661: look again later) and
 `no` answer with the Review tab's kill range and note and move on; `replay`, `next` (skip without answering),
 `back` and `stop` move around. `range <from> <to>` and `note <text>` set the
 answer from the console, for key binds. Bare prints where the review is.
+While a review runs, the viewer's spectator buttons (`+attack`, `+attack2`,
+`+jump`, `+duck`, `+use`) do nothing in an HLTV demo, so a stray click can't
+move the camera off the highlight's player (#826).
 Each answer goes to Studio as a `[dod-studio] REVIEW` line on the events
 pipe. See `src/review.rs`.
 
