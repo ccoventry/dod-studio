@@ -714,6 +714,11 @@ pub fn spawn_capture_engine(
                     (with_start(&args), Vec::new(), lines)
                 }
             };
+            let early_lines = crate::game_handoff::with_player_overrides(
+                early_lines,
+                config.player_overrides,
+                config.goldsrc_hooks_dll().is_some(),
+            );
             let mut handoff = (!first_lines.is_empty()).then(|| {
                 crate::game_handoff::GameHandoff::with_early(early_lines, first_lines)
             });

@@ -325,7 +325,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
         if DEAD_TARGET.swap(0, Ordering::Relaxed) != 0 {
             unsafe {
                 crate::debug::report(&format!(
-                    "spectator_deathcam: player {target} is alive again -- his own view"
+                    "spectator_deathcam: player {target} is alive again -- their own view"
                 ))
             };
         }
@@ -361,7 +361,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
         DEATHS.fetch_add(1, Ordering::Relaxed);
         unsafe {
             crate::debug::report(&format!(
-                "spectator_deathcam: player {target} died ({}) -- death cam, as his own recording shows",
+                "spectator_deathcam: player {target} died ({}) -- death cam, as their own recording shows",
                 match killer_of(target, killer) {
                     Some(killer) => format!("killer {killer}"),
                     None => "no killer to turn to: looking down".to_string(),
@@ -379,7 +379,7 @@ pub unsafe fn after_calc_refdef(pparams: *mut RefParamsPartial) {
         DONE.store(true, Ordering::Relaxed);
         unsafe {
             crate::debug::report(&format!(
-                "spectator_deathcam: player {target}'s death cam is over after {HOLD_SECONDS} s -- back in his eyes until he respawns"
+                "spectator_deathcam: player {target}'s death cam is over after {HOLD_SECONDS} s -- back in their eyes until they respawn"
             ))
         };
         return;
@@ -442,7 +442,9 @@ pub fn status_line() -> Option<String> {
     let now = match DEAD_TARGET.load(Ordering::Relaxed) {
         0 => "the watched player is alive".to_string(),
         target if DONE.load(Ordering::Relaxed) => {
-            format!("player {target} is dead, his death cam over: in his eyes until he respawns")
+            format!(
+                "player {target} is dead, their death cam over: in their eyes until they respawn"
+            )
         }
         target => format!(
             "death cam on player {target}, {}",
