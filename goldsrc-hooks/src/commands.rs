@@ -588,6 +588,8 @@ pub fn poll() {
     // After spectator_bars::poll, so it lays out by this frame's bar state.
     crate::spectator_hud::poll();
     crate::spectator_follow::poll();
+    // While a review runs, the viewer's clicks don't move its camera (#826).
+    crate::spectator_buttons::poll();
     crate::overview_players::poll();
     crate::overview_marker::poll();
     // Lifts the scope's demo gate and keeps the in-eye rifle current (#307).

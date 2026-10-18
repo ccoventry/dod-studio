@@ -37,6 +37,8 @@
 //! before a highlight ends can't move the camera to someone else. The hold
 //! adds to the cvar (the lock is on if either asks), never writes it, so a
 //! user who keeps the cvar at 1 still has the lock after the review ends.
+//! While the hold is on, the viewer's own spectator buttons (a click, jump
+//! or duck) do nothing either (`spectator_buttons`, #826).
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 

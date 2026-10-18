@@ -36,8 +36,13 @@
 //! [`hook::set_text_color`] records the colour the game asked for, since each
 //! name is coloured by a call just before it. A 16-byte detour at the line
 //! step makes it `max(icon height, font height)`, so taller text does not
-//! overlap the next line. The icon stays where the layout puts it, at its own
-//! size (#728 is scaling it).
+//! overlap the next line. The icon's size and its place on the line are
+//! [`super::scale`]'s (#728), which rewrites three more operands and adds a
+//! line-start detour in the same span, sharing this module's pattern match.
+//! Through that detour the name draws here know the line's icon height, so
+//! both names are centred on the line whenever a font or a scale is set
+//! (`scale::name_draw_y`); at scale 1 with no font they stay where the game
+//! puts them.
 //!
 //! The font is `ISurface::CreateFont()` plus `AddGlyphSetToFont`. Each change
 //! makes a **new** handle: `CFontManager::AddGlyphSetToFont` returns false
@@ -47,7 +52,8 @@
 //! allocates nothing more. The next frame draws with the new handle: no
 //! demo reload.
 //!
-//! Installed on the first `font`, and never undone (`detour::Detour`):
+//! Installed on the first `font` or `scale` other than 1, and never undone
+//! (`detour::Detour`):
 //! `font default` makes the calls forward again. Checked every frame like
 //! the other patches, and re-applied should `client.dll` be loaded afresh.
 //!
@@ -108,13 +114,14 @@ const SITES: &[(usize, Call)] = &[
     (0x133, Call::Draw),
 ];
 
-/// Two more `call [gEngfuncs+N]` in the same span, left alone but read: the
-/// icon's `SPR_Set` (slot 4, `+0x2b0de`) and `SPR_DrawHoles` (slot 6,
-/// `+0x2b0f1`). They pin `gEngfuncs` independently of the six above.
-const ANCHORS: &[(usize, usize)] = &[(0xdc, 4), (0xef, 6)];
+/// One more `call [gEngfuncs+N]` in the same span, left alone but read: the
+/// icon's `SPR_Set` (slot 4, `+0x2b0de`). It pins `gEngfuncs` independently
+/// of the six above. The `SPR_DrawHoles` call after it (slot 6, `+0x2b0f1`)
+/// is not an anchor: `scale` redirects it (#728).
+const ANCHORS: &[(usize, usize)] = &[(0xdc, 4)];
 
 /// `FF 15 imm32`, the same length as `E8 rel32` plus one `nop`.
-const CALL_LEN: usize = 6;
+pub(super) const CALL_LEN: usize = 6;
 
 /// Where the line step is computed, from the match: `+0x2b13e`.
 const STEP_AT: usize = 0x13c;
@@ -227,7 +234,7 @@ pub(super) fn parse_args(rest: &[String]) -> Result<Option<FontSpec>, String> {
 /// `call rel32; nop` from `site` to `target`: the six bytes that replace a
 /// `call [gEngfuncs+N]`. On 32-bit the displacement wraps, so any target is
 /// in reach.
-fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
+pub(super) fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
     let rel = (target as u32)
         .wrapping_sub((site + 5) as u32)
         .to_le_bytes();
@@ -235,11 +242,21 @@ fn redirect_bytes(site: usize, target: usize) -> [u8; CALL_LEN] {
 }
 
 /// `call [gengfuncs + slot*4]`, the shipped bytes at a site; what
-/// `hook::gengfuncs_of` reads back.
+/// [`gengfuncs_of`] reads back.
 #[cfg(test)]
-fn stock_bytes(gengfuncs: usize, slot: usize) -> [u8; CALL_LEN] {
+pub(super) fn stock_bytes(gengfuncs: usize, slot: usize) -> [u8; CALL_LEN] {
     let abs = ((gengfuncs + slot * 4) as u32).to_le_bytes();
     [0xff, 0x15, abs[0], abs[1], abs[2], abs[3]]
+}
+
+/// `gEngfuncs` from a stock `call [gEngfuncs + slot*4]`, or `None` for
+/// anything else.
+pub(super) fn gengfuncs_of(bytes: &[u8; CALL_LEN], slot: usize) -> Option<usize> {
+    if bytes[..2] != [0xff, 0x15] {
+        return None;
+    }
+    let abs = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
+    abs.checked_sub(slot * 4)
 }
 
 /// The step stub, hand-assembled:
@@ -327,6 +344,16 @@ static COLOR: AtomicI32 = AtomicI32::new(-1);
 static COMPLAINED: AtomicBool = AtomicBool::new(false);
 /// The `client.dll` the sites were rewritten in, 0 before.
 static INSTALLED_BASE: AtomicUsize = AtomicUsize::new(0);
+/// The engine font's height as its length call last reported it, for
+/// centring the names drawn in it; 0 until a line was measured.
+static ENGINE_TALL: AtomicI32 = AtomicI32::new(0);
+
+/// Our font's height in pixels, 0 while the game's font is in use: the floor
+/// the step stub applies, so `scale` centres the icon on the same line height
+/// the step uses.
+pub(super) fn tall() -> i32 {
+    FONT_TALL.load(Ordering::Relaxed)
+}
 
 /// What `status` says about the font.
 pub(super) fn describe() -> String {
@@ -451,15 +478,19 @@ mod hook {
             .unwrap_or(CON_COLOR_DEFAULT)
     }
 
-    /// Stands in for `pfnDrawConsoleString` at the two name draws.
+    /// Stands in for `pfnDrawConsoleString` at the two name draws. Both are
+    /// centred on the line by [`super::super::scale::name_draw_y`], which
+    /// leaves `y` alone at scale 1 with no font.
     unsafe extern "C" fn draw_string(x: i32, y: i32, text: *const c_char) -> i32 {
         let font = FONT.load(Ordering::Acquire);
         if font == 0 {
+            let y = super::super::scale::name_draw_y(y, ENGINE_TALL.load(Ordering::Relaxed));
             return match engine::engfuncs() {
                 Some(e) => unsafe { (e.pfn_draw_console_string)(x, y, text) },
                 None => x,
             };
         }
+        let y = super::super::scale::name_draw_y(y, FONT_TALL.load(Ordering::Relaxed));
         let Ok(surface) = surface() else {
             return x;
         };
@@ -510,6 +541,11 @@ mod hook {
         if font == 0 {
             if let Some(e) = engine::engfuncs() {
                 unsafe { (e.pfn_draw_console_string_len)(text, width, height) };
+                // The engine font's height, for centring its names: the
+                // victim's width call starts every line, before either draw.
+                if !height.is_null() {
+                    ENGINE_TALL.store(unsafe { *height }, Ordering::Relaxed);
+                }
             }
             return;
         }
@@ -569,14 +605,10 @@ mod hook {
         out
     }
 
-    /// `gEngfuncs` from a stock `call [gEngfuncs + slot*4]`, or `None` for
-    /// anything else.
-    fn gengfuncs_of(bytes: &[u8; CALL_LEN], slot: usize) -> Option<usize> {
-        if bytes[..2] != [0xff, 0x15] {
-            return None;
-        }
-        let abs = u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]) as usize;
-        abs.checked_sub(slot * 4)
+    /// The [`PATTERN`] match in the module at `base`, for `scale`, whose
+    /// sites are offsets from the same match.
+    pub(in crate::deathmsg) fn draw_site(base: usize) -> Result<usize, String> {
+        site(base)
     }
 
     /// Rewrites the six sites and installs the step detour in the module at
@@ -689,6 +721,16 @@ mod hook {
         };
         let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
         install(base)?;
+        // Centring the icon and the names on a line goes through `scale`'s
+        // sites, which draw the game's own at scale 1. The font works
+        // without them, top-aligned, so a failure is logged, not refused.
+        if let Err(why) = super::super::scale::ensure_installed() {
+            unsafe {
+                crate::debug::report(&format!(
+                    "deathmsg font: the names and icons stay top-aligned -- {why}"
+                ))
+            };
+        }
         let surface = surface()?;
         let face = CString::new(spec.face.as_str()).map_err(|_| "the face has a NUL in it")?;
         // Safety: the surface's own font calls, slots checked on both builds.
@@ -738,6 +780,14 @@ mod hook {
         Ok(reply)
     }
 
+    /// Installs the six sites and the step detour with the font in force
+    /// (forwarding to the engine while none is set), for `scale`, which
+    /// centres the names through [`draw_string`].
+    pub(in crate::deathmsg) fn ensure_installed() -> Result<(), String> {
+        let base = engine::client_module_base().ok_or("client.dll is not loaded yet")?;
+        install(base).map(|_| ())
+    }
+
     /// Keeps the sites ours once they ever were. Called every frame.
     pub(super) fn poll() {
         if FONT.load(Ordering::Relaxed) == 0 && INSTALLED_BASE.load(Ordering::Relaxed) == 0 {
@@ -778,6 +828,11 @@ pub(super) fn poll() {
     #[cfg(target_arch = "x86")]
     hook::poll();
 }
+
+/// `Draw`'s span in the module at `base` -- the [`PATTERN`] match -- for
+/// `scale`, whose three operands are offsets from the same match.
+#[cfg(target_arch = "x86")]
+pub(super) use hook::{draw_site, ensure_installed};
 
 #[cfg(test)]
 mod tests {
