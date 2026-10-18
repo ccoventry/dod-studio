@@ -32,47 +32,17 @@ export function streakUid(demoPath, streak) {
   return uid;
 }
 
-/**
- * Copies the user-owned, non-derivable state from a previously-loaded version
- * of a demo onto a freshly-scanned one, matching highlights by uid.
- *
- * A re-scan re-parses the demo and produces brand new streak objects, so
- * without this every status, selection, and note on that demo is silently
- * destroyed. Only fields the user set are carried over — everything derived
- * from the demo file itself comes from the fresh scan.
- */
-export function preserveHighlightState(previousDemo, freshDemo) {
-  if (!previousDemo?.streaks?.length || !freshDemo?.streaks?.length) return freshDemo;
-
-  const previousByUid = new Map(
-    previousDemo.streaks.map(s => [streakUid(previousDemo.path, s), s])
-  );
-
-  freshDemo.streaks.forEach(fresh => {
-    const previous = previousByUid.get(streakUid(freshDemo.path, fresh));
-    if (!previous) return;
-    if (previous.status !== undefined) fresh.status = previous.status;
-    if (previous.statusByHand) fresh.statusByHand = true;
-    if (previous.selected !== undefined) fresh.selected = previous.selected;
-    if (previous.notes !== undefined) fresh.notes = previous.notes;
-    if (previous.clipName !== undefined) fresh.clipName = previous.clipName;
-    if (previous.curation !== undefined) fresh.curation = previous.curation;
-    // Kill Range edits are user edits too, not scan output.
-    if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
-    if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
-  });
-
-  return freshDemo;
-}
-
 // ── Curation (#44) ──────────────────────────────────────────────────────────
 //
 // An editorial mark, separate from `status` (which drives what the pipeline
-// does): unset = not reviewed yet, Keep, or Skip. Skip unticks the row and
-// locks it, so no batch can include it. Frontend-only, persisted in the
-// project file with the rest of the streak.
+// does): unset = not reviewed yet, Keep, Maybe (look again later, #661), or
+// Skip. Skip unticks the row and locks it, so no batch can include it; Maybe
+// leaves the row tickable. Frontend-only, persisted in the project file with
+// the rest of the streak.
 
-export const CURATION = { KEEP: 'Keep', SKIP: 'Skip' };
+export const CURATION = { KEEP: 'Keep', MAYBE: 'Maybe', SKIP: 'Skip' };
+
+const MARKS = new Set(Object.values(CURATION));
 
 /** True for a highlight marked Skip: never selectable, never captured. */
 export function isSkipped(streak) {
@@ -81,7 +51,7 @@ export function isSkipped(streak) {
 
 /** Sets the mark ('' clears it). Skip also unticks the row. */
 export function setCuration(streak, value) {
-  if (value === CURATION.KEEP || value === CURATION.SKIP) streak.curation = value;
+  if (MARKS.has(value)) streak.curation = value;
   else delete streak.curation;
   if (value === CURATION.SKIP) streak.selected = false;
 }
@@ -157,6 +127,18 @@ export function renameDemoInTakeIndex(takeIndex, oldPath, newPath) {
     takeIndex[key] = takeIndex[key].map((uid) =>
       uid.startsWith(oldPrefix) ? `${newPath}#${uid.slice(oldPrefix.length)}` : uid
     );
+  });
+}
+
+/**
+ * Points each recorded uid in `renames` (old uid -> new uid) at its new one:
+ * a split demo's highlights live on in its pieces under new uids (#217), and
+ * their captured takes must still resolve to them.
+ */
+export function renameUidsInTakeIndex(takeIndex, renames) {
+  if (!takeIndex || !renames || renames.size === 0) return;
+  Object.keys(takeIndex).forEach((key) => {
+    takeIndex[key] = Array.from(new Set(takeIndex[key].map((uid) => renames.get(uid) ?? uid)));
   });
 }
 

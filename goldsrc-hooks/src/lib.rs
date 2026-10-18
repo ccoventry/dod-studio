@@ -67,6 +67,9 @@
 //!   `docs/goldsrc_scoreboard.md`.
 //! - `voice`: the `dodstudio_mute_voice_commands` cvar -- silence "fire in the
 //!   hole!" and the rest, without overwriting the game's own `.wav` files.
+//! - `voice_menus`: the `dodstudio_hide_voice_menus` cvar -- hide the
+//!   numbered voice-command menus and the hand-signal command menu a POV
+//!   demo's player opened.
 //! - `crosshair`: the `dodstudio_hide_crosshair` cvar -- hide the crosshair and have
 //!   it stay hidden, which the stock `crosshair` cvar cannot do because
 //!   `CHud::Redraw` forces the value back every frame.
@@ -80,6 +83,9 @@
 //!   current cvars before a map's lightmaps are built. On by default;
 //!   `GOLDSRC_HOOKS_LIGHTMAP_GAMMA=0` turns it off. Pre-Anniversary only: the
 //!   Anniversary engine rebuilds its lightmaps on a gamma change itself (#370).
+//! - `hud_sprites`: `dodstudio_hide_asset` for the HUD's own 2D sprites, by
+//!   sheet path or `hud.txt` icon name, through client.dll's `SPR_*` engine
+//!   function pointers (#808). Installed when client.dll initialises.
 //! - `particle_hide`: `dodstudio_hide_asset` for DoD's own particles (impact
 //!   debris, the grenade dirt cloud, smoke trails), which never reach
 //!   `HUD_AddEntity` (issue #614). Installed on the first `add`.
@@ -213,6 +219,7 @@ mod hand_signals;
 mod hide_asset;
 mod hlae_window;
 mod hltv_messages;
+mod hud_sprites;
 mod hudelement;
 mod hull_trace_guard;
 mod lightmap_gamma;
@@ -230,6 +237,9 @@ mod panic_log;
 mod particle_hide;
 mod patch;
 mod pe;
+mod player_crosshair;
+mod player_overrides;
+mod player_table;
 mod pmove_guard;
 mod position;
 mod pov_live_bob;
@@ -242,6 +252,7 @@ mod scoreboard;
 mod screen_effects;
 mod server_query;
 mod spectator_bars;
+mod spectator_buttons;
 mod spectator_crosshair;
 mod spectator_deathcam;
 mod spectator_eye;
@@ -249,12 +260,15 @@ mod spectator_follow;
 mod spectator_gun;
 mod spectator_hud;
 mod spectator_target;
+mod spray;
+mod spray_hltv;
 mod sprite_blend;
 mod streaks;
 mod studio_panel;
 mod tempent_fix;
 mod texture_hires;
 mod voice;
+mod voice_menus;
 mod window_layout;
 mod world_shaders;
 
