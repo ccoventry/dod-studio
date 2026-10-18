@@ -22,8 +22,21 @@
 //! separated: the demo's full path, Studio's key for the row, the player,
 //! each kill's time on the demo player's clock (comma separated), the kill
 //! range's first and last kill (from 1), the answer already given (`yes`,
-//! `maybe`, `no` or `-`), and the note. The review starts at the first
-//! highlight with no answer yet.
+//! `maybe`, `no` or `-`), the note, and, for an HLTV demo, the player's
+//! number (#822; `-` or missing for a POV demo). The review starts at the
+//! first highlight: Studio's Review box decides what the queue holds, so
+//! picking up where a review left off is its Unmarked choice.
+//!
+//! ## HLTV demos
+//!
+//! An HLTV demo's camera follows no one by itself, so a highlight with a
+//! player number puts the camera on them in first person (`spec_mode 4` and
+//! `dodstudio_spec_target`) once each seek has landed, the way the
+//! Highlights tab's Go does: the player may only exist after the seek. For
+//! the whole review it holds `dodstudio_spec_lock`'s lock on, so a death
+//! before a highlight ends can't move the camera to someone else. The hold
+//! adds to the cvar (the lock is on if either asks), never writes it, so a
+//! user who keeps the cvar at 1 still has the lock after the review ends.
 //!
 //! Commands and [`poll`] both run on the game's main thread.
 
@@ -90,9 +103,18 @@ pub(crate) struct Highlight {
     pub to: usize,
     pub verdict: Option<Verdict>,
     pub note: String,
+    /// HLTV: the player the camera goes on, by number (#822).
+    pub spectate: Option<i32>,
 }
 
 impl Highlight {
+    /// What runs once the seek has landed: the camera onto the player, in
+    /// first person, for an HLTV highlight.
+    fn camera_line(&self) -> Option<String> {
+        self.spectate
+            .map(|n| format!("spec_mode 4; {} {n}", crate::spectator_follow::TARGET_NAME))
+    }
+
     /// Where playback starts and stops.
     fn window(&self) -> (f64, f64) {
         let first = self.kills.first().copied().unwrap_or(0.0);
@@ -191,7 +213,11 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
         }
         let fields: Vec<&str> = line.split('\t').collect();
         if fields.len() < 7 {
-            return Err(format!("line {} has {} fields, not 8", n + 2, fields.len()));
+            return Err(format!(
+                "line {} has {} fields, not 8 or 9",
+                n + 2,
+                fields.len()
+            ));
         }
         let kills = fields[3]
             .split(',')
@@ -230,18 +256,16 @@ pub(crate) fn parse_queue(text: &str) -> Result<(Vec<Highlight>, Options), Strin
             note: fields
                 .get(7)
                 .map_or(String::new(), |n| n.trim().to_string()),
+            spectate: fields
+                .get(8)
+                .and_then(|n| n.trim().parse::<i32>().ok())
+                .filter(|n| (1..=32).contains(n)),
         });
     }
     if queue.is_empty() {
         return Err("the queue has no highlights".to_string());
     }
     Ok((queue, options))
-}
-
-/// Where a review picks up: the first highlight not answered yet, or the
-/// first of all when every one has been.
-fn first_unanswered(queue: &[Highlight]) -> usize {
-    queue.iter().position(|h| h.verdict.is_none()).unwrap_or(0)
 }
 
 /// A note as one line Studio can split on tabs.
@@ -462,7 +486,7 @@ fn play(review: &mut Review) {
     let h = &review.queue[review.at];
     let (from, until) = h.window();
     let spans = fast_spans(&h.kills, review.options.gap);
-    let started = crate::demo_seek::seek_to_seconds(from).and_then(|seek| {
+    let started = crate::demo_seek::seek_to_seconds_then(from, h.camera_line()).and_then(|seek| {
         crate::demo_seek::set_time_scale(1.0)?;
         crate::demo_seek::set_paused(false)?;
         Ok(seek)
@@ -548,6 +572,7 @@ fn advance(guard: &mut Option<Review>) {
         ));
         crate::events::send("REVIEW_END\tdone");
         *guard = None;
+        crate::spectator_follow::hold_for_review(false);
         GENERATION.fetch_add(1, Ordering::Relaxed);
         open_tab();
     }
@@ -819,6 +844,7 @@ pub unsafe extern "C" fn command() {
                     let _ = crate::demo_seek::set_time_scale(1.0);
                 }
                 crate::events::send("REVIEW_END\tstopped");
+                crate::spectator_follow::hold_for_review(false);
                 GENERATION.fetch_add(1, Ordering::Relaxed);
                 say("stopped");
             } else {
@@ -846,13 +872,12 @@ fn start(path: &str) {
         }
     };
     let (queue, options) = queue;
-    let at = first_unanswered(&queue);
-    say(&format!(
-        "{} highlight(s); starting at {}",
-        queue.len(),
-        at + 1
-    ));
+    let at = 0;
+    say(&format!("{} highlight(s)", queue.len()));
     crate::events::send(&format!("REVIEW_START\t{}", queue.len()));
+    // Held for the whole review: it only matters on an HLTV highlight, and
+    // it adds to the cvar rather than changing it (see the module docs).
+    crate::spectator_follow::hold_for_review(true);
     let mut guard = lock();
     let review = guard.insert(Review {
         queue,
@@ -885,7 +910,29 @@ mod tests {
             to: 1,
             verdict,
             note: String::new(),
+            spectate: None,
         }
+    }
+
+    #[test]
+    fn an_hltv_highlight_names_the_player_the_camera_goes_on() {
+        let (queue, _) = parse_queue(&queue_text(&[
+            "h.dem\t1\tgskiLL\t5\t1\t1\t-\t\t7",
+            "h.dem\t2\tp\t9\t1\t1\t-\tnote\t-",
+            "p.dem\t3\tp\t9\t1\t1\t-\tnote",
+            "h.dem\t4\tp\t9\t1\t1\t-\t\t40",
+        ]))
+        .unwrap();
+        assert_eq!(queue[0].spectate, Some(7));
+        assert_eq!(
+            queue[0].camera_line().as_deref(),
+            Some("spec_mode 4; dodstudio_spec_target 7")
+        );
+        // A POV demo's line has no number, or `-`; a number out of range is none.
+        assert_eq!(queue[1].spectate, None);
+        assert_eq!(queue[2].spectate, None);
+        assert_eq!(queue[3].spectate, None);
+        assert_eq!(queue[2].camera_line(), None);
     }
 
     #[test]
@@ -991,33 +1038,18 @@ mod tests {
     }
 
     #[test]
-    fn the_review_starts_at_the_first_unanswered_highlight() {
-        let mut queue = vec![
-            highlight("a", Some(Verdict::Yes)),
-            highlight("a", None),
-            highlight("b", None),
-        ];
-        assert_eq!(first_unanswered(&queue), 1);
-        queue[1].verdict = Some(Verdict::No);
-        queue[2].verdict = Some(Verdict::No);
-        assert_eq!(first_unanswered(&queue), 0);
-    }
-
-    #[test]
-    fn maybe_is_read_sent_and_passed_over_like_any_answer() {
+    fn maybe_is_read_and_sent_like_any_answer() {
         let (queue, _) = parse_queue(&queue_text(&[
             "d.dem\t1\tp\t5\t1\t1\tmaybe\t",
             "d.dem\t2\tp\t9\t1\t1\t-\t",
         ]))
         .unwrap();
         assert_eq!(queue[0].verdict, Some(Verdict::Maybe));
-        assert_eq!(first_unanswered(&queue), 1);
+        assert_eq!(queue[1].verdict, None);
         assert_eq!(
             answer_label(&queue[0], Verdict::Maybe),
             "REVIEW\td.dem\t1\tmaybe\t1\t1\t"
         );
-        // A review of only Maybe rows starts at the first of them.
-        assert_eq!(first_unanswered(&queue[..1]), 0);
     }
 
     #[test]

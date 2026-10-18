@@ -112,9 +112,13 @@ export const STRINGS = {
     TABLE_HEADER_DEMO_FILE: 'Demo File',
     TABLE_HEADER_HIGHLIGHTS: 'Highlights',
     TABLE_HEADER_SELECTED: 'Selected',
-    TABLE_HEADER_PENDING: 'Pending',
-    TABLE_HEADER_CAPTURED: 'Captured',
-    TABLE_HEADER_RENDERED: 'Rendered',
+    // One cell each of coloured counts, legend letters under the name.
+    TABLE_HEADER_STATUS: 'Status',
+    TABLE_HEADER_STATUS_TITLE: 'How many of the demo\'s highlights are Pending / Captured / Rendered (P / C / R), each in its status colour. Hover a row for the numbers in words.',
+    TABLE_HEADER_REVIEW: 'Review',
+    TABLE_HEADER_REVIEW_TITLE: 'How many of the demo\'s highlights have no Review mark yet / Keep / Maybe / Skip (– / K / M / S), each in its colour. Hover a row for the numbers in words.',
+    COUNT_LABELS: { Pending: 'Pending', Captured: 'Captured', Rendered: 'Rendered', Unmarked: 'not reviewed', Keep: 'Keep', Maybe: 'Maybe', Skip: 'Skip' },
+    COUNT_LETTERS: { Pending: 'P', Captured: 'C', Rendered: 'R', Unmarked: '–', Keep: 'K', Maybe: 'M', Skip: 'S' },
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
@@ -1675,7 +1679,7 @@ export const STRINGS = {
     BUILD_CANCELLED: 'Stopped. Files already built are kept; Build again to carry on.',
     STYLE_NEEDS_UPSCALER: ' (needs Download)',
     // Asset types, as the hook's folder names.
-    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', detail: 'Detail textures', sky: 'Skies' },
+    TYPE_NAMES: { world: 'Map textures', models: 'Model skins', sprites: 'Sprites', decals: 'Decals', detail: 'Detail textures', sky: 'Skies' },
     NOTHING_BUILT: 'Nothing yet',
     cellSummary: (files, size) => `${files.toLocaleString()} files, ${size}`,
     // #426: how much of the game a style covers.
@@ -1683,7 +1687,7 @@ export const STRINGS = {
     CELL_OF_TITLE: 'Fewer files than the fullest style has for this type. Wherever this style has none, the game shows the stock texture.',
     largestSize: (width, height) => `up to ${width}×${height}`,
     LARGEST_SIZE_TITLE: "The size of this style's biggest file of this type.",
-    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', detail: 'detail textures', sky: 'skies' },
+    TYPE_NAMES_LOWER: { world: 'map textures', models: 'model skins', sprites: 'sprites', decals: 'decals', detail: 'detail textures', sky: 'skies' },
     someOf: (files, most, type) => `${files} of ${most} ${type}`,
     styleGaps: (style, none, some) => {
       const list = (items, word) => (items.length < 2 ? items.join('') : `${items.slice(0, -1).join(', ')} ${word} ${items[items.length - 1]}`);
@@ -1855,12 +1859,12 @@ export const STRINGS = {
     // What to do about each reason, after the hook's own heading.
     MISSES_ADVICE: {
       wrong_version: 'The texture has changed since it was built (or another map has one with the same name). Build this style again: files already built are skipped, so only these are made.',
-      no_file: 'Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps.',
+      no_file: "Nothing is built for these in this style. Build it, and check hd_maps.txt if you narrowed the maps. A decal that isn't in decals.wad is a player's spray, which has no HD version.",
       failed: "A file was found but couldn't be used; each line says why.",
       on_purpose: 'Tool textures, blank sprite frames and formats HD never replaces.',
     },
     // The hook's asset kinds in the miss list (singular, unlike the folders).
-    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', detail: 'Detail texture', sky: 'Sky' },
+    MISS_TYPE_NAMES: { world: 'Map texture', model: 'Model skin', sprite: 'Sprite', decal: 'Decal', detail: 'Detail texture', sky: 'Sky' },
   },
 
   // ── batch_results.js: the Last Batch panel (#172) ──────────────────────
@@ -2139,12 +2143,29 @@ export const STRINGS = {
     BUTTON: 'Review highlights',
     TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
     // #661: which Review marks a review plays.
-    COVERS_TITLE: 'Which highlights the review plays, by their Review mark. All starts at the first one with no mark and passes over Keep, Maybe and Skip rows; pick Maybe to look at those again.',
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
     COVERS_ALL: 'All',
     COVERS_UNMARKED: 'Unmarked',
     COVERS_KEEP: 'Keep',
     COVERS_MAYBE: 'Maybe',
     COVERS_SKIP: 'Skip',
+    // #822: whose highlights an HLTV demo's review plays.
+    HLTV_LABEL: 'HLTV:',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_MISSING: 'Players missing their POV for this half',
+    HLTV_RECORDERS: 'Players with a POV demo in the queue',
+    HLTV_ALL: 'Everyone',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
+    // The HLTV box left out every highlight there was (#822).
+    hltvNoneChosen: (choice, count) => {
+      const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'missing' || !choice) {
+        return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
+      }
+      return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
+    },
     nothingCovered: (covers, ticked) => {
       const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
       return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;

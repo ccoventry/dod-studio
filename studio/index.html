@@ -142,6 +142,16 @@
                   <option value="maybe" data-str="REVIEW.COVERS_MAYBE">Maybe</option>
                   <option value="skip" data-str="REVIEW.COVERS_SKIP">Skip</option>
                 </select>
+                <!-- #822: whose highlights an HLTV demo's review plays; review_mode.js fills it. -->
+                <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.HLTV_TITLE">
+                  <span data-str="REVIEW.HLTV_LABEL">HLTV:</span>
+                  <select id="review-hltv-select" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px; max-width: 260px;"></select>
+                </label>
+                <!-- The order an HLTV demo's players' highlights play in. -->
+                <select id="review-order-select" data-str-title="REVIEW.ORDER_TITLE" style="padding: 3px 6px; font-size: 12px; background: #1a1a1a; color: #fff; border: 1px solid #444; border-radius: 3px;">
+                  <option value="time" data-str="REVIEW.ORDER_TIME">Chronological</option>
+                  <option value="player" data-str="REVIEW.ORDER_PLAYER">By player (A–Z)</option>
+                </select>
                 <label style="display: flex; gap: 3px; align-items: center; font-size: 12px;" data-str-title="REVIEW.TICK_YES_TITLE">
                   <input type="checkbox" id="review-tick-yes-cb" />
                   <span data-str="REVIEW.TICK_YES_LABEL">Tick Yes for capture</span>
@@ -173,15 +183,15 @@
                     <th data-str="WORKSPACE.TABLE_HEADER_DEMO_FILE">Demo File</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_HIGHLIGHTS">Highlights</th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_SELECTED">Selected</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_PENDING">Pending</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_CAPTURED">Captured</th>
-                    <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_RENDERED">Rendered</th>
+                    <!-- Counts in one cell each, a legend of coloured letters under the name (queue_counts.js). -->
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_STATUS_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_STATUS">Status</span><div class="count-legend" id="status-count-legend"></div></th>
+                    <th class="col-center" data-str-title="WORKSPACE.TABLE_HEADER_REVIEW_TITLE"><span data-str="WORKSPACE.TABLE_HEADER_REVIEW">Review</span><div class="count-legend" id="review-count-legend"></div></th>
                     <th class="col-center" data-str="WORKSPACE.TABLE_HEADER_ACTIONS">Actions</th>
                   </tr>
                 </thead>
                 <tbody id="master-demo-table-body">
                   <tr>
-                    <td colspan="8" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
+                    <td colspan="7" class="table-empty" data-str="WORKSPACE.TABLE_EMPTY_NO_DEMOS">No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.</td>
                   </tr>
                 </tbody>
               </table>

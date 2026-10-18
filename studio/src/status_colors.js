@@ -1,6 +1,6 @@
 // status_colors.js
 // One colour per highlight status (#527), shared by Highlight Details' status
-// dropdown and the Master Demo Queue's Pending / Captured / Rendered columns,
+// dropdown and the Master Demo Queue's Status counts (queue_counts.js),
 // so the two can't drift apart again.
 
 /**
@@ -27,7 +27,22 @@ export function statusColor(status) {
   return STATUS_COLORS[status] ?? STATUS_COLORS.None;
 }
 
-/** A Master Demo Queue count column: the status's colour, or grey at zero. */
+/** A Master Demo Queue count: the status's colour, or grey at zero. */
 export function statusCountColor(status, count) {
   return count > 0 ? statusColor(status) : STATUS_COLORS.None;
+}
+
+/** One colour per Review mark (#44, #661), plus no mark, for the queue's
+ *  Review counts; none of them is a Status colour, so the two columns side by
+ *  side never read as each other. */
+export const REVIEW_COLORS = Object.freeze({
+  Unmarked: '#e0e0e0',
+  Keep: '#26c6da',
+  Maybe: '#ffd54f',
+  Skip: '#ef5350',
+});
+
+/** A Review count: the mark's colour, or grey at zero. */
+export function reviewCountColor(mark, count) {
+  return count > 0 ? (REVIEW_COLORS[mark] ?? STATUS_COLORS.None) : STATUS_COLORS.None;
 }
