@@ -3549,3 +3549,56 @@ button.setup-skip:hover:not(:disabled) {
 .players-x:hover {
   color: #fff;
 }
+
+/* The HLTV box's "Players I pick" (#828): the picked players as chips with
+   an x, then the lists that add a player or a team. */
+.review-hltv-pick {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.review-hltv-pick[hidden] {
+  display: none;
+}
+
+.review-hltv-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.review-hltv-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 2px 1px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--bg-input);
+}
+
+/* Picked, but no highlight in the queue's HLTV demos right now. */
+.review-hltv-chip-away {
+  opacity: 0.5;
+}
+
+.review-hltv-chip-x {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 4px;
+  cursor: pointer;
+}
+
+.review-hltv-chip-x:hover {
+  color: #fff;
+}
+
+.review-hltv-none {
+  color: var(--text-muted);
+}

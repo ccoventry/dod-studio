@@ -5,7 +5,8 @@
 // comes back over the game's events pipe and lands on that highlight's row
 // (review_queue.js says how). In an HLTV demo only the players the "HLTV"
 // box picks are played, with the camera on them (#822); by default, the
-// players who didn't record that half themselves.
+// players who didn't record that half themselves, or any players picked
+// beside it (#828, review_hltv_picker.js).
 
 import { listen } from '@tauri-apps/api/event';
 import { startHighlightReview, stopHighlightReview } from './ipc_bridge.js';
@@ -25,8 +26,10 @@ import { STRINGS } from './strings.js';
  *  - recorderOf(demo): who recorded a demo, `{ id, name }` or null, to tell
  *    which players an HLTV demo's half is missing
  *  - onChanged(): re-render and mark the project dirty after an answer
+ *  - hltvPick: review_hltv_picker.js's picker, which holds the box's choice
+ *    and the players "Players I pick" reviews
  */
-export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged }) {
+export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRecorders, recorderOf, onChanged, hltvPick = null }) {
   const btn = document.querySelector('#review-highlights-btn');
   if (!btn) return;
   let answers = 0;
@@ -34,8 +37,9 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
 
   // The HLTV box lists the queue's recorders, checked each time it opens so
   // it follows the queue, and rebuilt only when that list changed so the
-  // open dropdown isn't swapped out under the click; the pick survives a
-  // rebuild while that player is still there.
+  // open dropdown isn't swapped out under the click; the pick (the
+  // picker's, which a loaded project sets) survives a rebuild while that
+  // player is still there.
   const hltvSelect = document.querySelector('#review-hltv-select');
   let hltvKey = null;
   const fillHltvSelect = () => {
@@ -44,7 +48,7 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const key = recorders.map((p) => `${p.id}\t${p.label}`).join('\n');
     if (key === hltvKey) return;
     hltvKey = key;
-    const keep = hltvSelect.value;
+    const keep = hltvPick?.choice() ?? hltvSelect.value;
     hltvSelect.textContent = '';
     const add = (value, label) => {
       const option = document.createElement('option');
@@ -55,8 +59,10 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     add(HLTV_PLAYERS.MISSING, STRINGS.REVIEW.HLTV_MISSING);
     add(HLTV_PLAYERS.RECORDERS, STRINGS.REVIEW.HLTV_RECORDERS);
     add(HLTV_PLAYERS.ALL, STRINGS.REVIEW.HLTV_ALL);
+    add(HLTV_PLAYERS.PICKED, STRINGS.REVIEW.HLTV_PICKED);
     for (const p of recorders) add(p.id, p.label);
     hltvSelect.value = [...hltvSelect.options].some((o) => o.value === keep) ? keep : HLTV_PLAYERS.MISSING;
+    hltvPick?.refresh();
   };
   fillHltvSelect();
   hltvSelect?.addEventListener('mousedown', fillHltvSelect);
@@ -84,13 +90,15 @@ export function initReviewMode({ getDemos, getCheckedPaths, getShownPaths, getRe
     const covers = document.querySelector('#review-covers-select')?.value;
     const ticked = getCheckedPaths();
     const paths = reviewDemoPaths(ticked, getShownPaths());
-    const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf });
+    fillHltvSelect();
+    const picked = hltvPick?.players() || [];
+    const hltvPlayers = hltvPlayersFor(hltvSelect?.value, getRecorders?.() || [], { demos: getDemos(), recorderOf, picked });
     const order = document.querySelector('#review-order-select')?.value;
     const { highlights, skipped, notChosen } = buildReviewQueue(getDemos(), paths, minKills, covers, hltvPlayers, order);
     if (highlights.length === 0) {
       let why = STRINGS.REVIEW.NOTHING_TO_REVIEW;
       if (skipped > 0) why = STRINGS.REVIEW.ONLY_OLD_HIGHLIGHTS;
-      else if (notChosen > 0) why = STRINGS.REVIEW.hltvNoneChosen(hltvSelect?.value, notChosen);
+      else if (notChosen > 0) why = STRINGS.REVIEW.hltvNoneChosen(hltvSelect?.value, notChosen, picked.length);
       else if (paths.length > 0) why = STRINGS.REVIEW.nothingCovered(covers, ticked.length > 0);
       showToast(why, 'info');
       return;
