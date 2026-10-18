@@ -211,7 +211,7 @@ pub const ELEMENTS: &[Element] = &[
         name: "menu",
         class: ".?AVCHudMenu@@",
         vftable_rva: 0xac1a0,
-        what: "the team and class menus",
+        what: "the voice-command menus and server plugin menus (ShowMenu)",
     },
     Element {
         name: "message",
@@ -280,7 +280,7 @@ unsafe fn read_u32(address: usize) -> u32 {
 /// image-relative.
 ///
 /// Safety: `vftable` must be a mapped address inside the module.
-unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
+pub(crate) unsafe fn rtti_class_name(vftable: usize) -> Option<String> {
     unsafe {
         let locator = read_u32(vftable - 4) as usize;
         if locator == 0 {
