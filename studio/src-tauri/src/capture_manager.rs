@@ -1008,7 +1008,10 @@ pub async fn start_capture_batch_impl(
         .store(false, std::sync::atomic::Ordering::Relaxed);
 
     // ── Build PatcherConfig from the IPC payload ───────────────────────────────
-    let patcher_config = config_from_payload(&payload);
+    let mut patcher_config = config_from_payload(&payload);
+    // Configuration > Players' box (#428) is a saved setting, not part of
+    // the batch's payload.
+    patcher_config.player_overrides = Some(saved_settings(&app_handle).players.use_in_game);
     {
         let mut slot = manager
             .last_config
@@ -2792,6 +2795,8 @@ pub async fn launch_standalone_game(app: tauri::AppHandle) -> Result<(), String>
             .spawn()
             .map_err(crate::messages::failed_to_launch_hlae)?;
         watch_for_error_dialogs(app, launcher);
+        // Configuration > Players' box (#428), once the game takes commands.
+        crate::players_tab::send_when_listening(settings.players.use_in_game);
 
         Ok(())
     }))
