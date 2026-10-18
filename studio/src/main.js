@@ -31,7 +31,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks, getVisibleDemos, getQueueRecorders, queueRecorderOf } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -505,6 +505,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initReviewMode({
     getDemos: () => currentScannedDemos,
     getCheckedPaths: getCheckedDemoPaths,
+    getShownPaths: () => getVisibleDemos().map((d) => d.path),
+    getRecorders: getQueueRecorders,
+    recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
   });
 

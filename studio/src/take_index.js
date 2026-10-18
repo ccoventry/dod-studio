@@ -68,11 +68,14 @@ export function preserveHighlightState(previousDemo, freshDemo) {
 // ── Curation (#44) ──────────────────────────────────────────────────────────
 //
 // An editorial mark, separate from `status` (which drives what the pipeline
-// does): unset = not reviewed yet, Keep, or Skip. Skip unticks the row and
-// locks it, so no batch can include it. Frontend-only, persisted in the
-// project file with the rest of the streak.
+// does): unset = not reviewed yet, Keep, Maybe (look again later, #661), or
+// Skip. Skip unticks the row and locks it, so no batch can include it; Maybe
+// leaves the row tickable. Frontend-only, persisted in the project file with
+// the rest of the streak.
 
-export const CURATION = { KEEP: 'Keep', SKIP: 'Skip' };
+export const CURATION = { KEEP: 'Keep', MAYBE: 'Maybe', SKIP: 'Skip' };
+
+const MARKS = new Set(Object.values(CURATION));
 
 /** True for a highlight marked Skip: never selectable, never captured. */
 export function isSkipped(streak) {
@@ -81,7 +84,7 @@ export function isSkipped(streak) {
 
 /** Sets the mark ('' clears it). Skip also unticks the row. */
 export function setCuration(streak, value) {
-  if (value === CURATION.KEEP || value === CURATION.SKIP) streak.curation = value;
+  if (MARKS.has(value)) streak.curation = value;
   else delete streak.curation;
   if (value === CURATION.SKIP) streak.selected = false;
 }

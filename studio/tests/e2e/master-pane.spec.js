@@ -66,6 +66,30 @@ test.describe('master_pane multi-map demos (#217)', () => {
   });
 });
 
+test.describe('master_pane Status and Review counts', () => {
+  const cells = (page) => row(page, 'here.dem').locator('td.queue-counts-cell');
+
+  test('each column is one cell of slash-separated counts, spelled out on hover', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(cells(page)).toHaveText(['1 / 1 / 0', '2 / 1 / 0 / 1']);
+    await expect(cells(page).nth(0)).toHaveAttribute('title', '1 Pending, 1 Captured, 0 Rendered');
+    await expect(cells(page).nth(1)).toHaveAttribute('title', '2 not reviewed, 1 Keep, 0 Maybe, 1 Skip');
+  });
+
+  test('a count is in its colour, and grey at zero', async ({ page }) => {
+    await gotoHarness(page);
+    const numbers = cells(page).nth(0).locator('span:not(.count-slash)');
+    await expect(numbers.nth(0)).toHaveCSS('color', 'rgb(255, 167, 38)');
+    await expect(numbers.nth(2)).toHaveCSS('color', 'rgb(85, 85, 85)');
+  });
+
+  test('the headers carry the matching legend letters', async ({ page }) => {
+    await gotoHarness(page);
+    await expect(page.locator('#status-count-legend')).toHaveText('P / C / R');
+    await expect(page.locator('#review-count-legend')).toHaveText('– / K / M / S');
+  });
+});
+
 test.describe('master_pane search clear button (#529)', () => {
   const search = (page) => page.locator('#demo-search-input');
   const x = (page) => page.locator('.clearable-x');
