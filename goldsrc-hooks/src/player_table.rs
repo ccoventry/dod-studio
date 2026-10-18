@@ -9,8 +9,8 @@
 //! game. Nothing here applies unless `dodstudio_player_overrides` is 1
 //! (`player_overrides.rs`).
 //!
-//! The rule, the same for both demo types: a player in the table gets his
-//! PNG and his crosshair; anyone else gets the fallbacks. Sprays fall back
+//! The rule, the same for both demo types: a player in the table gets their
+//! PNG and their crosshair; anyone else gets the fallbacks. Sprays fall back
 //! per demo type -- POV: the game's own (the spray the demo saved), one PNG,
 //! or none; HLTV: one PNG or none (`game` there is the engine's bullet hole,
 //! which is what an HLTV demo draws with no image). The crosshair falls back
@@ -23,6 +23,13 @@ use std::path::PathBuf;
 pub const FILE_NAME: &str = "goldsrc_hooks_players.txt";
 /// Tiles in a crosshair sprite's 4x4 grid (`spectator_crosshair::tile_rect`).
 pub const TILES: u8 = 16;
+/// The longer side of a spray built from a PNG when the file names none:
+/// the size of a typical saved spray, so a built one sits beside a real one
+/// at the same scale.
+pub const DEFAULT_SPRAY_SIZE: u32 = 64;
+/// The sizes the file may name: the writer's sides go in steps of 16, and
+/// `Draw_ValidateCustomLogo` takes up to 256.
+const SPRAY_SIZES: std::ops::RangeInclusive<u32> = 16..=256;
 
 /// What a spray becomes.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash)]
@@ -35,6 +42,10 @@ pub enum Choice {
     Blank,
     /// A PNG in `<game>\logos\`, by file name.
     Png(String),
+    /// A listed player's "From the demo": the spray the demo saved, drawn by
+    /// the game as it is; [`Table::resolve`] makes it the fallback when the
+    /// demo saved none.
+    Own,
 }
 
 impl std::fmt::Display for Choice {
@@ -42,6 +53,7 @@ impl std::fmt::Display for Choice {
         match self {
             Choice::Game => f.write_str("the game's own"),
             Choice::Blank => f.write_str("no spray"),
+            Choice::Own => f.write_str("the spray from the demo"),
             Choice::Png(png) => f.write_str(png),
         }
     }
@@ -77,7 +89,8 @@ pub struct Who {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub who: Who,
-    pub png: String,
+    /// A PNG, or `None` for "From the demo".
+    pub png: Option<String>,
 }
 
 /// One crosshair row.
@@ -95,6 +108,9 @@ pub struct Table {
     pub pov: Choice,
     pub hltv: Choice,
     pub crosshair: Crosshair,
+    /// The longer side of a spray built from a PNG, from a `spray_size`
+    /// line; 0 when there is none ([`Table::spray_side`]).
+    pub spray_size: u32,
     /// Lines that weren't a comment, blank, or one of the shapes, by number.
     pub bad: Vec<usize>,
 }
@@ -185,11 +201,19 @@ pub fn parse(text: &str) -> Table {
         let ok = match cells.as_slice() {
             ["spray_pov_fallback", rest @ ..] => spray_fallback(rest).map(|c| table.pov = c),
             ["spray_hltv_fallback", rest @ ..] => spray_fallback(rest).map(|c| table.hltv = c),
+            ["spray_size", n] => n
+                .parse::<u32>()
+                .ok()
+                .filter(|n| SPRAY_SIZES.contains(n) && n.is_multiple_of(16))
+                .map(|n| table.spray_size = n),
             ["crosshair_fallback", rest @ ..] => {
                 crosshair_fallback(rest).map(|c| table.crosshair = c)
             }
             ["spray", rest @ ..] => who(rest, 1).and_then(|(who, cells)| {
-                let png = png_name(cells[0])?;
+                let png = match cells[0] {
+                    "own" => None,
+                    file => Some(png_name(file)?),
+                };
                 table.players.push(Row { who, png });
                 Some(())
             }),
@@ -241,6 +265,15 @@ impl Table {
     }
 
     /// Whether the crosshairs ask for anything.
+    /// How big a spray built from a PNG is drawn: its longer side.
+    pub fn spray_side(&self) -> u32 {
+        if self.spray_size == 0 {
+            DEFAULT_SPRAY_SIZE
+        } else {
+            self.spray_size
+        }
+    }
+
     pub fn crosshair_active(&self) -> bool {
         !self.crosshairs.is_empty() || self.crosshair != Crosshair::Game
     }
@@ -250,12 +283,38 @@ impl Table {
         row_for(&self.players, |r| &r.who, name, steam_id)
     }
 
-    /// What this player's spray becomes in a demo of this type.
+    /// What this player's row or the fallback says for a demo of this type,
+    /// before [`Table::resolve`] knows whether the demo saved the spray.
     pub fn choose(&self, hltv: bool, name: &str, steam_id: u64) -> Choice {
         match self.row_for(name, steam_id) {
-            Some(row) => Choice::Png(row.png.clone()),
-            None if hltv => self.hltv.clone(),
-            None => self.pov.clone(),
+            Some(Row { png: Some(png), .. }) => Choice::Png(png.clone()),
+            Some(Row { png: None, .. }) => Choice::Own,
+            None => self.fallback(hltv),
+        }
+    }
+
+    /// What players not listed get in a demo of this type.
+    pub fn fallback(&self, hltv: bool) -> Choice {
+        if hltv {
+            self.hltv.clone()
+        } else {
+            self.pov.clone()
+        }
+    }
+
+    /// What the spray is, once it is known whether the demo saved one for
+    /// the player (`saved`). "From the demo" with none saved is the fallback
+    /// for the demo type. The game's own with none saved would be the
+    /// engine's bullet-hole stand-in, which is never what the table means:
+    /// it is no spray. So [`Choice::Game`] comes back only with a saved
+    /// spray, and never [`Choice::Own`].
+    pub fn resolve(&self, choice: Choice, saved: bool, hltv: bool) -> Choice {
+        match choice {
+            Choice::Own if saved => Choice::Game,
+            Choice::Own => self.resolve(self.fallback(hltv), saved, hltv),
+            Choice::Game if saved => Choice::Game,
+            Choice::Game => Choice::Blank,
+            other => other,
         }
     }
 
@@ -279,14 +338,12 @@ impl Table {
     pub fn pngs(&self) -> Vec<String> {
         let mut out: Vec<String> = Vec::new();
         let fallbacks = [&self.pov, &self.hltv];
-        let named =
-            self.players
-                .iter()
-                .map(|r| r.png.as_str())
-                .chain(fallbacks.into_iter().filter_map(|c| match c {
-                    Choice::Png(p) => Some(p.as_str()),
-                    _ => None,
-                }));
+        let named = self.players.iter().filter_map(|r| r.png.as_deref()).chain(
+            fallbacks.into_iter().filter_map(|c| match c {
+                Choice::Png(p) => Some(p.as_str()),
+                _ => None,
+            }),
+        );
         for png in named {
             if !out.iter().any(|p| p.eq_ignore_ascii_case(png)) {
                 out.push(png.to_string());
@@ -309,21 +366,6 @@ pub fn load() -> Table {
     path()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .map_or_else(Table::default, |text| parse(&text))
-}
-
-/// The player slot (0-based, `cl.players`' index) a custom spray's texture
-/// is named after: `{` or `}`, then `%03i%02i` of the slot and the lump.
-/// `None` for anything else, and for the `-2` slot the engine validates a
-/// spray under when it connects.
-pub fn slot_of_custom_name(identifier: &str) -> Option<usize> {
-    let b = identifier.as_bytes();
-    if b.len() != 6 || !(b[0] == b'{' || b[0] == b'}') || !b[1..].iter().all(u8::is_ascii_digit) {
-        return None;
-    }
-    identifier[1..4]
-        .parse()
-        .ok()
-        .filter(|&slot: &usize| slot < 32)
 }
 
 #[cfg(test)]
@@ -360,11 +402,15 @@ mod tests {
             vec![
                 Row {
                     who: who(M00CAT, "dicE[: :]m00cat :D"),
-                    png: "chris_teamwork.png".into(),
+                    png: Some("chris_teamwork.png".into()),
                 },
                 Row {
                     who: who(0, "Cpl. Preddy"),
-                    png: "bot spray.png".into(),
+                    png: Some("bot spray.png".into()),
+                },
+                Row {
+                    who: who(0, "Own Spray"),
+                    png: None,
                 },
             ]
         );
@@ -384,6 +430,7 @@ mod tests {
             ]
         );
         assert!(t.active() && t.crosshair_active());
+        assert_eq!(t.spray_side(), 96);
         assert_eq!(
             t.pngs(),
             vec!["chris_teamwork.png", "bot spray.png", "team_allies.png"]
@@ -396,9 +443,9 @@ mod tests {
         let m00cat = Choice::Png("chris_teamwork.png".into());
         // By SteamID, whatever the name is today.
         assert_eq!(t.choose(false, "someone else", M00CAT), m00cat);
-        // By name when the game doesn't know his SteamID.
+        // By name when the game doesn't know their SteamID.
         assert_eq!(t.choose(true, "DICE[: :]M00CAT :d", 0), m00cat);
-        // A known, different SteamID with his name is someone else.
+        // A known, different SteamID with their name is someone else.
         assert_ne!(
             t.choose(true, "dicE[: :]m00cat :D", 76561197960265729),
             m00cat
@@ -448,6 +495,39 @@ mod tests {
     }
 
     #[test]
+    fn from_the_demo_keeps_a_saved_spray_and_else_falls_back() {
+        let t = fixture();
+        // "Own Spray" is listed with "From the demo".
+        assert_eq!(t.choose(false, "own spray", 0), Choice::Own);
+        assert_eq!(t.resolve(Choice::Own, true, false), Choice::Game);
+        // None saved: the fallback for the demo type.
+        assert_eq!(t.resolve(Choice::Own, false, false), Choice::Blank);
+        assert_eq!(
+            t.resolve(Choice::Own, false, true),
+            Choice::Png("team_allies.png".into())
+        );
+        // A POV fallback of "Their own spray" with none saved is no spray,
+        // never the bullet hole -- listed or not.
+        let own = parse("spray_pov_fallback\tgame\nspray\tname\tx\town\n");
+        assert_eq!(
+            own.resolve(own.choose(false, "x", 0), false, false),
+            Choice::Blank
+        );
+        assert_eq!(
+            own.resolve(own.choose(false, "y", 0), false, false),
+            Choice::Blank
+        );
+        assert_eq!(
+            own.resolve(own.choose(false, "y", 0), true, false),
+            Choice::Game
+        );
+        // A PNG or no spray is that, saved or not.
+        let png = Choice::Png("a.png".into());
+        assert_eq!(t.resolve(png.clone(), true, false), png);
+        assert_eq!(t.resolve(Choice::Blank, true, true), Choice::Blank);
+    }
+
+    #[test]
     fn everyone_else_gets_the_spray_fallback_for_the_demo_type() {
         let t = fixture();
         assert_eq!(t.choose(false, "stranger", 0), Choice::Blank);
@@ -488,15 +568,17 @@ mod tests {
         assert_eq!(t.crosshairs.len(), 1);
         assert_eq!(t.pov, Choice::Game);
         assert_eq!(t.crosshair, Crosshair::Game);
-    }
-
-    #[test]
-    fn custom_spray_names_give_the_slot() {
-        assert_eq!(slot_of_custom_name("{00300"), Some(3));
-        assert_eq!(slot_of_custom_name("}03101"), Some(31));
-        assert_eq!(slot_of_custom_name("{-0200"), None);
-        assert_eq!(slot_of_custom_name("{03200"), None);
-        assert_eq!(slot_of_custom_name("{shot5"), None);
-        assert_eq!(slot_of_custom_name("{hltvspray0001"), None);
+        // No size line: a built spray is 64, like a typical saved one.
+        assert_eq!(t.spray_side(), DEFAULT_SPRAY_SIZE);
+        for bad in [
+            "spray_size\t100\n",
+            "spray_size\t512\n",
+            "spray_size\tbig\n",
+        ] {
+            let t = parse(bad);
+            assert_eq!(t.bad, vec![1], "{bad:?}");
+            assert_eq!(t.spray_side(), 64);
+        }
+        assert_eq!(parse("spray_size\t128\n").spray_side(), 128);
     }
 }

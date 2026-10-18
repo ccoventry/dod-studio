@@ -15,6 +15,7 @@ import {
   missingSprites,
   isPngName,
   isSpriteName,
+  OWN_SPRAY,
 } from './players.js';
 
 const M00CAT = '76561197972576011';
@@ -84,7 +85,7 @@ describe('players', () => {
 });
 
 describe('rows', () => {
-  it('adds a player once: the same SteamID, or the same name without one, finds his row', () => {
+  it('adds a player once: the same SteamID, or the same name without one, finds their row', () => {
     let t = defaultPlayers();
     let at;
     ({ table: t, index: at } = addPlayer(t, { steam_id: M00CAT, name: 'm00cat' }));
@@ -152,5 +153,21 @@ describe('the crosshair grid', () => {
     expect(tileRect(17)).toBeNull();
     expect(cleanTile('7')).toBe(7);
     expect(cleanTile(2.5)).toBe(0);
+  });
+});
+
+describe('spray size and From the demo', () => {
+  it('defaults the spray size to 64 and keeps only the sizes offered', () => {
+    expect(defaultPlayers().spray_size).toBe(64);
+    expect(normalizePlayers({ spray_size: 96 }).spray_size).toBe(96);
+    expect(normalizePlayers({ spray_size: '128' }).spray_size).toBe(128);
+    expect(normalizePlayers({ spray_size: 100 }).spray_size).toBe(64);
+    expect(normalizePlayers({}).spray_size).toBe(64);
+  });
+
+  it('keeps From the demo on a row and never reports it as a missing PNG', () => {
+    const t = normalizePlayers({ players: [{ steam_id: '', name: 'a', png: OWN_SPRAY }] });
+    expect(t.players[0].png).toBe('own');
+    expect(missingPngs(t, [])).toEqual([]);
   });
 });

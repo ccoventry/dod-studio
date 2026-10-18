@@ -294,5 +294,5 @@ In a POV demo with `cl_xhair_style 0`, DoD draws its classic dynamic
 crosshair (`client+0x2cda0`), which has no `customXHair.spr` tile, and the
 table's crosshair does not appear.
 
-The draw path reads three atomics; the decision (the player, his row, the
+The draw path reads three atomics; the decision (the player, their row, the
 handle) is made once a frame in `HUD_Frame`.

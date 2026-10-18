@@ -43,7 +43,7 @@ async function loadHarness(page, { pngs = [], sprites = [], spriteReadable = tru
 
 const calls = (page, cmd) => page.evaluate((c) => window.__mockInvocations.filter((i) => i.cmd === c), cmd);
 
-test('adds a queue player, gives him a spray and a crosshair tile, and removes him', async ({ page }) => {
+test('adds a queue player, gives them a spray and a crosshair tile, and removes them', async ({ page }) => {
   await loadHarness(page, { pngs: ['chris_teamwork.png', 'team_allies.png'], sprites: ['customXHair.spr', 'mine.spr'] });
   const [list] = await calls(page, 'list_crosshair_sprites');
   expect(list.args).toEqual({ gamePath: 'C:/Games/Half-Life/hl.exe', gameFolder: 'dod' });
@@ -139,4 +139,23 @@ test('says when logos has no PNG, and marks files that are gone', async ({ page 
   await expect(page.locator('.players-spray option:checked')).toHaveText('gone.png (not in logos)');
   await expect(page.locator('#players-list .players-crosshair select option:checked')).toHaveText('gone.spr (not in sprites)');
   expect(await page.evaluate(() => window.__persisted)).toBe(0);
+});
+
+test('the spray size defaults to 64 and a row can keep the spray from the demo', async ({ page }) => {
+  await loadHarness(page, { pngs: ['a.png'] });
+  const size = page.locator('#players-spray-size');
+  await expect(size).toHaveValue('64');
+  await expect(size.locator('option')).toHaveCount(3);
+  await size.selectOption('96');
+  expect(await page.evaluate(() => window.__players().spray_size)).toBe(96);
+
+  await page.locator('#players-player-input').fill('Some Name');
+  await page.locator('#players-add-btn').click();
+  const spray = page.locator('#players-list .players-spray');
+  await expect(spray.locator('option[value="own"]')).toHaveText('From the demo');
+  await expect(spray.locator('option[value="own"]')).toHaveAttribute('title', /fallback for players not listed/);
+  await spray.selectOption('own');
+  expect(await page.evaluate(() => window.__players().players[0].png)).toBe('own');
+  // Not a file: no "not in logos" warning for it.
+  await expect(page.locator('#players-warning')).not.toContainText('own');
 });

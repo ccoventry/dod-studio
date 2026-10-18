@@ -1,6 +1,6 @@
 // players_ui.js
 // Configuration > Players (#428): one row per player with the spray and the
-// crosshair he gets in a demo, what everyone not listed gets, and whether the
+// crosshair they get in a demo, what everyone not listed gets, and whether the
 // game uses the table at all ("Use in the game", sent to a running game as
 // dodstudio_player_overrides). The players come from the queue's demos (the
 // player index, lane 'players'); the sprays are the PNGs in the install's
@@ -28,6 +28,8 @@ import {
   tileRect,
   missingPngs,
   missingSprites,
+  OWN_SPRAY,
+  SPRAY_SIZES,
   GRID,
   TILES,
 } from './players.js';
@@ -91,12 +93,19 @@ function spriteCanvas(file) {
 }
 
 /** A dropdown of `files` holding `value`, marked when it isn't there, with
- *  `emptyLabel` as the empty choice. */
-function fileSelect(files, value, emptyLabel, missingLabel, onPick) {
+ *  `emptyLabel` as the empty choice and `extra` (`[{ value, label, title }]`)
+ *  after it. */
+function fileSelect(files, value, emptyLabel, missingLabel, onPick, extra = []) {
   const select = document.createElement('select');
   const names = [...files];
-  if (value && !names.some((n) => n.toLowerCase() === value.toLowerCase())) names.unshift(value);
+  const special = extra.some((e) => e.value === value);
+  if (value && !special && !names.some((n) => n.toLowerCase() === value.toLowerCase())) names.unshift(value);
   select.append(new Option(emptyLabel, ''));
+  for (const e of extra) {
+    const option = new Option(e.label, e.value);
+    option.title = e.title;
+    select.append(option);
+  }
   for (const name of names) {
     const missing = !files.some((n) => n.toLowerCase() === name.toLowerCase());
     select.append(new Option(missing ? missingLabel(name) : name, name));
@@ -215,7 +224,7 @@ function renderRows() {
     who.title = row.steam_id ? S().MATCHED_BY_STEAMID : S().MATCHED_BY_NAME;
     const spray = fileSelect(pngs, row.png, S().FALLBACK_SPRAY_OPTION, S().pngMissingOption, (png) => {
       edit(updatePlayer(current, i, { png }));
-    });
+    }, [{ value: OWN_SPRAY, label: S().FROM_DEMO_OPTION, title: S().FROM_DEMO_TITLE }]);
     spray.className = 'players-spray';
     const crosshair = crosshairCell(row.crosshair_sprite, row.crosshair_tile, i, (patch) => {
       edit(updatePlayer(current, i, patch));
@@ -315,6 +324,13 @@ function renderWarning() {
 function render() {
   const use = $('#players-use-in-game');
   if (use) use.checked = current.use_in_game;
+  const size = $('#players-spray-size');
+  if (size) {
+    if (!size.options.length) {
+      size.append(...SPRAY_SIZES.map((n) => new Option(S().spraySizeOption(n), String(n))));
+    }
+    size.value = String(current.spray_size);
+  }
   renderRows();
   renderSprayFallback('pov');
   renderSprayFallback('hltv');
@@ -419,6 +435,9 @@ export function createPlayersUi({ getDemos, getHlPath, getGameFolder, persist })
       edit({ ...current, [`${kind}_fallback`]: e.target.value });
     });
   }
+  $('#players-spray-size')?.addEventListener('change', (e) => {
+    edit({ ...current, spray_size: Number(e.target.value) });
+  });
   $('#players-crosshair-fallback')?.addEventListener('change', (e) => {
     edit({ ...current, crosshair_fallback: e.target.value });
   });

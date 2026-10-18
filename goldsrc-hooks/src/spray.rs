@@ -16,9 +16,8 @@
 //!   `"%03i%02i"` of the player slot (0-based, `cl.players`' index) and lump
 //!   index; then `Draw_MiptexTexture` rewrites the first character to `{`
 //!   (palette entry 255 is pure blue, a cut-out) or `}` (index-alpha). So the
-//!   second player's spray is `{00100` in every demo, whoever he is: the slot
-//!   leads to the player through the engine's player info, and from him to
-//!   Studio's Players table (`player_table.rs`).
+//!   second player's spray is `{00100` in every demo, whoever is in that
+//!   slot.
 //! - **`gfCustomBuild` is 1 for exactly that upload** (pre-Anniversary
 //!   `hw+0x1ff5718`, 25th Anniversary `hw+0x104b77d8`, read out of the one
 //!   `mov [flag], 1` in `Draw_CacheLoadFromCustom` by signature), which is
@@ -31,26 +30,21 @@
 //!
 //! ## Who gets which spray
 //!
-//! Studio's Configuration > Players: a table of players and the PNG (in
-//! `<game>\logos\`) each gets, and a fallback for everyone else per demo type
-//! (POV: the game's own, one PNG or none; HLTV: one PNG or none), mirrored to
-//! `%APPDATA%\dod-studio\goldsrc_hooks_players.txt` (`player_table.rs`). It
-//! applies only while a demo plays. Two routes, one rule:
+//! Studio's Configuration > Players: a table of players and the spray each
+//! gets (a PNG in `<game>\logos\`, or "From the demo"), and a fallback for
+//! everyone else per demo type (POV: their own, one PNG or none; HLTV: one
+//! PNG or none), mirrored to `%APPDATA%\dod-studio\goldsrc_hooks_players.txt`
+//! (`player_table.rs`). It applies only while a demo plays and
+//! `dodstudio_player_overrides` is 1. Every spray from a PNG, and every "no
+//! spray", is a spray `spray_hltv.rs` builds and shoots in place of the
+//! engine's, whether or not the demo saved one: so it is the same size (the
+//! tab's spray size) in every demo, and needs no HD textures. With HD
+//! textures on, its upload comes back through `texture_hires`' spray arm,
+//! which swaps the PNG itself in at the largest power of two `gl_max_size`
+//! allows, drawn at the built spray's size. A spray the demo saved is never
+//! changed: "From the demo" and "Their own spray" draw it as it is.
 //!
-//! - **A spray the demo carries the image for** (a POV demo that caught the
-//!   player's `svc_customization`) is swapped at upload, here and in
-//!   `texture_hires`' spray arm: the PNG resampled to the largest power of
-//!   two `gl_max_size` allows per side (alpha kept, drawn at the spray's own
-//!   size because the decal is sized from `texture_t`), or a fully
-//!   transparent texture for "no spray". This route is `texture_hires`' hook,
-//!   so it needs HD textures on (`dodstudio_hd_enabled 1`).
-//! - **A spray it doesn't** (every HLTV demo, and POV players who joined
-//!   before the recording) goes through `spray_hltv.rs`, which shoots a
-//!   texture of its own built from the PNG instead of the bullet hole.
-//!
-//! The content key below names a spray in the HD-miss list and keeps
-//! `texture_hires` from reusing a slot's texture that now stands for
-//! someone else.
+//! The content key below names a spray in the HD-miss list.
 //!
 //! ## `dodstudio_spray <name>`
 //!
@@ -77,7 +71,7 @@ use crate::names::console_name;
 use crate::texture_hires::{Rgba, game_dir};
 
 /// `dodstudio_spray`: list the PNGs in `logos\`, switch to one, or list
-/// each player and the spray the Players table gives him. Registered in
+/// each player and the spray the Players table gives them. Registered in
 /// `commands.rs`.
 pub const NAME: &str = console_name!("spray");
 const LOGOS: &str = "logos";
@@ -325,33 +319,6 @@ fn clean_png_name(raw: &str) -> Option<String> {
 
 pub fn logos_dir() -> PathBuf {
     game_dir().join(LOGOS)
-}
-
-/// A token for what a slot-named spray upload stands for: its content key
-/// and what the Players table gives the slot's player now. `texture_hires`
-/// keeps one per GL texture and lets the engine reuse a same-named texture
-/// only while the token matches, because the engine's cache matches decals
-/// by name and size alone, and a slot is a different player in the next
-/// demo. `None` for anything but a slot-named spray.
-///
-/// # Safety
-///
-/// As [`upload_key`].
-pub unsafe fn slot_upload_token(
-    identifier: &str,
-    data: *const u8,
-    palette: *const u8,
-    width: u32,
-    height: u32,
-) -> Option<u64> {
-    let slot = crate::player_table::slot_of_custom_name(identifier)?;
-    if crate::spray_hltv::building() {
-        return None;
-    }
-    let key = unsafe { upload_key(data, palette, width, height) }?;
-    let choice = crate::spray_hltv::choice_for_slot(slot).unwrap_or_default();
-    let digest = md5(&[&key, choice.to_string().as_bytes()]);
-    Some(u64::from_le_bytes(digest[..8].try_into().ok()?))
 }
 
 // ── PNG in, fitted RGBA out ─────────────────────────────────────────────────
@@ -857,7 +824,7 @@ fn usage() -> String {
         "{NAME}: list the PNGs in dod\\{LOGOS}\\ and say how big your spray is\n\
          {NAME} <name>: make dod\\{LOGOS}\\<name>.png your spray for live play (writes dod\\{TEMPDECAL}, \
          the game's spray file; shows from the next connect)\n\
-         {NAME} players: each player in the demo and the spray Studio's Players table gives him\n"
+         {NAME} players: each player in the demo and the spray Studio's Players table gives them\n"
     )
 }
 
@@ -961,7 +928,7 @@ fn switch(name: &str) -> Result<String, String> {
 }
 
 /// `players`: every slot the engine has a player in, with the spray the
-/// Players table gives him in this demo. The SteamID comes from the slot's
+/// Players table gives them in this demo. The SteamID comes from the slot's
 /// userinfo, as `dodstudio_deathmsg players` reads it.
 fn players() -> String {
     let Some(engfuncs) = engine::engfuncs() else {
@@ -996,7 +963,13 @@ fn players() -> String {
         } else {
             "not listed"
         };
-        let choice = table.choose(hltv, &name, steam_id);
+        let saved = crate::spray_hltv::has_customdata(slot);
+        let choice = table.resolve(table.choose(hltv, &name, steam_id), saved, hltv);
+        let saved = if saved {
+            "spray saved in the demo"
+        } else {
+            "no spray saved"
+        };
         let state = match &choice {
             crate::player_table::Choice::Png(png) => {
                 format!(" ({})", crate::spray_hltv::png_state(png))
@@ -1004,7 +977,7 @@ fn players() -> String {
             _ => String::new(),
         };
         out.push_str(&format!(
-            "  {:>2}  {name}  {id}  {listed} -> {choice}{state}\n",
+            "  {:>2}  {name}  {id}  {listed}, {saved} -> {choice}{state}\n",
             slot + 1
         ));
     }
@@ -1012,8 +985,7 @@ fn players() -> String {
         out.push_str("  nobody: no demo or game loaded\n");
     }
     out.push_str(&format!(
-        "  sprays with no image in the demo (every HLTV demo): {}\n  sprays with one: swapped as they load, \
-         which needs HD textures on (dodstudio_hd_enabled 1)\n",
+        "  sprays from the table: {}\n",
         crate::spray_hltv::status()
     ));
     out

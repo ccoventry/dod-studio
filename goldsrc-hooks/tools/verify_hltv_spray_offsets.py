@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Checks `spray_hltv.rs`'s two detours and its texture call against a real `hw.dll`.
 
-`spray_hltv.rs` (#428) makes a demo with no customization for a player draw
-the spray his `player` line names instead of the bullet hole. It patches two
+`spray_hltv.rs` (#428) makes a demo draw the spray Studio's Players table
+gives a player -- with or without the player's customization -- instead of
+the engine's (the bullet hole when there is no customization). It patches two
 places and calls a third; the unit tests prove the stubs assemble as
 documented, and only the binary can prove what they rely on:
 

@@ -36,7 +36,7 @@
 //!
 //! ## Cost on the draw path
 //!
-//! [`poll`] decides once a frame, from `commands::poll`: the player, his
+//! [`poll`] decides once a frame, from `commands::poll`: the player, their
 //! row, and the sprite's handle (loaded with the engine's own `SPR_Load` the
 //! first time it is needed after each level load). The draw hooks then read
 //! three atomics ([`swap`]); no lock is taken there.
@@ -255,7 +255,7 @@ fn viewed_player() -> Option<i32> {
 }
 
 /// This frame's crosshair: the player on screen and what the table gives
-/// him, or `None` for the game's own.
+/// them, or `None` for the game's own.
 fn decide() -> Option<(String, Crosshair)> {
     if !crate::player_overrides::on() || !crate::spray_hltv::playing_demo() {
         return None;

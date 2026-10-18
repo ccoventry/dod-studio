@@ -25,6 +25,11 @@ export const DEFAULT_CROSSHAIR_SPRITE = 'customXHair.spr';
 export const TILE_SIZE = 64;
 export const GRID = 4;
 export const TILES = GRID * GRID;
+/** A row's spray value for "From the demo" (native::player_overrides::OWN_SPRAY). */
+export const OWN_SPRAY = 'own';
+/** The spray sizes offered: the longer side of a spray built from a PNG. */
+export const SPRAY_SIZES = [64, 96, 128];
+export const DEFAULT_SPRAY_SIZE = 64;
 
 /** The table as a settings file without one gets it (matches
  *  `PlayerTable::default()`). */
@@ -39,6 +44,7 @@ export function defaultPlayers() {
     crosshair_fallback: 'game',
     crosshair_fallback_sprite: DEFAULT_CROSSHAIR_SPRITE,
     crosshair_fallback_tile: 1,
+    spray_size: DEFAULT_SPRAY_SIZE,
   };
 }
 
@@ -91,6 +97,7 @@ export function normalizePlayers(raw) {
       ? raw.crosshair_fallback : d.crosshair_fallback,
     crosshair_fallback_sprite: text(raw.crosshair_fallback_sprite) || d.crosshair_fallback_sprite,
     crosshair_fallback_tile: cleanTile(raw.crosshair_fallback_tile) || d.crosshair_fallback_tile,
+    spray_size: SPRAY_SIZES.includes(Number(raw.spray_size)) ? Number(raw.spray_size) : d.spray_size,
   };
 }
 
@@ -112,7 +119,7 @@ export function parseSteamId(input) {
 /**
  * The player picker's options from the players of the queue's demos
  * (`{ id, name }` from the player index, any number of demos): one per
- * player, every name he was seen with in the label, like the queue's
+ * player, every name they were seen with in the label, like the queue's
  * player filter (player_filter.js).
  */
 export function playerOptions(players) {
@@ -142,7 +149,7 @@ export function samePlayer(a, b) {
   return a.name.toLowerCase() === b.name.toLowerCase();
 }
 
-/** The table with `player` in it, and his row's index: his existing row
+/** The table with `player` in it, and their row's index: their existing row
  *  (which keeps the name it was added with, or picks one up), or a new
  *  empty one at the end. */
 export function addPlayer(table, player) {
@@ -195,7 +202,7 @@ export function tileRect(tile) {
 export function missingPngs(table, listed) {
   const have = new Set((listed || []).map((n) => n.toLowerCase()));
   const named = [
-    ...table.players.map((p) => p.png),
+    ...table.players.map((p) => p.png).filter((p) => p !== OWN_SPRAY),
     table.pov_fallback === 'png' ? table.pov_fallback_png : '',
     table.hltv_fallback === 'png' ? table.hltv_fallback_png : '',
   ].filter(Boolean);

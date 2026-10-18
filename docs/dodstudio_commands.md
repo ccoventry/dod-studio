@@ -277,8 +277,8 @@ shows one map; `dodstudio_debug_hd_misses clear` forgets the list.
 Player sprays and crosshairs per player in demos, and switching your own
 spray (#428). Who gets what is Studio's **Configuration > Players**: a table
 of players (by SteamID, or by name when there is none), each with a spray (a
-PNG from the game's own `<game>\logos\` folder, any size, RGBA) and a
-crosshair (a 64x64 tile of a sprite in `<game>\sprites\`, picked from a 4x4
+PNG from the game's own `<game>\logos\` folder, any size, RGBA, or **From
+the demo**) and a crosshair (a 64x64 tile of a sprite in `<game>\sprites\`, picked from a 4x4
 preview), and what everyone not listed gets:
 
 - **Sprays, POV demos:** their own spray (the default: the one the demo
@@ -297,29 +297,35 @@ looked up through the engine's player info: SteamID first, then the name,
 ignoring case.
 
 **Sprays.** One rule for both demo types, and who the camera follows plays
-no part: when a player sprays, the wall shows his PNG, or the fallback.
+no part: when a player sprays, the wall shows the PNG the table gives that
+player, or the fallback.
 
-- **A spray the demo saved the image for** (a POV demo that caught the
-  player's customization) is swapped as it uploads: the PNG at the largest
-  power of two `gl_max_size` allows per side, alpha kept, drawn at the
-  spray's own size (the engine sizes a decal from its texture record), or a
-  fully transparent texture for "no spray". This is the HD texture hook, so
-  it needs `dodstudio_hd_enabled 1`. The engine keeps a spray's texture by
-  its slot name for the session, so while the table applies, a texture is
-  reused only when it stands for the same picture and the same answer;
-  otherwise the engine loads a fresh one.
-- **A spray it has no image for** (every HLTV demo, #368, and POV players who
-  joined before the recording started) would be the bullet hole: the hook
-  builds a spray 128 a side from the PNG (the PNG itself as its HD version),
-  or a fully transparent one for "no spray", and draws it through the
-  engine's own custom-spray path, so it sits on the wall like a real spray.
-  "No spray" is drawn as a transparent spray rather than skipped, because
-  skipping would need another patch inside `CL_ParseTEnt` on both builds;
-  this path is the one already checked on both. The game's own (a POV
-  player not listed, with no saved image) stays the bullet hole. These
-  detours install once the table asks for anything and the cvar is 1. The
-  log says `spray: TE_PLAYERDECAL with no image for <player> (slot <n>) ->
-  <spray>` for each one drawn.
+- **Every spray from a PNG** -- a listed player's, and every fallback PNG --
+  is a spray the hook builds from the PNG and shoots in place of the
+  engine's, whether or not the demo saved one for that player: the same in
+  every demo, at the Players tab's **Spray size** (the longer side, 64 by
+  default, 96 or 128; the picture's shape kept). It needs no HD textures;
+  with them on, its upload is swapped for the PNG itself at the largest
+  power of two `gl_max_size` allows, drawn at the built size. A size change,
+  like any other spray change, reaches sprays built after the table is
+  read again.
+- **"No spray"** is a fully transparent spray, shot the same way. It is
+  drawn rather than skipped because skipping would need another patch
+  inside `CL_ParseTEnt` on both builds; this path is the one already checked
+  on both.
+- **"From the demo"** (a listed player) and **"Their own spray"** (the POV
+  fallback) draw the spray the demo saved, untouched, at its real size.
+  With none saved (the player joined before the recording, or any HLTV
+  demo), "From the demo" is the fallback for that demo type, and "Their own
+  spray" is no spray: never the engine's bullet-hole stand-in.
+
+How: `CL_ParseTEnt`'s `customdata` test asks the hook for every spray, and
+`Draw_DecalTexture` answers each frame with the hook's texture for that
+player, from one table for players with no saved spray and one for players
+whose saved spray the table replaces (`goldsrc-hooks/src/spray_hltv.rs`;
+`tools/verify_hltv_spray_offsets.py`). These detours install once the table
+asks for anything and the cvar is 1. The log says `spray: TE_PLAYERDECAL for
+<player> (slot <n>, ...) -> <spray>` for each one drawn.
 
 A flip of `dodstudio_player_overrides` reaches sprays loaded after it; a
 spray already on a wall keeps its texture, so reload the demo to compare.
@@ -343,7 +349,7 @@ draws no tile to swap. Details: `docs/goldsrc_crosshair.md` §3.
 | --- | --- |
 | `dodstudio_spray` | lists the PNGs in `logos\` and your spray's size |
 | `dodstudio_spray <name>` | makes `logos\<name>.png` your spray for live play: writes `dod\tempdecal.wad` (the game's spray file -- the one file in the game's folder the hook writes, because that is what the command is for; sides in steps of 16 and the file at most 20480 bytes, the most a server takes, so a square picture is 112x112; 8-bit, 255 colours, transparent where the PNG is) and keeps `tempdecal.wad.dodstudio-backup` of the original the first time. The engine reads the file when it connects, so it shows from the next connect; a demo already playing draws the sprays it recorded |
-| `dodstudio_spray players` | each player in the demo with his name, SteamID, whether the Players table lists him and the spray he gets, then whether the detours are on |
+| `dodstudio_spray players` | each player in the demo with their name, SteamID, whether the Players table lists them and the spray they get, then whether the detours are on |
 
 `cl_logofile` and the game's `.cfg` files are left alone. Refused in a
 capture batch's Initial and Scheduled Commands (`docs/command_tiers.md`): a

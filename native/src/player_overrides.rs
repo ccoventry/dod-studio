@@ -27,13 +27,20 @@ pub const OVERRIDES_CVAR: &str = "dodstudio_player_overrides";
 pub const DEFAULT_CROSSHAIR_SPRITE: &str = "customXHair.spr";
 /// `customXHair.spr`'s grid: 4x4 tiles of 64x64 (`docs/goldsrc_crosshair.md`).
 pub const TILES: u8 = 16;
+/// A row's spray value for "From the demo": the spray the demo saved,
+/// drawn as it is, or the fallback when the demo saved none.
+pub const OWN_SPRAY: &str = "own";
+
+/// The spray size the tab offers by default: a typical saved spray's side,
+/// so a spray built from a PNG sits beside a real one at the same scale.
+pub const DEFAULT_SPRAY_SIZE: u32 = 64;
 
 /// The console line that turns the table on or off in the game.
 pub fn cvar_line(on: bool) -> String {
     format!("{OVERRIDES_CVAR} {}", u8::from(on))
 }
 
-/// One row: a player, and what he gets. An empty `png` or a `crosshair_tile`
+/// One row: a player, and what they get. An empty `png` or a `crosshair_tile`
 /// of 0 leaves that one to the fallback.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PlayerRow {
@@ -44,7 +51,7 @@ pub struct PlayerRow {
     /// The name to match when there is no SteamID, and the label otherwise.
     #[serde(default)]
     pub name: String,
-    /// A PNG in `<game>\logos\`.
+    /// A PNG in `<game>\logos\`, or [`OWN_SPRAY`] for "From the demo".
     #[serde(default)]
     pub png: String,
     /// A sprite in `<game>\sprites\`.
@@ -55,7 +62,7 @@ pub struct PlayerRow {
     pub crosshair_tile: u8,
 }
 
-/// What a player not in the table gets for his spray.
+/// What a player not in the table gets for their spray.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SprayFallback {
@@ -69,7 +76,7 @@ pub enum SprayFallback {
     None,
 }
 
-/// What a player not in the table gets for his crosshair.
+/// What a player not in the table gets for their crosshair.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CrosshairFallback {
@@ -105,6 +112,25 @@ pub struct PlayerTable {
     pub crosshair_fallback_sprite: String,
     #[serde(default = "default_tile")]
     pub crosshair_fallback_tile: u8,
+    /// The longer side, on the wall, of a spray built from a PNG: players
+    /// whose spray the demo didn't save, and every HLTV spray. A saved
+    /// spray keeps its real size.
+    #[serde(default = "default_spray_size")]
+    pub spray_size: u32,
+}
+
+fn default_spray_size() -> u32 {
+    DEFAULT_SPRAY_SIZE
+}
+
+/// A size the hook takes: sides in steps of 16, at most 256 (what the
+/// engine validates a spray against); anything else is the default.
+fn spray_size(size: u32) -> u32 {
+    if (16..=256).contains(&size) && size.is_multiple_of(16) {
+        size
+    } else {
+        DEFAULT_SPRAY_SIZE
+    }
 }
 
 fn default_true() -> bool {
@@ -135,6 +161,7 @@ impl Default for PlayerTable {
             crosshair_fallback: CrosshairFallback::Game,
             crosshair_fallback_sprite: default_crosshair_sprite(),
             crosshair_fallback_tile: default_tile(),
+            spray_size: DEFAULT_SPRAY_SIZE,
         }
     }
 }
@@ -213,7 +240,9 @@ fn steam_id64(id: &str) -> Option<String> {
 /// - `spray_pov_fallback` / `spray_hltv_fallback`, then `game`, `none` or
 ///   `png <file>`;
 /// - `crosshair_fallback`, then `game` or `sprite <file> <tile>`;
-/// - `spray steamid <SteamID64> <file> <name>` / `spray name <name> <file>`;
+/// - `spray_size`, then the longer side of a spray built from a PNG;
+/// - `spray steamid <SteamID64> <file> <name>` / `spray name <name> <file>`,
+///   where `<file>` is a PNG or `own` ("From the demo");
 /// - `crosshair steamid <SteamID64> <file> <tile> <name>` /
 ///   `crosshair name <name> <file> <tile>`.
 ///
@@ -237,14 +266,20 @@ pub fn table_text(table: &PlayerTable) -> String {
         "crosshair_fallback\t{}\n",
         crosshair_fallback_cells(table)
     ));
+    out.push_str(&format!("spray_size\t{}\n", spray_size(table.spray_size)));
     for p in &table.players {
         let name = cell(&p.name);
         let id = steam_id64(&p.steam_id);
         if id.is_none() && name.is_empty() {
             continue;
         }
-        if is_png_name(&p.png) {
-            let png = cell(&p.png);
+        let own = p.png.trim() == OWN_SPRAY;
+        if own || is_png_name(&p.png) {
+            let png = if own {
+                OWN_SPRAY.to_string()
+            } else {
+                cell(&p.png)
+            };
             match &id {
                 Some(id) => out.push_str(&format!("spray\tsteamid\t{id}\t{png}\t{name}\n")),
                 None => out.push_str(&format!("spray\tname\t{name}\t{png}\n")),
@@ -451,6 +486,7 @@ mod tests {
                     3,
                 ),
                 row("", "Cpl. Preddy", "bot spray.png", "", 0),
+                row("", "Own Spray", "own", "", 0),
                 row("", "Xhair Only", "", "my_xhair.spr", 16),
                 // Nothing usable: left out.
                 row("76561197960265729", "nobody", "", "customXHair.spr", 0),
@@ -464,6 +500,7 @@ mod tests {
             crosshair_fallback: CrosshairFallback::Sprite,
             crosshair_fallback_sprite: "customXHair.spr".into(),
             crosshair_fallback_tile: 7,
+            spray_size: 96,
         }
     }
 
@@ -488,6 +525,12 @@ mod tests {
             ..PlayerTable::default()
         };
         assert!(table_text(&bad_tile).contains("crosshair_fallback\tgame\n"));
+        assert!(text.contains("spray_size\t64\n"), "{text}");
+        let odd = PlayerTable {
+            spray_size: 100,
+            ..PlayerTable::default()
+        };
+        assert!(table_text(&odd).contains("spray_size\t64\n"));
     }
 
     #[test]
@@ -509,6 +552,7 @@ mod tests {
         assert_eq!(table, PlayerTable::default());
         assert!(table.use_in_game);
         assert_eq!(table.crosshair_fallback_sprite, "customXHair.spr");
+        assert_eq!(table.spray_size, 64);
         let partial: PlayerTable = serde_json::from_str(
             r#"{"use_in_game":false,"pov_fallback":"png","crosshair_fallback":"sprite"}"#,
         )

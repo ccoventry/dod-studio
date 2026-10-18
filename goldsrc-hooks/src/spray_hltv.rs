@@ -1,5 +1,6 @@
-//! Sprays a demo has no image for: each player's spray from Studio's Players
-//! table instead of the bullet hole (#428, #368).
+//! Sprays in demos from Studio's Players table (#428, #368): every listed
+//! player's spray built from their PNG, whether or not the demo saved their own,
+//! and the fallbacks for everyone else -- one route for POV and HLTV.
 //!
 //! ## Why a demo draws the bullet hole
 //!
@@ -24,33 +25,37 @@
 //! ## The route: two detours and a texture of ours
 //!
 //! 1. **At `CL_ParseTEnt`'s `customdata` test**, after its `r_decals` check
-//!    (pre-Anniversary `hw+0x24689`, 25th Anniversary `hw+0x1ae907`): when
-//!    the player has no `customdata`, the stub asks [`hltv_texture`] for a
-//!    texture. With one, it continues into the engine's own custom branch,
-//!    which calls `R_CustomDecalShoot` with it; without, into the wad-decal
-//!    branch as before. The two builds keep the player number, the texture
-//!    and the `customdata` pointer in different places ([`BUILDS`]).
-//! 2. **At `Draw_DecalTexture`'s entry**: a negative index whose player has
-//!    no `customdata` and a texture from step 1 gets that texture back,
-//!    before the engine's own lookup can fail. A player whose `customdata`
-//!    is there (a POV demo that caught his `svc_customization`) still gets
-//!    the engine's.
+//!    (pre-Anniversary `hw+0x24689`, 25th Anniversary `hw+0x1ae907`): for
+//!    every spray, the stub asks [`slot_texture`] for a texture. With one, it
+//!    continues into the engine's own custom branch, which calls
+//!    `R_CustomDecalShoot` with it; with none, the engine's own test runs as
+//!    before (their saved spray, or the wad decal). The two builds keep the
+//!    player number, the texture and the `customdata` pointer in different
+//!    places ([`BUILDS`]). The 25th Anniversary build keeps the texture of a
+//!    saved spray in `ecx`, which the stub saves around the call; every other
+//!    scratch register is written before it is read on both paths
+//!    (`tools/verify_hltv_spray_offsets.py`).
+//! 2. **At `Draw_DecalTexture`'s entry**: a negative index gets our texture
+//!    back, before the engine's own lookup can fail -- from [`SLOT_TEX`] for
+//!    a player with no `customdata`, from [`SLOT_OVER`] for one whose saved
+//!    spray the table replaces. A player with `customdata` and no
+//!    replacement gets the engine's.
 //! 3. **The texture** is built by the engine's own `Draw_MiptexTexture`, the
 //!    function a customization goes through, from a buffer laid out the way
 //!    `Draw_CacheLoadFromCustom` lays one out (32 bytes for the `texture_t`
 //!    in front of the lump). It names, sizes and uploads it (`GLT_DECAL`)
-//!    exactly as it would the player's real spray, and the upload passes
-//!    `texture_hires`'s spray arm, which keys it by content and swaps the
-//!    HD PNG in (`spray.rs`).
+//!    exactly as it would a real spray, and with HD textures on the upload
+//!    passes `texture_hires`' spray arm, which swaps the HD PNG in.
 //!
-//! What a slot gets is Studio's Players table (`player_table.rs`): the
-//! player's PNG when he is listed, by SteamID or name, else the fallback for
-//! the demo's type. A PNG becomes a spray built with `spray.rs`'s writer,
-//! [`PNG_SIDE`] a side (the drawn size; the real one is unknown), with the
-//! PNG itself as its HD version; "no spray" is a fully transparent one; the
-//! game's own is the engine's bullet hole, untouched. Each PNG is read on a
-//! background thread whenever the table changes, so a 3840 px PNG never
-//! stalls a demo; a spray that isn't ready yet draws the bullet hole.
+//! What a spray becomes is Studio's Players table (`player_table.rs`), by
+//! SteamID or name: a listed player's PNG, built with `spray.rs`'s writer at
+//! the tab's spray size (the longer side; 64 by default, a typical saved
+//! spray's) whoever's demo it is and whether or not it saved their own; the spray
+//! the demo saved for "From the demo" (the fallback when it saved none); else the fallback for the demo's type.
+//! "No spray" is a fully transparent spray; the game's own is untouched.
+//! Each PNG is read on a background thread whenever the table changes, so a
+//! 3840 px PNG never stalls a demo; a spray that isn't ready yet is left to
+//! the engine.
 //!
 //! "No spray" draws a transparent texture rather than skipping the shoot:
 //! skipping would need another patch inside `CL_ParseTEnt` on both builds,
@@ -60,14 +65,14 @@
 //!
 //! ## Installing
 //!
-//! Only once the table asks for something (`Table::active`): [`poll`] reads
-//! the file's time once a second and installs both detours the first time.
-//! The `Draw_DecalTexture` one goes in first, because a decal shot through
-//! step 1 without step 2 would crash the next frame. Each site's bytes are
-//! checked before patching, and [`poll`] checks the jumps are still there.
-//! Detours are never removed (see [`detour::Detour`]); with the table back
-//! to the defaults, [`hltv_texture`] answers "none" and the engine runs as
-//! before.
+//! Only once the table asks for something (`Table::active`) and
+//! `dodstudio_player_overrides` is 1: [`poll`] reads the file's time once a
+//! second and installs both detours the first time. The `Draw_DecalTexture`
+//! one goes in first, because a decal shot through step 1 without step 2
+//! would crash the next frame. Each site's bytes are checked before
+//! patching, and [`poll`] checks the jumps are still there. Detours are
+//! never removed (see [`detour::Detour`]); with the table back to the
+//! defaults, [`slot_texture`] answers "none" and the engine runs as before.
 //!
 //! `tools/verify_hltv_spray_offsets.py` checks every offset and register
 //! above against both builds' `hw.dll`. The reading behind it is in
@@ -169,16 +174,18 @@ const TEX_PREFIX: usize = 0x20;
 /// `GL_Upload8` reads a whole palette whatever the count says, so every
 /// buffer has this much zero after the lump.
 const PALETTE_PAD: usize = 768;
-/// The longer side of a spray built from a PNG: how big it is drawn. The
-/// player's own spray size isn't known on this route; the cached sprays
-/// #368 counted are 64 to 128 a side (team sprays 112), and the `custom.hpk`
-/// route keeps the real size.
-pub const PNG_SIDE: u32 = 128;
 
-/// The texture each slot's last spray was shot with, read by the
-/// `Draw_DecalTexture` stub every frame. Never set back to 0 once set: a
-/// decal already on a wall would then find nothing.
+/// The texture each slot's last spray of ours was shot with, for a player
+/// with no `customdata`, read by the `Draw_DecalTexture` stub every frame.
+/// Never set back to 0 once set: a decal already on a wall would then find
+/// nothing, and the engine's lookup returns NULL for them.
 static SLOT_TEX: [AtomicUsize; MAX_PLAYERS] = [const { AtomicUsize::new(0) }; MAX_PLAYERS];
+/// The same for a player whose `customdata` is there: our texture over their
+/// saved spray, or 0 for the engine's, which can always answer for them.
+static SLOT_OVER: [AtomicUsize; MAX_PLAYERS] = [const { AtomicUsize::new(0) }; MAX_PLAYERS];
+/// `cl.players[0].customdata`'s list head, read out of `Draw_DecalTexture`;
+/// a slot's is [`PLAYER_STRIDE`] further on per slot.
+static CUSTOMDATA: AtomicUsize = AtomicUsize::new(0);
 /// Where the `CL_ParseTEnt` stub jumps: the custom branch, the wad-decal
 /// branch, and back after the span.
 static TE_CUSTOM: AtomicUsize = AtomicUsize::new(0);
@@ -277,45 +284,50 @@ fn jmp_indirect(code: &mut Vec<u8>, slot: usize) {
 /// the frame holds what both branches read.
 ///
 /// ```asm
-///         <cust_test>                ; is there a customdata?
-///         jne   .cust
+///         push  ecx                  ; a saved spray's texture (25th Anniversary)
 ///         push  dword [ebp+<playernum>]
-///         mov   eax, hltv_texture
+///         mov   eax, slot_texture
 ///         call  eax                  ; cdecl: keeps ebx, esi, edi, ebp
 ///         add   esp, 4
+///         pop   ecx
 ///         test  eax, eax
-///         jz    .else
+///         jz    .game
 ///         <tex_store>                ; where the custom branch reads it
 ///         jmp   dword [TE_CUSTOM]
-/// .else:  jmp   dword [TE_ELSE]
+/// .game:  <cust_test>                ; is there a customdata?
+///         jne   .cust
+///         jmp   dword [TE_ELSE]
 /// .cust:  <tex_test>                 ; the engine's own, for its `je`
 ///         jmp   dword [TE_RESUME]
 /// ```
 ///
-/// Neither branch reads `eax`, `ecx` or `edx` before writing them, so the
-/// call may clobber them; the x87 stack is empty after `r_decals`' `fcomp`
-/// (pre-Anniversary) or was never used (25th Anniversary, SSE).
+/// Neither branch reads `eax`, `ecx` or `edx` before writing them except
+/// the texture register, which `ecx` saves; the x87 stack is empty after
+/// `r_decals`' `fcomp` (pre-Anniversary) or was never used (25th
+/// Anniversary, SSE).
 fn te_stub(build: &Build, callback: usize, custom: usize, els: usize, resume: usize) -> Vec<u8> {
-    let mut code = build.cust_test.to_vec();
-    let jne_at = code.len();
-    code.extend_from_slice(&[0x75, 0]); // jne .cust, patched below
+    let mut code = vec![0x51]; // push ecx
     code.extend_from_slice(&[0xff, 0x75, build.playernum_disp]); // push [ebp+disp8]
     code.push(0xb8); // mov eax, imm32
     code.extend_from_slice(&(callback as u32).to_le_bytes());
     code.extend_from_slice(&[0xff, 0xd0]); // call eax
     code.extend_from_slice(&[0x83, 0xc4, 0x04]); // add esp, 4
+    code.push(0x59); // pop ecx
     code.extend_from_slice(&[0x85, 0xc0]); // test eax, eax
     let jz_at = code.len();
-    code.extend_from_slice(&[0x74, 0]); // jz .else, patched below
+    code.extend_from_slice(&[0x74, 0]); // jz .game, patched below
     code.extend_from_slice(build.tex_store);
     jmp_indirect(&mut code, custom);
-    let else_label = code.len();
+    let game_label = code.len();
+    code.extend_from_slice(build.cust_test);
+    let jne_at = code.len();
+    code.extend_from_slice(&[0x75, 0]); // jne .cust, patched below
     jmp_indirect(&mut code, els);
     let cust_label = code.len();
     code.extend_from_slice(build.tex_test);
     jmp_indirect(&mut code, resume);
+    code[jz_at + 1] = (game_label - (jz_at + 2)) as u8;
     code[jne_at + 1] = (cust_label - (jne_at + 2)) as u8;
-    code[jz_at + 1] = (else_label - (jz_at + 2)) as u8;
     code
 }
 
@@ -326,12 +338,15 @@ fn te_stub(build: &Build, callback: usize, custom: usize, els: usize, resume: us
 ///         not   eax                      ; the player, if index < 0
 ///         cmp   eax, 32
 ///         jae   .game                    ; index >= 0 (or out of range)
-///         mov   ecx, [SLOT_TEX + eax*4]
-///         test  ecx, ecx
-///         jz    .game                    ; no texture of ours for him
-///         imul  eax, eax, PLAYER_STRIDE
-///         cmp   dword [eax + customdata], 0
-///         jne   .game                    ; he has a real one: the engine's
+///         mov   ecx, eax
+///         imul  ecx, ecx, PLAYER_STRIDE
+///         cmp   dword [ecx + customdata], 0
+///         jne   .saved
+///         mov   ecx, [SLOT_TEX + eax*4]  ; no customdata: ours, if any
+///         jmp   .test
+/// .saved: mov   ecx, [SLOT_OVER + eax*4] ; their saved one, or ours over it
+/// .test:  test  ecx, ecx
+///         jz    .game
 ///         mov   eax, ecx
 ///         ret
 /// .game:  push ebp; mov ebp, esp; mov ecx, [ebp+8]
@@ -339,31 +354,40 @@ fn te_stub(build: &Build, callback: usize, custom: usize, els: usize, resume: us
 /// ```
 ///
 /// Touches `eax`, `ecx` and the flags, which a cdecl callee may clobber.
-fn dt_stub(slot_tex: usize, customdata: usize, resume: usize) -> Vec<u8> {
+fn dt_stub(slot_tex: usize, slot_over: usize, customdata: usize, resume: usize) -> Vec<u8> {
     let mut code = vec![0x8b, 0x44, 0x24, 0x04]; // mov eax, [esp+4]
     code.extend_from_slice(&[0xf7, 0xd0]); // not eax
     code.extend_from_slice(&[0x83, 0xf8, MAX_PLAYERS as u8]); // cmp eax, 32
     let jae_at = code.len();
     code.extend_from_slice(&[0x73, 0]); // jae .game
-    code.extend_from_slice(&[0x8b, 0x0c, 0x85]); // mov ecx, [abs32 + eax*4]
-    code.extend_from_slice(&(slot_tex as u32).to_le_bytes());
-    code.extend_from_slice(&[0x85, 0xc9]); // test ecx, ecx
-    let jz_at = code.len();
-    code.extend_from_slice(&[0x74, 0]); // jz .game
-    code.extend_from_slice(&[0x69, 0xc0]); // imul eax, eax, imm32
+    code.extend_from_slice(&[0x8b, 0xc8]); // mov ecx, eax
+    code.extend_from_slice(&[0x69, 0xc9]); // imul ecx, ecx, imm32
     code.extend_from_slice(&PLAYER_STRIDE.to_le_bytes());
-    code.extend_from_slice(&[0x83, 0xb8]); // cmp dword [eax + abs32], imm8
+    code.extend_from_slice(&[0x83, 0xb9]); // cmp dword [ecx + abs32], imm8
     code.extend_from_slice(&(customdata as u32).to_le_bytes());
     code.push(0);
     let jne_at = code.len();
-    code.extend_from_slice(&[0x75, 0]); // jne .game
+    code.extend_from_slice(&[0x75, 0]); // jne .saved
+    code.extend_from_slice(&[0x8b, 0x0c, 0x85]); // mov ecx, [abs32 + eax*4]
+    code.extend_from_slice(&(slot_tex as u32).to_le_bytes());
+    let jmp_at = code.len();
+    code.extend_from_slice(&[0xeb, 0]); // jmp .test
+    let saved = code.len();
+    code.extend_from_slice(&[0x8b, 0x0c, 0x85]); // mov ecx, [abs32 + eax*4]
+    code.extend_from_slice(&(slot_over as u32).to_le_bytes());
+    let test = code.len();
+    code.extend_from_slice(&[0x85, 0xc9]); // test ecx, ecx
+    let jz_at = code.len();
+    code.extend_from_slice(&[0x74, 0]); // jz .game
     code.extend_from_slice(&[0x8b, 0xc1, 0xc3]); // mov eax, ecx; ret
     let game = code.len();
     code.extend_from_slice(&DT_STOLEN);
     jmp_indirect(&mut code, resume);
-    for at in [jae_at, jz_at, jne_at] {
+    for at in [jae_at, jz_at] {
         code[at + 1] = (game - (at + 2)) as u8;
     }
+    code[jne_at + 1] = (saved - (jne_at + 2)) as u8;
+    code[jmp_at + 1] = (test - (jmp_at + 2)) as u8;
     code
 }
 
@@ -430,8 +454,10 @@ fn install() {
     let result = find_sites(base).and_then(|sites| {
         let mut detours = Vec::new();
         DT_RESUME.store(sites.dt + DT_STOLEN.len(), Ordering::Release);
+        CUSTOMDATA.store(sites.customdata, Ordering::Release);
         let dt = dt_stub(
             SLOT_TEX.as_ptr() as usize,
+            SLOT_OVER.as_ptr() as usize,
             sites.customdata,
             DT_RESUME.as_ptr() as usize,
         );
@@ -445,7 +471,7 @@ fn install() {
         TE_RESUME.store(sites.te + build.te_stolen.len(), Ordering::Release);
         let te = te_stub(
             build,
-            hltv_texture as *const () as usize,
+            slot_texture as *const () as usize,
             TE_CUSTOM.as_ptr() as usize,
             TE_ELSE.as_ptr() as usize,
             TE_RESUME.as_ptr() as usize,
@@ -573,13 +599,17 @@ fn check_sites() {
 /// The sides of the "no spray" texture: the smallest the writer makes.
 const BLANK_SIDE: u32 = 16;
 
-fn prepare(source: &Choice) -> Result<Lump, String> {
+/// Builds `source`'s spray; one from a PNG gets `side` as its longer side
+/// (`Table::spray_side`: the player's own size isn't known on this route,
+/// and the sprays #368 counted are 64 to 128 a side). A size change reaches
+/// sprays built after the table is read again, like any other change.
+fn prepare(source: &Choice, side: u32) -> Result<Lump, String> {
     let (lump, png) = match source {
         Choice::Png(name) => {
             let path = spray::logos_dir().join(name);
             let bytes = std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))?;
             let img = spray::decode_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))?;
-            let (wad, _) = spray::build_wad_sized(&img, PNG_SIDE)?;
+            let (wad, _) = spray::build_wad_sized(&img, side)?;
             (spray::wad_lump(&wad)?.to_vec(), Some(path))
         }
         Choice::Blank => {
@@ -591,7 +621,7 @@ fn prepare(source: &Choice) -> Result<Lump, String> {
             let (wad, _) = spray::build_wad_sized(&img, BLANK_SIDE)?;
             (spray::wad_lump(&wad)?.to_vec(), None)
         }
-        Choice::Game => return Err("the game's own spray isn't built".into()),
+        Choice::Game | Choice::Own => return Err("the spray the demo saved isn't built".into()),
     };
     let (key, width, height) = spray::lump_key(&lump)?;
     if let Some(png) = png
@@ -641,7 +671,7 @@ fn kick_prepare() {
                         if done {
                             continue;
                         }
-                        let result = prepare(source).map(Arc::new);
+                        let result = prepare(source, table.spray_side()).map(Arc::new);
                         let line = match &result {
                             Ok(lump) => format!(
                                 "spray: built {source}: {}x{}, key {}",
@@ -790,9 +820,22 @@ pub fn hltv() -> bool {
     engine::engfuncs().is_some_and(|e| unsafe { (e.is_spectate_only)() } != 0)
 }
 
-/// What the Players table gives the player in `slot` (0-based) in the demo
-/// playing. `None` outside a demo, with the table at its defaults, or with
-/// nobody in the slot: the engine's own then.
+/// Whether the player in `slot` has a `customdata`: the spray the demo
+/// saved for them, the same test the engine's own code makes.
+pub fn has_customdata(slot: usize) -> bool {
+    let base = CUSTOMDATA.load(Ordering::Acquire);
+    if base == 0 || slot >= MAX_PLAYERS {
+        return false;
+    }
+    // Safety: `cl.players[slot]`'s list head in hw.dll's data, read out of
+    // Draw_DecalTexture's own code at install.
+    unsafe { ((base + slot * PLAYER_STRIDE as usize) as *const u32).read_volatile() != 0 }
+}
+
+/// What the Players table makes of the spray `slot` (0-based) shoots now,
+/// in the demo playing. `None` outside a demo, with the table at its
+/// defaults or `dodstudio_player_overrides` 0, or with nobody in the slot:
+/// the engine's own then.
 pub fn choice_for_slot(slot: usize) -> Option<Choice> {
     if !ACTIVE.load(Ordering::Relaxed)
         || !crate::player_overrides::on()
@@ -802,25 +845,38 @@ pub fn choice_for_slot(slot: usize) -> Option<Choice> {
         return None;
     }
     let (name, steam_id) = player(slot)?;
-    Some(current_table()?.choose(hltv(), &name, steam_id))
+    let table = current_table()?;
+    let hltv = hltv();
+    Some(table.resolve(
+        table.choose(hltv, &name, steam_id),
+        has_customdata(slot),
+        hltv,
+    ))
 }
 
-/// Called by the `CL_ParseTEnt` stub for a spray whose player has no
-/// `customdata`. Returns the `texture_t` to shoot it with, or 0 for the
-/// engine's wad decal.
-unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
+/// Called by the `CL_ParseTEnt` stub for every spray. Returns the
+/// `texture_t` to shoot it with, or 0 for the engine's own: their saved spray
+/// when they have one, the wad decal when not.
+unsafe extern "C" fn slot_texture(playernum: i32) -> usize {
     if !ACTIVE.load(Ordering::Relaxed) {
         return 0;
     }
     let Ok(slot) = usize::try_from(playernum) else {
         return 0;
     };
-    let Some(choice) = choice_for_slot(slot) else {
-        return 0;
+    let saved = has_customdata(slot);
+    let choice = match choice_for_slot(slot) {
+        Some(Choice::Png(png)) => Choice::Png(png),
+        Some(Choice::Blank) => Choice::Blank,
+        // The game's own: their saved spray from here on (the decals of ours
+        // already up turn into it too, as the engine's own do).
+        _ => {
+            if saved {
+                SLOT_OVER[slot].store(0, Ordering::Release);
+            }
+            return 0;
+        }
     };
-    if choice == Choice::Game {
-        return 0;
-    }
     let name = player(slot).map(|(n, _)| n).unwrap_or_default();
     let lump = match PREPARED.read().ok().and_then(|p| p.get(&choice).cloned()) {
         Some(Ok(lump)) => lump,
@@ -828,7 +884,9 @@ unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
         None => {
             warn_once(
                 &choice,
-                format!("spray: TE_PLAYERDECAL for {name}: {choice} isn't built yet, bullet hole"),
+                format!(
+                    "spray: TE_PLAYERDECAL for {name}: {choice} isn't built yet, the game's own"
+                ),
             );
             return 0;
         }
@@ -841,11 +899,19 @@ unsafe extern "C" fn hltv_texture(playernum: i32) -> usize {
         return 0;
     };
     SLOT_TEX[slot].store(texture, Ordering::Release);
+    if saved {
+        SLOT_OVER[slot].store(texture, Ordering::Release);
+    }
     DRAWN.fetch_add(1, Ordering::Relaxed);
     unsafe {
         crate::debug::report(&format!(
-            "spray: TE_PLAYERDECAL with no image for {name} (slot {}) -> {choice}",
-            slot + 1
+            "spray: TE_PLAYERDECAL for {name} (slot {}, {}) -> {choice}",
+            slot + 1,
+            if saved {
+                "over the spray the demo saved"
+            } else {
+                "no spray saved"
+            }
         ))
     };
     texture
@@ -970,19 +1036,21 @@ mod tests {
         assert_eq!(
             code,
             vec![
-                0x3b, 0xfe,                         //  0 cmp  edi, esi
-                0x75, 0x20,                         //  2 jne  .cust (36)
-                0xff, 0x75, 0xc8,                   //  4 push [ebp-0x38]
-                0xb8, 0x11, 0x11, 0x11, 0x11,       //  7 mov  eax, hltv_texture
-                0xff, 0xd0,                         // 12 call eax
-                0x83, 0xc4, 0x04,                   // 14 add  esp, 4
-                0x85, 0xc0,                         // 17 test eax, eax
-                0x74, 0x09,                         // 19 jz   .else (30)
-                0x89, 0x45, 0xd4,                   // 21 mov  [ebp-0x2c], eax
-                0xff, 0x25, 0x22, 0x22, 0x22, 0x22, // 24 jmp  [TE_CUSTOM]
-                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // 30 .else: jmp [TE_ELSE]
-                0x39, 0x75, 0xd4,                   // 36 .cust: cmp [ebp-0x2c], esi
-                0xff, 0x25, 0x44, 0x44, 0x44, 0x44, // 39 jmp  [TE_RESUME]
+                0x51,                               //  0 push ecx
+                0xff, 0x75, 0xc8,                   //  1 push [ebp-0x38]
+                0xb8, 0x11, 0x11, 0x11, 0x11,       //  4 mov  eax, slot_texture
+                0xff, 0xd0,                         //  9 call eax
+                0x83, 0xc4, 0x04,                   // 11 add  esp, 4
+                0x59,                               // 14 pop  ecx
+                0x85, 0xc0,                         // 15 test eax, eax
+                0x74, 0x09,                         // 17 jz   .game (28)
+                0x89, 0x45, 0xd4,                   // 19 mov  [ebp-0x2c], eax
+                0xff, 0x25, 0x22, 0x22, 0x22, 0x22, // 22 jmp  [TE_CUSTOM]
+                0x3b, 0xfe,                         // 28 .game: cmp edi, esi
+                0x75, 0x06,                         // 30 jne  .cust (38)
+                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // 32 jmp  [TE_ELSE]
+                0x39, 0x75, 0xd4,                   // 38 .cust: cmp [ebp-0x2c], esi
+                0xff, 0x25, 0x44, 0x44, 0x44, 0x44, // 41 jmp  [TE_RESUME]
             ]
         );
         let post = te_stub(
@@ -996,26 +1064,28 @@ mod tests {
         assert_eq!(
             post,
             vec![
-                0x85, 0xf6,                         //  0 test esi, esi
-                0x75, 0x1f,                         //  2 jne  .cust (35)
-                0xff, 0x75, 0xa4,                   //  4 push [ebp-0x5c]
-                0xb8, 0x11, 0x11, 0x11, 0x11,       //  7 mov  eax, hltv_texture
-                0xff, 0xd0,                         // 12 call eax
-                0x83, 0xc4, 0x04,                   // 14 add  esp, 4
-                0x85, 0xc0,                         // 17 test eax, eax
-                0x74, 0x08,                         // 19 jz   .else (29)
-                0x8b, 0xc8,                         // 21 mov  ecx, eax
-                0xff, 0x25, 0x22, 0x22, 0x22, 0x22, // 23 jmp  [TE_CUSTOM]
-                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // 29 .else: jmp [TE_ELSE]
-                0x85, 0xc9,                         // 35 .cust: test ecx, ecx
-                0xff, 0x25, 0x44, 0x44, 0x44, 0x44, // 37 jmp  [TE_RESUME]
+                0x51,                               //  0 push ecx (a saved spray's texture)
+                0xff, 0x75, 0xa4,                   //  1 push [ebp-0x5c]
+                0xb8, 0x11, 0x11, 0x11, 0x11,       //  4 mov  eax, slot_texture
+                0xff, 0xd0,                         //  9 call eax
+                0x83, 0xc4, 0x04,                   // 11 add  esp, 4
+                0x59,                               // 14 pop  ecx
+                0x85, 0xc0,                         // 15 test eax, eax
+                0x74, 0x08,                         // 17 jz   .game (27)
+                0x8b, 0xc8,                         // 19 mov  ecx, eax
+                0xff, 0x25, 0x22, 0x22, 0x22, 0x22, // 21 jmp  [TE_CUSTOM]
+                0x85, 0xf6,                         // 27 .game: test esi, esi
+                0x75, 0x06,                         // 29 jne  .cust (37)
+                0xff, 0x25, 0x33, 0x33, 0x33, 0x33, // 31 jmp  [TE_ELSE]
+                0x85, 0xc9,                         // 37 .cust: test ecx, ecx
+                0xff, 0x25, 0x44, 0x44, 0x44, 0x44, // 39 jmp  [TE_RESUME]
             ]
         );
     }
 
     #[test]
     fn the_decal_texture_stub_assembles_to_what_the_comment_claims() {
-        let code = dt_stub(0x1111_1111, 0x2222_2222, 0x3333_3333);
+        let code = dt_stub(0x1111_1111, 0x5555_5555, 0x2222_2222, 0x3333_3333);
         #[rustfmt::skip]
         assert_eq!(
             code,
@@ -1023,17 +1093,20 @@ mod tests {
                 0x8b, 0x44, 0x24, 0x04,                   //  0 mov  eax, [esp+4]
                 0xf7, 0xd0,                               //  4 not  eax
                 0x83, 0xf8, 0x20,                         //  6 cmp  eax, 32
-                0x73, 0x1d,                               //  9 jae  .game (40)
-                0x8b, 0x0c, 0x85, 0x11, 0x11, 0x11, 0x11, // 11 mov  ecx, [SLOT_TEX + eax*4]
-                0x85, 0xc9,                               // 18 test ecx, ecx
-                0x74, 0x12,                               // 20 jz   .game (40)
-                0x69, 0xc0, 0x50, 0x02, 0x00, 0x00,       // 22 imul eax, eax, 0x250
-                0x83, 0xb8, 0x22, 0x22, 0x22, 0x22, 0x00, // 28 cmp  dword [eax + customdata], 0
-                0x75, 0x03,                               // 35 jne  .game (40)
-                0x8b, 0xc1,                               // 37 mov  eax, ecx
-                0xc3,                                     // 39 ret
-                0x55, 0x8b, 0xec, 0x8b, 0x4d, 0x08,       // 40 .game: the stolen prologue
-                0xff, 0x25, 0x33, 0x33, 0x33, 0x33,       // 46 jmp  [DT_RESUME]
+                0x73, 0x28,                               //  9 jae  .game (51)
+                0x8b, 0xc8,                               // 11 mov  ecx, eax
+                0x69, 0xc9, 0x50, 0x02, 0x00, 0x00,       // 13 imul ecx, ecx, 0x250
+                0x83, 0xb9, 0x22, 0x22, 0x22, 0x22, 0x00, // 19 cmp  dword [ecx + customdata], 0
+                0x75, 0x09,                               // 26 jne  .saved (37)
+                0x8b, 0x0c, 0x85, 0x11, 0x11, 0x11, 0x11, // 28 mov  ecx, [SLOT_TEX + eax*4]
+                0xeb, 0x07,                               // 35 jmp  .test (44)
+                0x8b, 0x0c, 0x85, 0x55, 0x55, 0x55, 0x55, // 37 .saved: mov ecx, [SLOT_OVER + eax*4]
+                0x85, 0xc9,                               // 44 .test: test ecx, ecx
+                0x74, 0x03,                               // 46 jz   .game (51)
+                0x8b, 0xc1,                               // 48 mov  eax, ecx
+                0xc3,                                     // 50 ret
+                0x55, 0x8b, 0xec, 0x8b, 0x4d, 0x08,       // 51 .game: the stolen prologue
+                0xff, 0x25, 0x33, 0x33, 0x33, 0x33,       // 57 jmp  [DT_RESUME]
             ]
         );
     }

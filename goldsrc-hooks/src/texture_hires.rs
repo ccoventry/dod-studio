@@ -2254,11 +2254,12 @@ fn match_engine_gamma_keep_alpha(pixels: &mut [u8], gamma: &[u8; 256]) {
 }
 
 /// The spray arm of [`decide`]: a `GLT_DECAL` upload made while the engine
-/// builds a player's custom logo, or one `spray_hltv` builds. A slot-named
-/// spray gets what Studio's Players table gives the slot's player in the demo
-/// playing (`player_table.rs`): his PNG, the fallback PNG, or a fully
-/// transparent texture for "no spray"; the game's own is left alone. A
-/// spray `spray_hltv` built from a PNG gets that PNG in HD.
+/// builds a player's custom logo, or one `spray_hltv` builds. A spray of
+/// ours built from a PNG gets that PNG in HD; the blank one has nothing to
+/// swap. A spray the demo saved is drawn as it is: Studio's Players table
+/// replaces one by shooting a spray of ours instead (`spray_hltv.rs`), never
+/// by changing the saved one's upload, so it is the same in every demo and
+/// whether or not HD textures are on.
 fn spray_upload(
     identifier: &str,
     key: Option<crate::spray::Key>,
@@ -2267,70 +2268,44 @@ fn spray_upload(
     i_type: u32,
     log: bool,
 ) -> *const AtomicUsize {
-    use crate::player_table::Choice;
     SPRAY_SEEN.fetch_add(1, Ordering::Relaxed);
     let shown = match &key {
         Some(key) => format!("spray {}", crate::spray::hex(key)),
         None => format!("spray {identifier}"),
     };
-    let choice = if crate::spray_hltv::building() {
-        // A spray of ours: the PNG it was built from, or nothing to swap
-        // (the blank one).
-        match key.and_then(|k| crate::spray_hltv::png_for_built_key(&k)) {
-            Some(path) => Some(path),
-            None => return std::ptr::null(),
+    if !crate::spray_hltv::building() {
+        if log {
+            unsafe {
+                crate::debug::report(&format!(
+                    "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: \
+                     saved in the demo, drawn as it is"
+                ))
+            };
         }
-    } else {
-        match crate::player_table::slot_of_custom_name(identifier)
-            .and_then(crate::spray_hltv::choice_for_slot)
-        {
-            Some(Choice::Png(png)) => Some(crate::spray::logos_dir().join(png)),
-            Some(Choice::Blank) => None,
-            Some(Choice::Game) | None => {
-                if log {
-                    unsafe {
-                        crate::debug::report(&format!(
-                            "texture_hires: spray {identifier:?} {width}x{height} iType {i_type}: \
-                             the game's own (Studio's Players table)"
-                        ))
-                    };
-                }
-                record_miss(Miss::OnPurpose, "decal", &shown, || {
-                    format!(
-                        "{width}x{height}, a player spray the Players table leaves as the game's own"
-                    )
-                });
-                return std::ptr::null();
-            }
+        record_miss(Miss::OnPurpose, "decal", &shown, || {
+            format!("{width}x{height}, a spray the demo saved, drawn as it is")
+        });
+        return std::ptr::null();
+    }
+    // A spray of ours: the PNG it was built from, or nothing to swap (the
+    // blank one).
+    let Some(path) = key.and_then(|k| crate::spray_hltv::png_for_built_key(&k)) else {
+        return std::ptr::null();
+    };
+    let mut img = match crate::spray::load_png_fit(&path, replacement_cap()) {
+        Ok(img) => img,
+        Err(why) => {
+            crate::spray::warn_once(&path, &why);
+            record_miss(Miss::Failed, "decal", &shown, || {
+                format!("{width}x{height}, {}: {why}", path.display())
+            });
+            return std::ptr::null();
         }
     };
-    let (img, from) = match &choice {
-        Some(path) => match crate::spray::load_png_fit(path, replacement_cap()) {
-            Ok(mut img) => {
-                // Safety: read out of GL_Upload8's own instructions and
-                // checked at install.
-                let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
-                match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
-                (img, path.display().to_string())
-            }
-            Err(why) => {
-                crate::spray::warn_once(path, &why);
-                record_miss(Miss::Failed, "decal", &shown, || {
-                    format!("{width}x{height}, {}: {why}", path.display())
-                });
-                return std::ptr::null();
-            }
-        },
-        // "No spray": every pixel transparent, at the spray's own size.
-        None => (
-            Rgba {
-                width,
-                height,
-                pixels: vec![0; (width * height * 4) as usize],
-            },
-            "nothing (no spray)".to_string(),
-        ),
-    };
+    // Safety: read out of GL_Upload8's own instructions and checked at install.
+    let gamma = unsafe { &*(GAMMA_TABLE.load(Ordering::Acquire) as *const [u8; 256]) };
+    match_engine_gamma_keep_alpha(&mut img.pixels, gamma);
+    let from = path.display().to_string();
 
     let Ok(mut owned) = PENDING_PIXELS.lock() else {
         return std::ptr::null();
@@ -2388,26 +2363,6 @@ unsafe extern "C" fn decide(frame: *const u8, record: *const u8) -> *const Atomi
         && let Ok(mut hashes) = RECORD_HASH.lock()
     {
         hashes.insert(record as usize, hash);
-    }
-    // What a slot-named spray's record stands for, for `keep_cached_spray`.
-    // Only while the swap below can run: with HD off the record holds the
-    // engine's own picture, whatever the table says.
-    if texture_type == GLT_DECAL
-        && enabled()
-        && !record.is_null()
-        && !name_ptr.is_null()
-        && let Some(token) = unsafe {
-            crate::spray::slot_upload_token(
-                &std::ffi::CStr::from_ptr(name_ptr).to_string_lossy(),
-                data,
-                palette,
-                width,
-                height,
-            )
-        }
-        && let Ok(mut tokens) = SPRAY_TOKEN.lock()
-    {
-        tokens.insert(record as usize, token);
     }
     if !enabled() {
         return std::ptr::null();
@@ -3026,56 +2981,6 @@ static STALE_REFRESHED: AtomicU32 = AtomicU32::new(0);
 static RECORD_HASH: Mutex<std::collections::BTreeMap<usize, u32>> =
     Mutex::new(std::collections::BTreeMap::new());
 
-/// What each slot-named spray's GL texture (by record address) stood for
-/// when it was uploaded: `spray::slot_upload_token`, noted by [`decide`].
-static SPRAY_TOKEN: Mutex<std::collections::BTreeMap<usize, u64>> =
-    Mutex::new(std::collections::BTreeMap::new());
-
-/// [`keep_cached`] for decals. A spray's texture is named after the player
-/// slot and kept for the session (decals carry no servercount), so the next
-/// demo's player in that slot would get the last one's texture whenever the
-/// sizes match -- with the Players table, his PNG or blank. While the table
-/// applies, a slot-named texture is reused only when its token (content and
-/// the table's answer) is the one the incoming spray would get; otherwise
-/// the lookup moves on and the engine loads a new copy (the old one stays,
-/// as when the engine renames a texture whose size changed). With the table
-/// at its defaults or outside a demo, the engine decides as it always did.
-///
-/// # Safety
-///
-/// As [`keep_cached`].
-unsafe fn keep_cached_spray(frame: *const u8, record: *const u8) -> u32 {
-    let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
-    let name_ptr = arg(0x08) as *const std::ffi::c_char;
-    if !enabled() || name_ptr.is_null() {
-        return 1;
-    }
-    // Safety: the identifier every caller passes is a NUL-terminated name.
-    let identifier = unsafe { std::ffi::CStr::from_ptr(name_ptr) }.to_string_lossy();
-    let Some(slot) = crate::player_table::slot_of_custom_name(&identifier) else {
-        return 1;
-    };
-    if crate::spray_hltv::choice_for_slot(slot).is_none() {
-        return 1;
-    }
-    let Some(token) = (unsafe {
-        crate::spray::slot_upload_token(
-            &identifier,
-            arg(0x18) as *const u8,
-            arg(0x24) as *const u8,
-            arg(0x10),
-            arg(0x14),
-        )
-    }) else {
-        return 1;
-    };
-    let stored = SPRAY_TOKEN
-        .lock()
-        .ok()
-        .and_then(|t| t.get(&(record as usize)).copied());
-    u32::from(stored == Some(token))
-}
-
 /// Whether a cached texture whose name matches may be used for this load.
 ///
 /// The engine's cache matches on name and size only. The previous map's
@@ -3095,13 +3000,7 @@ unsafe fn keep_cached_spray(frame: *const u8, record: *const u8) -> u32 {
 /// lookup is comparing, both live for the call.
 unsafe extern "C" fn keep_cached(frame: *const u8, record: *const u8) -> u32 {
     let arg = |offset: usize| unsafe { (frame.add(offset) as *const u32).read_unaligned() };
-    if frame.is_null() || record.is_null() {
-        return 1;
-    }
-    if arg(0x0c) == GLT_DECAL {
-        return unsafe { keep_cached_spray(frame, record) };
-    }
-    if arg(0x0c) != GLT_WORLD {
+    if frame.is_null() || record.is_null() || arg(0x0c) != GLT_WORLD {
         return 1;
     }
     let servercount_at = SERVERCOUNT.load(Ordering::Acquire);
