@@ -42,7 +42,7 @@ export const UNCARRIED_REASON = Object.freeze({
   TAKEN: 'taken',
 });
 
-/** True when `streak` carries anything the user set (what preserveHighlightState copies). */
+/** True when `streak` carries anything the user set (what a split or a rescan carries). */
 export function hasWork(streak) {
   if (!streak) return false;
   if (streak.status !== undefined && streak.status !== HIGHLIGHT_STATUS.NONE) return true;
@@ -145,7 +145,18 @@ export function matchSplitHighlights(original, pieces) {
     result.uncarried = worked.map((from) => ({ from, reason: UNCARRIED_REASON.NO_PIECE }));
     return result;
   }
+  matchByKills(original, candidates, worked, new Set(), result);
+  return result;
+}
 
+/**
+ * The kill matcher on its own, for a split and a rescan (rescan_carry.js):
+ * finds each of `worked` (highlights of `original`) in `candidates`, never on
+ * a highlight already in `taken`, and pushes onto `result.carried` /
+ * `result.uncarried`. Adds each match's target to `taken`.
+ */
+export function matchByKills(original, candidates, worked, taken, result) {
+  const streaks = original?.streaks || [];
   const placesOf = new Map(streaks.map((s) => [s, candidates.flatMap((p) => placesFor(s, p))]));
   // Each piece's offset from the original, from every highlight (worked on or
   // not) with two or more kills that fits exactly one place.
@@ -159,7 +170,6 @@ export function matchSplitHighlights(original, pieces) {
   });
   const pieceOffset = new Map([...offsets].map(([piece, list]) => [piece, median(list)]));
 
-  const taken = new Set();
   worked.forEach((from) => {
     const places = placesOf.get(from).filter((p) => !pieceOffset.has(p.piece)
       || Math.abs(p.offset - pieceOffset.get(p.piece)) <= OFFSET_TOLERANCE);
@@ -179,7 +189,6 @@ export function matchSplitHighlights(original, pieces) {
     taken.add(range.target);
     result.carried.push({ from, to: range.target, piece: places[0].piece, ...range });
   });
-  return result;
 }
 
 /**
@@ -226,18 +235,32 @@ export function carryReport(original, result, piecePaths) {
   const kept = result.carried.length;
   const total = result.withWork;
   if (total === 0) return { toast: null, log: [] };
-  const at = (s) => clockRound(highlightStartSeconds(s, original.tickrate));
-  const who = (s) => s.target_player || `player ${s.player_index}`;
-  const log = [STRINGS.MAIN.splitCarryLog(name, kept, total, piecePaths.map(fileNameOf))];
-  result.carried.filter((c) => c.narrowed).forEach((c) => {
-    log.push(STRINGS.MAIN.splitNarrowedLog(at(c.from), who(c.from), fileNameOf(c.piece.path)));
-  });
-  result.uncarried.forEach(({ from, reason }) => {
-    log.push(STRINGS.MAIN.splitUncarriedLog(at(from), who(from), from.timeline_string || '',
-      STRINGS.MAIN.SPLIT_UNCARRIED_REASON[reason], workText(from)));
-  });
+  const log = [
+    STRINGS.MAIN.splitCarryLog(name, kept, total, piecePaths.map(fileNameOf)),
+    ...workLossLines(original, result, {
+      narrowed: STRINGS.MAIN.splitNarrowedLog,
+      uncarried: STRINGS.MAIN.splitUncarriedLog,
+      reasons: STRINGS.MAIN.SPLIT_UNCARRIED_REASON,
+    }),
+  ];
   return {
     toast: { text: STRINGS.MAIN.splitCarryToast(name, kept, total), type: kept === total ? 'success' : 'warning' },
     log,
   };
+}
+
+/**
+ * One activity log line per highlight of `original` whose Kill Range was
+ * narrowed or whose work didn't carry, naming its time, player and all its
+ * work. `words` holds the split's or the rescan's wording.
+ */
+export function workLossLines(original, result, words) {
+  const at = (s) => clockRound(highlightStartSeconds(s, original.tickrate));
+  const who = (s) => s.target_player || `player ${s.player_index}`;
+  return [
+    ...result.carried.filter((c) => c.narrowed)
+      .map((c) => words.narrowed(at(c.from), who(c.from), fileNameOf(c.piece.path))),
+    ...result.uncarried.map(({ from, reason }) => words.uncarried(at(from), who(from),
+      from.timeline_string || '', words.reasons[reason], workText(from))),
+  ];
 }

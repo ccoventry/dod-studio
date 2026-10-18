@@ -32,39 +32,6 @@ export function streakUid(demoPath, streak) {
   return uid;
 }
 
-/**
- * Copies the user-owned, non-derivable state from a previously-loaded version
- * of a demo onto a freshly-scanned one, matching highlights by uid.
- *
- * A re-scan re-parses the demo and produces brand new streak objects, so
- * without this every status, selection, and note on that demo is silently
- * destroyed. Only fields the user set are carried over — everything derived
- * from the demo file itself comes from the fresh scan.
- */
-export function preserveHighlightState(previousDemo, freshDemo) {
-  if (!previousDemo?.streaks?.length || !freshDemo?.streaks?.length) return freshDemo;
-
-  const previousByUid = new Map(
-    previousDemo.streaks.map(s => [streakUid(previousDemo.path, s), s])
-  );
-
-  freshDemo.streaks.forEach(fresh => {
-    const previous = previousByUid.get(streakUid(freshDemo.path, fresh));
-    if (!previous) return;
-    if (previous.status !== undefined) fresh.status = previous.status;
-    if (previous.statusByHand) fresh.statusByHand = true;
-    if (previous.selected !== undefined) fresh.selected = previous.selected;
-    if (previous.notes !== undefined) fresh.notes = previous.notes;
-    if (previous.clipName !== undefined) fresh.clipName = previous.clipName;
-    if (previous.curation !== undefined) fresh.curation = previous.curation;
-    // Kill Range edits are user edits too, not scan output.
-    if (previous.start_index !== undefined) fresh.start_index = previous.start_index;
-    if (previous.end_index !== undefined) fresh.end_index = previous.end_index;
-  });
-
-  return freshDemo;
-}
-
 // ── Curation (#44) ──────────────────────────────────────────────────────────
 //
 // An editorial mark, separate from `status` (which drives what the pipeline

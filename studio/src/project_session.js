@@ -23,7 +23,8 @@ import { STRINGS } from './strings.js';
  *   getDemos() the queue, replaceDemos(demos) main.js's replaceScannedDemos,
  *   loadDemos(demos) make a loaded project's demos the queue and show them,
  *   getTakeIndex()/setTakeIndex(index), getProjectTeams()/setProjectTeams(teams),
- *   and checkMissingDemos(projectPath, scanPaths) from project_demos.js.
+ *   checkMissingDemos(projectPath, scanPaths) from project_demos.js, and
+ *   offerRescan() from project_rescan.js.
  */
 export function createProjectSession({
   getDemos,
@@ -34,6 +35,7 @@ export function createProjectSession({
   getProjectTeams,
   setProjectTeams,
   checkMissingDemos,
+  offerRescan = async () => false,
 }) {
   // The project session file last loaded or saved in this window, if any —
   // once set, "Save Session" writes straight back to it instead of asking
@@ -217,6 +219,9 @@ export function createProjectSession({
             loadDemos(data.demos);
             showToast(STRINGS.MAIN.loadedDemosToast(data.demos.length), 'success');
             await checkMissingDemos(selected, data.scanPaths || []);
+            // After the missing check: a demo it relocates can be rescanned,
+            // one still missing can't.
+            await offerRescan();
           }
           refreshTeamsPane();
         }

@@ -129,7 +129,7 @@ describe('putting the work back', () => {
     expect(resolveTake(takeIndex, 'sess/chain_01_b0')).toEqual([streakUid(p.path, second), 'C:/d/other.dem#1#5#5']);
   });
 
-  it('hasWork counts what preserveHighlightState carries', () => {
+  it('hasWork counts what a split or a rescan carries', () => {
     expect(hasWork(hl([[1, 1, 'K98']]))).toBe(false);
     expect(hasWork(hl([[1, 1, 'K98']], { status: 'None' }))).toBe(false);
     expect(hasWork(hl([[1, 1, 'K98']], { selected: true }))).toBe(true);

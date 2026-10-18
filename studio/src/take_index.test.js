@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { setStatusByHand, restoreStatus, setVerifiedStatus, preserveHighlightState, setCuration, isSkipped, isDemoTracked, CURATION } from './take_index.js';
+import { setStatusByHand, restoreStatus, setVerifiedStatus, setCuration, isSkipped, isDemoTracked, CURATION } from './take_index.js';
+import { applyRescanWork, matchRescanHighlights } from './rescan_carry.js';
+
+/** What a queue rescan does to a demo's work (queue_scan.js). */
+function rescanned(previous, fresh) {
+  applyRescanWork(previous, matchRescanHighlights(previous, fresh));
+  return fresh;
+}
 
 const streak = (extra = {}) => ({ player_index: 1, kills: [[100, 1.0, 'K98'], [200, 3.0, 'K98']], ...extra });
 
@@ -62,14 +69,14 @@ describe('status source (#105)', () => {
   it('the mark survives a re-scan', () => {
     const previous = { path: 'C:/demos/a.dem', streaks: [streak()] };
     setStatusByHand(previous.streaks[0], 'Captured');
-    const fresh = preserveHighlightState(previous, { path: 'C:/demos/a.dem', streaks: [streak()] });
+    const fresh = rescanned(previous, { path: 'C:/demos/a.dem', streaks: [streak()] });
     expect(fresh.streaks[0].status).toBe('Captured');
     expect(fresh.streaks[0].statusByHand).toBe(true);
   });
 
   it('a re-scan does not invent the mark', () => {
     const previous = { path: 'C:/demos/a.dem', streaks: [streak({ status: 'Captured' })] };
-    const fresh = preserveHighlightState(previous, { path: 'C:/demos/a.dem', streaks: [streak()] });
+    const fresh = rescanned(previous, { path: 'C:/demos/a.dem', streaks: [streak()] });
     expect('statusByHand' in fresh.streaks[0]).toBe(false);
   });
 });
@@ -103,7 +110,7 @@ describe('curation (#44)', () => {
 
   it('survives a re-scan', () => {
     const before = { path: 'd.dem', streaks: [streak({ curation: CURATION.SKIP })] };
-    const after = preserveHighlightState(before, { path: 'd.dem', streaks: [streak()] });
+    const after = rescanned(before, { path: 'd.dem', streaks: [streak()] });
     expect(after.streaks[0].curation).toBe(CURATION.SKIP);
   });
 });
