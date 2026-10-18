@@ -39,6 +39,8 @@ pub struct AppSettings {
     /// reads.
     #[serde(default)]
     pub goldsrc_hooks_dll_path: Option<String>,
+    /// The hook DLL's in-game Demos tab reads this and `demo_folder_history`
+    /// out of settings.json for its Go to list (#779): keep the key names.
     pub pinned_folders: Vec<String>,
     /// Analyzer sidebar's "Recent" quick-links tier — most-recent-first,
     /// capped at 10, pushed whenever a folder selection yields a non-empty

@@ -31,7 +31,7 @@ import { switchNavTab, setCaptureDetailSubtab } from './nav.js';
 import { createListEditor } from './list_editor.js';
 import { emptyProjectTeams } from './project_teams.js';
 import { initTeamsPane } from './teams_pane.js';
-import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks } from './master_pane.js';
+import { getCheckedDemoPaths, clearCheckedPaths, listedStreaks, getVisibleDemos, getQueueRecorders, queueRecorderOf } from './master_pane.js';
 import { initErrorReporter } from './error_reporter.js';
 import { STRINGS } from './strings.js';
 import { applyStaticStrings } from './apply_strings.js';
@@ -48,6 +48,7 @@ import { initRenderPresets } from './render_presets_ui.js';
 import { pinnedFoldersOnly } from './project_paths.js';
 import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
+import { createProjectRescan } from './project_rescan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
@@ -134,6 +135,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     getProjectTeams: () => projectTeams,
     setProjectTeams: (teams) => { projectTeams = teams; },
     checkMissingDemos: (projectPath, savedScanPaths) => checkMissingDemos(projectPath, savedScanPaths),
+    offerRescan: () => offerRescan(),
   });
 
   // Initialize modular UI panes
@@ -330,7 +332,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
-    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    getTakeIndex: () => takeIndex,
+    refreshQueue: () => refreshAfterRelocation(true),
     pickedDemosPresent,
   });
 
@@ -388,6 +391,14 @@ window.addEventListener("DOMContentLoaded", async () => {
     getScanPaths: () => scanPaths,
     persistAppSettings: () => persistAppSettings(),
     regroupMatches: () => regroupMatches(),
+    getTakeIndex: () => takeIndex,
+  });
+
+  // Demos an older DoD Studio scanned, offered for a rescan when a project
+  // opens: project_rescan.js.
+  const { offerRescan } = createProjectRescan({
+    getDemos: () => currentScannedDemos,
+    scan: (paths) => triggerAutoScan(paths),
   });
 
   async function updateExportPoolIndicator() {
@@ -505,6 +516,9 @@ window.addEventListener("DOMContentLoaded", async () => {
   initReviewMode({
     getDemos: () => currentScannedDemos,
     getCheckedPaths: getCheckedDemoPaths,
+    getShownPaths: () => getVisibleDemos().map((d) => d.path),
+    getRecorders: getQueueRecorders,
+    recorderOf: queueRecorderOf,
     onChanged: onHighlightStatusChange,
   });
 
@@ -649,7 +663,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Clear Untracked / Selected / All and the tracked-work modal:
   // queue_actions.js.
-  const { requestTrackedClearConfirmation, requestTrackedDeleteConfirm } = createQueueActions({
+  const { requestTrackedDeleteConfirm } = createQueueActions({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     saveProjectSession: () => saveProjectSession(),

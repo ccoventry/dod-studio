@@ -210,6 +210,16 @@ def verify(game, src):
             func = int(tail.split()[1], 16) - ui.base
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # The Demos tab scrolls its list to the top after a new filter through
+    # OnMouseWheeled: the scroll bar's GetValue (+0x21c), less delta * 3,
+    # into its SetValue (+0x218).
+    wheel_slot = vwl.rust_usize(src, "LIST_SLOT_ON_MOUSE_WHEELED")
+    wheel = ui.body(ui.u32(list_vt + 4 * wheel_slot) - ui.base, 0x40)
+    times_three = any(re.fullmatch(r"lea ecx, \[e[a-d]x \+ e[a-d]x\*2\]", x) for x in wheel)
+    sets = any(x.endswith("+ 0x218]") and x.startswith(("jmp", "call")) for x in wheel)
+    gets = any(x.endswith("+ 0x21c]") and x.startswith("call") for x in wheel)
+    check(times_three and sets and gets,
+          f"ListPanel slot {wheel_slot} is OnMouseWheeled: scroll bar value - delta * 3 into SetValue")
 
     # 19: the Map and Date columns. The window's constructor makes its one
     # column through AddColumnHeader, just after pushing "demoname".
@@ -381,6 +391,32 @@ def verify(game, src):
     check(b"ButtonClicked" in pushed,
           f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
 
+    # The Demos tab's Up is greyed out through Panel's SetEnabled(bool): the
+    # slot ApplySettings calls with the `enabled` key's GetInt.
+    enabled_slot = vwl.rust_usize(src, "PANEL_SLOT_SET_ENABLED")
+    enabled_at = ui.img.find(b"\0enabled\0") + 1
+    enabled_push = b"\x68" + struct.pack("<I", ui.base + enabled_at)
+    sites = [m.start() for m in re.finditer(re.escape(enabled_push), ui.img)]
+    want_call = f"+ {enabled_slot * 4:#x}]"
+    calls_enabled = any(
+        any(x.startswith("call dword ptr [e") and x.endswith(want_call)
+            for x in [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[at:at + 0x30], ui.base + at)][:9])
+        for at in sites)
+    check(calls_enabled, f"Panel slot {enabled_slot} is SetEnabled(bool), called with the `enabled` setting")
+
+    # The Go to dropdown is widened through the menu's SetFixedWidth(int):
+    # it stores its argument and invalidates the layout (Panel slot 58,
+    # +0xe8), the slot the box itself calls with its own width when the
+    # list opens.
+    fixed_slot = vwl.rust_usize(src, "MENU_SLOT_SET_FIXED_WIDTH")
+    fixed_fn = ui.u32(menu_vt + 4 * fixed_slot) - ui.base if menu_vt else 0
+    fixed = ui.body(fixed_fn, 0x30)
+    stores = any(re.fullmatch(r"mov dword ptr \[ecx \+ 0x[0-9a-f]+\], eax", x) for x in fixed)
+    layout_slot = vwl.rust_usize(src, "PANEL_SLOT_INVALIDATE_LAYOUT")
+    lays_out = any(re.fullmatch(rf"call dword ptr \[e[a-d]x \+ {layout_slot * 4:#x}\]", x) for x in fixed)
+    check(stores and lays_out and ui.last_ret(fixed_fn) == "ret 4",
+          f"Menu slot {fixed_slot} is SetFixedWidth(int): stores it and invalidates the layout (Panel slot {layout_slot}): {fixed[:6]}")
+
     # 21: the Highlights tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
     check(bar_vt == build["progress_bar_vftable"],
@@ -535,7 +571,8 @@ def constructor_of(ui, cls):
 
 def main():
     games = [Path(a) for a in sys.argv[1:]] or [g for g in vwl.DEFAULT_GAMES if g.is_dir()]
-    src = RUST.read_text(encoding="utf-8")
+    # The shared list slots (#796) live beside studio_panel.rs.
+    src = RUST.read_text(encoding="utf-8") + (RUST.parent / "list_panel.rs").read_text(encoding="utf-8")
     ok = all([verify(g, src) for g in games])
     print("\nOFFSETS VERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

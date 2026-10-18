@@ -464,11 +464,17 @@ pub fn set_time_scale(scale: f32) -> Result<(), String> {
 
 /// [`SEEK_TO_NAME`]'s seek, for code: lands on `seconds` of the world clock.
 pub fn seek_to_seconds(seconds: f64) -> Result<String, String> {
+    seek_to_seconds_then(seconds, None)
+}
+
+/// [`seek_to_seconds`], then runs `then` (a console line) once the seek has
+/// landed, as `dodstudio_seek_to <seconds> <command>` does.
+pub fn seek_to_seconds_then(seconds: f64, then: Option<String>) -> Result<String, String> {
     #[cfg(target_arch = "x86")]
-    return player::seek(seconds, false, skip_between(), None);
+    return player::seek(seconds, false, skip_between(), then);
     #[cfg(not(target_arch = "x86"))]
     {
-        let _ = seconds;
+        let _ = (seconds, then);
         Err("only the 32-bit build has a demo player".to_string())
     }
 }

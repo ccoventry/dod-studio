@@ -389,6 +389,10 @@ unsafe fn fill(
             // through a slot nothing here has verified.
             add_item(list, row, 0, 0, 0);
         }
+        // A list scrolled down for the last demo showed nothing for one with
+        // fewer highlights until the next scroll (#796). Nothing is sorted
+        // unless a heading was clicked: the rows are in highlight order.
+        crate::list_panel::after_refill(list, build.list_sort_column, None);
         if !streaks.is_empty() {
             // What the list holds now, counted back through it.
             let first: ListFirstFn = slot(list, LIST_SLOT_FIRST_ITEM);
@@ -424,17 +428,15 @@ unsafe fn set_label(object: *mut c_void, text: &str) {
 /// player.
 unsafe extern "thiscall" fn on_command(this: *mut c_void, raw: *const c_char) {
     if text(raw).eq_ignore_ascii_case("load") {
-        match unsafe { selected_value(this, SEEK_KEY) } {
-            Some(secs) => {
-                let target = unsafe { selected_value(this, TARGET_KEY) };
-                let line = go_line(&secs, target.as_deref());
-                if !CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l)) {
-                    crate::commands::console_print(&format!("{NAME}: could not run the seek\n"));
-                }
+        // Nothing picked: Enter anywhere on the tab lands here too (the
+        // window's default button), so no console line then (#777); the
+        // hint under the list already says what to do.
+        if let Some(secs) = unsafe { selected_value(this, SEEK_KEY) } {
+            let target = unsafe { selected_value(this, TARGET_KEY) };
+            let line = go_line(&secs, target.as_deref());
+            if !CString::new(line).is_ok_and(|l| crate::engine::client_cmd(&l)) {
+                crate::commands::console_print(&format!("{NAME}: could not run the seek\n"));
             }
-            None => crate::commands::console_print(&format!(
-                "{NAME}: pick a streak in the list first\n"
-            )),
         }
         return;
     }
