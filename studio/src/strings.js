@@ -1473,15 +1473,33 @@ export const STRINGS = {
     CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
     CHANGED_DEMOS_RESCAN: 'Rescan',
     // #217: splitting a queued demo that recorded more than one map.
-    SPLIT_TRACKED_DEMO_TITLE: 'Split Tracked Demo',
-    VERB_SPLITS: 'splits and replaces',
-    SPLIT_ANYWAY: 'Split Anyway',
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    // What happened to the original's highlight work (split_carry.js).
+    splitCarryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the split demos; their marks and notes are listed in the activity log (View Logs).`,
+    splitCarryLog: (name, kept, total, pieces) => `[split] ${name} -> ${pieces.join(', ')}: kept the work on ${kept} of ${total} highlight(s)`,
+    splitNarrowedLog: (time, player, piece) => `[split]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    splitUncarriedLog: (time, player, timeline, reason, work) => `[split]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    SPLIT_UNCARRIED_REASON: {
+      'no-piece': 'its map was not written as a demo of its own (shorter than a minute), or the piece did not scan',
+      'not-found': 'no highlight in the split demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
+    splitWorkText: ({ curation, status, picked, notes, clipName, range }) => [
+      curation && `Review: ${curation}`,
+      status && `Status: ${status}`,
+      picked && 'Picked',
+      range && `Kill Range: ${range}`,
+      clipName && `Clip name: "${clipName}"`,
+      notes && `Note: "${notes}"`,
+    ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
     queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',
+    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
     MULTI_MAP_PICKED_SPLIT: 'Split Them',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',

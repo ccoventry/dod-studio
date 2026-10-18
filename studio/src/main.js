@@ -330,7 +330,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     getDemos: () => currentScannedDemos,
     removeDemo: (demo) => replaceScannedDemos(currentScannedDemos.filter((d) => d !== demo)),
     scan: (paths, opts) => triggerAutoScan(paths, opts),
-    confirmTracked: (demo) => requestTrackedClearConfirmation([demo], { title: STRINGS.MAIN.SPLIT_TRACKED_DEMO_TITLE, verb: STRINGS.MAIN.VERB_SPLITS, confirmLabel: STRINGS.MAIN.SPLIT_ANYWAY }),
+    getTakeIndex: () => takeIndex,
+    refreshQueue: () => refreshAfterRelocation(true),
     pickedDemosPresent,
   });
 
@@ -652,7 +653,7 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   // Clear Untracked / Selected / All and the tracked-work modal:
   // queue_actions.js.
-  const { requestTrackedClearConfirmation, requestTrackedDeleteConfirm } = createQueueActions({
+  const { requestTrackedDeleteConfirm } = createQueueActions({
     getDemos: () => currentScannedDemos,
     replaceDemos: (demos) => replaceScannedDemos(demos),
     saveProjectSession: () => saveProjectSession(),
