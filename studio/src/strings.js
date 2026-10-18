@@ -112,9 +112,13 @@ export const STRINGS = {
     TABLE_HEADER_DEMO_FILE: 'Demo File',
     TABLE_HEADER_HIGHLIGHTS: 'Highlights',
     TABLE_HEADER_SELECTED: 'Selected',
-    TABLE_HEADER_PENDING: 'Pending',
-    TABLE_HEADER_CAPTURED: 'Captured',
-    TABLE_HEADER_RENDERED: 'Rendered',
+    // One cell each of coloured counts, legend letters under the name.
+    TABLE_HEADER_STATUS: 'Status',
+    TABLE_HEADER_STATUS_TITLE: 'How many of the demo\'s highlights are Pending / Captured / Rendered (P / C / R), each in its status colour. Hover a row for the numbers in words.',
+    TABLE_HEADER_REVIEW: 'Review',
+    TABLE_HEADER_REVIEW_TITLE: 'How many of the demo\'s highlights have no Review mark yet / Keep / Maybe / Skip (– / K / M / S), each in its colour. Hover a row for the numbers in words.',
+    COUNT_LABELS: { Pending: 'Pending', Captured: 'Captured', Rendered: 'Rendered', Unmarked: 'not reviewed', Keep: 'Keep', Maybe: 'Maybe', Skip: 'Skip' },
+    COUNT_LETTERS: { Pending: 'P', Captured: 'C', Rendered: 'R', Unmarked: '–', Keep: 'K', Maybe: 'M', Skip: 'S' },
     TABLE_HEADER_ACTIONS: 'Actions',
     TABLE_EMPTY_NO_DEMOS: "No demos scanned yet. Use '+ Add Demo Files' or '+ Add Folder' to get started.",
     TABLE_EMPTY_NO_DEMOS_IN_DIRS: 'No demos found in specified directories.',
@@ -141,7 +145,7 @@ export const STRINGS = {
     REASON_STATUS: 'a Pending/Captured/Rendered status',
     REASON_NOTE: 'a note',
     REASON_CLIP_NAME: 'a typed clip name',
-    REASON_REVIEW: 'a Keep/Skip review mark',
+    REASON_REVIEW: 'a Keep/Maybe/Skip review mark',
     REASON_RANGE: 'an edited kill range',
     EMPTY_DASH: '—',
   },
@@ -186,9 +190,10 @@ export const STRINGS = {
     COL_DUR: 'Dur.',
     // #44: an editorial mark, separate from Status.
     COL_REVIEW: 'Review',
-    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, or Skip. Skip unticks the row and locks it out of every capture batch.',
+    COL_REVIEW_TITLE: 'Your call on each highlight: Keep, Maybe (look again later), or Skip. Skip unticks the row and locks it out of every capture batch.',
     CURATION_UNREVIEWED: '–',
     CURATION_KEEP: 'Keep',
+    CURATION_MAYBE: 'Maybe',
     CURATION_SKIP: 'Skip',
     SKIPPED_CB_TITLE: 'Marked Skip in the Review column, so it can\'t be captured. Set Review back to use it.',
     COL_STATUS: 'Status',
@@ -268,7 +273,7 @@ export const STRINGS = {
       : `Give just the name of a folder beside hl.exe: "${c}" can't be part of it.`),
     gameFolderNotFoundOption: (name) => `${name} (not found beside hl.exe)`,
     gameFolderMissing: (name) =>
-        `There's no "${name}" folder with a liblist.gam beside hl.exe, so the game can't start it. Pick one from the list.`,
+        `There's no "${name}" folder beside hl.exe with a liblist.gam and a cl_dlls/client.dll, so the game can't start it. Pick one from the list.`,
     GAME_FOLDER_NO_LIST: 'Set the Half-Life Executable to a real hl.exe first: the game folders are listed from beside it.',
     // HLAE spawns its own FFmpeg for `mirv_movie_ffmpeg` and does not consult
     // the app's FFmpeg setting, so this is reported separately from it.
@@ -1465,18 +1470,56 @@ export const STRINGS = {
     // #21: demos whose file changed on disk after they were scanned.
     CHANGED_DEMOS_TITLE: 'Demos have changed',
     CHANGED_DEMOS_MESSAGE: "These demos aren't the files they were scanned from (their size or start is different), so their highlights won't line up. Capture didn't start.",
-    CHANGED_DEMOS_QUESTION: 'Rescan them now? Their highlights are replaced by the new scan.',
+    CHANGED_DEMOS_QUESTION: "Rescan them now? Their highlights are replaced by the new scan; marks, notes, status and kill ranges go with any highlight found again.",
     CHANGED_DEMOS_RESCAN: 'Rescan',
+    // Opening a project with demos an older DoD Studio scanned (scan_version.js).
+    OUTDATED_DEMOS_TITLE: 'Demos scanned by an older DoD Studio',
+    outdatedDemosMessage: (n) => `${n} demo${n === 1 ? '' : 's'} in this project ${n === 1 ? 'was' : 'were'} scanned with an older DoD Studio. Rescan ${n === 1 ? 'it' : 'them'} now? Your marks, notes, status and kill ranges are carried over.`,
+    OUTDATED_DEMOS_FOOTER: "Not now leaves them as they are; you'll be asked again next time you open the project.",
+    OUTDATED_DEMOS_RESCAN: 'Rescan',
+    OUTDATED_DEMOS_NOT_NOW: 'Not now',
+    // What a rescan did with the highlights' work (rescan_carry.js).
+    rescanCarryToast: (kept, total) => kept === total
+      ? `Rescan kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `Rescan kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the new scan; their marks and notes are listed in the activity log (View Logs).`,
+    rescanCarryLog: (kept, total, demos) => `[rescan] kept the work on ${kept} of ${total} highlight(s) across ${demos} demo(s)`,
+    rescanDemoLog: (name) => `[rescan] ${name}:`,
+    rescanNarrowedLog: (time, player) => `[rescan]   ${time} ${player}: the new scan splits its Kill Range over two highlights; kept on the one holding most of its kills`,
+    rescanUncarriedLog: (time, player, timeline, reason, work) => `[rescan]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    RESCAN_UNCARRIED_REASON: {
+      'no-piece': 'the demo did not scan',
+      'not-found': 'no highlight in the new scan has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
     // #217: splitting a queued demo that recorded more than one map.
-    SPLIT_TRACKED_DEMO_TITLE: 'Split Tracked Demo',
-    VERB_SPLITS: 'splits and replaces',
-    SPLIT_ANYWAY: 'Split Anyway',
     queueSplitDone: (name, names) => `Split ${name} into ${names.length} demo${names.length === 1 ? '' : 's'}: ${names.join(', ')}`,
+    // What happened to the original's highlight work (split_carry.js).
+    splitCarryToast: (name, kept, total) => kept === total
+      ? `${name}: kept the marks, notes, status and kill ranges of all ${total} highlight${total === 1 ? '' : 's'} with work on them.`
+      : `${name}: kept the work on ${kept} of ${total} highlights. The other ${total - kept} couldn't be found in the split demos; their marks and notes are listed in the activity log (View Logs).`,
+    splitCarryLog: (name, kept, total, pieces) => `[split] ${name} -> ${pieces.join(', ')}: kept the work on ${kept} of ${total} highlight(s)`,
+    splitNarrowedLog: (time, player, piece) => `[split]   ${time} ${player}: its Kill Range spans two highlights in ${piece}; kept on the one holding most of its kills`,
+    splitUncarriedLog: (time, player, timeline, reason, work) => `[split]   NOT KEPT ${time} ${player} (${timeline}): ${reason}. ${work}`,
+    SPLIT_UNCARRIED_REASON: {
+      'no-piece': 'its map was not written as a demo of its own (shorter than a minute), or the piece did not scan',
+      'not-found': 'no highlight in the split demo has the same player and kills',
+      ambiguous: 'the same player and kills fit more than one highlight',
+      taken: 'another highlight\'s work went to the same highlight',
+    },
+    splitWorkText: ({ curation, status, picked, notes, clipName, range }) => [
+      curation && `Review: ${curation}`,
+      status && `Status: ${status}`,
+      picked && 'Picked',
+      range && `Kill Range: ${range}`,
+      clipName && `Clip name: "${clipName}"`,
+      notes && `Note: "${notes}"`,
+    ].filter(Boolean).join('; '),
     queueSplitFailed: (name, err) => `Could not split ${name}: ${err}`,
     queueSplitStatus: (name, step) => `Splitting ${name}: ${step}`,
     MULTI_MAP_PICKED_TITLE: 'Demos with more than one map',
     MULTI_MAP_PICKED_MESSAGE: 'These demos have picked highlights but recorded more than one map. The game stops playing a demo at its first map change, so they can\'t be captured as they are. Capture didn\'t start.',
-    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue; their picks don\'t carry over, so pick the highlights again in each one.',
+    MULTI_MAP_PICKED_QUESTION: 'Split them now? Each map becomes a demo of its own in the queue, and the highlights keep their picks, marks, notes and status.',
     MULTI_MAP_PICKED_SPLIT: 'Split Them',
     RELOCATE_CANCEL_PLAIN: 'Cancel',
     LOAD_PROJECT_ERROR: 'Error loading project session.',
@@ -2136,13 +2179,41 @@ export const STRINGS = {
   // ── Review highlights (#623) ─────────────────────────────────────────────
   REVIEW: {
     BUTTON: 'Review highlights',
-    TITLE: 'Play every highlight of the ticked demos in the game, one after another. Answer Yes or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, No marks it Skip.',
+    TITLE: 'Play every highlight of the ticked demos in the game, one after another. With none ticked, every demo the list shows (after its search and filters) is reviewed. Answer Yes, Maybe or No on the DoD Studio window\'s Review tab after each: Yes marks the row Keep, Maybe marks it Maybe (look again later), No marks it Skip.',
+    // #661: which Review marks a review plays.
+    COVERS_TITLE: 'Which highlights the review plays, by their Review mark, always from the first. All plays every highlight, answered or not; Unmarked picks up where an earlier review left off; Keep, Maybe or Skip go back over those.',
+    COVERS_ALL: 'All',
+    COVERS_UNMARKED: 'Unmarked',
+    COVERS_KEEP: 'Keep',
+    COVERS_MAYBE: 'Maybe',
+    COVERS_SKIP: 'Skip',
+    // #822: whose highlights an HLTV demo's review plays.
+    HLTV_LABEL: 'HLTV:',
+    HLTV_TITLE: 'An HLTV demo lists every player\'s highlights. Pick whose to review: by default, the players who recorded POV demos in the queue but not this half (the HLTV demo stands in for their missing recording); or everyone with a POV demo in the queue (your team, usually); everyone; or one player. The game puts the camera on that player in first person for each one. An HLTV demo whose half isn\'t known yet reviews everyone with a POV demo in the queue.',
+    HLTV_MISSING: 'Players missing their POV for this half',
+    HLTV_RECORDERS: 'Players with a POV demo in the queue',
+    HLTV_ALL: 'Everyone',
+    ORDER_TITLE: 'The order an HLTV demo\'s highlights play in when they belong to several players. Chronological: as the match went, the camera switching player between highlights (two starting at the same moment go A to Z). By player: every highlight of one player, then the next player\'s from the start, players A to Z. The game seeks back as easily as forward.',
+    ORDER_TIME: 'Chronological',
+    ORDER_PLAYER: 'By player (A–Z)',
+    // The HLTV box left out every highlight there was (#822).
+    hltvNoneChosen: (choice, count) => {
+      const n = `${count} HLTV highlight${count === 1 ? '' : 's'}`;
+      if (choice === 'missing' || !choice) {
+        return `Nothing to review: every player with a POV demo in the queue recorded this half themselves, so the ${n} were left out. To review a player from the HLTV demo, add one of their POV demos from another half, or set HLTV to Everyone.`;
+      }
+      return `Nothing to review: the ${n} belong to players the HLTV box didn't pick. Set HLTV to Everyone to see them all.`;
+    },
+    nothingCovered: (covers, ticked) => {
+      const which = { unmarked: 'with no Review mark', keep: 'marked Keep', maybe: 'marked Maybe', skip: 'marked Skip' }[covers] || 'to review';
+      return `${ticked ? 'The ticked demos have' : 'The demos in the list have'} no highlights ${which}.`;
+    },
     TICK_YES_LABEL: 'Tick Yes for capture',
-    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep.',
+    TICK_YES_TITLE: 'Also tick each highlight you answer Yes, ready for a capture batch. Off: Yes only marks it Keep. Maybe never ticks a row.',
     FAST_FORWARD_LABEL: 'Fast-forward gaps over',
     FAST_FORWARD_UNIT: 's',
     FAST_FORWARD_TITLE: 'When two kills in a highlight are further apart than this, the stretch between them plays at 4x: from 2 s after one kill to 4 s before the next. You still see everything, just quicker. Takes effect when a review starts.',
-    NOTHING_TO_REVIEW: 'Tick the demos to review in the Master Demo Queue first.',
+    NOTHING_TO_REVIEW: 'The Master Demo Queue shows no demos to review: add some, or clear its search and filters.',
     ONLY_OLD_HIGHLIGHTS: 'These highlights were found before DoD Studio kept their demo-player times. Rescan the demos, then review them.',
     STOP: 'Stop',
     startedToast: (count, launched, skipped) =>
