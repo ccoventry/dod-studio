@@ -50,6 +50,7 @@ import { createProjectDemos } from './project_demos.js';
 import { createQueueScan } from './queue_scan.js';
 import { createProjectRescan } from './project_rescan.js';
 import { createQueueMatchGroups } from './queue_match_groups.js';
+import { createQueueGroupBy, isGroupedByMatch } from './queue_group_by.js';
 import { createProjectSession } from './project_session.js';
 import { createSettingsSync, applySettingsToForm } from './settings_sync.js';
 import { checkObsOrphanOnStartup, currentCaptureMode, applyCaptureModeUI, refreshHlaeFfmpegStatus, initConfigWiring, refreshSameDriveWarning } from './config_wiring.js';
@@ -379,11 +380,18 @@ window.addEventListener("DOMContentLoaded", async () => {
     setup?.refresh();
   }
 
-  // Which match and half each queued demo is, and Group by match (#685):
-  // queue_match_groups.js. Runs after a scan and a project load.
+  // Which match and half each queued demo is (#685): queue_match_groups.js.
+  // Runs after a scan and a project load. The Group by dropdown (#823):
+  // queue_group_by.js; grouped by match, a regroup also reads uncached demos.
   const { regroup: regroupMatches } = createQueueMatchGroups({
     getDemos: () => currentScannedDemos,
     renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    parseMissingByDefault: isGroupedByMatch,
+  });
+  createQueueGroupBy({
+    getDemos: () => currentScannedDemos,
+    renderQueue: () => renderMasterList(currentScannedDemos, selectedDemoIdx),
+    regroupMatches: (opts) => regroupMatches(opts),
   });
 
   // Add Demo Files / Add Folder, Cancel Scan and the scan itself:
