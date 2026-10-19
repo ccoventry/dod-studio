@@ -38,7 +38,7 @@
             </div>
             <div class="menu-dropdown" data-menu="help">
               <button class="menu-dropdown-btn" id="help-menu-btn" data-str="NAV.HELP_MENU">
-                Help<span id="help-menu-update-dot" class="menu-update-dot" style="display: none;" title="An update is available"></span>
+                Help
               </button>
               <div class="menu-dropdown-panel" id="help-menu-panel">
                 <button class="menu-dropdown-item" id="update-check-btn" data-str="FOOTER.CHECK_UPDATES_BUTTON" data-str-title="FOOTER.CHECK_UPDATES_TITLE" title="Check for app updates">Check for Updates</button>
@@ -47,6 +47,8 @@
                 <button class="menu-dropdown-item" id="about-menu-btn" data-str="NAV.ABOUT_MENU">About</button>
               </div>
             </div>
+            <!-- #868: an update is out, or downloaded; update_chip.js. -->
+            <button id="update-chip" class="update-chip" type="button" hidden></button>
           </nav>
         </div>
         <div class="nav-tabs">
@@ -776,6 +778,20 @@
                 <span id="players-crosshair-fallback-pick"></span>
               </div>
               <div id="players-crosshair-fallback-picker"></div>
+              <!-- Make / add a crosshair (#842): crosshair_import_ui.js. -->
+              <div class="input-row">
+                <button id="players-make-crosshair-btn" data-str="PLAYERS.MAKE_CROSSHAIR_BUTTON" data-str-title="PLAYERS.MAKE_CROSSHAIR_TITLE">Make your own crosshair…</button>
+                <button id="players-add-crosshair-btn" data-str="PLAYERS.ADD_CROSSHAIR_BUTTON" data-str-title="PLAYERS.ADD_CROSSHAIR_TITLE">Add a crosshair file…</button>
+              </div>
+              <p style="font-size: 12px; color: var(--text-muted); margin: 4px 0 8px;" data-str="PLAYERS.MAKE_CROSSHAIR_HELP">The crosshair maker gives you a file called customxhair.spr, or a ZIP with it inside.</p>
+              <div id="players-add-crosshair-form" class="input-row" style="display: none;">
+                <label for="players-add-crosshair-name" data-str="PLAYERS.CROSSHAIR_NAME_LABEL" data-str-title="PLAYERS.CROSSHAIR_NAME_TITLE">Name:</label>
+                <input type="text" id="players-add-crosshair-name" maxlength="60" data-str-title="PLAYERS.CROSSHAIR_NAME_TITLE" />
+                <span id="players-add-crosshair-file" style="font-size: 12px;"></span>
+                <button id="players-add-crosshair-save" data-str="PLAYERS.CROSSHAIR_SAVE_BUTTON">Add</button>
+                <button id="players-add-crosshair-cancel" data-str="PLAYERS.CROSSHAIR_CANCEL_BUTTON">Cancel</button>
+              </div>
+              <div id="players-add-crosshair-status" class="players-status" style="display: none;"></div>
               <div class="input-row">
                 <label for="players-spray-size" data-str="PLAYERS.SPRAY_SIZE_LABEL" data-str-title="PLAYERS.SPRAY_SIZE_TITLE">Spray size:</label>
                 <select id="players-spray-size" data-str-title="PLAYERS.SPRAY_SIZE_TITLE"></select>
@@ -937,13 +953,26 @@
           <div class="auditor-tab-panel" data-auditor-panel="duplicates">
             <div class="egui-panel" style="margin-top: 10px;">
               <div class="panel-body">
+                <!-- Folders to check (#844): audit_folders.js. The Target
+                     Folder above, folders added with the picker, or every
+                     fixed drive, in one pass. -->
+                <label data-str="AUDITOR.FOLDERS_TO_CHECK_LABEL">Folders to check:</label>
+                <ul id="audit-folder-list" class="audit-folder-list"></ul>
+                <div class="row-inputs">
+                  <button id="audit-add-folder-btn" type="button" data-str="AUDITOR.ADD_FOLDER_BUTTON">Add Folder…</button>
+                  <label class="audit-all-drives" data-str-title="AUDITOR.ALL_DRIVES_TITLE" title="Check every fixed drive in one pass">
+                    <input type="checkbox" id="audit-all-drives" />
+                    <span id="audit-all-drives-label" data-str="AUDITOR.ALL_DRIVES_LABEL">All drives</span>
+                  </label>
+                </div>
                 <div class="row-inputs">
                   <button id="run-audit-btn" class="primary-btn" disabled data-str="AUDITOR.START_AUDIT_BUTTON">Start Audit</button>
                   <button id="cancel-audit-btn" disabled data-str="AUDITOR.CANCEL_SCAN_BUTTON">Cancel Scan</button>
                 </div>
+                <div id="audit-progress" class="progress-bar-container" hidden><div class="progress-bar-fill" style="width: 0%;"></div></div>
                 <p id="audit-status" class="status-indicator">
-                  <span id="audit-spinner" class="spinner" style="display: none;"></span>
                   <span id="audit-status-text" data-str="AUDITOR.STATUS_READY">Status: Ready to audit</span>
+                  <br><span id="audit-status-current" class="text-muted audit-status-current"></span>
                 </p>
               </div>
             </div>
@@ -951,7 +980,10 @@
           <div id="auditor-results-pane" class="egui-panel" style="margin-top: 10px;">
             <div class="panel-header flex-between">
               <h3 data-str="AUDITOR.RESULTS_TITLE">Duplicate Groups Found</h3>
-              <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Delete Selected Files</button>
+              <div class="row-inputs">
+                <button id="delete-selected-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_SELECTED_BUTTON">Move to Recycle Bin</button>
+                <button id="delete-permanent-audits-btn" style="color: #ff5555; border-color: #ff5555;" disabled data-str="AUDITOR.DELETE_PERMANENT_BUTTON">Delete Permanently…</button>
+              </div>
             </div>
             <div class="table-wrapper" style="max-height: 400px;">
               <table id="audit-results-table">

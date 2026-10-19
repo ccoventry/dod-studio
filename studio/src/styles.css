@@ -185,11 +185,28 @@ body {
   color: #ffffff;
 }
 
-.menu-update-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #5fb85f;
+/* The menu bar's update button (#868), beside Help: seen without opening a
+   menu, quiet enough to leave while you work. */
+.update-chip {
+  align-self: center;
+  margin-left: 6px;
+  padding: 2px 10px;
+  font-size: 12px;
+  color: #5fb85f;
+  background: rgba(95, 184, 95, 0.12);
+  border: 1px solid #5fb85f;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.update-chip:hover {
+  background: rgba(95, 184, 95, 0.25);
+  color: #ffffff;
+}
+
+.update-chip[hidden] {
+  display: none;
 }
 
 .menu-dropdown-panel {
@@ -3620,4 +3637,42 @@ button.setup-skip:hover:not(:disabled) {
 
 .review-hltv-none {
   color: var(--text-muted);
+}
+
+/* Demo Auditor › Duplicates: Folders to check (audit_folders.js, #844). */
+.audit-folder-list {
+  list-style: none;
+  margin: 4px 0 6px;
+  padding: 0;
+  max-height: 140px;
+  overflow-y: auto;
+}
+
+.audit-folder-list li {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.audit-folder-path {
+  word-break: break-all;
+}
+
+/* All drives walks every fixed drive, so the list doesn't apply: dimmed, not hidden. */
+.audit-folder-list.dimmed {
+  opacity: 0.45;
+}
+
+.audit-all-drives {
+  display: flex;
+  gap: 3px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.audit-status-current {
+  font-size: 0.9em;
+  word-break: break-all;
 }
