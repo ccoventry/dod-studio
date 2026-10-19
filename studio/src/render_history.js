@@ -5,11 +5,22 @@
 import { STRINGS } from './strings.js';
 
 /**
+ * What an attempt came to, as HISTORY_OUTCOME keys it. An attempt is written
+ * as `started` before FFmpeg runs, so a crash leaves that behind: it is the
+ * render in progress when it is the job's `currentAttempt`, else it was cut
+ * off. Files from before #818's fix say `interrupted` for the latter.
+ */
+function outcomeOf(h, currentAttempt) {
+  if (h.outcome !== 'started') return h.outcome;
+  return currentAttempt != null && h.started_unix_ms === currentAttempt ? 'rendering' : 'interrupted';
+}
+
+/**
  * The History cell's summary: `{ label, bytes }`. `label` is New, Rendered
  * ×N (N = finished attempts), or the latest attempt's outcome when that
  * didn't finish. `bytes` totals the finished outputs still on disk.
  */
-export function historySummary(history) {
+export function historySummary(history, currentAttempt = null) {
   const list = history || [];
   const finished = list.filter((h) => h.outcome === 'finished');
   const bytes = finished
@@ -19,7 +30,10 @@ export function historySummary(history) {
   let label;
   if (!latest) label = STRINGS.RENDER.HISTORY_NEW;
   else if (latest.outcome === 'finished') label = STRINGS.RENDER.historyRendered(finished.length);
-  else label = STRINGS.RENDER.HISTORY_OUTCOME[latest.outcome] || latest.outcome;
+  else {
+    const outcome = outcomeOf(latest, currentAttempt);
+    label = STRINGS.RENDER.HISTORY_OUTCOME[outcome] || outcome;
+  }
   return { label, bytes };
 }
 
@@ -37,7 +51,7 @@ function fileName(path) {
  * One line per attempt, newest first: when, settings, and what came of it.
  * `formatSize(bytes)` renders a size the way the table does.
  */
-export function historyLines(history, formatSize) {
+export function historyLines(history, formatSize, currentAttempt = null) {
   return [...(history || [])].reverse().map((h) => {
     const settings = h.codec === 'source_copy'
       ? STRINGS.RENDER.HISTORY_SKIPPED_SETTINGS
@@ -48,7 +62,8 @@ export function historyLines(history, formatSize) {
         ? `${fileName(h.output_path)}, ${formatSize(h.output_size_bytes)}`
         : STRINGS.RENDER.historyFileNotFound(fileName(h.output_path));
     } else {
-      const outcome = STRINGS.RENDER.HISTORY_OUTCOME[h.outcome] || h.outcome;
+      const key = outcomeOf(h, currentAttempt);
+      const outcome = STRINGS.RENDER.HISTORY_OUTCOME[key] || key;
       result = h.error ? `${outcome}: ${h.error}` : outcome;
     }
     return `${when(h.started_unix_ms)} · ${settings} · ${result}`;

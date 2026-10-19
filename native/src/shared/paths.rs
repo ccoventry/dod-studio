@@ -370,10 +370,12 @@ pub fn downloads_dir(game_root: &Path) -> PathBuf {
     game_root.join(format!("{}_downloads", game_folder()))
 }
 
-/// The folders beside `hl.exe` (`game_root`) that hold a `liblist.gam`, the
-/// file that makes a folder a mod `-game` can start, sorted by name. The
-/// Game folder setting offers these (#402). `_addon`/`_downloads` siblings
-/// have no `liblist.gam`, so they are not listed.
+/// The folders beside `hl.exe` (`game_root`) that hold a `liblist.gam` and a
+/// `cl_dlls/client.dll`, the files that make a folder a mod `-game` can
+/// start, sorted by name. The Game folder setting offers these (#402).
+/// `_addon`/`_downloads` siblings have no `liblist.gam`; the movie installs'
+/// `valve` has one but no `client.dll`, and starting it ends in the engine's
+/// "could not load library" error (#768).
 #[cfg(not(target_arch = "wasm32"))]
 pub fn list_game_folders(game_root: &Path) -> Vec<String> {
     let Ok(entries) = std::fs::read_dir(game_root) else {
@@ -381,7 +383,10 @@ pub fn list_game_folders(game_root: &Path) -> Vec<String> {
     };
     let mut names: Vec<String> = entries
         .flatten()
-        .filter(|e| e.path().join("liblist.gam").is_file())
+        .filter(|e| {
+            let dir = e.path();
+            dir.join("liblist.gam").is_file() && dir.join("cl_dlls").join("client.dll").is_file()
+        })
         .filter_map(|e| e.file_name().to_str().map(str::to_string))
         .filter(|name| validate_game_folder(name).is_ok())
         .collect();
@@ -749,28 +754,30 @@ mod tests {
     }
 
     #[test]
-    fn only_folders_with_a_liblist_are_listed() {
+    fn only_folders_with_a_liblist_and_a_client_dll_are_listed() {
         let root = Scratch::new("game_folders");
-        for (folder, liblist) in [
-            ("dod", true),
-            ("dod_movies", true),
-            ("Dod_1_2", true),
-            ("dod_addon", false),
-            ("dod_downloads", false),
-            ("valve", true),
+        for (folder, liblist, client) in [
+            ("dod", true, true),
+            ("dod_movies", true, true),
+            ("Dod_1_2", true, true),
+            ("dod_addon", false, false),
+            ("dod_downloads", false, false),
+            // The movie installs' valve: a liblist.gam, no client.dll (#768).
+            ("valve", true, false),
+            ("half_a_mod", false, true),
         ] {
             let dir = root.join(folder);
-            std::fs::create_dir_all(&dir).unwrap();
+            std::fs::create_dir_all(dir.join("cl_dlls")).unwrap();
             if liblist {
                 std::fs::write(dir.join("liblist.gam"), b"game \"Day of Defeat\"").unwrap();
+            }
+            if client {
+                std::fs::write(dir.join("cl_dlls").join("client.dll"), b"MZ").unwrap();
             }
         }
         // A file named like a folder is not one.
         std::fs::write(root.join("liblist.gam"), b"").unwrap();
-        assert_eq!(
-            list_game_folders(&root),
-            ["dod", "Dod_1_2", "dod_movies", "valve"]
-        );
+        assert_eq!(list_game_folders(&root), ["dod", "Dod_1_2", "dod_movies"]);
         assert!(list_game_folders(&root.join("missing")).is_empty());
     }
 }

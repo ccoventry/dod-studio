@@ -238,7 +238,7 @@ pub fn check_demo_bytes(bytes: &[u8]) -> Result<IntegrityReport, String> {
 /// `nom_fail` puts its message in the nom error's `input`, which `Display`
 /// prints as a list of byte values; any other nom error's `input` is the rest
 /// of the file, so that is cut short instead of printed whole.
-fn parse_error_reason(error: &str) -> String {
+pub fn parse_error_reason(error: &str) -> String {
     const MAX: usize = 200;
     let message = error
         .split_once("input: [")

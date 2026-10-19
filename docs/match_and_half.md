@@ -14,7 +14,7 @@
 
 - `native::match_groups` numbers the matches (1 is the match whose oldest file is oldest; undated last) and flattens the result per demo.
 - **Rename Demos:** `demo_rename_list` groups the listed folder, so `{match}` and `{half}` see every demo in it. `{half}` is `h1`, `h2`, or the `|fallback` (else `unknown`) — never a default first half.
-- **Master Demo Queue:** `queue_match_groups` runs after each scan and project load, from the analyzer cache. The answer stays on each demo for the clip name's `{match}` and `{half}` (`queue_match_groups.js`), not in the project file. Numbers stay put as the queue grows. "Group by match" shows the queue in match order under one header line per match, and reads any demo the cache lacks.
+- **Master Demo Queue:** `queue_match_groups` runs after each scan and project load, from the analyzer cache. The answer stays on each demo for the clip name's `{match}` and `{half}` (`queue_match_groups.js`), not in the project file. Numbers stay put as the queue grows. "Group by: Match" (`queue_group_by.js`, #823) shows the queue in match order under one header line per match, and reads any demo the cache lacks, also on later regroups while it stays picked.
 
 ## Grouping rules
 
