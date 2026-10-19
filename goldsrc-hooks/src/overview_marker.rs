@@ -1,5 +1,5 @@
 //! `dodstudio_hud_map_team_marker`: in HLTV, mark the player being watched
-//! on the overview map with his team's camera icon, not `spec_camera.spr`
+//! on the overview map with their team's camera icon, not `spec_camera.spr`
 //! (`1`), or leave the camera icon off the map altogether (`2`, #677).
 //!
 //! ## What the game does
@@ -27,7 +27,7 @@
 //! The stock `*_camera.spr` files are byte-for-byte the player icons, so on
 //! their own this changes nothing visible. DoD Studio puts bordered, themed
 //! ones in `dod_addon/sprites`; the game draws the camera icon about 1.5x the
-//! player icons, so the watched player stands out over his own icon.
+//! player icons, so the watched player stands out over their own icon.
 //!
 //! ## No camera icon (`2`)
 //!
@@ -142,7 +142,7 @@ pub fn set_mode(mode: i32) -> Result<bool, String> {
 
 fn describe(mode: i32) -> &'static str {
     match mode {
-        TEAM => "1: in HLTV the watched player is marked with his team's camera icon",
+        TEAM => "1: in HLTV the watched player is marked with their team's camera icon",
         NONE => "2: no camera icon on the overview map",
         _ => "0: in HLTV the watched player is marked with spec_camera.spr",
     }

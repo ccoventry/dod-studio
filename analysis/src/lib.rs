@@ -773,7 +773,12 @@ impl Analysis {
         }));
         let demo = match demo_res {
             Ok(Ok(d)) => d,
-            Ok(Err(e)) => return Err(format!("Parse error: {}", e)),
+            Ok(Err(e)) => {
+                return Err(format!(
+                    "Parse error: {}",
+                    integrity::parse_error_reason(&e.to_string())
+                ));
+            }
             Err(_) => return Err("Parser panicked during demo structural decoding".to_string()),
         };
 

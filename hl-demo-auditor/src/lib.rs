@@ -78,6 +78,19 @@ pub fn scan_dir(
 /// Folder levels [`scan_dir`] reads below the folder it is given.
 const SCAN_MAX_DEPTH: usize = 32;
 
+/// Folders [`scan_dir`] never enters: a demo in the Recycle Bin is a deleted
+/// copy, not a duplicate to clean up (#843). The same list as
+/// `native::sys::folder_walk::SYSTEM_FOLDERS`, which can't be used here
+/// (`native` depends on this crate); a test there checks they agree.
+pub const SYSTEM_FOLDERS: [&str; 2] = ["$RECYCLE.BIN", "System Volume Information"];
+
+fn is_system_folder(path: &Path) -> bool {
+    path.file_name().is_some_and(|name| {
+        let name = name.to_string_lossy();
+        SYSTEM_FOLDERS.iter().any(|s| name.eq_ignore_ascii_case(s))
+    })
+}
+
 /// `file_type` never follows a junction or symlink, so a link is never
 /// entered; with the depth cap, no folder layout can make this loop (#376).
 fn scan_dir_to_depth(
@@ -100,7 +113,7 @@ fn scan_dir_to_depth(
             }
             let path = entry.path();
             if entry.file_type().is_ok_and(|t| t.is_dir()) {
-                if depth < SCAN_MAX_DEPTH {
+                if depth < SCAN_MAX_DEPTH && !is_system_folder(&path) {
                     scan_dir_to_depth(&path, files, cancel, progress, depth + 1);
                 }
             } else if path
@@ -378,6 +391,22 @@ mod tests {
 
         // A junction is a directory to `remove_dir`, which unlinks it only.
         fs::remove_dir(&link).unwrap();
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn the_recycle_bin_and_system_volume_information_are_not_entered() {
+        let root = std::env::temp_dir().join(format!("auditor_system_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(root.join("d/$Recycle.Bin/S-1-5")).unwrap();
+        fs::create_dir_all(root.join("SYSTEM VOLUME INFORMATION")).unwrap();
+        fs::write(root.join("a.dem"), b"").unwrap();
+        fs::write(root.join("d/$Recycle.Bin/S-1-5/$R1A2B3C.dem"), b"").unwrap();
+        fs::write(root.join("SYSTEM VOLUME INFORMATION/x.dem"), b"").unwrap();
+
+        let mut files = vec![];
+        scan_dir(&root, &mut files, &AtomicBool::new(false), &None);
+        assert_eq!(files, [root.join("a.dem")]);
         let _ = fs::remove_dir_all(&root);
     }
 }

@@ -21,6 +21,10 @@ GameUI builds its own Load Demo window (`CDemoPlayerFileDialog`):
   8. GameUI calls the engine's `BaseUI001` slot before
      `BASEUI_SLOT_ACTIVATE_GAME_UI` (HideGameUI) after an `engine ...` menu
      command, and calls that slot (ActivateGameUI) itself.
+  26. The Demos tab's drag handles (#801): the column records, the column
+     order and the `Dragger`'s stored position `renumber_draggers` rewrites,
+     read off `AddColumnHeader`, `OnColumnResized` and the Dragger's
+     "ColumnResized" message (see `verify_column_draggers`).
 
 Usage:
     python goldsrc-hooks/tools/verify_studio_panel.py [game-folder ...]
@@ -210,6 +214,16 @@ def verify(game, src):
             func = int(tail.split()[1], 16) - ui.base
         got = ui.last_ret(func)
         check(got == want, f"ListPanel slot {index} ({name}) returns with {got!r}")
+    # The Demos tab scrolls its list to the top after a new filter through
+    # OnMouseWheeled: the scroll bar's GetValue (+0x21c), less delta * 3,
+    # into its SetValue (+0x218).
+    wheel_slot = vwl.rust_usize(src, "LIST_SLOT_ON_MOUSE_WHEELED")
+    wheel = ui.body(ui.u32(list_vt + 4 * wheel_slot) - ui.base, 0x40)
+    times_three = any(re.fullmatch(r"lea ecx, \[e[a-d]x \+ e[a-d]x\*2\]", x) for x in wheel)
+    sets = any(x.endswith("+ 0x218]") and x.startswith(("jmp", "call")) for x in wheel)
+    gets = any(x.endswith("+ 0x21c]") and x.startswith("call") for x in wheel)
+    check(times_three and sets and gets,
+          f"ListPanel slot {wheel_slot} is OnMouseWheeled: scroll bar value - delta * 3 into SetValue")
 
     # 19: the Map and Date columns. The window's constructor makes its one
     # column through AddColumnHeader, just after pushing "demoname".
@@ -259,6 +273,10 @@ def verify(game, src):
           and any(re.fullmatch(r"mov byte ptr \[e[a-z]{2} \+ 0x1d\], [a-d]l", x) for x in body)
           and any("+ 0x1e]" in x for x in body),
           f"ListPanel slot {visible_slot} is SetColumnVisible (hidden byte +0x1d, unhidable +0x1e)")
+
+    # 26: Demo File's drag handle (#801).
+    ok &= verify_column_draggers(ui, src, build, list_vt, check)
+
     # ApplyItemChanges: re-index the row, then InvalidateLayout (slot 58).
     body = ui.body(ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_APPLY_ITEM_CHANGES")) - ui.base, 0x40)
     calls = [x for x in body if x.startswith("call")]
@@ -314,6 +332,40 @@ def verify(game, src):
     got = ui.last_ret(ui.u32(list_vt + add_item) - ui.base)
     check(got == "ret 0x10", f"which returns with {got!r} (data, userData, scrollTo, sortOnAdd)")
 
+    # 26: the Highlights tab frees each row after AddItem (#812). AddItem
+    # keeps `data->MakeCopy()` (KeyValues slot 21, +0x54), never `data`;
+    # MakeCopy allocates a new KEYVALUES_SIZE row; DeleteAllItems frees the
+    # list's copies through slot KEYVALUES_SLOT_DELETE_THIS; and that slot
+    # (null-checked) runs the destructor, which stores KeyValues' vftable,
+    # and gives the memory back to the KeyValuesSystem slot (+0xc) next to
+    # the one keyvalues_new allocates from (+8).
+    add_body = ui.body(ui.u32(list_vt + add_item) - ui.base, 0x60)
+    copy_at = next((n for n, x in enumerate(add_body) if x == "call dword ptr [eax + 0x54]"), None)
+    data_arg = ("mov ecx, dword ptr [esp + 0x18]", "mov ecx, dword ptr [ebp + 8]")
+    check(copy_at is not None and add_body[copy_at - 2] in data_arg
+          and re.fullmatch(r"mov dword ptr \[e[a-z]{2}\], eax", add_body[copy_at + 1 + (add_body[copy_at + 1].startswith("mov ecx"))]),
+          f"AddItem stores its data's KeyValues slot 21 (MakeCopy) in the new item: {add_body[(copy_at or 2) - 2:(copy_at or 0) + 3]}")
+    copy_fn = ui.u32(kv_vt + 4 * 21) - ui.base if kv_vt else 0
+    copy_body = ui.body(copy_fn, 0x40)
+    allocs = (f"call {hex(ui.base + build['keyvalues_new'])}", "call dword ptr [edx + 8]")
+    check(f"push {hex(size)}" in copy_body and any(x in allocs for x in copy_body),
+          f"KeyValues slot 21 (MakeCopy, +{copy_fn:#x}) allocates a new {size:#x}-byte row")
+    delete_this = vwl.rust_usize(src, "KEYVALUES_SLOT_DELETE_THIS")
+    clear_body = ui.body(ui.u32(list_vt + delete_all) - ui.base, 0x200)
+    check(any(re.fullmatch(rf"call dword ptr \[e[a-d]x \+ {hex(4 * delete_this)}\]", x) for x in clear_body),
+          f"DeleteAllItems frees the list's own copies through KeyValues slot {delete_this}")
+    free_fn = ui.u32(kv_vt + 4 * delete_this) - ui.base if kv_vt else 0
+    free_body = ui.body(free_fn, 0x20)
+    callees = [int(x.split()[1], 16) - ui.base for x in free_body if re.fullmatch(r"call 0x[0-9a-f]+", x)]
+    destroys = any(f"mov dword ptr [e{r}], {hex(ui.base + kv_vt)}" in ui.body(c, 0x40)
+                   for c in callees for r in ("bx", "di", "si"))
+    gives_back = any("call dword ptr [edx + 0xc]" in ui.body(c, 0x100) for c in callees)
+    news = ui.body(build["keyvalues_new"], 0x20)
+    check(ui.last_ret(free_fn) == "ret" and any(re.fullmatch(r"test e[a-z]{2}, e[a-z]{2}", x) for x in free_body[:3])
+          and destroys and gives_back and "call dword ptr [edx + 8]" in news,
+          f"KeyValues slot {delete_this} (deleteThis, +{free_fn:#x}) destroys the row and frees it "
+          f"where keyvalues_new allocates: {free_body}")
+
     # 22: the Demos tab's Type dropdown. The labeled combo box in the
     # Options dialog adds its items through slot COMBO_SLOT_ADD_ITEM's
     # function on PRE; on both builds that function makes the "SetText"
@@ -332,7 +384,8 @@ def verify(game, src):
     body = ui.body(row_fn, 0x20)
     jumps = [x for x in body if re.fullmatch(r"jmp dword ptr \[eax \+ 0x[0-9a-f]+\]", x)]
     menu_vt = ui.vftable("Menu@vgui2")
-    ok = False
+    # Its own name: `ok` is the whole run's result, which `check` adds to.
+    forwards = False
     if jumps and menu_vt:
         menu_slot = int(jumps[0].split("+ ")[1].rstrip("]"), 16)
         menu_fn = ui.u32(menu_vt + menu_slot) - ui.base
@@ -340,8 +393,8 @@ def verify(game, src):
         # The menu's ActivateItemByRow turns the row into an item id and hands
         # it to ActivateItem, the slot before it.
         before = hex(menu_slot - 4)
-        ok = any(x.endswith(f"+ {before}]") and x.split()[0] in ("jmp", "call") for x in menu_body)
-    check(ok, f"ComboBox slot {row_slot} forwards to the menu's ActivateItemByRow, which calls ActivateItem: {jumps}")
+        forwards = any(x.endswith(f"+ {before}]") and x.split()[0] in ("jmp", "call") for x in menu_body)
+    check(forwards, f"ComboBox slot {row_slot} forwards to the menu's ActivateItemByRow, which calls ActivateItem: {jumps}")
     text_vt = ui.vftable("TextEntry@vgui2")
     get_text = vwl.rust_usize(src, "TEXT_ENTRY_SLOT_GET_TEXT")
     check(combo_vt and ui.u32(combo_vt + 4 * get_text) == ui.u32(text_vt + 4 * get_text),
@@ -380,6 +433,32 @@ def verify(game, src):
                 pushed.append(ui.img[r:r + 20].split(b"\x00")[0])
     check(b"ButtonClicked" in pushed,
           f"ComboBox's OnCommand (slot {on_command}) answers ButtonClicked: {pushed[:3]}")
+
+    # The Demos tab's Up is greyed out through Panel's SetEnabled(bool): the
+    # slot ApplySettings calls with the `enabled` key's GetInt.
+    enabled_slot = vwl.rust_usize(src, "PANEL_SLOT_SET_ENABLED")
+    enabled_at = ui.img.find(b"\0enabled\0") + 1
+    enabled_push = b"\x68" + struct.pack("<I", ui.base + enabled_at)
+    sites = [m.start() for m in re.finditer(re.escape(enabled_push), ui.img)]
+    want_call = f"+ {enabled_slot * 4:#x}]"
+    calls_enabled = any(
+        any(x.startswith("call dword ptr [e") and x.endswith(want_call)
+            for x in [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[at:at + 0x30], ui.base + at)][:9])
+        for at in sites)
+    check(calls_enabled, f"Panel slot {enabled_slot} is SetEnabled(bool), called with the `enabled` setting")
+
+    # The Go to dropdown is widened through the menu's SetFixedWidth(int):
+    # it stores its argument and invalidates the layout (Panel slot 58,
+    # +0xe8), the slot the box itself calls with its own width when the
+    # list opens.
+    fixed_slot = vwl.rust_usize(src, "MENU_SLOT_SET_FIXED_WIDTH")
+    fixed_fn = ui.u32(menu_vt + 4 * fixed_slot) - ui.base if menu_vt else 0
+    fixed = ui.body(fixed_fn, 0x30)
+    stores = any(re.fullmatch(r"mov dword ptr \[ecx \+ 0x[0-9a-f]+\], eax", x) for x in fixed)
+    layout_slot = vwl.rust_usize(src, "PANEL_SLOT_INVALIDATE_LAYOUT")
+    lays_out = any(re.fullmatch(rf"call dword ptr \[e[a-d]x \+ {layout_slot * 4:#x}\]", x) for x in fixed)
+    check(stores and lays_out and ui.last_ret(fixed_fn) == "ret 4",
+          f"Menu slot {fixed_slot} is SetFixedWidth(int): stores it and invalidates the layout (Panel slot {layout_slot}): {fixed[:6]}")
 
     # 21: the Highlights tab's progress bar.
     bar_vt = ui.vftable("ProgressBar@vgui2")
@@ -514,6 +593,104 @@ def verify(game, src):
     return ok
 
 
+def verify_column_draggers(ui, src, build, list_vt, check):
+    """Item 26 (#801): what `renumber_draggers` reads and writes.
+
+    The Load Demo window adds "demoname" with flags 0, which the 5-argument
+    AddColumnHeader turns into a 20..10000 width range: the column was always
+    resizable. The 7-argument one (the slot after) allocates a record from
+    the linked list at `list_columns` (`[+0]` memory, `[+4]` allocated count,
+    `COLUMN_RECORD_SIZE` bytes each), stores the column's `Dragger` at
+    `COLUMN_DRAGGER` in it, gives the Dragger the position it was added at
+    (`dragger_column`), and inserts the record's index into the order at
+    `list_column_order`. Nothing renumbers the Draggers afterwards; the
+    Dragger's "ColumnResized" message names its stored position, and
+    `OnColumnResized` looks the column up by position in that order.
+    """
+    ok = True
+    cols, order, dcol = build["list_columns"], build["list_column_order"], build["dragger_column"]
+    record_size = vwl.rust_usize(src, "COLUMN_RECORD_SIZE")
+    dragger_at = vwl.rust_usize(src, "COLUMN_DRAGGER")
+
+    def has(body, pattern):
+        return any(re.fullmatch(pattern, x) for x in body)
+
+    add5 = ui.u32(list_vt + 4 * vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER")) - ui.base
+    body = ui.body(add5, 0x100)
+    passed = "push 0x2710" in body and "push 0x14" in body
+    ok &= passed
+    check(passed, "AddColumnHeader without the fixed-size flag gives a column a width range of 20..10000")
+
+    demoname = ui.base + ui.img.find(b"demoname\0")
+    ctor = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(
+        ui.img[build["file_dialog_ctor"]:build["file_dialog_ctor"] + 0x400], ui.base + build["file_dialog_ctor"])]
+    at = ctor.index(f"push {hex(demoname)}") if f"push {hex(demoname)}" in ctor else 0
+    # Pushed right to left: flags, then the width (GetWide's eax), the text, the name.
+    width_at = max((n for n in range(max(0, at - 10), at) if ctor[n] == "push eax"), default=None)
+    flags = next((ctor[n] for n in range((width_at or 0) - 1, max(0, at - 12), -1) if ctor[n].startswith("push")), None)
+    passed = width_at is not None and flags == "push 0"
+    ok &= passed
+    check(passed, f"the Load Demo window adds \"demoname\" with flags {flags!r} (no fixed size), the list's width wide")
+
+    slot7 = vwl.rust_usize(src, "LIST_SLOT_ADD_COLUMN_HEADER") + 1
+    add7 = ui.u32(list_vt + 4 * slot7) - ui.base
+    body = ui.body(add7, 0x500)
+    passed = ui.last_ret(add7, 0x500) == "ret 0x1c" and has(body, rf"(lea|mov) e\w\w, (dword ptr )?\[e\w\w \+ {hex(cols)}\]")
+    ok &= passed
+    check(passed, f"slot {slot7} (AddColumnHeader with min/max) takes its record from the list at +{cols:#x}")
+    # The linked list's Alloc: the first call made on that list.
+    lea = next((n for n, x in enumerate(body) if re.fullmatch(rf"lea e\w\w, \[e\w\w \+ {hex(cols)}\]", x)), None)
+    alloc = next((int(x.split()[1], 16) - ui.base for x in body[lea or 0:] if re.fullmatch(r"call 0x[0-9a-f]+", x)), None)
+    alloc_body = ui.body(alloc, 0x100) if alloc else []
+    text = " | ".join(alloc_body)
+    stride = re.search(r"shl (e\w\w), 4 \| add \1, e\w\w \| shl \1, 2", text)
+    passed = record_size == 0x44 and stride and has(alloc_body, r"mov dword ptr \[esi \+ 4\], e\w\w")
+    ok &= passed
+    check(passed, f"whose Alloc +{alloc or 0:#x} grows the allocated count at +4 and reallocates count * 0x44 "
+                  f"(COLUMN_RECORD_SIZE {record_size:#x})")
+    passed = has(body, rf"mov dword ptr \[e\w\w \+ {hex(dragger_at)}\], esi")
+    ok &= passed
+    check(passed, f"it stores the column's Dragger at record +{dragger_at:#x} (COLUMN_DRAGGER)")
+    vft = next((n for n, x in enumerate(body) if re.fullmatch(r"mov dword ptr \[esi\], 0x1[0-9a-f]{7}", x)
+                and any(re.fullmatch(rf"mov dword ptr \[esi \+ {hex(dcol)}\], e\w\w", y) for y in body[n:n + 4])), None)
+    passed = vft is not None
+    ok &= passed
+    check(passed, f"and the column's position in the Dragger at +{dcol:#x} (dragger_column), after its vftable")
+    passed = has(body, rf"lea e\w\w, \[e\w\w \+ {hex(order)}\]")
+    ok &= passed
+    check(passed, f"then inserts the record's index into the column order at +{order:#x} (list_column_order)")
+    reset = [int(x.split()[1], 16) - ui.base for x in body if re.fullmatch(r"call 0x[0-9a-f]+", x)]
+    renumbers = any(has(ui.body(f, 0x200), rf"mov dword ptr \[e\w\w \+ {hex(dcol)}\], e\w\w") for f in reset)
+    ok &= not renumbers
+    check(not renumbers, "and nothing it calls renumbers the Draggers (why the hook does)")
+
+    # OnColumnResized, slot 189, the "ColumnResized" handler.
+    resized = 189
+    thunk = ["mov eax, dword ptr [ecx]", f"jmp dword ptr [eax + {hex(4 * resized)}]"]
+    name_at = ui.img.find(b"\0ColumnResized\0") + 1
+    registered = any(
+        ui.code[0] <= ui.u32(a) - ui.base < ui.code[1] and ui.body(ui.u32(a) - ui.base, 0x10)[:2] == thunk
+        for ref in ui.refs(name_at) for a in range(ref - 0x20, ref + 0x40))
+    body = ui.body(ui.u32(list_vt + 4 * resized) - ui.base, 0x300)
+    reads = all(any(f"+ {hex(off)}]" in x for x in body) for off in (cols, order, order + 0xc))
+    passed = registered and reads
+    ok &= passed
+    check(passed, f"\"ColumnResized\" is handled by ListPanel slot {resized} (OnColumnResized), which looks the "
+                  f"column up by position: order +{order:#x}, its count +{order + 0xc:#x}, records +{cols:#x}")
+
+    # The Dragger's own "ColumnResized" message carries its stored position.
+    column = ui.base + ui.img.find(b"\0column\0") + 1
+    sends = False
+    for ref in ui.refs(name_at):
+        after = [f"{i.mnemonic} {i.op_str}" for i in ui.md.disasm(ui.img[ref + 4:ref + 0x40], ui.base + ref + 4)]
+        k = next((n for n, x in enumerate(after) if x == f"push {hex(column)}"), None)
+        if k is not None and has(after[:k], rf"(mov e\w\w, |push )dword ptr \[e\w\w \+ {hex(dcol)}\]"):
+            sends = True
+    ok &= sends
+    check(sends, f"the Dragger's \"ColumnResized\" message sends the column at +{dcol:#x}")
+    return ok
+
+
 def constructor_of(ui, cls):
     """The function that stores `cls`'s vftable and has callers: its constructor."""
     vt = ui.vftable(cls)
@@ -535,7 +712,8 @@ def constructor_of(ui, cls):
 
 def main():
     games = [Path(a) for a in sys.argv[1:]] or [g for g in vwl.DEFAULT_GAMES if g.is_dir()]
-    src = RUST.read_text(encoding="utf-8")
+    # The shared list slots (#796) live beside studio_panel.rs.
+    src = RUST.read_text(encoding="utf-8") + (RUST.parent / "list_panel.rs").read_text(encoding="utf-8")
     ok = all([verify(g, src) for g in games])
     print("\nOFFSETS VERIFIED" if ok else "\nMISMATCH -- do not ship")
     return 0 if ok else 1

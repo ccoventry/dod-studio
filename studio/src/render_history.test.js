@@ -26,6 +26,14 @@ describe('historySummary', () => {
     expect(historySummary([attempt(), attempt({ outcome: 'interrupted' })]).label).toBe('Interrupted');
     expect(historySummary([attempt({ outcome: 'cancelled' })]).label).toBe('Cancelled');
   });
+
+  it('says Rendering for the attempt in progress, Interrupted for a started one nobody owns', () => {
+    const now = attempt({ started_unix_ms: at(15, 0), outcome: 'started' });
+    expect(historySummary([attempt(), now], at(15, 0)).label).toBe('Rendering…');
+    expect(historySummary([attempt(), now]).label).toBe('Interrupted');
+    expect(historySummary([attempt(), now], at(16, 0)).label).toBe('Interrupted');
+    expect(historyLines([now], (b) => `${b}`, at(15, 0))[0]).toMatch(/Rendering…$/);
+  });
 });
 
 describe('historyLines', () => {

@@ -712,3 +712,56 @@ test.describe('issue #644 — Delete Take', () => {
     expect(await invocationsFor(page, 'delete_take_folders')).toEqual([]);
   });
 });
+
+// #853: the start-up recovery dialog closes on the click, not when the
+// backend answers, which can take seconds at start-up.
+test.describe('start-up recovery dialog', () => {
+  /** Shows the dialog with a recover reply the test settles by hand. */
+  async function showDialog(page) {
+    await gotoHarness(page);
+    await page.evaluate(() => {
+      window.__mockInvokeHandlers.check_render_autosave = () => ({
+        source_folder: 'D:\\captures', completed_count: 1, pending_count: 2,
+      });
+      window.__mockInvokeHandlers.recover_render_batch = () => new Promise((resolve, reject) => {
+        window.__settleRecover = { resolve, reject };
+      });
+      window.__mockInvokeHandlers.discard_render_autosave = () => new Promise(() => {});
+      window.__testCheckRecovery();
+    });
+    await expect(page.locator('#render-recovery-modal')).toBeVisible();
+  }
+
+  test('Recover hides the dialog at once and shows the status line until the rows come back', async ({ page }) => {
+    await showDialog(page);
+    await page.locator('#render-recovery-recover-btn').click();
+    await expect(page.locator('#render-recovery-modal')).toBeHidden();
+    await expect(page.locator('#render-status')).toHaveText('Status: Recovering the render batch…');
+
+    await page.evaluate((jobs) => window.__settleRecover.resolve(jobs), [
+      job({ id: '0', status: 'Finished', progress: 100 }),
+      job({ id: '1', status: 'Queued' }),
+      job({ id: '2', status: 'Queued' }),
+    ]);
+    await expect(page.locator('#render-jobs-tbody tr[data-job-id]')).toHaveCount(3);
+    await expect(page.locator('#render-status')).toHaveText('Status: Render batch recovered — 2 take(s) queued');
+    await expect(page.locator('#toast-container')).toContainText('Recovered 1 completed, 2 pending render job(s).');
+  });
+
+  test('a failed Recover toasts the error and puts the status line back', async ({ page }) => {
+    await showDialog(page);
+    await page.locator('#render-recovery-recover-btn').click();
+    await expect(page.locator('#render-recovery-modal')).toBeHidden();
+    await page.evaluate(() => window.__settleRecover.reject('disk gone'));
+    await expect(page.locator('#toast-container')).toContainText('Failed to recover render batch: disk gone');
+    await expect(page.locator('#render-status')).toHaveText('Status: Waiting...');
+  });
+
+  test('Discard hides the dialog without waiting for the reply', async ({ page }) => {
+    await showDialog(page);
+    await page.locator('#render-recovery-discard-btn').click();
+    await expect(page.locator('#render-recovery-modal')).toBeHidden();
+    expect(await invocationsFor(page, 'discard_render_autosave')).toHaveLength(1);
+    expect(await invocationsFor(page, 'recover_render_batch')).toEqual([]);
+  });
+});
